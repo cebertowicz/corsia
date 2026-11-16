@@ -3,7 +3,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState, type OpenCell } from './widget-cell-state';
 import { tableCells, widgetCommentLabel } from './widget-cells';
-import { cellImageSlots } from './widget-cell-images';
+import { imageOnlyCell } from './widget-cell-images';
 import { imageContext } from './markdown-image';
 import { heldText, heldToSource, sourceToHeld } from './widget-cell-row';
 import { cellTextRange, markClasses, suggestionInsert, type CellSuggestion, type Mark } from './widget-paint';
@@ -69,49 +69,49 @@ export function paintOpenCell(view: EditorView, marks: Mark[]) {
 }
 
 /**
- * An empty cell has no text to select, so while its editor is open and still empty the Comment offer is the whole cell's,
- * as it is for a tap on an empty cell of a document that can't be edited. The first character typed makes it a cell with
- * text, where a comment starts from selected text as anywhere else; emptying the cell again brings the offer back. A cell holding
- * only images (a status badge) has no text to select either: its offer is on those images' markdown, as a press beside them is.
+ * A textless cell (an empty one, or one that draws only images) has no text to select, so while its editor is open and still
+ * textless the Comment offer is raised for it without a selection. An empty cell's offer is the whole cell's, as it is for a tap
+ * on an empty cell of a document that can't be edited. A cell drawing only images (a status badge) is offered on those images'
+ * markdown, as a press beside them is. The first character typed makes it a cell with text, where a comment starts from selected
+ * text as anywhere else; making the cell textless again brings the offer back.
  */
 
-/** The markdown of the images an open cell holds when it holds nothing else, as document offsets; null otherwise. */
+/** The markdown of the images an open cell draws when it draws no text, as document offsets; null otherwise. */
 function openCellImages(state: EditorState, cell: OpenCell): { from: number; to: number } | null {
-	const source = cellSource(state, cell), context = state.facet(imageContext)();
-	const slots = context ? cellImageSlots(source, context.docPath) : [];
-	if (!slots.length || slots.some((slot) => !slot)) return null;
-	const rest = slots.reduceRight((text, slot) => text.slice(0, slot!.from) + text.slice(slot!.to), source);
-	return rest.trim() ? null : { from: cell.from + slots[0]!.from, to: cell.from + slots[slots.length - 1]!.to };
+	const context = state.facet(imageContext)();
+	const images = context ? imageOnlyCell(cellSource(state, cell), context.docPath) : null;
+	return images && { from: cell.from + images.from, to: cell.from + images.to };
 }
 
-/** The open cell while it holds no text (nothing, or only images), or null: no cell open, or the open one has text. */
-export function emptyOpenCell(state: EditorState) {
+/** The open cell while it is textless (empty, or drawing only images), or null: no cell open, or the open one has text. */
+export function textlessOpenCell(state: EditorState) {
 	const cell = state.field(openCellState, false) ?? null;
 	return cell && (cellSource(state, cell).trim() === '' || openCellImages(state, cell)) ? cell : null;
 }
 
-/** Which empty cell is open, as a key that changes when another cell opens, so a move between empty cells raises the offer again. */
-export const emptyCellKey = (state: EditorState) => {
-	const cell = emptyOpenCell(state);
+/** Which textless cell is open, as a key that changes when another cell opens, so a move between textless cells raises the offer again. */
+export const textlessCellKey = (state: EditorState) => {
+	const cell = textlessOpenCell(state);
 	return cell ? `${cell.tableFrom}:${cell.row}:${cell.col}` : null;
 };
 
 /**
- * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed on that cell: centred vertically
- * in it, with its right end at the cell's right edge (beside or below the table when the cell is too narrow). Null otherwise.
- * Its one writer is the editor's own selection flow (`selectionOffer`), which raises it for a
+ * The selection the Comment offer is raised for while the open cell is textless; null otherwise. For an empty cell it is the
+ * whole cell, placed on that cell: centred vertically in it, with its right end at the cell's right edge (beside or below the
+ * table when the cell is too narrow). For a cell drawing only images it is those images' markdown, placed beside or below the
+ * table so it covers none of them. Its one writer is the editor's own selection flow (`selectionOffer`), which raises it for a
  * caret there and clears it once the cell has text; the widget comment flow reads only selections drawn inside a widget.
  */
-export function emptyCellSelection(view: EditorView): WidgetSelection | null {
-	const cell = emptyOpenCell(view.state);
+export function textlessCellSelection(view: EditorView): WidgetSelection | null {
+	const cell = textlessOpenCell(view.state);
 	const widget = cell && drawnTableAt(view, cell.tableFrom);
 	const td = widget && cellElement(widget, cell);
 	if (!widget || !td) return null;
 	const images = openCellImages(view.state, cell), { state } = view;
 	let raised: WidgetSelection | null;
 	if (images) {
-		// The open cell's editor stands in for its drawn images, so they are read from its source: the same markdown a press
-		// beside the drawn images comments on (`selectionIn`), labelled by the one shared function.
+		// The open cell's editor stands in for its drawn images, so they are read from its source by the same test a press beside
+		// the drawn images uses (`imageOnlyCell`), and labelled by the one shared function.
 		const { from, to } = images, text = state.sliceDoc(from, to);
 		raised = { from, to, text, top: 0, left: 0, above: true, inWidget: true, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: () => rowsBox(widget, [td]) };
 	} else {

@@ -3,6 +3,8 @@ import { blockRange, cellElement, DIAGRAM } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { type WidgetSelection } from './widget-selection-types';
 import { CELL_IMAGE, cellImageRange } from './widget-open';
+import { imageOnlyCell } from './widget-cell-images';
+import { imageContext } from './markdown-image';
 
 /**
  * What the person selected inside a rendered table or diagram, as a range of the block's own source. The widgets replace
@@ -85,10 +87,12 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 		const from = block.from + span.anchorFrom, to = block.from + span.anchorTo, text = src.slice(span.anchorFrom, span.anchorTo);
 		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
 	}
-	// Images and no text: in a cell with no text the comment is on those images' markdown, drawn on the cell (`paintTable`). A cell
-	// that also has text draws a mark on its text only, so there, or when an image cannot be read back, it is on the whole cell.
+	// Images and no text: in a cell that draws no text the comment is on those images' markdown, drawn on the cell (`paintTable`).
+	// A cell that also has text draws a mark on its text only, so there, or when an image cannot be read back, it is on the whole
+	// cell. Whether the cell draws text is read from its source by the one test its open editor uses too (`imageOnlyCell`).
 	if (!picked.trim()) {
-		const images = cell.textContent?.trim() ? null : cellImagesIn(view, cell, part);
+		const context = state.facet(imageContext)();
+		const images = context && imageOnlyCell(src.slice(span.from, span.to), context.docPath) ? cellImagesIn(view, cell, part) : null;
 		if (!images) return whole();
 		const { from, to } = images, text = state.sliceDoc(from, to);
 		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { widgetComments, type WidgetSelection } from './widget-comments';
-import { cellTextRows, emptyCellSelection, openCellText } from './widget-cell-comment';
+import { cellTextRows, textlessCellSelection, openCellText } from './widget-cell-comment';
 import { selectionOffer } from './selection-offer';
 import { offerPlace } from './offer-place';
 import { openCellState } from './widget-cell-state';
@@ -41,7 +41,7 @@ const wholeEmptyCell = () => expect.objectContaining({ inWidget: true, from: exp
 describe('the Comment offer on an empty cell being edited', () => {
 	it('is the whole cell, anchored in its own row, and the widget comment flow raises and clears none of it', () => {
 		const r = openCell(1);
-		const offer = emptyCellSelection(r.view);
+		const offer = textlessCellSelection(r.view);
 		expect(offer, 'the whole cell is offered').toEqual(wholeEmptyCell());
 		expect(offer!.from >= rowFrom && offer!.to <= rowTo, 'anchored on that cell, in its own row').toBe(true);
 		typed(r, 0, 'x');
@@ -54,14 +54,14 @@ describe('the Comment offer on an empty cell being edited', () => {
 	it("is placed inside the open cell's own box, at its far end, so it covers no text", () => {
 		const r = openCell(1);
 		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 200, 36));
-		const offer = emptyCellSelection(r.view);
+		const offer = textlessCellSelection(r.view);
 		expect(offer, "level with the cell's middle, ending just inside its right edge").toMatchObject({ top: 158, left: 506, exact: true, end: true, above: false });
 	});
 
 	it('leaves a cell too narrow to hold it for beside or below the table', () => {
 		const r = openCell(1);
 		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 100, 36));
-		const offer = emptyCellSelection(r.view);
+		const offer = textlessCellSelection(r.view);
 		expect(offer, 'not placed at the narrow cell\'s own far end').not.toMatchObject({ end: true });
 		expect(offer).toMatchObject({ exact: true, above: false });
 	});
@@ -69,10 +69,10 @@ describe('the Comment offer on an empty cell being edited', () => {
 	it('is none once the cell has text, and none for a cell opened with text', () => {
 		const r = openCell(1);
 		typed(r, 0, 'x');
-		expect(emptyCellSelection(r.view), 'a cell with text has no whole-cell offer').toBeNull();
+		expect(textlessCellSelection(r.view), 'a cell with text has no whole-cell offer').toBeNull();
 		deleted(r, 0, 1);
-		expect(emptyCellSelection(r.view), 'emptied, it has one again').toEqual(wholeEmptyCell());
-		expect(emptyCellSelection(openCell(0).view)).toBeNull();
+		expect(textlessCellSelection(r.view), 'emptied, it has one again').toEqual(wholeEmptyCell());
+		expect(textlessCellSelection(openCell(0).view)).toBeNull();
 	});
 });
 

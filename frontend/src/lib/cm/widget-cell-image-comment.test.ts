@@ -11,7 +11,7 @@ import { imageContext, type ImageContext } from './markdown-image';
 import { selectionIn } from './widget-selection';
 import { widgetComments, type WidgetSelection } from './widget-comments';
 import { paintTable } from './widget-paint';
-import { emptyCellSelection } from './widget-cell-comment';
+import { textlessCellSelection } from './widget-cell-comment';
 import { build, cellEditor, cellEl, cleanup, clicked, typed } from './widget-cell-rig';
 
 // A status column whose cells hold only a badge image, as a briefing's state column does.
@@ -142,7 +142,7 @@ describe('an image-only cell opened for editing, as a tap on a phone opens it', 
 		const r = openBadge();
 		// Wide enough that an empty cell's offer would sit inside it, at its far end.
 		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 200, 36));
-		const offer = emptyCellSelection(r.view);
+		const offer = textlessCellSelection(r.view);
 		expect(offer).toMatchObject({ from: at(BADGE), to: at(BADGE) + BADGE.length, text: BADGE, inWidget: true });
 		expect(label(offer)).toBe('“Design” · Alpha, Status');
 		// The badge is in the cell, so the offer goes beside or below the table, as for selected text, not over the cell's far end.
@@ -153,14 +153,53 @@ describe('an image-only cell opened for editing, as a tap on a phone opens it', 
 	it('is offered nothing once text is typed beside the image, and nothing for a cell that holds text and an image', () => {
 		const r = openBadge();
 		typed(r, 0, 'x');
-		expect(emptyCellSelection(r.view), 'the cell has text now').toBeNull();
+		expect(textlessCellSelection(r.view), 'the cell has text now').toBeNull();
 		r.view.destroy();
 		vi.useFakeTimers();
 		const mixed = build(DOC, [imageContext.of(() => CONTEXT)]);
 		clicked(mixed, cellEl(mixed, 2, 1));
 		expect(cellEditor(mixed), 'setup: the mixed cell opened').not.toBeNull();
-		expect(emptyCellSelection(mixed.view)).toBeNull();
+		expect(textlessCellSelection(mixed.view)).toBeNull();
 		mixed.view.destroy();
+	});
+});
+
+// Both routes read a cell as image-only by one test (`imageOnlyCell`), so a badge wrapped in a link or emphasis draws no text on
+// either, and a cell with words beside its image is not image-only on either.
+describe('a badge wrapped in a link or emphasis, pressed beside and opened for editing', () => {
+	afterEach(() => cleanup());
+	const tableWith = (content: string) => `intro\n\n| Item | Status |\n| --- | --- |\n| Alpha | ${content} |\n\nafter\n`;
+	const routes = (content: string) => {
+		vi.useFakeTimers();
+		const doc = tableWith(content);
+		const r = build(doc, [imageContext.of(() => CONTEXT)]);
+		const drawnCell = cellEl(r, 1, 1);
+		const range = document.createRange();
+		range.selectNode(drawnCell.querySelector('.cm-md-cell-image')!);
+		const pressed = selectionIn(r.view, r.view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!, range);
+		clicked(r, drawnCell);
+		expect(cellEditor(r), 'setup: the cell editor opened').not.toBeNull();
+		vi.advanceTimersByTime(50);
+		const opened = textlessCellSelection(r.view);
+		r.view.destroy();
+		return { doc, drawnText: drawnCell.textContent, pressed, opened };
+	};
+
+	for (const [name, content] of [['a linked', `[${BADGE}](https://example.com/status)`], ['an emphasised', `**${BADGE}**`]] as const) {
+		it(`${name} badge is commented on its image's markdown on both routes`, () => {
+			const { doc, drawnText, pressed, opened } = routes(content);
+			expect(drawnText?.trim(), 'the cell draws no text').toBe('');
+			const image = { from: doc.indexOf(BADGE), to: doc.indexOf(BADGE) + BADGE.length, text: BADGE };
+			expect(pressed, 'a press beside the drawn badge').toMatchObject(image);
+			expect(opened, 'the open cell, as a tap on a phone opens it').toMatchObject(image);
+		});
+	}
+
+	it('a cell with words beside a linked badge is not image-only on either route', () => {
+		const content = `See [${BADGE}](https://example.com/status)`;
+		const { doc, pressed, opened } = routes(content);
+		expect(pressed, 'a press beside the drawn badge takes the whole cell').toMatchObject({ from: doc.indexOf(content), to: doc.indexOf(content) + content.length, text: content });
+		expect(opened, 'the open cell is offered nothing: its words are selected to comment').toBeNull();
 	});
 });
 

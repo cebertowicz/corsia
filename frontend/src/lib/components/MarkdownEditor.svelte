@@ -144,7 +144,7 @@
 	}
 
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
-	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
+	import { cellTextRows, textlessCellKey } from '$lib/cm/widget-cell-comment';
 	import { openCellState } from '$lib/cm/widget-cell-state';
 	import { cellEditorExtensions } from '$lib/cm/widget-cell-setup';
 
@@ -257,7 +257,7 @@
 					if (u.transactions.some(releasesPress)) caretRule.released();
 					// The editor's selection is the one writer of its Comment offer, an open empty cell's whole-cell offer included: an empty cell opening or emptied raises it, its first character takes it away.
 					// The cell closing leaves the offer up, so a press on it (which closes the cell) still lands on it.
-					const offerMoved = u.selectionSet || (!!u.state.field(openCellState, false) && emptyCellKey(u.startState) !== emptyCellKey(u.state));
+					const offerMoved = u.selectionSet || (!!u.state.field(openCellState, false) && textlessCellKey(u.startState) !== textlessCellKey(u.state));
 					if (offerMoved && !caretRule.holding() && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
 						handleSelection(u.view, undefined, u.docChanged);
 					}
