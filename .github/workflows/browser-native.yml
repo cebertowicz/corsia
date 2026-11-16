@@ -78,9 +78,10 @@ jobs:
           PATH="$RUNNER_TEMP/browser-bin:$PATH" env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
             "backend/tests/test_browser_shared_e2e.py::test_installed_setup_steps_run_in_native_browser" \
             "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_opens_the_popup_its_button_opens" \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; both must actually run.
-          grep -q " 2 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all three must actually run.
+          grep -q " 3 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'

@@ -86,6 +86,10 @@ window.clicks = {shape: 0, far: 0, covered: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# A popup sign-in, as "Sign in with ..." buttons open one: Chrome blocks window.open without a click's activation.
+POPUP = """<!doctype html><title>Popup fixture</title>
+<button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
+
 # Password fields the probe must find without reading the whole DOM: in a same-origin frame, in open
 # and closed shadow roots, and named only by autocomplete, on a page whose DOM is over 1 MiB.
 PROBE = """<!doctype html><title>Probe fixture</title>
@@ -114,7 +118,8 @@ COOKIES = """<!doctype html><title>Cookies</title><script>document.title = docum
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
-             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -422,6 +427,31 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_opens_the_popup_its_button_opens():
+    """With the pane open, an agent's click opens a sign-in popup, as the person's own click would."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-popup-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-popup", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/popup.html"), show_window=True, session="new")).startswith("Error:")
+            assert await owner.run(thread_id, ("click", "#open"), session="existing") == "ok"
+            tabs = ""
+            for _ in range(20):
+                tabs = await owner.run(thread_id, ("tab", "list"), session="existing")
+                if "/popup-target.html" in tabs:
+                    break
+                await asyncio.sleep(0.25)
+            assert "/popup-target.html" in tabs, tabs
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
