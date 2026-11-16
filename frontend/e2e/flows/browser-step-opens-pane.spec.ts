@@ -75,6 +75,47 @@ test('one press on the sign-in chip shows the agent’s browser', async ({ page,
 	} finally { await probe.close(); }
 });
 
+test('a sign-in step for a site with a long name reaches the person, and Done wakes the agent', async ({ page, request }, info) => {
+	test.setTimeout(150_000);
+	const phone = info.project.name === 'chromium-mobile';
+	if (phone) await page.setViewportSize({ width: 393, height: 852 });
+	const width = phone ? 393 : 1440;
+	const probe = await startProbeServer();
+	try {
+		// Chrome resolves any *.localhost name to this machine. The site's name is too long for the step's title as
+		// worded, so the title keeps the name's end behind an ellipsis.
+		const origin = probe.origin.replace('127.0.0.1', 'sign-in-step-long-site.localhost');
+		const title = `sign-in-long-${Date.now()}`;
+		const thread = await createSession(request, title);
+		await loginByUrl(page);
+		if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, title).click();
+		await reachPasswordPage(page, request, thread, origin);
+		await expect(chip(page)).toContainText('…-site.localhost');
+		await saveEvidenceScreenshot(page, info, `${width}-long-1-chip`, { fullPage: false });
+
+		// The step is on the person's list of what needs them.
+		if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		const row = page.locator('aside.sidebar .thread-item').filter({ hasText: title });
+		await row.getByRole('button', { name: /: 1 item$/ }).click();
+		const listed = page.getByRole('dialog').getByRole('button', { name: /Enter your password.*…-site\.localhost/ });
+		await expect(listed).toBeVisible();
+		await saveEvidenceScreenshot(page, info, `${width}-long-2-needs-you`, { fullPage: false });
+		await (phone ? listed.tap() : listed.click());
+		await expectPagePixels(page);
+		await saveEvidenceScreenshot(page, info, `${width}-long-3-browser`, { fullPage: false });
+		if (phone) return;
+
+		// Marking the step done wakes the agent, which takes its next turn.
+		await seedMockResponses(request, [{ content: 'Signed in; carrying on.', finish_reason: 'stop', match_thread: thread }]);
+		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
+		await planRow.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Mark done' }).click();
+		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 45_000 });
+		await saveEvidenceScreenshot(page, info, `${width}-long-4-woken`, { fullPage: false });
+	} finally { await probe.close(); }
+});
+
 test('a subagent’s sign-in step opens the subagent’s browser from the parent’s plan', async ({ page, request }, info) => {
 	test.skip(info.project.name === 'chromium-mobile', 'desktop proof');
 	test.setTimeout(150_000);
