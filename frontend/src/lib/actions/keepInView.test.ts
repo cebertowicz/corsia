@@ -129,6 +129,43 @@ describe('keepInView', () => {
 		expect(reveals).toHaveBeenCalledTimes(2);
 		action.destroy();
 	});
+
+	/** A reading scroller (the chat transcript) holding a margin card's field, and a visual viewport whose height the keyboard takes from. */
+	function readingWithKeyboard() {
+		const parts = sheet();
+		parts.owner.setAttribute('data-reading-scroller', '');
+		const viewport = Object.assign(new EventTarget(), { height: 1100, offsetTop: 0 });
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(parts.field, { enabled: false, whole: parts.card });
+		action.update({ enabled: true, whole: parts.card });
+		const keyboardUp = (to: number) => { viewport.height = to; viewport.dispatchEvent(new Event('resize')); };
+		return { ...parts, action, keyboardUp };
+	}
+
+	it('brings a focused margin field back by the least scroll when the keyboard comes up over it', () => {
+		const { field, action, keyboardUp } = readingWithKeyboard();
+		expect(scrollTop).toBe(0);
+		field.focus();
+		// The field ends at 1059 on screen; the keyboard leaves 700 of the viewport.
+		keyboardUp(700);
+		expect(field.getBoundingClientRect().bottom).toBe(700);
+		expect(scrollTop).toBe(359);
+		action.destroy();
+	});
+
+	it('moves nothing when the viewport shrinks with no field focused, grows, or the transcript shrinks for another reason', () => {
+		const { field, shrink, action, keyboardUp } = readingWithKeyboard();
+		keyboardUp(700);
+		expect(scrollTop).toBe(0);
+		field.focus();
+		// The viewport grows back (the keyboard going down): nothing moves.
+		keyboardUp(1100);
+		expect(scrollTop).toBe(0);
+		// The composer or an attention stack grows and the transcript's view shrinks, with the field focused.
+		shrink(290);
+		expect(scrollTop).toBe(0);
+		action.destroy();
+	});
 });
 
 /** A scroller holding a field and, below it, a sticky row pinned to the scroller's bottom. */

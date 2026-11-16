@@ -60,7 +60,9 @@ function pinnedBottom(owner: HTMLElement | null): number {
  *
  * A scroller the person reads in (marked `data-reading-scroller`: the chat transcript, which a margin card's field sits
  * in) is never scrolled for its own or the viewport's change of size: that would move the text under the reader. There
- * the field is brought back only for its own growth and for typing at its end.
+ * the field is brought back only for its own growth, for typing at its end, and for the on-screen keyboard coming up
+ * over it: while the field has focus and the viewport got shorter, a field now outside the scroller's visible band is
+ * scrolled back by the least that shows it. The person tapped to type, so that move is theirs.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
@@ -116,6 +118,32 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	};
 	const viewport = reading ? null : window.visualViewport;
 	viewport?.addEventListener('resize', resized);
+	/** The viewport's height at the last reading: a reading scroller tells the keyboard coming up from other resizes by it. */
+	const viewportHeight = () => window.visualViewport?.height ?? window.innerHeight;
+	let lastViewport = viewportHeight();
+	let keyFrame = 0;
+	/** Scrolls a reading scroller by the least that brings the node inside its visible band: the scroller's box less its scroll padding, cut to the visual viewport. */
+	const uncover = () => {
+		if (!owner || document.activeElement !== node) return;
+		const style = getComputedStyle(owner), box = owner.getBoundingClientRect(), vv = window.visualViewport;
+		const vTop = vv?.offsetTop ?? 0, vBottom = vTop + (vv?.height ?? window.innerHeight);
+		const top = Math.max(box.top + (parseFloat(style.scrollPaddingTop) || 0), vTop);
+		const bottom = Math.min(box.bottom - (parseFloat(style.scrollPaddingBottom) || 0), vBottom);
+		const rect = node.getBoundingClientRect();
+		const shift = rect.bottom > bottom ? rect.bottom - bottom : rect.top < top ? rect.top - top : 0;
+		if (shift) owner.scrollTop += shift;
+	};
+	const keyboard = () => {
+		const now = viewportHeight(), shorter = now < lastViewport;
+		lastViewport = now;
+		if (!shorter || document.activeElement !== node) return;
+		cancelAnimationFrame(keyFrame);
+		keyFrame = requestAnimationFrame(uncover);
+	};
+	if (reading) {
+		window.visualViewport?.addEventListener('resize', keyboard);
+		window.addEventListener('resize', keyboard);
+	}
 	// The node growing is the person typing into it; the scroller or viewport changing size is not.
 	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
 	const ownerResized = !reading && typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
@@ -132,8 +160,13 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		},
 		destroy() {
 			cancelAnimationFrame(frame);
+			cancelAnimationFrame(keyFrame);
 			if (owner && held) owner.style.scrollPaddingBottom = '';
 			viewport?.removeEventListener('resize', resized);
+			if (reading) {
+				window.visualViewport?.removeEventListener('resize', keyboard);
+				window.removeEventListener('resize', keyboard);
+			}
 			node.removeEventListener('input', typed);
 			(owner ?? window).removeEventListener('scroll', readShown);
 			grown?.disconnect();
