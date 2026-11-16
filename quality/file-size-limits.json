@@ -25,7 +25,7 @@
     "backend/core/step_handler.py": 417,
     "backend/core/thread_lifecycle.py": 481,
     "backend/host_access/processes.py": 1403,
-    "backend/host_access/redaction.py": 891,
+    "backend/host_access/redaction.py": 890,
     "backend/host_access/supervisor.py": 1696,
     "backend/infra/host_access_leases.py": 1177,
     "backend/infra/project_repo_policy.py": 1076,
