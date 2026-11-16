@@ -214,6 +214,18 @@ def resolve_project_row_paths(
     return name, planning_root
 
 
+def project_row_folder(workspace: Path, row) -> Path | None:
+    """A prefetched project row's folder, or ``None`` when it has none or it does not resolve.
+
+    The one reading of a folderless or unresolvable project for the project fence and
+    the repo-registration claim, so the two cannot disagree on it.
+    """
+    try:
+        return resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])[1]
+    except (ValueError, OSError):
+        return None
+
+
 def _resolve_logical_project_root(
     reference: WorkspaceReference,
     selection: WorkspaceSelection,
