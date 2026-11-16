@@ -474,7 +474,7 @@ describe('BrowserLeaf letterbox input', () => {
 		expect(socket.sent.filter(message => message.type === 'input_mouse')).toEqual([
 			{ type: 'input_mouse', eventType: 'mouseMoved', x: 50, y: 25, button: 'none', clickCount: 0 },
 			{ type: 'input_mouse', eventType: 'mousePressed', x: 50, y: 25, button: 'left', clickCount: 1, id: expect.any(Number) },
-			{ type: 'input_mouse', eventType: 'mouseReleased', x: 50, y: 50, button: 'left', clickCount: 1, id: expect.any(Number) },
+			{ type: 'input_mouse', eventType: 'mouseReleased', x: 50, y: 50, button: 'left', clickCount: 1 },
 		]);
 	});
 
