@@ -4,7 +4,9 @@ import json
 import sqlite3
 
 SINCE, UNTIL = "2026-11-09T00:00:00Z", "2026-11-16T00:00:00Z"
-NOISE, NO_OWNER = "github.check_suite_completed", "github.pr_opened"
+NOISE, NO_OWNER = "webhook.github.check_suite_completed", "webhook.github.pr_opened"
+# Names an agent wrote: a declared event type and a script's own event.
+AGENT_NAMED = ("acme-invoices.paid_late", "nightly-digest.failed")
 
 
 def _seed(path) -> None:
@@ -25,6 +27,9 @@ def _seed(path) -> None:
                 ("a3", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-11T08:00:00Z"),
                 # Another status still counts: it was set aside when it was written.
                 ("b1", NO_OWNER, None, "no_owner", "{}", "retrying", "2026-11-10T12:00:00Z"),
+                ("c1", AGENT_NAMED[0], None, "no_owner", "{}", "parked", "2026-11-12T01:00:00Z"),
+                ("c2", AGENT_NAMED[1], None, "owner_inactive", "{}", "parked", "2026-11-12T02:00:00Z"),
+                ("c3", "github.not_a_manifest_type", None, "no_owner", "{}", "parked", "2026-11-12T03:00:00Z"),
                 # Outside the window on both sides; the end is exclusive.
                 ("z1", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-08T23:59:59+00:00"),
                 ("z2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-16T00:00:00Z"),
@@ -42,11 +47,25 @@ def test_set_aside_counts_per_kind_reason_and_day(isolated_db, monkeypatch):
     assert result["rows"] == [
         {"internal_event": NOISE, "reason": "check_suite_noise_parked", "total": 3,
          "days": {"2026-11-09": 2, "2026-11-11": 1}},
+        {"internal_event": "declared", "reason": "no_owner", "total": 2, "days": {"2026-11-12": 2}},
+        {"internal_event": "declared", "reason": "owner_inactive", "total": 1, "days": {"2026-11-12": 1}},
         {"internal_event": NO_OWNER, "reason": "no_owner", "total": 1, "days": {"2026-11-10": 1}},
     ]
     text = json.dumps(result)
-    for private in ("secret", "steve", "ext-"):
+    for private in ("secret", "steve", "ext-", *AGENT_NAMED, "not_a_manifest_type"):
         assert private not in text
+
+
+def test_set_aside_names_kinds_from_code():
+    from infra.audit_set_aside import _code_named
+    from infra.failed_wake_surface import REPORT_EVENT
+
+    named = _code_named()
+    for kind in (NOISE, "github.pr.merged", "measurement.measurement.movement_digest", "worker.result",
+                 REPORT_EVENT, "script.owner_gone", "github.ingress_overdue"):
+        assert kind in named
+    for kind in AGENT_NAMED:
+        assert kind not in named
 
 
 def test_set_aside_is_listed_by_the_tool():

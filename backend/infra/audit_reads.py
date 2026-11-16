@@ -28,7 +28,7 @@ _WINDOWED_READERS = {
     "plan_activity": plan_activity,
     # Accounts belong to the install, not to a user or project.
     "limit_stops": lambda db, _user_id, since, until: limit_stops(db, since, until),
-    # Set-aside events carry no user or project; the read is counts only.
+    # Set-aside rows carry no user or project: counts only, and only code-named kinds by name.
     "set_aside": lambda db, _user_id, since, until: set_aside(db, since, until),
 }
 MAX_ROWS = 50
