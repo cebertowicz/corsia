@@ -16,7 +16,8 @@ import sqlite3
 from collections import Counter
 from typing import Any, TypeGuard
 
-from infra.chat_comment_ids import format_cid, parse_cid
+from infra.chat_comment_ids import commentable_role_sql, format_cid, parse_cid
+from infra.chat_comment_schema import AGENT_ROOT_PREFIX
 from infra.failure_reference import new_error_reference
 from infra.message_update_schema import not_replaced_sql
 
@@ -159,6 +160,30 @@ def comment_cid(input_order: int, index: int) -> str:
     return format_cid(input_order, index + 1)
 
 
+def _is_agent_root_id(value: object) -> bool:
+    return isinstance(value, str) and value.startswith(AGENT_ROOT_PREFIX)
+
+
+def _filled_from_agent_root(db: sqlite3.Connection, thread_id: str, item: dict) -> tuple[dict, str | None]:
+    """A reply to an agent root names only its id and cid: the server owns the root's quote and anchors.
+
+    Returns the item with seq, offsets, quote and anchors taken from the root row, or the reason the
+    root can't take a reply: unknown here, or its target message was replaced.
+    """
+    root_cid = item.get('root_cid')
+    row = db.execute(
+        "SELECT target.seq,r.from_off,r.to_off,r.quote,r.anchor_prefix,r.anchor_suffix "
+        "FROM chat_comment_agent_roots r "
+        "JOIN messages target ON target.id=r.target_message_id AND target.thread_id=r.thread_id "
+        f"WHERE r.thread_id=? AND r.root_id=? AND r.cid=? AND {commentable_role_sql('target.role')} "
+        f"AND {not_replaced_sql('target.id')}",
+        (thread_id, item['root_user_message_id'], root_cid if isinstance(root_cid, str) else ''),
+    ).fetchone()
+    if row is None:
+        return item, 'invalid_root'
+    return item | dict(zip(('seq', 'from_off', 'to_off', 'quote', 'anchor_prefix', 'anchor_suffix'), row)), None
+
+
 def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
     if not isinstance(raw, list):
         dropped.append(_dropped("comments", "not_list"))
@@ -166,7 +191,11 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
     comments = []
     for index, item in enumerate(raw):
         reason = None
-        if not isinstance(item, dict):
+        if isinstance(item, dict) and _is_agent_root_id(item.get('root_user_message_id')):
+            item, reason = _filled_from_agent_root(db, thread_id, item)
+        if reason:
+            pass
+        elif not isinstance(item, dict):
             reason = "not_object"
         elif not _is_int(item.get("seq")) or not 1 <= item["seq"] <= newest:
             reason = "invalid_seq"
@@ -184,12 +213,12 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
         root_sender = item.get('root_user_message_id') if isinstance(item, dict) else None
         root_cid = item.get('root_cid') if isinstance(item, dict) else None
         if not reason and db.execute(
-            "SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND role='assistant' "
+            f"SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND {commentable_role_sql()} "
             f"AND {not_replaced_sql()}", (thread_id, item['seq']),
         ).fetchone() is None:
             # A comment lives in the thread of the agent message it marks; with none, it has no place to show.
             reason = 'not_agent_message'
-        if not reason and (root_sender is not None or root_cid is not None):
+        if not reason and (root_sender is not None or root_cid is not None) and not _is_agent_root_id(root_sender):
             if not isinstance(root_sender, str) or not root_sender or not isinstance(root_cid, str) or not root_cid:
                 reason = 'invalid_root'
             else:
@@ -198,7 +227,7 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
                     "JOIN messages sender ON sender.id=c.user_message_id AND sender.thread_id=c.thread_id "
                     "JOIN messages target ON target.id=c.target_message_id AND target.thread_id=c.thread_id "
                     "WHERE c.thread_id=? AND c.user_message_id=? AND c.cid=? "
-                    "AND c.root_user_message_id IS NULL AND target.seq=? AND target.role='assistant'",
+                    f"AND c.root_user_message_id IS NULL AND target.seq=? AND {commentable_role_sql('target.role')}",
                     (thread_id, root_sender, root_cid, item['seq']),
                 ).fetchone()
                 try:

@@ -9,6 +9,7 @@ from doceditor.reply_attention import chat_reply_items
 from infra.auth import owns_thread, require_user_header_only
 from infra.chat_comment_answers import has_comment_cid
 from infra.chat_comment_index import attach_comments, comment_only
+from infra.chat_comment_schema import AGENT_ROOT_PREFIX
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.failure_reference import ReferencedHTTPException, new_error_reference
@@ -212,14 +213,35 @@ async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
 
 
 class ViewRequest(BaseModel):
-    assistant_message_id: str
+    # An answer in a person's comment thread: the answer the person opened.
+    assistant_message_id: str | None = None
+    # An agent root: the root's updated_at the app showed when the person opened it.
+    updated_at: str | None = None
 
 
-def _stamp(user_id: str, thread_id: str, message_id: str, cid: str, assistant_message_id: str) -> bool:
+def _stamp(user_id: str, thread_id: str, message_id: str, cid: str, assistant_message_id: str | None,
+           shown_updated_at: str | None = None) -> bool:
     db = get_db()
     try:
         with write_transaction(db, scope="chat_comment_view"):
             if not owns_thread(thread_id, user_id, db=db):
+                return False
+            if message_id.startswith(AGENT_ROOT_PREFIX):
+                if not shown_updated_at:
+                    return False
+                # The view reaches only as far as the note the person was shown: a root replaced since stays unread.
+                db.execute(
+                    "INSERT INTO chat_comment_views "
+                    "SELECT ?, root_id, cid, MIN(?, updated_at) FROM chat_comment_agent_roots "
+                    "WHERE thread_id=? AND root_id=? AND cid=? "
+                    "ON CONFLICT(user_message_id, cid, user_id) DO UPDATE SET seen_at=MAX(seen_at, excluded.seen_at)",
+                    (user_id, shown_updated_at, thread_id, message_id, cid),
+                )
+                return db.execute(
+                    "SELECT 1 FROM chat_comment_agent_roots WHERE thread_id=? AND root_id=? AND cid=?",
+                    (thread_id, message_id, cid),
+                ).fetchone() is not None
+            if assistant_message_id is None:
                 return False
             row = db.execute(
                 "SELECT metadata FROM messages WHERE id=? AND thread_id=? AND role='user'",
@@ -244,6 +266,8 @@ def _stamp(user_id: str, thread_id: str, message_id: str, cid: str, assistant_me
 async def mark_chat_comment_viewed(
     thread_id: str, message_id: str, cid: str, body: ViewRequest, user: dict = Depends(require_user_header_only),
 ):
-    if not await run_in_db(_stamp, user["id"], thread_id, message_id, cid, body.assistant_message_id):
+    if message_id.startswith(AGENT_ROOT_PREFIX) and not body.updated_at:
+        raise HTTPException(422, "updated_at is required for an agent comment")
+    if not await run_in_db(_stamp, user["id"], thread_id, message_id, cid, body.assistant_message_id, body.updated_at):
         raise HTTPException(404, "Comment not found")
     return {"cid": cid}
