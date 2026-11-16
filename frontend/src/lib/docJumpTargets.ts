@@ -63,6 +63,20 @@ function landingsById(root: ParentNode): Map<string, Landing> {
 	return found;
 }
 
+/** Whether an element cuts what is inside it at its own edge (`visible` is what an element that clips nothing computes to). */
+const clips = (el: HTMLElement) => !['', 'visible'].includes(getComputedStyle(el).overflowY);
+
+/**
+ * The box the text is judged against: the nearest element, from the editor's scroller up to the canvas, that cuts its
+ * contents at its own edge. A document scrolls its CodeMirror scroller; an email draft lets that scroller grow to the
+ * full text and scrolls the body around it, so the scroller's own box holds every line and nothing would ever read as
+ * off screen. Asking what clips, rather than naming the class of each mode, keeps this right for the next mode too.
+ */
+function textPort(scroller: HTMLElement | null, root: HTMLElement): HTMLElement {
+	for (let el = scroller; el && el !== root; el = el.parentElement) if (clips(el)) return el;
+	return scroller ?? root;
+}
+
 /** The text offset at the top of the scrollport, or null when no editor answers there. */
 function offsetAtTop(scroller: HTMLElement | null, top: number): number | null {
 	// From the scroller, whose first `.cm-content` is the document's; inside that content is an open table cell's editor.
@@ -84,9 +98,10 @@ export function docJumpTargets(root: HTMLElement, threads: DocComment[]): DocJum
 	if (!count) return { count, target: null, direction: null };
 	const scroller = root.querySelector<HTMLElement>('.cm-scroller');
 	const column = root.querySelector<HTMLElement>('.drawer-comments');
+	const port = textPort(scroller, root);
 	const views: Record<View, Box> = {
-		text: (scroller ?? root).getBoundingClientRect(),
-		column: (column ?? scroller ?? root).getBoundingClientRect(),
+		text: port.getBoundingClientRect(),
+		column: (column ?? port).getBoundingClientRect(),
 		frame: (root.querySelector<HTMLElement>('.viewport') ?? root).getBoundingClientRect(),
 	};
 	const landings = landingsById(root);

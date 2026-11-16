@@ -34,6 +34,8 @@
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
 	let draftOpen = $state(false);
+	// A comment sheet is up over the image: its scrim is on screen, so the verdict bar is not drawn under it.
+	let sheetUp = $state(false);
 	// The review bar reports how much of the viewer its floating phone capsule covers.
 	let capsuleClearance = $state(0);
 	let lightbox = $state<ReturnType<typeof ImageCommentLightbox>>();
@@ -104,7 +106,7 @@
 
 <!-- The canvas ends above the review bar's floating capsule on a phone, so the capsule never covers its edge or focus ring. -->
 <div class="image-viewer" style:--capsule-clearance="{capsuleClearance}px">
-	<ReviewBar {artifactId} {draftOpen} bind:capsuleClearance />
+	<ReviewBar {artifactId} {draftOpen} suppressed={sheetUp} bind:capsuleClearance />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -119,7 +121,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {target} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {target} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen bind:sheetUp {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

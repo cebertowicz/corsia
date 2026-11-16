@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import logging
 import secrets
+import time
 from functools import partial
 from typing import Awaitable, Callable
 
@@ -19,7 +20,7 @@ from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
-from ws import browser_clipboard, browser_pane_input
+from ws import browser_clipboard, browser_pane_input, browser_pane_stats
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
@@ -193,7 +194,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
 
-    frames = PaneFrames()
+    stats = browser_pane_stats.PaneStats(thread_id, browser_pane_stats.viewer_kind(pane))
+    frames = PaneFrames(stats)
     overflow = asyncio.Event()
 
     def report(message: dict) -> None:
@@ -206,30 +208,38 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                                    session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
-        async with contextlib.aclosing(browser_pane_input.pane_messages(pane)) as messages:
+        async with contextlib.aclosing(browser_pane_input.pane_messages(pane, stats)) as messages:
             async for data in messages:
                 kind = data.get("type")
                 if kind == "navigate":
                     _request_navigate(thread_id, connection_token, data, report)
                 elif kind == "appearance":
+                    stats.appearance(browser_pane.PaneAppearance.parse(data))
                     _request_match(thread_id, connection_token, data, report)
                 elif kind == "input_mouse":
                     # CDP serializes pointer and key delivery on the page target, so typing cannot
                     # overtake the click that focuses its field.
+                    started = time.perf_counter()
                     await browser_pane.mouse_event(thread_id, data, connection_token)
+                    stats.input_handled(data, time.perf_counter() - started)
                     browser_control.person_input(thread_id)
                     if data.get("eventType") == "mousePressed":
                         report({"type": "pane_error", "source": "clipboard", "error": None})
                 elif kind == "input_keyboard":
+                    started = time.perf_counter()
                     await browser_pane.key_event(thread_id, data, connection_token)
+                    stats.input_handled(data, time.perf_counter() - started)
                     browser_control.person_input(thread_id)
                     if data.get("eventType") in {"keyDown", "rawKeyDown"}:
                         report({"type": "pane_error", "source": "clipboard", "error": None})
+                elif kind == "pane_stats":
+                    stats.client_report(data)
                 elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_undo"}:
                     await browser_clipboard.handle(thread_id, connection_token, data, report)
 
     tasks: set[asyncio.Task] = set()
     try:
+        browser_pane_stats.start(stats)
         # Shared panes have no control-holder state.
         tasks = {
             asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
@@ -244,6 +254,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         for task in done:
             task.result()
     finally:
+        browser_pane_stats.stop(stats)
         for task in tasks:
             if not task.done():
                 task.cancel()

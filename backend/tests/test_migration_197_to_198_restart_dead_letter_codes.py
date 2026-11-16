@@ -1,11 +1,11 @@
-"""Schema 196 -> 197 gives restart replay dead letters written before codes their reason code."""
+"""Schema 197 -> 198 gives restart replay dead letters written before codes their reason code."""
 
 import sqlite3
 
 from automation import restart_webhooks
 from infra.database_migrations import MIGRATIONS
-from infra.migration_196_to_197_restart_dead_letter_codes import (
-    migrate_196_to_197,
+from infra.migration_197_to_198_restart_dead_letter_codes import (
+    migrate_197_to_198,
     restart_dead_letter_id,
 )
 from infra.schema import SCHEMA_VERSION
@@ -31,9 +31,9 @@ def _row(db, row_id, event, external_id, reason):
     )
 
 
-def test_step_is_registered_at_196():
-    assert SCHEMA_VERSION == 197
-    assert MIGRATIONS[196] is migrate_196_to_197
+def test_step_is_registered_at_197():
+    assert SCHEMA_VERSION == 198
+    assert MIGRATIONS[197] is migrate_197_to_198
 
 
 def test_the_frozen_id_is_the_one_restart_webhooks_writes():
@@ -54,7 +54,7 @@ def test_only_restart_rows_holding_text_are_rewritten():
     _row(db, "abc123def456", "webhook.github.pr_opened", "d-old", "no_owner")
     _row(db, "other", "email.received", None, "no_owner")
 
-    migrate_196_to_197(db)
+    migrate_197_to_198(db)
 
     reasons = dict(db.execute("SELECT id, reason FROM dead_letter_events"))
     assert reasons == {old: CODE, done: CODE, "abc123def456": "no_owner", "other": "no_owner"}
@@ -62,5 +62,5 @@ def test_only_restart_rows_holding_text_are_rewritten():
 
 def test_an_install_without_the_table_is_left_alone():
     db = sqlite3.connect(":memory:")
-    migrate_196_to_197(db)
+    migrate_197_to_198(db)
     assert db.execute("SELECT count(*) FROM sqlite_master").fetchone() == (0,)

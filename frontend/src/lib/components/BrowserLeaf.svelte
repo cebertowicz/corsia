@@ -6,7 +6,8 @@
 	import { drawShifted, FrameScrollShift } from '$lib/browserPane';
 	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
 	import { agentColor } from '$lib/docPresence';
-	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneInput, keyMessage, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneStats } from '$lib/browserPaneStats';
 	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
 	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
 	import { browserTabLabel } from '$lib/browserAddress';
@@ -54,14 +55,15 @@
 	let decodeWarned = false;
 	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
 	const frameScroll = new FrameScrollShift(() => redraw());
-	const paneInput = new BrowserPaneInput(message => {
-		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-	}, delta => {
+	const stats = new BrowserPaneStats(() => socket?.bufferedAmount ?? 0);
+	const send = (message: object) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(stats.stamp(message))); };
+	const paneInput = new BrowserPaneInput(send, delta => {
 		frameScroll.shift(delta);
 		redraw();
 	});
 
 	function resetInput() {
+		stats.stop();
 		clipboard?.dispose();
 		paneErrors.resetUndo();
 		paneInput.reset();
@@ -84,6 +86,7 @@
 		streaming = false;
 		next.onopen = () => {
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
+			stats.start(send);
 			sendAppearance();
 			// A newly opened socket can beat the canvas's first layout; send again once it is laid out.
 			requestAnimationFrame(() => sendAppearance());
@@ -173,15 +176,17 @@
 		const frameWidth = metadata.deviceWidth;
 		const frameHeight = metadata.deviceHeight;
 		const generation = ++decodeGeneration;
+		const painted = stats.arrived(message);
 		const next = new Image();
 		next.src = `data:image/jpeg;base64,${message.data}`;
 		void next.decode().then(() => {
-			if (generation !== decodeGeneration) return;
+			if (generation !== decodeGeneration) return painted(false);
 			frameScroll.replace(metadata);
 			width = frameWidth;
 			height = frameHeight;
 			image = next;
 			redraw();
+			painted(true);
 		}, (error) => {
 			// An undecodable frame keeps the last good picture; a drawing failure is not caught here.
 			if (!decodeWarned) console.warn('Browser pane could not decode a frame', error);
@@ -282,10 +287,7 @@
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
 		), (error, cut) => paneErrors.set('clipboard', error, cut), () => paneErrors.set('clipboard', null))) return;
-		socket.send(JSON.stringify({
-			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
-			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
-		}));
+		send(keyMessage(event));
 	}
 
 	async function go(targetUrl = url) {

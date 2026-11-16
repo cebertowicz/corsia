@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { threads, coordinationThreads, activeThread, activeThreadId, isNavAgent, saveThreadTitle } from '$lib/stores/threads';
 	import { canvasHeader } from '$lib/stores/canvasHeader';
 	import { threadActivity, descendantRunning } from '$lib/stores/activity';
@@ -240,7 +241,7 @@
 				{/if}
 				{#if renamingThreadId === agent.id}
 					<!-- svelte-ignore a11y_autofocus -->
-					<input
+					<input use:keepTyped={{ prose: false }}
 						class="rename-input"
 						bind:value={renameValue}
 						onclick={(event) => event.stopPropagation()}

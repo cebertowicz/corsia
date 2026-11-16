@@ -1,6 +1,6 @@
-"""Schema 196 -> 197: restart replay dead letters store their reason code.
+"""Schema 197 -> 198: restart replay dead letters store their reason code.
 
-Before 197, ``automation.restart_webhooks`` wrote the replay exception's text
+Before 198, ``automation.restart_webhooks`` wrote the replay exception's text
 as a ``dead_letter_events.reason``; it now writes the code
 ``restart_replay_poison`` and keeps the text on the webhook delivery row. This
 step gives the rows written before the change the same code, so a read of set
@@ -32,7 +32,7 @@ def restart_dead_letter_id(delivery_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{_SEED}:{delivery_id}"))
 
 
-def migrate_196_to_197(db: sqlite3.Connection) -> None:
+def migrate_197_to_198(db: sqlite3.Connection) -> None:
     """Rewrite each restart dead letter's stored exception text to its code."""
     if db.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dead_letter_events'"

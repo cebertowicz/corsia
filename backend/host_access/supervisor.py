@@ -1040,8 +1040,12 @@ async def request_reviewed_lease(
                     raise HostAccessSupervisorError(
                         "host-access reviewer identity changed"
                     )
+                auto_approve = (
+                    review_auto_approve
+                    and await run_in_db(get_host_access_auto_approve)
+                )
                 isolation_failed = False
-                if review.allowed:
+                if review.allowed and not auto_approve:  # isolation guards the person's prompt
                     try:
                         await _close_user_model_browsers(lease["user_id"])
                     except HostAccessBrowserIsolationError:
@@ -1053,10 +1057,6 @@ async def request_reviewed_lease(
                         lease["id"],
                         "project_policy_changed",
                     )
-                auto_approve = (
-                    review_auto_approve
-                    and await run_in_db(get_host_access_auto_approve)
-                )
                 lease = await run_in_db(
                     lambda: record_application_review(
                         lease["id"],
