@@ -1,8 +1,10 @@
 """Post chat comments, read their threads, and record when a person has seen an answer."""
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel
 
 from doceditor.reply_attention import chat_reply_items
@@ -136,6 +138,37 @@ def _posted(user_id: str, thread_id: str, input_id: str) -> dict | None:
             **(_threads(user_id, thread_id, targets) or {'messages': []})}
 
 
+async def _admit(start) -> None:
+    """Answer once the comment is stored, not once its delivery is started.
+
+    The send runs as a retained task, as the WebSocket path runs its sends: its drain count
+    is its own and lasts until delivery settles, so a restart drain still waits for it. A
+    refusal before the row is stored raises here, so the box keeps its text and the reason. A
+    failure after it is logged; the comment's thread shows its delivery state and Retry.
+    """
+    from ws.ingress import track_background_task
+
+    admitted: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    async def on_admitted(_queued) -> None:
+        if not admitted.done():
+            admitted.set_result(None)
+
+    async def run() -> None:
+        try:
+            await start(on_admitted)
+        except SendRejected as exc:
+            if not admitted.done():
+                raise
+            logger.warning('Comment delivery rejected after it was stored: {}', exc.detail)
+
+    task = asyncio.create_task(run())
+    track_background_task(task)
+    await asyncio.wait({task, admitted}, return_when=asyncio.FIRST_COMPLETED)
+    if task.done() and not admitted.done():
+        task.result()  # a refusal, or any failure, before the input was stored
+
+
 @router.post('/threads/{thread_id}/chat-comments')
 async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depends(require_user_header_only)):
     """Post a comment, or a reply in a comment thread, as the thread's next input.
@@ -161,13 +194,14 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
     if body.viewing_document is not None:
         metadata['viewing_document'] = body.viewing_document
     try:
-        await send_thread_input(
+        await _admit(lambda on_admitted: send_thread_input(
             thread_id, thread_row, '',
             user=user, metadata=metadata, human_origin=True, input_id=input_id,
             native_mode='delegation' if subagent else 'event',
             touch_thread_on_insert=True, trim_content=False,
             reasoning_effort=None if subagent else (body.reasoning_effort or thread_row.get('reasoning_effort')),
-        )
+            on_admitted=on_admitted,
+        ))
     except SendRejected as exc:
         # Stored, then not delivered: the comment is in its thread with that failure and Retry,
         # so the box closes on it rather than offering a second post of the same text.
