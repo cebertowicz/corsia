@@ -6,11 +6,14 @@ import base64
 import contextlib
 import hashlib
 import json
+import logging
+import warnings
 from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 
 from host_access import browser_cdp, browser_ports
+from host_access.browser_session_state import BrowserSessionError
 
 _SENTINEL = 'DISPOSABLE_LISTENER_OK'
 
@@ -113,13 +116,43 @@ async def _close_popup(browser, target):
     pytest.fail('closed popup remained in Chrome target list')
 
 
+class _CdpRefusals(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
 async def _title(cdp):
-    for _ in range(60):
-        value = await _evaluate(cdp, '({title:document.title,ready:document.readyState,url:document.URL})')
-        if value['ready'] == 'complete' and value['url'] != 'about:blank':
-            return value['title']
-        await asyncio.sleep(.05)
-    pytest.fail('fixture document did not finish loading')
+    """Poll until the document settles, counting a CDP refusal as not loaded yet.
+
+    A just-opened popup is still replacing its initial about:blank; CI once saw Chrome refuse
+    the first evaluate on a refused popup. A refusal that persists still fails, and any
+    refusal is reported as a warning so its cause stays visible.
+    """
+    refusals = _CdpRefusals()
+    cdp_log = logging.getLogger(browser_cdp.__name__)
+    level = cdp_log.level
+    cdp_log.addHandler(refusals)
+    cdp_log.setLevel(logging.DEBUG)
+    try:
+        for _ in range(60):
+            try:
+                value = await _evaluate(cdp, '({title:document.title,ready:document.readyState,url:document.URL})')
+            except BrowserSessionError:
+                value = None
+            if value and value['ready'] == 'complete' and value['url'] != 'about:blank':
+                if refusals.messages:
+                    warnings.warn(f'CDP refused while the document settled: {refusals.messages[-3:]}',
+                                  stacklevel=2)
+                return value['title']
+            await asyncio.sleep(.05)
+    finally:
+        cdp_log.removeHandler(refusals)
+        cdp_log.setLevel(level)
+    pytest.fail(f'fixture document did not finish loading; CDP refusals: {refusals.messages[-3:]}')
 
 
 async def _matrix(owner, cdp, phase, allowed, restricted):
