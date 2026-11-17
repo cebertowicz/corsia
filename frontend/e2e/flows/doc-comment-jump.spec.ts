@@ -107,7 +107,7 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 	await expect(page.locator('.cm-scroller')).toBeVisible();
 	// The column opens by itself once, when the comments load and the canvas is already wide. The count in the control's name shows
 	// they have loaded, so that one check has run on this narrow canvas and the column will not open by itself after the panels go.
-	await expect(page.locator('.comment-status')).toHaveAccessibleName(/^2 comments\b/);
+	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^2 comments\b/);
 	// The margin column needs a wide canvas: tuck both side panels away.
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	if (!(await page.locator('.pane').evaluate((element) => element.classList.contains('collapsed')))) {
@@ -117,7 +117,7 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 	await waitForPanelsToSettle(page);
 	// Start from a closed column whatever happened above, so the press below is the one that opens it.
 	await closeComments(page);
-	await expect(page.locator('.comment-status')).toHaveAttribute('aria-expanded', 'false');
+	await expect(page.locator('[data-comments-entry]')).toHaveAttribute('aria-expanded', 'false');
 	await openComments(page);
 	// Inside the column's opening hold, which keeps the reader's line steady while the text narrows.
 	await parkInMiddle(page, { wheel: true });
@@ -127,6 +127,6 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 	expect(Math.abs((await scrolling.evaluate((element) => element.scrollTop)) - parked)).toBeLessThan(4);
 	await expect(lineOf(page, 'First')).toHaveCount(0);
 	// A column that never opened would hold the reader's line just as well, so the hold only counts with the column open.
-	await expect(page.locator('.comment-status')).toHaveAttribute('aria-expanded', 'true');
+	await expect(page.locator('[data-comments-entry]')).toHaveAttribute('aria-expanded', 'true');
 	await saveEvidenceScreenshot(page, testInfo, 'comment-margin-scroll-after-open-1440', { fullPage: false });
 });

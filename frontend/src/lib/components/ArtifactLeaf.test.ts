@@ -619,11 +619,14 @@ describe('reply stamping through the document canvas', () => {
 		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
 		render();
 		await vi.waitFor(() => expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(true));
-		await openComments();
+		// While the place is restored the document is off screen: its Comments is not offered, and nothing is read.
+		expect(host.querySelector('[data-comments-entry]')).toBeNull();
 		expect(observers().filter((observer) => !observer.disconnected)).toHaveLength(0);
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 		restore.resolve();
+		await openComments();
+		expect(observers().filter((observer) => !observer.disconnected)).toHaveLength(0);
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 	});

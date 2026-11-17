@@ -107,7 +107,7 @@ async function armReturnSampler(page: Page): Promise<void> {
 						top: visibleLine ? visibleLine.getBoundingClientRect().top : null,
 						editor: Boolean(scroller),
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none'),
-						commentText: document.querySelector<HTMLElement>('.comment-status')?.textContent?.trim() ?? '',
+						commentText: document.querySelector<HTMLElement>('[data-comments-entry]')?.textContent?.trim() ?? '',
 						tabReadOnly: Boolean(document.querySelector('.tab-ro')),
 					};
 				};

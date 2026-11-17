@@ -98,6 +98,18 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(control().getAttribute('aria-haspopup')).toBe('dialog');
 	});
 
+	it('withdraws Comments, Details and File changed from the bar while the document is off screen, and puts them back after', () => {
+		render(value(), undefined, { stale: true, offScreen: true });
+		const inBar = (selector: string) => host.querySelector(`[data-test-document-bar] ${selector}`);
+		expect(host.querySelector('[data-test-document-bar]')).toBeNull();
+		component!.$set({ offScreen: false }); flushSync();
+		expect(inBar('[data-comments-entry]')).not.toBeNull();
+		expect(inBar('[data-document-details]')).not.toBeNull();
+		expect(inBar('[data-file-changed]')).not.toBeNull();
+		component!.$set({ offScreen: true }); flushSync();
+		expect(host.querySelector('[data-test-document-bar]')).toBeNull();
+	});
+
 	it('does not claim a zero comment count before the document is ready', () => {
 		render(value(), undefined, { ready: false, commentCount: 0 });
 		const pill = host.querySelector<HTMLButtonElement>('[data-comments-entry]')!;

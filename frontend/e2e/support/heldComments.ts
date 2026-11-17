@@ -3,10 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, TEST_TOKEN } from './corsia';
+import { closeDetails, openDetails } from './documentBar';
 
 // Held-comment delivery: a held comment waits for a person's Send. Its one sender is the surface that owns its lane:
-// the document header (document-held), the image viewer bar (image-held), and the chat for the thread's document-held
-// comments whose own header is not on screen.
+// the document header (document-held, in the open document's Details panel), the image viewer bar (image-held), and the
+// chat for the thread's document-held comments whose own document is not on screen.
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HOLD_LATER = "strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+1 hour')";
@@ -83,13 +84,15 @@ export async function holdDocumentComments(request: APIRequestContext): Promise<
 	await setDeliveryPreference(request, false);
 }
 
-/** Set the preference through the real document header, as a person does. */
+/** Set the preference through the real document's Details panel, as a person does, then close Details again. */
 export async function turnOffDocumentComments(page: Page): Promise<void> {
+	await openDetails(page);
 	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 	await expect(toggle).toBeVisible();
 	if (await toggle.getAttribute('aria-pressed') === 'true') await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 	await expect.poll(async () => (await readDeliveryPreference(page.request)).immediate).toBe(false);
+	await closeDetails(page);
 }
 
 /** Makes `count` document-held comments on a document, as a person's would be with delivery-immediately off. */
@@ -168,8 +171,13 @@ export function makeHeldBatchDue(artifactId: string, policy: 'document-held' | '
 
 const SEND_NAME = /^Send( all)? \d+ comments?( to .+)?$/;
 
-/** The open document's own header Send (its document-held lane). */
+/** The open document's own header Send (its document-held lane), in its Details panel: hidden until Details is open. */
 export const headerSend = (page: Page): Locator => page.locator('.document-header').getByRole('button', { name: SEND_NAME });
+/** Opens the open document's Details, as a person does to reach its Send, and returns that Send. */
+export async function shownHeaderSend(page: Page): Promise<Locator> {
+	await openDetails(page);
+	return headerSend(page);
+}
 /** The image viewer bar's Send (its image-held lane), for an image over a document or an image file. */
 export const imageBarSend = (page: Page): Locator => page.locator('.image-comments .sending-now').getByRole('button', { name: SEND_NAME });
 /** The chat's Send for the thread's document-held comments whose header is not on screen. */

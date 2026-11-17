@@ -16,8 +16,8 @@ export type DocViewerProps = {
 	onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 	/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
 	covered?: boolean;
-	/** An image covers the document, or it is still being put back after a tab return, so its replies are not on screen and must not be marked read. */
-	readStampSuppressed?: boolean;
+	/** An image covers the document, or it is still being put back after a tab return: it is not on screen, so its replies are not marked read and the bar draws none of its controls. */
+	offScreen?: boolean;
 	/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
 	onLanded?: () => void;
 };

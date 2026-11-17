@@ -49,6 +49,7 @@
 		onReopen,
 		onRead,
 		imageOpen = false,
+		offScreen = false,
 		activityRoot = null,
 		historyAvailable = false,
 		historyOpen = false,
@@ -94,6 +95,8 @@
 		onRead?: () => void;
 		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
 		imageOpen?: boolean;
+		/** The document is not on screen (an image covers it, or it is still being put back): the bar draws none of its controls, as none of it takes input. */
+		offScreen?: boolean;
 		activityRoot?: HTMLElement | null;
 		/** The file has recorded versions (slice 1: instruction files). Without them there is no History, and no count. */
 		historyAvailable?: boolean;
@@ -194,8 +197,9 @@
 		return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keys, true); };
 	});
 
-	// The bar that holds the canvas draws this document's controls (barTools, barChange): one instance, wherever they show.
-	$effect(() => publishDocumentBar({ tools: barTools, titleEnd: urgent ? barChange : null }));
+	// The bar that holds the canvas draws this document's controls (barTools, barChange): one instance, wherever they show. Off
+	// screen the document publishes nothing, so the bar never offers a list or panel for a document the person can't see.
+	$effect(() => offScreen ? undefined : publishDocumentBar({ tools: barTools, titleEnd: urgent ? barChange : null }));
 
 	function closeThen(fn?: () => void) { panelOpen = false; fn?.(); }
 

@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/heldComments';
+import { detailsPanel, openDetails } from '../support/documentBar';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
@@ -12,7 +13,7 @@ import { LONG_NAME, overlaps, ownerItem, rolePicker, seedOwnedDocument, supervis
  * The person sees who owns and who supervises a document and changes each one on the document, at wide and phone
  * widths: two separate items, each opening a picker for that role only; a pick saves; a failed save says so; the
  * person can take the document over, after which an agent's edit is refused and it suggests instead; and Request
- * review never covers the owner and supervisor items, nor they it.
+ * review never covers the owner and supervisor items, nor they it. All three are in the document's Details panel.
  */
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
@@ -44,6 +45,7 @@ async function atRest(page: Page, touch: boolean, step: string) {
 type Seeded = Awaited<ReturnType<typeof seedOwnedDocument>>;
 
 async function pick(page: Page, seeded: Seeded, role: 'owner' | 'supervisor', name: string) {
+	await openDetails(page);
 	const item = role === 'owner' ? ownerItem(page) : supervisorItem(page);
 	await item.click();
 	const picker = rolePicker(page);
@@ -81,7 +83,8 @@ async function agentEditIsRefused(page: Page, request: APIRequestContext, owner:
 
 /** Opens Request review and checks it never covers the owner and supervisor items; returns which surface it used. */
 async function reviewLeavesOwnershipReachable(page: Page): Promise<'drawer' | 'popover'> {
-	await page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }).click();
+	await openDetails(page);
+	await detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }).click();
 	const reviews = page.locator('[data-review-surface]');
 	await expect(reviews).toBeVisible();
 	await page.waitForTimeout(400);
@@ -131,7 +134,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		await ownerItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'owner');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toBeVisible();
-		await reachable(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
+		await reachable(detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'supervisor');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toHaveCount(0);
@@ -241,6 +244,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 			"connection.execute(\"UPDATE threads SET agent_responsibility='Neighbourhood outreach and the volunteer rota for every weekend of the season' WHERE id=?\", (sys.argv[4],))",
 		], twin, seeded.agents[3], seeded.agents[1]);
 		await seeded.open(page);
+		await openDetails(page);
 		await supervisorItem(page).click();
 		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Planning specialist');
 		// This test's own two agents; earlier tests on the same server may have left agents with the same name.

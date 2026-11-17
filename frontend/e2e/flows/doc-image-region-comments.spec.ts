@@ -78,11 +78,11 @@ const overlay = (page: Page) => page.locator('.image-overlay');
 const bar = (page: Page) => overlay(page).locator('.bar');
 const docImage = (page: Page) => page.locator('.cm-md-image img').first();
 /** The document's header pill names the thread the image carries: no margin icon stands beside the image any more. */
-const imageThread = (page: Page) => page.locator('.document-header .comment-status');
+const imageThread = (page: Page) => page.locator('[data-comments-entry]');
 const drawer = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]');
 const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-tag="${number}"]:not([inert])`);
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
-const docComments = (page: Page) => page.locator('.document-header .comment-status');
+const docComments = (page: Page) => page.locator('[data-comments-entry]');
 /** The document's pending batch, as its header pill names it; its Send is the document header's. */
 const unsentName = (count: number) => new RegExp(`, ${count} waiting for Send$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();

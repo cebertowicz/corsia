@@ -68,7 +68,7 @@
 		onOpenImage,
 		onDocumentPlace,
 		covered = false,
-		readStampSuppressed = false,
+		offScreen = false,
 		onLanded,
 	}: DocViewerProps = $props();
 
@@ -288,7 +288,7 @@
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
-		imageOpen={covered} activityRoot={docRoot}
+		imageOpen={covered} {offScreen} activityRoot={docRoot}
 		{onReload}
 		onOpenComments={(opener) => { history.close(); commentUI.openList(opener); }}
 		historyAvailable={history.available}
@@ -388,7 +388,7 @@
 		onRevealDraft={revealDraft} onRevealCard={revealCard}
 		images={images.groups}
 		{covered}
-		{readStampSuppressed}
+		{offScreen}
 		draftOverColumn={commentUI.draftOverColumn}
 		opened={commentUI.opened}
 		bind:resolvedCount bind:resolvedOpen

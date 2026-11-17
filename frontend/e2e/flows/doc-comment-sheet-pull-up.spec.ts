@@ -354,7 +354,7 @@ test.describe(`${TAG} document`, () => {
 		await expect(sheet(page)).toHaveCount(0);
 
 		// The list, jumped from to a comment, rests as a half sheet the reader can reach past; they start a reply in it.
-		await page.locator('.comment-status').tap();
+		await page.locator('[data-comments-entry]').tap();
 		await expect(sheet(page)).toHaveCount(1);
 		await sheet(page).locator(`[data-comment-id="${ids.passage}"] [data-comment-jump]`).tap();
 		await expect(sheet(page)).toHaveClass(/\bhalf\b/);

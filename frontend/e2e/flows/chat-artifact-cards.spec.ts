@@ -173,7 +173,7 @@ for (const [label, width, theme] of SURFACES) {
 			const held = new Promise<void>((resolve) => { release = resolve; });
 			await page.route('**/api/attention/*/clear', async (route) => { await held; await route.continue(); });
 			await row.click();
-			const reviewBar = page.locator('.review-bar');
+			const reviewBar = page.locator('[data-ask-card]');
 			await expect(reviewBar).toBeVisible();
 			await reviewBar.getByRole('button', { name: 'Approve', exact: true }).click();
 			await expect(row).toHaveAttribute('data-card-state', 'approved');
@@ -243,7 +243,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await openTranscript(page, artifact, 393, theme);
 			const row = card(page, artifact);
 			await row.click();
-			await page.locator('.review-bar').getByRole('button', { name: 'Approve', exact: true }).click();
+			await page.locator('[data-ask-card]').getByRole('button', { name: 'Approve', exact: true }).click();
 			await expect(row).toHaveAttribute('data-card-state', 'approved_with_changes');
 			await expect(row).toContainText('2 comments, 1 suggestion');
 			await screenshot(page, `chat-card-settled-counts-${theme}`);
@@ -261,7 +261,7 @@ for (const theme of ['light', 'dark'] as const) {
 			const row = card(page, artifact);
 			await screenshot(page, `chat-card-failed-send-${theme}-before`);
 			await row.click();
-			await page.locator('.review-bar').getByRole('button', { name: 'Approve', exact: true }).click();
+			await page.locator('[data-ask-card]').getByRole('button', { name: 'Approve', exact: true }).click();
 			await expect(row).toHaveAttribute('data-card-state', 'approved');
 			await screenshot(page, `chat-card-failed-send-${theme}-during`);
 			release();

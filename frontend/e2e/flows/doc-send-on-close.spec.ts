@@ -77,7 +77,7 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 		const label = document.createRange();
 		label.selectNodeContents(send);
 		return {
-			count: row('.comment-status').top,
+			count: row('[data-comments-entry]').top,
 			review: row('.review-request').top,
 			sendTop: send.getBoundingClientRect().top,
 			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,

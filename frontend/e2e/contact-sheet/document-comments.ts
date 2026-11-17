@@ -44,7 +44,7 @@ async function closePanes(page: Page, sidebar: boolean) {
 
 /** The cards beside the text, opened from the comments button if the canvas was narrower when the document loaded. */
 async function showMargin(page: Page) {
-  if (!(await page.locator('[data-margin-card]').count())) await page.locator('.comment-status').click();
+  if (!(await page.locator('[data-margin-card]').count())) await page.locator('[data-comments-entry]').click();
   await expect(page.locator('[data-margin-card]').first()).toBeVisible();
 }
 

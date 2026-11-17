@@ -51,7 +51,7 @@ test('@flow:doc-comment-sheet keeps the whole card visible when its reply field 
 	await expect(page.locator('.cm-content')).toContainText('commentable');
 
 	// The person opens the comments: the sheet lists all nine cards, and its second card sits at its far edge.
-	await page.locator('.comment-status').tap();
+	await page.locator('[data-comments-entry]').tap();
 	await expect(page.locator('[data-comment-id]')).toHaveCount(ANCHORS.length);
 	await settled(page);
 

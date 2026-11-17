@@ -12,7 +12,7 @@
 		compact?: boolean;
 		/** The held lane this control sends; none where Send lives elsewhere, so only what was not delivered, and Retry, show here. */
 		lane?: HeldLane | null;
-		/** PROTOTYPE ONLY (round 2): what sits between Send and its count in the short label (' · ' in the details panel, beside "Resolved · N"). */
+		/** What sits between Send and its count in the short label: ' · ' in the document's Details panel, matching "Resolved · N". */
 		countSep?: string;
 	} = $props();
 	const held = $derived(lane ? feedback.heldCount(lane) : 0);

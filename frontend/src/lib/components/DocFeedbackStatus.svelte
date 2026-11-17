@@ -27,7 +27,7 @@
 		lane?: HeldLane | null;
 		/** Document canvas whose active use extends the document-held delivery deadline. */
 		activityRoot?: HTMLElement | null;
-		/** PROTOTYPE ONLY (round 2): passed to DocFeedbackControls' short Send label. */
+		/** Passed to DocFeedbackControls' short Send label (' · ' in the document's Details panel). */
 		countSep?: string;
 	} = $props();
 

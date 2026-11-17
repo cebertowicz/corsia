@@ -18,7 +18,7 @@ test.afterEach(({ request }) => deleteSeededThreads(request));
 const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
 /** The list is showing its threads. Read from a thread, not the list: the margin column's own box is 0 px tall, its cards placed beside their lines. */
 const listShown = (drawer: Locator) => expect(drawer.locator('[data-comment-id]').first()).toBeVisible();
-const pill = (page: Page) => page.locator('.comment-status');
+const pill = (page: Page) => page.locator('[data-comments-entry]');
 /** A margin card at rest is a short preview that counts its replies; picking it (by its header: its jump button lies under it) shows them. A list row or a sheet shows them already. */
 async function showReplies(drawer: Locator) {
 	const card = drawer.getByRole('region', { name: /^Comment by / }).first();

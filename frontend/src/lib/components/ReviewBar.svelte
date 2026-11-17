@@ -32,7 +32,7 @@
 	const SEND_BACK = 'Send back';
 	let approveButton = $state<HTMLButtonElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-	/** How many suggestions the last Approve all accepted, for the receipt. */
+	/** How many suggestions the last Approve accepted along with it ("Also accepts N suggestions"), for the receipt. */
 	let acceptedCount = $state(0);
 
 	const read = $derived(bar.read);

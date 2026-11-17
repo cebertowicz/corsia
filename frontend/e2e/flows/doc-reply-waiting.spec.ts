@@ -447,7 +447,7 @@ for (const theme of ['light', 'dark'] as const) {
 			if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByText(title, { exact: true }).first().click();
 			const replyMark = page.locator('.reply-mark');
-			const pillUnread = page.locator('.document-header .comment-status');
+			const pillUnread = page.locator('[data-comments-entry]');
 			if (width === 393) {
 				// The artifact row remains mounted in the hidden pane while the document is active.
 				await expect(replyMark).toHaveCount(1);
