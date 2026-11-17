@@ -13,12 +13,15 @@ describe('browser pane labels', () => {
 	it('leads with the whole host when the domain is missing or names another site', () => {
 		expect(browserAddressLabel('https://www.example.test/path')).toBe('www.example.test · …path');
 		expect(browserAddressLabel('https://www.example.test/path', 'other.test')).toBe('www.example.test · …path');
+		expect(browserAddressLabel('https://www.example.co.uk/news')).toBe('www.example.co.uk · …news');
 	});
 
 	it('keeps an IP address or single-label host whole', () => {
 		expect(browserAddressLabel('http://127.0.0.1:5320/browser-pane-probe.html', '127.0.0.1')).toBe('127.0.0.1 · …browser-pane-probe.html');
+		expect(browserAddressLabel('http://127.0.0.1:5320/browser-pane-probe.html')).toBe('127.0.0.1 · …browser-pane-probe.html');
 		expect(browserAddressLabel('http://[::1]:3000/', '::1')).toBe('[::1]');
 		expect(browserAddressLabel('http://localhost:3000/app', 'localhost')).toBe('localhost · …app');
+		expect(browserAddressLabel('http://localhost:3000/app')).toBe('localhost · …app');
 	});
 
 	it('shows a URL with no host as written', () => {

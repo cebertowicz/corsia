@@ -70,7 +70,7 @@ describe('WorkBlock structure', () => {
 	});
 
 	it('shows the browser chip of its open beside the closed capsule, and on the opening row once expanded', () => {
-		const open = { ...work('open', 2, '10:02:00'), metadata: { turn_id: 't1', tool_hints: ['Open a page'], browser_chip: { host: 'github.com' } } };
+		const open = { ...work('open', 2, '10:02:00'), metadata: { turn_id: 't1', tool_hints: ['Open a page'], browser_chip: { host: 'github.com', domain: 'github.com' } } };
 		render(present([work('a', 1, '10:01:00'), open, said('reply', 5, '10:10:00')]));
 
 		const chips = () => [...host.querySelectorAll<HTMLElement>('button.tile.chip')];

@@ -53,7 +53,7 @@ AGENT_BROWSER_SOCKET_DIR=<private-dir> AGENT_BROWSER_DEFAULT_TIMEOUT=8000 AGENT_
 `AGENT_BROWSER_STREAM_PORT` is set only once the owned Chrome has a reserved
 stream port. On Linux, where launch stays native-owned, `--cdp` is replaced by
 `--executable-path <verified-chrome>` (also exported as
-`AGENT_BROWSER_EXECUTABLE_PATH`), the stealth Chrome arguments are passed with
+`AGENT_BROWSER_EXECUTABLE_PATH`), the managed launch's Chrome arguments are passed with
 `--args`, and `CI` is removed from the client environment.
 
 Native snapshots, navigation, evaluation and screenshots are rendered back to
@@ -99,8 +99,11 @@ sign-in automatically; agents needing extraction without it can launch their
 own ephemeral agent-browser session in the protected shell. Headless launches drop the
 `AutomationControlled` blink feature, use a
 user agent derived from the installed Chrome without the `Headless` token, and
-run `browser_stealth_init.js` on every document. Launch flags apply only to a
-session's first command.
+run `browser_stealth_init.js` on every document. Every managed launch, headless
+or visible, uses Chrome's fake camera and microphone
+(`--use-fake-device-for-media-stream`), so no page reaches the real devices or
+makes the operating system ask the person for that permission. Launch flags apply
+only to a session's first command.
 
 Every managed navigation URL uses the pane's shared normalizer before native setup
 or daemon admission: HTTP, HTTPS and `about:blank` only. The pinned 0.31.2 navigation

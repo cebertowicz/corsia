@@ -34,6 +34,7 @@ def test_linux_launch_keeps_other_inherited_flags(monkeypatch, blocked):
     assert '--foo=1' in args[1]
     assert blocked not in args[1]
     assert '--disable-blink-features=AutomationControlled' in args[1]
+    assert '--use-fake-device-for-media-stream' in args[1]
 
 
 @pytest.mark.parametrize(('show_window', 'ua'), [(False, 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0.0.0'),
@@ -43,7 +44,8 @@ def test_linux_launch_user_agent_is_a_separate_argument(monkeypatch, show_window
     monkeypatch.setattr(launch, 'sys', SimpleNamespace(platform='linux'))
     monkeypatch.setenv('AGENT_BROWSER_ARGS', '--foo=1,--bar=2\n--baz=3')
     args = launch.flags(SimpleNamespace(show_window=show_window), ua)
-    assert args[0:2] == ['--args', '--foo=1\n--bar=2\n--baz=3\n--disable-blink-features=AutomationControlled']
+    assert args[0:2] == ['--args', '--foo=1\n--bar=2\n--baz=3\n--disable-blink-features=AutomationControlled\n'
+                         '--use-fake-device-for-media-stream']
     assert ' ' not in args[1]
     if not show_window and ua:
         assert args[2:4] == ['--user-agent', ua]

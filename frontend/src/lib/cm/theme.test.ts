@@ -20,6 +20,16 @@ describe('document editor theme', () => {
 		expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) ?\{[^@]*\.cm-scroller, [^{]*\.cm-scroller \* ?\{ ?transition-property: none !important;? ?\}/);
 	});
 
+	it('sets the text you edit at phone width to the input size, on selectors a browser applies', () => {
+		// A phone's browser zooms the page when an editable under the input size takes focus. A bare '&' inside @media renders
+		// as a rule with no selector, which no browser applies, so the size has to name elements inside the editor.
+		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
+		const css = mountedCss().replace(/\s+/g, ' ');
+		view.destroy();
+		expect(css).toMatch(/@media \(max-width: 768px\) ?\{[^@]*\.cm-scroller, [^{]*\.cm-md-table table ?\{ ?font-size: var\(--text-input\)/);
+		expect(css).not.toMatch(/@media[^{]*\{ ?font-size/);
+	});
+
 	it('paints the selection from the accent selection role, never a share chosen here, and keeps the matched-text wash faint', () => {
 		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
 		const css = mountedCss().replace(/\s+/g, ' ');

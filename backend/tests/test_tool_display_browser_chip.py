@@ -15,7 +15,7 @@ def _open_args(**extra) -> dict:
     return {"url": "https://www.GitHub.com/a/b", "show_window": True, **extra}
 
 
-GITHUB = {"host": "github.com"}
+GITHUB = {"host": "github.com", "domain": "github.com"}
 
 
 @pytest.mark.parametrize(("name", "arguments", "settled", "chip"), [
@@ -24,7 +24,12 @@ GITHUB = {"host": "github.com"}
     ("browser_open", json.dumps(_open_args()), SettledResult("ok"), GITHUB),
     ("mcp__corsia__tool_call", {"name": "browser_open", "arguments": _open_args()}, SettledResult("ok"), GITHUB),
     ("tool_call", {"name": "mcp__corsia__browser_open", "arguments": _open_args()}, SettledResult("ok"), GITHUB),
-    ("browser_open", _open_args(url="not a url"), SettledResult("ok"), {"host": None}),
+    ("browser_open", _open_args(url="not a url"), SettledResult("ok"), {"host": None, "domain": None}),
+    # A lookalike host: the registrable domain the chip carries is the one the person must see, not the labels in front.
+    (
+        "browser_open", _open_args(url="https://accounts.example.com.other-site.net/login"), SettledResult("ok"),
+        {"host": "accounts.example.com.other-site.net", "domain": "other-site.net"},
+    ),
     # Only an open that succeeded: running, failed, refused and unknown calls claim no chip.
     ("browser_open", _open_args(), None, None),
     ("browser_open", _open_args(), SettledResult("Error: no window", is_error=True), None),
@@ -113,8 +118,18 @@ def test_the_finalized_frame_carries_the_later_of_two_opens_like_the_row(isolate
     asyncio.run(handler.handle("tool_calls_done", {"tool_ids": ["c1", "c2"]}))
 
     final = next(frame for frame in frames if frame["type"] == "step_text")
-    assert final["metadata"]["browser_chip"] == {"host": "other.example"}
+    assert final["metadata"]["browser_chip"] == {"host": "other.example", "domain": "other.example"}
     assert final["metadata"]["browser_chip"] == _step_metadata(step_id)["browser_chip"]
+
+
+def test_the_stamped_chip_carries_the_registrable_domain_of_a_lookalike_host(isolated_db):
+    handler, _ = _native_step([("c1", _open_args(url="https://accounts.example.com.other-site.net/login"))])
+    step_id = handler.tool_step_id
+    asyncio.run(handler.handle("tool_complete", {"id": "c1", "name": "browser_open", "result": "opened"}))
+
+    assert _step_metadata(step_id)["browser_chip"] == {
+        "host": "accounts.example.com.other-site.net", "domain": "other-site.net",
+    }
 
 
 def test_a_failed_or_headless_open_stores_nothing(isolated_db):
@@ -145,11 +160,11 @@ def test_every_harness_result_write_stores_it_and_the_reloaded_step_keeps_it(iso
 
     # The newer open replaces the older one, and the declared calls are untouched.
     stored = _step_metadata(step_id)
-    assert stored["browser_chip"] == {"host": "other.example"}
+    assert stored["browser_chip"] == {"host": "other.example", "domain": "other.example"}
     assert [call["id"] for call in stored["llm_tool_calls"]] == ["c1", "c2"]
     step = load_assistant_step_display("t-chip", step_id)
     metadata = step["metadata"] if isinstance(step["metadata"], dict) else json.loads(step["metadata"])
-    assert metadata["browser_chip"] == {"host": "other.example"}
+    assert metadata["browser_chip"] == {"host": "other.example", "domain": "other.example"}
 
 
 def test_a_call_appended_after_the_stamp_keeps_it(isolated_db):

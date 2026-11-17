@@ -51,6 +51,51 @@ it('gives the caller the comment its highlight picked, and the first Escape drop
 	expect(picked()).toBe('');
 });
 
+it('gives focus in the released card back to its highlight on Escape, as a document margin gives it back to the text, keeping the unsent reply', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	// The column's card for the comment, holding its Reply field.
+	host.insertAdjacentHTML('beforeend', '<div class="chat-margin"><div class="chat-margin-card"><div data-comment-uuid="one" tabindex="-1"><textarea></textarea></div></div></div>');
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	const mark = host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="one"]')!;
+	mark.click();
+	flushSync();
+	await tick();
+	expect(picked()).toBe('one');
+	const field = host.querySelector<HTMLTextAreaElement>('.chat-margin textarea')!;
+	field.focus();
+	field.value = 'A reply not sent yet';
+	document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	flushSync();
+	await tick();
+	expect(picked()).toBe('');
+	expect(document.activeElement).toBe(mark);
+	expect(field.value).toBe('A reply not sent yet');
+});
+
+it('leaves focus outside the column where it is when Escape releases the picked card', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	host.insertAdjacentHTML('beforeend', '<div class="chat-margin"><div class="chat-margin-card"><div data-comment-uuid="one" tabindex="-1"><textarea></textarea></div></div></div><textarea id="composer"></textarea>');
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="one"]')!.click();
+	flushSync();
+	await tick();
+	const composer = host.querySelector<HTMLTextAreaElement>('#composer')!;
+	composer.focus();
+	composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	flushSync();
+	await tick();
+	expect(picked()).toBe('');
+	expect(document.activeElement).toBe(composer);
+});
+
 it('hands a thread open in its popover to its card when the column comes up, keeping the unsent reply', async () => {
 	setupSurface();
 	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [

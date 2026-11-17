@@ -46,7 +46,7 @@ def _operate(operation):
 def test_settings_writer_rejects_foreign_work(isolated_db, monkeypatch, operation):
     db = database.get_db()
     _seed(db)
-    monkeypatch.setattr(subagent_caps, "_load_seed_cap", lambda: 3)
+    monkeypatch.setattr(subagent_caps, "_load_seed_value", lambda field: 3)
     before = {key: _stored(isolated_db, key) for key in ("probe", "delegation", "agents", "subagents")}
     db.execute("INSERT INTO settings VALUES ('foreign', '{}', 't')")
     try:
@@ -66,7 +66,7 @@ def test_settings_writer_rejects_foreign_work(isolated_db, monkeypatch, operatio
         ("merge", "probe", {"nested": {"keep": 1, "change": 2}, "other": True}),
         ("delegation", "delegation", {"other": True}),
         ("agents", "agents", {"defaults": {"temperature": 0.2}}),
-        ("seed", "subagents", {"other": True, "max_concurrent_live": 3}),
+        ("seed", "subagents", {"other": True, "max_idle_live": 3}),
     ],
 )
 def test_settings_merge_owns_read_and_preserves_unrelated_keys(
@@ -74,9 +74,9 @@ def test_settings_merge_owns_read_and_preserves_unrelated_keys(
 ):
     db = database.get_db()
     _seed(db)
-    monkeypatch.setattr(subagent_caps, "_load_seed_cap", lambda: 3)
-    # The cap alone exercises the owned read; the idle fields seed the same way.
-    monkeypatch.setattr(subagent_caps, "_load_seed_value", lambda field: None)
+    # One field alone exercises the owned read; the other seeds the same way.
+    monkeypatch.setattr(subagent_caps, "_load_seed_value",
+                        lambda field: 3 if field == "max_idle_live" else None)
     reads_owned = []
 
     def trace(sql):
@@ -126,26 +126,21 @@ def test_rejected_setting_does_not_leak_partial_json(isolated_db, operation):
         observer.rollback()
 
 
-def test_seed_file_read_precedes_owner_and_never_clobbers_cap(isolated_db, monkeypatch):
+def test_seed_file_read_precedes_owner_and_never_clobbers_a_field(isolated_db, monkeypatch):
     db = database.get_db()
     _seed(db)
     db.execute(
-        "UPDATE settings SET value=? WHERE key='subagents'", ('{"max_concurrent_live":2}',),
+        "UPDATE settings SET value=? WHERE key='subagents'", ('{"max_idle_live":2}',),
     )
     db.commit()
 
-    def load_seed():
+    def load_seed(field):
         assert not db.in_transaction
-        return 3
+        return 3 if field == "max_idle_live" else None
 
-    def load_idle_seed(field):
-        assert not db.in_transaction
-        return None
-
-    monkeypatch.setattr(subagent_caps, "_load_seed_cap", load_seed)
-    monkeypatch.setattr(subagent_caps, "_load_seed_value", load_idle_seed)
+    monkeypatch.setattr(subagent_caps, "_load_seed_value", load_seed)
     assert subagent_caps.seed_subagent_caps() is False
-    assert _stored(isolated_db, "subagents") == {"max_concurrent_live": 2}
+    assert _stored(isolated_db, "subagents") == {"max_idle_live": 2}
     assert not db.in_transaction
 
 

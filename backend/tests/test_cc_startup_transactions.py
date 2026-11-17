@@ -38,7 +38,7 @@ def _assert_preserved(db):
 
 @pytest.mark.parametrize(("value", "expected"), [
     (None, None),
-    ('{"max_concurrent_live": 3}', {"max_concurrent_live": 3}),
+    ('{"max_idle_live": 3}', {"max_idle_live": 3}),
     ('"scalar"', None),
     ("malformed", None),
 ])

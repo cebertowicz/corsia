@@ -31,54 +31,22 @@ def _clean_live():
 
 
 
-class TestSpawnCap:
-    def test_cap_resolves_from_settings_then_seed(self, monkeypatch):
-        from infra import subagent_caps as caps
-
-        monkeypatch.setattr(caps, "get_setting",
-                            lambda k: {"max_concurrent_live": 3})
-        assert caps.get_max_concurrent_live() == 3
-
-        monkeypatch.setattr(caps, "get_setting", lambda k: None)
-        assert caps.get_max_concurrent_live() >= 1
-
+class TestNoWorkingCap:
     @pytest.mark.asyncio
-    async def test_spawn_refused_at_cap(self, child_db, fake_claude_oneshot, monkeypatch):
+    async def test_spawn_starts_while_many_processes_work(self, child_db, fake_claude_oneshot):
+        """No count of working Claude Code processes refuses a spawn."""
         import subagents.cc_runtime as rt
-        from infra.subagent_caps import LiveSpawnCapExceeded
-
-        _seed_parent(child_db)
-        monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live",
-                            lambda: 1)
         from subagents.cc_runtime_state import _Live
 
-        # Only a working process counts toward the cap (#2064).
-        rt._LIVE.put("sentinel", _Live(
-            session=None, parent_thread_id=None, name="sentinel", turn_active=True,
-        ))
-
-        before = child_db.execute("SELECT COUNT(*) AS c FROM threads").fetchone()["c"]
-        with pytest.raises(LiveSpawnCapExceeded) as ei:
-            await _spawn("parent", "task", binary=fake_claude_oneshot,
-                           model="sonnet", broadcast=lambda s, m: None)
-        assert ei.value.cap == 1 and ei.value.active == 1
-        after = child_db.execute("SELECT COUNT(*) AS c FROM threads").fetchone()["c"]
-        assert after == before  # no child session row was created
-
-    @pytest.mark.asyncio
-    async def test_spawn_allowed_below_cap(self, child_db, fake_claude_oneshot, monkeypatch):
-        import subagents.cc_runtime as rt
-
         _seed_parent(child_db)
-        monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live",
-                            lambda: 5)
+        for index in range(12):
+            rt._LIVE.put(f"working-{index}", _Live(
+                session=None, parent_thread_id=None, name=f"working-{index}", turn_active=True,
+            ))
         child_id = await _spawn("parent", "task", binary=fake_claude_oneshot,
                                   model="sonnet", broadcast=lambda s, m: None)
-        assert child_id
-        row = child_db.execute("SELECT id FROM threads WHERE id = ?",
-                               (child_id,)).fetchone()
+        row = child_db.execute("SELECT id FROM threads WHERE id = ?", (child_id,)).fetchone()
         assert row is not None
-
 
 
 class TestCwdValidation:
@@ -102,8 +70,6 @@ class TestCwdValidation:
     @pytest.mark.asyncio
     async def test_spawn_fails_loud_on_stale_cwd(self, child_db, fake_claude_oneshot, monkeypatch):
         import subagents.cc_runtime as rt
-        monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live",
-                            lambda: 5)
         _seed_parent(child_db)
         with pytest.raises(CCWorkingDirMissing):
             await _spawn("parent", "task", binary=fake_claude_oneshot,
