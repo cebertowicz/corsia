@@ -12,17 +12,28 @@ from __future__ import annotations
 #: followed-up, deleted, archived or retired-branch item asks nothing.
 #: ``blocked_asks_user`` is its twin for an item blocked on the user (``blocked_on_user_sql``);
 #: it feeds no mark or dot, only whether the card splits a Focus block.
-def asks_user_sql(blocked: bool = False) -> str:
+def _asks_user_rule(blocked: bool) -> str:
+    """The ask rule as a condition on ``plan_nodes`` row ``n``."""
     from plans import public
 
-    rule = (
-        public.blocked_on_user_sql('n', public.placed_ask_hold_sql('thread_updates.source_id'))
-        if blocked else public.failure_asks_user_sql('n')
-    )
+    if blocked:
+        return public.blocked_on_user_sql('n', public.placed_ask_hold_sql('thread_updates.source_id'))
+    return public.failure_asks_user_sql('n')
+
+
+def asks_user_sql(blocked: bool = False) -> str:
     return f"""EXISTS (
     SELECT 1 FROM plan_nodes n
-     WHERE n.id = thread_updates.node_id AND {rule}
+     WHERE n.id = thread_updates.node_id AND {_asks_user_rule(blocked)}
 )"""
+
+
+def asks_user_joined_sql(blocked: bool = False) -> str:
+    """``asks_user_sql`` for a read that already joins the update's node as ``n``.
+
+    Same rule, no second lookup of the node: NULL (no node) reads false.
+    """
+    return f"({_asks_user_rule(blocked)})"
 
 
 def ask_sql(column: str) -> str:
