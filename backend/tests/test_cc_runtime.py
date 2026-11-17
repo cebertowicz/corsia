@@ -505,7 +505,11 @@ class TestSpawn:
         await rt.retire(
             child_id, broadcast=lambda sid, m: casts.append((sid, m)),
         )
-        # Retire's user-driving logical-close notice is unchanged by Wave F.
+        # Retire's user-driving logical-close notice is unchanged by Wave F; it
+        # is written off the event loop by a tracked task (#2913).
+        from human_usage_fixtures import drain_background
+
+        await drain_background()
         assert _done_count(casts) == 1
 
     @pytest.mark.asyncio

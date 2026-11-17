@@ -86,6 +86,10 @@ window.clicks = {shape: 0, far: 0, covered: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
+POPUP = """<!doctype html><title>Popup fixture</title>
+<button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
+
 # Password fields the probe must find without reading the whole DOM: in a same-origin frame, in open
 # and closed shadow roots, and named only by autocomplete, on a page whose DOM is over 1 MiB.
 PROBE = """<!doctype html><title>Probe fixture</title>
@@ -131,7 +135,8 @@ def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
-             "/choice.html": CHOICE_FORM.encode(), "/covered.html": COVERED.encode()}
+             "/choice.html": CHOICE_FORM.encode(), "/covered.html": COVERED.encode(),
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -504,6 +509,53 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+async def _shared_page_path(owner: BrowserSessionOwner, thread_id: str) -> str | None:
+    """The path of the page the pane shows, read through the resolver the pane and the agent share."""
+    async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+        result = await cdp.call("Runtime.evaluate", expression="location.pathname", returnByValue=True)
+    return result["result"].get("value")
+
+
+async def _shared_page_reaches(owner: BrowserSessionOwner, thread_id: str, path: str) -> tuple[str | None, str]:
+    """Wait up to 5 s for the shared page to be ``path``; return the last path and tab list seen."""
+    seen, tabs = None, ""
+    for _ in range(20):
+        seen = await _shared_page_path(owner, thread_id)
+        tabs = await owner.run(thread_id, ("tab", "list"), session="existing")
+        if seen == path:
+            break
+        await asyncio.sleep(0.25)
+    return seen, tabs
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_opens_the_popup_its_button_opens():
+    """With the pane open, an agent's click opens a sign-in popup, as the person's own click would.
+
+    The popup becomes the shared page (the pane's and the agent's), and when it closes itself, as a sign-in
+    popup does once it finishes, both return to the page that opened it.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-popup-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-popup", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/popup.html"), show_window=True, session="new")).startswith("Error:")
+            assert await owner.run(thread_id, ("click", "#open"), session="existing") == "ok"
+            seen, tabs = await _shared_page_reaches(owner, thread_id, "/popup-target.html")
+            assert seen == "/popup-target.html" and "/popup-target.html" in tabs, (seen, tabs)
+            async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+                await cdp.call("Runtime.evaluate", expression="setTimeout(() => window.close(), 0); null")
+            seen, tabs = await _shared_page_reaches(owner, thread_id, "/popup.html")
+            assert seen == "/popup.html" and "/popup-target.html" not in tabs, (seen, tabs)
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
