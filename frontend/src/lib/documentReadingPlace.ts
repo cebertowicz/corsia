@@ -222,8 +222,9 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
  * edge, from inside its measure and its scroll handler. That block is the paragraph the place skips when it is cut off,
  * so its scroll is not the reader's: at a width other than the one the place was taken at, a scroll lays the place again
  * instead of taking it, unless the reader has scrolled by hand (wheel, touch, a press or a key on the scroller) since the
- * width last changed. A scroll with no input on the page at all (the browser's find bar, a screen reader's cursor) is
- * still laid back until the reader's next input there.
+ * width last changed. The resize observation that sees the new width lays the rewrap itself (`applyPlace` has CodeMirror
+ * measure first, so its anchor scroll for the rewrap comes inside that call), and the place is then held at that width:
+ * a later scroll with no input on the page (the browser's find bar, a screen reader's cursor) is the reader's again.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	const scroller = view.scrollDOM;
@@ -248,9 +249,11 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 		keeper.width = scroller.clientWidth;
 	};
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+		const widthChanged = scroller.clientWidth !== keeper.width;
 		// The text rewrapping under an earlier press is the layout's move, not the reader's.
-		if (scroller.clientWidth !== keeper.width) hand = false;
+		if (widthChanged) hand = false;
 		applyPlace(view);
+		if (widthChanged) keeper.width = scroller.clientWidth;
 	}) : null;
 	observer?.observe(scroller);
 	observer?.observe(view.contentDOM);
