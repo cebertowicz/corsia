@@ -1,6 +1,6 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { deleteRenderedLine, openLiveDocument, renderedCount, seedLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
+import { deleteRenderedLine, documentCount, openLiveDocument, renderedCount, seedLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 import { armLiveFault, beginLiveFaultCase, liveFaultEvidence, liveFaultsEnabled, liveFaultStatus, observeFaultTraffic, prepareHeldDocument, refuseLiveFaultOnce, waitForLiveFaultRestart, type FaultTraffic } from '../support/liveFault';
 
 const viewports = [
@@ -133,6 +133,9 @@ for (const [width, viewport] of viewports) {
 						}
 						if (edit === 'insert') expect(await renderedCount(page, `received ${stamp}`)).toBe(choice === 'corsia' ? 1 : 0);
 						else expect(await renderedCount(page, `remove ${stamp}`)).toBe(choice === 'corsia' ? 0 : 1);
+						// A drawn count of 0 can be text out of view; the editor's document must agree.
+						if (edit === 'insert') expect(await documentCount(page, `received ${stamp}`)).toBe(choice === 'corsia' ? 1 : 0);
+						else expect(await documentCount(page, `remove ${stamp}`)).toBe(choice === 'corsia' ? 0 : 1);
 						// A true reopen must reconstruct the same item identities and exact bytes.
 						const settledState = (await liveFaultEvidence(request, document.artifactId)).durable_state_digest;
 						await page.reload();

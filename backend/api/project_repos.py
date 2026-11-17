@@ -38,7 +38,8 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
-from api.project_repo_claim import add_transition, confirmed_repo_path
+from api.project_repo_add_entry import register_source_repo_async
+from api.project_repo_claim import AdmittedAdd, add_transition, confirmed_repo_path
 from api.project_repo_controls import RepoAdd, RepoUpdate, add_controls, update_controls
 from api.project_repo_add_source import resolve_add_source
 from api.project_repo_sync import sync_sources
@@ -89,18 +90,18 @@ def _with_policy(repo: dict, policies: dict[str, RepoPolicy]) -> dict:
     """Attach policy state only when the visible binding still matches its row."""
     row = dict(repo)
     policy = policies.get(repo["name"])
-    bound = (
+    bound_policy = policy if (
         policy is not None
         and not repo.get("missing", False)
         and policy.path
         == Path(str(repo["path"])).expanduser().resolve(strict=False)
-    )
-    row["registered"] = bound
-    row["pinned_branch"] = policy.pinned_branch if bound else None
-    row["protect_base_checkout"] = policy.protect_base_checkout if bound else False
+    ) else None
+    row["registered"] = bound_policy is not None
+    row["pinned_branch"] = bound_policy.pinned_branch if bound_policy else None
+    row["protect_base_checkout"] = bound_policy.protect_base_checkout if bound_policy else False
     # Current clients still render this derived response field. Mutations use
     # only the two canonical controls above.
-    row["branch_pinned"] = bool(bound and policy.branch_pinned)
+    row["branch_pinned"] = bool(bound_policy and bound_policy.branch_pinned)
     return row
 
 
@@ -376,9 +377,9 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
 
 
 def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None = None) -> dict:
-    """Add-repo procedure shared by Project settings and project_repo_register (``checked``)."""
+    """Register once; raises RepoPolicyTransitionBusy while another repo change runs (front door: project_repo_add_entry)."""
 
-    def _add(claim: frozenset[str] | None):
+    def _add(admitted: AdmittedAdd):
         ws_dir = _workspace_dir_for(project_id)
         connection = None
         identity: SourceEntryIdentity | None = None
@@ -390,7 +391,7 @@ def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None
                 project_id, ws_dir, mode=body.mode, path=body.path, name=body.name,
             )
             _require_owned_source(identity)
-            repo_path = confirmed_repo_path(claim, project_id, ws_dir, row, checked=checked)
+            repo_path = confirmed_repo_path(admitted, project_id, ws_dir, row, checked=checked)
             pinned_branch, protected, switched = _select_add_policy(
                 row,
                 body,
@@ -439,14 +440,11 @@ def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None
                 connection.close()
 
     def _transitioned_add():
-        try:
-            with add_transition(
-                project_id, body.mode, body.path, body.name,
-                ws_dir_for=_workspace_dir_for, active_process_count=_active_owned_process_count,
-            ) as claim:
-                return _add(claim)
-        except RepoPolicyTransitionBusy as exc:
-            raise HTTPException(409, str(exc)) from exc
+        with add_transition(
+            project_id, body.mode, body.path, body.name,
+            ws_dir_for=_workspace_dir_for, active_process_count=_active_owned_process_count,
+        ) as admitted:
+            return _add(admitted)
 
     return _under_project_repo_lock(project_id, _transitioned_add)
 
@@ -459,7 +457,7 @@ async def add_repo(token: str, project_id: str, body: RepoAdd):
     if body.mode not in ("link", "create"):
         raise HTTPException(400, "mode must be 'link' or 'create'")
 
-    repo = await run_in_db(lambda: register_source_repo(project_id, body))
+    repo = await register_source_repo_async(project_id, body)
     return {"added": True, "repo": repo}
 
 

@@ -174,6 +174,21 @@ async function expandCanvas(page: Page) {
 	}
 	await expect.poll(async () => (await box(page.locator('.doc'))).width).toBeGreaterThan(narrow + 100);
 	await waitForPanelsToSettle(page);
+	// The document holds the reader's place until its text has rewrapped at the new width, and lays back a scroll with no
+	// input that comes sooner (CodeMirror measures a resize 50 ms after it): wait until the width has held for at least
+	// 60 ms and then 2 frames more.
+	await page.locator('.cm-scroller').evaluate((scroller) => new Promise<void>((settled) => {
+		let width = Number.NaN;
+		let since = 0;
+		let frames = 0;
+		const frame = (now: number) => {
+			if (scroller.clientWidth !== width) [width, since, frames] = [scroller.clientWidth, now, 0];
+			else if (now - since >= 60) frames += 1;
+			if (frames >= 2) settled();
+			else requestAnimationFrame(frame);
+		};
+		requestAnimationFrame(frame);
+	}));
 }
 
 const layouts = [
