@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
@@ -56,6 +57,42 @@ PERSON_STEP_DECLINED = (
     "The person declined this step on this page, so it can't be given to them again. "
     "Tell them in chat what you needed the page for and stop."
 )
+FILLED_FIELD_REFUSED = (
+    "The person filled in a password field on this page, so until you open another page or reload this one, "
+    "only commands that can't show what they typed run here: open, back, forward, reload, click, dblclick, "
+    "hover, focus, fill, type, press, select, check, uncheck, scroll, scrollintoview, "
+    "wait (but not --fn or --download), tab, snapshot (field values hidden), "
+    "get (but not get html, get value or a value attribute), and is. Name each element by its @ref from a "
+    "snapshot, not by a CSS selector."
+)
+FILLED_FIELD_SNAPSHOT_WITHHELD = (
+    "Error: this snapshot was withheld. The person filled in a password field on this page, and "
+    "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
+)
+# Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
+# display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
+# new text input the probe can't tell from any other. So for the rest of the visit only commands that never
+# render a field's value or run a page script run, even after the field is gone.
+_FILLED_FIELD_COMMANDS = frozenset({
+    "open", "back", "forward", "reload", "click", "dblclick", "hover", "focus", "fill", "type", "press",
+    "select", "check", "uncheck", "scroll", "scrollintoview", "tab", "is",
+    # Only session teardown checks with close (an agent's own close is refused before any page check).
+    "close",
+})
+_FILLED_FIELD_GETS = frozenset({"title", "url", "text", "count", "attr", "box", "styles"})
+# wait's options that take one operand and run no script; --fn evaluates one and --download writes a file.
+_FILLED_FIELD_WAIT_OPTIONS = frozenset({"--load", "--url", "--text", "--state"})
+_FILLED_FIELD_SNAPSHOTS = frozenset({("snapshot",), ("snapshot", "-i")})
+# Where each command takes its element. A CSS selector can test a value attribute some frameworks keep in step
+# with what was typed (input[value^=a]), so any command's match or failure would answer it; a snapshot ref can't.
+_FILLED_FIELD_TARGET_AT = {"click": 1, "dblclick": 1, "hover": 1, "focus": 1, "fill": 1, "type": 1, "select": 1,
+                           "check": 1, "uncheck": 1, "scrollintoview": 1, "get": 2, "is": 2}
+_SNAPSHOT_REF = re.compile(r"@e\d+")
+# Snapshot roles that hold typed text; the value follows the line's ref and attributes after ": ".
+_FIELD_LINE = re.compile(r"^(?P<indent>\s*)- (?:textbox|searchbox|combobox|spinbutton)\b")
+_REF = re.compile(r"\[ref=e\d+\]")
+_ATTRIBUTES = re.compile(r"(?:\s*\[[a-z-]+(?:=[^\]\s]*)?\])*")
+VALUE_HIDDEN = "[value hidden]"
 # Locates an agent's ref or CSS selector on the page as a backendNodeId, or None when it can't.
 Resolve = Callable[[str], Awaitable[int | None]]
 
@@ -97,6 +134,14 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
     )
 
 
+@dataclass(frozen=True)
+class PageAccess:
+    """What a command the guard let through must carry: its note, and whether a snapshot hides field values."""
+
+    note: str | None
+    filled_field_visit: bool
+
+
 async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
                               resolve: Resolve | None = None, session: str | None = None) -> str | None:
     """Enforce page ownership, then the independent password-visit read guard.
@@ -104,10 +149,77 @@ async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, a
     Returns STEP_NOT_RECORDED when no step is held and the page has no password field but its step couldn't
     be written; the command still runs.
     """
+    return (await check_page_access(thread_id, probe, args, resolve=resolve, session=session)).note
+
+
+async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
+                            resolve: Resolve | None = None, session: str | None = None) -> PageAccess:
+    """require_page_access, also saying whether a snapshot's field values must be hidden (hide_field_values).
+
+    A command passes with a password field visible only once the person marked it done (R14): every other
+    path with one showing refuses first. Once a password step ended on the visit (finished_visit), only
+    _filled_field_allows commands run until the visit ends, with or without a visible field.
+    """
     result, note = await _guarded_probe(thread_id, probe, session=session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
-    return note
+    filled = bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
+    if filled and not _filled_field_allows(args):
+        raise BrowserSessionError(FILLED_FIELD_REFUSED)
+    return PageAccess(note, filled)
+
+
+def _filled_field_allows(args: tuple[str, ...]) -> bool:
+    at = _FILLED_FIELD_TARGET_AT.get(args[0])
+    if at is not None and len(args) > at and not _SNAPSHOT_REF.fullmatch(args[at]):
+        return False
+    if args[0] == "snapshot":
+        return tuple(args) in _FILLED_FIELD_SNAPSHOTS
+    if args[0] == "get":
+        if args[1:2] == ("attr",):
+            return len(args) == 4 and args[3].strip().casefold() != "value"
+        return len(args) >= 2 and args[1] in _FILLED_FIELD_GETS
+    if args[0] == "wait":
+        position = 1
+        while position < len(args):
+            if args[position] in _FILLED_FIELD_WAIT_OPTIONS:
+                # An operand that looks like an option (wait --text --fn ...) may parse as one.
+                if position + 1 >= len(args) or args[position + 1].startswith("-"):
+                    return False
+                position += 2
+            elif args[position].startswith("-") or not (
+                    args[position].isdigit() or _SNAPSHOT_REF.fullmatch(args[position])):
+                return False
+            else:
+                position += 1
+        return True
+    return args[0] in _FILLED_FIELD_COMMANDS
+
+
+def hide_field_values(snapshot: str) -> str:
+    """Replace every text field's value in a snapshot, and drop the text nodes beneath it.
+
+    Reads no value and needs no node identity: anything after a field's ref and attributes is hidden, so a
+    line it can't parse fails closed.
+    """
+    lines, field_indent = [], None
+    for line in snapshot.split("\n"):
+        indent = len(line) - len(line.lstrip())
+        if field_indent is not None and indent > field_indent and line.strip():
+            continue
+        field_indent = None
+        if (match := _FIELD_LINE.match(line)) is None:
+            lines.append(line)
+            continue
+        field_indent = len(match.group("indent"))
+        ref = _REF.search(line, match.end())
+        if ref is None:
+            lines.append(f"{line[:match.end()]} {VALUE_HIDDEN}")
+            continue
+        attributes = _ATTRIBUTES.match(line, ref.end())
+        kept = attributes.end() if attributes is not None else ref.end()
+        lines.append(line if not line[kept:].strip() else f"{line[:kept]}: {VALUE_HIDDEN}")
+    return "\n".join(lines)
 
 
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,

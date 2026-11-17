@@ -33,7 +33,7 @@ RUNNING = "running"
 RAN = "ran"
 FAILED = "failed"
 SKIPPED = "skipped"
-# A start_worker rule's start: queued by evaluation (and while the worker limit is full),
+# A start_worker rule's start: queued by evaluation until the runner claims it,
 # then started, and settled once by its worker's result (returned, invalid or no_result);
 # or skipped, or refused before any worker was made.
 STARTED = "started"

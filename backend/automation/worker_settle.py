@@ -58,7 +58,6 @@ class Settle:
     event_type: str
     event_id: str
     facts: dict[str, Any]
-    waited: bool = False  # whether the start waited for a free Claude Code slot
     staging_path: str | None = None
 
 
@@ -173,7 +172,7 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
                      injection_signs=said.get("injection_signs"))
     clean_facts = {k: v for k, v in facts.items() if v is not None or (context and k == "injection_signs")}
     return Settle(row["id"], row["thread_id"], outcome, f"{worker_events.NAMESPACE}.{kind}",
-                  f"worker:{row['id']}:{kind}", clean_facts, bool(check.get("waited")),
+                  f"worker:{row['id']}:{kind}", clean_facts,
                   context["staging_path"] if context else None)
 
 
@@ -206,7 +205,7 @@ async def settle(item: Settle) -> None:
     outcome, woke = settled
     emit_product_event("event_rule", "start_settled", thread_id=item.owner, properties={
         "rule_id": item.facts.get("rule_id"), "workflow": item.facts.get("workflow"),
-        "outcome": outcome, "waited_for_capacity": item.waited,
+        "outcome": outcome,
     })
     if woke:
         from automation import script_runner

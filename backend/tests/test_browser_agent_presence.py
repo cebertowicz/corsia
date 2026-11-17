@@ -30,12 +30,13 @@ def _owner(monkeypatch, password_page):
     async def page_access(_thread_id, _probe, _args, **_kwargs):
         if password_page["shown"]:
             raise BrowserSessionError(browser_control.PASSWORD_PAGE)
+        return browser_control.PageAccess(None, False)
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
-    monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    monkeypatch.setattr(browser_control, "check_page_access", page_access)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/devtools/page/1"))
     return owner
 
@@ -84,7 +85,7 @@ async def test_ref_click_is_refused_before_input_when_person_has_control(monkeyp
         input_calls.append(args)
         return "ok"
 
-    monkeypatch.setattr(browser_control, "require_page_access", refuse_person_step)
+    monkeypatch.setattr(browser_control, "check_page_access", refuse_person_step)
     monkeypatch.setattr(owner, "_run_admitted", native_input)
     monkeypatch.setattr(browser_dom_write, "shared_action", shared_input)
     with pytest.raises(BrowserSessionError, match=browser_control.PERSON_STEP):
