@@ -35,7 +35,8 @@ for (const [label, width, height] of [['wide', 1440, 900], ['phone', 393, 852]] 
   if (width < 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await page.getByRole('button', { name: /Jump to/ }).click();
   await page.locator('.palette').getByRole('button', { name, exact: true }).click();
-  await page.getByText('Garden planner', { exact: true }).first().click();
+  if (width < 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await page.getByRole('navigation', { name: 'Agents' }).getByRole('button', { name: 'Garden planner' }).click();
   await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
   await ownerItem(page).click();
   await rolePicker(page).getByRole('option', { name: /^You/ }).click();
@@ -44,7 +45,8 @@ for (const [label, width, height] of [['wide', 1440, 900], ['phone', 393, 852]] 
   if (width < 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await page.getByRole('button', { name: /Jump to/ }).click();
   await page.locator('.palette').getByRole('button', { name, exact: true }).click();
-  await page.getByText('Garden planner', { exact: true }).first().click();
+  if (width < 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await page.getByRole('navigation', { name: 'Agents' }).getByRole('button', { name: 'Garden planner' }).click();
   await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
   expect(isolatedDb(["print(connection.execute(\"SELECT parent_thread_id FROM artifact_registrations WHERE artifact_id=? AND relationship_state IN ('owner-active','owner-pinned')\", (sys.argv[2],)).fetchone()[0])"], artifact).trim()).toBe('ui');
  });
