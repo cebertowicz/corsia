@@ -169,6 +169,41 @@ def reanchor_edited(
     return start16, end16
 
 
+def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suffix: str | None) -> bool:
+    """Whether the quote at ``start``/``end`` sits on the line beside the commented one, not on the commented one.
+
+    A comment whose line was deleted finds the same words on the line that moved into its place: that line
+    starts like the deleted one and so matches one stored side. The stored context says whose line it is.
+    The text after the commented line's first line break is the start of the line below it; if that starts
+    this line, and does not start the line after this one, this is the line below, moved up. The text before
+    the last line break is the end of the line above it; the same test, mirrored, finds the line above.
+    It never refuses a line whose own text around the quote is unchanged: that is the commented line,
+    whatever happened to its neighbours.
+
+    Limit: it needs a line break inside the stored context (up to 32 characters each side), so a comment
+    inside a long line has none and the caller's matching rule stands unchanged. When the neighbouring
+    line was edited in the same rewrite its stored start no longer matches and this cannot tell it apart
+    from the commented line itself edited.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line_end = len(text) if line_end < 0 else line_end
+    before_in_line = (prefix or "").rsplit("\n", 1)[-1]
+    after_in_line = (suffix or "").split("\n", 1)[0]
+    if (before_in_line or after_in_line) and text[max(0, start - len(before_in_line)):start] == before_in_line \
+            and text[end:end + len(after_in_line)] == after_in_line:
+        return False
+    if suffix and "\n" in suffix:
+        below = suffix.split("\n", 1)[1]
+        if below and text.startswith(below, line_start) and not text.startswith(below, line_end + 1):
+            return True
+    if prefix and "\n" in prefix:
+        above = prefix.rsplit("\n", 1)[0]
+        if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, max(line_start - 1, 0)):
+            return True
+    return False
+
+
 def reanchor(
     text: str,
     quote: str,
@@ -185,6 +220,11 @@ def reanchor(
     nothing tells its original quote apart from another occurrence, so any
     move could attach it to different text. Ties at the same score and distance
     deliberately become orphaned for the same reason.
+
+    Two cases tighten that, so a reload agrees with the live document. A stored span that is collapsed
+    (the comment's text is gone) comes back only where every stored side matches, as when deleted text
+    is restored. A candidate that is the line beside the commented one is refused
+    (``_is_neighbour_line``), at its stored place too.
     """
     if not quote:
         return None
@@ -197,14 +237,20 @@ def reanchor(
 
     eligible: list[tuple[int, int, int, int]] = []
     for start, candidate_from, candidate_to in candidates:
-        score = 0
+        score = sides = 0
         if prefix:
+            sides += 1
             score += int(text[max(0, start - len(prefix)):start] == prefix)
         end = start + len(quote)
         if suffix:
+            sides += 1
             score += int(text[end:end + len(suffix)] == suffix)
         exact = candidate_from == from16 and candidate_to == to16
-        if score > 0 or exact:
+        if from16 is not None and from16 == to16:
+            counts = sides > 0 and score == sides
+        else:
+            counts = score > 0 or exact
+        if counts and not _is_neighbour_line(text, start, end, prefix, suffix):
             eligible.append((score, start, candidate_from, candidate_to))
     if not eligible:
         return None
