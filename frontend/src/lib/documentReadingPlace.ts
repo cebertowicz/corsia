@@ -2,7 +2,6 @@ import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
-import { watchWidthSettle } from '$lib/documentWidthSettle';
 
 /**
  * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
@@ -223,9 +222,9 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
  * edge, from inside its measure and its scroll handler. That block is the paragraph the place skips when it is cut off,
  * so its scroll is not the reader's: at a width other than the one the place was taken at, a scroll lays the place again
  * instead of taking it, unless the reader has scrolled by hand (wheel, touch, a press or a key on the scroller) since the
- * width last changed. That lasts until the rewrap is laid: the first frame after CodeMirror's own resize measure in which
- * the width is the one laid in the frame before and laying the place moves nothing. The place is then held at that width,
- * so a scroll with no input on the page (the browser's find bar, a screen reader's cursor) is the reader's again.
+ * width last changed. The resize observation that sees the new width lays the rewrap itself (`applyPlace` has CodeMirror
+ * measure first, so its anchor scroll for the rewrap comes inside that call), and the place is then held at that width:
+ * a later scroll with no input on the page (the browser's find bar, a screen reader's cursor) is the reader's again.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	const scroller = view.scrollDOM;
@@ -235,7 +234,6 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	keeper.width = scroller.clientWidth;
 	let hand = false;
 	const byHand = () => { hand = true; };
-	const widthSettle = watchWidthSettle(scroller, () => view.dom.isConnected, () => applyPlace(view), (width) => { keeper.width = width; });
 	const onScroll = () => {
 		// The editor grew back past the text below the view and the browser cut the offset to the new end: that scroll is
 		// the browser's, and the resize observation that follows lays the place again.
@@ -251,12 +249,11 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 		keeper.width = scroller.clientWidth;
 	};
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-		if (scroller.clientWidth !== keeper.width) {
-			// The text rewrapping under an earlier press is the layout's move, not the reader's.
-			hand = false;
-			widthSettle.changed();
-		}
+		const widthChanged = scroller.clientWidth !== keeper.width;
+		// The text rewrapping under an earlier press is the layout's move, not the reader's.
+		if (widthChanged) hand = false;
 		applyPlace(view);
+		if (widthChanged) keeper.width = scroller.clientWidth;
 	}) : null;
 	observer?.observe(scroller);
 	observer?.observe(view.contentDOM);
@@ -264,7 +261,6 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	for (const kind of BY_HAND) scroller.addEventListener(kind, byHand, { capture: true, passive: true });
 	return () => {
 		observer?.disconnect();
-		widthSettle.stop();
 		scroller.removeEventListener('scroll', onScroll);
 		for (const kind of BY_HAND) scroller.removeEventListener(kind, byHand, { capture: true });
 		keepers.delete(view);
