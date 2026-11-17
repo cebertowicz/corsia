@@ -136,6 +136,32 @@ export async function renderedCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
 }
 
+/** How often `text` is in the editor's document. `renderedCount` sees only the lines CodeMirror draws, so a 0 there can be text out of view. */
+export async function documentCount(page: Page, text: string): Promise<number> {
+	return (await editorPlace(page, text)).count;
+}
+
+/**
+ * How often `text` is in the editor's document, and whether every copy lies inside the range CodeMirror draws.
+ * When both hold, a drawn count of 0 means the editor hides the text (a typed reveal), not that it is out of view.
+ */
+export async function editorPlace(page: Page, text: string): Promise<{ count: number; inDrawnRange: boolean }> {
+	return page.evaluate((text) => {
+		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
+		const view = content?.cmTile?.root.view;
+		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+		const doc = view.state.doc.toString() as string;
+		const { from, to } = view.viewport as { from: number; to: number };
+		let count = 0;
+		let inDrawnRange = true;
+		for (let at = doc.indexOf(text); at >= 0; at = doc.indexOf(text, at + text.length)) {
+			count += 1;
+			if (at < from || at + text.length > to) inDrawnRange = false;
+		}
+		return { count, inDrawnRange };
+	}, text);
+}
+
 async function lineEnd(line: ReturnType<Page['locator']>): Promise<{ x: number; y: number }> {
 	await line.scrollIntoViewIfNeeded();
 	const box = await line.boundingBox();
@@ -152,6 +178,7 @@ async function lineEnd(line: ReturnType<Page['locator']>): Promise<{ x: number; 
 export async function deleteRenderedLine(page: Page, text: string): Promise<void> {
 	const before = await renderedCount(page, text);
 	expect(before).toBeGreaterThan(0);
+	const inDocument = await documentCount(page, text);
 	const line = page.locator('.cm-line').filter({ hasText: text }).first();
 	const previous = line.locator('xpath=preceding-sibling::div[contains(concat(" ", normalize-space(@class), " "), " cm-line ")][1]');
 	const start = await lineEnd(previous);
@@ -163,6 +190,7 @@ export async function deleteRenderedLine(page: Page, text: string): Promise<void
 	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toContain(text);
 	await page.keyboard.press('Backspace');
 	await expect.poll(() => renderedCount(page, text)).toBe(before - 1);
+	await expect.poll(() => documentCount(page, text), { message: 'the line is gone from the document, not only from view' }).toBe(inDocument - 1);
 	await expect(page.locator('.cm-content')).toBeFocused();
 }
 

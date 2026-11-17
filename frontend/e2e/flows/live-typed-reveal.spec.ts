@@ -3,7 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { setDeliveryPreference } from '../support/heldComments';
-import { openLiveDocument, type LiveDocument } from '../support/liveDocument';
+import { editorPlace, openLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, designateConductor } from '../support/sharedLiveDocument';
 import { layouts } from '../support/liveConcurrency';
 import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses, waitForThreadReply } from '../support/mock';
@@ -72,6 +72,11 @@ function caret(page: Page, agent: Agent) {
 
 async function shownCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
+}
+
+/** A drawn count of 0 is the reveal hiding text only if the text is in the viewer's document and inside the drawn range. */
+async function expectHeldBack(page: Page, text: string): Promise<void> {
+	expect(await editorPlace(page, text), `${text} is in the document and drawn range, so its 0 is the reveal, not out of view`).toEqual({ count: 1, inDrawnRange: true });
 }
 
 /** The writing agent creates the document it then edits, so it owns it; the viewer opens it afterwards. */
@@ -181,6 +186,7 @@ for (const [width, height, project] of layouts) {
 			await expect(caret(viewer, agent).locator('.cm-presence-cursor-label')).toHaveText(agent.title);
 			await expect(caret(viewer, agent)).toHaveClass(/cm-presence-cursor-typing/);
 			expect(await shownCount(viewer, last), 'the end of the write is not shown yet').toBe(0);
+			await expectHeldBack(viewer, last);
 
 			await expect.poll(() => shownCount(viewer, last), { timeout: PACE_CAP_MS + 3_000 }).toBe(1);
 			// Idle: the steady caret goes back to blinking.
@@ -207,6 +213,7 @@ for (const [width, height, project] of layouts) {
 			await agentWrites(request, agent, live, MARKER_A, text);
 			await expect(caret(viewer, agent)).toHaveClass(/cm-presence-cursor-typing/);
 			expect(await shownCount(viewer, last)).toBe(0);
+			await expectHeldBack(viewer, last);
 
 			const line = viewer.locator('.cm-line').filter({ has: caret(viewer, agent) });
 			const box = await line.boundingBox();
@@ -267,6 +274,8 @@ for (const [width, height, project] of layouts) {
 			await expect(caret(viewer, first).locator('.cm-presence-cursor-label')).toHaveText(first.title);
 			await expect(caret(viewer, second).locator('.cm-presence-cursor-label')).toHaveText(second.title);
 			expect(await shownCount(viewer, lastA) + await shownCount(viewer, lastB), 'neither write is complete yet').toBe(0);
+			await expectHeldBack(viewer, lastA);
+			await expectHeldBack(viewer, lastB);
 
 			await expect.poll(async () => [await shownCount(viewer, lastA), await shownCount(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
 			// The second writer's edit selects review work for the owner; settle it before another case seeds replies.
@@ -323,6 +332,8 @@ for (const [width, height, project] of layouts) {
 				});
 				observer.observe(probe);
 			}));
+			// The samples cover the write in progress only if it is already in the document; a 0 below is then the reveal.
+			if (await shownCount(viewer, last) === 0) await expectHeldBack(viewer, last);
 			// The caret sweeps every line end while it types; sample until the write is complete.
 			for (let sample = 0; sample < 40 && await shownCount(viewer, last) === 0; sample += 1) {
 				const seen = await overflow();
