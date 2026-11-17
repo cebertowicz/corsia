@@ -2,6 +2,7 @@ import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
+import { frameLayoutTop, frameTop } from '$lib/documentPlaceFrame';
 
 /**
  * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
@@ -21,18 +22,6 @@ export interface TextDocumentPlace {
 	top: number;
 	scrollTop: number;
 	end?: boolean;
-}
-
-/** The frame places are measured from: the document pane, or the scroller for an editor outside one. */
-const frameOf = (view: EditorView): HTMLElement => view.dom.closest<HTMLElement>('.doc') ?? view.scrollDOM;
-/** The edge places are measured from: the frame's top on screen. */
-const frameTop = (view: EditorView): number => frameOf(view).getBoundingClientRect().top;
-
-/** The frame's layout top on the page, which no scroll (a phone keyboard showing the caret) or transform moves. */
-function frameLayoutTop(view: EditorView): number {
-	let top = 0;
-	for (let el: HTMLElement | null = frameOf(view); el; el = el.offsetParent as HTMLElement | null) top += el.offsetTop;
-	return top;
 }
 
 /** How far below the frame edge the line block holding `from` starts, or inside a drawn table the row holding it. */
