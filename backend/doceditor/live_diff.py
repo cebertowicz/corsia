@@ -20,6 +20,19 @@ def _trim(old: str, new: str) -> tuple[int, int, int]:
     return prefix, len(old) - suffix, len(new) - suffix
 
 
+def _line_trim(old: str, new: str) -> tuple[int, int, int]:
+    """``_trim`` with both cuts moved onto line starts, so a changed block holds whole lines.
+
+    Trimmed to the character, a deleted line whose first words match the next line's keeps those
+    letters as the next line's, and a comment on the deleted line lands there.
+    """
+    prefix, old_end, new_end = _trim(old, new)
+    prefix = old.rfind("\n", 0, prefix) + 1
+    boundary = old.find("\n", max(old_end - 1, 0))
+    boundary = len(old) if boundary == -1 else boundary + 1
+    return prefix, boundary, new_end + boundary - old_end
+
+
 def _edges(lines: list[str]) -> list[int]:
     result = [0]
     for line in lines:
@@ -83,8 +96,117 @@ def _character_changes(old: str, new: str, start: int):
             if tag != "equal"]
 
 
+LINE_ALIKE = .5
+GROUP = 4  # the most lines one side of a pair holds, for a line split, lines joined or a reflow
+# Pairing compares every group of old lines with every group of new ones, each comparison costing
+# about the product of the two texts' lengths. A block of several lines past either bound (line
+# pairs, or the characters all those comparisons cover, see ``_pair_work``) is not paired: it gets
+# the one character diff of the whole block, so the bound caps cost and drops no text a character
+# diff keeps. One line replaced by one line is never compared in groups, so it has no bound but the
+# character cap.
+MAX_LINE_PAIRS = 64
+MAX_PAIR_WORK = 1_000_000
+
+
+def _alike(left: str, right: str) -> float:
+    """How much of two lines is shared; 0 unless more than half is."""
+    matcher = SequenceMatcher(None, left, right, autojunk=False)
+    if matcher.real_quick_ratio() <= LINE_ALIKE or matcher.quick_ratio() <= LINE_ALIKE:
+        return 0
+    ratio = matcher.ratio()
+    return ratio if ratio > LINE_ALIKE else 0
+
+
+def _pair_lines(before: list[str], after: list[str]) -> list[tuple[str | None, str | None]]:
+    """Pair a changed block's lines in order, most alike first; an unpaired line is a whole delete or insert.
+
+    A pair is up to GROUP old lines with up to GROUP new lines (a line split, lines joined, a paragraph
+    reflowed), alike when more than half of their text is shared. A character is kept only inside a pair.
+    A line that left no alike text behind keeps no letter in another, so a comment on it is left with
+    no text.
+    """
+    if len(before) == len(after) == 1:
+        return [(before[0], after[0])]
+    best = [[0.0] * (len(after) + 1) for _ in range(len(before) + 1)]
+    pick: dict[tuple[int, int], tuple[int, int]] = {}
+    for row in reversed(range(len(before))):
+        for column in reversed(range(len(after))):
+            steps = [(k, m) for k in range(1, min(GROUP, len(before) - row) + 1)
+                     for m in range(1, min(GROUP, len(after) - column) + 1)]
+            top, pick[row, column] = best[row + 1][column], (1, 0)
+            if best[row][column + 1] > top:
+                top, pick[row, column] = best[row][column + 1], (0, 1)
+            for rows, columns in steps:
+                left, right = "".join(before[row:row + rows]), "".join(after[column:column + columns])
+                ratio = _alike(left, right)
+                # Worth: shared characters less unshared ones, so a pair that takes in an unrelated line
+                # is worth less than the same pair without it.
+                worth = best[row + rows][column + columns] + (len(left) + len(right)) * (2 * ratio - 1)
+                if ratio and worth > top:
+                    top, pick[row, column] = worth, (rows, columns)
+            best[row][column] = top
+    pairs: list[tuple[str | None, str | None]] = []
+    row = column = 0
+    while row < len(before) and column < len(after):
+        rows, columns = pick[row, column]
+        if rows and columns:
+            pairs.append(("".join(before[row:row + rows]), "".join(after[column:column + columns])))
+        elif rows:
+            pairs.append((before[row], None))
+        else:
+            pairs.append((None, after[column]))
+        row += rows
+        column += columns
+    pairs += [(line, None) for line in before[row:]] + [(None, line) for line in after[column:]]
+    return _merge_unpaired(pairs)
+
+
+def _merge_unpaired(pairs: list[tuple[str | None, str | None]]) -> list[tuple[str | None, str | None]]:
+    """Join runs of whole deleted lines, or of whole inserted lines, into one change each, as a character diff gives."""
+    merged: list[tuple[str | None, str | None]] = []
+    for left, right in pairs:
+        if merged and (left is None) == (merged[-1][0] is None) and (right is None) == (merged[-1][1] is None) \
+                and (left is None or right is None):
+            before, after = merged[-1]
+            merged[-1] = (None if left is None else (before or "") + left, None if right is None else (after or "") + right)
+        else:
+            merged.append((left, right))
+    return merged
+
+
+def _pair_work(before: list[str], after: list[str]) -> int:
+    """The characters ``_pair_lines`` compares at most: every old group against every new group.
+
+    The sum over all group pairs of (old group characters x new group characters) is the product of
+    the two sides' sums, so it is cheap to know before any comparison is made.
+    """
+    def covered(lines: list[str]) -> int:
+        return sum(sum(map(len, lines[row:row + size])) for row in range(len(lines))
+                   for size in range(1, min(GROUP, len(lines) - row) + 1))
+    return covered(before) * covered(after)
+
+
+def _block_changes(before: list[str], after: list[str], start: int):
+    """The character changes that turn one changed block of whole lines into another."""
+    several = len(before) > 1 or len(after) > 1
+    # With one side empty there is nothing to pair: the block is one whole insert or delete.
+    if not before or not after or (several and (len(before) * len(after) > MAX_LINE_PAIRS
+                                                or _pair_work(before, after) > MAX_PAIR_WORK)):
+        return _character_changes("".join(before), "".join(after), start)
+    changes, position = [], start
+    for left, right in _pair_lines(before, after):
+        if left is not None and right is not None:
+            changes += _character_changes(left, right, position)
+        elif left is not None:
+            changes.append((position, position + len(left), ""))
+        else:
+            changes.append((position, position, right))
+        position += len(left or "")
+    return changes
+
+
 def _changes(old: str, new: str):
-    prefix, old_end, new_end = _trim(old, new)
+    prefix, old_end, new_end = _line_trim(old, new)
     if prefix == len(old) == len(new):
         return
     before = old[prefix:old_end].splitlines(keepends=True)
@@ -94,9 +216,8 @@ def _changes(old: str, new: str):
     for tag, first, last, new_first, new_last in _line_opcodes(before, after):
         if tag == "equal":
             continue
-        start, end = prefix + old_edges[first], prefix + old_edges[last]
-        replacement = new[prefix + new_edges[new_first]:prefix + new_edges[new_last]]
-        for first, last, inserted in _character_changes(old[start:end], replacement, start):
+        start = prefix + old_edges[first]
+        for first, last, inserted in _block_changes(before[first:last], after[new_first:new_last], start):
             # Encode each span once, never each changed edge's whole prefix.
             byte_cursor += len(old[cursor:first].encode("utf-8"))
             end_byte = byte_cursor + len(old[first:last].encode("utf-8"))
