@@ -15,9 +15,12 @@ from subagents.cc_idle_retirement import idle_retirement_loop
 from thread.idle_checkpoint import rearm_idle_checkpoints
 
 
-# sqlite3 releases the GIL for each fetched row, so contended fetches otherwise
-# wait a full Python thread-switch interval at every handoff.
-SQLITE_FETCH_SWITCH_INTERVAL_SECONDS = 0.0001
+# sqlite3 releases the GIL around every prepare and every fetched row, so a
+# database read on a busy server waits about one switch interval per handoff
+# for each thread competing for the GIL. At 0.1 ms, a Measurement read that
+# takes 1.3 s on a quiet server took 19 s with four busy Python threads; at
+# 0.02 ms it took 4-5 s, and four CPU-bound threads lost about 8% throughput.
+SQLITE_FETCH_SWITCH_INTERVAL_SECONDS = 0.00002
 
 
 def configure_sqlite_fetch_switch_interval() -> None:
