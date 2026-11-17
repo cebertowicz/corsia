@@ -7,8 +7,7 @@ vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeo
 import type { DocOwnership } from '$lib/api/docOwnership';
 
 const agent = (id: string, name: string, status = 'ready', responsibility = '') => ({ id, name, status, responsibility });
-const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner.';
-const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here.';
+const SHARED = 'Giving it to an agent would hide it from the other people who use CORSIA here.';
 function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
 		owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },
@@ -61,29 +60,41 @@ describe('DocOwnerControl', () => {
 		expect(document.body.querySelectorAll('.role-picker')).toHaveLength(1);
 		expect(picker()!.dataset.role).toBe('supervisor');
 	});
-	it('does not offer You when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ multi_person: true, multi_person_refusal: MULTI }));
+	it('offers You when more than one person uses this CORSIA', async () => {
+		await render(ownership({ multi_person: true }));
 		item('owner').click(); await settle();
-		expect(options()).not.toContain('You');
-		expect(picker()!.textContent).toContain(MULTI);
+		expect(options()).toContain('You');
 	});
-	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'Everyone' }, multi_person: true, can_change: false, refusal: SHARED, choices: [] }));
-		expect(item('owner').textContent).toContain('Everyone');
-		for (const role of ['owner', 'supervisor'] as const) {
-			item(role).click(); await settle();
-			expect(options()).toEqual([]);
-			expect(picker()!.textContent).toContain(SHARED);
-		}
-		expect(changed).not.toHaveBeenCalled();
+	it('offers only You for a shared owner while preserving supervisor choices', async () => {
+		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' }, multi_person: true, multi_person_refusal: SHARED }));
+		item('owner').click(); await settle();
+		expect(options()).toEqual(['You']);
+		expect(picker()!.textContent).toContain(SHARED);
+		item('supervisor').click(); await settle();
+		expect(options()).toEqual(['Release planning', 'Research coordinator']);
+		expect(picker()!.textContent).not.toContain(SHARED);
+	});
+	it.each([
+		['project owner with no recorded person', false, true],
+		['person owner with no recorded person', false, true],
+		['person owner recorded to someone else', false, true],
+		['person owner recorded to this viewer', true, false],
+	])('choosing You for %s sends only when needed', async (_case, recorded, shouldSend) => {
+		const value = ownership({ owner: { kind: 'person', id: null, name: null, label: 'You', recorded_viewer: recorded } });
+		changed.mockResolvedValue(value);
+		await render(value);
+		item('owner').click(); await settle();
+		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
+		if (shouldSend) expect(changed).toHaveBeenCalledWith('doc', { owner: 'user' });
+		else expect(changed).not.toHaveBeenCalled();
 	});
 	it('reads You when the person owns the document', async () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } }));
 		expect(item('owner').getAttribute('aria-label')).toBe('Owner: You');
 	});
-	it('reads Not set for an owner that is not set', async () => {
-		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'Not set' } }));
-		expect(item('owner').textContent).toContain('Not set');
+	it('reads No owner for a released document', async () => {
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'No owner' } }));
+		expect(item('owner').textContent).toContain('No owner');
 	});
 	it('merges the two when one agent holds both roles, and its picker still reaches the supervisor', async () => {
 		await render(ownership({ supervisor: { id: 'a1', name: 'Release planning', source: 'owner', status: 'ready' } }));
@@ -129,12 +140,12 @@ describe('DocOwnerControl', () => {
 		expect(changed).toHaveBeenCalledWith('doc', { supervisor: expect.any(String) });
 	});
 	it('shows the server’s refusal in the picker when it sent one', async () => {
-		changed.mockRejectedValue(new OwnershipChangeError(409, MULTI));
+		changed.mockRejectedValue(new OwnershipChangeError(409, SHARED));
 		await render(ownership());
 		item('owner').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
 		item('owner').click(); await settle();
-		expect(picker()!.textContent).toContain('Only an agent can own a document');
+		expect(picker()!.textContent).toContain(SHARED);
 	});
 	it('tells agents with the same name apart by what each is responsible for', async () => {
 		await render(ownership({ choices: [agent('a1', 'Planner', 'ready', 'Release planning'), agent('a2', 'Planner', 'paused', 'Research')] }));

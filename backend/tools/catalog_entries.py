@@ -385,7 +385,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "artifact_rehome": _Entry(
         "artifacts", status="substrate", authority="artifact-ownership",
-        summary="Transfer an artifact's ownership to another thread",
+        summary="Transfer an artifact's ownership to the person or another thread",
         activity="Transferring artifact",
     ),
     "artifact_release": _Entry(

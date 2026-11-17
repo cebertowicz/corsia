@@ -21,6 +21,13 @@ from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from registry import models, service
+from registry.document_ownership_change import (
+    AGENT_CHOICE_REFUSAL as AGENT_CHOICE_REFUSAL,
+    PERSON_OR_AGENT_CHOICE_REFUSAL as PERSON_OR_AGENT_CHOICE_REFUSAL,
+    OwnershipBody,
+    apply_change as _apply_change,
+    refusal_for as _refusal_for,
+)
 from registry.ownership_authority import (
     can_rehome,
     can_release,
@@ -196,76 +203,7 @@ async def release_artifact(token: str, body: ReleaseBody):
     return result
 
 
-class OwnershipBody(BaseModel):
-    """A field left out stays as it is, so one field's picker never touches the other."""
-
-    owner: str | None = None
-    supervisor_thread_id: str | None = None
-
-
-AGENT_CHOICE_REFUSAL = "Pick one of the agents listed."
-PERSON_OR_AGENT_CHOICE_REFUSAL = "Pick yourself or one of the agents listed."
 NOT_FOUND_REFUSAL = "Couldn’t find this document. Reload the page to see where it is."
-
-
-def _refusal_for(
-    body: OwnershipBody, current: str | None, multi_person: bool, agents: set[str],
-) -> tuple[int, str] | None:
-    """The status and sentence this change is refused with, or ``None``.
-
-    ``agents`` are the payload's choices, the only agents a pick may name. Only
-    a new owner is checked against them; one that stays may be outside them.
-    """
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL, change_refusal
-    from registry.shared_principals import UI_PRINCIPAL
-
-    refusal = change_refusal(current, multi_person=multi_person)
-    if refusal:
-        return 409, refusal
-    new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
-    if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
-        return 400, AGENT_CHOICE_REFUSAL if multi_person else PERSON_OR_AGENT_CHOICE_REFUSAL
-    if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
-        return 400, AGENT_CHOICE_REFUSAL
-    if new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL and multi_person:
-        return 409, MULTI_PERSON_REFUSAL
-    return None
-
-
-def _apply_change(db, artifact: dict, body: OwnershipBody, current: str | None) -> tuple[dict, list]:
-    """Make the change inside the caller's transaction; returns the changed artifact and its events.
-
-    Every comparison is against the stored pick, the one value the header and
-    comment delivery read, so the person's explicit choice is always written and
-    an event fires only when what is stored changes.
-    """
-    from registry.document_supervisor import SUPERVISOR_KEY, owner_kind, stored_pick
-    from registry.identity_metadata import merge_identity_metadata
-    from registry.shared_principals import UI_PRINCIPAL
-
-    artifact_id = artifact["id"]
-    stored = stored_pick(artifact)
-    new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
-    picked = "supervisor_thread_id" in body.model_fields_set
-    supervisor = (body.supervisor_thread_id or None) if picked else stored
-    # The agent a person takes a document from supervises it, unless they picked one.
-    if new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL and supervisor is None and owner_kind(current) == "agent":
-        supervisor = current
-    if new_owner != current:
-        models.rehome_artifact(
-            integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
-            new_owner_thread_id=new_owner, actor_thread_id=None, authority="signed-in-person",
-            reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
-        )
-    # The owner supervises by default, so picking the owner stores no pick.
-    supervisor = supervisor if supervisor != new_owner else None
-    events = []
-    if new_owner != current:
-        events.append(("owner_changed", {"from": owner_kind(current), "to": owner_kind(new_owner)}))
-    if supervisor != stored:
-        merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
-        events.append(("supervisor_changed", {"from": "agent" if stored else "none", "to": "agent" if supervisor else "none"}))
-    return models.get_artifact(artifact_id, db=db), events
 
 
 def _change_ownership(artifact_id: str, body: OwnershipBody, user: dict):
@@ -289,7 +227,7 @@ def _change_ownership(artifact_id: str, body: OwnershipBody, user: dict):
         refusal = _refusal_for(body, current, multi_person, {choice["id"] for choice in view["choices"]})
         if refusal:
             return refusal, None
-        changed, events = _apply_change(db, artifact, body, current)
+        changed, events, _rehome = _apply_change(db, artifact, body, current, owner_user_id=user["id"])
         return None, (changed, ownership(db, changed, user_id=user["id"], workspace=config.WORKSPACE, multi_person=multi_person), events)
 
 

@@ -2,10 +2,10 @@
 
 The one place that decides these: the document header shows them, comment
 delivery (new comments and re-opens alike) asks ``comment_recipients``, and the
-ownership PUT asks ``change_refusal`` and ``ownership``'s choices before
+ownership PUT asks ``ownership``'s choices before
 changing either. Who owns it follows the registry owner alone, the same reading
 ``may_edit_document`` makes: a ``ui`` owner is the person's, so agents suggest;
-a ``project:`` owner is no one's.
+a ``project:`` owner is also the person's.
 
 A supervisor pick is checked once, when the person makes it: it must be one of
 ``ownership``'s choices. Every reader then takes the stored pick as it is while
@@ -35,15 +35,7 @@ log = logging.getLogger(__name__)
 
 SUPERVISOR_KEY = "supervisor_thread_id"
 
-# The refusal sentences the screen shows, in the payload before a pick and in the 409 after one.
-MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
-SHARED_REFUSAL = (
-    "Everyone here shares this document, so its owner and supervisor can’t be changed "
-    "while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner."
-)
-RELEASED_REFUSAL = "No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner."
-
-
+# Supervisor picks are stored in artifact identity metadata.
 def _thread(db, thread_id: str | None):
     if not thread_id:
         return None
@@ -74,11 +66,11 @@ def _status(row, paused: set[str]) -> str:
 
 
 def owner_kind(owner: str | None) -> str:
-    """``person`` for the ``ui`` owner (agents suggest there), ``none`` for no owner or a ``project:`` owner."""
-    if owner == UI_PRINCIPAL:
-        return "person"
-    if owner is None or is_owner_sentinel(owner):
+    """Classify both person sentinels consistently for display, routing and authority."""
+    if not owner:
         return "none"
+    if is_owner_sentinel(owner):
+        return "person"
     return "agent"
 
 
@@ -132,35 +124,24 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
     row, _source = _supervisor(
         db, owner, stored_pick(artifact), lambda: (_scope(db, artifact, workspace) or (None, None))[1],
     )
-    found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, owner) if who))
+    recipient_owner = UI_PRINCIPAL if owner_kind(owner) == "person" else owner
+    found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, recipient_owner) if who))
     released_owner = artifact.get("parent_thread_id")
-    return found or ((str(released_owner),) if released_owner else ())
+    return found or ((str(released_owner),) if owner is None and owner_kind(released_owner) == "agent" else ())
 
 
 def is_multi_person(db) -> bool:
-    """More than one person account uses this CORSIA.
-
-    The one home for this check, read once per request and passed on: the
-    ownership PUT refuses a person taking a document over on exactly this
-    condition, and the ownership payload reports it so the control never
-    offers "You" an action that would be refused.
-    """
+    """More than one person account uses this CORSIA."""
     return person_accounts(db) > 1
 
 
-def change_refusal(owner: str | None, *, multi_person: bool) -> str | None:
-    """Why no one may change this document's owner or supervisor, or ``None`` when the person may.
+SHARED_ACCESS_REFUSAL = "Giving it to an agent would hide it from the other people who use CORSIA here."
 
-    The one decision: the payload shows it before a pick and the ownership PUT
-    answers it as a 409. A document nobody owns has no owner to change. A
-    ``ui`` or ``project:`` document is shared by everyone on the install, so
-    while more than one person uses it, no one person re-routes its comments
-    or moves it into their own agents.
-    """
-    if owner is None:
-        return RELEASED_REFUSAL
-    if multi_person and is_owner_sentinel(owner):
-        return SHARED_REFUSAL
+
+def change_refusal(current: str | None, new_owner: str | None, multi_person: bool) -> str | None:
+    """Preserve shared access when a multi-person document would move to an agent."""
+    if multi_person and current and is_owner_sentinel(current) and new_owner and not is_owner_sentinel(new_owner):
+        return SHARED_ACCESS_REFUSAL
     return None
 
 
@@ -173,11 +154,11 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
     kind = owner_kind(owner)
+    owner_user_id = parse_metadata(artifact.get("metadata")).get("owner_user_id")
     scope = _scope(db, artifact, workspace)
     owner_row = _thread(db, owner) if kind == "agent" else None
     row, source = _supervisor(db, owner, stored_pick(artifact), lambda: scope[1] if scope is not None else None)
-    refusal = change_refusal(owner, multi_person=multi_person)
-    agents = [] if refusal or scope is None else pickable_agents(scope[0], user_id, db=db)
+    agents = [] if scope is None else pickable_agents(scope[0], user_id, db=db)
     paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
     status = _status(row, paused)
     supervisor = None if row is None else {
@@ -191,13 +172,15 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     return {
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None,
-                  "label": person_owner_label(owner, db=db, multi_person=multi_person)},
+                  "label": person_owner_label(owner, db=db, user_id=user_id,
+                                              owner_user_id=owner_user_id),
+                  "recorded_viewer": owner == "ui" and bool(owner_user_id) and owner_user_id == user_id},
         "supervisor": supervisor,
         "can_act": status == "ready",
         "multi_person": multi_person,
-        "can_change": refusal is None,
-        "refusal": refusal,
-        "multi_person_refusal": MULTI_PERSON_REFUSAL if multi_person else None,
+        "can_change": True,
+        "refusal": None,
+        "multi_person_refusal": change_refusal(owner, "agent", multi_person),
         # None when the scope couldn't be resolved, so the picker says it couldn't load rather than "no agents".
         "scope": None if scope is None else "project" if scope[0] is not None else "workspace",
         "choices": choices,

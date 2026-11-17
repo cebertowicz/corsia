@@ -102,8 +102,8 @@ def may_edit_document(
     """Decide whether this actor may change a document ``owner`` owns.
 
     The one decision for every write path. The owner, the owner's temporary
-    subagents, the conductor of the scope that holds the document and its
-    temporary subagents, and the user may edit; every other agent suggests.
+    subagents, and the user may edit. The scope conductor and its temporary
+    subagents may edit unless the person owns the document; other agents suggest.
     One ``acting_owner`` walk serves both subagent exceptions. ``conductor`` is
     the document's scope conductor, never the actor's. A mechanical
     ``INDEX.md`` entry is allowed to anyone, and an unowned document is
@@ -113,18 +113,22 @@ def may_edit_document(
         return WriteAuthority(basis, owner, path_rel, actor, artifact_id)
 
     if direct_user:
-        basis = "unowned" if owner is None else "owner" if owner == UI_PRINCIPAL else "user"
+        from infra.auth import is_owner_sentinel
+
+        basis = "unowned" if owner is None else "owner" if is_owner_sentinel(owner) else "user"
         return decide(basis, UI_PRINCIPAL)
     if owner is None:
         return decide("unowned", thread_id)
     if thread_id == owner:
         return decide("owner", thread_id)
-    if thread_id == conductor:
+    from infra.auth import is_owner_sentinel
+
+    if thread_id == conductor and not is_owner_sentinel(owner):
         return decide("conductor", thread_id)
     principal = acting_owner(thread_id, False, db=db)
     if principal is not None and principal == owner:
         return decide("owner_subagent", principal)
-    if principal is not None and principal == conductor:
+    if principal is not None and principal == conductor and not is_owner_sentinel(owner):
         return decide("conductor_subagent", principal)
     if mechanical_index:
         return decide("index_entry", principal or thread_id)
@@ -234,7 +238,9 @@ def artifact_owner(artifact_id: str, *, db) -> str | None:
 
 def owner_label(owner_thread_id: str, *, db) -> str:
     """Return a product-facing label for an owner principal."""
-    if owner_thread_id == UI_PRINCIPAL:
+    from infra.auth import is_owner_sentinel
+
+    if is_owner_sentinel(owner_thread_id):
         return "the user"
     row = db.execute(
         "SELECT title FROM threads WHERE id=?",
@@ -244,21 +250,14 @@ def owner_label(owner_thread_id: str, *, db) -> str:
     return title or owner_thread_id
 
 
-def person_owner_label(owner: str | None, *, db, multi_person: bool) -> str:
-    """The owner as a person reads it: the agent's name, or for a shared owner ``You`` or ``Not set``.
-
-    A ``ui`` document is the person's only while one person uses CORSIA; while
-    more than one does, it reads ``Not set`` like a ``project:`` one, until
-    an agent is made its owner. Every person-facing surface (the
-    document header, the Files tree, the viewer) shows this; ``owner_label``
-    stays the agents' wording.
-    """
+def person_owner_label(owner: str | None, *, db, user_id: str | None = None, owner_user_id: str | None = None) -> str:
+    """Show the recorded person's account name to other people, or You to the owner."""
     from infra.auth import is_owner_sentinel
 
-    if owner == UI_PRINCIPAL and not multi_person:
-        return "You"
-    if owner is None or is_owner_sentinel(owner):
-        return "Not set"
+    if owner is None:
+        return "No owner"
+    if is_owner_sentinel(owner):
+        return str(owner_user_id) if owner_user_id and user_id and owner_user_id != user_id else "You"
     return owner_label(owner, db=db)
 
 

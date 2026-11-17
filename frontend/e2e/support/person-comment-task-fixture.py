@@ -14,7 +14,8 @@ from plans.boundary import PlanActor
 mode, artifact_id, thread_id = sys.argv[1:]
 db = get_db()
 try:
-    agent = PlanActor(thread_id, db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0], None)
+    identity = db.execute('SELECT user_id, project_id FROM threads WHERE id=?', (thread_id,)).fetchone()
+    agent = PlanActor(thread_id, identity['user_id'], identity['project_id'])
     if mode == 'ask':
         # The document's agent asks the person to review it, as block_node with ask_artifact_id does.
         with write_transaction(db, scope='seed_ask') as connection:
