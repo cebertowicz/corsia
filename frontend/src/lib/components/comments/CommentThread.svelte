@@ -115,8 +115,8 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
-	// A chat card keeps its answers showing at rest.
-	const preview = $derived(hideReply && !chatSurface);
+	// An unpicked margin card, on a document or in chat, is a short preview.
+	const preview = $derived(hideReply);
 	// A suggestion may have no text of its own; its tags still show.
 	const hasBody = $derived(!!(comment.text || comment.taggedPerson || comment.taggedAgents?.length));
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
