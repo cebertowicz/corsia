@@ -1,4 +1,4 @@
-"""Working-process cap and silent idle retirement for Claude Code (#2064)."""
+"""Silent idle retirement for Claude Code workers (#2064)."""
 
 from __future__ import annotations
 
