@@ -130,10 +130,12 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		// Each item opens a picker for its own role only; "You" is offered only as owner.
 		await ownerItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'owner');
+		await expect(page.getByRole('combobox', { name: 'Owner' })).toHaveAttribute('placeholder', 'Search');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toBeVisible();
 		await reachable(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'supervisor');
+		await expect(page.getByRole('combobox', { name: 'Supervisor' })).toHaveAttribute('placeholder', 'Search agents');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toHaveCount(0);
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveCount(0);
