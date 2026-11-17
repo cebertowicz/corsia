@@ -99,7 +99,7 @@ async def _run(args, _timeout):
 
 @pytest.fixture(autouse=True)
 def _no_frame_targets(monkeypatch):
-    monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {})
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {})
     monkeypatch.setattr(browser_dom_hit, "SETTLE_INTERVAL", 0)
 
 
@@ -130,6 +130,39 @@ async def test_a_link_in_a_same_origin_frame_is_hit_at_the_frames_place_and_writ
 
 
 @pytest.mark.asyncio
+async def test_a_write_into_a_frame_does_not_scroll_the_persons_page_first(monkeypatch):
+    """A target in a frame always misses the page's own hit test; that miss is not a cover to scroll clear."""
+    page = _page(frames=("child",), owners={"child": OWNER})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    commands = []
+
+    async def run(args, timeout):
+        commands.append(tuple(args))
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.written == ["field"] and not [command for command in commands if command[0] == "scrollintoview"]
+
+
+@pytest.mark.asyncio
+async def test_a_ref_that_two_frames_laid_out_alike_both_match_is_refused_and_nothing_is_written(monkeypatch):
+    """Two embeds of the same form: the frame-relative box matches an element in each, so which was named is unknown."""
+    twin_owner, twin_link = 51, 11
+    twin_hit = (56 + 50, 414 + 10)
+    page = Target(
+        {TOP_HIT: TOP, FRAMED_HIT: LINK, twin_hit: twin_link},
+        {LINK: {"border": PLACED}, twin_link: {"border": [56, 414, 156, 414, 156, 434, 56, 434]},
+         TOP: {"border": [0, 0, 800, 0, 800, 60, 0, 60]}, OWNER: {"content": FRAME_CONTENT},
+         twin_owner: {"content": [8, 380, 608, 380, 608, 580, 8, 580]}},
+        {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}, {"frame": {"id": "twin"}}]},
+        owners={"child": OWNER, "twin": twin_owner}, covers={TOP: "HEADER"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
 async def test_an_element_covered_inside_a_same_origin_frame_is_still_refused_naming_the_cover(monkeypatch):
     page = _page(hit=COVER, frames=("child",), owners={"child": OWNER})
     _connect(monkeypatch, **{PAGE_URL: page})
@@ -141,7 +174,7 @@ async def test_an_element_covered_inside_a_same_origin_frame_is_still_refused_na
 
 @pytest.mark.asyncio
 async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_written_there(monkeypatch):
-    monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
     page = _page(hit=OWNER, owners={"oopif": OWNER})
     frame = _frame()
     opened = _connect(monkeypatch, **{PAGE_URL: page, FRAME_URL: frame})
@@ -158,7 +191,7 @@ async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("overlay_on_page", [False, True])
 async def test_an_element_covered_inside_a_cross_site_frame_is_still_refused(monkeypatch, overlay_on_page):
-    monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
     # Either the frame's own page covers the link, or something on the top page covers the whole frame.
     page = _page(hit=COVER if overlay_on_page else OWNER, owners={"oopif": OWNER})
     frame = _frame(hit=COVER)
@@ -176,7 +209,7 @@ async def test_a_target_the_page_itself_holds_never_looks_for_frames(monkeypatch
     def not_listed(_endpoint):
         raise AssertionError("the page's own target does not list frames")
 
-    monkeypatch.setattr(browser_cdp, "frame_targets", not_listed)
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", not_listed)
     _connect(monkeypatch, **{PAGE_URL: page})
     assert await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2")) == "ok"
     assert page.worlds == ["main"] and "DOM.getFrameOwner" not in page.calls
@@ -210,12 +243,12 @@ def test_frame_targets_are_the_listed_iframe_targets_by_frame_id(monkeypatch):
     monkeypatch.undo()
     targets = [{"type": "page", "id": "p", "webSocketDebuggerUrl": "ws://x/page"},
                {"type": "iframe", "id": "oopif", "webSocketDebuggerUrl": "ws://x/frame"},
-               {"type": "iframe", "id": "no-socket"}]
-    monkeypatch.setattr(browser_cdp, "_targets", lambda _endpoint: targets)
-    assert browser_cdp.frame_targets("ws://x/devtools/page/p") == {"oopif": "ws://x/frame"}
+               {"type": "iframe", "webSocketDebuggerUrl": "ws://x/no-id"}]
+    monkeypatch.setattr(browser_cdp, "list_targets", lambda _endpoint: targets)
+    assert browser_dom_frames.frame_targets("ws://x/devtools/page/p") == {"oopif": "ws://x/frame"}
 
     def unreachable(_endpoint):
         raise BrowserSessionError("This page couldn't be checked")
 
-    monkeypatch.setattr(browser_cdp, "_targets", unreachable)
-    assert browser_cdp.frame_targets("ws://x/devtools/page/p") == {}
+    monkeypatch.setattr(browser_cdp, "list_targets", unreachable)
+    assert browser_dom_frames.frame_targets("ws://x/devtools/page/p") == {}

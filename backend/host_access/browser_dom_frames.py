@@ -27,8 +27,11 @@ class ChildFrame:
 
 
 async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, selector: str, box: dict | None,
-                            frame_clients: AsyncExitStack) -> tuple[Located | None, str | None, bool]:
-    """Find a target inside a child frame: the node, else the tag of what covers it, and whether a frame was tried.
+                            frame_clients: AsyncExitStack) -> tuple[Located | None, str | None, str | None]:
+    """Find a target inside a child frame: the node, else why not, and the tag of what covers it.
+
+    Why not is "covered" when a frame showed the box but held no matching element there, "ambiguous" when
+    more than one frame did, and None when no frame showed the box at all.
 
     agent-browser measures an element inside a frame from that frame's own corner, so each frame's content-box
     origin moves the box onto the page. A frame counts only when the moved centre is inside both the page's
@@ -37,28 +40,30 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
     The search stops one level down: a frame nested inside a cross-site frame has its owner in that frame's
     process, not in this page, so it is never listed here and its elements are still refused.
     """
-    cover: str | None = None
     for read in range(browser_dom_hit.SETTLE_READS):
         # The first box is the page path's last read; later ones are fresh, after the page moved.
         box = box if read == 0 else await read_box(run, selector)
         if box is None or is_empty(box):
-            return None, None, False
+            return None, None, None
         view = await page_viewport(page)
         shown = [(frame, _on_page(box, frame)) for frame in await _child_frames(page, endpoint)]
         shown = [(frame, placed) for frame, placed in shown if in_viewport(view, placed) and _inside(frame.viewport, placed)]
         if not shown:
-            return None, None, False
-        found, cover = None, None
-        for frame, placed in shown:
-            found, cover = await _hit_in_frame(page, frame, box, placed, frame_clients)
-            if found is not None:
-                break
+            return None, None, None
+        hits = [await _hit_in_frame(page, frame, box, placed, frame_clients) for frame, placed in shown]
+        found = [located for located, _ in hits if located is not None]
         # The frame may have moved while it was hit, so the answer holds only if its place and the box did not.
         if await read_box(run, selector) == box and [frame.viewport for frame, _ in shown] == [
                 await _owner_viewport(page, frame.owner) for frame, _ in shown]:
-            return found, cover, True
+            if len(found) > 1:
+                # The box is all a ref gives, so two frames laid out alike both hold an element that matches
+                # it, and which one the agent named can't be told: refused, as before frames were searched.
+                return None, "ambiguous", None
+            if found:
+                return found[0], None, None
+            return None, "covered", next((cover for _, cover in hits if cover), None)
         await asyncio.sleep(browser_dom_hit.SETTLE_INTERVAL)
-    return None, None, False
+    return None, None, None
 
 
 async def _hit_in_frame(page: CdpClient, frame: ChildFrame, box: dict, placed: dict,
@@ -80,12 +85,27 @@ async def _hit_in_frame(page: CdpClient, frame: ChildFrame, box: dict, placed: d
     return None, await cover_tag(target, box)
 
 
+def frame_targets(endpoint: str) -> dict[str, str]:
+    """The frames Chrome runs in their own processes, as frame id to that target's endpoint.
+
+    Such a frame is not in its parent page's frame tree; Chrome lists it beside ``endpoint`` as a target
+    of its own whose id is the frame id. A host that answers nothing has none as far as this sees, so a
+    page that cannot be listed keeps its caller's own refusal instead of reporting the listing's failure.
+    """
+    try:
+        targets = browser_cdp.list_targets(endpoint)
+    except BrowserSessionError:
+        return {}
+    return {target["id"]: target["webSocketDebuggerUrl"] for target in targets
+            if target.get("type") == "iframe" and isinstance(target.get("id"), str)}
+
+
 async def _child_frames(page: CdpClient, endpoint: str) -> list[ChildFrame]:
     """Every frame whose owner element is in this page and shows a box, nearest the page first."""
     tree = await page.call("Page.getFrameTree")
     listed: list[tuple[str, str | None]] = [(frame_id, None) for frame_id in _descendants(tree.get("frameTree", {}))]
     # A cross-site frame is in no frame tree; it is a target of its own whose id is the frame's.
-    listed += list((await asyncio.to_thread(browser_cdp.frame_targets, endpoint)).items())
+    listed += list((await asyncio.to_thread(frame_targets, endpoint)).items())
     frames = []
     for frame_id, frame_endpoint in listed:
         try:

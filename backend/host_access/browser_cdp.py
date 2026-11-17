@@ -341,10 +341,9 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
     return value if not result.returncode and isinstance(value, str) else None
 
 
-def _targets(browser_endpoint: str) -> list[dict]:
-    """The targets Chrome lists over HTTP beside the endpoint it answers, page, frame or browser."""
-    parsed = urlparse(browser_endpoint)
-    listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
+def list_targets(browser_endpoint: str) -> list[dict]:
+    """The targets with a socket that Chrome lists over HTTP beside the endpoint it answers, of any type."""
+    listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
     try:
         with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
             targets = json.load(response)
@@ -352,36 +351,19 @@ def _targets(browser_endpoint: str) -> list[dict]:
         raise BrowserSessionError("This page couldn't be checked") from exc
     if not isinstance(targets, list):
         raise BrowserSessionError("This page couldn't be checked")
-    return [target for target in targets if isinstance(target, dict)]
-
-
-def frame_targets(endpoint: str) -> dict[str, str]:
-    """The frames Chrome runs in their own processes, as frame id to that target's endpoint.
-
-    Such a frame is not in its parent page's frame tree; Chrome lists it beside ``endpoint`` as a target
-    of its own whose id is the frame id. A host that answers nothing has none as far as this sees, so a
-    page that cannot be listed keeps its caller's own refusal instead of reporting the listing's failure.
-    """
-    try:
-        targets = _targets(endpoint)
-    except BrowserSessionError:
-        return {}
-    return {target["id"]: target["webSocketDebuggerUrl"] for target in targets
-            if target.get("type") == "iframe" and isinstance(target.get("id"), str)
-            and isinstance(target.get("webSocketDebuggerUrl"), str) and target["webSocketDebuggerUrl"].startswith("ws")}
+    return [target for target in targets if isinstance(target, dict)
+            and isinstance(target.get("webSocketDebuggerUrl"), str) and target["webSocketDebuggerUrl"].startswith("ws")]
 
 
 def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
-    pages = [target for target in _targets(browser_endpoint) if target.get("type") == "page"]
+    pages = [target for target in list_targets(browser_endpoint) if target.get("type") == "page"]
     if expected_url:
         pages.sort(key=lambda target: (target.get("url") != expected_url,
                                        expected_title is not None and target.get("title") != expected_title))
-    for target in pages:
-        endpoint = target.get("webSocketDebuggerUrl")
-        if isinstance(endpoint, str) and endpoint.startswith("ws"):
-            return endpoint
-    raise BrowserSessionError("This page couldn't be checked")
+    if not pages:
+        raise BrowserSessionError("This page couldn't be checked")
+    return pages[0]["webSocketDebuggerUrl"]
 
 
 async def border_rect(cdp: browser_cdp_frames.Session, **node: object) -> Rect | None:

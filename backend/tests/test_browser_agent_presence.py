@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane, browser_pane_state
+from host_access import browser_cdp, browser_control, browser_dom_frames, browser_dom_write, browser_pane, browser_pane_state
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -23,7 +23,7 @@ def _no_presence_state():
 @pytest.fixture(autouse=True)
 def _no_frame_listing(monkeypatch):
     # A refused write also looks for frames; the listing is a request to the browser, which these fakes lack.
-    monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {})
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {})
 
 
 def _owner(monkeypatch, password_page):

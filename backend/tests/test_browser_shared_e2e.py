@@ -22,7 +22,8 @@ from uuid import uuid4
 import pytest
 
 from host_access import (
-    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
+    browser_cdp, browser_control, browser_dom_frames, browser_dom_write, browser_pane_state, browser_screencast,
+    browser_session_commands, browser_steps,
     browser_step_lifecycle as lifecycle,
 )
 from tools import browser_runtime, browser_run_steps
@@ -469,7 +470,7 @@ async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site
     if not cross_site:
         return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
     # A cross-site frame's document is in another process: read it through the frame's own target.
-    listed = await asyncio.to_thread(browser_cdp.frame_targets, await owner.page_endpoint(thread_id))
+    listed = await asyncio.to_thread(browser_dom_frames.frame_targets, await owner.page_endpoint(thread_id))
     seen = []
     for frame_endpoint in listed.values():
         async with browser_cdp.CdpClient(frame_endpoint) as cdp:

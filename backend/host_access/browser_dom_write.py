@@ -26,6 +26,7 @@ _WRITE_REFUSALS = {
     "stale_ref": ("the element has no box on the page; the page may have changed since your snapshot, "
                   "so take a new snapshot and use its refs"),
     "covered": "another element covers it",
+    "ambiguous": "an element at the same place in more than one frame on the page matches it",
     "moving": "the page kept moving",
     "off_screen": "it never came into view",
     "page_error": "the page refused the change",
@@ -106,16 +107,27 @@ async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str
     """Find the node a write acts on, why not if absent, and the tag of what covers it.
 
     The main page is tried first. Only when it fails is the target looked for in a frame, because
-    agent-browser measures an element inside a frame from that frame's own corner.
+    agent-browser measures an element inside a frame from that frame's own corner. Frames are searched
+    before the page is scrolled to clear a cover, since a target in a frame always misses the page's hit
+    test and would otherwise scroll the person's page on every write into a frame.
     """
     node, reason, box = await _locate_in_page(run, page, selector)
-    if node is not None:
-        return Located(node, page), reason, None
-    found, framed_cover, framed = await locate_in_frames(run, page, endpoint, selector, box, frame_clients)
-    if found is not None:
-        return found, "covered", None
-    if reason != "covered":
-        return None, reason, None
+    for retry in (False, True):
+        if node is not None:
+            return Located(node, page), reason, None
+        found, framed, framed_cover = await locate_in_frames(run, page, endpoint, selector, box, frame_clients)
+        if found is not None:
+            return found, "covered", None
+        if framed == "ambiguous":
+            return None, framed, None
+        if reason != "covered":
+            return None, reason, None
+        if retry:
+            break
+        # A sticky header or a bottom bar covers part of the viewport, so a target in view can sit under
+        # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
+        await run(("scrollintoview", selector), 10)
+        node, reason, box = await _settled_hit(run, page, selector, await _box(run, selector))
     if framed:
         return None, reason, framed_cover
     return None, reason, await _cover(page, await _box(run, selector))
@@ -132,13 +144,7 @@ async def _locate_in_page(run: RunCommand, cdp: CdpClient, selector: str, *,
         # agent-browser's own click scrolls its target into view the same way.
         await run(("scrollintoview", selector), 10)
         box = await _box(run, selector)
-    node, reason, box = await _settled_hit(run, cdp, selector, box)
-    if node is None and reason == "covered" and scroll:
-        # A sticky header or a bottom bar covers part of the viewport, so a target in view can sit under
-        # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
-        await run(("scrollintoview", selector), 10)
-        node, reason, box = await _settled_hit(run, cdp, selector, await _box(run, selector))
-    return node, reason, box
+    return await _settled_hit(run, cdp, selector, box)
 
 
 async def _settled_hit(run: RunCommand, cdp: CdpClient, selector: str,
