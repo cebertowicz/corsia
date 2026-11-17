@@ -113,6 +113,14 @@ def _supervisor(
     return None, "none"
 
 
+def effective_supervisor(db, artifact: dict[str, Any], *, workspace: Path):
+    """Return the same available supervisor shown in the document header."""
+    owner = artifact_owner(str(artifact["id"]), db=db)
+    return _supervisor(
+        db, owner, stored_pick(artifact), lambda: (_scope(db, artifact, workspace) or (None, None))[1],
+    )[0]
+
+
 def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tuple[str, ...]:
     """Who every comment on a document goes to, and exactly who a re-open goes to.
 
@@ -121,9 +129,7 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
     document with neither still reaches the agent that last owned it.
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
-    row, _source = _supervisor(
-        db, owner, stored_pick(artifact), lambda: (_scope(db, artifact, workspace) or (None, None))[1],
-    )
+    row = effective_supervisor(db, artifact, workspace=workspace)
     recipient_owner = UI_PRINCIPAL if owner_kind(owner) == "person" else owner
     found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, recipient_owner) if who))
     released_owner = artifact.get("parent_thread_id")

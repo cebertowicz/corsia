@@ -67,4 +67,6 @@ def apply_change(db, artifact: dict, body: OwnershipBody, current: str | None, *
     if supervisor != stored:
         merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
         events.append(("supervisor_changed", {"from": "agent" if stored else "none", "to": "agent" if supervisor else "none"}))
+        from plans.public import comment_tasks_changed
+        comment_tasks_changed(db, [artifact_id])
     return models.get_artifact(artifact_id, db=db), events, rehome
