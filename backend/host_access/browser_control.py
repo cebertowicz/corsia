@@ -62,7 +62,8 @@ FILLED_FIELD_REFUSED = (
     "only commands that can't show what they typed run here: open, back, forward, reload, click, dblclick, "
     "hover, focus, fill, type, press, select, check, uncheck, scroll, scrollintoview, "
     "wait (but not --fn or --download), tab, snapshot (field values hidden), "
-    "get (but not get html, get value or a value attribute), and is."
+    "get (but not get html, get value or a value attribute), and is. Name each element by its @ref from a "
+    "snapshot, not by a CSS selector."
 )
 FILLED_FIELD_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. The person filled in a password field on this page, and "
@@ -82,6 +83,11 @@ _FILLED_FIELD_GETS = frozenset({"title", "url", "text", "count", "attr", "box", 
 # wait's options that take one operand and run no script; --fn evaluates one and --download writes a file.
 _FILLED_FIELD_WAIT_OPTIONS = frozenset({"--load", "--url", "--text", "--state"})
 _FILLED_FIELD_SNAPSHOTS = frozenset({("snapshot",), ("snapshot", "-i")})
+# Where each command takes its element. A CSS selector can test a value attribute some frameworks keep in step
+# with what was typed (input[value^=a]), so any command's match or failure would answer it; a snapshot ref can't.
+_FILLED_FIELD_TARGET_AT = {"click": 1, "dblclick": 1, "hover": 1, "focus": 1, "fill": 1, "type": 1, "select": 1,
+                           "check": 1, "uncheck": 1, "scrollintoview": 1, "get": 2, "is": 2}
+_SNAPSHOT_REF = re.compile(r"@e\d+")
 # Snapshot roles that hold typed text; the value follows the line's ref and attributes after ": ".
 _FIELD_LINE = re.compile(r"^(?P<indent>\s*)- (?:textbox|searchbox|combobox|spinbutton)\b")
 _REF = re.compile(r"\[ref=e\d+\]")
@@ -164,6 +170,9 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
 
 
 def _filled_field_allows(args: tuple[str, ...]) -> bool:
+    at = _FILLED_FIELD_TARGET_AT.get(args[0])
+    if at is not None and len(args) > at and not _SNAPSHOT_REF.fullmatch(args[at]):
+        return False
     if args[0] == "snapshot":
         return tuple(args) in _FILLED_FIELD_SNAPSHOTS
     if args[0] == "get":
@@ -178,7 +187,8 @@ def _filled_field_allows(args: tuple[str, ...]) -> bool:
                 if position + 1 >= len(args) or args[position + 1].startswith("-"):
                     return False
                 position += 2
-            elif args[position].startswith("-"):
+            elif args[position].startswith("-") or not (
+                    args[position].isdigit() or _SNAPSHOT_REF.fullmatch(args[position])):
                 return False
             else:
                 position += 1

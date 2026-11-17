@@ -62,12 +62,12 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
     monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, visible: events.append(visible))
 
     with pytest.raises(BrowserSessionError, match="asks for a password"):
-        await browser_control.require_page_access("thread", probe, ("fill", "@password", "secret"))
+        await browser_control.require_page_access("thread", probe, ("fill", "@e1", "secret"))
     assert opened == ["visit-one"]
     assert browser_control.password_page("thread")
 
     # The field has gone and the code field is available; ordinary fixed actions resume.
-    await browser_control.require_page_access("thread", probe, ("fill", "@code", "123456"))
+    await browser_control.require_page_access("thread", probe, ("fill", "@e2", "123456"))
     assert settled == [("password-step", frozenset({42}))]
     assert events == [True, False]
     assert not browser_control.password_page("thread")

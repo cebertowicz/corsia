@@ -232,13 +232,22 @@ async def test_while_a_done_field_still_shows_only_commands_that_cannot_show_it_
     page = Page()
     await _done_with_field_showing(plan, page)
     allowed = (("snapshot",), ("snapshot", "-i"), ("click", "@e3"), ("get", "text", "@e3"), ("get", "attr", "@e3", "href"),
-               ("wait", "2000"), ("wait", "#next", "--state", "hidden"), ("wait", "--load", "networkidle"),
-               ("wait", "--url", "**/home"), ("wait", "--text", "Welcome"))
+               ("wait", "2000"), ("wait", "@e3", "--state", "hidden"), ("wait", "--load", "networkidle"),
+               ("wait", "--url", "**/home"), ("wait", "--text", "Welcome"), ("get", "title"), ("is", "visible", "@e3"),
+               ("fill", "@e3", "x"), ("scroll", "down", "300"))
+    # A CSS selector could test a value attribute that holds what was typed, by matching or failing to.
+    probe = "input[value^=a]"
+    by_selector = (("click", probe), ("dblclick", probe), ("hover", probe), ("focus", probe), ("fill", probe, "x"),
+                   ("type", probe, "x"), ("select", probe, "x"), ("check", probe), ("uncheck", probe),
+                   ("scrollintoview", probe), ("get", "count", probe), ("get", "text", probe), ("get", "box", probe),
+                   ("get", "styles", probe), ("get", "attr", probe, "href"), ("is", "visible", probe), ("wait", probe),
+                   ("wait", "#next", "--state", "hidden"), ("wait", "--load", "load", probe))
     refused = (("screenshot", "shot.png"), ("pdf", "page.pdf"), ("get", "html", "body"), ("read",),
                ("snapshot", "--json"), ("keyboard", "type", "x"), ("diff", "snapshot"), ("find", "role", "textbox"),
                ("eval", "1"), ("get", "value", "@e7"), ("get", "attr", "@e7", "value"), ("get", "attr", "@e7", " Value"),
                ("get", "attr", "@e7"), ("wait", "--fn", "window.x"), ("wait", "-f", "window.x"),
-               ("wait", "--download", "f.zip"), ("wait", "--text", "--fn", "window.x"), ("wait", "--load"))
+               ("wait", "--download", "f.zip"), ("wait", "--text", "--fn", "window.x"), ("wait", "--load"),
+               *by_selector)
 
     async def other_field(_target):
         return 7
