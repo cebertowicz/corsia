@@ -10,7 +10,7 @@ so the registration makes no path newly writable for anyone outside it.
 Anything else claims everywhere (``None``), the instance-wide fence: a target
 outside the workspace, inside the workspace but outside every project folder,
 touching another project, or any read that fails. Each such fallback is logged
-with its reason, so production can tell why a registration waited for everyone.
+with its reason, so production can tell why a registration fenced everyone.
 
 Another project whose folder does not resolve (an archived project whose folder
 is gone, say) has no folder to overlap and is skipped, as the project fence
@@ -38,12 +38,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from loguru import logger
-from infra.repo_policy_transition import (
-    EVERYWHERE,
-    Holder,
-    repo_policy_transition,
-    transition_generation,
-)
+from infra.repo_policy_transition import repo_policy_transition, transition_generation
 from tools.host_path_resolution import canonical, containment_key, contains
 
 log = logging.getLogger(__name__)
@@ -213,25 +208,6 @@ def confirmed_repo_path(
     return repo_path
 
 
-def owned_process_holders() -> tuple[Holder, ...]:
-    """Each live owned process with the reach of the call that launched it."""
-    from host_access.processes import PROCESS_OWNER
-
-    return tuple(
-        Holder(
-            reach=record.reach or EVERYWHERE,
-            thread_id=record.thread_id,
-            what=(
-                f'process "{record.description}"' if record.description
-                else f"a {record.mode} process"
-            ),
-            # A long-running process has no time limit, so no wait outlasts it.
-            waitable=not record.long_running,
-        )
-        for record in PROCESS_OWNER.outstanding_records()
-    )
-
-
 def _add_claim(
     project_id: str, mode: str, path: str | None, name: str | None, ws_dir_for: Callable[[str], Path],
 ) -> AdmittedAdd:
@@ -281,11 +257,13 @@ def add_transition(
     """
     generation = transition_generation()
     read = _add_claim(project_id, mode, path, name, ws_dir_for)
+    # A registration never waits for or refuses over what agents are running: a running
+    # call that crosses the new rules fails on them.
     with repo_policy_transition(
         active_process_count=active_process_count,
-        owned_processes=owned_process_holders,
         claim=read.claim,
         claim_generation=generation,
         folders=read.folders,
+        checks_running=False,
     ) as claim:
         yield AdmittedAdd(claim, read.folders)

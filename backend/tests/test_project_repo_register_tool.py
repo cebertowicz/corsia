@@ -366,10 +366,10 @@ async def test_registry_lets_project_repo_register_complete(registry_env, monkey
 
 @pytest.mark.parametrize("blocker", ["effect", "owned process"])
 @pytest.mark.asyncio
-async def test_registry_still_refuses_register_while_repo_access_is_active(
+async def test_registry_registers_while_repo_access_is_active(
     registry_env, monkeypatch, blocker,
 ):
-    """The exemption removes only self-collision, never real exclusion."""
+    """Through the registry too, a running call or process never holds a registration."""
     from infra.repo_policy_transition import admit_repo_effect
     from api import project_repos
 
@@ -389,20 +389,10 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
         if held is not None:
             held.__exit__(None, None, None)
 
-    # An action ends within its own time limit, so it is waited out first; a process
-    # the count reports but no holder accounts for is refused at once.
-    expected = (
-        "Repositories can't change while you're running an action. "
-        "It was still going after 1 second; try again once it finishes."
-        if blocker == "effect"
-        else "Repositories can't change while an agent's process is running. "
-        "Try again once it finishes."
-    )
-    assert expected in result, result
+    assert "Registered repository 'app'" in result, result
     assert registry_env["db"].execute(
         "SELECT COUNT(*) FROM project_repo_policies"
-    ).fetchone()[0] == 0
-    assert not (registry_env["workspace"] / "source" / "app").exists()
+    ).fetchone()[0] == 1
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Repo registration: the claim and transition log lines, and projects with no folder."""
+"""Repo registration: the claim log line, and projects with no folder."""
 
 from __future__ import annotations
 
@@ -33,19 +33,16 @@ def _logged():
 
 
 @pytest.mark.asyncio
-async def test_each_transition_logs_the_claim_it_ran_or_was_refused_under(env):
+async def test_a_registration_logs_the_claim_it_ran_under(env):
     target = _own_target(env)
     with _logged() as lines:
         task = await _held_effect(env, "p-agent")
         try:
-            assert "Repositories can't change" in await _register(env, target)
+            assert "Registered repository 'app'" in await _register(env, target)
         finally:
             await _release(env, task)
-        assert "Registered repository 'app'" in await _register(env, target)
-    # The waiting registration logs each refused attempt, then the one that ran.
-    refused = "repo policy transition refused claim=pa blocker_thread=p-agent blocker_reach=walled_from:pb"
-    assert lines[-1] == "repo policy transition admitted claim=pa", lines
-    assert lines[:-1] and set(lines[:-1]) == {refused}, lines
+    # A same-project action was running; the registration ran once, with no refusal.
+    assert lines == ["repo policy transition admitted claim=pa"], lines
 
 
 @pytest.mark.asyncio

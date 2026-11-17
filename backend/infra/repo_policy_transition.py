@@ -7,10 +7,10 @@ everywhere. A transition carries a claim: the projects whose write rules it
 changes, or everywhere, and the folders it changes when it knows them. They
 conflict when the reach meets the claim. A call that only reads is no effect.
 
-A registration that meets an in-flight effect or a bounded owned process waits for
-it (``infra.repo_policy_wait``), up to its bound, then
-proceeds; it is refused only once that bound passes. A long-running process has no
-bound a wait could outlast, so meeting one is refused at once, naming it.
+A registration never waits for or refuses over effects and processes already
+running (``checks_running=False``): it proceeds at once, a running call that then
+crosses the new write rules fails on them, and a call that meets the registration
+while it runs is refused. Other transitions are refused while one meets them.
 
 Only a registration whose target sits inside the registering project's own
 folder claims less than everywhere (``api.project_repo_claim``): every caller not
@@ -22,7 +22,7 @@ every owned process, as before.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -38,15 +38,11 @@ log = logging.getLogger(__name__)
 class RepoPolicyTransitionBusy(RuntimeError):
     """A repository effect or policy transition cannot start safely.
 
-    ``retryable`` marks a conflict that ends when what is in flight finishes;
     ``running`` is what is still running, as a clause ("agent "X" is running an action").
     """
 
-    def __init__(
-        self, message: str, *, retryable: bool = False, running: str | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, running: str | None = None) -> None:
         super().__init__(message)
-        self.retryable = retryable
         self.running = running
 
 
@@ -107,14 +103,11 @@ class Holder:
     """One in-flight effect or live owned process, with what the refusal names.
 
     ``what`` is what its starter is running, as the refusal reads it ("an action").
-    ``waitable`` is false for a holder with no bound a wait could outlast (a
-    long-running process).
     """
 
     reach: Reach
     thread_id: str | None
     what: str
-    waitable: bool = True
 
 
 # The reach of the tool effect running in this task, so an owned process spawned by
@@ -170,7 +163,7 @@ def _agent_label(thread_id: str) -> str:
         return "an agent"
 
 
-def _busy(fallback: str, holder: Holder | None, *, retryable: bool) -> RepoPolicyTransitionBusy:
+def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
     """The refusal a person or agent reads: who is still running what, and what to do.
 
     No thread is the person's own session, so the refusal names them as "you".
@@ -183,7 +176,6 @@ def _busy(fallback: str, holder: Holder | None, *, retryable: bool) -> RepoPolic
         running = f"you're running {holder.what}"
     return RepoPolicyTransitionBusy(
         f"Repositories can't change while {running}. Try again once it finishes.",
-        retryable=retryable,
         running=running,
     )
 
@@ -227,30 +219,10 @@ class _RepoPolicyTransitionCoordinator:
             with self._lock:
                 del self._effects[key]
 
-    def _process_blocker(
-        self,
-        claim: frozenset[str] | None,
-        folders: tuple[Path, ...] | None,
-        active_process_count: Callable[[], int],
-        owned_processes: Callable[[], Iterable[Holder]] | None,
-    ) -> tuple[bool, Holder | None, bool]:
-        """Whether a live owned process meets the claim, which one to name, and
-        whether every one that meets it can be waited out."""
+    @staticmethod
+    def _any_process(active_process_count: Callable[[], int]) -> bool:
+        """Whether any owned process is live; refused when that can't be read."""
         unverified = RepoPolicyTransitionBusy("Owned process activity could not be verified.")
-        holders: tuple[Holder, ...] | None = None
-        if owned_processes is not None:
-            try:
-                holders = tuple(owned_processes())
-            except Exception as exc:
-                raise unverified from exc
-            if any(not isinstance(holder, Holder) for holder in holders):
-                raise unverified
-        if claim is not None:
-            if holders is None:
-                raise unverified
-            meeting = [holder for holder in holders if holder.reach.meets(claim, folders)]
-            stuck = [holder for holder in meeting if not holder.waitable]
-            return bool(meeting), next(iter(stuck or meeting), None), not stuck
         try:
             process_count = active_process_count()
         except Exception as exc:
@@ -261,28 +233,23 @@ class _RepoPolicyTransitionCoordinator:
             or process_count < 0
         ):
             raise unverified
-        if not process_count:
-            return False, None, True
-        # Unless every counted process has its holder, none is known to end within the wait.
-        stuck = [holder for holder in holders or () if not holder.waitable]
-        waitable = holders is not None and len(holders) >= process_count and not stuck
-        return True, next(iter(stuck or holders or ()), None), waitable
+        return process_count > 0
 
     @contextmanager
     def transition(
         self,
         *,
         active_process_count: Callable[[], int],
-        owned_processes: Callable[[], Iterable[Holder]] | None = None,
         claim: frozenset[str] | None = None,
         claim_generation: int | None = None,
         folders: tuple[Path, ...] | None = None,
+        checks_running: bool = True,
     ) -> Iterator[frozenset[str] | None]:
         blocker: RepoPolicyTransitionBusy | None = None
         with self._lock:
             if self._transition_active:
                 raise RepoPolicyTransitionBusy(
-                    "Repository policy transition is already in progress.", retryable=True,
+                    "Repository policy transition is already in progress.",
                     running="another repository change is in progress",
                 )
             if claim is not None and claim_generation != self._generation:
@@ -291,16 +258,14 @@ class _RepoPolicyTransitionCoordinator:
                             "another transition ended after it was read", _scope(claim))
                 claim = None
             effects = [h for h in self._effects.values() if h.reach.meets(claim, folders)]
-            # An in-flight tool call always ends within its own time limit.
-            waitable = True
-            if effects:
-                blocker_holder: Holder | None = effects[0]
+            blocker_holder: Holder | None = None
+            if not checks_running:
+                running = ""
+            elif effects:
+                blocker_holder = effects[0]
                 running = "an agent's action"
             else:
-                busy, blocker_holder, waitable = self._process_blocker(
-                    claim, folders, active_process_count, owned_processes,
-                )
-                running = "an agent's process" if busy else ""
+                running = "an agent's process" if self._any_process(active_process_count) else ""
             if not running:
                 self._transition_active = True
                 self._claim = claim
@@ -315,7 +280,7 @@ class _RepoPolicyTransitionCoordinator:
                 _reach_token(blocker_holder.reach) if blocker_holder else None,
             )
             # Named outside the lock: the label reads the database.
-            blocker = _busy(running, blocker_holder, retryable=waitable)
+            blocker = _busy(running, blocker_holder)
             raise blocker
         logger.info("repo policy transition admitted claim={}", _scope(claim))
         try:
@@ -352,28 +317,30 @@ def admit_repo_effect(
 def repo_policy_transition(
     *,
     active_process_count: Callable[[], int],
-    owned_processes: Callable[[], Iterable[Holder]] | None = None,
     claim: frozenset[str] | None = None,
     claim_generation: int | None = None,
     folders: tuple[Path, ...] | None = None,
+    checks_running: bool = True,
 ) -> Iterator[frozenset[str] | None]:
     """Quarantine durable repo policy changes from the effects and processes they meet.
 
     ``claim`` is ``None`` (everywhere) unless the caller read a narrower one, with the
-    :func:`transition_generation` it read it at; a narrowed claim also needs
-    ``owned_processes`` so each live process is judged by its own reach. ``folders``
+    :func:`transition_generation` it read it at. ``folders``
     are the folders whose write rules change, when the caller knows them; a call that
     writes known paths meets the transition only if they overlap one, and the caller
     must confirm inside the transition that what it changes is still inside them.
     Yields the claim the transition was admitted under (``None`` once widened to
     everywhere), so the caller can check what it resolves inside the transition.
+    With ``checks_running`` false (registration) the transition never waits for or
+    refuses over calls and processes already running; while it runs, a new call that
+    meets it is refused, and a running one that crosses the new rules fails on them.
     """
     with _COORDINATOR.transition(
         active_process_count=active_process_count,
-        owned_processes=owned_processes,
         claim=claim,
         claim_generation=claim_generation,
         folders=folders,
+        checks_running=checks_running,
     ) as admitted:
         yield admitted
 

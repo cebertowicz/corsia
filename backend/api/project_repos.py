@@ -38,7 +38,7 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
-from api.project_repo_add_wait import register_source_repo_waiting
+from api.project_repo_add_entry import register_source_repo_async
 from api.project_repo_claim import AdmittedAdd, add_transition, confirmed_repo_path
 from api.project_repo_controls import RepoAdd, RepoUpdate, add_controls, update_controls
 from api.project_repo_add_source import resolve_add_source
@@ -377,7 +377,7 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
 
 
 def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None = None) -> dict:
-    """One add attempt; raises RepoPolicyTransitionBusy on a conflict (front door: project_repo_add_wait)."""
+    """Register once; raises RepoPolicyTransitionBusy while another repo change runs (front door: project_repo_add_entry)."""
 
     def _add(admitted: AdmittedAdd):
         ws_dir = _workspace_dir_for(project_id)
@@ -457,7 +457,7 @@ async def add_repo(token: str, project_id: str, body: RepoAdd):
     if body.mode not in ("link", "create"):
         raise HTTPException(400, "mode must be 'link' or 'create'")
 
-    repo = await register_source_repo_waiting(project_id, body)  # waits out writes it meets
+    repo = await register_source_repo_async(project_id, body)
     return {"added": True, "repo": repo}
 
 

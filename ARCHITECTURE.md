@@ -539,20 +539,20 @@ caller was walled from, else everywhere. Each transition carries a claim (its
 projects, or everywhere) and, when known, the folders it changes. They conflict
 only where the reach meets the claim; a file tool that only reads is no effect.
 Only a registration inside the registering project's own folder claims less
-than everywhere (`api/project_repo_claim.py`). A registration that meets an
-in-flight effect or a bounded owned process waits for it
-(`infra/repo_policy_wait.py`, bounded by `TRANSITION_WAIT_SECONDS`, polling on
-the event loop with no thread or lock held), then proceeds; past the bound it is
-refused naming the holder. A long-running process has no bound a wait could
-outlast, so a registration that meets one is refused at once, naming it. Tool
-effects that meet an active transition refuse at once.
+than everywhere (`api/project_repo_claim.py`). A registration never waits for or
+refuses over in-flight effects or owned processes (`checks_running=False`): it
+proceeds at once, and a later call that crosses the protection it adds is refused
+by the project fence. It is refused only while another transition is in progress.
+The other transitions (detach, policy update, project creation) still refuse
+against an effect or process they meet. Tool effects that meet an active
+transition refuse at once.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`
 except the tools whose own execution enters the stronger transition:
 `_REPO_TRANSITION_OWNERS` in `backend/tools/registry.py`, matched on the
 resolved post-dispatch name so a `tool_call` dispatch matches too. Those two are
 `project_create` (through `api.project_scaffolding.initialize_project`) and
-`project_repo_register` (through `api.project_repo_add_wait.register_source_repo_waiting`);
+`project_repo_register` (through `api.project_repo_add_entry.register_source_repo_async`);
 admitting their own effect would only make each collide with its own
 transition. The set is pinned in test to those two tool objects, so a rename or
 a re-point cannot silently widen the exemption. Everything else is still
