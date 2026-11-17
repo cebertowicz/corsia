@@ -82,15 +82,24 @@ def owned_document(isolated_db):
     return TestClient(app), artifact["id"]
 
 
-def test_multi_person_installation_reports_the_flag_and_refuses_the_person(owned_document):
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL
+def test_two_people_can_take_ownership_and_see_who_took_it(owned_document):
+    from infra import config
+    from infra.database import get_db
+    from registry import models
+    from registry.document_supervisor import ownership
 
     client, artifact_id = owned_document
-
     assert _view(artifact_id)["multi_person"] is True
-    refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
-    assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"] == MULTI_PERSON_REFUSAL
+    taken = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
+    assert taken.status_code == 200, taken.text
+    assert taken.json()["ownership"]["owner"]["label"] == "You"
+    db = get_db()
+    try:
+        artifact = models.get_artifact(artifact_id, db=db)
+        other = ownership(db, artifact, user_id=SECOND_PERSON, workspace=config.WORKSPACE, multi_person=True)
+        assert other["owner"]["label"] == OWNER_USER
+    finally:
+        db.close()
 
 
 def test_single_person_installation_reports_no_flag_and_allows_the_person(owned_document):
@@ -131,6 +140,23 @@ def _add_agent(thread_id: str, title: str) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def test_project_person_owner_is_not_a_comment_delivery_recipient(owned_document, monkeypatch):
+    """A project sentinel must not be sent to thread delivery alongside the supervisor."""
+    from doceditor import feedback_delivery
+    from infra.database import get_db
+    from registry import document_supervisor
+
+    _, artifact_id = owned_document
+    monkeypatch.setattr(document_supervisor, "artifact_owner", lambda *_args, **_kwargs: "project:example")
+    monkeypatch.setattr(document_supervisor, "stored_pick", lambda _artifact: "agent-1")
+    db = get_db()
+    try:
+        assert feedback_delivery.recipient_problem(db, "project:example") == "owner_unavailable"
+    finally:
+        db.close()
+    assert _comment_recipients(artifact_id) == ("agent-1",)
 
 
 def test_taking_a_document_over_routes_its_comments_to_the_supervisor(owned_document):
@@ -336,45 +362,20 @@ def test_a_released_document_routes_as_its_header_reads_and_never_to_no_one(owne
     assert _comment_recipients(artifact_id) == ("agent-2",)
 
 
-@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
-def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_document, shared_owner):
-    """Everyone shares a ``ui`` or ``project:`` document, so with two people neither field changes."""
-    from registry.document_supervisor import SHARED_REFUSAL
-
-    client, artifact_id = owned_document
-    _set_owner(artifact_id, shared_owner)
-    assert _view(artifact_id)["can_change"] is False
-    for change in ({"supervisor_thread_id": "agent-1"}, {"owner": "agent-1"}):
-        refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json=change)
-        assert refused.status_code == 409, refused.text
-        assert refused.json()["detail"] == SHARED_REFUSAL
-    view = _view(artifact_id)
-    assert view["owner"]["kind"] == ("person" if shared_owner == "ui" else "none")
-    assert (view["supervisor"] or {}).get("source") != "picked"
-
-
-@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
-def test_one_persons_owner_pick_leaves_a_shared_document_reachable_by_the_other(owned_document, shared_owner):
-    """One of two people tries to give a shared document their own agent; it stays shared, so the other still reaches it."""
-    from infra.auth import may_access_artifact
-    from infra.database import get_db
-    from registry import models
-    from registry.document_supervisor import SHARED_REFUSAL
-
+@pytest.mark.parametrize("person_owner", ["ui", "project:p1"])
+def test_each_person_can_take_a_person_owned_document(owned_document, person_owner):
+    """Both accounts can take it, and the identity of the latest taker is retained."""
     client, artifact_id = owned_document
     url = f"/api/artifacts/{artifact_id}/ownership"
-    _set_owner(artifact_id, shared_owner)
-    picked = client.put(url, json={"owner": "agent-1"})
-    assert (picked.status_code, picked.json()["detail"]) == (409, SHARED_REFUSAL)
-    db = get_db()
-    try:
-        assert may_access_artifact(models.get_artifact(artifact_id, db=db)["parent_thread_id"], SECOND_PERSON, db=db)
-    finally:
-        db.close()
-    # The other person reaches the document (a missing one answers 404) and meets the same refusal.
+    _set_owner(artifact_id, person_owner)
+    assert _view(artifact_id)["owner"]["kind"] == "person"
+    assert client.put(url, json={"supervisor_thread_id": "agent-1"}).status_code == 200
+    assert client.put(url, json={"owner": "user"}).status_code == 200
     client.app.dependency_overrides[require_human_user] = lambda: {"id": SECOND_PERSON, "token_kind": "session"}
-    other = client.put(url, json={"owner": "agent-1"})
-    assert (other.status_code, other.json()["detail"]) == (409, SHARED_REFUSAL)
+    other = client.put(url, json={"owner": "user"})
+    assert other.status_code == 200, other.text
+    assert other.json()["ownership"]["owner"]["label"] == "You"
+    assert _view(artifact_id)["owner"]["label"] == SECOND_PERSON
 
 
 def test_another_persons_document_reads_as_missing(owned_document):

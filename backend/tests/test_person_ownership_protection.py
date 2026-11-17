@@ -30,7 +30,8 @@ def test_assignment_preserves_person_owner_despite_agent_header(assignment_scope
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("actor", ["conductor", "helper"])
-async def test_conductor_and_worker_cannot_edit_person_owned_document_but_suggest(ownership_scope, actor):
+@pytest.mark.parametrize("owner", ["ui", "project:project-alpha"])
+async def test_conductor_and_worker_cannot_edit_person_owned_document_but_suggest(ownership_scope, actor, owner):
     from registry import models
     from registry.shared_write_errors import DurableWritePolicyError
     from tests.registry_helpers import make_session
@@ -44,7 +45,7 @@ async def test_conductor_and_worker_cannot_edit_person_owned_document_but_sugges
     artifact = models.get_artifact(artifact_id, db=scope["db"])
     models.rehome_artifact(
         integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
-        new_owner_thread_id="ui", actor_thread_id=None, authority="signed-in-person",
+        new_owner_thread_id=owner, actor_thread_id=None, authority="signed-in-person",
         reason="test", source_path="test", db=scope["db"],
     )
     with pytest.raises(DurableWritePolicyError) as caught:

@@ -35,7 +35,7 @@
 
 	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
 	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
-	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
+	const ownerChoices = $derived([{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
 
@@ -111,7 +111,6 @@
 			{:else if !options.length}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
 			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
-			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if role === 'supervisor' && supervisorPaused}<p class="note">This agent is paused. Comments wait until it resumes.</p>
 			{:else if role === 'supervisor' && !supervisorShown}<p class="note">No one gets comments on this document.</p>{/if}
 			{#if role === 'owner' && merged}<button type="button" class="link" onclick={pickSupervisor}>Choose a different supervisor</button>{/if}

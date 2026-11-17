@@ -48,6 +48,28 @@ def _project_document(slug: str = "acme") -> str:
         db.close()
 
 
+def test_two_people_can_take_a_project_document(owned_document):
+    from infra import config
+    from infra.database import get_db
+    from registry import models
+    from registry.document_supervisor import ownership
+
+    client, _ = owned_document
+    artifact_id = _project_document()
+    _set_owner(artifact_id, "project:p1")
+    assert _view(artifact_id)["owner"]["label"] == "You"
+    response = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
+    assert response.status_code == 200, response.text
+    assert response.json()["ownership"]["owner"]["label"] == "You"
+    db = get_db()
+    try:
+        artifact = models.get_artifact(artifact_id, db=db)
+        assert ownership(db, artifact, user_id=OTHER_USER, workspace=config.WORKSPACE,
+                         multi_person=True)["owner"]["label"] == PERSON["id"]
+    finally:
+        db.close()
+
+
 def test_the_picker_lists_the_documents_own_project_agents_when_the_project_has_no_conductor(owned_document):
     """The picker's scope is the document's, not the owner's or the conductor's."""
     _client, workspace_document = owned_document
@@ -116,13 +138,13 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     db = get_db()
     try:
         assert person_owner_label("ui", db=db, multi_person=False) == "You"
-        assert person_owner_label("project:p1", db=db, multi_person=False) == "Not set"
-        assert person_owner_label(None, db=db, multi_person=False) == "Not set"
+        assert person_owner_label("project:p1", db=db, multi_person=False) == "You"
+        assert person_owner_label(None, db=db, multi_person=False) == "No owner"
         assert person_owner_label("agent-1", db=db, multi_person=False) == "Document agent"
-        # While more than one person uses CORSIA, no person owns a shared document: no agent owns it yet.
-        assert person_owner_label("ui", db=db, multi_person=True) == "Not set"
-        assert person_owner_label("project:p1", db=db, multi_person=True) == "Not set"
-        assert person_owner_label(None, db=db, multi_person=True) == "Not set"
+        # The same ownership reading holds when there are two accounts.
+        assert person_owner_label("ui", db=db, multi_person=True) == "You"
+        assert person_owner_label("project:p1", db=db, multi_person=True) == "You"
+        assert person_owner_label(None, db=db, multi_person=True) == "No owner"
         assert person_owner_label("agent-1", db=db, multi_person=True) == "Document agent"
     finally:
         db.close()
@@ -136,14 +158,14 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
         # Agents keep their own wording; every person-facing read asks for the person's.
         assert artifact_freshness(artifact, path, db=db)["owner_name"] == "the user"
         assert artifact_freshness(artifact, path, db=db, multi_person=False)["owner_name"] == "You"
-        assert artifact_freshness(artifact, path, db=db, multi_person=True)["owner_name"] == "Not set"
+        assert artifact_freshness(artifact, path, db=db, multi_person=True)["owner_name"] == "You"
     finally:
         db.close()
     seed_account(OTHER_USER, OTHER_TOKEN)
-    assert _view(artifact_id)["owner"]["label"] == "Not set"
+    assert _view(artifact_id)["owner"]["label"] == "You"
     _one_person_account()
     _set_owner(artifact_id, "project:p1")
-    assert _view(artifact_id)["owner"]["label"] == "Not set"
+    assert _view(artifact_id)["owner"]["label"] == "You"
 
 
 def test_each_owner_or_supervisor_change_emits_one_event_and_a_no_op_none(owned_document, monkeypatch):
@@ -176,30 +198,25 @@ def test_a_rejected_pick_says_who_can_be_picked(owned_document):
     url = f"/api/artifacts/{artifact_id}/ownership"
     supervisor = client.put(url, json={"supervisor_thread_id": "nobody"})
     assert (supervisor.status_code, supervisor.json()["detail"]) == (400, AGENT_CHOICE_REFUSAL)
-    # On a two-person install the person is not a choice, so the sentence doesn't offer them.
+    # Both installations offer the person as a choice.
     multi = client.put(url, json={"owner": "nobody"})
-    assert (multi.status_code, multi.json()["detail"]) == (400, AGENT_CHOICE_REFUSAL)
+    assert (multi.status_code, multi.json()["detail"]) == (400, PERSON_OR_AGENT_CHOICE_REFUSAL)
     _one_person_account()
     single = client.put(url, json={"owner": "nobody"})
     assert (single.status_code, single.json()["detail"]) == (400, PERSON_OR_AGENT_CHOICE_REFUSAL)
 
 
-def test_the_refusal_sentences_reach_the_screen_in_the_payload(owned_document):
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL, SHARED_REFUSAL
-
+def test_person_owner_remains_changeable_on_a_two_person_install(owned_document):
     _client, artifact_id = owned_document
-    view = _view(artifact_id)
-    assert (view["refusal"], view["multi_person_refusal"]) == (None, MULTI_PERSON_REFUSAL)
-    _set_owner(artifact_id, "ui")
-    assert _view(artifact_id)["refusal"] == SHARED_REFUSAL
-    _one_person_account()
-    assert _view(artifact_id)["multi_person_refusal"] is None
+    for owner in ("ui", "project:p1"):
+        _set_owner(artifact_id, owner)
+        view = _view(artifact_id)
+        assert (view["can_change"], view["refusal"], view["multi_person_refusal"]) == (True, None, None)
 
 
-def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_404(owned_document):
+def test_a_person_can_take_a_released_document(owned_document):
     from infra.database import get_db
     from registry import ownership
-    from registry.document_supervisor import RELEASED_REFUSAL
 
     client, artifact_id = owned_document
     db = get_db()
@@ -214,16 +231,12 @@ def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_40
         db.commit()
     finally:
         db.close()
-    refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
-    assert (refused.status_code, refused.json()["detail"]) == (409, RELEASED_REFUSAL)
-    # With no owner there is nothing to change, so the sentence speaks of picking one.
-    assert RELEASED_REFUSAL == "No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner."
-    # The picker says so before a pick and lists no one, on a multi-person install and on a single-person one.
     view = _view(artifact_id)
-    assert (view["can_change"], view["refusal"], view["choices"]) == (False, RELEASED_REFUSAL, [])
-    _one_person_account()
-    view = _view(artifact_id)
-    assert (view["can_change"], view["refusal"], view["choices"]) == (False, RELEASED_REFUSAL, [])
+    assert (view["can_change"], view["refusal"], view["owner"]["label"]) == (True, None, "No owner")
+    assert [choice["id"] for choice in view["choices"]] == ["agent-1"]
+    taken = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
+    assert taken.status_code == 200, taken.text
+    assert taken.json()["ownership"]["owner"]["label"] == "You"
 
 
 def test_an_archived_document_with_an_owner_reads_as_missing_not_as_owned_by_no_one(owned_document):
@@ -372,7 +385,7 @@ def test_a_put_that_changes_nothing_stored_emits_nothing(owned_document, monkeyp
 
 
 def test_a_pick_on_a_shared_document_keeps_routing_when_the_install_becomes_multi_person(owned_document):
-    """A known trade-off: the earlier single-person pick stays, shown and routed, and no one may change it."""
+    """The earlier supervisor pick stays visible and changeable when another person joins."""
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
@@ -382,5 +395,6 @@ def test_a_pick_on_a_shared_document_keeps_routing_when_the_install_becomes_mult
 
     seed_account(OTHER_USER, OTHER_TOKEN)
     view = _view(artifact_id)
-    assert (view["supervisor"]["id"], view["can_change"], view["choices"], view["owner"]["label"]) == ("agent-2", False, [], "Not set")
+    assert (view["supervisor"]["id"], view["can_change"], view["owner"]["label"]) == ("agent-2", True, "You")
+    assert {choice["id"] for choice in view["choices"]} == {"agent-1", "agent-2"}
     assert _comment_recipients(artifact_id) == ("agent-2",)

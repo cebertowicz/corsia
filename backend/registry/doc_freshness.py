@@ -167,6 +167,7 @@ def artifact_freshness(
     db,
     now: datetime | None = None,
     multi_person: bool | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Return a display-ready freshness payload for one shared artifact.
 
@@ -182,7 +183,8 @@ def artifact_freshness(
     value = freshness(path, artifact.get("metadata"), now or datetime.now(timezone.utc))
     value["owner_name"] = (
         owner_label(owner, db=db) if multi_person is None
-        else person_owner_label(owner, db=db, multi_person=multi_person)
+        else person_owner_label(owner, db=db, multi_person=multi_person, user_id=user_id,
+                                owner_user_id=parse_metadata(artifact.get("metadata")).get("owner_user_id"))
     )
     return value
 

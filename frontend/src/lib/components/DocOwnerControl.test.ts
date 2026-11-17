@@ -61,11 +61,10 @@ describe('DocOwnerControl', () => {
 		expect(document.body.querySelectorAll('.role-picker')).toHaveLength(1);
 		expect(picker()!.dataset.role).toBe('supervisor');
 	});
-	it('does not offer You when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ multi_person: true, multi_person_refusal: MULTI }));
+	it('offers You when more than one person uses this CORSIA', async () => {
+		await render(ownership({ multi_person: true }));
 		item('owner').click(); await settle();
-		expect(options()).not.toContain('You');
-		expect(picker()!.textContent).toContain(MULTI);
+		expect(options()).toContain('You');
 	});
 	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'Everyone' }, multi_person: true, can_change: false, refusal: SHARED, choices: [] }));
@@ -81,9 +80,9 @@ describe('DocOwnerControl', () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } }));
 		expect(item('owner').getAttribute('aria-label')).toBe('Owner: You');
 	});
-	it('reads Not set for an owner that is not set', async () => {
-		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'Not set' } }));
-		expect(item('owner').textContent).toContain('Not set');
+	it('reads No owner for a released document', async () => {
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'No owner' } }));
+		expect(item('owner').textContent).toContain('No owner');
 	});
 	it('merges the two when one agent holds both roles, and its picker still reaches the supervisor', async () => {
 		await render(ownership({ supervisor: { id: 'a1', name: 'Release planning', source: 'owner', status: 'ready' } }));

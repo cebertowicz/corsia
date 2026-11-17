@@ -36,7 +36,8 @@ async def tree(token: str, project_id: str | None = None, nodes: bool = True):
     A chat link only resolves its target against the root paths, so it asks for
     these and the walk, the artifact index and the annotation never run.
     """
-    if not authenticate(token):
+    user = authenticate(token)
+    if not user:
         raise HTTPException(401)
 
     def _tree():
@@ -46,7 +47,7 @@ async def tree(token: str, project_id: str | None = None, nodes: bool = True):
             if not nodes:
                 return {"roots": roots}
             by_path = artifact_index(db)
-            project = shared_projector(db)
+            project = shared_projector(db, user_id=user["id"])
             for r in roots:
                 path = Path(r["path"])
                 walked, capped = walk(path)

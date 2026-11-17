@@ -227,7 +227,7 @@ def _change_ownership(artifact_id: str, body: OwnershipBody, user: dict):
         refusal = _refusal_for(body, current, multi_person, {choice["id"] for choice in view["choices"]})
         if refusal:
             return refusal, None
-        changed, events, _rehome = _apply_change(db, artifact, body, current)
+        changed, events, _rehome = _apply_change(db, artifact, body, current, owner_user_id=user["id"])
         return None, (changed, ownership(db, changed, user_id=user["id"], workspace=config.WORKSPACE, multi_person=multi_person), events)
 
 

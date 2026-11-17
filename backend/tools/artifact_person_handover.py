@@ -29,7 +29,7 @@ def handover_to_person(db, routing, actor_thread_id: str, *, reason: str, causal
     if artifact is None or not artifact.get("path") or artifact.get("type") != "document":
         return "not_found", None
     current = artifact_owner(identity["id"], db=db)
-    if owner_kind(current) == "none":
+    if current is None or (current is not None and current.startswith("project:")):
         _, project_id = document_project(artifact["path"], workspace=config.WORKSPACE, db=db)
         allowed = (
             project_id is not None
@@ -44,8 +44,10 @@ def handover_to_person(db, routing, actor_thread_id: str, *, reason: str, causal
     refusal = refusal_for(body, current, is_multi_person(db), set(), agent_released=current is None)
     if refusal:
         return "person_refused", refusal[1]
+    actor = db.execute("SELECT user_id FROM threads WHERE id=?", (actor_thread_id,)).fetchone()
     changed, _events, rehome = apply_change(
-        db, artifact, body, current, actor_thread_id=actor_thread_id, authority="agent-handover-to-person",
+        db, artifact, body, current, owner_user_id=actor["user_id"] if actor else None,
+        actor_thread_id=actor_thread_id, authority="agent-handover-to-person",
         reason=reason, source_path="tool:artifact_rehome", causal_event_id=causal_event_id, metadata=metadata,
     )
     assert rehome is not None

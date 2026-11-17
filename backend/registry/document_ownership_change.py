@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 from registry import models
-from registry.document_supervisor import MULTI_PERSON_REFUSAL, SUPERVISOR_KEY, change_refusal, owner_kind, stored_pick
+from registry.document_supervisor import SUPERVISOR_KEY, owner_kind, stored_pick
 from registry.identity_metadata import merge_identity_metadata
 from registry.shared_principals import UI_PRINCIPAL
 
@@ -25,20 +25,15 @@ def refusal_for(body: OwnershipBody, current: str | None, multi_person: bool, ag
     ``agents`` are the payload's choices, the only agents a pick may name. Only
     a new owner is checked against them; one that stays may be outside them.
     """
-    refusal = None if agent_released and current is None else change_refusal(current, multi_person=multi_person)
-    if refusal:
-        return 409, refusal
     new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
     if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
-        return 400, AGENT_CHOICE_REFUSAL if multi_person else PERSON_OR_AGENT_CHOICE_REFUSAL
+        return 400, PERSON_OR_AGENT_CHOICE_REFUSAL
     if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
         return 400, AGENT_CHOICE_REFUSAL
-    if new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL and multi_person:
-        return 409, MULTI_PERSON_REFUSAL
     return None
 
 
-def apply_change(db, artifact: dict, body: OwnershipBody, current: str | None, *, actor_thread_id: str | None = None, authority: str = "signed-in-person", reason: str = "changed by the signed-in person", source_path: str = "api:/api/artifacts/{id}/ownership", causal_event_id: str | None = None, metadata: dict | None = None) -> tuple[dict, list, dict | None]:
+def apply_change(db, artifact: dict, body: OwnershipBody, current: str | None, *, owner_user_id: str | None = None, actor_thread_id: str | None = None, authority: str = "signed-in-person", reason: str = "changed by the signed-in person", source_path: str = "api:/api/artifacts/{id}/ownership", causal_event_id: str | None = None, metadata: dict | None = None) -> tuple[dict, list, dict | None]:
     """Make the change inside the caller's transaction and return the changed artifact and events.
 
     Every comparison is against the stored pick, the one value the header and
@@ -60,6 +55,10 @@ def apply_change(db, artifact: dict, body: OwnershipBody, current: str | None, *
             new_owner_thread_id=new_owner, actor_thread_id=actor_thread_id, authority=authority,
             reason=reason, source_path=source_path, causal_event_id=causal_event_id, metadata=metadata, db=db,
         )
+    if body.owner == "user" and owner_user_id is not None:
+        merge_identity_metadata(db, artifact_id, {"owner_user_id": owner_user_id})
+    elif body.owner is not None and body.owner != "user":
+        merge_identity_metadata(db, artifact_id, {"owner_user_id": None})
     # The owner supervises by default, so picking the owner stores no pick.
     supervisor = supervisor if supervisor != new_owner else None
     events = []

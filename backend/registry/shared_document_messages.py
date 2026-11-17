@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from registry.shared_principals import UI_PRINCIPAL, owner_label, scope_relative
+from infra.auth import is_owner_sentinel
+from registry.shared_principals import owner_label, scope_relative
 
 
 def missing_category_message(
@@ -47,7 +48,7 @@ def _suggest_instruction(path: Path) -> str:
 def owner_refusal(path: Path, scope_root: Path, owner: str, *, db) -> str:
     """The refusal for a non-owner write to an owned document."""
     label = owner_label(owner, db=db)
-    editors = "Only the person edits it directly." if owner == UI_PRINCIPAL else (
+    editors = "Only the person edits it directly." if is_owner_sentinel(owner) else (
         "Only its owner, the conductor, or the user edits it directly."
     )
     return f"{scope_relative(path, scope_root)} is owned by {label}. {editors} {_suggest_instruction(path)}"

@@ -55,11 +55,11 @@ async def test_owner_worker_can_handover_but_unrelated_agent_is_refused(owned_do
 
 
 @pytest.mark.asyncio
-async def test_handover_preserves_existing_multi_person_refusal(owned_document):
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL
-
+async def test_handover_succeeds_with_two_people(owned_document):
     _, artifact_id = owned_document
-    assert await _handover(artifact_id, "agent-1") == f"Error: {MULTI_PERSON_REFUSAL}"
+    result = json.loads(await _handover(artifact_id, "agent-1"))
+    assert result["new_owner_thread_id"] == "ui"
+    assert _view(artifact_id)["owner"]["label"] == "You"
 
 
 from tests.test_shared_ownership_assignment import assignment_scope as assignment_scope, _register

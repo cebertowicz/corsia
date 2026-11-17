@@ -36,6 +36,10 @@ def claim_and_deliver(
     if changed.rowcount == 0:
         return False, ()
     batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    # Earlier versions addressed project-owned documents to a non-thread sentinel.
+    # Retry those batches through the same person-delivery path as a ui owner.
+    if from_state == "undelivered" and str(batch["recipient_id"]).startswith("project:"):
+        batch = {**dict(batch), "recipient_id": "ui"}
     delivered = feedback_delivery.deliver_claimed(db, batch)
     review_woken: tuple[str, ...] = ()
     if delivered.reason is not None:
