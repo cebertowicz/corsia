@@ -1623,6 +1623,8 @@ async def test_shell_worktree_root_refusal(tmp_path, monkeypatch, reported, matc
     monkeypatch.setattr(shell, "safehouse_argv", lambda *_a, **_k: ["safehouse"])
     monkeypatch.setattr(shell, "check_repo_write_path", lambda *_a: None)
     monkeypatch.setattr(shell, "chained_base_git_denial_guidance", lambda *_a: None)
+    # shell.py reads sys.platform itself to pick the macOS denial reply.
+    monkeypatch.setattr(shell, "sys", SimpleNamespace(platform="darwin"))
     result = await shell.BashTool(working_dir=str(root)).execute(
         "touch .", _thread_id="thread-1", _host_access_turn_identity=TurnIdentity("turn-1", 1),
     )
