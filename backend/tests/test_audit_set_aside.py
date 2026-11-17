@@ -86,6 +86,25 @@ def test_a_connector_event_set_aside_by_the_platform_is_shown_by_name(isolated_d
     assert [row["internal_event"] for row in rows] == [library.ITEM_CHANGED_EVENT]
 
 
+def test_script_failure_wake_is_parked_and_read_by_name(isolated_db):
+    from automation.script_readings import wake_owner
+    from infra.audit_set_aside import set_aside
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        assert not wake_owner(
+            db, "missing-owner", "script.error", "failed", {},
+            message_id="message", chip="Script failed", park_key="schedule",
+        )
+        rows = set_aside(db, "2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+        assert [(row["internal_event"], row["reason"]) for row in rows] == [
+            ("script.error", "owner_inactive")
+        ]
+    finally:
+        db.close()
+
+
 def test_set_aside_is_listed_by_the_tool():
     from tools.audit_reads import AuditReadTool
 

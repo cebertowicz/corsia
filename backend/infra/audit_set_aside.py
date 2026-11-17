@@ -8,10 +8,10 @@ read returns counts only: no payload, external id or thread.
 The read is install-wide and rows carry no owner, so a kind is shown by name
 only when its writer stored ``code_named``: CORSIA's code chose the name (a
 built-in connector's kind, GitHub's routed kinds, a kind the platform parks
-itself). Any other name was written by a person or an agent (a declared event
-type, a script's event) and is counted under ``DECLARED`` instead, so no
-project's or user's names cross to another. Rows written before schema 199
-carry no such mark and count under ``DECLARED``.
+itself, including script failure wakes). Other names, including declared event
+types, are counted under ``DECLARED``, so no project's or user's names cross
+to another. Some pre-199 rows have their marks backfilled; unproven names stay
+under ``DECLARED``.
 """
 
 from __future__ import annotations

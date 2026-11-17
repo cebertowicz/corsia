@@ -1,5 +1,6 @@
 """Schema 198 -> 199 gives restart replay dead letters written before codes their reason code."""
 
+import json
 import sqlite3
 
 from automation import restart_webhooks
@@ -23,15 +24,15 @@ def _db():
     return db
 
 
-def _row(db, row_id, event, external_id, reason):
+def _row(db, row_id, event, external_id, reason, payload="{}"):
     db.execute(
         "INSERT INTO dead_letter_events (id,internal_event,external_id,reason,payload_json,status,created_at) "
-        "VALUES (?,?,?,?,'{}','parked','2026-11-10T00:00:00Z')",
-        (row_id, event, external_id, reason),
+        "VALUES (?,?,?,?,?,'parked','2026-11-10T00:00:00Z')",
+        (row_id, event, external_id, reason, payload),
     )
 
 
-def test_step_is_registered_at_197():
+def test_step_is_registered_at_198():
     assert SCHEMA_VERSION == 199
     assert MIGRATIONS[198] is migrate_198_to_199
 
@@ -60,7 +61,7 @@ def test_only_restart_rows_holding_text_are_rewritten():
     assert reasons == {old: CODE, done: CODE, "abc123def456": "no_owner", "other": "no_owner"}
 
 
-def test_rows_written_before_198_are_not_marked_code_named():
+def test_unproven_rows_written_before_199_are_not_marked_code_named():
     db = _db()
     _row(db, "gh", "webhook.github.pr_opened", None, "no_owner")
     _row(db, "declared", "pr.merged", None, "no_owner")
@@ -69,6 +70,36 @@ def test_rows_written_before_198_are_not_marked_code_named():
     migrate_198_to_199(db)
 
     assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {"gh": 0, "declared": 0}
+
+
+def test_backfill_only_proven_platform_envelopes():
+    db = _db()
+    def envelope(connector, event_id):
+        return json.dumps({"connector": connector, "event_id": event_id, "facts": {}})
+
+    rows = [
+        ("platform", "email.received", "e1", envelope("gmail", "e1"), 1),
+        ("declared", "email.received", "e2", envelope("my_agent", "e2"), 0),
+        # A connector registered after declared intake may have been an agent namespace.
+        ("later", "event", "e3", envelope("imap", "e3"), 0),
+        ("router", "webhook.github.push", "e4", json.dumps({"repository": {}}), 0),
+        ("watch", "automation.watch_expired", "e5", json.dumps({"watch_id": "w"}), 0),
+        ("bulletin", "system_bulletin.infrastructure", "e6", json.dumps({"reason": "x", "item": "i"}), 0),
+        ("failed_wake", "wake.failed", "e7", json.dumps({"message_id": "m", "summary": "x"}), 0),
+        ("runner", "script.owner_gone", "e8", json.dumps({"schedule_id": "s", "summary": "x"}), 0),
+        ("script_wake", "script.error", "e9", json.dumps({"owner": "o", "summary": "x"}), 0),
+        ("quiet_watch", "github.ingress_overdue", None, json.dumps({"pull_requests": []}), 0),
+        ("missing", "event", "e10", None, 0),
+        ("malformed", "event", "e11", "{", 0),
+        (restart_dead_letter_id("e12"), "webhook.github.push", "e12", envelope("gmail", "e12"), 0),
+    ]
+    for row_id, event, external, payload, _ in rows:
+        _row(db, row_id, event, external, "no_owner", payload)
+    migrate_198_to_199(db)
+    migrate_198_to_199(db)
+    assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {
+        row_id: expected for row_id, _, _, _, expected in rows
+    }
 
 
 def test_an_install_without_the_table_is_left_alone():
