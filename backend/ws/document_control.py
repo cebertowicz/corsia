@@ -16,6 +16,7 @@ from doceditor.live_lane import Operation
 from doceditor.live_publication_record import WriteActor
 from doceditor.live_runtime import LiveEntry, get_documents
 from doceditor.live_store import BrowserMessage, StoreRefused
+from doceditor.live_text import utf16_length
 from infra.db_async import run_in_db
 from infra.state import send_to_client
 from ws import document_email, section_turn
@@ -212,6 +213,10 @@ def _reserved(live, socket, user_id: str, ask) -> bool:
         raise ValueError("A comment range needs a selection and the browser's state")
     if quote is not None and not isinstance(quote, str):
         raise ValueError("A comment range's quote must be text")
+    # A quote is the selection's own text, so it is never longer than the span. The character count, never
+    # more than the UTF-16 count, refuses an oversized quote before it is encoded or compared.
+    if quote is not None and (len(quote) > end - start or utf16_length(quote) > end - start):
+        raise ValueError("A comment range's quote is longer than its selection")
     return live.reserve(identifier, start, end, user_id, socket, vector=base64.b64decode(ask["vector"], validate=True),
                         digest=digest, length=length, quote=quote)
 

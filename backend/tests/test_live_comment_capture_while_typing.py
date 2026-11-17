@@ -11,6 +11,7 @@ from tests.test_document_live_suggestions import typing
 from tests.test_live_comment_creation import snapshot
 from tests.test_live_comment_reservation import finish, reserved_text, scenario, submit
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
+from ws import document_control
 
 
 def selection(entry, quote):
@@ -122,5 +123,26 @@ async def test_equal_length_deletes_in_another_order_are_refused_not_anchored_el
         # The browser's 'aa' at 1..3 is the server's 1..3 now; read as the server's 'Xaaaa' it would become 0..2.
         assert not await session.reserve('late', 1, 3, 'aa', **browser_state)
         assert live.held_span('late') is None
+    finally:
+        await finish(manager, session)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('quote', ['second' * 1000, 'secon\U0001F600'], ids=['characters', 'utf16-units'])
+async def test_a_quote_longer_than_its_selection_is_refused_before_any_compare(ownership_scope, tmp_path, monkeypatch,
+                                                                              quote):
+    manager, entry, session = await scenario(ownership_scope, tmp_path, monkeypatch)
+    try:
+        start, end = selection(entry, 'second')
+        proof = snapshot(entry)
+        await document_control.handle_frame(session.socket, {'id': session.user_id}, dict(
+            type='doc_positions', artifact_id=entry.artifact_id, store_id=entry.live.store.store_id, seq=1,
+            request_id='long', reserve=dict(client_id='long', from_off=start, to_off=end, quote=quote, vector=proof['vector'],
+                                            digest=proof['digest'], text_length_utf16=proof['text_length_utf16'])))
+        frame = await session.socket.next('doc_error')
+        assert frame['request_id'] == 'long' and 'longer than its selection' in frame['message']
+        assert entry.live.held_span('long') is None
+        # A quote exactly the selection's length still reserves.
+        assert await session.reserve('exact', start, end, 'second')
     finally:
         await finish(manager, session)
