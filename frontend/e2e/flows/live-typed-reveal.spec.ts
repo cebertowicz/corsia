@@ -74,6 +74,19 @@ async function shownCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
 }
 
+/** Scrolls the editor to `text` in its document, then counts it where a reader would see it: CodeMirror draws only the lines near the view. */
+async function shownAtItsPlace(page: Page, text: string): Promise<number> {
+	await page.evaluate((text) => new Promise<void>((resolve) => {
+		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
+		const view = content?.cmTile?.root.view;
+		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+		const at = (view.state.doc.toString() as string).indexOf(text);
+		if (at >= 0) view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
+		requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+	}), text);
+	return shownCount(page, text);
+}
+
 /** A drawn count of 0 is the reveal hiding text only if the text is in the viewer's document and inside the drawn range. */
 async function expectHeldBack(page: Page, text: string): Promise<void> {
 	expect(await editorPlace(page, text), `${text} is in the document and drawn range, so its 0 is the reveal, not out of view`).toEqual({ count: 1, inDrawnRange: true });
@@ -277,7 +290,7 @@ for (const [width, height, project] of layouts) {
 			await expectHeldBack(viewer, lastA);
 			await expectHeldBack(viewer, lastB);
 
-			await expect.poll(async () => [await shownCount(viewer, lastA), await shownCount(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
+			await expect.poll(async () => [await shownAtItsPlace(viewer, lastA), await shownAtItsPlace(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
 			// The second writer's edit selects review work for the owner; settle it before another case seeds replies.
 			await waitForThreadReply(request, first.id, 'Reviewed the other agent’s edit.');
 			expect(await readUnmatchedThreads(request)).toEqual([]);
