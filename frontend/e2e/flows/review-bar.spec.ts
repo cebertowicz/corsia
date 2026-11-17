@@ -71,8 +71,11 @@ async function setCardOpen(page: Page, open: boolean) {
 	if ((await question.getAttribute('aria-expanded')) !== String(open)) await question.click();
 	await expect(question).toHaveAttribute('aria-expanded', String(open));
 }
-/** A MiddleName shows whole: its head, the part that would ellipsize, is not cut. */
-const nameWhole = (name: import('@playwright/test').Locator) => name.locator('.name-head').evaluate((el) => el.scrollWidth <= el.clientWidth);
+/** The opened name shows whole without horizontal clipping, including when it wraps. */
+const nameWhole = (name: import('@playwright/test').Locator) => name.evaluate((el) => {
+	const head = el.querySelector<HTMLElement>('.name-head');
+	return el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight && (!head || head.scrollWidth <= head.clientWidth);
+});
 for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'dark'] as const) test.describe(`delivery header ${width} ${theme}`, () => {
 	// A desktop width is measured as a desktop (pointer, no mobile viewport), also under the phone project, where the Pixel 7 device would otherwise give it the touch layout.
 	test.use(width === 393 ? { hasTouch: true, isMobile: true } : { hasTouch: false, isMobile: false });
