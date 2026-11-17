@@ -90,14 +90,13 @@ def _with_policy(repo: dict, policies: dict[str, RepoPolicy]) -> dict:
     """Attach policy state only when the visible binding still matches its row."""
     row = dict(repo)
     policy = policies.get(repo["name"])
-    bound = (
+    bound_policy = policy if (
         policy is not None
         and not repo.get("missing", False)
         and policy.path
         == Path(str(repo["path"])).expanduser().resolve(strict=False)
-    )
-    bound_policy = policy if bound else None
-    row["registered"] = bound
+    ) else None
+    row["registered"] = bound_policy is not None
     row["pinned_branch"] = bound_policy.pinned_branch if bound_policy else None
     row["protect_base_checkout"] = bound_policy.protect_base_checkout if bound_policy else False
     # Current clients still render this derived response field. Mutations use
