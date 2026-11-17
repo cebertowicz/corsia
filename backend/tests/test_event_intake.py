@@ -284,6 +284,22 @@ def test_a_rule_fires_when_intake_dead_letters_for_an_inactive_owner(intake_worl
     assert _decisions(intake_world, "orphaned") == {("self", OTHER, "woke", None)}
 
 
+def test_a_declared_event_set_aside_by_the_platform_is_counted_as_declared(intake_world):
+    """The platform stores a declared type's bare suffix; its row is marked as not named by code."""
+    from infra.audit_set_aside import DECLARED, set_aside
+
+    intake_world.execute("UPDATE threads SET lifecycle_state='purged' WHERE id=?", (OWNER,))
+    intake_world.commit()
+
+    assert _admit(event_id="orphaned").accepted
+    stored = intake_world.execute(
+        "SELECT internal_event, code_named FROM dead_letter_events WHERE external_id='orphaned'").fetchall()
+    rows = set_aside(intake_world, "2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+
+    assert [tuple(row) for row in stored] == [("route", 0)]
+    assert [(row["internal_event"], row["reason"]) for row in rows] == [(DECLARED, "owner_inactive")]
+
+
 @pytest.fixture
 def tracking(monkeypatch, github_checks_type):
     """Projects tracking each repository; records whether each lookup ran inside a transaction."""

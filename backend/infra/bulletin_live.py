@@ -37,7 +37,7 @@ def _record_failure(db, failure: FetchFailure) -> None:
     if row is None:
         dead_letter.park(
             INFRASTRUCTURE_EVENT, {"reason": failure.reason, "item": failure.item},
-            reason, failure.item, db=db,
+            reason, failure.item, db=db, code_named=True,
         )
 
 

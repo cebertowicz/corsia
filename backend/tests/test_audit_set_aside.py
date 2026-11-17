@@ -5,8 +5,8 @@ import sqlite3
 
 SINCE, UNTIL = "2026-11-09T00:00:00Z", "2026-11-16T00:00:00Z"
 NOISE, NO_OWNER = "webhook.github.check_suite_completed", "webhook.github.pr_opened"
-# Names an agent wrote: a declared event type and a script's own event.
-AGENT_NAMED = ("acme-invoices.paid_late", "nightly-digest.failed")
+# Names an agent wrote: a declared type's stored suffix equal to a GitHub kind, and a script's own event.
+AGENT_NAMED = ("pr.merged", "nightly_digest.failed")
 
 
 def _seed(path) -> None:
@@ -18,21 +18,22 @@ def _seed(path) -> None:
         )
         db.executemany(
             "INSERT INTO dead_letter_events "
-            "(id,internal_event,external_id,reason,payload_json,status,created_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "(id,internal_event,external_id,reason,payload_json,status,created_at,code_named) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             [
                 ("a1", NOISE, "ext-secret", "check_suite_noise_parked", '{"x":"payload-secret"}',
-                 "parked", "2026-11-09T00:00:00+00:00"),
-                ("a2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-09T23:59:59.5+00:00"),
-                ("a3", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-11T08:00:00Z"),
+                 "parked", "2026-11-09T00:00:00+00:00", 1),
+                ("a2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-09T23:59:59.5+00:00", 1),
+                ("a3", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-11T08:00:00Z", 1),
                 # Another status still counts: it was set aside when it was written.
-                ("b1", NO_OWNER, None, "no_owner", "{}", "retrying", "2026-11-10T12:00:00Z"),
-                ("c1", AGENT_NAMED[0], None, "no_owner", "{}", "parked", "2026-11-12T01:00:00Z"),
-                ("c2", AGENT_NAMED[1], None, "owner_inactive", "{}", "parked", "2026-11-12T02:00:00Z"),
-                ("c3", "github.not_a_manifest_type", None, "no_owner", "{}", "parked", "2026-11-12T03:00:00Z"),
+                ("b1", NO_OWNER, None, "no_owner", "{}", "retrying", "2026-11-10T12:00:00Z", 1),
+                ("c1", AGENT_NAMED[0], None, "no_owner", "{}", "parked", "2026-11-12T01:00:00Z", 0),
+                ("c2", AGENT_NAMED[1], None, "owner_inactive", "{}", "parked", "2026-11-12T02:00:00Z", 0),
+                # Written before 198: no mark, so not shown by name.
+                ("c3", "github.not_a_manifest_type", None, "no_owner", "{}", "parked", "2026-11-12T03:00:00Z", 0),
                 # Outside the window on both sides; the end is exclusive.
-                ("z1", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-08T23:59:59+00:00"),
-                ("z2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-16T00:00:00Z"),
+                ("z1", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-08T23:59:59+00:00", 1),
+                ("z2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-16T00:00:00Z", 1),
             ],
         )
 
@@ -56,25 +57,24 @@ def test_set_aside_counts_per_kind_reason_and_day(isolated_db, monkeypatch):
         assert private not in text
 
 
-def test_set_aside_names_kinds_from_code():
-    from infra.audit_set_aside import _code_named
-    from infra.failed_wake_surface import REPORT_EVENT
+def _platform_set_aside(connector: str, raw: dict) -> list[dict]:
+    """Deliver one event through the platform's own path and read the set_aside rows back."""
+    from events.platform import DEAD_LETTERED, deliver_platform_event_sync
+    from infra.audit_set_aside import set_aside
+    from infra.database import get_db
 
-    named = _code_named()
-    # Connector kinds by the name the platform parks them under: the manifest key.
-    for kind in (NOISE, "pr.merged", "head.checks_completed", "measurement.movement_digest", "result",
-                 REPORT_EVENT, "script.owner_gone", "github.ingress_overdue"):
-        assert kind in named
-    for kind in AGENT_NAMED:
-        assert kind not in named
+    deliveries = deliver_platform_event_sync(connector, raw)
+    assert [d.outcome for d in deliveries] == [DEAD_LETTERED]
+    db = get_db()
+    try:
+        return set_aside(db, "2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+    finally:
+        db.close()
 
 
 def test_a_connector_event_set_aside_by_the_platform_is_shown_by_name(isolated_db):
     """Read back a dead letter written through the platform's own delivery path."""
     from events.connectors import library
-    from events.platform import DEAD_LETTERED, deliver_platform_event_sync
-    from infra.audit_set_aside import set_aside
-    from infra.database import get_db
 
     raw = {
         "event_type": library.ITEM_CHANGED_EVENT, "external_id": "nobody/pdf", "name": "pdf",
@@ -82,14 +82,7 @@ def test_a_connector_event_set_aside_by_the_platform_is_shown_by_name(isolated_d
         "library_index_generation": 1, "installed_at": "2026-10-19T00:00:00+00:00",
         "changed_files": ["SKILL.md"], "edited": False, "withdrawn_reason": None,
     }
-    deliveries = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, raw)
-    assert [d.outcome for d in deliveries] == [DEAD_LETTERED]
-
-    db = get_db()
-    try:
-        rows = set_aside(db, "2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
-    finally:
-        db.close()
+    rows = _platform_set_aside(library.LIBRARY_CONNECTOR, raw)
     assert [row["internal_event"] for row in rows] == [library.ITEM_CHANGED_EVENT]
 
 
@@ -112,7 +105,8 @@ def _work_done(history_days: int) -> int:
     db.execute(
         "CREATE TABLE dead_letter_events (id TEXT PRIMARY KEY, internal_event TEXT NOT NULL, "
         "external_id TEXT, reason TEXT NOT NULL, payload_json TEXT, "
-        "status TEXT NOT NULL DEFAULT 'parked', created_at TEXT NOT NULL)"
+        "status TEXT NOT NULL DEFAULT 'parked', created_at TEXT NOT NULL, "
+        "code_named INTEGER NOT NULL DEFAULT 0)"
     )
     db.execute("CREATE INDEX idx_dead_letter_status ON dead_letter_events(status, created_at)")
     end = datetime(2026, 11, 16, tzinfo=timezone.utc)

@@ -60,6 +60,17 @@ def test_only_restart_rows_holding_text_are_rewritten():
     assert reasons == {old: CODE, done: CODE, "abc123def456": "no_owner", "other": "no_owner"}
 
 
+def test_rows_written_before_198_are_not_marked_code_named():
+    db = _db()
+    _row(db, "gh", "webhook.github.pr_opened", None, "no_owner")
+    _row(db, "declared", "pr.merged", None, "no_owner")
+
+    migrate_197_to_198(db)
+    migrate_197_to_198(db)
+
+    assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {"gh": 0, "declared": 0}
+
+
 def test_an_install_without_the_table_is_left_alone():
     db = sqlite3.connect(":memory:")
     migrate_197_to_198(db)

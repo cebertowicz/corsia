@@ -328,7 +328,7 @@ SCHEMA_SQL = f"""
         reason TEXT NOT NULL,
         payload_json TEXT,
         status TEXT NOT NULL DEFAULT 'parked',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL, code_named INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_dead_letter_status
         ON dead_letter_events(status, created_at);

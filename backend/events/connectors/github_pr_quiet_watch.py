@@ -323,7 +323,7 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
         INGRESS_OVERDUE_EVENT,
         {"summary": "GitHub CI or reviewer events are overdue for registered PRs.",
          "pull_requests": pending},
-        "ingress_overdue",
+        "ingress_overdue", code_named=True,
     )
     set_setting(REPORT_SETTING, (
         {"at": now.isoformat(), "pull_requests": pending} if parked

@@ -26,7 +26,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from events import dead_letter, rule_zero, rules
-from events.connectors import EventTypeDecl, get_manifest
+from events.connectors import EventTypeDecl, get_manifest, registered_connectors
 from events.delivery import enqueue_event_wake, start_idle_after_commit
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
@@ -141,7 +141,7 @@ def _deliver_target(
             envelope.type,
             {"event_id": event_id, "connector": envelope.connector,
              "facts": envelope.facts},
-            reason, event_id, db=db,
+            reason, event_id, db=db, code_named=envelope.connector in registered_connectors(),
         )
         return PlatformDelivery(event_id, None, DEAD_LETTERED, reason)
     if disposition == "owner_wake":

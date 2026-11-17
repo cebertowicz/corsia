@@ -297,7 +297,7 @@ def _route_failure_wake(watch: Watch, target, db) -> bool:
             {"watch_id": watch.id, "artifact_ref": ref,
              "target": target.thread, "resolution": target.resolution},
             "artifact_identity_missing_at_expiry",
-            ref["external_id"], db=db)
+            ref["external_id"], db=db, code_named=True)
         return False
     from registry import models
     models.record_artifact_change(

@@ -168,7 +168,7 @@ def _report_owner_gone(connection, schedule: Schedule, row) -> None:
             pass
     dead_letter.park(
         OWNER_GONE_EVENT, {**details, "summary": summary},
-        "owner_inactive", schedule.id, db=connection,
+        "owner_inactive", schedule.id, db=connection, code_named=True,
     )
 
 

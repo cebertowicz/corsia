@@ -856,6 +856,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 196 -> 197 drops a closing-text answer a sent message already gave.
         from infra.migration_196_to_197_closing_text_answers import migrate_196_to_197
         migrate_194_to_195(db)
+        # 197 -> 198 adds dead_letter_events.code_named.
+        from infra.migration_197_to_198_restart_dead_letter_codes import migrate_197_to_198
+        migrate_197_to_198(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)

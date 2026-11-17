@@ -6,52 +6,25 @@ replay) writes a ``dead_letter_events`` row instead of waking an agent. The
 read returns counts only: no payload, external id or thread.
 
 The read is install-wide and rows carry no owner, so a kind is shown by name
-only when code names it: a built-in connector's manifest, the GitHub routing
-map, or a kind the platform parks itself. Any other name was written by a
-person or an agent (a declared event type, a script's event) and is counted
-under ``DECLARED`` instead, so no project's or user's names cross to another.
+only when its writer stored ``code_named``: CORSIA's code chose the name (a
+built-in connector's kind, GitHub's routed kinds, a kind the platform parks
+itself). Any other name was written by a person or an agent (a declared event
+type, a script's event) and is counted under ``DECLARED`` instead, so no
+project's or user's names cross to another. Rows written before schema 198
+carry no such mark and count under ``DECLARED``.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta
-from functools import cache
 
 #: The one row name every kind not named in code is counted under.
 DECLARED = "declared"
 
 
-@cache
-def _code_named() -> frozenset[str]:
-    # Imported here so loading the audit reads does not load the event stack.
-    from events.connectors import get_manifest, registered_connectors
-    from events.connectors.github import GITHUB_ROUTED_EVENTS
-    from automation.script_runner import OWNER_GONE_EVENT
-    from automation.watches import WATCH_EXPIRED_EVENT
-    from events.connectors.github_pr_quiet_watch import INGRESS_OVERDUE_EVENT
-    from infra.bulletin_live import INFRASTRUCTURE_EVENT
-    from infra.failed_wake_surface import REPORT_EVENT
-
-    # Kinds the platform parks under a name of its own, each read from its writer.
-    platform = {
-        INFRASTRUCTURE_EVENT, OWNER_GONE_EVENT, WATCH_EXPIRED_EVENT,
-        INGRESS_OVERDUE_EVENT, REPORT_EVENT,
-    }
-    # The platform parks a connector event under its envelope type, the manifest's own
-    # key (events.envelope.normalize, events.intake), never prefixed by the connector.
-    manifest_kinds = {
-        event_type
-        for connector in registered_connectors()
-        for event_type in get_manifest(connector).event_types
-    }
-    return frozenset(
-        manifest_kinds | set(GITHUB_ROUTED_EVENTS.values()) | platform
-    )
-
-
-def _kind(internal_event: str, reason: str) -> str:
-    """The name a row is counted under: its own if code names it, else one fixed name.
+def _kind(internal_event: str, reason: str, code_named: int) -> str:
+    """The name a row is counted under: its own if code named it, else one fixed name.
 
     The restart replay parks a held GitHub delivery under GitHub's raw event name,
     which no code names, so all of them count under the replay's one kind.
@@ -60,7 +33,7 @@ def _kind(internal_event: str, reason: str) -> str:
 
     if reason == DEAD_LETTER_REASON and internal_event.startswith(f"{DEAD_LETTER_KIND}."):
         return DEAD_LETTER_KIND
-    return internal_event if internal_event in _code_named() else DECLARED
+    return internal_event if code_named else DECLARED
 
 
 # Rows are written with more than one ISO form, so the text bounds only narrow
@@ -75,12 +48,12 @@ WITH RECURSIVE statuses(status) AS (
             ORDER BY n.status LIMIT 1)
     FROM statuses s WHERE s.status IS NOT NULL
 )
-SELECT d.internal_event, d.reason, date(d.created_at) AS day, count(*) AS n
+SELECT d.internal_event, d.reason, d.code_named, date(d.created_at) AS day, count(*) AS n
 FROM statuses s CROSS JOIN dead_letter_events d ON d.status=s.status
 WHERE s.status IS NOT NULL
   AND d.created_at>=:since_lo AND d.created_at<:until_hi
   AND julianday(d.created_at)>=julianday(:since) AND julianday(d.created_at)<julianday(:until)
-GROUP BY d.internal_event, d.reason, day
+GROUP BY d.internal_event, d.reason, d.code_named, day
 """
 
 
@@ -95,7 +68,7 @@ def set_aside(db: sqlite3.Connection, since: str, until: str) -> list[dict]:
     groups: dict[tuple[str, str], dict] = {}
     for row in db.execute(_SET_ASIDE_SQL, params):
         reason = row["reason"]
-        kind = _kind(row["internal_event"], reason)
+        kind = _kind(row["internal_event"], reason, row["code_named"])
         key = (kind, reason)
         group = groups.setdefault(key, {
             "internal_event": kind, "reason": reason, "total": 0, "days": {},
