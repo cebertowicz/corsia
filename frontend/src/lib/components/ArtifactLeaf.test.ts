@@ -82,6 +82,7 @@ vi.mock('$lib/documentImagePlace', async (importOriginal) => {
 });
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
+import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 import { updateDocumentOpenCapability } from '$lib/ws/presence';
@@ -164,12 +165,15 @@ function restoreDirtyDraft(target: Parameters<typeof seedDraft>[0], saved: strin
 	docSaveDrafts.update((all) => ({ ...all, [target.instanceId]: { ...all[target.instanceId], editText: edited, status: 'dirty' } }));
 }
 
+/** A compact leaf's document controls are drawn by the app bar, which these tests do not mount; a stand-in draws them. */
+let barHost: ReturnType<typeof mount> | null = null;
 function render(mode: 'expanded' | 'compact' = 'expanded') {
 	publishShowing();
 	component = mount(ArtifactLeaf, {
 		target: host,
 		props: { threadId: THREAD, mode },
 	});
+	if (mode === 'compact') barHost = mount(DocumentBarTestHost, { target: host });
 	flushSync();
 }
 
@@ -232,6 +236,7 @@ afterEach(() => {
 
 afterEach(() => {
 	stopShowing?.(); stopShowing = null;
+	if (barHost) { unmount(barHost); barHost = null; }
 	if (component) unmount(component);
 	component = null;
 	stopLive?.(); stopLive = null;
@@ -338,9 +343,9 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
+			await vi.waitFor(() => expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
 			paneOpen.set(true);
-			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+			host.querySelector<HTMLButtonElement>('[data-comments-entry]')!.click();
 			flushSync();
 			expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
 			expect(document.body.querySelector('.popover')).toBeNull();
@@ -368,8 +373,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			] });
 			openArtifactTab(THREAD, { path: '/resolved.md', title: 'resolved.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
-			if (!host.querySelector('.doc [data-doc-comments-drawer]')) { host.querySelector<HTMLButtonElement>('.comment-status')!.click(); flushSync(); }
+			await vi.waitFor(() => expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
+			if (!host.querySelector('.doc [data-doc-comments-drawer]')) { host.querySelector<HTMLButtonElement>('[data-comments-entry]')!.click(); flushSync(); }
 			const entry = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('[data-resolved-entry]'); expect(found).not.toBeNull(); return found!; });
 			expect(entry.textContent).toBe('Resolved · 1');
 			expect(entry.getAttribute('aria-expanded')).toBe('false');
@@ -391,7 +396,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		mocks.setComments({ 'art-anchored': [{ id: 'comment', from: 0, to: 8, anchor: 'Document', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 		openArtifactTab(THREAD, { path: '/anchored.md', title: 'anchored.md' });
 		render();
-		await vi.waitFor(() => expect(host.querySelector('.comment-status')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[data-comments-entry]')).not.toBeNull());
 		expect(host.querySelector('.orphan-status')).toBeNull();
 	});
 
@@ -406,9 +411,9 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		openArtifactTab(THREAD, { path: '/narrow.md', title: 'narrow.md' });
 		render('compact');
 		// The pill sits in the header from the first frame and stays disabled until the comments load.
-		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[data-comments-entry]')?.disabled).toBe(false));
 		paneOpen.set(false);
-		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+		host.querySelector<HTMLButtonElement>('[data-comments-entry]')!.click();
 		flushSync();
 		expect(document.querySelector('[data-adaptive-drawer].within [data-doc-comments-drawer]')).not.toBeNull();
 		expect(document.body.querySelector('.popover')).toBeNull();
@@ -587,8 +592,8 @@ describe('reply stamping through the document canvas', () => {
 		return get(threadWorkspaces)[THREAD].activeTabId!;
 	}
 	async function openComments() {
-		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
-		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[data-comments-entry]')?.disabled).toBe(false));
+		host.querySelector<HTMLButtonElement>('[data-comments-entry]')!.click();
 		flushSync();
 		// The resting margin card is a short preview: it counts the reply and does not draw it, so nothing could read it by view.
 		await vi.waitFor(() => expect(document.querySelector('[data-margin-card="comment"]')?.textContent).toContain('1 reply'));

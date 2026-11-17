@@ -15,8 +15,12 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', hint = '', suppressed = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', suppressed = false, docked = false, named = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
+		/** The ask answers from a card docked to the document canvas's bottom edge, at every width: at rest the question on one line above the answers; a tap opens it to the asker and the full question. */
+		docked?: boolean;
+		/** Docked: the asker's name stays on the resting line (a comment task, whose line is about who commented). */
+		named?: boolean;
 		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
 		/** How many others also asked. */
@@ -30,8 +34,6 @@
 		noting?: boolean;
 		busy?: boolean;
 		status?: string;
-		/** A neutral line shown in the status slot while there is no status. */
-		hint?: string;
 		suppressed?: boolean;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
@@ -42,6 +44,11 @@
 
 	const expandable = $derived(ask !== '');
 	let expanded = $state(false);
+	/** The docked card, opened by a tap on its question. A new ask starts it closed. */
+	let cardOpen = $state(false);
+	$effect(() => {
+		if (view !== 'ask') cardOpen = false;
+	});
 	let receiptEl = $state<HTMLElement>();
 	let slotEl = $state<HTMLElement>();
 	let capsuleEl = $state<HTMLElement>();
@@ -74,6 +81,12 @@
 	function measureClearance(): number {
 		const capsule = capsuleEl;
 		if (!capsule || suppressed) return 0;
+		// The docked card reaches up from the canvas's bottom edge into the box it is placed against; the document keeps its last lines clear of it.
+		if (docked) {
+			const box = capsule.offsetParent?.getBoundingClientRect();
+			const reach = box ? box.bottom - capsule.getBoundingClientRect().top : 0;
+			return reach > 0 ? Math.round(reach) : 0;
+		}
 		const style = getComputedStyle(capsule);
 		if (style.position !== 'fixed') return 0;
 		// From its layout box, not its rect: the capsule slides in by a transform, which would move the measured top.
@@ -99,6 +112,39 @@
 	});
 </script>
 
+{#if docked}
+<!-- Docked to the document canvas's left, right and bottom edges. A review ask cuts one thing per line: at rest the question alone, then the answers; opened, the asker takes its own line above the full question. -->
+<div class="rb-dock-slot" bind:this={slotEl}>
+{#if view === 'ask' && who}
+	<section class="rb-dock" class:suppressed class:noting class:named class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+		<button type="button" class="rb-dock-ask" title={full || ask} aria-expanded={cardOpen} aria-label={lineLabel || `${who.name}${plus ? ` +${plus}` : ''}: ${full || ask}`} onclick={() => (cardOpen = !cardOpen)}>
+			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who"><MiddleName name={who.name} /></strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
+		</button>
+		{#if (cardOpen || noting) && others.length}
+			<ul class="rb-others">
+				{#each others as other (other.name)}<li><strong>{other.name}</strong>: {other.reason}</li>{/each}
+			</ul>
+		{/if}
+		<span class="rb-status" class:busy role="status">{status}</span>
+		{@render actions()}
+	</section>
+{:else if view === 'receipt' && receipt}
+	<section class="rb-dock receipt" class:changes={receipt.icon === 'changes'} data-ask-card aria-label={receipt.label} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">
+			{#if receipt.icon === 'changes'}<g transform="scale(0.666667)"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></g>
+			{:else if receipt.icon === 'dash'}<circle cx="8" cy="8" r="6" /><path d="M5 8h6" />
+			{:else}<circle cx="8" cy="8" r="6" /><path d="M5.3 8.2l1.9 1.9 3.5-3.9" />{/if}
+		</svg>
+		<span class="rb-receipt" role="status" tabindex="-1" bind:this={receiptEl}><span class="rb-text">{receipt.segments[0] ?? ''}</span>{#each receipt.segments.slice(1) as segment (segment)}<span class="rb-seg"> · {segment}</span>{/each}</span>
+	</section>
+{:else if view === 'stale' && stale}
+	<section class="rb-dock stale" role="status" aria-label={stale.label} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-1.5-3.6M13 2.5v3h-3" /></svg>
+		<span class="rb-text">{stale.text}</span><span class="rb-sub">{stale.sub}</span>
+	</section>
+{/if}
+</div>
+{:else}
 <!-- The slot outlives the phase: it grows once when the first ask arrives, and an answer or a replaced notice swaps inside it at the same height. -->
 <div class="rb-slot" bind:this={slotEl}>
 {#if view === 'receipt' && receipt}
@@ -146,15 +192,53 @@
 		<span class="rb-row2">
 			<div class="rb-capsule" class:suppressed class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
-				<span class="rb-status" class:busy={busy} class:hint={!status && hint !== ''} role="status">{status || hint}</span>
+				<span class="rb-status" class:busy={busy} role="status">{status}</span>
 				{@render actions()}
 			</div>
 		</span>
 	</section>
 {/if}
 </div>
+{/if}
 
 <style>
+	/* The docked card: placed against the document box, which sits inside the canvas's padding, so it reaches past that padding to the canvas's edges; its content keeps the document's inset. Solid, not glass: document text would read through. */
+	.rb-dock-slot { display: contents; }
+	.rb-dock { position: absolute; z-index: 5; left: calc(-1 * var(--canvas-pad-inline, 0px)); right: calc(-1 * var(--canvas-pad-inline, 0px)); bottom: calc(-1 * var(--canvas-pad-bottom, 0px)); box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-4); row-gap: var(--space-1); padding: var(--space-3) calc(var(--space-3) + var(--canvas-pad-inline, 0px)) calc(var(--space-2) + var(--safe-bottom, 0px)); border: 1px solid var(--border-subtle); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); font-size: var(--text-footnote); color: var(--text-secondary); }
+	/* Hidden under a comment sheet, and while the Details panel would reach down over it (Details then carries the ask). */
+	.rb-dock.suppressed, :global(.card-covered) .rb-dock { visibility: hidden; pointer-events: none; }
+	.rb-dock :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; transition: none; }
+	.rb-dock-ask { position: relative; flex: 1 0 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-primary); font: inherit; font-size: var(--text-subhead); line-height: var(--lh-normal); text-align: left; cursor: pointer; }
+	/* At rest the question is one line; its tap area reaches up through the card's top padding and border and 8px down, so it is 44px without making the card taller. The answers sit above it, so they keep their own 44px. */
+	.rb-dock-ask::after { content: ''; position: absolute; inset: calc(-1 * var(--space-3) - 1px) 0 calc(-1 * var(--space-2)) 0; }
+	.rb-dock-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.rb-dock-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; overflow-wrap: break-word; }
+	.rb-dock.open .rb-dock-text { -webkit-line-clamp: unset; line-clamp: none; }
+	/* The name stays on one line, cut in the middle (MiddleName). */
+	.rb-dock-who { display: inline-grid; max-width: 60%; vertical-align: bottom; font-weight: var(--fw-semibold); }
+	.rb-dock-sep { margin-inline: var(--space-1); color: var(--text-tertiary); }
+	.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by { display: none; }
+	.rb-dock.open:not(.named) .rb-dock-by { display: flex; min-width: 0; white-space: nowrap; }
+	.rb-dock.open:not(.named) .rb-dock-who { display: grid; max-width: 100%; min-width: 0; }
+	/* A comment task holds one line: Dismiss all ends it where the card is wide enough, else wraps to its own row. */
+	.rb-dock.named .rb-dock-ask { flex: 1 1 auto; }
+	.rb-dock .rb-others { flex: 1 0 100%; padding-left: 0; }
+	.rb-dock .rb-status { flex: 1 0 100%; }
+	.rb-dock .rb-status:empty { display: none; }
+	.rb-dock.named .rb-status { order: 3; }
+	/* What Approve also does: left-aligned under the question, one line beside the answers at rest, whole when opened. */
+	.rb-dock :global(.rb-derived) { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.rb-dock.open :global(.rb-derived) { flex-basis: 100%; white-space: normal; }
+	.rb-dock :global(.rb-actions) { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-4); flex: 0 0 auto; margin-left: auto; }
+	.rb-dock.noting :global(.rb-note) { flex: 1 0 100%; height: auto; min-height: var(--space-6); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
+	@media (any-pointer: coarse), (max-width: 48rem) { .rb-dock :global(.btn) { min-height: var(--touch-target); } }
+	.rb-dock.receipt, .rb-dock.stale { flex-wrap: nowrap; column-gap: var(--space-2); padding-top: var(--space-2); }
+	.rb-dock .rb-receipt { flex: 1 1 0; min-width: 0; color: var(--text-secondary); }
+	.rb-dock .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
+	.rb-dock.receipt .rb-icon { color: var(--green-text); }
+	.rb-dock.receipt.changes .rb-icon, .rb-dock.stale .rb-icon { color: var(--amber-text); }
+	.rb-dock.stale .rb-sub { margin-left: auto; opacity: 0.85; }
+
 	/* One flat row inside the document header's chrome: no card, border or shadow of its own. The owner's answer controls (`.rb-actions`, `.rb-note`) are its snippet, so their rules reach them through `:global`. */
 	.review-bar { --rb-hit: calc(var(--space-8) - var(--space-1)); flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); padding: 0 var(--space-1) 0 0; font-size: var(--text-footnote); color: var(--text-secondary); min-width: 0; }
 	/* The block grows from nothing (height through grid rows, clipped only while it moves) so the text below slides down instead of jumping; its own margin cancels the header's gap until it has height. An answer swaps in at the block's own height: the rows share one grid cell and crossfade (the transitions in the script). No transform on any ancestor of the capsule: it would make the floating capsule position against the row instead of the viewport. */
@@ -192,7 +276,7 @@
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	/* A name cut in the middle keeps its first letter, the ellipsis, its last four characters and the colon (MiddleName's floor), whatever the row leaves it. */
 	.rb-who:has(:global(.name.cut)) { min-width: calc(1.8em + 6ch); }
-	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. Where the header cannot hold both floors beside the tools, the header stacks (headerStack). */
+	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. */
 	.rb-ask { flex: 1 1 0; min-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
 	.review-bar.expanded .rb-chev { transform: rotate(180deg); }
@@ -205,7 +289,7 @@
 	.rb-others strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
-	.rb-status.busy, .rb-status.hint { color: var(--text-secondary); }
+	.rb-status.busy { color: var(--text-secondary); }
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
@@ -213,9 +297,9 @@
 	.review-bar.ask.suppressed .rb-row2 { display: none; }
 	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
 	/* The note grows at every width, with the same bounded scrolling used by the narrow canvas. */
-	.rb-capsule :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
-	.rb-capsule :global(.rb-note::placeholder) { color: var(--text-tertiary); }
-	.rb-capsule :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
+	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
+	.rb-capsule :global(.rb-note::placeholder), .rb-dock :global(.rb-note::placeholder) { color: var(--text-tertiary); }
+	.rb-capsule :global(.rb-note:focus), .rb-dock :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
 	.rb-icon { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
 	.review-bar.receipt .rb-icon { color: var(--green-text); }
 	.review-bar.receipt.changes .rb-icon { color: var(--amber-text); }
@@ -231,50 +315,15 @@
 	.review-bar.stale .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
 	.review-bar.stale .rb-sub { margin-left: auto; opacity: 0.85; }
 
-	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or an ended notice takes the first column at the same height and keeps its text on line 1. */
-	:global(.document-header) .rb-slot { grid-template-columns: subgrid; }
-	:global(.document-header) .rb-slot > .review-bar { grid-area: 1 / 1 / 2 / 2; }
-	:global(.document-header) .rb-slot > .review-bar.ask { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
-	:global(.document-header) .review-bar.ask .rb-head { display: contents; }
-	:global(.document-header) .review-bar.ask .rb-line { grid-column: 1; }
-	:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others, :global(.document-header) .review-bar.ask .rb-row2 { grid-column: 1 / -1; }
-	:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: flex-start; }
-	:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
-	:global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: var(--space-7); }
-	/* The receipt spans the header's columns, under the tools, as the ask's line 2 does: the verdict and the rest flow as one text of whole segments, one line where it fits and two where it does not, centred beside its icon in a row as tall as the single-line receipt. */
-	:global(.document-header) .rb-slot > .review-bar.receipt { --rb-recrow: var(--space-7); grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: minmax(var(--rb-recrow), auto); align-items: center; }
-	:global(.document-header) .review-bar.receipt .rb-icon { grid-area: 1 / 1; margin-block: 0; }
-	:global(.document-header) .review-bar.receipt .rb-receipt { grid-area: 1 / 1 / 2 / -1; padding-left: calc(var(--text-subhead) + var(--space-2)); line-height: 1.4; padding-block: var(--space-1); }
-		/* A person step has no one-line ask beside its name: let its existing column wrap the full name at every width. */
-	:global(.document-header) .review-bar.ask.static .rb-who { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
-	:global(.document-header) .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
-	:global(.document-header) .review-bar.ask.static .rb-who :global(.name) { display: inline; white-space: normal; }
-	:global(.document-header) .review-bar.ask.static .rb-who :global(.name-head) { overflow: visible; }
-	/* A 16ch ask needs more room than the prior 48px floor. When the header cannot hold the review line at its floors (avatar, name down to its floor, a 16-character ask, chevron, gaps) beside the tools as drawn, the header is marked `rb-stack` (actions/headerStack.ts): the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. The point is read from the tools as drawn, not from a fixed width. An ask with no one-line text (the person step) has no third row. */
-	/* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
-	:global(.document-header:where(.rb-stack)) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-who { max-width: none; }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-content: center; }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
-	:global(.document-header:where(.rb-stack)) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
-
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
 	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and the note's send button, as the phone capsule does. */
 	/* There, a status takes its own row above the buttons too, rather than wrapping a word per line beside them. */
 	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
 	@container doc-canvas (max-width: 37.5rem) {
 		.review-bar.ask .rb-row2 { flex-wrap: wrap; }
-		.review-bar.ask .rb-status:not(:empty):not(.hint) { flex-basis: 100%; }
+		.review-bar.ask .rb-status:not(:empty) { flex-basis: 100%; }
 		.review-bar.noting :global(.rb-note) { flex: 1 0 100%; order: 1; height: auto; min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
-	}
-
-	/* The hint beside Approve all is short and belongs to that button, so it keeps the buttons' row (wrapping in the room they leave, which is no taller than the buttons) until the canvas is too narrow for both. A refusal or a sending message still takes its own row. A landscape phone's header would otherwise spend a third of its height on one sentence. */
-	@container doc-canvas (max-width: 32rem) {
-		.review-bar.ask .rb-status.hint:not(:empty) { flex-basis: 100%; }
 	}
 
 	/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */
@@ -283,24 +332,7 @@
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
 			.rb-line { min-height: var(--rb-hit); }
-			/* A closed ask keeps its existing requester/ask markup in one 44px line: the requester has a bounded natural width and the ask end-ellipsizes in the remaining space. With no one-line ask, the requester takes the line. */
-			:global(.document-header) .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 auto; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
-			:global(.document-header) .review-bar.ask.static .rb-lead { flex: 1 1 auto; max-width: 100%; }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
-			/* The person step's name may wrap, so its touch row grows with it. */
-			:global(.document-header) .review-bar.ask.static:not(.expanded) { grid-template-rows: minmax(var(--rb-hit), auto); }
-			/* The request wraps to two lines beside the name, centred in the touch row (two lines of the footnote size fit inside it, so the row does not grow); past two lines it ends in an ellipsis and the chevron opens the whole text. */
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-self: center; flex: 1 1 0; min-width: 0; line-height: var(--lh-normal); }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
-			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
-			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }
 			.review-bar.receipt, .review-bar.stale { min-height: var(--rb-hit); }
-			:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: center; }
-			:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: 0; }
-			:global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: inherit; }
-			:global(.document-header) .rb-slot > .review-bar.receipt { --rb-recrow: var(--rb-hit); }
 			.rb-capsule :global(.btn) { min-height: var(--rb-hit); }
 		}
 	}

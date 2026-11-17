@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import DocViewerStatus from './DocViewerStatus.svelte';
+import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentFeedback } from '$lib/api/docs';
@@ -12,6 +13,7 @@ import { toasts } from '$lib/stores/toast';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 
 let host: HTMLElement;
+let bar: ReturnType<typeof mount> | null = null;
 let component: ({ commentCreated: () => void; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
 
 function value(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
@@ -33,7 +35,6 @@ function render(freshness: DocumentFreshness, onMarkVerified = vi.fn().mockResol
 		target: host,
 		component: DocViewerStatus,
 		props: {
-			title: 'Review document',
 			ready: true,
 			stale: false,
 			readonly: false,
@@ -46,11 +47,14 @@ function render(freshness: DocumentFreshness, onMarkVerified = vi.fn().mockResol
 			...overrides,
 		},
 	}) as unknown as typeof component;
+	// Comments and Details are drawn by the bar that holds the canvas; a stand-in draws them here.
+	bar = mount(DocumentBarTestHost, { target: host });
 	flushSync();
 	return onMarkVerified;
 }
 
 afterEach(() => {
+	if (bar) { unmount(bar); bar = null; }
 	component?.$destroy();
 	component = null;
 	host?.remove();
@@ -60,15 +64,14 @@ afterEach(() => {
 });
 
 describe('DocViewerStatus freshness metadata', () => {
-	it('keeps document identity and zero-comment navigation in its header', async () => {
+	it('keeps the owner in Details and zero-comment navigation in the bar', async () => {
 		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ immediate: false, stored: true }))));
 		vi.stubGlobal('fetch', fetchMock);
 		token.set('test-token');
 		render(value());
 		const header = host.querySelector('header');
-		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
-		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 comments');
+		expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('0 comments');
 		const delivery = header?.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
@@ -77,11 +80,14 @@ describe('DocViewerStatus freshness metadata', () => {
 		await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/doc-feedback/delivery-preference' && init.method === 'PUT' && init.body === '{"immediate":false}')).toBe(true));
 		vi.unstubAllGlobals();
 		token.set(null);
-		const details = header?.querySelector<HTMLButtonElement>('[aria-label="Document details"]');
+		const details = host.querySelector<HTMLButtonElement>('[data-document-details]');
+		expect(details?.getAttribute('aria-label')).toBe('Document details');
 		expect(details?.getAttribute('aria-expanded')).toBe('false');
+		expect(host.querySelector<HTMLElement>('.doc-panel')?.hidden).toBe(true);
 		details!.click();
 		flushSync();
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
+		expect(host.querySelector<HTMLElement>('.doc-panel')?.hidden).toBe(false);
 	});
 
 	it('announces a dialog from the Resolved control only where the resolved list opens as one', () => {
@@ -94,18 +100,18 @@ describe('DocViewerStatus freshness metadata', () => {
 
 	it('does not claim a zero comment count before the document is ready', () => {
 		render(value(), undefined, { ready: false, commentCount: 0 });
-		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		const pill = host.querySelector<HTMLButtonElement>('[data-comments-entry]')!;
 		expect(pill.getAttribute('aria-label')).toBe('Comments unavailable until the document opens');
-		expect(pill.querySelector('.count')).toBeNull();
+		expect(pill.textContent).not.toContain('0');
 	});
 
-	it('names unsent feedback in the comment pill; Send waits for held document comments', () => {
+	it('names unsent feedback on the Comments button, with no dot; Send waits for held document comments', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		const pill = host.querySelector('.comment-status');
+		const pill = host.querySelector('[data-comments-entry]');
 		expect(pill?.getAttribute('aria-label')).toBe('2 comments, 3 waiting for Send');
-		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
+		expect(pill?.querySelector('.unsent-dot')).toBeNull();
 		expect(host.textContent).not.toContain('Send 3 comments');
 		// Nothing is held back for the document, so no Send shows, not even clipped.
 		expect(host.querySelector('.sending-now')).toBeNull();
@@ -118,7 +124,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		// Open, but in the immediate lane: no Send closes it, so nothing waits for one.
 		component!.sync('artifact-1', { open_count: 3, document_held_count: 0, image_held_count: 0, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		const pill = host.querySelector('.comment-status');
+		const pill = host.querySelector('[data-comments-entry]');
 		expect(pill?.getAttribute('aria-label')).toBe('2 comments');
 		expect(pill?.querySelector('.unsent-dot')).toBeNull();
 	});
@@ -146,7 +152,7 @@ describe('DocViewerStatus freshness metadata', () => {
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
 			expect(get(deliverCommentsImmediately)).toBe(true);
 			await vi.waitFor(() => expect(host.textContent).not.toContain('Send 2 comments'));
-			expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toContain('3 waiting for Send');
+			expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toContain('3 waiting for Send');
 			toggle.click(); flushSync();
 			expect(sends()).toHaveLength(1);
 		} finally {
@@ -179,35 +185,53 @@ describe('DocViewerStatus freshness metadata', () => {
 		}
 	});
 
-	it('updates the comment-pill count and unsent indicator as feedback changes', () => {
-		render(value(), undefined, { commentCount: 1 });
-		const pill = host.querySelector('.comment-status')!;
-		expect(pill.querySelector('.count')!.textContent).toBe('1');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('comment');
+	it('updates the Comments count and its unsent summary as feedback changes', () => {
+		render(value(), undefined, { commentCount: 1, unreadCount: 0 });
+		const pill = host.querySelector('[data-comments-entry]')!;
+		expect(pill.textContent?.trim()).toBe('1');
 		expect(pill.getAttribute('aria-label')).toBe('1 comment');
-		expect(pill.querySelector('.unsent-dot')).toBeNull();
 		component!.sync('artifact-1', { open_count: 1, image_held_count: 1, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		expect(pill.getAttribute('aria-label')).toBe('1 comment, 1 waiting for Send');
-		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		expect(pill.getAttribute('aria-label')).toBe('1 comment');
-		expect(pill.querySelector('.unsent-dot')).toBeNull();
+		// Unread shows as text, never a dot.
+		component!.$set({ unreadCount: 25 }); flushSync();
+		expect(pill.textContent?.trim()).toBe('25 new');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment, 25 new');
 	});
 
-	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {
+	it('closes Details on scoped Escape, restores its toggle, and leaves Escape elsewhere to its own control', () => {
 		render(value({ state: 'overdue' }));
-		const toggle = host.querySelector<HTMLButtonElement>('.identity-details')!;
+		const toggle = host.querySelector<HTMLButtonElement>('[data-document-details]')!;
 		toggle.click(); flushSync();
 		const escape = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-		host.querySelector<HTMLButtonElement>('.comment-status')!.dispatchEvent(escape()); flushSync();
+		host.querySelector<HTMLButtonElement>('[data-comments-entry]')!.dispatchEvent(escape()); flushSync();
 		expect(toggle.getAttribute('aria-expanded')).toBe('true');
 		const event = escape();
 		host.querySelector<HTMLButtonElement>('.verification-action button')!.dispatchEvent(event); flushSync();
 		expect(event.defaultPrevented).toBe(true);
 		expect(toggle.getAttribute('aria-expanded')).toBe('false');
 		expect(document.activeElement).toBe(toggle);
+	});
+
+	it('stays open under a picker or review list drawn at the page top level, and closes on a press anywhere else', () => {
+		render(value());
+		const toggle = host.querySelector<HTMLButtonElement>('[data-document-details]')!;
+		toggle.click(); flushSync();
+		const press = (target: Element) => { target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync(); };
+		for (const attribute of ['data-popover', 'data-adaptive-drawer']) {
+			const layer = document.createElement('div');
+			layer.setAttribute(attribute, '');
+			const inner = layer.appendChild(document.createElement('button'));
+			document.body.appendChild(layer);
+			press(inner);
+			expect(toggle.getAttribute('aria-expanded'), attribute).toBe('true');
+			layer.remove();
+		}
+		press(document.body);
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
 	});
 
 	it.each([
@@ -248,7 +272,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		render(value(), undefined, props);
 		if (feedback) component!.sync('artifact-1', feedback);
 		flushSync();
-		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		const pill = host.querySelector<HTMLButtonElement>('[data-comments-entry]')!;
 		expect(pill.getAttribute('aria-label')).toBe(expected);
 	});
 
@@ -264,11 +288,13 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.textContent).not.toContain('Mark verified');
 	});
 
-	it('preserves the owner-label space and aligns the ghost action with its text', () => {
+	it('puts Mark verified on the overdue Status row, which names the last verification date', () => {
 		render(value({ state: 'overdue' }));
-		expect(host.querySelector('.metadata-owner')?.textContent).toBe('Owner: Structured Plans');
-		expect(host.querySelector('.verification-action button')?.textContent?.trim()).toBe('Mark verified');
-		expect(docViewerStatusSource).toContain('.verification-action { margin-left: -10px; }');
+		const row = host.querySelector('.verification-action')!.closest('.p-row')!;
+		expect(row.textContent).toContain('Status: Overdue · verified');
+		expect(row.querySelector('.verification-action button')?.textContent?.trim()).toBe('Mark verified');
+		// The action keeps its whole label; the Status text is what shortens.
+		expect(docViewerStatusSource).toContain('.verification-action { flex: none;');
 	});
 
 	it('puts the absolute date in screen-reader time text', () => {
@@ -337,14 +363,12 @@ describe('DocViewerStatus held comments', () => {
 		flushSync();
 		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''))!;
 		expect(send.querySelector('.send-full')!.textContent!.trim()).toBe('Send 3 comments');
+		expect(send.querySelector('.send-short')!.textContent!.trim()).toBe('Send · 3');
 		expect(send.getAttribute('aria-label')).toBe('Send 3 comments to Style');
-		const identity = host.querySelector('.document-identity')!;
-		expect(identity.contains(send)).toBe(true);
-		expect([...identity.children].indexOf(send.closest('.feedback-controls')!)).toBeLessThan(
-			[...identity.children].indexOf(identity.querySelector<HTMLElement>('.document-tools')!),
-		);
-		// The pill's dot still counts everything unsent on the document.
-		expect(host.querySelector('.comment-status')!.getAttribute('aria-label')).toContain('5 waiting for Send');
+		// Send is in Details, under Comments.
+		expect(send.closest('.doc-panel .p-send')).not.toBeNull();
+		// The Comments button's name still counts everything unsent on the document.
+		expect(host.querySelector('[data-comments-entry]')!.getAttribute('aria-label')).toContain('5 waiting for Send');
 	});
 
 	it('keeps a read that arrives before the identity-row sender exists, and shows it once that sender mounts', () => {
@@ -386,14 +410,12 @@ describe('DocViewerStatus held comments', () => {
 		expect(sends()).toHaveLength(0);
 	});
 
-	it('names the History button "History" whether its text or only its icon shows, and omits it without recorded history', () => {
+	it('offers History as a Details row and omits it without recorded history', () => {
 		const onOpenHistory = vi.fn();
 		render(value(), undefined, { historyAvailable: true, onOpenHistory });
 		const button = host.querySelector<HTMLButtonElement>('.history-tool')!;
-		expect(button.getAttribute('aria-label')).toBe('History');
-		expect(button.getAttribute('title')).toBe('History');
-		expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-		expect(button.querySelector('.label')?.textContent).toBe('History');
+		expect(button.textContent?.trim()).toBe('History');
+		expect(button.closest('.doc-panel')).not.toBeNull();
 		button.click();
 		expect(onOpenHistory).toHaveBeenCalledTimes(1);
 		component!.$destroy(); host.remove();

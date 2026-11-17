@@ -374,14 +374,15 @@
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	/* In compact the document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; padding-top: 0; }
-	.leaf-body.document-canvas { position: relative; }
+	/* The canvas's padding is named so the review card docked to the canvas's edges can reach past it. */
+	.leaf-body.document-canvas { position: relative; --canvas-pad-inline: 20px; --canvas-pad-bottom: 20px; padding-inline: var(--canvas-pad-inline); padding-bottom: var(--canvas-pad-bottom); }
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
 	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	.leaf-body.browser-canvas { padding: 0; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
-	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { --canvas-pad-inline: 12px; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

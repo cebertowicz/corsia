@@ -16,6 +16,7 @@
 		compact = false,
 		lane = null,
 		activityRoot = null,
+		countSep = ' ',
 	}: {
 		artifactId: string | null;
 		targetInstanceId: string | null;
@@ -26,6 +27,8 @@
 		lane?: HeldLane | null;
 		/** Document canvas whose active use extends the document-held delivery deadline. */
 		activityRoot?: HTMLElement | null;
+		/** PROTOTYPE ONLY (round 2): passed to DocFeedbackControls' short Send label. */
+		countSep?: string;
 	} = $props();
 
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId }), () => onFeedbackChanged?.());
@@ -74,4 +77,4 @@
 	});
 </script>
 
-<DocFeedbackControls {feedback} {compact} {lane} />
+<DocFeedbackControls {feedback} {compact} {lane} {countSep} />

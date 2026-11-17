@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createReviewBarState } from './reviewBarState.svelte';
+import { createReviewBarState, documentAskOf } from './reviewBarState.svelte';
 import { answerSubmitted, submittedAnswers } from './stores/cardAnswers';
 import { ReviewRefusal, type ReviewBarRead } from './api/reviewBar';
 
@@ -86,5 +86,20 @@ describe('review-bar submission outcomes', () => {
 		state.noteFor = 'approved_with_changes';
 		state.setTarget('doc-2');
 		expect(state.noteFor).toBe('changes_requested');
+	});
+});
+
+describe('documentAskOf', () => {
+	const step = { node_id: 'n1', node_title: 'Check the figures', node_revision: 1, plan_id: 'p1', owner_thread_id: 't1', owner_name: 'Finance' };
+	it('summarises a raised ask, with the other asks, and says whether the card is on screen', () => {
+		const others = [{ name: 'Research', reason: 'Check the links.' }];
+		expect(documentAskOf({ read: { ...read, other_asks: others }, phase: 'ask' }, false)).toEqual({ who: 'Docs agent', text: 'Is this ready?', others, onCard: true });
+		expect(documentAskOf({ read, phase: 'noting' }, true)?.onCard).toBe(false);
+	});
+	it('names a person step by its owner, and has no ask once answered, stale, unread or not raised', () => {
+		expect(documentAskOf({ read: { ...read, ask_raised: false, person_step: step }, phase: 'ask' }, false)).toEqual({ who: 'Finance', text: 'Needs you to do this: Check the figures', others: [], onCard: true });
+		for (const phase of ['answered', 'stale'] as const) expect(documentAskOf({ read, phase }, false)).toBeNull();
+		expect(documentAskOf({ read: null, phase: 'ask' }, false)).toBeNull();
+		expect(documentAskOf({ read: { ...read, ask_raised: false }, phase: 'ask' }, false)).toBeNull();
 	});
 });

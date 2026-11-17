@@ -50,7 +50,7 @@
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
-	import { createReviewBarState } from '$lib/reviewBarState.svelte';
+	import { createReviewBarState, documentAskOf } from '$lib/reviewBarState.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
@@ -85,6 +85,8 @@
 	let editText = $state('');
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
+	let commentsEntry = $state<HTMLButtonElement | null>(null);
+	let detailsEntry = $state<HTMLButtonElement | null>(null);
 
 	const save = createDocSaveState(() => target);
 	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.closeAll(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && columnFits(), showColumn: () => { if (listedComments.length > 0 && columnFits()) commentUI.openOnLoad(); }, root: () => docRoot, liveText: () => liveSession?.text.toString() ?? null });
@@ -124,6 +126,9 @@
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, columnFits);
 	const reviewBarState = createReviewBarState();
+	/** The ask waiting on this document, for Details while its card is hidden (under a comment sheet, or stepped aside for Details). */
+	const askSheetHidden = $derived(commentUI.state != null && commentUI.sheetUp);
+	const documentAsk = $derived(documentAskOf(reviewBarState, askSheetHidden));
 	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
 	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
@@ -267,11 +272,12 @@
 
 <div class="doc" class:margin-room={commentSurface?.marginShown()} use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
-		title={target?.name ?? 'Document'}
+		ask={documentAsk}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		saveStatus={history.restoring ? 'saving' : save.status}
 		bind:this={feedbackStatus}
+		bind:commentsEntry bind:detailsEntry
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !confirming && !openRefusal}
@@ -349,6 +355,7 @@
 		anchor={commentUI.anchor}
 		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
+		{commentsEntry} resolvedAnchor={detailsEntry}
 		narrow={isPaneDrawer()}
 		phone={$isMobile || $isShortTouch}
 		onRelease={commentUI.release}
@@ -388,6 +395,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar docked artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

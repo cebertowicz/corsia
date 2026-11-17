@@ -53,6 +53,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--header-right-controls-inset',
 	// HomeShell's `style:--status-banners-height` on main: the height the status banners add to the column's flow.
 	'--status-banners-height',
+	// DocViewerStatus's `style:--panel-max` on the Details panel: the height left below its top edge.
+	'--panel-max',
 ]);
 
 /**

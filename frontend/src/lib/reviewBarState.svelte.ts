@@ -2,6 +2,8 @@ import {
 	answerReview, fetchReviewBar, ReviewRefusal,
 	type FeedbackCounts, type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
+import type { DocumentAsk } from '$lib/stores/documentBar';
+import { personStepAsk } from '$lib/components/comments/commentTask';
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
@@ -113,3 +115,12 @@ export function createReviewBarState() {
 	};
 }
 export type ReviewBarState = ReturnType<typeof createReviewBarState>;
+
+/** The ask waiting on a document, for its Details while the card is hidden; `hidden` is the card stepped aside under a comment sheet. */
+export function documentAskOf(bar: Pick<ReviewBarState, 'read' | 'phase'>, hidden: boolean): DocumentAsk | null {
+	const read = bar.read;
+	if (!read || bar.phase === 'answered' || bar.phase === 'stale') return null;
+	if (read.person_step) return { who: read.person_step.owner_name, text: personStepAsk(read.person_step), others: [], onCard: !hidden };
+	if (!read.ask_raised) return null;
+	return { who: read.asker?.name ?? 'An agent', text: read.ask_reason ?? '', others: read.other_asks ?? [], onCard: !hidden };
+}

@@ -40,7 +40,7 @@
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
-	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
+	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false), commentsEntry = null, resolvedAnchor = null }: {
 		state: CommentSurfaceState;
 		onThreadMissing?: (remaining: string[]) => void;
 		/** The column opened on its own at load, so opening it does not hide the sidebar or the Workspace panel. */
@@ -106,6 +106,10 @@
 		opened?: number;
 		/** The resolved drawer is open: set by that control only. */
 		resolvedOpen?: boolean;
+		/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
+		commentsEntry?: HTMLElement | null;
+		/** The visible control the Resolved list opened from (Details); its row sits in a panel that closes as the list opens. */
+		resolvedAnchor?: HTMLElement | null;
 	} = $props();
 	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
@@ -137,8 +141,8 @@
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
 	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text isn’t in the document" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	/** The comments control the list opened from; a list the canvas opened on load hangs from the header's control. */
-	const listEntry = $derived(anchor instanceof HTMLElement ? anchor : bounds?.querySelector<HTMLElement>('[data-comments-entry]') ?? null);
-	const resolvedEntry = () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null;
+	const listEntry = $derived(anchor instanceof HTMLElement ? anchor : commentsEntry ?? bounds?.querySelector<HTMLElement>('[data-comments-entry]') ?? null);
+	const resolvedEntry = () => resolvedAnchor ?? bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null;
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: resolvedEntry, sheet: () => resolvedPlace === 'sheet' });
 	// A comment the reader picked, wrote or listed while the resolved list holds the column's place or a popover takes the canvas back; a change nobody asked for (the shown thread resolved elsewhere, a picked card let go) leaves the list open.
 	let lastOpened: number | undefined;

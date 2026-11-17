@@ -199,6 +199,32 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
 	});
 
+	it('hangs both lists from the bar controls outside the canvas: Comments, and Details for the Resolved list', () => {
+		const bounds = noRoomCanvas();
+		// The canvas holds a Resolved row in its closed Details panel; the bar's buttons sit outside it, in the app bar.
+		const row = bounds.appendChild(document.createElement('button'));
+		row.setAttribute('data-resolved-entry', '');
+		row.hidden = true;
+		const details = document.body.appendChild(document.createElement('button'));
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ bounds, resolvedAnchor: details, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		open.set(true); flushSync();
+		const pop = document.body.querySelector<HTMLElement>('[data-popover]')!;
+		expect(pop).not.toBeNull();
+		// Closing returns focus to Details, the visible control it came from, never to the row hidden in the closed panel.
+		pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); flushSync();
+		expect(open.isOpen()).toBe(false);
+		expect(document.activeElement).toBe(details);
+		unmount(component!); component = null; host.remove();
+		const onClose = vi.fn();
+		const comments = document.body.appendChild(document.createElement('button'));
+		render({ bounds, anchor: null, commentsEntry: comments, onClose, state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('[data-popover] [data-doc-comments-drawer]')).not.toBeNull();
+		comments.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
+		expect(onClose).not.toHaveBeenCalled();
+		details.remove(); comments.remove();
+	});
+
 	it('brings the picked thread into view in the list popover after the popover has moved to the page body, once', async () => {
 		// Moving a node resets its scroll, and the popover moves to the page body after its threads mount: a scroll from the
 		// thread's own mount is undone by the move, so the one that counts lands after the popover is placed.

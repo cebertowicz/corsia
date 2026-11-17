@@ -10,8 +10,12 @@
 	import { uiScope } from '$lib/stores/uiScope';
 	import { measurementScopeTitle } from '$lib/stores/measurementScopeTitle';
 	import { canvasHeader } from '$lib/stores/canvasHeader';
+	import { documentBar } from '$lib/stores/documentBar';
+	import { paneOpen } from '$lib/stores/paneOpen';
+	import HeaderDocTitle from './HeaderDocTitle.svelte';
 	import { haptic } from '$lib/haptic';
 	import { toastTopSurface } from '$lib/stores/toastTop';
+	import { inlineReach } from '$lib/actions/inlineReach';
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
@@ -35,8 +39,16 @@
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
 	const designatedName = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
+	/** A document holds the canvas: its name opens the open-files list and its own controls join this bar. */
+	const titleAction = $derived(isTakeover ? h?.titleAction ?? null : null);
+	const docBar = $derived(titleAction ? $documentBar : null);
+	/** On a phone a document is left by Back, not the sidebar: the sidebar toggle goes, and Back carries its needs-you dot. */
+	const phoneDocument = $derived($isMobile && titleAction != null);
 	// A phone hides the menu, so its toggle carries the menu rows' needs-you dot.
 	const menuNeedsYou = $derived($isMobile && $listedNeedsYou);
+	const backNeedsYou = $derived(phoneDocument && $listedNeedsYou);
+	/** On a phone with the panel closed, Toggle panel moves into the document's Details as Show panel; open, it is back here to close it. */
+	const paneMoved = $derived(phoneDocument && docBar != null && !$paneOpen);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
 	// When activeThreadId is set but activeThread is null we are loading or
@@ -46,22 +58,6 @@
 
 	let overflowOpen = $state(false);
 	let headerEl = $state<HTMLElement>();
-	let rightControlsEl = $state<HTMLElement>();
-
-	$effect(() => {
-		const shell = headerEl;
-		const controls = rightControlsEl;
-		if (!shell || !controls || typeof ResizeObserver === 'undefined') return;
-		const updateWidth = () => {
-			onRightControlsWidth?.(Math.ceil(shell.getBoundingClientRect().right - controls.getBoundingClientRect().left));
-		};
-		updateWidth();
-		const observer = new ResizeObserver(updateWidth);
-		observer.observe(shell);
-		// Border box: the overlaid-drawer padding changes the controls' reach without changing their content.
-		observer.observe(controls, { box: 'border-box' });
-		return () => observer.disconnect();
-	});
 	const overflowActions = $derived((h?.actions ?? []).filter((a) => !a.primary && !a.wideOnly));
 	// PL-2: an agent thread opens its own scope, a conductor thread its project.
 	const isLaneThread = $derived($activeThread != null && isNavAgent($activeThread));
@@ -117,7 +113,9 @@
 {/snippet}
 
 {#snippet titleInner()}
-	{#if isTakeover}
+	{#if titleAction}
+		<HeaderDocTitle title={h?.title ?? ''} action={titleAction} titleEnd={docBar?.titleEnd} onclick={() => run(titleAction.onClick)} />
+	{:else if isTakeover}
 		<span class="h-scope">{h?.title}</span>
 		{#if h?.tag}<span class="h-cond-tag">{h.tag}</span>{/if}
 
@@ -152,14 +150,18 @@
 	>
 		<div class="h-leading">
 			<div class="h-zone h-left">
-				<button class="h-icon h-menu" data-shell-control onmousedown={keepFocus} onclick={toggleSidebar} title="Toggle sidebar" aria-label={menuNeedsYou ? 'Toggle sidebar · Needs you' : 'Toggle sidebar'}>
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
-					{#if menuNeedsYou}<span class="needs-you-dot" data-testid="menu-needs-you-dot" aria-hidden="true"></span>{/if}
-				</button>
+				{#if !phoneDocument}
+					<button class="h-icon h-menu" data-shell-control onmousedown={keepFocus} onclick={toggleSidebar} title="Toggle sidebar" aria-label={menuNeedsYou ? 'Toggle sidebar · Needs you' : 'Toggle sidebar'}>
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+						{#if menuNeedsYou}<span class="needs-you-dot" data-testid="menu-needs-you-dot" aria-hidden="true"></span>{/if}
+					</button>
+				{/if}
 				{#if isTakeover && h?.onBack}
-					<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
+					{@const backName = `${h?.backLabel ?? 'Back'}${backNeedsYou ? ' · Needs you' : ''}`}
+					<button class="h-back" class:h-back-phone={phoneDocument} onclick={back} title={h?.backLabel ?? 'Back'} aria-label={backName}>
 						<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
 						<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+						{#if backNeedsYou}<span class="needs-you-dot" data-testid="back-needs-you-dot" aria-hidden="true"></span>{/if}
 					</button>
 				{/if}
 			</div>
@@ -167,7 +169,7 @@
 			<span class="h-title">{@render titleInner()}</span>
 		</div>
 
-		<div bind:this={rightControlsEl} class="h-zone h-right">
+		<div use:inlineReach={{ shell: headerEl, report: onRightControlsWidth }} class="h-zone h-right">
 			{#if isTakeover && h?.actions?.length}
 				{#each h.actions as a (a.id)}
 					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
@@ -196,7 +198,8 @@
 					{@render gearIcon()}
 				</button>
 			{/if}
-			{#if hasPane}
+			{#if docBar}{@render docBar.tools()}{/if}
+			{#if hasPane && !paneMoved}
 				<button class="h-icon" data-shell-control onmousedown={keepFocus} onclick={onTogglePane} title="Toggle panel" aria-label="Toggle panel">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
 				</button>
@@ -275,9 +278,12 @@
 		background: var(--amber);
 	}
 	.h-icon:active { scale: 0.94; }
+	/* A phone's Back is the 44px chevron alone in a document (its label is hidden at phone width). */
+	.h-back-phone { justify-content: center; min-width: var(--touch-target); min-height: var(--touch-target); padding: 0; }
+
 
 	.h-back {
-		display: flex; align-items: center; gap: 3px; flex-shrink: 0;
+		position: relative; display: flex; align-items: center; gap: 3px; flex-shrink: 0;
 		max-width: 180px;
 		padding: 6px 10px 6px 6px; border-radius: var(--radius-sm);
 		background: none; border: none; cursor: pointer; color: var(--text-secondary);

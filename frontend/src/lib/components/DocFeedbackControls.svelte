@@ -6,12 +6,14 @@
 	import type { DocFeedback, HeldLane } from '$lib/docFeedback.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
 
-	let { feedback, compact = false, lane = null }: {
+	let { feedback, compact = false, lane = null, countSep = ' ' }: {
 		feedback: DocFeedback;
 		/** A narrow bar: the Send control alone, its full wording read out rather than shown. */
 		compact?: boolean;
 		/** The held lane this control sends; none where Send lives elsewhere, so only what was not delivered, and Retry, show here. */
 		lane?: HeldLane | null;
+		/** PROTOTYPE ONLY (round 2): what sits between Send and its count in the short label (' · ' in the details panel, beside "Resolved · N"). */
+		countSep?: string;
 	} = $props();
 	const held = $derived(lane ? feedback.heldCount(lane) : 0);
 	const undelivered = $derived(feedback.undeliveredCount(lane));
@@ -48,7 +50,7 @@
 				Sent
 			</span>
 		{:else}
-			<Button size="sm" onclick={() => void send()} loading={feedback.sendingLane === lane} ariaLabel={feedback.sendLabel(lane)} title={feedback.sendText(lane)}><span class="send-full">{feedback.sendText(lane)}</span><span class="send-short" class:sending={feedback.sendingLane === lane} aria-hidden="true">Send {held > 99 ? '99+' : held}</span></Button>
+			<Button size="sm" onclick={() => void send()} loading={feedback.sendingLane === lane} ariaLabel={feedback.sendLabel(lane)} title={feedback.sendText(lane)}><span class="send-full">{feedback.sendText(lane)}</span><span class="send-short" class:sending={feedback.sendingLane === lane} aria-hidden="true">Send{countSep}{held > 99 ? '99+' : held}</span></Button>
 		{/if}
 	</span>
 {/if}
