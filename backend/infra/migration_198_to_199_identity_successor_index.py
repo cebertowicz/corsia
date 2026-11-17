@@ -1,4 +1,4 @@
-"""Schema 197 -> 198: index each identity by the successor its promote handed it to.
+"""Schema 198 -> 199: index each identity by the successor its promote handed it to.
 
 A promote moves a document's comments to the identity it hands the document to, so new
 comments never stay on a retired identity. Older rows can: promotes made before that move
@@ -19,7 +19,7 @@ import time
 from infra.artifact_identity_schema import SUCCESSOR_INDEX_SQL
 
 
-def migrate_197_to_198(conn: sqlite3.Connection) -> None:
+def migrate_198_to_199(conn: sqlite3.Connection) -> None:
     """Create the successor index on an existing identity table."""
     if conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_identities'"

@@ -37,19 +37,19 @@ function render(metadata: Record<string, unknown>): HTMLElement {
 describe('AssistantMessage browser chip', () => {
 	// The server stores the chip on the Step as a visible open succeeds; the message reads it and decides nothing.
 	it('shows the chip the Step carries', () => {
-		const chips = render({ tool_calls: [open], browser_chip: { host: 'github.com' } }).querySelectorAll('button.tile.chip');
+		const chips = render({ tool_calls: [open], browser_chip: { host: 'github.com', domain: 'github.com' } }).querySelectorAll('button.tile.chip');
 		expect(chips).toHaveLength(1);
 		expect(chips[0].getAttribute('title')).toBe('Reopen the shared browser');
 		expect(chips[0].querySelector('.title')?.textContent).toBe('github.com');
 	});
 
 	it('names the shared browser when the open had no host', () => {
-		expect(render({ browser_chip: { host: null } }).querySelector('button.tile.chip .title')?.textContent).toBe('Shared browser');
+		expect(render({ browser_chip: { host: null, domain: null } }).querySelector('button.tile.chip .title')?.textContent).toBe('Shared browser');
 	});
 
 	it('shows no strip for a Step with no stored chip, however its calls look', () => {
 		expect(render({ tool_calls: [open] }).querySelector('.cards')).toBeNull();
-		expect(render({ tool_calls: [{ ...open, browser_chip: { host: 'github.com' } }] }).querySelector('.cards')).toBeNull();
+		expect(render({ tool_calls: [{ ...open, browser_chip: { host: 'github.com', domain: 'github.com' } }] }).querySelector('.cards')).toBeNull();
 		expect(render({ browser_chip: { host: 3 } }).querySelector('.cards')).toBeNull();
 		expect(render({}).querySelector('.cards')).toBeNull();
 	});

@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- The browser chip in chat and the browser's address bar now lead with the site's real domain, so a long web address cut short no longer hides which site the agent is on; before, the cut-off end was the part that named the site.
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
@@ -144,6 +145,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Plan task details no longer show a token count of zero when nothing was used; an incomplete recording still says so.
 - Plan Working and Waiting timers now account for the difference between your browser's clock and the computer running CORSIA.
 - A repository an agent attaches to a project is now refused if its Git settings go beyond a short safe list, since some settings can run a program; the refusal names each setting to remove, and adding that repository yourself in Project settings still works.
+- A website open in the shared browser can no longer make your computer ask for camera or microphone access; the site gets a stand-in camera and microphone instead.
 - A workflow step where you approve the result now reaches you as a review you answer; before, the agent could ask in chat and mark the step approved on your reply, so your answer was not counted.
 - Reading the last new reply on a document no longer drops keyboard focus out of the document when the button that takes you to the next new comment goes away.
 - Registering a repository that sits inside a project's own folder now works while agents in other projects are working, and one already in the project's source folder is registered where it is. Before, it was refused while any agent was working, and one already in the source folder was always refused.
