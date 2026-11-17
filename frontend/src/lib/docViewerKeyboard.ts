@@ -1,3 +1,6 @@
+import { get } from 'svelte/store';
+import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
+
 export function handleDocumentEscape(
 	event: KeyboardEvent,
 	state: {
@@ -44,7 +47,8 @@ function typedKey(event: KeyboardEvent): boolean {
 }
 
 export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState): void {
-	if (event.defaultPrevented || state.covered) return;
+	// The phone navigation over the document covers it as an image does: keys pressed there are the navigation's.
+	if (event.defaultPrevented || state.covered || get(phoneNavOver)) return;
 	const { commentUI, draftController } = state;
 	// A raised phone sheet is the topmost layer even when focus has left it, so Escape closes it before the document.
 	if (

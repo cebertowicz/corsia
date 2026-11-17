@@ -63,7 +63,7 @@ def _dead_letter_result(
     reason: str,
     external_id: str | None,
 ) -> RouteResult:
-    dl_id = dead_letter.park(internal_event, payload, reason, external_id)
+    dl_id = dead_letter.park(internal_event, payload, reason, external_id, code_named=True)
     emit_product_event(
         "event_route", "dead_lettered",
         properties={
@@ -190,6 +190,7 @@ def _unowned_check_result(
     )
     dead_letter.park(
         internal_event, payload, "check_suite_noise_parked", external_id, expected=True,
+        code_named=True,
     )
     return RouteResult(
         RouteOutcome.PARKED, external_id=external_id,

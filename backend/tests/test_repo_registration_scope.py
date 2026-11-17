@@ -1,4 +1,4 @@
-"""A registration inside its own project's folder waits only for work that can reach that project.
+"""A registration never waits for or refuses over what agents are running.
 
 Driven through the real ToolRegistry (effect admission and reach), the real
 ProcessOwner (launch reach on the record), the real add procedure and the real
@@ -205,12 +205,21 @@ async def test_registers_in_own_folder_while_other_project_effect_and_process_ar
     assert _registered(env) == 1
 
 
-@pytest.mark.parametrize("blocker", ["same project", "leased", "unreadable caller"])
+@pytest.mark.parametrize("blocker", ["same project", "leased", "unreadable caller", "person"])
 @pytest.mark.asyncio
-async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monkeypatch, blocker):
+async def test_a_running_action_that_reaches_the_project_does_not_stop_registration(
+    env, monkeypatch, blocker,
+):
     from infra import project_fence
+    from infra.repo_policy_transition import admit_repo_effect, caller_reach
 
     target = _own_target(env)
+    if blocker == "person":
+        with admit_repo_effect(caller_reach(None, db=env["db"])):
+            result = await _register(env, target)
+        assert "Registered repository 'app'" in result, result
+        assert _registered(env) == 1
+        return
     thread = "p-agent" if blocker == "same project" else "q-agent"
     if blocker == "leased":
         env["leased"].add("q-agent")
@@ -225,20 +234,16 @@ async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monke
         monkeypatch.setattr(project_fence, "read_caller", failing)
     task = await _held_effect(env, thread)
     try:
-        result = await _register(env, target)
+        result = await asyncio.wait_for(_register(env, target), 5)
     finally:
         await _release(env, task)
-    title = "Alpha worker" if blocker == "same project" else "Beta worker"
-    assert (
-        f"Repositories can't change while agent \"{title}\" is running an action. "
-        "Try again once it finishes."
-    ) in result, result
-    assert _registered(env) == 0
+    assert "Registered repository 'app'" in result, result
+    assert _registered(env) == 1
 
 
 @pytest.mark.asyncio
-async def test_live_connected_app_call_from_another_project_refuses(env, monkeypatch):
-    """A connected app's local server is not project-fenced, so its call reaches everywhere."""
+async def test_a_live_connected_app_call_does_not_stop_registration(env, monkeypatch):
+    """A connected app's local server is not project-fenced; registration still goes ahead."""
     from types import SimpleNamespace
 
     from tools.mcp import MCPToolWrapper
@@ -266,88 +271,56 @@ async def test_live_connected_app_call_from_another_project_refuses(env, monkeyp
     await asyncio.wait({task, entered}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
     assert entered.done() and not task.done(), task.result() if task.done() else "never entered"
     try:
-        result = await _register(env, target)
+        result = await asyncio.wait_for(_register(env, target), 5)
     finally:
         await _release(env, task)
-    assert "while agent \"Beta worker\" is running an action." in result, result
-    assert _registered(env) == 0
+    assert "Registered repository 'app'" in result, result
+    assert _registered(env) == 1
 
 
+@pytest.mark.parametrize("long_running", [False, True])
 @pytest.mark.asyncio
-async def test_person_session_effect_refuses(env):
-    from infra.repo_policy_transition import admit_repo_effect, caller_reach
-
+async def test_a_running_process_does_not_stop_registration(env, long_running):
+    """Bounded or long-running, a process an agent left running never holds a registration."""
     target = _own_target(env)
-    with admit_repo_effect(caller_reach(None, db=env["db"])):
-        result = await _register(env, target)
-    assert "while you're running an action." in result, result
-    assert _registered(env) == 0
-
-
-@pytest.mark.parametrize("blocker", ["same project", "no recorded reach", "moved thread"])
-@pytest.mark.asyncio
-async def test_process_that_can_reach_the_project_refuses_and_is_named(env, blocker):
-    target = _own_target(env)
-    if blocker == "no recorded reach":
-        await env["owner"].spawn(
-            [sys.executable, "-c", "import time;time.sleep(60)"],
-            thread_id="q-agent", turn_id="turn-1", cwd=Path.cwd(), env=os.environ,
-            timeout_seconds=60.0, background=True, description="sleeper",
-        )
-        owner_title = "Beta worker"
-    else:
-        assert await _call(env["registry"], "p-agent", "hold", {"spawn": True}) == "spawned"
-        owner_title = "Alpha worker"
-        if blocker == "moved thread":
-            # Its launch reach, not the thread's current project, still decides.
-            env["db"].execute("UPDATE threads SET project_id='pb' WHERE id='p-agent'")
-            env["db"].commit()
-    result = await _register(env, target)
-    assert f"while agent \"{owner_title}\" is running process \"sleeper\"." in result, result
-    assert _registered(env) == 0
-
-
-@pytest.mark.parametrize("where", ["outside workspace", "workspace outside projects"])
-@pytest.mark.asyncio
-async def test_targets_outside_own_folder_keep_the_instance_wide_fence(env, where):
-    target = (
-        env["tmp"] / "external" / "app" if where == "outside workspace"
-        else env["ws"] / "shared" / "app"
+    await env["owner"].spawn(
+        [sys.executable, "-c", "import time;time.sleep(60)"],
+        thread_id="p-agent", turn_id="turn-1", cwd=Path.cwd(), env=os.environ,
+        timeout_seconds=60.0, background=True, description="sleeper",
+        long_running=long_running,
     )
-    _git_repo(target)
-    task = await _held_effect(env, "q-agent")
-    try:
-        result = await _register(env, target)
-    finally:
-        await _release(env, task)
-    assert "Repositories can't change while agent \"Beta worker\" is running an action." in result, result
-    assert _registered(env) == 0
-    # Once nothing is in flight the same registration goes through, as today.
-    assert "Registered repository 'app'" in await _register(env, target)
+    assert env["owner"].active_process_count() == 1
+    result = await asyncio.wait_for(_register(env, target), 5)
+    assert "Registered repository 'app'" in result, result
+    assert _registered(env) == 1
 
 
+@pytest.mark.parametrize("where", ["outside workspace", "workspace outside projects", "another project"])
 @pytest.mark.asyncio
-async def test_target_in_another_projects_folder_keeps_the_instance_wide_fence(env):
-    from fastapi import HTTPException
-
-    from api import project_repos
-
-    target = env["beta"] / "code" / "app"
+async def test_targets_outside_own_folder_register_while_agents_run(env, where):
+    target = {
+        "outside workspace": env["tmp"] / "external" / "app",
+        "workspace outside projects": env["ws"] / "shared" / "app",
+        "another project": env["beta"] / "code" / "app",
+    }[where]
     _git_repo(target)
     task = await _held_effect(env, "q-agent")
     try:
-        with pytest.raises(HTTPException) as raised:
-            project_repos.register_source_repo(
+        if where == "another project":
+            # Outside the agent's own reach, so through project settings, as a person adds it.
+            from api import project_repos
+            from api.project_repo_add_entry import register_source_repo_async
+
+            await asyncio.wait_for(register_source_repo_async(
                 "pa", project_repos.RepoAdd(mode="link", path=str(target), name="app"),
-            )
+            ), 5)
+            result = "Registered repository 'app'"
+        else:
+            result = await asyncio.wait_for(_register(env, target), 5)
     finally:
         await _release(env, task)
-    assert raised.value.status_code == 409
-    assert (
-        "Repositories can't change while agent \"Beta worker\" is running an action."
-        in raised.value.detail
-    )
-    assert _registered(env) == 0
+    assert "Registered repository 'app'" in result, result
+    assert _registered(env) == 1
 
 
 @pytest.mark.asyncio
@@ -370,7 +343,7 @@ async def test_effect_arriving_during_a_narrowed_registration_is_refused_only_if
     )
 
     with repo_policy_transition(
-        active_process_count=lambda: 0, owned_processes=lambda: (),
+        active_process_count=lambda: 0,
         claim=frozenset({"pa"}), claim_generation=transition_generation(),
     ):
         with admit_repo_effect(Reach(frozenset({"pa"}))):
@@ -609,9 +582,10 @@ async def test_entry_that_leaves_the_project_after_the_claim_is_refused_to_retry
     monkeypatch.setattr(project_repos, "resolve_add_source", swap_then_resolve)
     with pytest.raises(HTTPException) as raised:
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
-    # Only an add admitted under the narrowed claim checks, so this refusal shows it was.
+    # The resolved folder left the folders the transition claimed, so the add fails closed.
     assert raised.value.status_code == 409
-    assert "no longer inside this project's folder; try again" in raised.value.detail
+    assert "changed while it was being registered" in raised.value.detail
+    assert "try again" in raised.value.detail
     assert _registered(env) == 0
     assert entry.is_symlink() and entry.readlink() == outside
     # The retry claims everywhere and registers it, as any outside link.

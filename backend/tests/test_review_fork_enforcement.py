@@ -85,6 +85,24 @@ def test_read_uses_request_ownership_without_document_path_restriction(review_en
     ) == row["id"]
 
 
+def test_a_fork_reply_must_name_a_parent_on_its_requested_document(review_env):
+    from doc_feedback_helpers import seed_document
+    from doceditor import comments
+    from doceditor.review_fork_scope import authorize_tool
+
+    db, aid = review_env
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+    own = db.execute("SELECT id FROM doc_comments WHERE artifact_id=?", (aid,)).fetchone()["id"]
+    elsewhere = comments.create(seed_document(db, "owner", name="Other.md"), body="Elsewhere", announce=False, db=db)
+    fork = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace")
+
+    assert authorize_tool(fork, "doc_comment_create", {"parent_id": own, "body": "Reply"}) == row["id"]
+    for parent_id in (elsewhere["id"], "no-such-comment"):
+        with pytest.raises(PermissionError, match="requested document"):
+            authorize_tool(fork, "doc_comment_create", {"parent_id": parent_id, "body": "Reply"})
+
+
 @pytest.mark.asyncio
 async def test_cc_bridge_owns_token_allowlist_exact_call_and_cancel(review_env):
     from core.fork_cc_bridge import authenticate, bind_bridge, definitions, execute

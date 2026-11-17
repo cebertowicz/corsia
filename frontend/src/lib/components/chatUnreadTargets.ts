@@ -10,6 +10,13 @@ export const quoteLabel = (quote: string) => `“${snippet(clean(plainQuote(quot
 
 export type UnreadTarget = { quote: string; distance: number; destination: AttentionDestination };
 
+/** A comment's painted highlight, the control that opens or picks its thread, in `messageId`'s rows when given. */
+export function commentHighlight(root: ParentNode | null | undefined, commentId: string, messageId?: string): HTMLElement | undefined {
+	const rows = messageId ? `[data-message-id="${CSS.escape(messageId)}"] ` : '';
+	return [...(root?.querySelectorAll<HTMLElement>(`${rows}[data-comment-ids][role="button"]`) ?? [])]
+		.find(mark => mark.dataset.commentIds?.split(',').includes(commentId));
+}
+
 /** The body a message's text is drawn in, wherever that row is. */
 export const messageBody = (row: Element | null | undefined): HTMLElement | null => row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
 
@@ -22,8 +29,7 @@ export const messageBody = (row: Element | null | undefined): HTMLElement | null
  */
 export function commentLanding(root: ParentNode, messageId: string, comment: Pick<ChatComment, 'id'>): HTMLElement | null {
 	const rows = `[data-message-id="${CSS.escape(messageId)}"]`;
-	return [...root.querySelectorAll<HTMLElement>(`${rows} [data-comment-ids][role="button"]`)]
-		.find(mark => mark.dataset.commentIds?.split(',').includes(comment.id))
+	return commentHighlight(root, comment.id, messageId)
 		?? root.querySelector<HTMLElement>(`${rows} [data-comment-uuid="${CSS.escape(comment.id)}"]`)
 		?? [...root.querySelectorAll(rows)].map(messageBody).find(body => body !== null) ?? null;
 }

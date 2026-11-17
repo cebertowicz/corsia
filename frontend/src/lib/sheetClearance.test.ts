@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { capSheetAboveText, giveBackRoom, keptWhole, placeAboveSheet, SHEET_GAP } from './sheetClearance';
+import { capSheetAboveText, giveBackRoom, keptWhole, liftSheetCap, placeAboveSheet, SHEET_GAP, sheetCapped, sheetRaised } from './sheetClearance';
 
-function sheet(backdropBottom: number): HTMLElement {
+/**
+ * A sheet in a drawer whose content is `natural` px tall: it lays out at that height, or at its cap when the cap is lower, its body
+ * then showing only part of its content.
+ */
+function sheet(backdropBottom: number, natural = 600): HTMLElement {
 	const backdrop = document.createElement('div');
 	backdrop.setAttribute('data-adaptive-drawer', '');
 	backdrop.getBoundingClientRect = () => ({ bottom: backdropBottom, top: 0, left: 0, right: 393, width: 393, height: backdropBottom, x: 0, y: 0, toJSON: () => ({}) });
 	const panel = document.createElement('div');
+	panel.getBoundingClientRect = () => {
+		const cap = Number.parseFloat(panel.style.getPropertyValue('--drawer-text-cap'));
+		const height = Number.isFinite(cap) ? Math.min(natural, cap) : natural;
+		return { bottom: backdropBottom, top: backdropBottom - height, left: 0, right: 393, width: 393, height, x: 0, y: backdropBottom - height, toJSON: () => ({}) };
+	};
+	const body = document.createElement('div');
+	body.className = 'drawer-body';
+	Object.defineProperty(body, 'scrollHeight', { get: () => natural });
+	Object.defineProperty(body, 'clientHeight', { get: () => panel.getBoundingClientRect().height });
+	panel.append(body);
 	backdrop.append(panel);
 	document.body.append(backdrop);
 	return panel;
@@ -36,6 +50,71 @@ describe('capSheetAboveText', () => {
 		const panel = document.createElement('div');
 		capSheetAboveText(panel, { height: 21, regionTop: 125 });
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+});
+
+describe('liftSheetCap', () => {
+	it('only a capped sheet can be pulled up, and once it is, it reads as raised and no longer capped', () => {
+		const panel = sheet(852);
+		expect(sheetCapped(panel)).toBe(false);
+		capSheetAboveText(panel, { height: 400, regionTop: 100 });
+		expect(sheetCapped(panel)).toBe(true);
+		expect(sheetRaised(panel)).toBe(false);
+		liftSheetCap(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		expect(sheetRaised(panel)).toBe(true);
+		expect(sheetCapped(panel)).toBe(false);
+	});
+
+	it('a short thread under a tall cap is not held by it, so it cannot be pulled up, and the cap stays as it was', () => {
+		const panel = sheet(852, 150);
+		capSheetAboveText(panel, { height: 21, regionTop: 125 });
+		const cap = panel.style.getPropertyValue('--drawer-text-cap');
+		expect(Number.parseFloat(cap)).toBeGreaterThan(150);
+		expect(sheetCapped(panel)).toBe(false);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe(cap);
+		expect(sheetRaised(panel)).toBe(false);
+	});
+
+	it('a sheet exactly as tall as its cap is not held by it', () => {
+		const panel = sheet(852, 300);
+		panel.style.setProperty('--drawer-text-cap', '300px');
+		expect(sheetCapped(panel)).toBe(false);
+		panel.style.setProperty('--drawer-text-cap', '298px');
+		expect(sheetCapped(panel)).toBe(true);
+	});
+
+	it('reads a capped sheet with long content as held, with transitions on, without touching the sheet: nothing can start a transition', () => {
+		const panel = sheet(852, 900);
+		panel.style.transition = 'max-height 220ms ease';
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		const events: string[] = [];
+		for (const type of ['transitionrun', 'transitionstart', 'transitioncancel', 'transitionend']) panel.addEventListener(type, () => events.push(type));
+		const writes: MutationRecord[] = [];
+		const observer = new MutationObserver((records) => writes.push(...records));
+		observer.observe(panel, { attributes: true, subtree: true });
+		expect(sheetCapped(panel)).toBe(true);
+		writes.push(...observer.takeRecords());
+		observer.disconnect();
+		expect(writes).toEqual([]);
+		expect(events).toEqual([]);
+	});
+
+	it('a sheet the screen holds lower than its cap is not held by the cap, so lifting the cap would not grow it', () => {
+		const panel = sheet(852, 900);
+		panel.style.setProperty('--drawer-text-cap', '700px');
+		panel.getBoundingClientRect = () => ({ bottom: 852, top: 252, left: 0, right: 393, width: 393, height: 600, x: 0, y: 252, toJSON: () => ({}) });
+		expect(sheetCapped(panel)).toBe(false);
+	});
+
+	it('a new sheet starts capped again', () => {
+		const first = sheet(852);
+		capSheetAboveText(first, { height: 400, regionTop: 100 });
+		liftSheetCap(first);
+		const next = sheet(852);
+		capSheetAboveText(next, { height: 400, regionTop: 100 });
+		expect(sheetCapped(next)).toBe(true);
+		expect(sheetRaised(null)).toBe(false);
 	});
 });
 

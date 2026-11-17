@@ -31,12 +31,14 @@ class Session:
         document_control._subscriptions[self.socket] = {
             entry.artifact_id: document_control.Subscription(entry, actor, True, self.user_id)}
 
-    async def reserve(self, identifier, start, end, **changes):
+    async def reserve(self, identifier, start, end, quote=None, **changes):
+        """Ask as the browser does; ``quote`` is the selected text, which a past state needs."""
         proof = {**snapshot(self.entry), **changes}
         await document_control.handle_frame(self.socket, {'id': self.user_id}, dict(
             type='doc_positions', artifact_id=self.entry.artifact_id, store_id=self.entry.live.store.store_id, seq=1,
             reserve=dict(client_id=identifier, from_off=start, to_off=end, vector=proof['vector'],
-                         digest=proof['digest'], text_length_utf16=proof['text_length_utf16'])))
+                         digest=proof['digest'], text_length_utf16=proof['text_length_utf16'],
+                         **({} if quote is None else {'quote': quote}))))
         return (await self.socket.next('doc_positions'))['reserved']
 
     async def release(self, identifier):

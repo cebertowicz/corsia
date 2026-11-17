@@ -56,7 +56,11 @@ async function chatWithHeldAnswer(page: Page, request: APIRequestContext, width:
 	const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
 	// A cid names the input's admission order, the same on every fresh instance; the read after posting proves it.
 	const gate = `read-on-click-${width}`;
-	await seedMockResponses(request, [{ content: '[c2.1] The answer to read.', response_gate: gate }]);
+	// The answer is sent with post_update, the only place a comment answer comes from (#2685).
+	await seedMockResponses(request, [
+		{ content: '', response_gate: gate, tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: '[c2.1] The answer to read.' }) }], finish_reason: 'tool_calls' },
+		{ content: 'Done.' },
+	]);
 	await openAppPastLanding(page);
 	await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
 	await openChat(page, title);
@@ -96,9 +100,12 @@ for (const width of [1440, 900, 393] as const) {
 		await page.reload();
 		await openChat(page, title);
 		if (width === 1440) {
-			// Its card shows the answer at rest.
+			// At rest its card is a short preview, as a document's is: the answer counted and marked New, not shown.
 			await raiseChatMargin(page);
-			await expect(page.locator('.chat-margin .chat-margin-card')).toContainText('The answer to read.');
+			const resting = page.locator('.chat-margin .chat-margin-card');
+			await expect(resting.locator('.ct-reply-count')).toBeVisible();
+			await expect(resting.locator('.ct-head .ct-new')).toBeVisible();
+			await expect(resting).not.toContainText('The answer to read.');
 		}
 		await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 		await page.waitForTimeout(SEEN_FOR_MS);

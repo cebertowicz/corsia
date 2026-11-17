@@ -35,6 +35,7 @@ def require_forkable(request_id: str) -> None:
 def authorize_tool(request, name: str, arguments: dict) -> str:
     """Bind a fork to its request; restrict document tools to that request's document."""
     from pathlib import Path
+    from doceditor.comments import thread_root_on
     from infra.database import get_db
 
     db = get_db()
@@ -52,8 +53,7 @@ def authorize_tool(request, name: str, arguments: dict) -> str:
         if arguments.get("artifact_id") and arguments["artifact_id"] != row["artifact_id"]:
             raise PermissionError("review fork may only use its requested document")
         if parent_id := arguments.get("parent_id"):
-            parent = db.execute("SELECT artifact_id FROM doc_comments WHERE id=?", (parent_id,)).fetchone()
-            if parent is None or parent["artifact_id"] != row["artifact_id"]:
+            if thread_root_on(db, parent_id, row["artifact_id"]) is None:
                 raise PermissionError("review fork may only use its requested document")
         if arguments.get("doc_path"):
             selected = Path(arguments["doc_path"])

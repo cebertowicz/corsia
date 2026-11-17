@@ -31,7 +31,7 @@ it('asks for the selection under a fresh client id with the browser\'s state, an
 	const request = captureComment(value.selection, 1, new AbortController().signal).then(received);
 	await value.asked(1);
 	expect(value.reserve()).toEqual({ client_id: expect.any(String), from_off: 6, to_off: 10, vector: encodeUpdate(Y.encodeStateVector(value.session.doc)),
-		digest: createHash('sha256').update('alpha beta gamma').digest('hex').slice(0, 16), text_length_utf16: 16 });
+		digest: createHash('sha256').update('alpha beta gamma').digest('hex').slice(0, 16), text_length_utf16: 16, quote: 'beta' });
 	for (const fields of [{ artifact_id: 'other' }, { store_id: 'other' }, { request_id: 'other' }, { seq: 2 }]) value.answer(fields);
 	await Promise.resolve();
 	expect(received).not.toHaveBeenCalled();
