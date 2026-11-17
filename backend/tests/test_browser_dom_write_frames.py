@@ -22,9 +22,11 @@ PAGE_URL, FRAME_URL = "ws://page.test/devtools/page/1", "ws://frame.test/devtool
 class Target:
     """One CDP target: the page, or a frame Chrome runs in its own process."""
 
-    def __init__(self, hits, boxes, frame_tree, owners=None, covers=None):
+    def __init__(self, hits, boxes, frame_tree, owners=None, covers=None, holds=()):
         self.hits, self.boxes, self.frame_tree, self.owners = hits, boxes, frame_tree, owners or {}
         self.covers = covers or {}
+        # The frames (by world) whose document holds an element with the target's box, whatever covers it.
+        self.holds = set(holds)
         self.calls = []
         self.worlds = []
         self.resolved = []
@@ -60,7 +62,10 @@ class Target:
             return {"node": {"backendNodeId": params.get("backendNodeId"), "nodeName": self.covers.get(params.get("backendNodeId"))}}
         if method == "Page.createIsolatedWorld":
             self.worlds.append(params["frameId"])
-            return {"executionContextId": 3}
+            return {"executionContextId": len(self.worlds)}
+        if method == "Runtime.callFunctionOn" and "elementsFromPoint" in params["functionDeclaration"]:
+            frame = self.worlds[params["executionContextId"] - 1]
+            return {"result": {"type": "boolean", "value": frame in self.holds}}
         if method == "DOM.resolveNode":
             self.resolved.append(params["backendNodeId"])
             return {"object": {"objectId": "field"}}
@@ -75,20 +80,20 @@ class Target:
         return {}
 
 
-def _page(*, hit=LINK, frames=(), owners=None):
+def _page(*, hit=LINK, frames=(), owners=None, holds=()):
     """A page whose top-page element at the unmoved point is node 8 and, in a frame, at the moved one ``hit``."""
     return Target(
         {TOP_HIT: TOP, FRAMED_HIT: hit},
         {LINK: {"border": PLACED}, TOP: {"border": [0, 0, 800, 0, 800, 60, 0, 60]},
          COVER: {"border": [0, 90, 800, 90, 800, 400, 0, 400]}, OWNER: {"content": FRAME_CONTENT}},
         {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": frame}} for frame in frames]},
-        owners=owners or {}, covers={COVER: "DIV", TOP: "HEADER"})
+        owners=owners or {}, covers={COVER: "DIV", TOP: "HEADER"}, holds=holds)
 
 
-def _frame(*, hit=LINK):
+def _frame(*, hit=LINK, holds=()):
     """A cross-site frame's own target: the same link, measured from the frame's corner."""
     return Target({TOP_HIT: hit}, {LINK: {"border": RAW}, COVER: {"border": [0, 0, 600, 0, 600, 300, 0, 300]}},
-                  {"frame": {"id": "oopif"}}, covers={COVER: "DIV"})
+                  {"frame": {"id": "oopif"}}, covers={COVER: "DIV"}, holds=holds)
 
 
 async def _run(args, _timeout):
@@ -162,9 +167,52 @@ async def test_a_ref_that_two_frames_laid_out_alike_both_match_is_refused_and_no
     assert refused.value.reason == "ambiguous" and page.written == []
 
 
+def _twins(*, twin_hit_node, holds):
+    """Two frames laid out alike: the link at the first's place, and ``twin_hit_node`` at the second's."""
+    twin_owner, twin_hit = 51, (56 + 50, 414 + 10)
+    return Target(
+        {TOP_HIT: TOP, FRAMED_HIT: LINK, twin_hit: twin_hit_node},
+        {LINK: {"border": PLACED}, TOP: {"border": [0, 0, 800, 0, 800, 60, 0, 60]},
+         COVER: {"border": [0, 380, 800, 380, 800, 600, 0, 600]}, OWNER: {"content": FRAME_CONTENT},
+         twin_owner: {"content": [8, 380, 608, 380, 608, 580, 8, 580]}},
+        {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}, {"frame": {"id": "twin"}}]},
+        owners={"child": OWNER, "twin": twin_owner}, covers={TOP: "HEADER", COVER: "DIV"}, holds=holds)
+
+
+@pytest.mark.asyncio
+async def test_a_twin_frames_covered_match_still_makes_the_ref_ambiguous_and_nothing_is_written(monkeypatch):
+    """The ref may name the second frame's link, under an overlay: the first frame's uncovered one is not assumed."""
+    page = _twins(twin_hit_node=COVER, holds={"twin"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_page_element_under_a_banner_with_a_look_alike_in_a_frame_is_ambiguous_not_written_in_the_frame(
+        monkeypatch):
+    """The ref may name the page's own element under its sticky header: the frame's look-alike is not assumed."""
+    page = _page(frames=("child",), owners={"child": OWNER}, holds={"main"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_covered_box_in_a_frame_that_holds_no_such_element_keeps_the_pages_own_refusal(monkeypatch):
+    """Only a frame that holds the element makes it a frame target; otherwise the page's cover is named."""
+    page = _page(hit=COVER, frames=("child",), owners={"child": OWNER})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <header>\)") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "covered" and page.written == []
+
+
 @pytest.mark.asyncio
 async def test_an_element_covered_inside_a_same_origin_frame_is_still_refused_naming_the_cover(monkeypatch):
-    page = _page(hit=COVER, frames=("child",), owners={"child": OWNER})
+    page = _page(hit=COVER, frames=("child",), owners={"child": OWNER}, holds={"child"})
     _connect(monkeypatch, **{PAGE_URL: page})
     with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)") as refused:
         await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
@@ -182,7 +230,7 @@ async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_
     assert await browser_dom_write.shared_action(_run, PAGE_URL, ("fill", "@e2", "text"),
                                                  lambda field, label: marked.append((field, label))) == "ok"
     assert opened == [PAGE_URL, FRAME_URL]
-    assert frame.resolved == [LINK] and frame.written == ["field"] and frame.worlds == ["oopif"]
+    assert frame.resolved == [LINK] and frame.written == ["field"] and frame.worlds[-1] == "oopif"
     assert LINK not in page.resolved and page.written == []
     # The frame's target measures from its own corner, so the field is moved onto the page.
     assert marked == [({"x": 56, "y": 102, "width": 100, "height": 20}, None)]
@@ -194,12 +242,13 @@ async def test_an_element_covered_inside_a_cross_site_frame_is_still_refused(mon
     monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
     # Either the frame's own page covers the link, or something on the top page covers the whole frame.
     page = _page(hit=COVER if overlay_on_page else OWNER, owners={"oopif": OWNER})
-    frame = _frame(hit=COVER)
+    frame = _frame(hit=COVER, holds={"oopif"})
     opened = _connect(monkeypatch, **{PAGE_URL: page, FRAME_URL: frame})
     with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)") as refused:
         await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
     assert refused.value.reason == "covered" and frame.written == [] and page.written == []
-    assert (FRAME_URL in opened) is (not overlay_on_page)
+    # The frame's own target is read for whether it holds the link, once per write, though the page is read twice.
+    assert opened.count(FRAME_URL) == 1
 
 
 @pytest.mark.asyncio

@@ -102,6 +102,11 @@ FRAME_COVERED = FRAME_LINK + '<div style="position:fixed;inset:0;background:whit
 FRAME_OUTER = """<!doctype html><title>Frame outer</title><body style="margin:8px">
 <div style="height:60px">top</div>
 <iframe src="__FRAME__" style="width:600px;height:240px;border:0"></iframe>"""
+# Two frames laid out alike, side by side; the second one's link is under the sheet that fills that frame.
+FRAME_TWINS = """<!doctype html><title>Frame twins</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0"></iframe>
+<iframe src="/frame-covered.html" style="width:300px;height:120px;border:0"></iframe>"""
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -136,6 +141,7 @@ def fixture_server():
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
              "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode(),
+             "/frame-twins.html": FRAME_TWINS.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
     frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered"}
 
@@ -454,13 +460,13 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
         await owner.close_thread(thread_id)
 
 
-async def frame_link_ref(owner: BrowserSessionOwner, thread_id: str) -> str:
-    """The agent's ref for the link inside the frame, once the frame has loaded."""
+async def frame_link_ref(owner: BrowserSessionOwner, thread_id: str, *, links: int = 1) -> str:
+    """The agent's ref for the link inside the frame (the last of ``links``), once the frames have loaded."""
     for _ in range(50):
         snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
-        found = re.search(r'link \\?"Go\\?" \[ref=(e\d+)\]', snapshot)
-        if found:
-            return f"@{found.group(1)}"
+        found = re.findall(r'link \\?"Go\\?" \[ref=(e\d+)\]', snapshot)
+        if len(found) >= links:
+            return f"@{found[-1]}"
         await asyncio.sleep(0.1)
     raise AssertionError(f"the frame's link never appeared in the snapshot: {snapshot}")
 
@@ -536,6 +542,28 @@ async def test_a_covered_link_inside_a_frame_is_still_refused():
             with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
                 await owner.run(thread_id, ("click", ref), session="existing")
             assert await frame_clicks(owner, thread_id, cross_site=False) == 0
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_in_one_of_two_frames_laid_out_alike_is_refused_as_ambiguous():
+    """The ref names the covered frame's link; the other frame's uncovered look-alike is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+            assert await cdp_value(owner, thread_id, clicks) == [0, 0]
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

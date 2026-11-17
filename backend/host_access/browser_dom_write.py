@@ -9,7 +9,7 @@ from typing import Callable, Sequence
 
 from host_access import browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, border_rect, protocol_int
-from host_access.browser_dom_frames import locate_in_frames, shifted
+from host_access.browser_dom_frames import FrameTargets, locate_in_frames, shifted
 from host_access.browser_dom_hit import (
     Located, box_matches as _box_matches, cover_tag as _cover, in_viewport as _in_viewport,
     is_empty as _is_empty, isolated_context as _isolated_context, node_for_box as _node_for_box,
@@ -66,7 +66,7 @@ async def shared_action(run: RunCommand, endpoint: str, args: Sequence[str],
     """
     async with CdpClient(endpoint) as page, AsyncExitStack() as frame_clients:
         try:
-            found, unresolved, cover = await _locate(run, page, endpoint, args[1], frame_clients)
+            found, unresolved, cover = await _locate(run, page, endpoint, args[1], FrameTargets(frame_clients))
             if found is None:
                 raise DomWriteRefused(unresolved, cover)
             cdp = found.cdp
@@ -103,7 +103,7 @@ async def target_node(run: RunCommand, endpoint: str, selector: str) -> int | No
 
 
 async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str,
-                  frame_clients: AsyncExitStack) -> tuple[Located | None, str, str | None]:
+                  frame_targets: FrameTargets) -> tuple[Located | None, str, str | None]:
     """Find the node a write acts on, why not if absent, and the tag of what covers it.
 
     The main page is tried first. Only when it fails is the target looked for in a frame, because
@@ -115,7 +115,7 @@ async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str
     for retry in (False, True):
         if node is not None:
             return Located(node, page), reason, None
-        found, framed, framed_cover = await locate_in_frames(run, page, endpoint, selector, box, frame_clients)
+        found, framed, framed_cover = await locate_in_frames(run, page, endpoint, selector, box, frame_targets)
         if found is not None:
             return found, "covered", None
         if framed == "ambiguous":

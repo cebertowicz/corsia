@@ -8,9 +8,35 @@ from dataclasses import dataclass
 from host_access import browser_cdp, browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, protocol_int
 from host_access.browser_dom_hit import (
-    Located, cover_tag, in_viewport, is_empty, node_at_centre, node_for_box, page_viewport, read_box,
+    Located, cover_tag, in_viewport, is_empty, isolated_context, node_at_centre, node_for_box, page_viewport, read_box,
 )
 from host_access.browser_session_state import BrowserSessionError
+
+# Whether a document holds an element with the target's box at its place, whatever covers it: every element at
+# the point, through open shadow roots, not only the topmost one a hit test returns.
+_HOLDS = """function(x, y, box) {
+  const near = (rect) => ['x', 'y', 'width', 'height'].every((key) => Math.abs(rect[key] - box[key]) <= 1);
+  const seen = new Set();
+  const holds = (root) => root.elementsFromPoint(x, y).some((element) => {
+    if (seen.has(element)) return false;
+    seen.add(element);
+    return near(element.getBoundingClientRect()) || (element.shadowRoot !== null && holds(element.shadowRoot));
+  });
+  return holds(document);
+}"""
+
+
+class FrameTargets:
+    """The cross-site frames' own targets one write opens, each opened once and closed when the write returns."""
+
+    def __init__(self, stack: AsyncExitStack) -> None:
+        self._stack = stack
+        self._open: dict[str, CdpClient] = {}
+
+    async def open(self, endpoint: str) -> CdpClient:
+        if endpoint not in self._open:
+            self._open[endpoint] = await self._stack.enter_async_context(CdpClient(endpoint))
+        return self._open[endpoint]
 
 
 @dataclass(frozen=True)
@@ -27,11 +53,14 @@ class ChildFrame:
 
 
 async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, selector: str, box: dict | None,
-                            frame_clients: AsyncExitStack) -> tuple[Located | None, str | None, str | None]:
+                            targets: FrameTargets) -> tuple[Located | None, str | None, str | None]:
     """Find a target inside a child frame: the node, else why not, and the tag of what covers it.
 
-    Why not is "covered" when a frame showed the box but held no matching element there, "ambiguous" when
-    more than one frame did, and None when no frame showed the box at all.
+    A ref gives only a box, so which document it names is decided first, apart from what covers it: the page
+    and each shown frame that hold an element with that box at its place. Why not is "ambiguous" when more
+    than one does, "covered" when the one that does is a frame whose hit test reached something else, and None
+    when no frame holds it, so the page's own answer stands. A document that cannot be read counts as holding
+    it, so a doubt refuses. A covered element inside a closed shadow root is not seen.
 
     agent-browser measures an element inside a frame from that frame's own corner, so each frame's content-box
     origin moves the box onto the page. A frame counts only when the moved centre is inside both the page's
@@ -50,24 +79,46 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
         shown = [(frame, placed) for frame, placed in shown if in_viewport(view, placed) and _inside(frame.viewport, placed)]
         if not shown:
             return None, None, None
-        hits = [await _hit_in_frame(page, frame, box, placed, frame_clients) for frame, placed in shown]
-        found = [located for located, _ in hits if located is not None]
+        hits = [await _hit_in_frame(page, frame, box, placed, targets) for frame, placed in shown]
+        held = [(located, cover) for (frame, _), (located, cover) in zip(shown, hits)
+                if located is not None or await _holds(*(await _document(page, frame, targets)), box)]
+        page_holds = in_viewport(view, box) and await _holds(page, None, box)
         # The frame may have moved while it was hit, so the answer holds only if its place and the box did not.
         if await read_box(run, selector) == box and [frame.viewport for frame, _ in shown] == [
                 await _owner_viewport(page, frame.owner) for frame, _ in shown]:
-            if len(found) > 1:
-                # The box is all a ref gives, so two frames laid out alike both hold an element that matches
-                # it, and which one the agent named can't be told: refused, as before frames were searched.
+            if len(held) + page_holds > 1:
+                # Two places laid out alike both hold an element that matches the box, and which one the agent
+                # named can't be told, whichever of them is covered: refused, as before frames were searched.
                 return None, "ambiguous", None
-            if found:
-                return found[0], None, None
-            return None, "covered", next((cover for _, cover in hits if cover), None)
+            if not held:
+                return None, None, None
+            located, cover = held[0]
+            return (located, None, None) if located is not None else (None, "covered", cover)
         await asyncio.sleep(browser_dom_hit.SETTLE_INTERVAL)
     return None, None, None
 
 
+async def _document(page: CdpClient, frame: ChildFrame, targets: FrameTargets) -> tuple[CdpClient, str | None]:
+    """The target a frame's document is read through, and the frame to name in it (None for its main frame)."""
+    return (page, frame.id) if frame.endpoint is None else (await targets.open(frame.endpoint), None)
+
+
+async def _holds(cdp: CdpClient, frame_id: str | None, box: dict) -> bool:
+    """Whether a document holds an element with the box at its place, whatever covers it; unreadable counts as yes."""
+    try:
+        result = await cdp.call(
+            "Runtime.callFunctionOn", executionContextId=await isolated_context(cdp, frame_id), functionDeclaration=_HOLDS,
+            arguments=[{"value": box["x"] + box["width"] / 2}, {"value": box["y"] + box["height"] / 2},
+                       {"value": {key: box[key] for key in ("x", "y", "width", "height")}}],
+            returnByValue=True, silent=True)
+    except BrowserSessionError:
+        return True
+    value = result.get("result", {}).get("value")
+    return "exceptionDetails" in result or value is not False
+
+
 async def _hit_in_frame(page: CdpClient, frame: ChildFrame, box: dict, placed: dict,
-                        frame_clients: AsyncExitStack) -> tuple[Located | None, str | None]:
+                        targets: FrameTargets) -> tuple[Located | None, str | None]:
     """The node a box inside a frame names, or the tag of what covers it."""
     if frame.endpoint is None:
         # A frame in the page's own process is hit-tested through the page, at the box moved onto the page.
@@ -78,7 +129,7 @@ async def _hit_in_frame(page: CdpClient, frame: ChildFrame, box: dict, placed: d
     # A cross-site frame shows on the page as its owner element; what is inside it is known only to its own target.
     if await node_at_centre(page, placed) != frame.owner:
         return None, await cover_tag(page, placed)
-    target = await frame_clients.enter_async_context(CdpClient(frame.endpoint))
+    target = await targets.open(frame.endpoint)
     node = await node_for_box(target, box)
     if node:
         return Located(node, target, None, (frame.viewport["x"], frame.viewport["y"])), None
