@@ -6,6 +6,15 @@ export type TurnSummary = {
 	cause?: string | null;
 };
 
+/**
+ * Page summaries are keyed by durable Turn identity; a later page refreshes the prior value for that same Turn without
+ * disturbing other loaded Turns. Anything that is not a summary map leaves `current` as it is.
+ */
+export function mergeTurnSummaries(current: Record<string, TurnSummary>, value: unknown): Record<string, TurnSummary> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return current;
+	return { ...current, ...(value as Record<string, TurnSummary>) };
+}
+
 export interface MessagePage {
 	messages: any[];
 	has_more: boolean;
@@ -64,11 +73,26 @@ export function createPager(initial?: Partial<PagerState>): PagerState {
 	};
 }
 
+/**
+ * The pager for a refetch of the first page of the chat already on screen. It keeps what the loaded window knows
+ * (whether older history exists, and where it starts) until the refetched page lands and says otherwise, so the rows
+ * above the reader (the load-older row, the update cards placed by that window) stay put meanwhile, and an older read
+ * still pages from the rows on screen, whether the refetch lands or fails. A fresh object: a read of the generation it
+ * replaces settles on its own pager, never on this one.
+ */
+export function refreshPager(state: Pick<PagerState, 'hasMore' | 'oldestId'>): PagerState {
+	return createPager({ hasMore: state.hasMore, oldestId: state.oldestId });
+}
+
+/**
+ * A first page landing seeds where older history starts. `loading` belongs to the older read (`loadOlder`) alone: while
+ * one is in flight the page leaves the cursor to it, since that read lands further back than the first page reaches.
+ */
 export function adoptFirstPage(state: PagerState, page: MessagePage): void {
+	state.error = false;
+	if (state.loading) return;
 	state.hasMore = page.has_more ?? false;
 	state.oldestId = page.oldest_id ?? null;
-	state.loading = false;
-	state.error = false;
 }
 
 export function canLoadOlder(state: Pick<PagerState, 'hasMore' | 'loading' | 'error'>): boolean {
