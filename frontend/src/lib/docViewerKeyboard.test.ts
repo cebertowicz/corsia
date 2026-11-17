@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 import { focusTrap } from '$lib/actions/focusTrap';
+import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 
 function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const anchor = document.createElement('button');
@@ -107,6 +108,19 @@ describe('handleDocumentKey typing with a phone sheet up', () => {
 			expect(commentUI.close).not.toHaveBeenCalled();
 		}
 		field.remove();
+	});
+
+	it('leaves a sheet a tap in the text opened alone while the phone navigation is over it, for a key pressed on a nav row', () => {
+		const row = document.body.appendChild(document.createElement('button'));
+		phoneNavOver.set(true);
+		try {
+			const { state, commentUI } = sheetFrom(true);
+			handleDocumentKey(key(row, { key: 'Z' }), state);
+			expect(commentUI.close).not.toHaveBeenCalled();
+		} finally {
+			phoneNavOver.set(false);
+			row.remove();
+		}
 	});
 });
 

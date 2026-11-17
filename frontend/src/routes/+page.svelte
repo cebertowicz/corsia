@@ -15,6 +15,7 @@
 	import { uiScope, exitScope, type UiScope } from '$lib/stores/uiScope';
 	import { enterProjectScope, enterThreadScope } from '$lib/stores/projects';
 	import { paneOpen } from '$lib/stores/paneOpen';
+	import { pageEscape } from '$lib/pageEscape';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { watchSubagentOpenRequests } from '$lib/subagentOpen';
 	import { openThread } from '$lib/stores/openThread';
@@ -396,10 +397,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			if (get(paneOpen)) { paneOpen.set(false); return; }
-			if (sidebarOpen) { sidebarOpen = false; return; }
-		}
+		if (pageEscape(e, { open: sidebarOpen, close: () => { sidebarOpen = false; } })) return;
 		if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
 			e.preventDefault();
 			$sidebarCollapsed = !$sidebarCollapsed;

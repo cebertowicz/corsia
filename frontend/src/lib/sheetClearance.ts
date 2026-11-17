@@ -10,13 +10,52 @@ const MIN_SHEET = 200;
 /**
  * Lets a bottom sheet rise only as far as leaves room above it for the text it was opened from (`height` tall, with a gap each side), under
  * the top of the visible page (`regionTop`). The sheet's own content scrolls. A sheet that is shorter than the room is not changed.
- * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled.
+ * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled. Callers skip a sheet the reader pulled
+ * up (`sheetRaised`), so it stays up.
  */
 export function capSheetAboveText(panel: HTMLElement, text: { height: number; regionTop: number }): void {
 	const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
 	if (!backdrop) return;
 	const room = backdrop.getBoundingClientRect().bottom - (text.regionTop + SHEET_GAP + text.height + SHEET_GAP);
 	panel.style.setProperty('--drawer-text-cap', `${Math.max(MIN_SHEET, Math.floor(room))}px`);
+}
+
+/** Sheets the reader pulled up past their cap; each one is forgotten with its element, when the sheet closes. */
+const raised = new WeakSet<HTMLElement>();
+
+/**
+ * Whether `capSheetAboveText` holds a sheet below the height its content would take, so pulling its grabber up grows it: the sheet
+ * rests at its cap and its body has more content than it shows. The cap is set on every opened comment, but a short thread under a
+ * tall cap is not held, and a sheet held by the screen's own limit is not held by the cap. Read from the layout as it stands: nothing
+ * is changed to measure it, so no transition starts.
+ */
+export function sheetCapped(panel: HTMLElement | null): boolean {
+	if (!panel || raised.has(panel)) return false;
+	const cap = Number.parseFloat(panel.style.getPropertyValue('--drawer-text-cap'));
+	const body = panel.querySelector<HTMLElement>(':scope > .drawer-body');
+	if (!Number.isFinite(cap) || !body) return false;
+	return Math.abs(panel.getBoundingClientRect().height - cap) <= 1 && body.scrollHeight - body.clientHeight > 1;
+}
+
+/** Sheets whose grabber is held, or that are settling after it was let go. */
+const pulled = new WeakSet<HTMLElement>();
+
+/** A grabber drag holds the sheet from its press until it settles: while held, nothing places the page or caps the sheet for it (`onSheetMoved`). */
+export function holdSheet(panel: HTMLElement, held: boolean): void {
+	if (held) pulled.add(panel);
+	else pulled.delete(panel);
+}
+
+/** Whether a grabber drag holds this sheet. */
+export const sheetHeld = (panel: HTMLElement | null): boolean => !!panel && pulled.has(panel);
+
+/** Whether the reader pulled this sheet up: until it closes, nothing caps it again or moves the page for it. */
+export const sheetRaised = (panel: HTMLElement | null): boolean => !!panel && raised.has(panel);
+
+/** The reader pulled a capped sheet up: it grows to its full height, over the text if it must, and stays there until it closes. */
+export function liftSheetCap(panel: HTMLElement): void {
+	raised.add(panel);
+	panel.style.removeProperty('--drawer-text-cap');
 }
 
 const roomAdded = new WeakMap<HTMLElement, string>();

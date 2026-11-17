@@ -11,6 +11,8 @@
 	import CloseButton from './CloseButton.svelte';
 	import { sheetFly } from '$lib/sheetMotion';
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
+	import { liftSheetCap, sheetCapped } from '$lib/sheetClearance';
+	import { coverUnderNav } from '$lib/stores/phoneNav.svelte';
 
 	let {
 		ariaLabel,
@@ -96,12 +98,14 @@
 		if (!within) { box = null; return; }
 		return trackColumnBox(within, (next) => { box = next; });
 	});
+	// A half sheet, or one held below its height to leave its text room above it, grows when pulled up: the one drag path for both.
 	const drag = createSheetDrag({
-		detent: () => detent,
-		height: () => panel?.clientHeight ?? 480,
-		onExpand: () => onDetent?.('full'),
+		expandable: () => detent === 'half' || sheetCapped(panel),
+		panel: () => panel,
+		onExpand: () => { if (detent === 'half') onDetent?.('full'); else if (panel) liftSheetCap(panel); },
 		onDismiss: () => onClose(),
 	});
+	const underNav = coverUnderNav(() => open, () => panel);
 
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.
@@ -144,9 +148,8 @@
 </script>
 
 <!--
-	The backdrop is portaled to `document.body` so no ancestor can clip it, lift
-	or sink it, or decide its stacking by a `:has()` rule. Mounted inside the chat
-	band it was painted only over the chat column in a WebKit webview, leaving the
+	The backdrop is portaled to `document.body` so no ancestor can clip it, lift or sink it, or decide its stacking by a
+	`:has()` rule. Mounted inside the chat band it was painted only over the chat column in a WebKit webview, leaving the
 	rail, the open document and the right pane uncovered.
 -->
 {#if open}
@@ -158,8 +161,8 @@
 	class:within={!!box}
 	class:half={detent === 'half'}
 	class:nonmodal={!modal || detent === 'half'}
-	class:covered
-	inert={covered}
+	class:covered={covered || underNav.covers}
+	inert={covered || underNav.covers}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
 	style:--drawer-bottom="{box?.bottom ?? 0}px"
@@ -181,6 +184,7 @@
 			class:opaque class:compact
 			class:half={detent === 'half'}
 			style:--drawer-drag-y="{drag.y}px"
+			style:--drawer-pull="{drag.pull}px"
 			role="dialog"
 			aria-modal={modal && detent !== 'half' ? 'true' : 'false'}
 			aria-label={ariaLabel}
@@ -230,7 +234,6 @@
 		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
 	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: color-mix(in srgb, var(--glass-scrim) 88%, transparent); }
-	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
 	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
 	.drawer-backdrop.covered { visibility: hidden; }
@@ -242,7 +245,7 @@
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))), var(--drawer-text-cap));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))), calc(var(--drawer-text-cap) + var(--drawer-pull)));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -252,10 +255,12 @@
 	}
 	.drawer-panel {
 		--drawer-drag-y: 0px;
+		/* How far the grabber is pulled up while the sheet can grow: the sheet grows with it, up to its full height. */
+		--drawer-pull: 0px;
 		/* The room a phone sheet leaves for the text it was opened from; capSheetAboveText sets it inline on the panel. */
 		--drawer-text-cap: 100dvh;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))), var(--drawer-text-cap));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))), calc(var(--drawer-text-cap) + var(--drawer-pull)));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -275,8 +280,8 @@
 	.drawer-panel.dragging { transition: none; }
 	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
-	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
-	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
+	.drawer-panel.half { max-height: min(calc(46dvh + var(--drawer-pull)), 82dvh, calc(100dvh - max(16px, var(--safe-top)))); }
+	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull)), calc(var(--drawer-h) * 0.82)); }
 	.drawer-panel:focus {
 		outline: none;
 	}
