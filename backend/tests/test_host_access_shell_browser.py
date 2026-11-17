@@ -1575,6 +1575,64 @@ async def test_shell_state_refusal_names_scoped_route(tmp_path, monkeypatch, lea
     assert "request a host-access lease" not in result
 
 
+@pytest.mark.parametrize(
+    ("reported", "matches"),
+    [
+        ("touch: .: Operation not permitted", True),
+        ("touch: {root}: Operation not permitted", True),
+        ("cp: utimensat: {root}/.: Operation not permitted", True),
+        ("touch: {container}/: Operation not permitted", True),
+        ("touch: {root}/child: Operation not permitted", False),
+        ("touch: {container}X: Operation not permitted", False),
+        ("touch: /unrelated: Operation not permitted", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_shell_worktree_root_refusal(tmp_path, monkeypatch, reported, matches):
+    from core.turn_core import TurnIdentity
+    from host_access.processes import ForegroundProcessResult
+    from infra.project_repo_policy import RepoPolicy
+    from tests.shell_platform_helpers import use_mac_shell
+    from tools import host_access_gate, shell
+    from tools.repo_worktree_guidance import worktree_root_denial_guidance
+
+    repo = tmp_path / "repo"
+    root = repo / ".worktrees" / "task"
+    root.mkdir(parents=True)
+    policy = RepoPolicy("project", "repo", repo, "dev", True)
+    message = reported.format(root=root, container=root.parent)
+    assert bool(worktree_root_denial_guidance(message, root, [policy])) is matches
+
+    async def no_permit(**_kwargs):
+        return None
+
+    class Owner:
+        async def spawn(self, _argv, **_kwargs):
+            return ForegroundProcessResult(record=None, stdout=b"", stderr=message.encode(), returncode=1)
+
+    monkeypatch.setattr(host_access_gate, "consume_current_action_permit", no_permit)
+    monkeypatch.setattr(shell, "PROCESS_OWNER", Owner())
+    monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
+    monkeypatch.setattr(shell, "controlled_fast_forward_policy", lambda *_a, **_k: None)
+    monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    use_mac_shell(monkeypatch)
+    monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
+    monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
+    monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
+    monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
+    monkeypatch.setattr(shell, "safehouse_argv", lambda *_a, **_k: ["safehouse"])
+    monkeypatch.setattr(shell, "check_repo_write_path", lambda *_a: None)
+    monkeypatch.setattr(shell, "chained_base_git_denial_guidance", lambda *_a: None)
+    result = await shell.BashTool(working_dir=str(root)).execute(
+        "touch .", _thread_id="thread-1", _host_access_turn_identity=TurnIdentity("turn-1", 1),
+    )
+    if matches:
+        assert "Host access is not needed." in result
+        assert "request_host_access" not in result
+    else:
+        assert "request_host_access" in result
+
+
 @pytest.mark.asyncio
 async def test_stale_thread_default_cwd_degrades_to_workspace_root(
     tmp_path,

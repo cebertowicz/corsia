@@ -1,6 +1,59 @@
 """Recovery guidance shown when a write targets a protected or pinned base checkout."""
 
+import os
+from pathlib import Path
+
 from infra.project_repo_policy import RepoPolicy
+from tools.host_path_resolution import containment_key
+
+
+def worktree_root_denial_guidance(output: str, cwd: Path, policies: list[RepoPolicy]) -> str | None:
+    """Recognize macOS refusals on protected worktree container metadata."""
+    suffix = ": Operation not permitted"
+    for line in output.splitlines():
+        if not line.endswith(suffix):
+            continue
+        head = line[:-len(suffix)]
+        if ": " not in head:
+            continue
+        candidate = head.rsplit(": ", 1)[1].strip()
+        if not candidate:
+            continue
+        path = Path(os.path.abspath(cwd / candidate))
+        for policy in policies:
+            if not policy.source_binding_valid or not (policy.protect_base_checkout or policy.enforcement_error):
+                continue
+            container = Path(os.path.abspath(policy.path / ".worktrees"))
+            if (containment_key(path) == containment_key(container)
+                    or containment_key(path.parent) == containment_key(container)):
+                return (
+                    "A worktree's own folder and the .worktrees folder cannot have their times or "
+                    "attributes changed from an agent shell; files inside remain writable. "
+                    "Copy without preserving the folder's times (for example, `cp -R` without "
+                    "`-p`), or touch the files rather than the folder. Host access is not needed."
+                )
+    return None
+
+
+async def shell_denial_guidance(output: str, cwd: Path, policies: list[RepoPolicy],
+                                thread_id: str, leased: bool, linux: bool) -> str:
+    """Compose fallback guidance without changing other denial paths."""
+    from host_access.refusal_messages import protected_scope_denial
+    from infra.db_async import run_in_db
+    from tools.host_path_policy import denial_guidance_prefix
+    from tools.shell_cwd import _thread_has_live_lease
+
+    root_guidance = None if linux else worktree_root_denial_guidance(output, cwd, policies)
+    if root_guidance:
+        return root_guidance
+    guidance = await run_in_db(lambda: denial_guidance_prefix(output, thread_id, cwd))
+    if leased or "No host-access lease can open it." in guidance:
+        return guidance
+    return guidance + protected_scope_denial(
+        "the sandbox may restrict access to the path" if linux else
+        "this command was blocked by the protected-mode sandbox",
+        lease_active=await _thread_has_live_lease(thread_id), conditional=linux,
+    )
 
 
 def branch_pinned_worktree_guidance(policy: RepoPolicy) -> str:
