@@ -51,6 +51,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A pull request that is closed and then reopened is followed again: it returns to Files in its agent's chat, the agent is told it was reopened, and the agent's event rules fire on it again. Before, nothing about it reached the agent after the reopen.
 - A pull request whose checks all finish while CORSIA is briefly busy now still starts its review; before, it could wait at Waiting for checks until CORSIA restarted.
 - A queued message for a signed-out account now waits with its sign-in notice, which names the account, instead of looking ready when another account is chosen for the next turn.
+- A reply you paste or dictate into a comment now shows every line at once; before, the box could stay one row tall and hide the rest until you typed again.
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - A one-time reminder an agent sets for a time in another time zone now goes off at that time; before, it could go off hours early or late.
 - The message box and the chat above it no longer jump up when you click into the box on a computer or a window without touch; the extra space for the phone keyboard now applies only on touch screens.
