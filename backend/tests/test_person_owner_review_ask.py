@@ -33,12 +33,12 @@ async def test_handover_ask_follows_current_supervisor(owned_document):
     try:
         # Agent-owned documents still admit only their owner.
         assert _ask(db, artifact_id, "agent-1") == artifact_id
-        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns"):
+        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
             _ask(db, artifact_id, "agent-2")
 
         await _handover(artifact_id, "agent-1")
         assert _ask(db, artifact_id, "agent-1") == artifact_id
-        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns"):
+        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
             _ask(db, artifact_id, "agent-2")
 
         thread = db.execute("SELECT user_id, project_id FROM threads WHERE id=?", ("agent-1",)).fetchone()
@@ -56,7 +56,7 @@ async def test_handover_ask_follows_current_supervisor(owned_document):
         )
         response = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"})
         assert response.status_code == 200, response.text
-        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns"):
+        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
             _ask(db, artifact_id, "agent-1")
         assert _ask(db, artifact_id, "agent-2") == artifact_id
 
@@ -68,7 +68,7 @@ async def test_handover_ask_follows_current_supervisor(owned_document):
             reason="test", source_path="test", db=db,
         )
         assert _ask(db, artifact_id, "agent-2") == artifact_id
-        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns"):
+        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
             _ask(db, artifact_id, "agent-1")
     finally:
         db.close()

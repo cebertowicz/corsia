@@ -288,7 +288,9 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
             if artifact is not None:
                 supervisor, _ = effective_supervisor(db, artifact, owner=owner, workspace=config.WORKSPACE)
         if supervisor is None or supervisor["id"] != plan["owner_id"]:
-            raise service.PlanInputError("ask_artifact_id must name an artifact this thread owns")
+            raise service.PlanInputError(
+                "ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises"
+            )
     if identity["type"] == decision_projection.DECISION_TYPE:
         raise service.PlanInputError(
             "a decision is not blocked on; raise it, and it holds its task by itself"
