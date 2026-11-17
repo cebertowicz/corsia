@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 from registry import models
-from registry.document_supervisor import SUPERVISOR_KEY, owner_kind, stored_pick
+from registry.document_supervisor import SUPERVISOR_KEY, change_refusal, owner_kind, stored_pick
 from registry.identity_metadata import merge_identity_metadata
 from registry.shared_principals import UI_PRINCIPAL
 
@@ -19,13 +19,16 @@ AGENT_CHOICE_REFUSAL = "Pick one of the agents listed."
 PERSON_OR_AGENT_CHOICE_REFUSAL = "Pick yourself or one of the agents listed."
 
 
-def refusal_for(body: OwnershipBody, current: str | None, multi_person: bool, agents: set[str], *, agent_released: bool = False) -> tuple[int, str] | None:
+def refusal_for(body: OwnershipBody, current: str | None, multi_person: bool, agents: set[str]) -> tuple[int, str] | None:
     """The status and sentence this change is refused with, or ``None``.
 
     ``agents`` are the payload's choices, the only agents a pick may name. Only
     a new owner is checked against them; one that stays may be outside them.
     """
     new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
+    shared_refusal = change_refusal(current, new_owner, multi_person) if body.owner is not None else None
+    if shared_refusal:
+        return 409, shared_refusal
     if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
         return 400, PERSON_OR_AGENT_CHOICE_REFUSAL
     if body.supervisor_thread_id and body.supervisor_thread_id not in agents:

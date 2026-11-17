@@ -250,7 +250,7 @@ def owner_label(owner_thread_id: str, *, db) -> str:
     return title or owner_thread_id
 
 
-def person_owner_label(owner: str | None, *, db, multi_person: bool, user_id: str | None = None, owner_user_id: str | None = None) -> str:
+def person_owner_label(owner: str | None, *, db, user_id: str | None = None, owner_user_id: str | None = None) -> str:
     """Show the recorded person's account name to other people, or You to the owner."""
     from infra.auth import is_owner_sentinel
 

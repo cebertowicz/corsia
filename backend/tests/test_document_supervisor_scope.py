@@ -137,15 +137,10 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     _one_person_account()
     db = get_db()
     try:
-        assert person_owner_label("ui", db=db, multi_person=False) == "You"
-        assert person_owner_label("project:p1", db=db, multi_person=False) == "You"
-        assert person_owner_label(None, db=db, multi_person=False) == "No owner"
-        assert person_owner_label("agent-1", db=db, multi_person=False) == "Document agent"
-        # The same ownership reading holds when there are two accounts.
-        assert person_owner_label("ui", db=db, multi_person=True) == "You"
-        assert person_owner_label("project:p1", db=db, multi_person=True) == "You"
-        assert person_owner_label(None, db=db, multi_person=True) == "No owner"
-        assert person_owner_label("agent-1", db=db, multi_person=True) == "Document agent"
+        assert person_owner_label("ui", db=db) == "You"
+        assert person_owner_label("project:p1", db=db) == "You"
+        assert person_owner_label(None, db=db) == "No owner"
+        assert person_owner_label("agent-1", db=db) == "Document agent"
     finally:
         db.close()
     assert _view(artifact_id)["owner"]["label"] == "Document agent"
@@ -206,12 +201,50 @@ def test_a_rejected_pick_says_who_can_be_picked(owned_document):
     assert (single.status_code, single.json()["detail"]) == (400, PERSON_OR_AGENT_CHOICE_REFUSAL)
 
 
-def test_person_owner_remains_changeable_on_a_two_person_install(owned_document):
-    _client, artifact_id = owned_document
-    for owner in ("ui", "project:p1"):
-        _set_owner(artifact_id, owner)
-        view = _view(artifact_id)
-        assert (view["can_change"], view["refusal"], view["multi_person_refusal"]) == (True, None, None)
+@pytest.mark.parametrize("owner", ["ui", "project:p1"])
+def test_shared_owner_cannot_be_given_to_an_agent_on_a_two_person_install(owned_document, owner):
+    client, artifact_id = owned_document
+    _set_owner(artifact_id, owner)
+    url = f"/api/artifacts/{artifact_id}/ownership"
+    sentence = "Giving it to an agent would hide it from the other people who use CORSIA here."
+    view = _view(artifact_id)
+    assert view["multi_person_refusal"] == sentence
+    assert any(choice["id"] == "agent-1" for choice in view["choices"])  # supervisor choices remain available
+    refused = client.put(url, json={"owner": "agent-1"})
+    assert (refused.status_code, refused.json()["detail"]) == (409, sentence)
+    assert client.put(url, json={"supervisor_thread_id": "agent-1"}).status_code == 200
+    assert client.put(url, json={"owner": "user"}).status_code == 200
+    _one_person_account()
+    assert client.put(url, json={"owner": "agent-1"}).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["ui", "project:p1"])
+@pytest.mark.parametrize("authority", ["current-owner-handoff", "workspace-corsia", "blessed-edge-policy", "source-scope-conductor", "target-scope-conductor"])
+async def test_rehome_tool_cannot_move_shared_owner_to_agent(owned_document, owner, authority):
+    from infra.database import get_db
+    from registry.shared_principals import artifact_owner
+    from tools.artifact_ownership import ArtifactRehomeTool
+
+    _, artifact_id = owned_document
+    _set_owner(artifact_id, owner)
+    db = get_db()
+    try:
+        identity = db.execute(
+            "SELECT integration,type,external_id FROM artifact_identities WHERE id=?", (artifact_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    result = await ArtifactRehomeTool().execute(
+        integration=identity[0], type=identity[1], external_id=identity[2],
+        new_owner_thread_id="agent-1", reason="test", authority=authority, _thread_id="agent-1",
+    )
+    assert result.startswith("Error")
+    db = get_db()
+    try:
+        assert artifact_owner(artifact_id, db=db) == owner
+    finally:
+        db.close()
 
 
 def test_a_person_can_take_a_released_document(owned_document):

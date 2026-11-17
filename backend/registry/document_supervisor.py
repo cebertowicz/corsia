@@ -131,14 +131,20 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
 
 
 def is_multi_person(db) -> bool:
-    """More than one person account uses this CORSIA.
-
-    Read once per request to distinguish person labels.
-    """
+    """More than one person account uses this CORSIA."""
     return person_accounts(db) > 1
 
 
-# Choices are constrained by document scope, not by the number of people.
+SHARED_ACCESS_REFUSAL = "Giving it to an agent would hide it from the other people who use CORSIA here."
+
+
+def change_refusal(current: str | None, new_owner: str | None, multi_person: bool) -> str | None:
+    """Preserve shared access when a multi-person document would move to an agent."""
+    if multi_person and current and is_owner_sentinel(current) and new_owner and not is_owner_sentinel(new_owner):
+        return SHARED_ACCESS_REFUSAL
+    return None
+
+
 def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, multi_person: bool) -> dict[str, Any]:
     """The owner, the effective supervisor and the picker's choices for one document.
 
@@ -166,7 +172,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     return {
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None,
-                  "label": person_owner_label(owner, db=db, multi_person=multi_person, user_id=user_id,
+                  "label": person_owner_label(owner, db=db, user_id=user_id,
                                               owner_user_id=owner_user_id),
                   "recorded_viewer": owner == "ui" and bool(owner_user_id) and owner_user_id == user_id},
         "supervisor": supervisor,
@@ -174,7 +180,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
         "multi_person": multi_person,
         "can_change": True,
         "refusal": None,
-        "multi_person_refusal": None,
+        "multi_person_refusal": change_refusal(owner, "agent", multi_person),
         # None when the scope couldn't be resolved, so the picker says it couldn't load rather than "no agents".
         "scope": None if scope is None else "project" if scope[0] is not None else "workspace",
         "choices": choices,

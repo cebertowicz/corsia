@@ -2,8 +2,8 @@
 
 from infra import config
 from registry import models
-from registry.document_ownership_change import OwnershipBody, apply_change, refusal_for
-from registry.document_supervisor import is_multi_person, owner_kind
+from registry.document_ownership_change import OwnershipBody, apply_change
+from registry.document_supervisor import owner_kind
 from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_project, scope_conductor
 
 
@@ -26,10 +26,12 @@ def handover_to_person(db, routing, actor_thread_id: str, *, reason: str, causal
     if identity is None or identity.get("state") != "active":
         return "not_found", None
     artifact = models.get_artifact(identity["id"], db=db)
-    if artifact is None or not artifact.get("path") or artifact.get("type") != "document":
+    if artifact is None:
         return "not_found", None
+    if not artifact.get("path") or artifact.get("type") != "document":
+        return "person_invalid_document", None
     current = artifact_owner(identity["id"], db=db)
-    if current is None or (current is not None and current.startswith("project:")):
+    if current is None or current.startswith("project:"):
         _, project_id = document_project(artifact["path"], workspace=config.WORKSPACE, db=db)
         allowed = (
             project_id is not None
@@ -41,9 +43,6 @@ def handover_to_person(db, routing, actor_thread_id: str, *, reason: str, causal
     if not allowed:
         return "person_forbidden", None
     body = OwnershipBody(owner="user")
-    refusal = refusal_for(body, current, is_multi_person(db), set(), agent_released=current is None)
-    if refusal:
-        return "person_refused", refusal[1]
     actor = db.execute("SELECT user_id FROM threads WHERE id=?", (actor_thread_id,)).fetchone()
     changed, _events, rehome = apply_change(
         db, artifact, body, current, owner_user_id=actor["user_id"] if actor else None,

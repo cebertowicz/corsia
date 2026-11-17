@@ -183,7 +183,7 @@ def artifact_freshness(
     value = freshness(path, artifact.get("metadata"), now or datetime.now(timezone.utc))
     value["owner_name"] = (
         owner_label(owner, db=db) if multi_person is None
-        else person_owner_label(owner, db=db, multi_person=multi_person, user_id=user_id,
+        else person_owner_label(owner, db=db, user_id=user_id,
                                 owner_user_id=parse_metadata(artifact.get("metadata")).get("owner_user_id"))
     )
     return value
