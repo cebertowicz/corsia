@@ -269,6 +269,21 @@ describe('merging a refetched page into a live row', () => {
 		expect(row.chat_comments[0].answers.map((a: { unread: boolean }) => a.unread)).toEqual([false, true]);
 	});
 
+	it('keeps the comments on screen as the same objects when a page states them unchanged, and replaces only one that changed', () => {
+		const answer = (assistant: string, unread: boolean) => ({ author_kind: 'agent', user_message_id: 'u1', cid: 'c2.1', assistant_message_id: assistant, text: 'Answer', created_at: '2026-09-27T20:01:00Z', unread });
+		const comment = (id: string, answers: unknown[]) => ({ id, cid: 'c2.1', user_message_id: 'u1', quote: 'q', answers });
+		const shown = [comment('c1', [answer('a1', false)]), comment('c2', [answer('a2', true)])];
+		// The page's own objects, keys in another order, saying the same thing.
+		const same = JSON.parse(JSON.stringify(shown)).map(({ answers, ...rest }: { answers: unknown[] }) => ({ answers, ...rest }));
+		const [unchanged] = mergeFetchedHistoryRows([{ ...pageRow, content: 'streamed answer', chat_comments: shown }], [{ ...pageRow, content: 'streamed answer', chat_comments: same }]);
+		expect(unchanged.chat_comments).toBe(shown);
+		// A new answer on the second comment: the first stays the object on screen, the second is the page's.
+		const replied = [JSON.parse(JSON.stringify(shown[0])), comment('c2', [answer('a2', true), answer('a3', true)])];
+		const [changed] = mergeFetchedHistoryRows([{ ...pageRow, content: 'streamed answer', chat_comments: shown }], [{ ...pageRow, content: 'streamed answer', chat_comments: replied }]);
+		expect(changed.chat_comments[0]).toBe(shown[0]);
+		expect(changed.chat_comments[1]).toBe(replied[1]);
+	});
+
 	it('takes content the page proves is richer', () => {
 		const [row] = mergeFetchedHistoryRows(
 			[{ ...liveRow, content: 'streamed' }], [{ ...pageRow, content: 'streamed answer' }],

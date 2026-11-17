@@ -9,7 +9,7 @@ import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
-function render(chip: { host: string | null }, threadId = 't1'): HTMLButtonElement {
+function render(chip: { host: string | null; domain: string | null }, threadId = 't1'): HTMLButtonElement {
 	if (component) unmount(component);
 	component = mount(BrowserChip, { target: host, props: { chip, threadId } });
 	flushSync();
@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('BrowserChip', () => {
 	it('is a real button that shows the host and says what a click does', () => {
-		const button = render({ host: 'github.com' });
+		const button = render({ host: 'github.com', domain: 'github.com' });
 
 		expect(button.tagName).toBe('BUTTON');
 		expect(button.type).toBe('button');
@@ -42,14 +42,14 @@ describe('BrowserChip', () => {
 	});
 
 	it('says Shared browser when the open named no host', () => {
-		const button = render({ host: null });
+		const button = render({ host: null, domain: null });
 		expect(button.querySelector('.title')?.textContent).toBe('Shared browser');
 		expect(button.getAttribute('aria-label')).toBe('Reopen the shared browser');
 	});
 
 	it('shows the live browser in its thread on click and reports one product event', () => {
 		const spy = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
-		render({ host: 'github.com' }, 'browser-thread').click();
+		render({ host: 'github.com', domain: 'github.com' }, 'browser-thread').click();
 
 		const ws = get(threadWorkspaces)['browser-thread'];
 		expect(ws.tabs.map((tab) => tab.kind)).toEqual(['browser']);
@@ -58,7 +58,7 @@ describe('BrowserChip', () => {
 	});
 
 	it('does not let the click reach the chat column', () => {
-		const button = render({ host: 'github.com' });
+		const button = render({ host: 'github.com', domain: 'github.com' });
 		const reached = vi.fn();
 		// Svelte listens at the mount target, so the column stands one element above it.
 		host.parentElement!.addEventListener('click', reached);
