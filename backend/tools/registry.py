@@ -136,12 +136,13 @@ class ToolRegistry(ToolStore):
             )
         execution_params.update(parameter_overrides)
         # These two tools own the stronger repository-policy transition for
-        # the repository work they start, and they enter it themselves. The
-        # transition already refuses while any effect is active, so admitting
-        # this call's own effect would only make the tool collide with itself.
-        # A file tool that only reads writes nothing a transition changes. Every
-        # other tool is still admitted as an effect carrying what it can write, and
-        # a transition excludes the effects and owned processes it meets
+        # the repository work they start, and they enter it themselves, so the
+        # transition alone judges them. Project creation's transition refuses
+        # while an effect meets it, so admitting its own effect would make it
+        # collide with itself; a registration's transition never looks at running
+        # effects. A file tool that only reads writes nothing a transition changes.
+        # Every other tool is still admitted as an effect carrying what it can
+        # write, and is refused while a transition it meets runs
         # (``infra.repo_policy_transition``).
         repo_effect = (
             nullcontext()

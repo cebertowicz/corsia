@@ -505,15 +505,17 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
             mutation,
             operation=f"branch switch to {target}",
         )
-        if current_repo_branch(repo) != target or not _repo_is_clean(repo):
+        # Only the branch is checked: git refuses to overwrite local changes, so any
+        # change now in the tree is a running writer's own, carried as it is.
+        if current_repo_branch(repo) != target:
             raise ValueError(
-                f"branch switch to {target} did not leave the requested clean checkout"
+                f"branch switch to {target} did not leave the requested branch"
             )
     except Exception as exc:
         try:
-            if not _repo_is_clean(repo):
-                raise RuntimeError("branch-switch rollback found a dirty checkout")
             if current_repo_branch(repo) != previous:
+                if not _repo_is_clean(repo):
+                    raise RuntimeError("branch-switch rollback found a dirty checkout")
                 _switch_existing_local(repo, previous)
             local_after_failure, _remote = _branch_inventory(repo)
             if created and target in local_after_failure:

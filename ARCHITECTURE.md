@@ -533,16 +533,19 @@ roster says why instead of omitting it.
 `backend/infra/repo_policy_transition.py` is the one process-local owner of the
 mutual exclusion between repository *effects* (any tool call that may write)
 and repository *policy transitions* (attaching, detaching, pinning or
-checkout-protecting a repository). Each effect and owned process carries a
-`Reach`: the exact paths a file-writing tool writes, else the projects its
-caller was walled from, else everywhere. Each transition carries a claim (its
-projects, or everywhere) and, when known, the folders it changes. They conflict
-only where the reach meets the claim; a file tool that only reads is no effect.
-Only a registration inside the registering project's own folder claims less
-than everywhere (`api/project_repo_claim.py`). A registration never waits for or
-refuses over in-flight effects or owned processes (`checks_running=False`): it
-proceeds at once, and a later call that crosses the protection it adds is refused
-by the project fence. It is refused only while another transition is in progress.
+checkout-protecting a repository). Each effect carries a `Reach`: the exact
+paths a file-writing tool writes, else the projects its caller was walled from,
+else everywhere. Owned processes are judged by count alone. Each transition
+carries a claim (its projects, or everywhere) and, when known, the folders it
+changes. They conflict only where the reach meets the claim; a file tool that
+only reads is no effect. Only a registration inside the registering project's
+own folder claims less than everywhere (`api/project_repo_claim.py`). A
+registration never waits for or refuses over in-flight effects or owned
+processes (`checks_running=False`): it proceeds at once. Calls started after it,
+and a file tool's own write check, see the protection it adds; a shell call or
+owned process already running keeps the sandbox write rules it launched with
+until it exits, so it can still write in a newly protected checkout. It is
+refused only while another transition is in progress.
 The other transitions (detach, policy update, project creation) still refuse
 against an effect or process they meet. Tool effects that meet an active
 transition refuse at once.
@@ -553,8 +556,9 @@ except the tools whose own execution enters the stronger transition:
 resolved post-dispatch name so a `tool_call` dispatch matches too. Those two are
 `project_create` (through `api.project_scaffolding.initialize_project`) and
 `project_repo_register` (through `api.project_repo_add_entry.register_source_repo_async`);
-admitting their own effect would only make each collide with its own
-transition. The set is pinned in test to those two tool objects, so a rename or
+each is judged by its own transition alone. Admitting project creation's own
+effect would make it collide with its transition, which refuses over effects it
+meets; a registration's transition never looks at running effects. The set is pinned in test to those two tool objects, so a rename or
 a re-point cannot silently widen the exemption. Everything else is still
 admitted as an effect and still refuses against an active transition it meets.
 The detach and policy-update routes take the same transition, claiming

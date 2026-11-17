@@ -257,8 +257,9 @@ def add_transition(
     """
     generation = transition_generation()
     read = _add_claim(project_id, mode, path, name, ws_dir_for)
-    # A registration never waits for or refuses over what agents are running: a running
-    # call that crosses the new rules fails on them.
+    # A registration never waits for or refuses over what agents are running, by
+    # design. A file tool reads the new rules at its own write check; a shell call
+    # or owned process already running keeps its launch-time sandbox rules until it exits.
     with repo_policy_transition(
         active_process_count=active_process_count,
         claim=read.claim,

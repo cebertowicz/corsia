@@ -1,16 +1,20 @@
 """Process-local admission fence for repository policy transitions.
 
-One coordinator, one lock. Every tool effect that can write and every owned
-process carries a :class:`Reach`: the exact paths a file-writing call writes, or
-else the projects its caller was fenced from when the effect was admitted, or
-everywhere. A transition carries a claim: the projects whose write rules it
-changes, or everywhere, and the folders it changes when it knows them. They
-conflict when the reach meets the claim. A call that only reads is no effect.
+One coordinator, one lock. Every tool effect that can write carries a
+:class:`Reach`: the exact paths a file-writing call writes, or else the projects
+its caller was fenced from when the effect was admitted, or everywhere. A
+transition carries a claim: the projects whose write rules it changes, or
+everywhere, and the folders it changes when it knows them. They conflict when the
+reach meets the claim. A call that only reads is no effect. Owned processes are
+judged by count alone: any live one meets every transition that checks them.
 
 A registration never waits for or refuses over effects and processes already
-running (``checks_running=False``): it proceeds at once, a running call that then
-crosses the new write rules fails on them, and a call that meets the registration
-while it runs is refused. Other transitions are refused while one meets them.
+running (``checks_running=False``): it proceeds at once, and a call that meets the
+registration while it runs is refused. The new write rules apply to what starts
+after it, and to a file tool's own write check, which reads them on each call. A
+shell call or owned process already running keeps the sandbox write rules it
+launched with until it exits, so it can still write in a checkout the registration
+protects. Other transitions are refused while an effect or process meets them.
 
 Only a registration whose target sits inside the registering project's own
 folder claims less than everywhere (``api.project_repo_claim``): every caller not
@@ -24,7 +28,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
 from dataclasses import dataclass
 import logging
 from pathlib import Path
@@ -36,14 +39,7 @@ log = logging.getLogger(__name__)
 
 
 class RepoPolicyTransitionBusy(RuntimeError):
-    """A repository effect or policy transition cannot start safely.
-
-    ``running`` is what is still running, as a clause ("agent "X" is running an action").
-    """
-
-    def __init__(self, message: str, *, running: str | None = None) -> None:
-        super().__init__(message)
-        self.running = running
+    """A repository effect or policy transition cannot start safely."""
 
 
 def _overlaps(paths: tuple[Path, ...], folders: tuple[Path, ...]) -> bool:
@@ -54,7 +50,7 @@ def _overlaps(paths: tuple[Path, ...], folders: tuple[Path, ...]) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Reach:
-    """What one effect or owned process could write.
+    """What one tool effect could write.
 
     ``paths``, when set, are the only paths the call writes (a file tool's target, as
     written and resolved). Otherwise it could write everything outside ``fenced``, the
@@ -108,16 +104,6 @@ class Holder:
     reach: Reach
     thread_id: str | None
     what: str
-
-
-# The reach of the tool effect running in this task, so an owned process spawned by
-# that call keeps the reach of the call that launched it.
-_EFFECT_REACH: ContextVar[Reach | None] = ContextVar("repo_effect_reach", default=None)
-
-
-def current_effect_reach() -> Reach | None:
-    """The reach of the admitted effect this task runs inside, or ``None`` outside one."""
-    return _EFFECT_REACH.get()
 
 
 def caller_reach(thread_id: str | None, *, db) -> Reach:
@@ -175,8 +161,7 @@ def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
     else:
         running = f"you're running {holder.what}"
     return RepoPolicyTransitionBusy(
-        f"Repositories can't change while {running}. Try again once it finishes.",
-        running=running,
+        f"Repositories can't change while {running}. Try again once it finishes."
     )
 
 
@@ -211,11 +196,9 @@ class _RepoPolicyTransitionCoordinator:
             key = self._next_effect
             self._next_effect += 1
             self._effects[key] = holder
-        token = _EFFECT_REACH.set(reach)
         try:
             yield
         finally:
-            _EFFECT_REACH.reset(token)
             with self._lock:
                 del self._effects[key]
 
@@ -249,8 +232,7 @@ class _RepoPolicyTransitionCoordinator:
         with self._lock:
             if self._transition_active:
                 raise RepoPolicyTransitionBusy(
-                    "Repository policy transition is already in progress.",
-                    running="another repository change is in progress",
+                    "Repository policy transition is already in progress."
                 )
             if claim is not None and claim_generation != self._generation:
                 # Another transition ended after the claim was read: claim everywhere.
@@ -333,7 +315,8 @@ def repo_policy_transition(
     everywhere), so the caller can check what it resolves inside the transition.
     With ``checks_running`` false (registration) the transition never waits for or
     refuses over calls and processes already running; while it runs, a new call that
-    meets it is refused, and a running one that crosses the new rules fails on them.
+    meets it is refused. A shell call or owned process already running keeps the
+    sandbox write rules it launched with until it exits.
     """
     with _COORDINATOR.transition(
         active_process_count=active_process_count,
