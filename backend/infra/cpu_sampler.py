@@ -28,10 +28,11 @@ ENABLE_ENV = "CORSIA_CPU_SAMPLER"
 DEFAULT_INTERVAL_SECONDS = 0.1
 SUMMARY_SECONDS = 60.0
 STOP_TIMEOUT_SECONDS = 1.0
-MAX_SUMMARY_CHARS = 8_192
+# Every record stays under log_read's 1,500-character per-record cap so no reader cuts it.
+MAX_SUMMARY_CHARS = 1_400
 SUMMARY_ENTRY_COUNT = 15
 THREAD_ENTRY_CHARS = 100
-# Each stack is its own record; this keeps one under log_read's 1,500-character cap.
+# Each stack is its own record, bounded by the same cap.
 STACK_ENTRY_CHARS = 1_400
 _BACKEND_PREFIX = f"{Path(__file__).resolve().parents[1]}{os.sep}"
 # Decorator plumbing between a reader and its caller: three frames per memoized call that
@@ -217,8 +218,9 @@ class CpuSampler:
             f"window_seconds={window_seconds:.3f} "
             f"sampler_cpu_seconds={self._sampler_cpu_seconds:.6f} "
             f"max_tick_lag_seconds={self._max_tick_lag_seconds:.6f} "
-            f"top_threads=[{top_threads}] "
-            f"top_stacks={len(top_stack_items)} other={other_stack_seconds:.6f}s"
+            f"top_stacks={len(top_stack_items)} other={other_stack_seconds:.6f}s "
+            # Last, so a cut drops only the lowest-ranked threads.
+            f"top_threads=[{top_threads}]"
         )
         # WARNING, not INFO: the served process leaves the stdlib root logger at
         # WARNING (uvicorn configures only its own loggers), and both the stderr
