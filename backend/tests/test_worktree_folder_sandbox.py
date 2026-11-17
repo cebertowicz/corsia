@@ -222,34 +222,6 @@ def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, 
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("operation", [
-    "touch", "chmod", "xattr", "copytree", "rsync", "cp-preserve",
-])
-def test_real_worktree_root_metadata_stays_writable(repository_sandbox, operation):
-    sandbox = repository_sandbox
-    source = sandbox.root / "source"
-    (source / "sub").mkdir(parents=True)
-    (source / "copied").write_text("copied")
-    (source / "sub" / "nested").write_text("nested")
-    quoted = shlex.quote(str(source))
-    command = {
-        "touch": "touch .",
-        "chmod": "chmod 755 .",
-        "xattr": "xattr -w com.corsia.probe value .",
-        "copytree": (f"{shlex.quote(sys.executable)} -I -c "
-                     f"'import shutil, sys; shutil.copytree(sys.argv[1], \".\", dirs_exist_ok=True)' {quoted}"),
-        "rsync": f"rsync -a {quoted}/ ./",
-        "cp-preserve": f"cp -Rp {quoted}/. .",
-    }[operation]
-    sandbox.allowed(command)
-    if operation in {"copytree", "rsync", "cp-preserve"}:
-        assert (sandbox.own / "copied").read_text() == "copied"
-        assert (sandbox.own / "sub" / "nested").read_text() == "nested"
-    # The worktree's pointer is untouched by a root-level copy.
-    assert sandbox.own.joinpath(".git").read_text().startswith("gitdir:")
-
-
-@pytest.mark.integration
 @pytest.mark.parametrize("attack", [
     "create-folder", "create-file", "symlink", "hard-link", "rename", "delete-empty", "replace-empty",
 ])
@@ -372,3 +344,46 @@ def test_real_worktree_folder_symlink_container_cannot_grant_the_base(repository
         raise ConfinementBreach("redirected .worktrees reopened the protected base")
     assert "Operation not permitted" in result.stderr or "Permission denied" in result.stderr, result.stderr
     unchanged(target.read_bytes(), before)
+
+
+# Root metadata runs last: L3 stops at the first failure, so these never hide
+# a confinement attack above.
+def _root_copy_source(sandbox):
+    source = sandbox.root / "source"
+    (source / "sub").mkdir(parents=True)
+    (source / "copied").write_text("copied")
+    (source / "sub" / "nested").write_text("nested")
+    return shlex.quote(str(source))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("operation", ["chmod", "xattr"])
+def test_real_worktree_root_mode_and_xattrs_stay_writable(repository_sandbox, operation):
+    sandbox = repository_sandbox
+    sandbox.allowed({
+        "chmod": "chmod 755 .",
+        "xattr": "xattr -w com.corsia.probe value .",
+    }[operation])
+    assert sandbox.own.joinpath(".git").read_text().startswith("gitdir:")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("operation", ["touch", "copytree", "rsync", "cp-preserve"])
+def test_real_worktree_root_times_are_refused(repository_sandbox, operation):
+    """macOS sets times through setattrlist, which Seatbelt checks as bare
+    file-write*; allowing it would reopen create, remove and rename."""
+    sandbox = repository_sandbox
+    quoted = _root_copy_source(sandbox)
+    command = {
+        "touch": "touch .",
+        "copytree": (f"{shlex.quote(sys.executable)} -I -c "
+                     f"'import shutil, sys; shutil.copytree(sys.argv[1], \".\", dirs_exist_ok=True)' {quoted}"),
+        "rsync": f"rsync -a {quoted}/ ./",
+        "cp-preserve": f"cp -Rp {quoted}/. .",
+    }[operation]
+    result = sandbox.run(command)
+    assert result.returncode != 0, (command, result.stdout, result.stderr)
+    assert "Operation not permitted" in result.stderr or "Permission denied" in result.stderr, (
+        command, result.returncode, result.stderr,
+    )
+    assert sandbox.own.joinpath(".git").read_text().startswith("gitdir:")

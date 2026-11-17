@@ -36,10 +36,13 @@ def worktree_folder_rules(repo: Path) -> list[str]:
     matches. The folder and its immediate entries are pinned, so a ``.git``
     prepared deeper cannot be renamed into place, and every immediate entry's
     ``.git`` (file, directory, any case) stays unwritable. An immediate entry
-    keeps only its own metadata writable (times, mode, xattrs, flags, owner,
-    ACL), so ``touch .`` or a copy that preserves attributes still works at a
-    worktree root. Creating, removing or renaming an entry checks other
-    operations, which stay denied.
+    keeps only its own metadata writable (mode, xattrs, flags, owner, ACL and
+    ``utimes``), so ``chmod`` and ``xattr`` still work at a worktree root.
+    Creating, removing or renaming an entry checks other operations, which
+    stay denied. Setting times through ``setattrlist`` (macOS ``utimensat``,
+    used by ``touch``, ``cp -p``, ``rsync -a`` and Python's ``os.utime``) is
+    checked as bare ``file-write*``, so it is refused on a worktree root:
+    allowing it would also allow creating, removing and renaming entries.
     """
     trees = repo / ".worktrees"
     subtree = f'(subpath "{sandbox_literal(trees)}")'
