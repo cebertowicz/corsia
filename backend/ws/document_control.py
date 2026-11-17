@@ -199,7 +199,7 @@ def _offset(value) -> int:
 
 
 def _reserved(live, socket, user_id: str, ask) -> bool:
-    """Track the capture's selection under its comment's client id when the browser's state is the live one.
+    """Track the capture's selection under its comment's client id, made in the live state or a recent one.
 
     Everything is read and decided without yielding.
     """
@@ -207,10 +207,13 @@ def _reserved(live, socket, user_id: str, ask) -> bool:
         raise ValueError("A comment range request must be an object")
     identifier, start, end = _client_id(ask.get("client_id")), _offset(ask.get("from_off")), _offset(ask.get("to_off"))
     digest, length = ask.get("digest"), _offset(ask.get("text_length_utf16"))
+    quote = ask.get("quote")
     if start >= end or not isinstance(digest, str) or not isinstance(ask.get("vector"), str):
         raise ValueError("A comment range needs a selection and the browser's state")
+    if quote is not None and not isinstance(quote, str):
+        raise ValueError("A comment range's quote must be text")
     return live.reserve(identifier, start, end, user_id, socket, vector=base64.b64decode(ask["vector"], validate=True),
-                        digest=digest, length=length)
+                        digest=digest, length=length, quote=quote)
 
 
 async def _operate(socket, user: dict, data: dict) -> None:

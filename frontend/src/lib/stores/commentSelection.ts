@@ -37,7 +37,8 @@ const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try agai
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
- * comment's own client id, which succeeds only when the server holds the state this browser hashed. A hash a
+ * comment's own client id, which succeeds when the server holds, or recently held, the state this browser hashed
+ * and the selection still holds the quote sent with it. A hash a
  * remote update interrupts is simply redone. After a refusal it waits for the next applied remote update (or
  * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort, refusal, or
  * an unanswered reservation gives the range back; abort also releases an in-progress hash.
@@ -102,7 +103,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 				const vector = encodeUpdate(Y.encodeStateVector(session.doc));
 				sent = { ...range, clientId };
 				requestId = session.requestPositions(seq, false, { client_id: clientId, from_off: range.from, to_off: range.to,
-					vector, digest, text_length_utf16: text.length });
+					vector, digest, text_length_utf16: text.length, quote: range.quote });
 				if (!requestId) finish(undefined, new Error(OFFLINE));
 			} catch (error) { finish(undefined, error instanceof Error ? error : new Error('Could not check the selection.')); }
 		}

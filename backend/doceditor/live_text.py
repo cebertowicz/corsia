@@ -59,6 +59,14 @@ def utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def utf16_slice(text: str, start: int, end: int) -> str | None:
+    """The text of a UTF-16 span, or None when it splits a character."""
+    try:
+        return text.encode("utf-16-le")[start * 2:end * 2].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+
+
 def byte_offset(text: str, offset: int) -> int:
     """Convert a character-aligned UTF-16 position at the pycrdt boundary."""
     data = text.encode("utf-16-le")
@@ -104,77 +112,105 @@ def state_clocks(vector: bytes) -> dict[int, int]:
     return clocks
 
 
-def map_offsets(edges: list[tuple[int, bool]], before: str, delta: list[dict]) -> list[int]:
-    """Map sorted UTF-16 edges and delta segments in one pass over one buffer.
+def utf16_delta(before: str, delta: list[dict]) -> list[tuple[str, int]]:
+    """One edit's UTF-8 Text delta as ``(kind, UTF-16 count)`` steps, kind being retain, delete or insert.
 
-    A True association stays before insertion at that edge; False moves after.
+    It holds no text, so it can be kept and replayed without ``before``.
     Each retained/deleted byte segment is decoded once, never as a prefix.
     """
     raw = before.encode("utf-8")
-    ordered = sorted((offset, not right, index) for index, (offset, right) in enumerate(edges))
-    mapped = [0] * len(edges)
-    cursor = position = byte_position = shift = 0
+    steps: list[tuple[str, int]] = []
+    byte_position = 0
     for operation in delta:
         if "insert" in operation:
+            steps.append(("insert", utf16_length(operation["insert"])))
+            continue
+        kind = "delete" if "delete" in operation else "retain"
+        end_byte = byte_position + operation.get(kind, 0)
+        steps.append((kind, utf16_length(raw[byte_position:end_byte].decode("utf-8"))))
+        byte_position = end_byte
+    return steps
+
+
+def shift_offsets(edges: list[tuple[int, bool]], steps: Sequence[tuple[str, int]]) -> list[int]:
+    """Map sorted UTF-16 edges through one edit's ``utf16_delta`` steps in one pass.
+
+    A True association stays before insertion at that edge; False moves after.
+    """
+    ordered = sorted((offset, not right, index) for index, (offset, right) in enumerate(edges))
+    mapped = [0] * len(edges)
+    cursor = position = shift = 0
+    for kind, count in steps:
+        if kind == "insert":
             while cursor < len(ordered) and ordered[cursor][:2] <= (position, False):
                 offset, _, index = ordered[cursor]
                 mapped[index] = offset + shift
                 cursor += 1
-            shift += utf16_length(operation["insert"])
+            shift += count
             continue
-        count = operation.get("retain", operation.get("delete", 0))
-        end_byte = byte_position + count
-        end = position + utf16_length(raw[byte_position:end_byte].decode("utf-8"))
+        end = position + count
         while cursor < len(ordered) and ordered[cursor][0] < end:
             offset, _, index = ordered[cursor]
-            mapped[index] = (position if "delete" in operation else offset) + shift
+            mapped[index] = (position if kind == "delete" else offset) + shift
             cursor += 1
-        if "delete" in operation:
-            shift -= end - position
-        position, byte_position = end, end_byte
+        if kind == "delete":
+            shift -= count
+        position = end
     for offset, _, index in ordered[cursor:]:
         mapped[index] = offset + shift
     return mapped
 
 
-def _changes(before: str, delta: list[dict]) -> list[tuple[int, int, int]]:
-    """An edit's changes as UTF-16 ``(start, end, inserted)`` in the text before it, a delete and the insert beside it merged."""
-    raw = before.encode("utf-8")
+def map_offsets(edges: list[tuple[int, bool]], before: str, delta: list[dict]) -> list[int]:
+    """Map sorted UTF-16 edges through one UTF-8 Text delta over ``before``."""
+    return shift_offsets(edges, utf16_delta(before, delta))
+
+
+def _changes(steps: Sequence[tuple[str, int]]) -> list[tuple[int, int, int]]:
+    """An edit's ``utf16_delta`` steps as ``(start, end, inserted)`` in the text before it, a delete and the insert beside it merged."""
     changes: list[list[int]] = []
-    position = byte_position = 0
+    position = 0
     last: list[int] | None = None
-    for operation in delta:
-        if "retain" in operation:
-            end_byte = byte_position + operation["retain"]
-            position += utf16_length(raw[byte_position:end_byte].decode("utf-8"))
-            byte_position, last = end_byte, None
+    for kind, count in steps:
+        if kind == "retain":
+            position, last = position + count, None
             continue
         if last is None:
             last = [position, position, 0]
             changes.append(last)
-        if "delete" in operation:
-            end_byte = byte_position + operation["delete"]
-            position += utf16_length(raw[byte_position:end_byte].decode("utf-8"))
-            byte_position, last[1] = end_byte, position
-        if "insert" in operation:
-            last[2] += utf16_length(operation["insert"])
+        if kind == "delete":
+            position += count
+            last[1] = position
+        else:
+            last[2] += count
     return [(start, end, inserted) for start, end, inserted in changes]
 
 
-def map_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict]) -> list[tuple[int, int]]:
-    """Map spans through one edit with exclusive edges, following nothing typed over.
+def shift_spans(spans: Sequence[tuple[int, int]], steps: Sequence[tuple[str, int]]) -> list[tuple[int, int]]:
+    """Map spans through one edit's ``utf16_delta`` steps with exclusive edges, following nothing typed over.
 
     A replaced span collapses: a selection still being commented on never
     moves onto text its author did not select.
     """
     edges = [(offset, right) for start, end in spans for offset, right in ((start, start == end), (end, True))]
-    mapped = map_offsets(edges, before, delta) if edges else []
+    mapped = shift_offsets(edges, steps) if edges else []
     return [(first, max(first, last)) for first, last in zip(mapped[::2], mapped[1::2])]
+
+
+def map_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict]) -> list[tuple[int, int]]:
+    """``shift_spans`` through one UTF-8 Text delta over ``before``."""
+    return shift_spans(spans, utf16_delta(before, delta)) if spans else []
 
 
 def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict],
                  open_ends: Collection[int] = ()) -> tuple[list[tuple[int, int]], set[int]]:
-    """Map comment spans through one edit, and say which have an open end after it.
+    """``follow_steps`` through one UTF-8 Text delta over ``before``."""
+    return follow_steps(spans, utf16_delta(before, delta), open_ends) if spans else ([], set())
+
+
+def follow_steps(spans: Sequence[tuple[int, int]], steps: Sequence[tuple[str, int]],
+                 open_ends: Collection[int] = ()) -> tuple[list[tuple[int, int]], set[int]]:
+    """Map comment spans through one edit's ``utf16_delta`` steps, and say which have an open end after it.
 
     The browser's ``cm/comment-range.ts`` follows the same rule. Edges are
     exclusive: text typed exactly at either edge lands outside. An edit that
@@ -186,10 +222,10 @@ def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict
     or replacing more than it, collapses the span, the comment whose text is
     gone. A collapsed span stays before text typed at it.
     """
-    moved = map_spans(spans, before, delta)
-    # Only a span this edit emptied can have been typed over; reading the edit's changes costs a pass over ``before``.
+    moved = shift_spans(spans, steps)
+    # Only a span this edit emptied can have been typed over.
     emptied = [index for index, ((start, end), (first, last)) in enumerate(zip(spans, moved)) if start < end and first == last]
-    changes = _changes(before, delta) if open_ends or emptied else []
+    changes = _changes(steps) if open_ends or emptied else []
     opened: set[int] = set()
     for index in open_ends:
         start, end = spans[index]
@@ -199,7 +235,7 @@ def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict
     replaced = {(first, last) for first, last, inserted in changes if inserted and first < last}
     typed_over = [index for index in emptied if index not in opened and tuple(spans[index]) in replaced]
     if typed_over:
-        wider = map_offsets([edge for index in typed_over for edge in ((spans[index][0], True), (spans[index][1], False))], before, delta)
+        wider = shift_offsets([edge for index in typed_over for edge in ((spans[index][0], True), (spans[index][1], False))], steps)
         for index, first, last in zip(typed_over, wider[::2], wider[1::2]):
             moved[index] = (first, last)
             opened.add(index)
