@@ -2,6 +2,7 @@ import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
+import { watchWidthSettle } from '$lib/documentWidthSettle';
 
 /**
  * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
@@ -213,9 +214,6 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
  */
 const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
-/** How long after a resize CodeMirror measures it (its resize observer's delay); its anchor scroll for the rewrap comes then. */
-const EDITOR_RESIZE_MEASURE_MS = 50;
-
 /**
  * Holds the reader's place in this editor until the returned stop is called: takes it at first open and from every
  * scroll of the reader's, and lays it again from the editor's one resize observation, which sees the editor's box move
@@ -237,27 +235,7 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	keeper.width = scroller.clientWidth;
 	let hand = false;
 	const byHand = () => { hand = true; };
-	// The width last laid while it changes, whether it has been resized since the last frame, when (in frame time) the
-	// loop first saw the change, whether a frame has begun since CodeMirror's resize measure was due (so that measure has
-	// run), and the frame asked to see whether the width has settled.
-	let laidWidth = scroller.clientWidth;
-	let resized = false;
-	let changedAt = 0;
-	let measured = false;
-	let settling = 0;
-	const settleWidth = () => {
-		settling = requestAnimationFrame((now) => {
-			settling = 0;
-			if (!view.dom.isConnected) return;
-			const width = scroller.clientWidth;
-			if (resized || width !== laidWidth) [laidWidth, resized, changedAt, measured] = [width, false, now, false];
-			else if (!applyPlace(view) && measured) {
-				keeper.width = width;
-				return;
-			} else measured = now - changedAt >= EDITOR_RESIZE_MEASURE_MS;
-			settleWidth();
-		});
-	};
+	const widthSettle = watchWidthSettle(scroller, () => view.dom.isConnected, () => applyPlace(view), (width) => { keeper.width = width; });
 	const onScroll = () => {
 		// The editor grew back past the text below the view and the browser cut the offset to the new end: that scroll is
 		// the browser's, and the resize observation that follows lays the place again.
@@ -276,8 +254,7 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 		if (scroller.clientWidth !== keeper.width) {
 			// The text rewrapping under an earlier press is the layout's move, not the reader's.
 			hand = false;
-			if (scroller.clientWidth !== laidWidth) resized = true;
-			if (!settling) settleWidth();
+			widthSettle.changed();
 		}
 		applyPlace(view);
 	}) : null;
@@ -287,7 +264,7 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	for (const kind of BY_HAND) scroller.addEventListener(kind, byHand, { capture: true, passive: true });
 	return () => {
 		observer?.disconnect();
-		if (settling) cancelAnimationFrame(settling);
+		widthSettle.stop();
 		scroller.removeEventListener('scroll', onScroll);
 		for (const kind of BY_HAND) scroller.removeEventListener(kind, byHand, { capture: true });
 		keepers.delete(view);
