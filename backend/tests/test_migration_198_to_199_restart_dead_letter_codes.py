@@ -61,18 +61,19 @@ def test_only_restart_rows_holding_text_are_rewritten():
     assert reasons == {old: CODE, done: CODE, "abc123def456": "no_owner", "other": "no_owner"}
 
 
-def test_unproven_rows_written_before_199_are_not_marked_code_named():
+def test_rows_written_before_199_keep_declared_names_private():
     db = _db()
     _row(db, "gh", "webhook.github.pr_opened", None, "no_owner")
-    _row(db, "declared", "pr.merged", None, "no_owner")
+    _row(db, "declared", "pr.merged", "id", "no_owner",
+         json.dumps({"event_id": "id", "connector": "agent", "facts": {}}))
 
     migrate_198_to_199(db)
     migrate_198_to_199(db)
 
-    assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {"gh": 0, "declared": 0}
+    assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {"gh": 1, "declared": 0}
 
 
-def test_backfill_only_proven_platform_envelopes():
+def test_backfill_historical_writers_and_keep_ambiguous_envelopes_private():
     db = _db()
     def envelope(connector, event_id):
         return json.dumps({"connector": connector, "event_id": event_id, "facts": {}})
@@ -82,24 +83,33 @@ def test_backfill_only_proven_platform_envelopes():
         ("declared", "email.received", "e2", envelope("my_agent", "e2"), 0),
         # A connector registered after declared intake may have been an agent namespace.
         ("later", "event", "e3", envelope("imap", "e3"), 0),
-        ("router", "webhook.github.push", "e4", json.dumps({"repository": {}}), 0),
-        ("watch", "automation.watch_expired", "e5", json.dumps({"watch_id": "w"}), 0),
-        ("bulletin", "system_bulletin.infrastructure", "e6", json.dumps({"reason": "x", "item": "i"}), 0),
-        ("failed_wake", "wake.failed", "e7", json.dumps({"message_id": "m", "summary": "x"}), 0),
-        ("runner", "script.owner_gone", "e8", json.dumps({"schedule_id": "s", "summary": "x"}), 0),
-        ("script_wake", "script.error", "e9", json.dumps({"owner": "o", "summary": "x"}), 0),
-        ("quiet_watch", "github.ingress_overdue", None, json.dumps({"pull_requests": []}), 0),
+        ("router", "webhook.github.check_suite_completed", "e4", json.dumps({"repository": {}}), 1),
+        ("watch", "automation.watch_expired", "e5", json.dumps({"watch_id": "w"}), 1),
+        ("bulletin", "system_bulletin.infrastructure", "e6", json.dumps({"reason": "x", "item": "i"}), 1),
+        ("failed_wake", "wake.failed", "e7", json.dumps({"message_id": "m", "summary": "x"}), 1),
+        ("runner", "script.owner_gone", "e8", json.dumps({"schedule_id": "s", "summary": "x"}), 1),
+        ("script_wake", "script.error", "e9", json.dumps({"owner": "o", "summary": "x"}), 1),
+        ("quiet_watch", "github.ingress_overdue", None, json.dumps({"pull_requests": []}), 1),
+        ("bad_facts", "secret", "e13", json.dumps({"event_id": "e13", "connector": "gmail", "facts": []}), 0),
+        ("extra", "secret", "e14", json.dumps({"event_id": "e14", "connector": "gmail", "facts": {}, "x": 1}), 0),
         ("missing", "event", "e10", None, 0),
         ("malformed", "event", "e11", "{", 0),
         (restart_dead_letter_id("e12"), "webhook.github.push", "e12", envelope("gmail", "e12"), 0),
     ]
     for row_id, event, external, payload, _ in rows:
-        _row(db, row_id, event, external, "no_owner", payload)
+        reason = "check_suite_noise_parked" if row_id == "router" else "no_owner"
+        _row(db, row_id, event, external, reason, payload)
     migrate_198_to_199(db)
     migrate_198_to_199(db)
     assert dict(db.execute("SELECT id, code_named FROM dead_letter_events")) == {
         row_id: expected for row_id, _, _, _, expected in rows
     }
+    from infra.audit_set_aside import set_aside
+
+    db.row_factory = sqlite3.Row
+    reading = set_aside(db, "2026-11-09T00:00:00Z", "2026-11-11T00:00:00Z")
+    assert any(row["internal_event"] == "webhook.github.check_suite_completed"
+               and row["reason"] == "check_suite_noise_parked" for row in reading)
 
 
 def test_an_install_without_the_table_is_left_alone():

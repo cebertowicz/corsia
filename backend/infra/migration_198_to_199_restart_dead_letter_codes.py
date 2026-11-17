@@ -6,10 +6,11 @@ as a ``dead_letter_events.reason``; it now writes the code
 step gives the rows written before the change the same code, so a read of set
 aside events over any window names their real reason.
 
-The step also adds ``code_named``. It marks old rows matching the platform
-writer's envelope for connectors registered from declared-event intake's
-introduction through this migration, excluding restart replay rows. Other old
-rows remain private: their name and payload do not establish who chose the name.
+The step also adds ``code_named``. Old non-platform rows are marked when their
+payload is readable and has no connector key. Rows that could be platform events
+are marked only for the exact envelope and connectors registered throughout
+declared-event intake; missing or malformed payloads and other platform-shaped
+rows remain private. Restart replay rows remain unmarked.
 
 Restart rows are found exactly: each restart dead letter's id is the uuid5 of
 its delivery id (its ``external_id``) under a fixed seed, which no other
@@ -41,18 +42,22 @@ def restart_dead_letter_id(delivery_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{_SEED}:{delivery_id}"))
 
 
-def _old_platform_code_named(row_id: str, external_id: str | None, payload: str | None) -> bool:
-    # Restart replay stores arbitrary webhook payloads; even one shaped like an
-    # envelope is not evidence of a platform writer.
-    if external_id is None or row_id == restart_dead_letter_id(external_id):
+def _old_code_named(row_id: str, external_id: str | None, payload: str | None) -> bool:
+    # Restart replay stores arbitrary webhook payloads, including possible envelopes.
+    if external_id is not None and row_id == restart_dead_letter_id(external_id):
         return False
     try:
         data = json.loads(payload or "")
     except (TypeError, ValueError):
         return False
-    return (isinstance(data, dict) and set(data) == {"event_id", "connector", "facts"}
-            and data["event_id"] == external_id and isinstance(data["facts"], dict)
-            and isinstance(data["connector"], str) and data["connector"] in _EARLY_CONNECTORS)
+    # Every declared event has a connector key. All other historic writers
+    # choose the name in code; a loose test keeps ambiguous envelopes private.
+    if not isinstance(data, dict) or "connector" not in data:
+        return True
+    return (set(data) == {"event_id", "connector", "facts"}
+            and external_id is not None and data["event_id"] == external_id
+            and isinstance(data["facts"], dict) and isinstance(data["connector"], str)
+            and data["connector"] in _EARLY_CONNECTORS)
 
 
 def migrate_198_to_199(db: sqlite3.Connection) -> None:
@@ -68,7 +73,7 @@ def migrate_198_to_199(db: sqlite3.Connection) -> None:
         )
         named = [(row_id,) for row_id, external_id, payload in db.execute(
             "SELECT id, external_id, payload_json FROM dead_letter_events"
-        ) if _old_platform_code_named(row_id, external_id, payload)]
+        ) if _old_code_named(row_id, external_id, payload)]
         db.executemany("UPDATE dead_letter_events SET code_named=1 WHERE id=?", named)
     ids = [
         (_CODE, row_id)

@@ -10,8 +10,11 @@ only when its writer stored ``code_named``: CORSIA's code chose the name (a
 built-in connector's kind, GitHub's routed kinds, a kind the platform parks
 itself, including script failure wakes). Other names, including declared event
 types, are counted under ``DECLARED``, so no project's or user's names cross
-to another. Some pre-199 rows have their marks backfilled; unproven names stay
-under ``DECLARED``.
+to another. For pre-199 rows the migration marks readable non-platform shapes
+without a connector key, and exact platform envelopes for the early built-in
+connectors. Declared and other ambiguous platform-shaped rows, and rows with
+missing or malformed payloads, stay under ``DECLARED``. Restart replay rows
+are counted under the fixed ``webhook.github`` kind.
 """
 
 from __future__ import annotations
