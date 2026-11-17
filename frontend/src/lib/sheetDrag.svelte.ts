@@ -93,7 +93,6 @@ export function createSheetDrag(props: {
 		/** How far the sheet has been pulled up past its height while it can grow, in px; it grows by that much, up to its full height. */
 		get pull() { return pullY; },
 		get dragging() { return dragging; },
-		start: startDrag,
 		press,
 		move: moveDrag,
 		finish: finishDrag,

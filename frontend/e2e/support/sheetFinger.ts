@@ -5,7 +5,8 @@ import { type Locator, type Page } from '@playwright/test';
  * WebKit (Playwright's WebKit has no touch input but taps). The press goes to the element under the point, as a touch does; each
  * move and the lift go to that same element, as they would under the sheet's pointer capture. Pointer id 1 is the one every
  * browser keeps active, so the sheet's setPointerCapture accepts it rather than throwing for an unknown pointer.
- * Not exercised: the browser's own touch-action handling, which only a real finger (or Chromium's CDP touch) drives.
+ * Not exercised: the browser's own touch-action handling, which only a real finger drives; `realTouchDrag` stands in for one
+ * in Chromium.
  */
 async function send(page: Page, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number): Promise<void> {
 	await page.evaluate(({ type, x, y }) => {
@@ -46,4 +47,19 @@ export async function fingerDrag<T>(page: Page, at: { x: number; y: number }, st
 	if (hold) await page.waitForTimeout(hold);
 	await send(page, 'pointerup', at.x, at.y + (steps.at(-1) ?? 0));
 	return seen;
+}
+
+/**
+ * The same drag as `fingerDrag`, through Chromium's own touch input (CDP), so the browser decides as it would for a finger
+ * whether the touch is the page's to pan or the sheet's to drag (touch-action). Chromium only.
+ */
+export async function realTouchDrag(page: Page, at: { x: number; y: number }, steps: number[]): Promise<void> {
+	const touch = await page.context().newCDPSession(page);
+	await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y, id: 1 }] });
+	for (const dy of steps) {
+		await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x, y: at.y + dy, id: 1 }] });
+		await painted(page);
+	}
+	await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	await touch.detach();
 }

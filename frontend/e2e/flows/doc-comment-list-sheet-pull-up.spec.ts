@@ -2,7 +2,7 @@ import path from 'node:path';
 import { type Page } from '@playwright/test';
 import { expect, test } from '../support/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { centre, fingerDrag, painted } from '../support/sheetFinger';
+import { centre, fingerDrag, painted, realTouchDrag } from '../support/sheetFinger';
 
 /**
  * The phone comment list drops to a half sheet when the reader taps a card or its Go to text, so they can see the text it points
@@ -131,7 +131,56 @@ async function pullUpFromHead(page: Page, rest: { height: number }) {
 	return raised;
 }
 
+/**
+ * Where the document stands and what holds focus, once the document has stopped scrolling (a card tap scrolls to its text).
+ * The first read marks the focused element, so `same` says whether focus is still on it.
+ */
+async function readerPlace(page: Page, mark = false): Promise<{ scrollTop: number; same: boolean }> {
+	const read = () => page.evaluate((mark) => {
+		let scroller = document.querySelector('.cm-content')?.parentElement ?? null;
+		while (scroller && !(/(auto|scroll)/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
+		const held = window as unknown as { __readerFocus?: Element | null };
+		if (mark) held.__readerFocus = document.activeElement;
+		return { scrollTop: scroller?.scrollTop ?? -1, same: document.activeElement === held.__readerFocus };
+	}, mark);
+	let last = await read();
+	for (let i = 0; i < 10; i++) {
+		await page.waitForTimeout(150);
+		const now = await read();
+		if (now.scrollTop === last.scrollTop) return mark ? read() : now;
+		last = now;
+	}
+	return last;
+}
+
 test.describe(`${TAG} list sheet`, () => {
+	test('takes touch: the grabber and the head row are touch-action none, so a finger on them drags the sheet, not the page', async ({ page }) => {
+		await openDocument(page);
+		await openList(page);
+		const actions = await sheet(page).evaluate((panel) => [panel.querySelector('.drawer-drag-region'), panel.querySelector('.drawer-heading')]
+			.map((el) => el ? getComputedStyle(el).touchAction : 'missing'));
+		expect(actions, 'grabber, then head row').toEqual(['none', 'none']);
+	});
+
+	test('takes touch: a real finger on the grabber, then on the head row, pulls the half sheet up while the document and focus stay put', async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-mobile', 'Real touch input (CDP) is Chromium only');
+		const ids = await openDocument(page);
+		await openList(page);
+		for (const [id, from, handle] of [[ids[2], 'the grabber', sheet(page).locator('.drawer-drag-region')], [ids[3], 'the head row', head(page).locator('h2')]] as const) {
+			await card(page, id).locator('[data-discussion-original]').tap();
+			const rest = await expectHalf(page, `a card tap before a pull on ${from}`);
+			const before = await readerPlace(page, true);
+			await realTouchDrag(page, await centre(handle), [-10, -20, -30, -40, -50, -60]);
+			await sheetSettled(page);
+			const raised = await sheetNow(page);
+			expect(raised.half, `pulled up from ${from}, the sheet is full`).toBe(false);
+			expect(raised.height, `and taller than at half (${raised.height} from ${rest.height})`).toBeGreaterThan(rest.height + 60);
+			const after = await readerPlace(page);
+			expect(after.scrollTop, `a pull on ${from} leaves the document where it was`).toBe(before.scrollTop);
+			expect(after.same, `and focus where it was`).toBe(true);
+		}
+	});
+
 	test('a card tap rests the list at half; its head row pulls it up with the finger, and it stays full through a list scroll', async ({ page }) => {
 		const ids = await openDocument(page);
 		await openList(page);
