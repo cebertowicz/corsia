@@ -163,12 +163,17 @@ async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open
 	return target;
 }
 
+/** The whole document from the editor's state; `.cm-content` holds only the lines CodeMirror has drawn, so its text can lack lines out of view. */
+const docText = (page: Page) => page.evaluate(() => {
+	const content = document.querySelector('.cm-content') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
+	return content!.cmTile!.root.view.state.doc.toString() as string;
+});
+
 /** Types one character with focus in the text and checks it lands inside or at an end of the commented selection, not at the top. */
 async function expectTypingAtSelection(page: Page, before: string, target: string) {
-	const text = page.locator('.cm-content');
-	expect(await text.textContent(), 'reaching the text typed nothing into it').toBe(before);
+	expect(await docText(page), 'reaching the text typed nothing into it').toBe(before);
 	await page.keyboard.type('Z');
-	const after = (await text.textContent())!;
+	const after = await docText(page);
 	let at = 0;
 	while (at < before.length && before[at] === after[at]) at++;
 	const from = before.indexOf(target), to = from + target.length;
@@ -182,7 +187,7 @@ test('@flow:doc-margin-cards after a new comment is cancelled and the column clo
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
 	const text = page.locator('.cm-content');
-	const before = (await text.textContent())!;
+	const before = await docText(page);
 	const target = await cancelDraftOnLine(page, doc);
 	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
 	await pill(page).click();
@@ -198,7 +203,7 @@ test('@flow:doc-margin-cards after a new comment is cancelled, Escape in the col
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
 	const text = page.locator('.cm-content');
-	const before = (await text.textContent())!;
+	const before = await docText(page);
 	const target = await cancelDraftOnLine(page, doc);
 	// Focus in a card in the column, as Tab from the text reaches it; Escape there gives focus back to the caret, and the column stays.
 	await card(page, doc, FIRST).getByRole('button').first().focus();
