@@ -11,6 +11,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -18,9 +19,15 @@ import pytest
 from infra.project_repo_policy import RepoPolicy
 from tools import shell_guard
 from tools.base_git_paths import base_git_control_paths, base_git_identity_paths
-from tests.worktree_sandbox_baseline import (
-    ConfinementBreach, per_worktree_renderer, unchanged,
-)
+
+
+class ConfinementBreach(AssertionError):
+    """The shell changed protected state or completed a forbidden operation; always a failure."""
+
+
+def unchanged(actual, expected):
+    if actual != expected:
+        raise ConfinementBreach("protected state changed")
 
 
 def test_worktree_profile_is_identical_at_zero_and_400_worktrees(tmp_path, monkeypatch):
@@ -39,10 +46,9 @@ def test_worktree_profile_is_identical_at_zero_and_400_worktrees(tmp_path, monke
 
 
 class RepositorySandbox:
-    def __init__(self, root, policy, safehouse, renderer):
+    def __init__(self, root, policy, safehouse):
         self.root, self.policy, self.safehouse = root, policy, safehouse
         self.repo = policy.path
-        self.renderer = renderer
         self.trees = self.repo / ".worktrees"
         self.own = self.trees / "own"
         self.peer = self.trees / "peer"
@@ -67,7 +73,7 @@ class RepositorySandbox:
         cwd = cwd or self.own
         profile = self.root / "repo.sb"
         # Exercise the strongest ordinary metadata grant as well as direct Git.
-        profile.write_text(before_rules + self.renderer(
+        profile.write_text(before_rules + shell_guard.pinned_repo_sandbox_profile(
             command, str(cwd), policies=[self.policy], grant_policies=[self.policy],
         ))
         return subprocess.run(
@@ -115,13 +121,13 @@ def repository_sandbox(monkeypatch, repo_name, protect_base):
             pytest.fail(f"CORSIA_REQUIRE_SAFEHOUSE=1: {reason}")
         pytest.skip(reason)
     with ExitStack() as stack:
-        def make(renderer):
+        def make():
             directory = stack.enter_context(tempfile.TemporaryDirectory(dir="/tmp"))
             root = Path(directory).resolve()
             repo = root / repo_name
             repo.mkdir()
             policy = RepoPolicy("project", "repo", repo, "main", protect_base)
-            sandbox = RepositorySandbox(root, policy, safehouse, renderer)
+            sandbox = RepositorySandbox(root, policy, safehouse)
             sandbox.setup_git("init", "-b", "main")
             (repo / "base.txt").write_text("base\n")
             sandbox.setup_git("add", "base.txt")
@@ -130,14 +136,10 @@ def repository_sandbox(monkeypatch, repo_name, protect_base):
             sandbox.setup_git("worktree", "add", "-b", "peer", str(sandbox.peer))
             monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [policy])
             monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
-            if renderer is not shell_guard.pinned_repo_sandbox_profile:
-                renderer.__globals__["list_registered_repo_policies"] = lambda: [policy]
-                renderer.__globals__["list_unsupported_pinned_repos"] = lambda _: []
             # Fail on a broken launch instead of mistaking it for confinement.
             sandbox.allowed("printf launched > launch-check && cat launch-check")
-            sandbox.make_baseline = lambda: make(per_worktree_renderer())
             return sandbox
-        yield make(shell_guard.pinned_repo_sandbox_profile)
+        yield make()
 
 
 @pytest.mark.integration
@@ -217,6 +219,59 @@ def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, 
                else f"mkdir {shlex.quote(str(target))}")
     sandbox.denied(command)
     assert not target.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("operation", [
+    "touch", "chmod", "xattr", "copytree", "rsync", "cp-preserve",
+])
+def test_real_worktree_root_metadata_stays_writable(repository_sandbox, operation):
+    sandbox = repository_sandbox
+    source = sandbox.root / "source"
+    (source / "sub").mkdir(parents=True)
+    (source / "copied").write_text("copied")
+    (source / "sub" / "nested").write_text("nested")
+    quoted = shlex.quote(str(source))
+    command = {
+        "touch": "touch .",
+        "chmod": "chmod 755 .",
+        "xattr": "xattr -w com.corsia.probe value .",
+        "copytree": (f"{shlex.quote(sys.executable)} -I -c "
+                     f"'import shutil, sys; shutil.copytree(sys.argv[1], \".\", dirs_exist_ok=True)' {quoted}"),
+        "rsync": f"rsync -a {quoted}/ ./",
+        "cp-preserve": f"cp -Rp {quoted}/. .",
+    }[operation]
+    sandbox.allowed(command)
+    if operation in {"copytree", "rsync", "cp-preserve"}:
+        assert (sandbox.own / "copied").read_text() == "copied"
+        assert (sandbox.own / "sub" / "nested").read_text() == "nested"
+    # The worktree's pointer is untouched by a root-level copy.
+    assert sandbox.own.joinpath(".git").read_text().startswith("gitdir:")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("attack", [
+    "create-folder", "create-file", "symlink", "hard-link", "rename", "delete-empty", "replace-empty",
+])
+def test_real_worktree_folder_immediate_entries_cannot_change(repository_sandbox, attack):
+    sandbox = repository_sandbox
+    trees = sandbox.trees
+    (trees / "empty").mkdir()
+    (trees / "spare").mkdir()
+    (sandbox.own / "ordinary").write_text("ordinary")
+    q = lambda path: shlex.quote(str(path))  # noqa: E731
+    command = {
+        "create-folder": f"mkdir {q(trees / 'new')}",
+        "create-file": f"touch {q(trees / 'new')}",
+        "symlink": f"ln -s / {q(trees / 'new')}",
+        "hard-link": f"ln {q(sandbox.own / 'ordinary')} {q(trees / 'new')}",
+        "rename": f"mv {q(sandbox.peer)} {q(trees / 'new')}",
+        "delete-empty": f"rmdir {q(trees / 'empty')}",
+        "replace-empty": (f"/usr/bin/perl -e 'rename($ARGV[0], $ARGV[1]) or die $!' "
+                          f"{q(trees / 'spare')} {q(trees / 'empty')}"),
+    }[attack]
+    sandbox.denied(command)
+    unchanged(sorted(path.name for path in trees.iterdir()), ["empty", "own", "peer", "spare"])
 
 
 @pytest.mark.integration

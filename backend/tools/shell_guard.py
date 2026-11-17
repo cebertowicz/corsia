@@ -39,7 +39,7 @@ from tools.sandbox_config import (
     registered_repo_for_path,
     repo_worktree_root,
 )
-from tools.sandbox_git import sandbox_literal, worktree_pointer_rules
+from tools.sandbox_git import sandbox_literal, worktree_folder_rules, worktree_pointer_rules
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.workspace_git_paths import workspace_git_rules
@@ -782,8 +782,8 @@ def pinned_repo_sandbox_profile(
     elif controlled_policy is None:
         rules.extend(
             _git_dir_grant(repo) for repo, policy in policy_by_repo.items()
-            if repo in grant_repos and (bool(listed_worktrees[repo]) if repo in listed_worktrees
-                                        else _has_verified_worktree(policy, repo))
+            if repo in grant_repos and (_has_verified_worktree(policy, repo) if policy.protect_base_checkout
+                                        else bool(listed_worktrees[repo]))
         )
     for policy in policies:
         repo = policy.path.resolve(strict=False)
@@ -804,8 +804,8 @@ def pinned_repo_sandbox_profile(
         # Any case: a base checkout has no commondir, and a literal rule misses a new spelling.
         any_case = (repo / ".git" / "commondir", repo / ".git" / "hooks")
         rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
-        if repo != worktree_control_repo and _enforceable(policy_by_repo[repo]):
-            rules.extend(worktree_pointer_rules(repo, listed_worktrees.get(repo)))
+        if repo != worktree_control_repo and _enforceable(owner := policy_by_repo[repo]):
+            rules.extend(worktree_folder_rules(repo) if owner.protect_base_checkout else worktree_pointer_rules(listed_worktrees[repo]))
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
             f'(deny file-write* (subpath "{_sandbox_path(root)}"))'

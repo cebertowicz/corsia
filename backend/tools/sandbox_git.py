@@ -35,28 +35,37 @@ def worktree_folder_rules(repo: Path) -> list[str]:
     the depth, so neither a similarly named sibling nor a deeper ``.worktrees``
     matches. The folder and its immediate entries are pinned, so a ``.git``
     prepared deeper cannot be renamed into place, and every immediate entry's
-    ``.git`` (file, directory, any case) stays unwritable.
+    ``.git`` (file, directory, any case) stays unwritable. An immediate entry
+    keeps only its own metadata writable (times, mode, xattrs, flags, owner,
+    ACL), so ``touch .`` or a copy that preserves attributes still works at a
+    worktree root. Creating, removing or renaming an entry checks other
+    operations, which stay denied.
     """
     trees = repo / ".worktrees"
     subtree = f'(subpath "{sandbox_literal(trees)}")'
     pattern = sandbox_any_case(trees)
 
-    def deny(regex: str) -> str:
-        return f'(deny file-write* (require-all {subtree} (regex #"^{pattern}/{regex}")))'
+    def rule(effect: str, regex: str) -> str:
+        return f'({effect} (require-all {subtree} (regex #"^{pattern}/{regex}")))'
 
     return [
         f'(deny file-write* (literal "{sandbox_literal(trees)}"))',
-        deny("[^/]+$"),
-        deny("[^/]+/[.][Gg][Ii][Tt](/|$)"),
+        rule("deny file-write*", "[^/]+$"),
+        rule(f"allow {' '.join(ENTRY_METADATA_WRITES)}", "[^/]+$"),
+        rule("deny file-write*", "[^/]+/[.][Gg][Ii][Tt](/|$)"),
     ]
 
 
-def worktree_pointer_rules(repo: Path, worktrees: list[Path] | None) -> list[str]:
-    """Worktree ``.git`` denies: the constant folder rules for a protected base
-    (``worktrees`` is None), else one literal per worktree the listing proved,
-    as unprotected repositories have always had."""
-    if worktrees is None:
-        return worktree_folder_rules(repo)
+# Seatbelt operations that change an existing entry's own metadata, not its name.
+ENTRY_METADATA_WRITES = (
+    "file-write-times", "file-write-mode", "file-write-xattr",
+    "file-write-flags", "file-write-owner", "file-write-acl",
+)
+
+
+def worktree_pointer_rules(worktrees: list[Path]) -> list[str]:
+    """One literal ``.git`` deny per worktree the listing proved, as
+    unprotected repositories have always had."""
     return [f'(deny file-write* (literal "{sandbox_literal(tree / ".git")}"))' for tree in worktrees]
 
 

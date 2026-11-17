@@ -8,8 +8,9 @@ import pytest
 
 from infra.project_repo_policy import RepoPolicy
 from tools import shell_guard
-from tests.test_worktree_folder_sandbox import protect_base, repository_sandbox, repo_name  # noqa: F401
-from tests.worktree_sandbox_baseline import ConfinementBreach, unchanged
+from tests.test_worktree_folder_sandbox import (  # noqa: F401
+    ConfinementBreach, protect_base, repository_sandbox, repo_name, unchanged,
+)
 
 
 @pytest.mark.parametrize("name,sibling", [
@@ -184,6 +185,21 @@ def test_folder_rules_only_for_enforceable_repositories(tmp_path, monkeypatch, k
         assert ".worktrees" not in text
 
 
+def test_immediate_entries_reopen_only_their_own_metadata(tmp_path):
+    from tools.sandbox_git import worktree_folder_rules
+
+    container, entry_deny, entry_allow, pointer_deny = worktree_folder_rules(tmp_path / "repo")
+    assert entry_deny.startswith("(deny file-write* ") and entry_deny.endswith('[^/]+$")))')
+    operations = entry_allow.removeprefix("(allow ").partition(" (require-all")[0].split()
+    assert set(operations) == {
+        "file-write-times", "file-write-mode", "file-write-xattr",
+        "file-write-flags", "file-write-owner", "file-write-acl",
+    }
+    # Same entries as the deny it follows; the pointer deny comes last and wins.
+    assert entry_allow.partition(" (require-all")[2] == entry_deny.partition(" (require-all")[2]
+    assert pointer_deny.startswith("(deny file-write* ") and "[.][Gg][Ii][Tt]" in pointer_deny
+
+
 def _linked_fixture(tmp_path):
     """A repo with one linked worktree and one leftover folder, built by Git."""
     import subprocess
@@ -222,57 +238,37 @@ def test_unprotected_pinned_repo_keeps_per_worktree_pointer_denies(tmp_path, mon
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("grant", [False, True])
-def test_unprotected_pinned_repo_profile_matches_former_producer(tmp_path, monkeypatch, grant):
-    from tests.worktree_sandbox_baseline import per_worktree_renderer
-
-    repo = _linked_fixture(tmp_path)
-    policy = RepoPolicy("project", "repo", repo, "main", False)
-    monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
-    former = per_worktree_renderer()
-    former.__globals__["list_unsupported_pinned_repos"] = lambda _: []
-    kwargs = {"policies": [policy], "grant_policies": [policy] if grant else None}
-    for cwd in (repo, repo / ".worktrees" / "own"):
-        assert shell_guard.pinned_repo_sandbox_profile("printf probe", str(cwd), **kwargs) == former(
-            "printf probe", str(cwd), **kwargs,
-        )
-
-
-@pytest.mark.integration
 @pytest.mark.parametrize("protect_base", [False])
-@pytest.mark.parametrize("probe", [
-    "worktree-add-from-worktree", "remove-stale-folder-with-git",
-    "new-pointer", "existing-pointer", "peer-ordinary",
+@pytest.mark.parametrize("probe,expected", [
+    # Only the proved worktrees' own pointers are denied; everything else in
+    # .worktrees stays as writable as the rest of the repository.
+    ("worktree-add-from-worktree", {"succeeded": True, "new_pointer": True}),
+    ("remove-stale-folder-with-git", {"succeeded": True, "stale_present": False}),
+    ("new-pointer", {"succeeded": True, "new_pointer": True}),
+    ("existing-pointer", {"succeeded": False}),
+    ("peer-ordinary", {"succeeded": True, "peer_written": True}),
 ])
-def test_real_unprotected_pinned_repo_matches_former_sandbox(repository_sandbox, protect_base, probe):
-    """Pinned but unprotected: the same outcome as the former producer, run for real."""
-    def attempt(sandbox):
-        new_root = sandbox.trees / "extra"
-        stale = sandbox.trees / "stale"
-        stale.mkdir()
-        (stale / ".git").write_text(f"gitdir: {sandbox.repo / '.git' / 'worktrees' / 'gone'}\n")
-        command = {
-            "worktree-add-from-worktree": f"git worktree add -b extra {shlex.quote(str(new_root))}",
-            "remove-stale-folder-with-git": f"rm -rf {shlex.quote(str(stale))}",
-            "new-pointer": f"mkdir {shlex.quote(str(new_root))} && printf forged > {shlex.quote(str(new_root / '.git'))}",
-            "existing-pointer": f"printf forged > {shlex.quote(str(sandbox.own / '.git'))}",
-            "peer-ordinary": f"printf allowed > {shlex.quote(str(sandbox.peer / 'ordinary'))}",
-        }[probe]
-        result = sandbox.run(command)
-        return {
-            "succeeded": result.returncode == 0,
-            "new_pointer": (new_root / ".git").exists(),
-            "stale_present": stale.exists(),
-            "own_pointer_forged": (sandbox.own / ".git").read_bytes() == b"forged",
-            "peer_written": (sandbox.peer / "ordinary").exists(),
-        }, result
-
-    outcome, result = attempt(repository_sandbox)
-    former, former_result = attempt(repository_sandbox.make_baseline())
-    assert outcome == former, (result.stderr, former_result.stderr)
-    # The proved pointer stays denied, as before.
-    assert not outcome["own_pointer_forged"]
-    if probe == "worktree-add-from-worktree":
-        assert outcome["succeeded"] and outcome["new_pointer"], result.stderr
-    if probe == "remove-stale-folder-with-git":
-        assert outcome["succeeded"] and not outcome["stale_present"], result.stderr
+def test_real_unprotected_pinned_repo_keeps_per_worktree_rules(repository_sandbox, protect_base, probe, expected):
+    """Pinned but unprotected: per-worktree pointer denies, run for real."""
+    sandbox = repository_sandbox
+    new_root = sandbox.trees / "extra"
+    stale = sandbox.trees / "stale"
+    stale.mkdir()
+    (stale / ".git").write_text(f"gitdir: {sandbox.repo / '.git' / 'worktrees' / 'gone'}\n")
+    command = {
+        "worktree-add-from-worktree": f"git worktree add -b extra {shlex.quote(str(new_root))}",
+        "remove-stale-folder-with-git": f"rm -rf {shlex.quote(str(stale))}",
+        "new-pointer": f"mkdir {shlex.quote(str(new_root))} && printf forged > {shlex.quote(str(new_root / '.git'))}",
+        "existing-pointer": f"printf forged > {shlex.quote(str(sandbox.own / '.git'))}",
+        "peer-ordinary": f"printf allowed > {shlex.quote(str(sandbox.peer / 'ordinary'))}",
+    }[probe]
+    result = sandbox.run(command)
+    outcome = {
+        "succeeded": result.returncode == 0,
+        "new_pointer": (new_root / ".git").exists(),
+        "stale_present": stale.exists(),
+        "peer_written": (sandbox.peer / "ordinary").exists(),
+    }
+    assert {key: outcome[key] for key in expected} == expected, result.stderr
+    # The proved pointer stays denied.
+    unchanged((sandbox.own / ".git").read_text().startswith("gitdir:"), True)
