@@ -17,7 +17,8 @@ def worktree_root_denial_guidance(output: str, cwd: Path, policies: list[RepoPol
     Only ``touch`` and ``utimensat`` refusals (``cp -p``) count: the same folder
     rules also refuse creating, removing and linking these folders, which this
     reply does not describe. Any other refusal in the same output keeps the
-    general reply, so its guidance is never dropped.
+    general reply, so its guidance is never dropped; that includes refusals the
+    line parser cannot read, such as Python's ``PermissionError`` text.
     """
     from tools.sandbox_config import policy_enforceable
 
@@ -32,7 +33,9 @@ def worktree_root_denial_guidance(output: str, cwd: Path, policies: list[RepoPol
         return containment_key(path) in containers or containment_key(path.parent) in containers
 
     refusals = refusals_in(output)
-    if not (containers and refusals and all(root_time_refusal(*refusal) for refusal in refusals)):
+    refusal_lines = sum("Operation not permitted" in line for line in output.splitlines())
+    if not (containers and refusals and refusal_lines == len(refusals)
+            and all(root_time_refusal(*refusal) for refusal in refusals)):
         return None
     return (
         "A worktree's own folder and the .worktrees folder cannot have their times "
