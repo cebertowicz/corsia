@@ -36,6 +36,7 @@ afterEach(() => {
 	pickedComments.set(new Set());
 	host?.remove();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 it('drops the unread tint once the thread is read and its picked card is let go', async () => {
@@ -72,7 +73,7 @@ it('reads every unread answer of a thread with several turns when its card is pi
 	setupSurface();
 	const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
 	vi.stubGlobal('fetch', fetcher);
-	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+	vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
 	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [turns(true)] }] as never);
 	component = mount(ChatCommentReadHost, { target: host.querySelector('#mount')! });
 	const cardNew = () => host.querySelector('[data-card="one"] .ct-head .ct-new') !== null;
@@ -94,7 +95,6 @@ it('reads every unread answer of a thread with several turns when its card is pi
 	expect(host.querySelector<HTMLElement>('[data-picked]')!.dataset.picked).toBe('');
 	await vi.waitFor(() => expect(tinted(), 'a read thread whose card is let go still has the unread tint').toBe(false));
 	expect(cardNew(), 'a read thread whose card is let go still says New').toBe(false);
-	delete (document as unknown as Record<string, unknown>).visibilityState;
 });
 
 it('drops the unread tint when the thread was read elsewhere and its card was never opened', async () => {
