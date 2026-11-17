@@ -47,8 +47,12 @@ async def test_conductor_and_worker_cannot_edit_person_owned_document_but_sugges
         new_owner_thread_id="ui", actor_thread_id=None, authority="signed-in-person",
         reason="test", source_path="test", db=scope["db"],
     )
-    with pytest.raises(DurableWritePolicyError):
+    with pytest.raises(DurableWritePolicyError) as caught:
         _write_text(scope, path, actor)
+    refusal = str(caught.value)
+    assert "Only the person edits it directly." in refusal
+    assert "the conductor, or the user edits" not in refusal
+    assert "doc_comment_create" in refusal and "comment instead" in refusal
     assert path.read_text(encoding="utf-8") == "alpha beta gamma\n"
     assert await _suggestion(scope, path, author=actor)
 
