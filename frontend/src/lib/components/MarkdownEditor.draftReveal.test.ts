@@ -27,7 +27,7 @@ function draftEditor() {
 	let height = 200;
 	Object.defineProperty(panel, 'offsetHeight', { get: () => height });
 	trackOverlaySheet(host, () => panel);
-	const reveal = component as unknown as { draftCovered(from: number, opening: boolean): boolean };
+	const reveal = component as unknown as { coveredBySheet(from: number, opening: boolean): boolean };
 	return { draft, reveal, setSheetHeight(next: number) { height = next; } };
 }
 
@@ -42,34 +42,34 @@ afterEach(async () => {
 describe('revealing a draft as its sheet moves', () => {
 	it('reveals when the sheet comes up', () => {
 		const { reveal } = draftEditor();
-		expect(reveal.draftCovered(5, true)).toBe(true);
+		expect(reveal.coveredBySheet(5, true)).toBe(true);
 	});
 
 	it('reveals the draft text the sheet or keyboard rises over', () => {
 		const { reveal, setSheetHeight } = draftEditor();
-		reveal.draftCovered(5, true);
+		reveal.coveredBySheet(5, true);
 		// The draft is at 400 to 420, above the sheet's top at 500; a keyboard lifts the sheet's top to 350, over the text.
 		setSheetHeight(350);
-		expect(reveal.draftCovered(5, false)).toBe(true);
+		expect(reveal.coveredBySheet(5, false)).toBe(true);
 	});
 
 	it('leaves a movement that does not reach the text alone', () => {
 		const { reveal, setSheetHeight } = draftEditor();
-		reveal.draftCovered(5, true);
+		reveal.coveredBySheet(5, true);
 		setSheetHeight(250);
-		expect(reveal.draftCovered(5, false)).toBe(false);
+		expect(reveal.coveredBySheet(5, false)).toBe(false);
 	});
 
 	it('never undoes a scroll the reader chose: text scrolled out of the band stays out as the sheet grows', () => {
 		const { reveal, draft, setSheetHeight } = draftEditor();
-		reveal.draftCovered(5, true);
+		reveal.coveredBySheet(5, true);
 		// The reader scrolls the draft's text up out of the band, then the textarea grows the sheet.
 		draft.top = -80; draft.bottom = -60;
 		setSheetHeight(350);
-		expect(reveal.draftCovered(5, false)).toBe(false);
+		expect(reveal.coveredBySheet(5, false)).toBe(false);
 		// Scrolled down to where the sheet now rests: not in view before either.
 		draft.top = 600; draft.bottom = 620;
 		setSheetHeight(450);
-		expect(reveal.draftCovered(5, false)).toBe(false);
+		expect(reveal.coveredBySheet(5, false)).toBe(false);
 	});
 });

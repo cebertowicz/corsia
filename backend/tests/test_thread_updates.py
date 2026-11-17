@@ -534,3 +534,23 @@ def test_an_account_move_row_changes_no_update_count_card_or_dot(db):
     display, attention = thread_updates.latest_by_thread_with_attention(db, ["owner"])
     assert display == {} and attention == {}
     assert thread_updates.seen_by_thread(db, "user", {}, ["owner"]) == {}
+
+
+@pytest.mark.parametrize(("outcome", "expected"), [
+    ("done", "done"),
+    ("done_follow_up", "done"),
+    ("closed", "closed"),
+    ("failed", "closed"),
+    (None, "closed"),
+])
+def test_a_person_step_whose_node_is_gone_reads_its_saved_outcome(db, outcome, expected):
+    node_id = _node(db)
+    _plan_update(db, "step", node_id, kind="person_step")
+    if outcome is not None:
+        _plan_update(db, "outcome", node_id, kind=outcome)
+    with raw_plan_seed(db):
+        db.execute("DELETE FROM plan_nodes WHERE id=?", (node_id,))
+
+    cards, _ = thread_updates.read_newest_cards(db, "owner", min_seq=0)
+    step = next(card for card in cards if card["kind"] == "person_step")
+    assert (step["step_state"], step["node_exists"]) == (expected, False)

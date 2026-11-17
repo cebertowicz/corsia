@@ -19,6 +19,9 @@ export class SuggestionRefused extends Error {
 	}
 }
 
+/** This side stopped before asking the server (the document could not be saved first); its message is a sentence written for the person. */
+export class SuggestionBlocked extends Error {}
+
 export async function decideSuggestion(
 	commentId: string, decision: 'accept' | 'reject', allFromAuthor = false
 ): Promise<SuggestionDecision> {
@@ -28,13 +31,13 @@ export async function decideSuggestion(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ decision, all_from_author: allFromAuthor }),
 	});
-	return decided(response, `Couldn't ${decision} this suggestion`);
+	return decided(response, allFromAuthor ? 'Couldn’t accept the suggestions. Try again.' : `Couldn’t ${decision} this suggestion. Try again.`);
 }
 
 /** Accept every open suggestion on a document, from every author, in one write; having none is not an error. */
 export async function acceptAllSuggestions(artifactId: string): Promise<SuggestionDecision> {
 	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all`, { sessionInAddress: true, method: 'POST' });
-	return decided(response, "Couldn't accept the suggestions");
+	return decided(response, 'Couldn’t accept the suggestions. Try again.');
 }
 
 async function decided(response: Response, fallback: string): Promise<SuggestionDecision> {

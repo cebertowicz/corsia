@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
 
+from host_access.browser_domain import url_domain
 from infra.delivery_states import (
     PROVIDER_MISSING_RESULT_REASON,
     TURN_ENDED_WITHOUT_RESULT_REASON,
@@ -62,8 +63,8 @@ class ToolDisplay:
     error_line: str | None = None
     # The argument the phrase names, unshortened; block summaries count by it.
     object: str = ""
-    # The shared browser window a visible `browser_open` put in front of the person: `{"host": ...}`. Stored on
-    # the Step when the call settles, never sent per call.
+    # The shared browser window a visible `browser_open` put in front of the person: `{"host": ..., "domain": ...}`.
+    # Stored on the Step when the call settles, never sent per call.
     browser_chip: dict | None = None
 
     def outcome_fields(self) -> dict:
@@ -118,12 +119,18 @@ def _browser_host(url: object) -> str | None:
 
 
 def _browser_chip(tool: str, arguments: object, outcome: ToolOutcome | None) -> dict | None:
-    """The chip for a visible `browser_open` that succeeded; a headless open puts nothing in front of anyone."""
+    """The chip for a visible `browser_open` that succeeded; a headless open puts nothing in front of anyone.
+
+    `domain` is the registrable domain the Public Suffix List names — the same value the pane's address bar and
+    a password step's title lead with (``host_access.browser_domain``) — so the chip can show which site a page
+    belongs to even when the host is long enough to be cut.
+    """
     if normalize_tool_name(tool) != "browser_open" or outcome != "done":
         return None
     if not isinstance(arguments, dict) or arguments.get("show_window") is not True:
         return None
-    return {"host": _browser_host(arguments.get("url"))}
+    url = arguments.get("url")
+    return {"host": _browser_host(url), "domain": url_domain(url)}
 
 
 def project_tool_display(

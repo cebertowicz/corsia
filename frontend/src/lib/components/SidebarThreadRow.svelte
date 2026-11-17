@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import type { Thread } from '$lib/stores/threads';
 	import {
 		activeCheckpoint,
@@ -157,7 +158,7 @@
 		<div class="thread-content">
 			{#if renaming}
 				<!-- svelte-ignore a11y_autofocus -->
-				<input
+				<input use:keepTyped={{ prose: false }}
 					class="thread-rename-input"
 					bind:value={renameValue}
 					onblur={onFinishRename}

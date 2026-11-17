@@ -72,19 +72,25 @@ window.addEventListener('load', () => {
 </script>"""
 
 
-# Page-context writes: a dropdown, an SVG target, a rich-text editor, a covered button and one far
-# below the fold, beside the person's own field.
+# Page-context writes: a dropdown, an SVG target, a rich-text editor, a covered button, one far below
+# the fold and one a sticky header can sit over, beside the person's own field.
 WRITES = """<!doctype html><title>Writes fixture</title>
+<header style="position:sticky;top:0;height:80px;z-index:1;background:#eee">Header</header>
 <input id=user value=person>
 <select id=choice><option value=a>Ay</option><option value=b>Bee</option></select>
 <svg width=60 height=40><rect id=shape width=60 height=40 fill=teal></rect></svg>
 <div id=rich contenteditable>rich</div>
 <div style="position:relative"><button id=covered>Under</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="height:600px"></div><button id=sticky>Under the header</button>
 <div style="height:3000px"></div><button id=far>Far</button>
 <script>
-window.clicks = {shape: 0, far: 0, covered: 0};
+window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
+
+# A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
+POPUP = """<!doctype html><title>Popup fixture</title>
+<button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
 
 # Password fields the probe must find without reading the whole DOM: in a same-origin frame, in open
 # and closed shadow roots, and named only by autocomplete, on a page whose DOM is over 1 MiB.
@@ -114,7 +120,8 @@ COOKIES = """<!doctype html><title>Cookies</title><script>document.title = docum
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
-             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -249,14 +256,8 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
         shutil.rmtree(profile, ignore_errors=True)
 
 
-def page_endpoint(rendered: str) -> str:
-    value = json.loads(rendered).get("cdpUrl")
-    assert isinstance(value, str) and value.startswith("ws"), rendered
-    return browser_cdp._page_endpoint(value)
-
-
 async def cdp_value(owner: BrowserSessionOwner, thread_id: str, expression: str):
-    endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+    endpoint = await owner.page_endpoint(thread_id)
     async with browser_cdp.CdpClient(endpoint) as cdp:
         result = await cdp.call("Runtime.evaluate", expression=expression, returnByValue=True)
     return result["result"].get("value")
@@ -282,7 +283,7 @@ async def test_shared_agent_actions_preserve_person_focus_caret_and_pointer(fixt
             agent_ref, button_ref = f"@{textboxes[1]}", f"@{button.group(1)}"
             # The person's caret is in their own field and their pointer rests at a distinct coordinate.
             await cdp_value(owner, thread_id, "document.querySelector('#user').focus(); document.querySelector('#user').setSelectionRange(1, 4); null")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call("Input.dispatchMouseEvent", type="mouseMoved", x=17, y=23)
             before = await cdp_value(owner, thread_id, "({ active: document.activeElement.id, start: document.querySelector('#user').selectionStart, end: document.querySelector('#user').selectionEnd, pointer })")
@@ -310,7 +311,7 @@ async def test_cdp_mouse_dispatch_clicks_the_visible_page():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             point = await cdp_value(owner, thread_id, "(() => { const box = document.querySelector('#agent-button').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()")
             for event_type in ("mouseMoved", "mousePressed", "mouseReleased"):
                 await browser_cdp.dispatch_mouse_event(endpoint, {
@@ -334,7 +335,7 @@ async def test_cdp_keyboard_dispatch_preserves_meta_shortcuts():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/keyboard.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             await cdp_value(owner, thread_id, "document.querySelector('#field').focus(); null")
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 4})
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4})
@@ -354,7 +355,7 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/form.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             for event_type, button, click_count in (("mouseMoved", "none", 0), ("mousePressed", "left", 1), ("mouseReleased", "left", 1)):
                 await browser_cdp.dispatch_mouse_event(endpoint, {"eventType": event_type, "x": 20, "y": 20, "button": button, "clickCount": click_count})
             for event in (
@@ -408,9 +409,14 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
             assert await owner.run(thread_id, ("select", "#choice", "Bee"), session="existing") == "ok"
             assert await owner.run(thread_id, ("click", "#shape"), session="existing") == "ok"
             assert await owner.run(thread_id, ("click", "#far"), session="existing") == "ok"
+            # In view, but with its centre under the sticky header: the write scrolls it clear first.
+            await cdp_value(owner, thread_id, (
+                "(() => { const r = document.querySelector('#sticky').getBoundingClientRect();"
+                " window.scrollBy(0, r.top + r.height / 2 - 40); return null; })()"))
+            assert await owner.run(thread_id, ("click", "#sticky"), session="existing") == "ok"
             with pytest.raises(browser_dom_write.DomWriteRefused, match="rich-text editor"):
                 await owner.run(thread_id, ("fill", "#rich", "agent"), session="existing")
-            with pytest.raises(browser_dom_write.DomWriteRefused, match="another element covers it"):
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
                 await owner.run(thread_id, ("click", "#covered"), session="existing")
             with pytest.raises(browser_dom_write.DomWriteRefused, match="no option"):
                 await owner.run(thread_id, ("select", "#choice", "Missing"), session="existing")
@@ -418,10 +424,57 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                 "({ choice: document.querySelector('#choice').value, clicks: window.clicks,"
                 " rich: document.querySelector('#rich').textContent, active: document.activeElement.id,"
                 " start: document.querySelector('#user').selectionStart, end: document.querySelector('#user').selectionEnd })"))
-            assert page == {"choice": "b", "clicks": {"shape": 1, "far": 1, "covered": 0}, "rich": "rich",
+            assert page == {"choice": "b", "clicks": {"shape": 1, "far": 1, "covered": 0, "sticky": 1}, "rich": "rich",
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+async def _shared_page_path(owner: BrowserSessionOwner, thread_id: str) -> str | None:
+    """The path of the page the pane shows, read through the resolver the pane and the agent share."""
+    async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+        result = await cdp.call("Runtime.evaluate", expression="location.pathname", returnByValue=True)
+    return result["result"].get("value")
+
+
+async def _shared_page_reaches(owner: BrowserSessionOwner, thread_id: str, path: str) -> tuple[str | None, str]:
+    """Wait up to 5 s for the shared page to be ``path``; return the last path and tab list seen."""
+    seen, tabs = None, ""
+    for _ in range(20):
+        seen = await _shared_page_path(owner, thread_id)
+        tabs = await owner.run(thread_id, ("tab", "list"), session="existing")
+        if seen == path:
+            break
+        await asyncio.sleep(0.25)
+    return seen, tabs
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_opens_the_popup_its_button_opens():
+    """With the pane open, an agent's click opens a sign-in popup, as the person's own click would.
+
+    The popup becomes the shared page (the pane's and the agent's), and when it closes itself, as a sign-in
+    popup does once it finishes, both return to the page that opened it.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-popup-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-popup", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/popup.html"), show_window=True, session="new")).startswith("Error:")
+            assert await owner.run(thread_id, ("click", "#open"), session="existing") == "ok"
+            seen, tabs = await _shared_page_reaches(owner, thread_id, "/popup-target.html")
+            assert seen == "/popup-target.html" and "/popup-target.html" in tabs, (seen, tabs)
+            async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+                await cdp.call("Runtime.evaluate", expression="setTimeout(() => window.close(), 0); null")
+            seen, tabs = await _shared_page_reaches(owner, thread_id, "/popup.html")
+            assert seen == "/popup.html" and "/popup-target.html" not in tabs, (seen, tabs)
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
@@ -534,7 +587,7 @@ async def test_shared_pane_input_to_frame_latency_reports_distribution():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with pane_screencast(endpoint) as (_cast, frames, next_frame):
                 # Starting a screencast sends the current picture without any page change.
                 await next_frame()
@@ -567,7 +620,7 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
             # Headless, as the pane's browser opens by default: a visible window under an emulated
             # viewport can skip the frame for a one-glyph change, which says nothing about the stream.
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=False, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with pane_screencast(endpoint) as (cast, frames, next_frame):
                 shown = (await next_frame())["deviceWidth"]
                 # Registered as the pane's cast, so the command path restarts it as it does in the app.

@@ -1,6 +1,7 @@
 import type { Thread } from '$lib/stores/threads';
 import type { View } from '$lib/homePaneConfig';
 import { TRANSCRIPT_MOVED } from '$lib/sheetClearance';
+import { coarsePointer } from '$lib/selectionButtonPlace';
 
 interface ChatViewportRef {
 	captureBottomOffset: () => void;
@@ -101,8 +102,9 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		if (document.querySelector('[data-keeps-text]')) document.dispatchEvent(new Event(TRANSCRIPT_MOVED));
 		else options.chatPanel()?.restoreBottomOffset();
 	};
+	// The keyboard-toolbar adjustments only make sense where a soft keyboard can open: a touch-primary device.
 	const onFocusIn = (e: FocusEvent) => {
-		if (!isEditableTarget(e.target)) return;
+		if (!isEditableTarget(e.target) || !coarsePointer()) return;
 		if (blurTimer !== undefined) clearTimeout(blurTimer);
 		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '60px');
@@ -129,7 +131,7 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		requestAnimationFrame(() => requestAnimationFrame(restoreTranscript));
 	};
 	const onFocusOut = (e: FocusEvent) => {
-		if (!isEditableTarget(e.target)) return;
+		if (!isEditableTarget(e.target) || !coarsePointer()) return;
 		if (blurTimer !== undefined) clearTimeout(blurTimer);
 		// Keep the current gesture stable through its synthesized click.
 		blurTimer = setTimeout(clearKeyboardInset, 0);

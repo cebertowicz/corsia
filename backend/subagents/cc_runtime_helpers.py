@@ -80,22 +80,6 @@ def native_stale_working_dir(
     return None
 
 
-def _check_live_cap() -> None:
-    """Refuse a new spawn while cap-many Claude Code processes are working.
-
-    Idle handles never count; the idle-retirement pass owns closing them.
-    """
-    from infra.subagent_caps import LiveSpawnCapExceeded, get_max_concurrent_live
-    from subagents.cc_idle_retirement import thread_titles, working_thread_ids
-
-    cap = get_max_concurrent_live()
-    working = working_thread_ids()
-    if len(working) >= cap:
-        raise LiveSpawnCapExceeded(
-            cap=cap, active=len(working), working=thread_titles(working),
-        )
-
-
 def _default_broadcast(session_id: str, message: dict) -> None:
     from infra import state
     state.broadcast_to_thread(session_id, message)

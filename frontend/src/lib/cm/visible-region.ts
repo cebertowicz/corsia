@@ -25,13 +25,22 @@ export function restingTop(panel: HTMLElement): number | null {
 	return panel.isConnected && backdrop ? backdrop.getBoundingClientRect().bottom - panel.offsetHeight : null;
 }
 
-function overlayTop(view: EditorView): number | null {
+/** The registered sheet over this editor while it is up, else null. */
+export function overlaySheet(view: EditorView): HTMLElement | null {
 	for (let element: HTMLElement | null = view.dom; element; element = element.parentElement) {
 		const panel = sheets.get(element)?.();
-		if (panel) return restingTop(panel);
+		if (panel) return panel;
 	}
 	return null;
 }
+
+function overlayTop(view: EditorView): number | null {
+	const panel = overlaySheet(view);
+	return panel ? restingTop(panel) : null;
+}
+
+/** Whether a registered sheet overlays this editor now, so the reader's band is shorter than the pane. */
+export const sheetOverlays = (view: EditorView): boolean => overlayTop(view) !== null;
 
 /**
  * The one answer to which part of the editor the reader can see and which element scrolls it, for every vertical comment scroll.

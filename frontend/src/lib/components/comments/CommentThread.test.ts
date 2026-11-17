@@ -66,22 +66,21 @@ describe('CommentThread', () => {
 		expect(host.querySelector<HTMLTextAreaElement>('.ct-input')?.value).toBe('half a reply');
 	});
 
-	it('draws an unpicked document margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', () => {
+	it.each([
+		['document', {}, { focused: true, scrollOnFocus: false }],
+		['chat', { chatSurface: true }, { chatSurface: true, opened: true }],
+	])('draws an unpicked %s margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', (_surface, surface, picked) => {
 		const unread = { ...reply, id: 'r1' };
-		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { hideReply: true, inMargin: true });
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { hideReply: true, inMargin: true, ...surface });
 		expect(host.textContent).toContain('1 reply');
 		expect(host.textContent).not.toContain(reply.text);
 		expect(host.querySelector('.ct-head')?.textContent).toContain('New');
 		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(true);
 		unmount(component!); host.remove();
 		// Picked, it shows the whole conversation at the usual clamp.
-		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { inMargin: true, focused: true, scrollOnFocus: false });
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { inMargin: true, ...picked });
 		expect(host.textContent).toContain(reply.text);
 		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(false);
-		unmount(component!); host.remove();
-		// A chat card at rest keeps its answers showing: they are read by being seen.
-		render(thread({ replies: [unread] }), false, { hideReply: true, inMargin: true, chatSurface: true });
-		expect(host.textContent).toContain(reply.text);
 	});
 
 	it('keeps a draft typed while the previous reply was still sending', async () => {
@@ -473,7 +472,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', orphaned: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text this suggestion replaces isn't in the document.");
+		expect(accept.title).toBe("Can’t accept: the text this suggestion replaces isn’t in the document.");
 		expect(host.textContent).toContain("The text this suggestion replaces isn't in the document.");
 	});
 
@@ -481,7 +480,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', textChanged: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text doesn't match this suggestion.");
+		expect(accept.title).toBe("Can’t accept: the text doesn’t match this suggestion.");
 		expect(host.querySelector('.ct-orphan')?.textContent).toBe("The text doesn't match this suggestion.");
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
 		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
@@ -536,8 +535,12 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text' }), false, { onDecision });
 		button(clicked).click(); flushSync();
 		expect(onDecision).toHaveBeenCalledWith('c1', decision);
-		expect(button(clicked).textContent).toBe(busyLabel);
-		expect(button(other).textContent).toBe(otherLabel);
+		expect(button(clicked).textContent?.trim()).toBe(busyLabel);
+		expect(button(clicked).getAttribute('aria-label')).toBe(`${busyLabel.replace('…', '')}: quote to new text`);
+		expect(button(other).textContent?.trim()).toBe(otherLabel);
+		expect(button(other).getAttribute('aria-label')).toBe(`${otherLabel}: quote to new text`);
+		expect(button(clicked).querySelector('.spinner')).not.toBeNull();
+		expect(button(clicked).getAttribute('aria-busy')).toBe('true');
 		expect(button(clicked).disabled).toBe(true);
 		expect(button(other).disabled).toBe(true);
 		button(other).click(); button(clicked).click();
@@ -546,6 +549,7 @@ describe('CommentThread', () => {
 		await vi.waitFor(() => expect(button(clicked).disabled).toBe(false));
 		expect(button(other).disabled).toBe(false);
 		expect(host.querySelector('.ct-suggestion-actions')?.textContent).not.toMatch(/Accepting|Rejecting/);
+		expect(host.querySelector('.ct-suggestion-actions .spinner')).toBeNull();
 	});
 
 	it('shows the refusal it is given, as an alert', () => {
@@ -690,5 +694,16 @@ describe('a decided suggestion that has replies', () => {
 		render(accepted({ resolved: true }));
 		expect(host.querySelector('.ct.resolved')).not.toBeNull();
 		expect(host.querySelector('.ct-decided')).toBeNull();
+	});
+});
+
+describe('CommentThread suggestion card in a short popover or sheet', () => {
+	it('keeps Accept and Reject in the pinned row below the reply field, so the field is never under them', () => {
+		render(thread({ replacement: 'new text' }));
+		const pin = host.querySelector('.ct-suggestion-pin[data-pin-bottom]');
+		const field = host.querySelector('.ct-compose');
+		expect(pin?.querySelector('.ct-suggestion-actions')).not.toBeNull();
+		expect(field).not.toBeNull();
+		expect(!!(field!.compareDocumentPosition(pin!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 	});
 });
