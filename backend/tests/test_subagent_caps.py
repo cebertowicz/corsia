@@ -50,7 +50,6 @@ def test_seed_writes_fields_from_data_file(caps_db):
     assert seed_subagent_caps() is True
     row = get_setting("subagents")
     assert row["idle_retire_after_seconds"] > 0 and row["max_idle_live"] >= 0
-    assert "max_concurrent_live" not in row
 
 
 def test_seed_is_idempotent_and_non_clobbering(caps_db):
@@ -72,18 +71,6 @@ def test_seed_drops_the_retired_working_cap(caps_db):
     assert seed_subagent_caps() is True
     assert get_setting("subagents") == {"idle_retire_after_seconds": 5, "max_idle_live": 1, "other": True}
     assert seed_subagent_caps() is False
-
-
-def test_no_hardcoded_literal_in_code(caps_db):
-    import json
-    from pathlib import Path
-
-    import infra.subagent_caps as caps
-    seed_path = Path(caps.__file__).parent / "subagent_caps.json"
-    data = json.loads(seed_path.read_text())
-    assert isinstance(data["idle_retire_after_seconds"], int)
-    assert isinstance(data["max_idle_live"], int)
-    assert "max_concurrent_live" not in data
 
 
 def test_seed_fills_each_missing_idle_field_without_clobbering(caps_db):

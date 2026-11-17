@@ -114,3 +114,25 @@ async def test_a_rules_queued_starts_are_capped_and_a_skip_shows_in_explain_and_
     [listed] = (await atool(OWNER, operation="list"))["rules"]
     assert (listed["starts_24h"], listed["skips_24h"]) == (2, 1)
     assert await worker_runner.drive() == 2
+
+
+@pytest.mark.asyncio
+async def test_a_start_behind_a_full_batch_of_skips_starts_in_the_same_pass(world, monkeypatch):
+    from automation import worker_runner
+    from events import rule_runs
+    from infra.database import get_db
+
+    world["reply"].write_text("HANG")
+    rule = await make_rule()
+    for n in range(worker_runner.BATCH + 1):
+        await request(f"pr-{n}@a1")
+    ids = [row[0] for row in get_db().execute(
+        "SELECT id FROM event_route_decisions WHERE rule_id=? ORDER BY id", (rule,)).fetchall()]
+    skipped_ids = set(ids[:worker_runner.BATCH])
+    real_skip = worker_runner._skip
+    monkeypatch.setattr(
+        worker_runner, "_skip",
+        lambda conn, row: rule_runs.TURNED_OFF if row["id"] in skipped_ids else real_skip(conn, row),
+    )
+    assert await worker_runner.drive() == 1
+    assert [row[0] for row in starts(rule)] == ["skipped"] * worker_runner.BATCH + ["started"]

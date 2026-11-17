@@ -105,9 +105,12 @@ async def drive() -> int:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
         claimed_ids: set[int] = set()
         made = 0
-        # Every queued start is claimed this pass, a batch at a time; one that waits goes back
-        # to the queue at its place and is passed over until the next pass.
-        while claimed := await run_in_db(_claim, None, frozenset(claimed_ids)):
+        # Every queued start is claimed or skipped this pass, a batch at a time; one that waits
+        # goes back to the queue at its place and is passed over until the next pass.
+        while True:
+            claimed, seen = await run_in_db(_claim, None, frozenset(claimed_ids))
+            if not seen:
+                break
             for row, run_input in claimed:
                 claimed_ids.add(row["id"])
                 made += await _start(row, run_input)
@@ -144,14 +147,20 @@ def _skip(conn: sqlite3.Connection, row: Mapping[str, Any]) -> str | None:
 
 
 def _claim(db: sqlite3.Connection | None = None, passed: frozenset[int] = frozenset(),
-           ) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
-    """Claim the next batch of queued starts, oldest first, past ``passed``."""
+           ) -> tuple[list[tuple[Mapping[str, Any], dict[str, Any]]], int]:
+    """Claim or skip the next batch of queued starts, oldest first, past ``passed``.
+
+    Returns the claimed starts and how many queued starts the batch handled (claimed or
+    skipped), so a batch of only skips still lets the pass go on to the next.
+    """
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
     cleanup: list[tuple[str, int, str | None]] = []
+    seen = 0
     with write_transaction(db, scope="worker_starts_claim") as conn:
         for row in worker_starts.queued(conn, BATCH + len(passed)):
             if row["id"] in passed:
                 continue
+            seen += 1
             skipped = _skip(conn, row)
             if skipped is not None:
                 if row["origin"] and row["origin"].startswith("rule_set:"):
@@ -166,7 +175,7 @@ def _claim(db: sqlite3.Connection | None = None, passed: frozenset[int] = frozen
                 claimed.append((row, run_input))
     for owner, decision, staging in cleanup:
         _remove_inputs(owner, decision, staging)
-    return claimed
+    return claimed, seen
 
 
 def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None) -> dict[str, Any]:
