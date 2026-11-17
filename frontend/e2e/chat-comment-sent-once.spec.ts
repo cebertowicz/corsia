@@ -1,7 +1,8 @@
-import { expect, test, type Page } from './support/test';
+import { expect, test } from './support/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses, setMockDeliveryDelay } from './support/mock';
 import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { framesWithBoth } from './support/sentOnceFrames';
 
 /**
  * A sent comment or reply is in its box or in its thread, never in both. The server answers the post
@@ -12,31 +13,6 @@ import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread
 // where a sent comment shows up while it is also still in its box.
 test.use({ viewport: { width: 1920, height: 1000 } });
 const DELAY_SECONDS = 2;
-
-/** Sample every frame until `act` resolves; count the frames that showed `note` in a field and in a thread at once. */
-async function framesWithBoth(page: Page, note: string, act: () => Promise<void>) {
-  await page.evaluate((text) => {
-    const state = { both: 0, inBox: 0, inThread: 0, running: true };
-    (window as any).__sentOnce = state;
-    const holds = (node: Element) => /^(TEXTAREA|INPUT)$/.test(node.tagName) && (node as HTMLTextAreaElement).value.includes(text);
-    const tick = () => {
-      const inBox = [...document.querySelectorAll('textarea, input')].some(holds);
-      const inThread = [...document.querySelectorAll('.chat-margin-card, [role="dialog"][aria-label="Comment"]')]
-        .some((card) => (card.textContent ?? '').includes(text));
-      if (inBox) state.inBox++;
-      if (inThread) state.inThread++;
-      if (inBox && inThread) state.both++;
-      if (state.running) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, note);
-  await act();
-  return page.evaluate(() => {
-    const state = (window as any).__sentOnce;
-    state.running = false;
-    return state as { both: number; inBox: number; inThread: number };
-  });
-}
 
 test('a sent comment and its reply are never in the box and the thread together', async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name === 'chromium-mobile', 'Requires disposable desktop mock instance');
