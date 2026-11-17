@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -9,9 +10,9 @@ from datetime import datetime, timezone
 from automation.turn_end_effects import TurnEndEffects, record_external_turn_end
 from connections.auth_failure import auth_failure_kind
 from core.turn_core import TurnIdentity, TurnTerminalResult
-from infra.db_async import run_in_db_unless_owned
+from infra.db_async import run_in_db, run_in_db_unless_owned
 from infra.queries import insert_message
-from infra.send_broadcast import broadcast_stored_message
+from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
 from llm.error_cause import cause_fields
 import subagents.cc_event_tool_boundary as tool_boundary
 import subagents.cc_trust as cc_trust
@@ -370,15 +371,28 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
 
 
 def notify_parent(live, child_id: str, content: str, bcast, db) -> None:
-    """Publish the retained logical-close notice for a user-driven child."""
-    message_id = insert_message(
-        live.parent_thread_id,
-        "system",
-        content,
-        {"type": "subagent_done", "child_thread_id": child_id},
-        msg_id=str(uuid.uuid4()),
-        db=db,
-    )
-    broadcast_stored_message(
-        live.parent_thread_id, message_id, db=db, broadcast=bcast,
-    )
+    """Publish the retained logical-close notice for a user-driven child.
+
+    A caller-owned connection writes in the caller's transaction. Without one,
+    handle finalization runs on the event loop, where a write would stall every
+    request, so a tracked task writes the notice on the DB pool (#2913).
+    """
+    parent = live.parent_thread_id
+    metadata = {"type": "subagent_done", "child_thread_id": child_id}
+    message_id = str(uuid.uuid4())
+    try:
+        loop = None if db is not None else asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        insert_message(parent, "system", content, metadata, msg_id=message_id, db=db)
+        broadcast_stored_message(parent, message_id, db=db, broadcast=bcast)
+        return
+
+    async def write_off_loop() -> None:
+        await run_in_db(insert_message, parent, "system", content, metadata, msg_id=message_id)
+        await broadcast_message_rows(parent, (message_id,), broadcast=bcast)
+
+    from ws.ingress import track_background_task
+
+    track_background_task(loop.create_task(write_off_loop()))
