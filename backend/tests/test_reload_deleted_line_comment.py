@@ -51,6 +51,36 @@ def test_the_line_above_does_not_take_the_comment_either():
     assert (comment["from_off"], comment["to_off"]) == stored_place
 
 
+def test_a_blank_line_between_the_items_does_not_hide_the_next_one():
+    # Paragraphs, headings and loose lists: the neighbour sits behind a blank line.
+    old = HEAD + "- deploy queue merge\n\n- deploy docs test\n" + TAIL
+    new = HEAD + "- deploy docs test\n" + TAIL
+    comment = _stored(old, "deploy")
+    stored_place = (comment["from_off"], comment["to_off"])
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is True
+    assert (comment["from_off"], comment["to_off"]) == stored_place
+
+
+def test_a_blank_line_between_the_items_does_not_hide_the_one_above():
+    old = HEAD + "- a deploy docs\n\n- b deploy docs\n" + TAIL
+    new = HEAD + "- a deploy docs\n" + TAIL
+    comment = _stored(old, "deploy", nth=1)
+    stored_place = (comment["from_off"], comment["to_off"])
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is True
+    assert (comment["from_off"], comment["to_off"]) == stored_place
+
+
+def test_a_comment_whose_line_stays_keeps_it_across_a_blank_line_when_the_neighbour_goes():
+    old = HEAD + "- deploy queue merge\n\n- deploy docs test\n" + TAIL
+    new = HEAD + "- deploy queue merge\n" + TAIL
+    comment = _stored(old, "deploy")
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
+    assert comment["from_off"] == len(HEAD) + 2
+
+
 def test_a_comment_whose_line_stays_keeps_it_when_the_next_line_goes():
     # The commented line starts like the line that went; its own text around the quote is unchanged.
     new = HEAD + "- deploy queue merge\n" + TAIL

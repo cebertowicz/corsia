@@ -174,9 +174,10 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
 
     A comment whose line was deleted finds the same words on the line that moved into its place: that line
     starts like the deleted one and so matches one stored side. The stored context says whose line it is.
-    The text after the commented line's first line break is the start of the line below it; if that starts
-    this line, and does not start the line after this one, this is the line below, moved up. The text before
-    the last line break is the end of the line above it; the same test, mirrored, finds the line above.
+    The text after the commented line's first line break (blank lines skipped) is the start of the line below
+    it; if that starts this line, and does not start the next non-blank line after this one, this is the line
+    below, moved up. The text before the last line break is the end of the line above it; the same test,
+    mirrored, finds the line above.
     It never refuses a line whose own text around the quote is unchanged: that is the commented line,
     whatever happened to its neighbours.
 
@@ -193,13 +194,20 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
     if (before_in_line or after_in_line) and text[max(0, start - len(before_in_line)):start] == before_in_line \
             and text[end:end + len(after_in_line)] == after_in_line:
         return False
+    # Blank lines between items are skipped on both sides, so paragraphs and loose lists work too.
+    next_start = line_end + 1
+    while next_start < len(text) and text[next_start] == "\n":
+        next_start += 1
+    prev_end = max(line_start - 1, 0)
+    while prev_end > 0 and text[prev_end - 1] == "\n":
+        prev_end -= 1
     if suffix and "\n" in suffix:
-        below = suffix.split("\n", 1)[1]
-        if below and text.startswith(below, line_start) and not text.startswith(below, line_end + 1):
+        below = suffix.split("\n", 1)[1].lstrip("\n")
+        if below and text.startswith(below, line_start) and not text.startswith(below, next_start):
             return True
     if prefix and "\n" in prefix:
-        above = prefix.rsplit("\n", 1)[0]
-        if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, max(line_start - 1, 0)):
+        above = prefix.rsplit("\n", 1)[0].rstrip("\n")
+        if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
             return True
     return False
 
