@@ -51,7 +51,15 @@ const BETA = () => thread('beta', { from: BETA_AT, to: BETA_AT + 4 }, 'Beta', []
 const serverSaysRead = (id: string) => docComments.update((all) => ({
 	...all, [artifact]: all[artifact].map((comment) => comment.id === id ? { ...comment, newComment: false, newReplyIds: [] } : comment),
 }));
+/** Another party answers: the server lists the new reply as unread in the thread. */
+const replyArrives = (id: string, replyId: string) => docComments.update((all) => ({
+	...all, [artifact]: all[artifact].map((comment) => comment.id === id
+		? { ...comment, newReplyIds: [replyId], replies: [...(comment.replies ?? []), { id: replyId, author: 'Browser', author_kind: 'agent', body: 'a later answer', created_at: '2026-11-16T02:10:00+00:00' }] }
+		: comment),
+}));
 const unreadMark = (id: string) => host.querySelector(`.cm-comment-anchor[data-unread][data-comment-new="${id}"]`);
+/** The pinned New signs on highlights, by their accessible name ('New reply' or 'New comment'). */
+const newSigns = () => [...document.querySelectorAll('[data-highlight-dot] [role="img"]')].map((sign) => sign.getAttribute('aria-label'));
 
 async function open(threads: Array<() => ServerComment>) {
 	// A fresh tab and document each time: a tab remembers whether its column was shown, and the load check runs once per document.
@@ -112,6 +120,23 @@ describe('the unread tint on a document highlight, margin column up', () => {
 		focusedDocComment.set(null); // the card goes back to its line; the column stays
 		flushSync();
 		await vi.waitFor(() => expect(unreadMark('alpha'), 'a read thread whose card is closed still has the unread tint').toBeNull(), { timeout: 1000 });
+	});
+
+	it('comes back, with its New sign, when a reply arrives after the card was let go', async () => {
+		await open([ALPHA, BETA]);
+		await vi.waitFor(() => expect(unreadMark('alpha')).not.toBeNull());
+		focusedDocComment.set('alpha');
+		flushSync();
+		serverSaysRead('alpha');
+		flushSync();
+		focusedDocComment.set(null);
+		flushSync();
+		await vi.waitFor(() => expect(unreadMark('alpha')).toBeNull(), { timeout: 1000 });
+		await vi.waitFor(() => expect(newSigns()).toEqual([]), { timeout: 1000 });
+		replyArrives('alpha', 'alpha-a3');
+		flushSync();
+		await vi.waitFor(() => expect(unreadMark('alpha'), 'a reply that arrives after the card was let go has no unread tint').not.toBeNull(), { timeout: 1000 });
+		await vi.waitFor(() => expect(newSigns(), 'its highlight has no New sign').toEqual(['New reply']), { timeout: 1000 });
 	});
 
 	it('goes when the thread was read elsewhere and its card was never opened here', async () => {
