@@ -67,6 +67,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An agent can now replace an update of its own that you haven't seen yet: the old update disappears from the chat and the new one appears at the bottom. If the old update answered one of your comments, that answer stays in its comment thread. An update you've seen, or commented on, can't be replaced.
 - An agent can now tag you in a document comment: the comment shows your name, and its thread stays marked as needing you until you open it, even in a thread you never took part in.
 - An agent that isn't busy now starts at once on an event its own rules, scripts or a connected mailbox deliver; before, the event could wait until the agent's next message arrived.
+- An agent that hands you a sign-in page while you don't have the shared browser open now knows you see only its task, and can point you to it in Needs you; before, it was told you could see the page and stayed quiet.
 - An agent that hits a password page or another step only you can finish in the shared browser now gets a turn once you finish or decline it, even with no task selected; before, it could wait for good.
 - An agent that writes to a document's old path after the document was promoted is now refused and told where the document went; before, the write made a stray file nobody saw.
 - An agent starting another agent in its own project now uses the account shown as ready in the model list when account rollover is on, instead of refusing because the default account is signed out.
