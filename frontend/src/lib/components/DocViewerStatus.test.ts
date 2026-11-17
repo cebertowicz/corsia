@@ -5,6 +5,7 @@ import DocViewerStatus from './DocViewerStatus.svelte';
 import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
+import { detailsNeedsCount, type DetailsNeeds } from '$lib/docDetailsNeeds';
 import type { CommentFeedback } from '$lib/api/docs';
 import { deliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 import { get } from 'svelte/store';
@@ -347,6 +348,13 @@ describe('DocViewerStatus toolbar', () => {
 		const status = host.querySelector('.metadata-status[role="status"]')!;
 		expect(status.textContent).toContain('File changed since you opened it');
 		expect(status.classList.contains('sr-only')).toBe(true);
+	});
+
+	it('counts beside Details exactly the three things behind it that need the reader, one each', () => {
+		// Every combination of the three sources; a fourth source is a new required field of DetailsNeeds, so this list stops compiling.
+		const all: DetailsNeeds[] = [false, true].flatMap((overdue) => [false, true].flatMap((fileChangedOffBar) =>
+			[false, true].map((hiddenAsk) => ({ overdue, fileChangedOffBar, hiddenAsk }))));
+		expect(all.map((needs) => detailsNeedsCount(needs))).toEqual(all.map(({ overdue, fileChangedOffBar, hiddenAsk }) => Number(overdue) + Number(fileChangedOffBar) + Number(hiddenAsk)));
 	});
 });
 

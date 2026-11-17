@@ -9,7 +9,8 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, replacePreviousFixtureThread, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
-import { headerSend, holdDocumentComments, seedHeldComments } from '../support/heldComments';
+import { closeDetails, openDetails } from '../support/documentBar';
+import { headerSend, headerSentStatus, holdDocumentComments, seedHeldComments, shownHeaderSend } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
 
@@ -399,12 +400,14 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			// Opened at the top: both replies are below the fold, so the bottom band offers the jump once.
 			await expectControl(page, '2 new');
-			await expect(headerSend(page)).toBeVisible();
+			// The held Send is in Details: open it as a person does to reach Send, and measure both while it is open.
+			await expect(await shownHeaderSend(page)).toBeVisible();
 			const sendBox = await hitBox(headerSend(page));
 			const controlBounds = await controlFace(page);
 			expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
 			expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
 			expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
+			await closeDetails(page);
 
 			// The label is the count alone; the thread it points at is named in the accessible name, and it is the first reply below the fold.
 			await expect(controlButton(page)).toHaveText(/^[↑↓]\d+ new$/);
@@ -857,7 +860,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expectControlPoints(page, 2, 'above');
 			await holdTimers(page, false);
 			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
-			await expect(page.locator('.document-header .feedback-controls [role="status"]')).toHaveText(/^2 comments sent/);
+			await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
 
 			await holdTimers(page, true);
@@ -1173,7 +1176,7 @@ test.describe('the jump control and held Send controls', () => {
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
-			const send = headerSend(page);
+			const send = await shownHeaderSend(page);
 			await expect(send).toBeVisible();
 			await page.waitForTimeout(500); // Let the sender's entrance slot finish before measuring.
 			const geometry = await send.evaluate(node => {
@@ -1278,6 +1281,7 @@ test.describe('the jump control and the document toolbar', () => {
 		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		await page.waitForTimeout(600);
+		await openDetails(page);
 		const geometry = await headerSend(page).evaluate(node => {
 			const rect = node.getBoundingClientRect();
 			const canvas = node.closest('.document-canvas')!.getBoundingClientRect();

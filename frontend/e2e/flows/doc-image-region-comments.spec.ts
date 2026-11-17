@@ -6,7 +6,8 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, settled, shoot } from '../support/imageRegionComments';
 import { openComments } from '../support/commentDrawer';
-import { headerSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
+import { closeDetails } from '../support/documentBar';
+import { headerSend, shownHeaderSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
 import { beginComment, submitButton } from '../support/liveCommentProof';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { clickDocImage, expectBarFits } from '../support/docImageComments';
@@ -86,8 +87,8 @@ const docComments = (page: Page) => page.locator('[data-comments-entry]');
 /** The document's pending batch, as its header pill names it; its Send is the document header's. */
 const unsentName = (count: number) => new RegExp(`, ${count} waiting for Send$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
-/** The document's own delivery row: what was sent, or not delivered with Retry. */
-const docDelivery = (page: Page) => page.locator('.document-header .feedback-controls');
+/** The document's own delivery row, in Details' Comments section: what was sent, or not delivered with Retry. */
+const docDelivery = (page: Page) => page.locator('.document-header .p-send');
 /** Back from the viewer to the document, then its comments drawer opened from the header pill. */
 async function backToDocumentDrawer(page: Page) {
 	await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
@@ -368,7 +369,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await holdOneDocumentComment(page);
 		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
+		await expect(await shownHeaderSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-1440-06c-header-send', true);
 		const sent = await sendByKeyboard(page, headerSend(page), async () => {
 			// The document's row says what was sent, and says it for 1.5 s only: check it as the Send goes.
@@ -425,7 +426,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await closeDocumentDrawer(page);
 		await holdOneDocumentComment(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
+		await expect(await shownHeaderSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-393-05c-header-send', true);
 		await sendByKeyboard(page, headerSend(page));
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
@@ -504,7 +505,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		await holdOneDocumentComment(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
+		await expect(await shownHeaderSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, `doc-${width}-09-header-send`, true);
 
 		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1, delivery_policy: 'document-held' }];
@@ -521,6 +522,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(retry).toBeInViewport({ ratio: 1 });
 		if (width <= 768) expect((await retry.boundingBox())!.height, 'Retry keeps a 44 px target').toBeGreaterThanOrEqual(44);
 		await shoot(page, testInfo, `doc-${width}-10-document-undelivered-retry`, true);
+		await closeDetails(page);
 		await openImage(page);
 		await expect(bar(page).getByRole('button', { name: /Retry/ })).toHaveCount(0);
 	});
@@ -564,7 +566,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 				await expect(overlay(page)).toHaveCount(0);
 				await holdOneDocumentComment(page);
-				await expect(headerSend(page)).toBeVisible();
+				await expect(await shownHeaderSend(page)).toBeVisible();
 				await page.route('**/api/doc-feedback/send', async (route) => { await new Promise((resolve) => setTimeout(resolve, 800)); await route.fallback(); });
 				// Finish the setup's Send entrance before slowing and filming this send's lifecycle.
 				await page.locator('.document-header').evaluate(async (element) => {

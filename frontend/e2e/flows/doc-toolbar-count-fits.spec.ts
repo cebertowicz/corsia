@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '../support/test';
 import { expect, type Page, type Route } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { closeDetails, documentBarHost, expectOneRow, expectTouchTargets, openDetails } from '../support/documentBar';
+import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails } from '../support/documentBar';
+import { raiseAsk } from '../support/reviewAsk';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
@@ -286,7 +287,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 		await answerOverdue(page);
 		const frames = process.env.CORSIA_FRAMES_DIR;
 		if (frames) mkdirSync(frames, { recursive: true });
-		const results: Array<{ label: string } & BarMeasured & { details: Awaited<ReturnType<typeof measureSwitch>> }> = [];
+		const results: Array<{ label: string; bar: BarMeasured; panel: Awaited<ReturnType<typeof measureSwitch>> }> = [];
 		const readers = async () => page.evaluate(async (artifactId) => {
 			const { recordDocActivity } = await import('/src/lib/docPresence.ts');
 			for (let index = 0; index < 4; index++) recordDocActivity({ type: 'doc_activity', artifact_id: artifactId, thread_id: `reader-${index}`, agent: `Reader ${index}`, kind: 'read', span: null, comment_id: null, revision: null, at: new Date().toISOString() });
@@ -315,7 +316,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			expectSwitchWhole(details, label);
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-details-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), fullPage: false });
 			await closeDetails(page);
-			results.push({ label, ...measured, details });
+			results.push({ label, bar: measured, panel: details });
 		};
 		for (const width of PHONE_SWEEP) {
 			await open(width, null);
@@ -346,6 +347,188 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 		if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify(results, null, 1));
 	} finally { holdPersonBatches(false); }
 });
+
+/**
+ * The amber count beside Details, driven through each real thing it counts, never set by hand. It counts what needs the reader
+ * behind Details and nowhere else on screen: Overdue; File changed where the bar does not show its reload mark (a canvas wide
+ * enough to split); an ask whose card is hidden under the comment sheet (a touch screen: a phone, or one held sideways). So it
+ * reads 1 at every width (Overdue), 2 where the canvas splits (File changed joins), at most 2 on a compact canvas (File changed is
+ * the bar's own mark there), and 3 only on a touch screen held sideways whose canvas splits. File changed comes from a second
+ * writer: a skill file opens without live editing (an agent saving an instruction file the reader has open), so the save is a
+ * change the reader is told about rather than merged into their text.
+ */
+const NEEDS_CASES = [
+	{ name: 'a split canvas on a desktop window', project: 'chromium-desktop', width: 1440, height: 900, split: true, sheet: false, max: 2 },
+	{ name: 'a phone (compact canvas)', project: 'chromium-mobile', width: 393, height: 852, split: false, sheet: true, max: 2 },
+	{ name: 'a phone held sideways (split canvas)', project: 'chromium-mobile', width: 915, height: 412, split: true, sheet: true, max: 3 },
+] as const;
+
+/** A skill file the thread owns: it opens without live editing, so another writer's save shows File changed. */
+async function seedSkillDocument(page: Page, threadId: string, title: string) {
+	const params = { token: TEST_TOKEN };
+	const tree = await page.request.get('/api/files/tree', { params });
+	const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
+	const folder = path.join(workspace, '.threads', threadId, 'skills', title);
+	mkdirSync(folder, { recursive: true });
+	const docPath = path.join(folder, 'SKILL.md');
+	const text = `---\nname: ${title}\ndescription: A skill whose header counts what needs the reader.\n---\n\n${TEXT}`;
+	const seeded = await page.request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
+	expect(seeded.ok(), await seeded.text()).toBeTruthy();
+	const artifactId: string = (await seeded.json()).artifact.id;
+	const quoted = 'ordinary prose', from = text.indexOf(quoted);
+	const comment = await page.request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
+	expect(comment.ok(), await comment.text()).toBeTruthy();
+	return { artifactId, path: docPath, fileName: 'SKILL.md', text };
+}
+
+/** The canvas's measured mode, as the bar reads it: compact puts File changed in the bar. */
+const canvasCompactNow = (page: Page) => page.evaluate(async () => {
+	const { canvasCompact } = await import('/src/lib/stores/artifactCanvas.ts');
+	let value = false; canvasCompact.subscribe((current: boolean) => { value = current; })();
+	return value;
+});
+
+/** Whether comments open in the sheet: the viewer's own rule, a phone or a touch screen too short for a card beside its text. */
+const commentsInSheet = (page: Page) => page.evaluate(async () => {
+	const { isMobile, isShortTouch } = await import('/src/lib/stores/viewport.ts');
+	const read = (store: { subscribe: (run: (value: boolean) => void) => () => void }) => { let value = false; store.subscribe((current) => { value = current; })(); return value; };
+	return read(isMobile) || read(isShortTouch);
+});
+
+for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
+	test(`@flow:doc-toolbar-count-fits @surface:documents the amber count beside Details counts each real source on ${name}, at most ${max}`, async ({ page }, info) => {
+		test.skip(info.project.name !== project, `${project} gives this case its pointer`);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(120_000);
+		await page.setViewportSize({ width, height });
+		await setDebugVersionOverlay(page.request, false);
+		const title = `needs-${width}-${Date.now()}`;
+		const threadId = await createSession(page.request, title);
+		const doc = await seedSkillDocument(page, threadId, title);
+		raiseAsk(threadId, doc.artifactId, 'Is this skill ready?');
+		await answerOverdue(page);
+		await installWorkspace(page, threadId, [doc], 0);
+		await openThread(page, threadId, title);
+		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
+		// Held sideways the window is wider than 768 px, so the sidebar sits beside the canvas; closed, the canvas has the room to split.
+		if (split && width > 768 && info.project.name.includes('mobile')) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await expect.poll(() => canvasCompactNow(page), { message: `the canvas ${split ? 'splits' : 'is compact'}` }).toBe(!split);
+		expect(await commentsInSheet(page), `comments ${sheet ? 'open' : 'do not open'} in the sheet on this screen`).toBe(sheet);
+		const details = page.locator('[data-document-details]');
+		const card = page.locator('[data-ask-card]');
+		const frame = async (state: string) => { if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `needs-${width}x${height}-${state}.png`), fullPage: false }); } };
+		const expectNeeds = async (needs: number, state: string) => {
+			await expect(details, `${name}, ${state}`).toHaveAccessibleName(`Document details · ${needs} needs you`);
+			await page.waitForTimeout(400);
+			await expectCountsWhole(page, await measureBar(page), `${name}, ${state}`, { threads: 1, unread: 0, needs });
+			await frame(state);
+		};
+
+		// Overdue alone; the ask's card is on screen, so the ask is not counted.
+		await expect(card).toBeVisible();
+		await expectNeeds(1, 'overdue, ask on its card');
+
+		// A second writer saves the file. Where the canvas splits, File changed is a row in Details and joins the count; on a compact
+		// canvas it is the bar's own reload mark and does not.
+		const saved = await page.request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: doc.path, text: `${doc.text}\nA line another writer added.\n`, thread_id: threadId } });
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		const barReload = documentBarHost(page).locator('[data-file-changed]');
+		if (split) {
+			await expectNeeds(2, 'overdue, file changed');
+			await expect(barReload, 'File changed is not drawn in the bar where the canvas splits').toHaveCount(0);
+			const panel = await openDetails(page);
+			await expect(panel.locator('[data-file-changed]')).toHaveText('File changed · Reload');
+			await closeDetails(page);
+		} else {
+			await expect(barReload).toBeVisible();
+			await expectNeeds(1, 'overdue, file changed in the bar');
+		}
+
+		// The comment sheet covers the ask's card on a touch screen, so the ask joins the count; elsewhere the card stays on screen.
+		await page.locator('[data-comments-entry]').click();
+		if (sheet) {
+			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+			await expectNeeds(max, `overdue, ${split ? 'file changed, ' : 'file changed in the bar, '}ask under the comment sheet`);
+		} else {
+			await expect(card, 'without a sheet the ask keeps its card').toBeVisible();
+			await expectNeeds(max, 'overdue, file changed, comments open beside the text');
+		}
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
+	});
+}
+
+/**
+ * A document a skill's evals folder holds: guidance by its path alone, so it opens without live editing and another writer's save shows
+ * File changed, under any file name.
+ */
+async function seedEvalDocument(page: Page, threadId: string, skill: string, fileName: string) {
+	const tree = await page.request.get(`/api/files/tree?token=${TEST_TOKEN}`);
+	const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
+	const folder = path.join(workspace, '.threads', threadId, 'skills', skill, 'evals');
+	mkdirSync(folder, { recursive: true });
+	const docPath = path.join(folder, fileName);
+	const seeded = await page.request.put(`/api/files/content?token=${TEST_TOKEN}`, { data: { path: docPath, text: TEXT, thread_id: threadId, create: true } });
+	expect(seeded.ok(), await seeded.text()).toBeTruthy();
+	return { artifactId: (await seeded.json()).artifact.id as string, path: docPath, fileName, text: TEXT };
+}
+
+/** The app bar's document name as drawn, its box, and the bar's reload mark beside it. */
+const restingName = (page: Page) => documentBarHost(page).evaluate((bar) => {
+	const title = bar.querySelector<HTMLElement>('[data-testid="header-document-title"]')!;
+	const shown = title.querySelector<HTMLElement>('[data-testid="middle-name-shown"]');
+	const reload = bar.querySelector<HTMLElement>('[data-file-changed]');
+	const box = (element: Element) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }; };
+	return {
+		text: (shown ?? title).textContent?.trim() ?? '',
+		overflows: shown ? shown.scrollWidth > shown.clientWidth + 0.5 : false,
+		title: box(title), reload: reload ? box(reload) : null, viewport: innerWidth,
+	};
+});
+
+/**
+ * The resting name on a phone with File changed on: at 393 px a typical name shows whole beside the reload mark, and a long one is cut in
+ * the middle, keeping its start and its suffix (the extension and the character before it), on the one row.
+ */
+for (const { label, fileName, whole } of [
+	{ label: 'a typical name shows whole', fileName: 'launch-plan.md', whole: true },
+	{ label: 'a long name is cut in the middle with its suffix kept', fileName: '2026-11-16-documents-header-design-review-pack.md', whole: false },
+] as const) {
+	test(`@flow:doc-toolbar-count-fits @surface:documents at 393 with File changed on, ${label}`, async ({ page }, info) => {
+		test.skip(info.project.name !== 'chromium-mobile', 'A phone gives the bar its touch sizes');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(90_000);
+		await page.setViewportSize({ width: 393, height: 852 });
+		await setDebugVersionOverlay(page.request, false);
+		const title = `name-${whole ? 'typical' : 'long'}-${Date.now()}`;
+		const threadId = await createSession(page.request, title);
+		const doc = await seedEvalDocument(page, threadId, title, fileName);
+		await installWorkspace(page, threadId, [doc], 0);
+		await openThread(page, threadId, title);
+		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
+		await expect.poll(() => canvasCompactNow(page), { message: 'the phone canvas is compact' }).toBe(true);
+		const saved = await page.request.put(`/api/files/content?token=${TEST_TOKEN}`, { data: { path: doc.path, text: `${doc.text}\nA line another writer added.\n`, thread_id: threadId } });
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		await expect(documentBarHost(page).locator('[data-file-changed]')).toBeVisible();
+		await page.waitForTimeout(400);
+		await expectOneRow(page);
+		const measured = await restingName(page);
+		if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `name-393-${whole ? 'typical' : 'long'}-file-changed.png`), fullPage: false }); }
+		await info.attach('resting-name', { body: JSON.stringify(measured, null, 2), contentType: 'application/json' });
+		expect(measured.overflows, `${fileName}: the drawn name is not clipped`).toBe(false);
+		if (whole) expect(measured.text, 'the typical name shows whole').toBe(fileName);
+		else {
+			const suffix = fileName.slice(-('.md'.length + 1));
+			expect(measured.text, 'the long name is cut').not.toBe(fileName);
+			expect(measured.text, 'the cut is in the middle, keeping the suffix').toMatch(new RegExp(`^${fileName.slice(0, 1)}.*…${suffix.replace('.', '\\.')}$`));
+		}
+		// Beside the reload mark: on its left, apart from it, and both inside the screen.
+		expect(measured.reload, 'the reload mark is in the bar').not.toBeNull();
+		expect(measured.title.right, 'the name ends before the reload mark').toBeLessThanOrEqual(measured.reload!.left + 0.5);
+		expect(measured.title.left).toBeGreaterThanOrEqual(-0.5);
+		expect(measured.reload!.right).toBeLessThanOrEqual(measured.viewport + 0.5);
+		await expectBarHitAreas(page);
+	});
+}
 
 /**
  * History is offered, so Details holds the count's Resolved, Deliver immediately, Request review and History at once. At every width

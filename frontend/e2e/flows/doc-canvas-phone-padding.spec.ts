@@ -72,7 +72,7 @@ for (const width of WIDTHS) {
 			const content = getComputedStyle(document.querySelector('.cm-content')!);
 			const anchor = document.querySelector<HTMLElement>('.cm-comment-anchor')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
-			const tool = document.querySelector<HTMLElement>('.document-tools button')!;
+			const tool = document.querySelector<HTMLElement>('[data-document-details]')!;
 			const tools = tool.getBoundingClientRect();
 			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
 			resolve({
@@ -82,7 +82,7 @@ for (const width of WIDTHS) {
 				scrollerLeft: scroller.left,
 				gutter: Number.parseFloat(getComputedStyle(document.querySelector('.leaf-body.document-canvas')!).paddingLeft),
 				headerTop: header.top, appHeaderBottom: document.querySelector('.shell-header')!.getBoundingClientRect().bottom,
-				toolsHit: !!hit?.closest('.document-tools'),
+				toolsHit: !!hit?.closest('[data-document-details]'),
 			});
 		}))));
 
@@ -95,7 +95,7 @@ for (const width of WIDTHS) {
 			expect(measured.anchor.left, 'the highlight is inside the text column').toBeGreaterThanOrEqual(measured.scrollerLeft + measured.left);
 			expect(measured.appHeaderBottom, 'the app header is taller than its nominal height by the safe area').toBeGreaterThan(64);
 			expect(measured.headerTop, 'the document header starts below the app header').toBeGreaterThanOrEqual(measured.appHeaderBottom);
-			expect(measured.toolsHit, 'the document tools are not under the app header').toBe(true);
+			expect(measured.toolsHit, 'the document controls (Details) are not covered').toBe(true);
 			// A tap on the highlight opens the thread rather than placing a caret.
 			await page.mouse.click(measured.anchor.left + 6, measured.anchor.top + measured.anchor.height / 2);
 			await expect(page.getByText('A comment', { exact: true }).first()).toBeVisible();

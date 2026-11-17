@@ -451,21 +451,21 @@ for (const theme of ['light', 'dark'] as const) {
 			if (width === 393) {
 				// The artifact row remains mounted in the hidden pane while the document is active.
 				await expect(replyMark).toHaveCount(1);
-				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 				await expect(replyMark).toBeVisible();
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 			} else {
 				await expect(replyMark).toBeVisible();
-				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
 			}
 			// Opening the document alone keeps the passive unread marks intact.
-			await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
+			await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
 			// Opening the thread from its highlight shows its replies; showing the reply is what stamps it viewed.
 			await page.locator('.cm-comment-anchor').first().click();
 			await expect(page.getByText('Reviewed.', { exact: true })).toBeVisible();
 			await expect(page.locator('.reply-mark')).toHaveCount(0);
-			await expect(pillUnread).not.toHaveAttribute('aria-label', /unread/);
+			await expect(pillUnread).not.toHaveAttribute('aria-label', /\bnew\b/);
 		});
 	}
 }
@@ -500,7 +500,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
 				// Landing reads nothing: marker and pill still agree on one unread reply.
-				await expect(page.getByRole('button', { name: '3 comments, 1 unread' })).toBeVisible();
+				await expect(page.getByRole('button', { name: '3 comments, 1 new' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
@@ -533,24 +533,17 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.waitForTimeout(1100);
 			LATER_REPLIES.forEach((body, index) => addAgentReply(scenario.artifactId, scenario.roots[index], threadId, body));
 			await reloadComments(page, scenario.artifactId);
-			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
+			const commentsPill = page.getByRole('button', { name: '3 comments, 3 new' });
 			await expect(commentsPill).toBeVisible();
-			// Up to 600 px of canvas the pill is the icon and "3 unread" alone (the row stays one line); wider, the whole count shows. The
-			// container query reads the canvas's content width, so it is measured the same way.
-			const canvasWidth = await commentsPill.evaluate((pill) => {
-				let canvas: HTMLElement | null = pill.parentElement;
-				while (canvas && !getComputedStyle(canvas).containerName.split(' ').includes('doc-canvas')) canvas = canvas.parentElement;
-				if (!canvas) return Infinity;
-				const style = getComputedStyle(canvas);
-				return canvas.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-			});
-			await expect(commentsPill).toHaveText(canvasWidth > 600 ? /^\s*3 comments · 3 unread$/ : /^\s*3 unread$/, { useInnerText: true });
+			// At every width the bar's Comments button shows "3 new" alone while replies are unread (the row stays one line); its name
+			// carries the total too.
+			await expect(commentsPill).toHaveText(/^\s*3 new$/, { useInnerText: true });
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
 			// Opening the comments shows the three threads the pill counted. Hold the
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
-			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
+			await page.getByRole('button', { name: '3 comments, 3 new' }).click();
 			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			await shot(page, `03-three-replies-${theme}-${width}`);

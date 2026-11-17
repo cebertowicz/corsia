@@ -1,6 +1,7 @@
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
+import { closeDetails, expectOneRow, openDetails } from '../support/documentBar';
 import {
 	deliveredBatches, headerSend, heldIn, installWorkspace, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
 	type TextDocument,
@@ -43,11 +44,13 @@ test('@surface:doc-send-on-close sends an unsent user batch exactly once before 
 	await installWorkspace(page, threadId, [document], 0);
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
-	// The open document's header is the one sender; a held comment waits for it, with no drawer footer and no Send now.
+	// The open document's header is the one sender (in Details); a held comment waits for it, with no drawer footer and no Send now.
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+	await openDetails(page);
 	await expectSenders(page, ['header: Send 1 comment']);
 	expect(heldIn(document.artifactId, 'document-held')).toBe(1);
 	expect(sends.document, 'looking at the header sends nothing').toHaveLength(0);
+	await closeDetails(page);
 
 	// Closing the tab sends what is still held, once, without the header Send.
 	await (await tabControl(page, document.fileName, 'close')).click();
@@ -70,21 +73,27 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
 
-	// Request review shares a row with the comment count and the header Send, whatever the owner's name.
+	// The bar stays one row whatever the owner's name; Request review and the header Send are in Details, whole, the Send on one line.
 	// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
+	await expectOneRow(page);
+	const panel = await openDetails(page);
 	const layout = await headerSend(page).evaluate((send) => {
-		const row = (selector: string) => document.querySelector<HTMLElement>(`.document-header ${selector}`)!.getBoundingClientRect();
-		const label = document.createRange();
+		const panel = send.closest<HTMLElement>('.doc-panel')!;
+		const inside = (element: Element | null) => { if (!element) return false; const box = element.getBoundingClientRect(), bounds = panel.getBoundingClientRect(); return box.width > 0 && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5; };
+		const label = send.ownerDocument.createRange();
 		label.selectNodeContents(send);
 		return {
-			count: row('[data-comments-entry]').top,
-			review: row('.review-request').top,
-			sendTop: send.getBoundingClientRect().top,
+			review: inside(panel.querySelector('.review-request')),
+			send: inside(send),
+			sideways: panel.scrollWidth - panel.clientWidth,
 			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
 		};
 	});
-	expect(Math.abs(layout.review - layout.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
+	expect(layout.review, 'Request review sits whole inside Details').toBe(true);
+	expect(layout.send, 'the header Send sits whole inside Details').toBe(true);
+	expect(layout.sideways, 'Details does not scroll sideways').toBeLessThanOrEqual(1);
 	expect(layout.lines, 'the header Send reads on one line').toBe(1);
+	await expect(panel).toBeVisible();
 
 	// The header Send is the batch's own Send: one send, then it goes.
 	await headerSend(page).click();
@@ -105,6 +114,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	await expect(page.getByRole('button', { name: /^2 comments, 2 waiting for Send$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
+	await openDetails(page);
 	await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 	await expectSenders(page, ['header: Send 2 comments']);
 

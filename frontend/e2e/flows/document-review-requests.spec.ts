@@ -165,8 +165,9 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			controls: [...new Set([...barTools, ...row.querySelectorAll('button')])].map((button) => {
 				// A Toggle's target is the hit area inside its button.
 				const rect = (button.querySelector('.hit') ?? button).getBoundingClientRect();
-				// Toolbar controls and phone actions are 44px; desktop Toggle and small Button keep their own sizes.
-				const minimum = window.innerWidth <= 768 || button.matches('.doc-tool') ? 44 : button.matches('.tg') ? 17 : 28;
+				// Phone actions are 44px; with a pointer the bar's Comments and Details are 36px (IconButton lg), and Toggle and small
+				// Button keep their own sizes.
+				const minimum = window.innerWidth <= 768 ? 44 : button.matches('.bar-comments, .bar-details') ? 36 : button.matches('.tg') ? 17 : 28;
 				return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height, minimum };
 			}),
 		};

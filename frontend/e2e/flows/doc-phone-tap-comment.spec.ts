@@ -300,18 +300,18 @@ test.describe(`${TAG} new sign`, () => {
 		test.setTimeout(60_000);
 		await openDocument(page, { unreadReply: ['conductor'], unreadRoot: ['reviewer'] });
 		await expect(sign(page)).toHaveCount(2);
-		await expect(pill(page)).toHaveAccessibleName(/2 unread/);
+		await expect(pill(page)).toHaveAccessibleName(/2 new/);
 		await frames(page, testInfo, 'signs-before');
 
 		await highlight(page, 'conductor').tap();
 		await expectOpenOn(page, 'conductor', 'opening the card from its highlight');
 		// The card read its thread at once (the header count says so) but its highlight keeps the unread look while the card is up, so the sign the reader came to see stays.
-		await expect(pill(page)).toHaveAccessibleName(/1 unread/);
+		await expect(pill(page)).toHaveAccessibleName(/1 new/);
 		await expect(sign(page), 'the opened comment keeps its sign while its card is up').toHaveCount(2);
 		await putSheetAway(page);
 		await expect(sign(page), 'the opened comment has been seen once its card closes; the other has not').toHaveCount(1);
 		await expect(page.locator('[data-comment-new]')).toHaveCount(1);
-		await expect(pill(page)).toHaveAccessibleName(/1 unread/);
+		await expect(pill(page)).toHaveAccessibleName(/1 new/);
 		await frames(page, testInfo, 'signs-after-one-seen');
 	});
 
@@ -325,10 +325,10 @@ test.describe(`${TAG} new sign`, () => {
 		await frames(page, testInfo, 'list-open');
 		// Listing is not opening: both are still new while the list is up, past the time a card would take to be read.
 		await page.waitForTimeout(2500);
-		await expect(pill(page)).toHaveAccessibleName(/2 unread/);
+		await expect(pill(page)).toHaveAccessibleName(/2 new/);
 
 		await sheet(page).getByText(WORDS.conductor).tap();
-		await expect(pill(page), 'the card the reader opened is seen').toHaveAccessibleName(/1 unread/);
+		await expect(pill(page), 'the card the reader opened is seen').toHaveAccessibleName(/1 new/);
 		await putSheetAway(page);
 		await expect(sign(page), 'the other thread is still new').toHaveCount(1);
 		await expect(page.locator('[data-comment-new]')).toHaveCount(1);

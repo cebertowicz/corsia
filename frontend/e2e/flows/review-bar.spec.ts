@@ -7,7 +7,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, leaveUnsent, shownHeaderSend } from '../support/heldComments';
-import { closeDetails, openDetails } from '../support/documentBar';
+import { closeDetails, expectTouchTargets, openDetails } from '../support/documentBar';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled, type JourneySetup } from '../support/reviewFixtures';
 
 /**
@@ -504,7 +504,13 @@ test.describe('375px review sheet', () => {
 		await expect(buttons).toHaveCount(2);
 		await expect(approve).toBeVisible();
 		await expect(card(page).locator('.rb-derived')).toHaveText('Also accepts 2 suggestions');
+		// Every answer on the card is a 44 px target with 8 px to each neighbour.
+		await expectTouchTargets(card(page), '.rb-actions .btn', { min: 44, gap: 8 });
 		await openComments(page, /^\d+ comments?\b/);
+		// So is every suggestion's Accept in the sheet.
+		const sheet = page.locator('[data-doc-comments-drawer]');
+		await expect(sheet.locator('.ct-suggestion-accept').first()).toBeVisible();
+		await expectTouchTargets(sheet, '.ct-suggestion-accept', { min: 44, gap: 8 });
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
 		await expect(page.locator('[data-doc-comments-drawer] [data-ask-card], [data-doc-comments-drawer] .review-bar')).toHaveCount(0);
 		await closeComments(page.locator('[data-doc-comments-drawer]'));
@@ -776,6 +782,9 @@ async function expectNameClearOfControls(page: Page, title: string) {
 		const apart = boxes.who.right <= control.left || control.right <= boxes.who.left || boxes.who.bottom <= control.top || control.bottom <= boxes.who.top;
 		expect(apart, `the name's box ${JSON.stringify(boxes.who)} intersects a control ${JSON.stringify(control)}`).toBe(true);
 	}
+	// Reachable once the card is open: on screen, and nothing drawn over it.
+	await expect(name).toBeInViewport({ ratio: 1 });
+	expect(await hitAtCentre(name), 'the asker is not covered once the card is open').toBe(true);
 }
 
 

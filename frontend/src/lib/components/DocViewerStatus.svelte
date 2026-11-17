@@ -9,6 +9,7 @@
 	import DocReviewControls from './DocReviewControls.svelte';
 	import { Button, Toggle } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -130,7 +131,7 @@
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen: Overdue, File changed where the bar doesn't show it, an ask whose card is hidden. */
-	const needsCount = $derived((freshnessPresentation?.overdue ? 1 : 0) + (urgent && !changeInBar ? 1 : 0) + (ask && !ask.onCard ? 1 : 0));
+	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: urgent && !changeInBar, hiddenAsk: !!ask && !ask.onCard }));
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'

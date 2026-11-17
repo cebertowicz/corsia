@@ -151,8 +151,8 @@ async function closeList(page: Page) {
 }
 
 /**
- * Waits out the header's passing Sent. At a narrow document width it wraps the header's controls onto a second line; when
- * it leaves, the document moves up by that line, so a press aimed at the text before then lands where the text no longer is.
+ * Waits out the passing Sent in the Details panel, so a press aimed at the text never races the send's own settling (the
+ * delivery status and the comment counts it updates).
  */
 async function headerSettled(page: Page) {
 	await expect(page.locator('.document-header .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });

@@ -107,9 +107,8 @@
 		opened?: number;
 		/** The resolved drawer is open: set by that control only. */
 		resolvedOpen?: boolean;
-		/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
+		/** Controls outside the canvas a list hangs from: the bar's Comments button, and Details (Resolved's row closes as its list opens). */
 		commentsEntry?: HTMLElement | null;
-		/** The visible control the Resolved list opened from (Details); its row sits in a panel that closes as the list opens. */
 		resolvedAnchor?: HTMLElement | null;
 	} = $props();
 	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));

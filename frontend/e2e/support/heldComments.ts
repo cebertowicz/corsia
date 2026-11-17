@@ -171,8 +171,12 @@ export function makeHeldBatchDue(artifactId: string, policy: 'document-held' | '
 
 const SEND_NAME = /^Send( all)? \d+ comments?( to .+)?$/;
 
-/** The open document's own header Send (its document-held lane), in its Details panel: hidden until Details is open. */
-export const headerSend = (page: Page): Locator => page.locator('.document-header').getByRole('button', { name: SEND_NAME });
+/**
+ * The open document's own header Send (its document-held lane), in its Details panel: hidden until Details is open. It is found
+ * closed or open, so a count of none means no Send at all, never only a closed panel; press, focus or measure it only after
+ * `shownHeaderSend` (or `openDetails`) has opened Details.
+ */
+export const headerSend = (page: Page): Locator => page.locator('.document-header').getByRole('button', { name: SEND_NAME, includeHidden: true });
 /** Opens the open document's Details, as a person does to reach its Send, and returns that Send. */
 export async function shownHeaderSend(page: Page): Promise<Locator> {
 	await openDetails(page);
@@ -288,10 +292,13 @@ export async function sendByKeyboard(page: Page, send: Locator, whileSent?: () =
 
 /** The toast a send raised, by its exact wording: an image viewer's band; a document says it in its header instead. */
 export const sentToast = (page: Page, text: string): Locator => page.locator('.toast').filter({ hasText: text });
-/** The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered. */
+/**
+ * The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered: in Details,
+ * found closed or open like `headerSend`; check it is visible only after opening Details.
+ */
 export const headerSent = (page: Page): Locator => page.locator('.document-header .sending-now .sent');
-/** The document header's spoken delivery status: what was sent, or what was not delivered. */
-export const headerSentStatus = (page: Page): Locator => page.locator('.document-header .feedback-controls [role="status"]');
+/** The document header's spoken delivery status (what was sent, or what was not delivered), in Details' Comments section; read while closed too. */
+export const headerSentStatus = (page: Page): Locator => page.locator('.document-header .p-send [role="status"]');
 
 // ---- Fixtures ----------------------------------------------------------------------------------------------------
 
