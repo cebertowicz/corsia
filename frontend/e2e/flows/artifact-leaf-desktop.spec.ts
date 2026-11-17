@@ -143,7 +143,8 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 				return !!stripBox && !!measurementBox && stripBox.x + stripBox.width <= measurementBox.x;
 			}).toBe(true);
 			else await expect(strip).toBeHidden();
-			for (const control of [measurement, settings, panelToggle]) await control.click({ trial: true });
+			// The compact surface's own header carries the panel toggle; measurement and chat settings live in the strip.
+			for (const control of expanded ? [measurement, settings, panelToggle] : [panelToggle]) await control.click({ trial: true });
 		};
 
 		await expect(drawer).not.toHaveClass(/(^|\s)(overlay|collapsed)(\s|$)/);
