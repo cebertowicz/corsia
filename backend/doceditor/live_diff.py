@@ -101,9 +101,9 @@ GROUP = 4  # the most lines one side of a pair holds, for a line split, lines jo
 # Pairing compares every group of old lines with every group of new ones, each comparison costing
 # about the product of the two texts' lengths. A block of several lines past either bound (line
 # pairs, or the characters all those comparisons cover, see ``_pair_work``) is not paired: it gets
-# the one character diff of the whole block, exactly as before pairing existed, so the bound caps
-# cost and drops no text a character diff keeps. One line replaced by one line is never compared in
-# groups, so it has no bound but the character cap.
+# the one character diff of the whole block, so the bound caps cost and drops no text a character
+# diff keeps. One line replaced by one line is never compared in groups, so it has no bound but the
+# character cap.
 MAX_LINE_PAIRS = 64
 MAX_PAIR_WORK = 1_000_000
 
@@ -189,7 +189,9 @@ def _pair_work(before: list[str], after: list[str]) -> int:
 def _block_changes(before: list[str], after: list[str], start: int):
     """The character changes that turn one changed block of whole lines into another."""
     several = len(before) > 1 or len(after) > 1
-    if several and (len(before) * len(after) > MAX_LINE_PAIRS or _pair_work(before, after) > MAX_PAIR_WORK):
+    # With one side empty there is nothing to pair: the block is one whole insert or delete.
+    if not before or not after or (several and (len(before) * len(after) > MAX_LINE_PAIRS
+                                                or _pair_work(before, after) > MAX_PAIR_WORK)):
         return _character_changes("".join(before), "".join(after), start)
     changes, position = [], start
     for left, right in _pair_lines(before, after):

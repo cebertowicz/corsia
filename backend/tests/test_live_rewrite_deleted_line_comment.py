@@ -3,6 +3,8 @@
 The live document follows a comment through the diff of the rewrite. The diff must not keep a
 character of the deleted line as a character of a neighbouring line, or the comment lands there.
 """
+from time import perf_counter
+
 import pytest
 
 from doceditor import live_diff
@@ -263,3 +265,31 @@ def test_a_run_of_unpaired_lines_beside_an_edited_one_is_one_change_per_run():
     new = HEAD + "- audit build docs deploy now\n" + inserted + TAIL
     changes = live_diff.text_changes(old, new)
     assert len(changes) == 2 and changes[1][2] == inserted
+
+
+@pytest.mark.parametrize("count", [1, 2, 7, 64, 65, 400])
+def test_a_pure_insert_or_delete_of_whole_lines_matches_the_diff_without_pairing(count):
+    lines = "".join(f"- item {number} with some padding text here\n" for number in range(count))
+    for old, new in ((HEAD + TAIL, HEAD + lines + TAIL), (HEAD + lines + TAIL, HEAD + TAIL)):
+        changes = live_diff.text_changes(old, new)
+        assert _applied(old, changes) == new
+        assert len(changes) == len(_dev_changes(old, new)) == 1
+
+
+def test_a_pure_insert_or_delete_of_whole_lines_is_never_paired(monkeypatch):
+    def paired(before, after):
+        raise AssertionError("a block with one empty side has nothing to pair")
+    monkeypatch.setattr(live_diff, "_pair_lines", paired)
+    lines = "".join(f"- item {number}\n" for number in range(100))
+    for old, new in ((HEAD + TAIL, HEAD + lines + TAIL), (HEAD + lines + TAIL, HEAD + TAIL)):
+        assert _applied(old, live_diff.text_changes(old, new)) == new
+
+
+def test_a_pure_insert_or_delete_of_fifty_thousand_lines_costs_linear_time():
+    """Joining the run's lines one at a time copied the text collected so far: seconds at this size, and 45 s at 200,000 lines."""
+    lines = "".join(f"- item {number} with some padding text here\n" for number in range(50_000))
+    for old, new in ((HEAD + TAIL, HEAD + lines + TAIL), (HEAD + lines + TAIL, HEAD + TAIL)):
+        started = perf_counter()
+        changes = live_diff.text_changes(old, new)
+        assert perf_counter() - started < 0.5  # linear takes about 10 ms; the per-line join took about 3 s
+        assert len(changes) == 1 and _applied(old, changes) == new
