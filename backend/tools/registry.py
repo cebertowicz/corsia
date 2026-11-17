@@ -37,11 +37,11 @@ _RESERVED_EXECUTION_PREFIXES = (
 
 # Tool names (resolved, post-dispatch) whose own execution enters
 # ``infra.repo_policy_transition.repo_policy_transition``. They are excused
-# from the registry's ``admit_repo_effect()`` wrapper because that effect would
-# be the active effect their own transition refuses. File tools that only read
-# are no effect either. Nothing else is exempt: effects, transitions and owned
-# processes stay mutually exclusive wherever an effect's reach meets what the
-# transition claims.
+# from the registry's ``admit_repo_effect()`` wrapper and judged by their own
+# transition alone: project creation's transition refuses while an effect is
+# active, so admitting its own effect would collide with itself; a
+# registration's transition never looks at running effects. File tools that
+# only read are no effect either. Nothing else is exempt.
 _REPO_TRANSITION_OWNERS = frozenset({"project_create", "project_repo_register"})
 
 log = logging.getLogger(__name__)
