@@ -29,7 +29,7 @@ def _seed(path) -> None:
                 ("b1", NO_OWNER, None, "no_owner", "{}", "retrying", "2026-11-10T12:00:00Z", 1),
                 ("c1", AGENT_NAMED[0], None, "no_owner", "{}", "parked", "2026-11-12T01:00:00Z", 0),
                 ("c2", AGENT_NAMED[1], None, "owner_inactive", "{}", "parked", "2026-11-12T02:00:00Z", 0),
-                # Written before 198: no mark, so not shown by name.
+                # Written before 199: no mark, so not shown by name.
                 ("c3", "github.not_a_manifest_type", None, "no_owner", "{}", "parked", "2026-11-12T03:00:00Z", 0),
                 # Outside the window on both sides; the end is exclusive.
                 ("z1", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-08T23:59:59+00:00", 1),

@@ -116,7 +116,7 @@ async def test_a_held_person_step_refuses_every_command_when_its_row_cannot_be_r
         for _ in range(3):
             with pytest.raises(BrowserSessionError) as raised:
                 await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
-            assert raised.value.args[0] == browser_control.PERSON_STEP
+            assert raised.value.args[0] == browser_control.PERSON_STEP + browser_control.NO_PANE
     assert lifecycle._steps[THREAD] is step
     assert _step_logs(caplog)[0].exc_info[0] is PlanError
     monkeypatch.setattr(lifecycle, "_step_row_state", original)
@@ -220,11 +220,11 @@ async def test_a_held_step_whose_row_cannot_be_read_refuses_the_command_and_brow
     try:
         with pytest.raises(BrowserSessionError) as raised:
             await fake.owner.run("thread", ["snapshot"])
-        assert raised.value.args[0] == browser_control.PERSON_STEP
+        assert raised.value.args[0] == browser_control.PERSON_STEP + browser_control.NO_PANE
         assert lifecycle.has_step("thread")
         with pytest.raises(BrowserSessionError) as closing:
             await fake.owner.close_thread("thread")
-        assert closing.value.args[0] == browser_control.PERSON_STEP
+        assert closing.value.args[0] == browser_control.PERSON_STEP + browser_control.NO_PANE
         assert lifecycle.has_step("thread")
     finally:
         lifecycle._steps.pop("thread", None)

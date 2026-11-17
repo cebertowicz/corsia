@@ -2,11 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import {
 	createPager,
 	adoptFirstPage,
+	mergeTurnSummaries,
 	shouldLoadOlder,
 	loadOlder,
 	LOAD_OLDER_TRIGGER_PX,
 	MAX_PAGER_CHAIN,
 	PAGER_ABORT,
+	refreshPager,
 	type MessagePage,
 	type PagerPort,
 	type ScrollAnchor,
@@ -50,15 +52,54 @@ describe('shouldLoadOlder', () => {
 });
 
 describe('adoptFirstPage', () => {
-	it('seeds cursor + hasMore from the first page and clears flags', () => {
+	it('seeds cursor + hasMore from the first page and clears the error', () => {
 		const s = createPager();
-		s.loading = true;
 		s.error = true;
 		adoptFirstPage(s, pageOf(['m20', 'm21', 'm22'], true));
 		expect(s.hasMore).toBe(true);
 		expect(s.oldestId).toBe('m20');
 		expect(s.loading).toBe(false);
 		expect(s.error).toBe(false);
+	});
+
+	it('leaves an older read in flight the only reader: no second read starts, and its cursor wins', async () => {
+		const el = makeScrollEl();
+		el._count = 10;
+		let land!: (page: MessagePage) => void;
+		const port: PagerPort = {
+			fetchPage: vi.fn(() => new Promise<MessagePage>((resolve) => { land = resolve; })),
+			prepend: vi.fn((older: unknown[]) => { el._count += older.length; }),
+			getScrollEl: () => el,
+			afterRender: async () => {},
+		};
+		const s = refreshPager(createPager({ hasMore: true, oldestId: 'm0' }));
+		const first = loadOlder(s, port, 1);
+		expect(port.fetchPage).toHaveBeenCalledWith('m0');
+		// The refetched first page lands while that read is out.
+		adoptFirstPage(s, pageOf(['m20', 'm21'], true));
+		expect(s.loading).toBe(true);
+		expect(await loadOlder(s, port, 1)).toBe(0);
+		expect(port.fetchPage).toHaveBeenCalledOnce();
+		land(pageOf(['o1', 'o2'], true));
+		expect(await first).toBe(2);
+		expect(s.oldestId).toBe('o1');
+		expect(s.loading).toBe(false);
+	});
+});
+
+describe('refreshPager', () => {
+	it('keeps what the loaded window knows, so an older read pages from the rows on screen even if the refetch fails', async () => {
+		const el = makeScrollEl();
+		const port: PagerPort = {
+			fetchPage: vi.fn(async () => pageOf(['o1', 'o2'], false)),
+			prepend: vi.fn(),
+			getScrollEl: () => el,
+			afterRender: async () => {},
+		};
+		const s = refreshPager(createPager({ hasMore: true, oldestId: 'm0' }));
+		expect(s).toMatchObject({ hasMore: true, oldestId: 'm0', loading: false, error: false });
+		expect(await loadOlder(s, port, 1)).toBe(2);
+		expect(port.fetchPage).toHaveBeenCalledWith('m0');
 	});
 });
 
@@ -399,5 +440,21 @@ describe('loadOlder — guards', () => {
 		expect(s.error).toBe(false);
 		expect(s.hasMore).toBe(true);
 		expect(s.loading).toBe(false);
+	});
+});
+
+describe('mergeTurnSummaries', () => {
+	const summary = (status: string) => ({ started_at: null, ended_at: null, status, activity_count: 1 });
+
+	it('refreshes the same Turn and keeps other loaded Turns', () => {
+		const current = { a: summary('running'), b: summary('done') };
+		expect(mergeTurnSummaries(current, { a: summary('done') })).toEqual({ a: summary('done'), b: summary('done') });
+	});
+
+	it('leaves the current map as it is for anything that is not a summary map', () => {
+		const current = { a: summary('done') };
+		for (const value of [undefined, null, 'x', [summary('done')]]) {
+			expect(mergeTurnSummaries(current, value)).toBe(current);
+		}
 	});
 });

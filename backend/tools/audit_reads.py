@@ -54,7 +54,7 @@ class AuditReadTool(Tool):
             "its count per UTC day (days with none are absent). A kind named by an agent "
             "or person, such as a declared event type or a script's event, is counted "
             "under internal_event 'declared', never by its name; so is every event set "
-            "aside before schema 198, which did not record who named it. GitHub deliveries "
+            "aside before schema 199, which did not record who named it. GitHub deliveries "
             "set aside on restart replay are counted under 'webhook.github'. "
             "stored_message_pressure returns the top "
             "ten stored-message sizes as a proxy for unfolded backlog. Its "

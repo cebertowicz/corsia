@@ -10,7 +10,7 @@ only when its writer stored ``code_named``: CORSIA's code chose the name (a
 built-in connector's kind, GitHub's routed kinds, a kind the platform parks
 itself). Any other name was written by a person or an agent (a declared event
 type, a script's event) and is counted under ``DECLARED`` instead, so no
-project's or user's names cross to another. Rows written before schema 198
+project's or user's names cross to another. Rows written before schema 199
 carry no such mark and count under ``DECLARED``.
 """
 

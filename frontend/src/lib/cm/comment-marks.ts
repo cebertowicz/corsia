@@ -1,11 +1,11 @@
 import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { sheetOverlays, visibleRegion, type Box } from './visible-region';
+import { overlaySheet, sheetOverlays, visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
-import { keptWhole } from '$lib/sheetClearance';
+import { keptWhole, sheetRaised } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -133,7 +133,9 @@ function spanBoxAt(current: EditorView, from: number, to: number, widget: Return
 export function pressSpan(view: EditorView, range: { from: number; to: number }, at: number): { top: number; bottom: number; height: number; regionTop: number } | null {
 	const length = view.state.doc.length;
 	const whole = spanBoxAt(view, Math.min(range.from, length), Math.min(range.to, length), widgetTarget(view, Math.min(range.from, length)));
-	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
+	const widget = widgetTarget(view, Math.min(at, length)), drawn = boxAt(view, Math.min(at, length), widget);
+	// A table row or a diagram is one box with no lines of its own: it is measured in the document's lines, and past three of them only its top line is kept.
+	const line = widget && drawn ? { top: drawn.top, bottom: drawn.top + view.defaultLineHeight } : drawn;
 	if (!whole || !line) return null;
 	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
 	const box = keptWhole(whole.bottom - whole.top, lineHeight) ? whole : line;
@@ -213,6 +215,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
 		if (!seenSize) { seenSize = true; return; }
 		if (done) return;
+		// A sheet the reader pulled up is their own move, as a scroll is: the keyboard that follows it moves nothing.
+		if (sheetRaised(overlaySheet(view))) { stop(); return; }
 		steady = 0;
 		check(settledPass);
 	}) : null;

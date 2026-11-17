@@ -50,10 +50,12 @@ def _terminal_tail_tokens(db, thread_id: str, message_id: str, *, model: str | N
             )
     if row["role"] != "assistant":
         return tokens
+    # No ORDER BY: the sum is order-free, and ordering by seq makes the planner (no statistics in
+    # production) walk the whole thread on idx_messages_session_seq instead of this step's rows.
     results = db.execute(
         "SELECT content FROM messages WHERE thread_id=? AND role='tool' "
         "AND json_valid(metadata) "
-        "AND json_extract(metadata,'$.assistant_step_id')=? ORDER BY seq",
+        "AND json_extract(metadata,'$.assistant_step_id')=?",
         (thread_id, str(row["id"])),
     ).fetchall()
     return tokens + sum(

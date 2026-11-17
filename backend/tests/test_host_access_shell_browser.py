@@ -1245,7 +1245,7 @@ async def test_browser_commands_forward_exact_backend_identity(
 @pytest.mark.asyncio
 async def test_browser_person_step_runs_the_real_declaration_for_the_authoritative_thread(monkeypatch) -> None:
     """Only the browser process and the plan write are stand-ins; the tool returns the declaration's success."""
-    from host_access import browser_cdp, browser_step_lifecycle as lifecycle
+    from host_access import browser_cdp, browser_control, browser_step_lifecycle as lifecycle
     from host_access.browser_cdp import PasswordProbe
     from host_access.browser_sessions import BrowserSessionOwner
     from host_access.browser_session_state import BrowserSessionRecord
@@ -1291,7 +1291,8 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
         lifecycle._answers.pop("authoritative-thread", None)
         lifecycle._sessions.pop("authoritative-thread", None)
 
-    assert result == "Person step opened; end your turn."
+    assert result == ("Person step opened: a task for it is in their Needs you list."
+                      f"{browser_control.NO_PANE} End your turn.")
     assert admitted == ["authoritative-thread"]
     assert writes == [("open_user_step", "Your turn in the shared browser (google.com)")]
 

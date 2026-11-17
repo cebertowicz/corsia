@@ -96,9 +96,12 @@ for (const width of [1440, 900, 393] as const) {
 		await page.reload();
 		await openChat(page, title);
 		if (width === 1440) {
-			// Its card shows the answer at rest.
+			// At rest its card is a short preview, as a document's is: the answer counted and marked New, not shown.
 			await raiseChatMargin(page);
-			await expect(page.locator('.chat-margin .chat-margin-card')).toContainText('The answer to read.');
+			const resting = page.locator('.chat-margin .chat-margin-card');
+			await expect(resting.locator('.ct-reply-count')).toBeVisible();
+			await expect(resting.locator('.ct-head .ct-new')).toBeVisible();
+			await expect(resting).not.toContainText('The answer to read.');
 		}
 		await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 		await page.waitForTimeout(SEEN_FOR_MS);

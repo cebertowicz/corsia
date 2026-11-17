@@ -2,6 +2,8 @@ import { expect, test } from './support/test';
 import type { Locator, Page } from '@playwright/test';
 import { openCommentThread, settleHighlight } from './support/chatComments';
 import { commentedMessage, QUOTE } from './support/chatCommentedMessage';
+import { TEST_TOKEN } from './support/corsia';
+import { injectMessage } from './support/mock';
 import { expectDiscussionReachableByScroll, expectFieldAndSendUsable, expectNoCardScroller, expectReachableByOuterScroll, expectRefitKeepsScroll } from './support/discussionVisible';
 
 
@@ -111,6 +113,17 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await page.keyboard.press('Escape');
 	await expect(card).toHaveCount(1);
 	await expect(card).not.toHaveClass(/selected/);
+
+	// Escape from a reply being written lets the card go the same way, and as in a document's margin the focus goes back to
+	// the text it came from, the highlight, so the resting card shows no focus; the unsent reply stays in its field.
+	await highlight.click();
+	await expect(card).toHaveClass(/selected/);
+	await replyField.fill('A reply not sent yet');
+	await page.keyboard.press('Escape');
+	await expect(card).not.toHaveClass(/selected/);
+	await expect(replyField).toHaveValue('A reply not sent yet');
+	await expect(replyField).not.toBeFocused();
+	await expect(highlight).toBeFocused();
 });
 
 for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark'] as const) test(`a long chat margin reply stays usable at ${width} in ${theme}`, async ({ page, request }, info) => {
@@ -242,6 +255,80 @@ test('a margin card level with the chat composer takes a click on its reply fiel
 	await page.mouse.click(sendAt.x, sendAt.y);
 	await expect(card).toContainText('Answer beside the composer');
 	await expect(page.locator('.messages .message.user')).toHaveCount(0);
+});
+
+test.describe('a touch screen wide enough for the margin column', () => {
+	test.use({ hasTouch: true });
+	test('a focused margin field stays above the on-screen keyboard, and the composer growing moves nothing', async ({ page, request }, info) => {
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name !== 'chromium-desktop');
+		test.setTimeout(120_000);
+		const { row, thread } = await commentedMessage(page, request, 1920);
+		// Later messages below the commented one, so the reader can sit away from the live edge (which follows the newest message by design).
+		await injectMessage(request, thread, { role: 'assistant', content: 'Later context.\n\n'.repeat(20), metadata: { for_user: true } }, TEST_TOKEN);
+		await expect(page.locator('.messages').getByText('Later context.').first()).toBeAttached();
+		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+		const card = page.locator('.chat-margin .chat-margin-card');
+		await expect(card).toHaveCount(1);
+		await centerAndSettle(page, row);
+		await row.locator('.cm-comment-anchor').filter({ hasText: QUOTE }).tap();
+		const field = card.getByPlaceholder('Reply…');
+		if (!(await field.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false))) await card.tap();
+		await expect(field).toBeVisible();
+		// The field sits in the lower part of the screen, where an on-screen keyboard comes up, with the reader well above the live edge.
+		await field.evaluate((el) => {
+			const scroller = el.closest<HTMLElement>('.messages')!;
+			const box = el.getBoundingClientRect();
+			scroller.scrollTop += box.top + box.height / 2 - 780;
+		});
+		const still = () => expect.poll(() => field.evaluate((el) => new Promise<string>((resolve) => {
+			const scroller = el.closest<HTMLElement>('.messages')!;
+			const read = () => `${scroller.scrollTop}|${Math.round(el.getBoundingClientRect().top)}`;
+			const first = read();
+			let n = 0;
+			const step = () => (++n < 5 ? requestAnimationFrame(step) : resolve(read() === first ? 'still' : 'moving'));
+			requestAnimationFrame(step);
+		}))).toBe('still');
+		await still();
+		await field.tap();
+		await expect(field).toBeFocused();
+		// A touch focus settles its own keyboard insets over two frames (homeLifecycle); the composer is grown only after that.
+		await still();
+		expect(await field.evaluate((el) => { const s = el.closest<HTMLElement>('.messages')!; return s.scrollHeight - s.scrollTop - s.clientHeight; }), 'the reader is away from the live edge').toBeGreaterThan(200);
+
+		// The composer grows while the person's focus is in the margin field: the transcript and the text in it hold still, frame by frame.
+		const growth = await page.evaluate(async () => {
+			const scroller = document.querySelector<HTMLElement>('.messages')!;
+			const mark = scroller.querySelector('.cm-comment-anchor')!;
+			const composer = document.querySelector<HTMLElement>('.input-floater .composer')!;
+			const bar = document.querySelector('.input-floater')!;
+			const before = bar.getBoundingClientRect().height;
+			const read = () => `${scroller.scrollTop}|${Math.round(mark.getBoundingClientRect().top)}`;
+			const seen = [read()];
+			// A draft arriving in the composer (a restored draft, a quoted reply) without taking the person's focus.
+			composer.textContent = Array.from({ length: 6 }, () => 'A longer message').join('\n');
+			composer.dispatchEvent(new Event('input', { bubbles: true }));
+			for (let i = 0; i < 40; i++) { await new Promise(requestAnimationFrame); seen.push(read()); }
+			const grew = bar.getBoundingClientRect().height - before;
+			composer.textContent = '';
+			composer.dispatchEvent(new Event('input', { bubbles: true }));
+			return { seen, grew, focused: document.activeElement?.classList.contains('ct-input') ?? false };
+		});
+		expect(growth.grew, 'the composer grew').toBeGreaterThan(0);
+		expect(growth.focused, 'focus stayed in the margin field').toBe(true);
+		expect([...new Set(growth.seen)], 'the transcript scroll and the text under the reader, every frame').toHaveLength(1);
+
+		// The on-screen keyboard comes up over the lower part of the screen, where this field sits: it is brought back uncovered.
+		const height = 1000, keyboardUp = Math.round(height * 0.58);
+		await expect.poll(() => field.evaluate((el) => Math.round(el.getBoundingClientRect().bottom)), { message: 'the keyboard would cover the field' }).toBeGreaterThan(keyboardUp);
+		await page.setViewportSize({ width: 1920, height: keyboardUp });
+		await expect.poll(() => field.evaluate((el) => {
+			const rect = el.getBoundingClientRect(), vv = window.visualViewport;
+			const top = vv?.offsetTop ?? 0, h = vv?.height ?? window.innerHeight;
+			const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			return rect.top >= top && rect.bottom <= top + h && !!hit && el.contains(hit);
+		}), { message: 'the focused field is uncovered above the keyboard' }).toBe(true);
+		await expect(field).toBeFocused();
+	});
 });
 
 test('a chat column too narrow for the card keeps the popover at the highlight', async ({ page, request }) => {
