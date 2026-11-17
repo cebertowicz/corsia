@@ -168,7 +168,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None,
                   "label": person_owner_label(owner, db=db, multi_person=multi_person, user_id=user_id,
                                               owner_user_id=owner_user_id),
-                  "recorded_viewer": kind == "person" and bool(owner_user_id) and owner_user_id == user_id},
+                  "recorded_viewer": owner == "ui" and bool(owner_user_id) and owner_user_id == user_id},
         "supervisor": supervisor,
         "can_act": status == "ready",
         "multi_person": multi_person,

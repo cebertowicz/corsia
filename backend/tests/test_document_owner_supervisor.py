@@ -382,6 +382,21 @@ def test_each_person_can_take_a_person_owned_document(owned_document, person_own
     assert _view(artifact_id)["owner"]["recorded_viewer"] is False
 
 
+def test_project_owner_with_old_viewer_identity_still_needs_claim(owned_document):
+    from infra.database import get_db
+    from registry.identity_metadata import merge_identity_metadata
+
+    _, artifact_id = owned_document
+    _set_owner(artifact_id, "project:p1")
+    db = get_db()
+    try:
+        merge_identity_metadata(db, artifact_id, {"owner_user_id": OWNER_USER})
+        db.commit()
+    finally:
+        db.close()
+    assert _view(artifact_id)["owner"]["recorded_viewer"] is False
+
+
 def test_another_persons_document_reads_as_missing(owned_document):
     """The ownership change refuses a document in another person's thread, as an unknown id."""
     from infra.database import get_db
