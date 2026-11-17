@@ -21,10 +21,10 @@ export function browserAddressLabel(raw: string, domain?: string | null): string
 
 /**
  * The two parts a host reads as: the registrable domain leads, the subdomain in front of it follows.
- * One copy, shared by the pane's address and the chat chip, so the two never word a host differently.
+ * One copy, shared by the pane's address and the chat chip, so both lead with the same domain.
  *
- * The backend's domain leads whenever the host sits inside it. Without one (a chip stored before the field
- * existed) the whole host stands as itself: only the Public Suffix List knows where a site's domain starts.
+ * The backend's domain leads whenever the host sits inside it. Without one (the pane before the backend has
+ * named it) the whole host stands as itself: only the Public Suffix List knows where a site's domain starts.
  */
 export function hostLabelParts(host: string, domain?: string | null): { lead: string; rest: string | null } {
 	if (!domain || !(host === domain || host.endsWith(`.${domain}`))) return { lead: host, rest: null };

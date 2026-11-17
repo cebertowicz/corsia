@@ -9,8 +9,8 @@ import { hostLabelParts } from './browserAddress';
 export interface BrowserChip {
 	/** The page's host without `www.`; `null` when the opened URL named none. */
 	host: string | null;
-	/** The page's registrable domain as the backend names it; `null` on chips stored before the field existed. */
-	domain?: string | null;
+	/** The page's registrable domain as the backend names it; `null` when there is no host. */
+	domain: string | null;
 }
 
 /** The chip's tooltip: it reopens the one browser view, it does not navigate. */
@@ -34,12 +34,12 @@ export function browserChipAccessibleName(chip: BrowserChip): string {
 	return chip.host ? `${browserChipLabel(chip)}, reopen the shared browser` : BROWSER_CHIP_NAME;
 }
 
-/** A `browser_chip` field as it arrives from the server; chips stored before `domain` existed parse with it `null`. */
+/** A `browser_chip` field as it arrives from the server: `host` and `domain`, each a string or null. */
 export function parseBrowserChip(raw: unknown): BrowserChip | null {
 	if (!raw || typeof raw !== 'object') return null;
 	const host = (raw as { host?: unknown }).host;
 	if (host !== null && typeof host !== 'string') return null;
 	const domain = (raw as { domain?: unknown }).domain;
-	if (domain !== undefined && domain !== null && typeof domain !== 'string') return null;
+	if (domain !== null && typeof domain !== 'string') return null;
 	return { host: host || null, domain: typeof domain === 'string' ? domain : null };
 }
