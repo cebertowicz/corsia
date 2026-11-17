@@ -113,6 +113,17 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await page.keyboard.press('Escape');
 	await expect(card).toHaveCount(1);
 	await expect(card).not.toHaveClass(/selected/);
+
+	// Escape from a reply being written lets the card go the same way, and as in a document's margin the focus goes back to
+	// the text it came from, the highlight, so the resting card shows no focus; the unsent reply stays in its field.
+	await highlight.click();
+	await expect(card).toHaveClass(/selected/);
+	await replyField.fill('A reply not sent yet');
+	await page.keyboard.press('Escape');
+	await expect(card).not.toHaveClass(/selected/);
+	await expect(replyField).toHaveValue('A reply not sent yet');
+	await expect(replyField).not.toBeFocused();
+	await expect(highlight).toBeFocused();
 });
 
 for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark'] as const) test(`a long chat margin reply stays usable at ${width} in ${theme}`, async ({ page, request }, info) => {
