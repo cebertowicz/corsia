@@ -127,16 +127,16 @@ journey('review note keeps typed text through an AutoFill replacement at 393', [
 	// The file's backend reset (about 23 s on this host) runs inside the test's budget, ahead of the journey itself.
 	test.setTimeout(120_000);
 	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	const note = page.getByRole('textbox', { name: /^Note for / });
 	const typed = 'Please revise the second ring';
 	await typeThenAutofill(page, note, typed);
 	await page.screenshot({ path: info.outputPath('393-review-note-kept.png'), animations: 'disabled' });
 	const clear = page.waitForRequest((request) => request.url().includes(`/api/attention/${doc.artifactId}/clear`) && request.method() === 'POST');
-	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	const body = (await clear).postDataJSON();
 	expect(body.note, 'the review the app sent carries the kept note').toBe(`${typed} ${SUGGESTION}`);
-	await expect(page.locator('.rb-receipt')).toContainText('Rejected');
+	await expect(page.locator('.rb-receipt')).toContainText('Sent back');
 	await page.screenshot({ path: info.outputPath('393-review-note-sent.png'), animations: 'disabled' });
 }, async ({ request }) => {
 	// The starting state is built as the journey's own fixture, outside the test's budget.
