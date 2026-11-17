@@ -11,7 +11,7 @@ def test_active_effect_blocks_repo_transition():
     )
 
     with admit_repo_effect():
-        with pytest.raises(RepoPolicyTransitionBusy, match="tool effect"):
+        with pytest.raises(RepoPolicyTransitionBusy, match="while you're running an action"):
             with repo_policy_transition(
                 active_process_count=lambda: 0,
             ):
@@ -53,7 +53,7 @@ def test_owned_process_blocks_transition_without_leaking_quarantine():
         repo_policy_transition,
     )
 
-    with pytest.raises(RepoPolicyTransitionBusy, match="owned process"):
+    with pytest.raises(RepoPolicyTransitionBusy, match="while an agent's process is running"):
         with repo_policy_transition(
             active_process_count=lambda: 1,
         ):

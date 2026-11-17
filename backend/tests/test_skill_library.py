@@ -47,8 +47,8 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
     assert TOOL_CATALOG["skill_library"].category == "memory"
     assert tool_pack("skill_library") == "memory"
     assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove", "fetch_pack"]
-    assert "local_edits_token" in tool.parameters["properties"]
-    assert "local_edits_token" in tool.parameters["properties"]["discard_local_edits"]["description"]
+    assert "local_edits_digest" in tool.parameters["properties"]
+    assert "local_edits_digest" in tool.parameters["properties"]["discard_local_edits"]["description"]
 
 
 def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
@@ -290,11 +290,11 @@ def test_discard_token_is_bound_to_the_exact_local_files(tmp_path):
     folder = tmp_path / "pdf"
     folder.mkdir()
     (folder / "SKILL.md").write_bytes(b"first")
-    token = skill_library._local_edits_token("owner", "pdf", folder)
+    token = skill_library._local_edits_digest("owner", "pdf", folder)
 
-    assert skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], token) == {}
+    assert skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], True, token) == {}
     (folder / "SKILL.md").write_bytes(b"changed")
-    assert skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], token)["error"] == "discard_confirmation_required"
+    assert skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], True, token)["error"] == "discard_confirmation_required"
 
 
 def test_update_results_name_files_dropped_upstream():
@@ -347,3 +347,35 @@ def test_refusals_name_the_missing_argument_and_exact_search_recovery():
 
     assert skill_library._error("query_required", "search requires query")["error"] == "query_required"
     assert skill_library._error("not_in_library", "search first; names are exact")["message"] == "search first; names are exact"
+
+
+def test_local_edits_refusal_calls_files_changed_only_when_it_knows(tmp_path):
+    from tools import skill_library
+
+    folder = tmp_path / "pdf"
+    folder.mkdir()
+    (folder / "SKILL.md").write_bytes(b"first")
+    exact = skill_library._local_edits_refusal("owner", "pdf", folder, ["notes.md"], True)
+    assert exact["message"].startswith("your changed files: notes.md;")
+    assert exact["changed_files"] == ["notes.md"]
+    unknown = skill_library._local_edits_refusal("owner", "pdf", folder, ["SKILL.md", "notes.md"], False)
+    assert "your changed files" not in unknown["message"]
+    assert unknown["message"].startswith("this copy was edited, but CORSIA can't tell which file; its files: SKILL.md, notes.md;")
+    assert unknown["changed_files"] == []
+    assert len(unknown["local_edits_digest"]) == 64
+
+
+def test_discard_confirmation_names_the_files_it_would_lose(tmp_path):
+    from tools import skill_library
+
+    folder = tmp_path / "pdf"
+    folder.mkdir()
+    (folder / "SKILL.md").write_bytes(b"edited")
+    exact = skill_library._discard_confirmation("owner", "pdf", folder, ["notes.md"], True, "stale")
+    assert exact["message"].startswith("your changed files: notes.md;")
+    assert exact["changed_files"] == ["notes.md"]
+    unknown = skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md", "notes.md"], False, "stale")
+    assert unknown["error"] == "discard_confirmation_required"
+    assert unknown["message"].startswith("this copy was edited, but CORSIA can't tell which file; its files: SKILL.md, notes.md;")
+    assert unknown["changed_files"] == []
+    assert len(unknown["local_edits_digest"]) == 64

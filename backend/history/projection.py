@@ -6,6 +6,7 @@ from bisect import bisect_right
 from collections.abc import Callable
 from typing import Any, NamedTuple, TypeVar
 
+from infra.delivery_states import TURN_ENDED_WITHOUT_RESULT_REASON
 from infra.tool_retention_marker import TOOL_TRIM_MARKER
 from history.boundaries import _slice_range, validate_boundary_identity
 from history.scoped_source import (
@@ -37,6 +38,11 @@ from history.types import (
 )
 
 _T = TypeVar("_T")
+# Calls whose result was never recorded: a read-time stub, or the durable row
+# a Turn's terminal wrote for a call it left open.
+_NEVER_RECORDED_REASONS = frozenset({
+    "tool_result_missing", TURN_ENDED_WITHOUT_RESULT_REASON,
+})
 
 
 class _Source(NamedTuple):
@@ -132,13 +138,14 @@ def _project_source(
     projected_turns = _project_selected_turns(selected, db=db)
     # One entry per LOST CALL, not per distinct seq: every stub in a Step is
     # anchored at that Step's own seq, so deduplicating would report a batch
-    # that lost twelve results as one. The notice states a count.
+    # that lost twelve results as one. The notice states a count. A call the
+    # Turn's terminal paid durably is the same loss, so it counts the same.
     missing_result_stub_seqs = tuple(
         sorted(
             message.seq
             for turn in projected_turns
             for message in turn.messages
-            if message.synthetic_reason == "tool_result_missing"
+            if message.synthetic_reason in _NEVER_RECORDED_REASONS
         )
     )
     return PortableHistoryProjection(

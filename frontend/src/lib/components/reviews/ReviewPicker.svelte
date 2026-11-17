@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { onDestroy, tick } from 'svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { Button } from '$lib/components/ui';
@@ -75,7 +76,7 @@
 	{/if}
 	{#if model.selected.length}
 		<label class="field-label" for={`${id}-note`}>Note <span class="optional">(optional)</span></label>
-		<textarea id={`${id}-note`} maxlength="500" rows="2" placeholder="What should they look at?" bind:value={model.note}></textarea>
+		<textarea use:keepTyped id={`${id}-note`} maxlength="500" rows="2" placeholder="What should they look at?" bind:value={model.note}></textarea>
 		{#if model.note.length >= 400}<span class="hint counter">{model.note.length} / 500</span>{/if}
 	{/if}
 	{#if model.refusal}

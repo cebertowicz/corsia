@@ -137,7 +137,10 @@ def _notice_payload(
     origin = read_origin(Path(path).parent)
     if item is None or item.get("kind", "skill") != "skill" or origin is None or not isinstance(origin.get("source"), str):
         return None
-    edited, changed_files = local_edits(Path(path).parent, origin)
+    edited, changed_files, exact = local_edits(Path(path).parent, origin)
+    if not exact:
+        # A copy without per-file digests can't say which file changed; don't call every file changed.
+        changed_files = []
     base = {
         "external_id": external_id,
         "name": name,

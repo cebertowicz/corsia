@@ -1,7 +1,7 @@
 """Change, close or archive many named nodes in one call, and report each one's outcome.
 
 Every bulk verb runs through this module's per-id loop, refusal list and slot
-release (``plans.boundary_after.archive_many`` included), in the shape the Later
+release (archive included), in the shape the Later
 design names as the template (section 5):
 
 * one connection and one write, so two hundred tasks cross the cut together;
@@ -49,10 +49,14 @@ def dispatch(plan_id, operation, params, common, db, actor) -> dict:
             plan_id, params["node_ids"], bulk_fields.edit_body(params, boundary_fields.text),
             common, db, acting=acting,
         )
-    return close_many(
-        plan_id, params["node_ids"], boundary_fields.text(params, "reason"), common, db,
-        acting=acting,
-    )
+    if operation == "close_node":
+        return close_many(
+            plan_id, params["node_ids"], boundary_fields.text(params, "reason"), common, db,
+            acting=acting,
+        )
+    if operation == "archive_node":
+        return archive_many(plan_id, params["node_ids"], common, db, acting=acting)
+    raise service.PlanError(f"Unsupported bulk operation: {operation}")
 
 
 def edit_many(
@@ -118,6 +122,20 @@ def close_many(
         "refused": _refused(node_ids, reasons),
         **_free_slot(plan_id, held, applied, common, acting, closed=True),
     }
+
+
+def archive_many(
+    plan_id: str, node_ids: list[str], common: dict, db, *, acting: str | None,
+) -> dict:
+    """Retire named nodes, preserving per-node refusals and releasing held slots."""
+    from plans import archival
+
+    held = _held_slots(db, node_ids)
+    applied, reasons = _apply(
+        db, node_ids, "archive_node", lambda node_id: archival.archive_node(node_id, **common),
+    )
+    _free_slot(plan_id, held, applied, common, acting, closed=False, archived=True)
+    return {"archived": applied, "refused": _refused(node_ids, reasons)}
 
 
 def _apply(

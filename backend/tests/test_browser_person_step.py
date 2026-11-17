@@ -10,7 +10,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from host_access import browser_control, browser_steps, browser_step_lifecycle as lifecycle
+from host_access import browser_control, browser_session_commands, browser_steps, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
@@ -439,8 +439,9 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
     page.show("visit-c", present=frozenset({42}))
     await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
     assert set(browser_control._guarded_visits[THREAD]) == {"visit-a"}
-    browser_control.browser_closed(THREAD)
+    await browser_session_commands.end_session(THREAD, "session-one")
     assert THREAD not in browser_control._guarded_visits
+    assert not lifecycle.finished_visit(THREAD, "visit-a")
     page.show("visit-a", present=frozenset({42}))
     await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
 
@@ -497,10 +498,12 @@ async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open
         raise PlanError("fixture row failure")
 
     monkeypatch.setattr(lifecycle, "_plan_write", fail)
-    with pytest.raises(PlanError, match="fixture row failure"):
-        if kind == "person":
+    # Contained: a declaration says it may not have been recorded; a password page refuses the command.
+    if kind == "person":
+        with pytest.raises(BrowserSessionError, match="may not have been recorded"):
             await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
-        else:
+    else:
+        with pytest.raises(BrowserSessionError, match="sign-in task couldn't be recorded"):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert THREAD not in lifecycle._steps
     assert _steps(plan["db"]) == []

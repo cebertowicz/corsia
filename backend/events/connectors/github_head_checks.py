@@ -23,7 +23,7 @@ from events.connectors import github_notifications_feed as feed
 from events.connectors import github_pr_facts as pr_facts
 from events.connectors import github_repo_activity as poller
 from events.connectors.github_pr_quiet_reasons import rank
-from events.intake_errors import failure_code
+from events.intake_retry import admit_with_retry
 
 log = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 30
@@ -167,27 +167,13 @@ class HeadCheckAggregator:
             try:
                 facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts)
                 event_id = _event_id(repo, head_sha, latest)
-                for attempt in range(1, MAX_ATTEMPTS + 1):
-                    try:
-                        result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
-                            origin="connector", producer="github", event_id=event_id)
-                        code = None if result.refusal is None else result.refusal.code
-                    except Exception as exc:
-                        # A write the intake could not take (a held database lock) raises rather than refuses.
-                        if failure_code(exc) != "intake_unreachable":
-                            raise
-                        code = "intake_unreachable"
-                        log.warning("github-head-checks: intake unreachable for %s@%s, try %s of %s: %s",
-                                    *key, attempt, MAX_ATTEMPTS, exc)
-                    if code is None:
-                        break
-                    log.info("github-head-checks: intake refused %s@%s code=%s", *key, code)
-                    if code != "intake_unreachable":
-                        break
-                    if attempt == MAX_ATTEMPTS:
-                        keep = True
-                    else:
-                        await self.sleep(DEBOUNCE_SECONDS * attempt)
+                result = await admit_with_retry(
+                    self.sink.admit_event, pauses=tuple(DEBOUNCE_SECONDS * n for n in range(1, MAX_ATTEMPTS)),
+                    sleep=self.sleep, event_type="github.head.checks_completed", facts=facts,
+                    origin="connector", producer="github", event_id=event_id,
+                )
+                if result.refusal is not None:
+                    log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
             except Exception:
                 log.warning("github-head-checks: could not admit settled head %s@%s", *key, exc_info=True)
                 keep = True

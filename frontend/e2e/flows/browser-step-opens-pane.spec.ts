@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { colorAt } from '../support/browserCanvas';
 import { createSession, loginByUrl, sendChatMessage, sidebarThread, saveEvidenceScreenshot } from '../support/corsia';
+import { revealWorked } from '../support/documentOpen';
 import { seedMockResponses } from '../support/mock';
 import { startProbeServer } from '../support/probeServer';
 
@@ -72,6 +73,69 @@ test('one press on the sign-in chip shows the agent’s browser', async ({ page,
 		await page.getByRole('dialog').getByRole('button', { name: /Enter your password/ }).click();
 		await expectPagePixels(page);
 		await saveEvidenceScreenshot(page, info, `${width}-5-needs-you`, { fullPage: false });
+	} finally { await probe.close(); }
+});
+
+test('marking the sign-in step done wakes the agent and leaves the page to it', async ({ page, request }, info) => {
+	test.skip(info.project.name === 'chromium-mobile', 'desktop proof');
+	test.setTimeout(150_000);
+	const probe = await startProbeServer();
+	try {
+		const title = `sign-in-done-${Date.now()}`;
+		const thread = await createSession(request, title);
+		await loginByUrl(page);
+		await sidebarThread(page, title).click();
+		await reachPasswordPage(page, request, thread, probe.origin);
+		await chip(page).click();
+		await expectPagePixels(page);
+
+		// The person marks the step done with the password field still on the page; the agent wakes, reads the page
+		// and is not asked to hand it back.
+		await seedMockResponses(request, [
+			{ tool_calls: [{ id: 'read-after-done', name: 'browser_snapshot', arguments: JSON.stringify({}) }], finish_reason: 'tool_calls', match_thread: thread },
+			{ content: 'Signed in; carrying on.', finish_reason: 'stop', match_thread: thread },
+		]);
+		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
+		await planRow.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Mark done' }).click();
+		// Focus folds the woken turn's plain reply into its own work group, after the first turn's.
+		await expect(page.getByRole('button', { name: /Expand Worked/ })).toHaveCount(2, { timeout: 45_000 });
+		await revealWorked(page);
+		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 30_000 });
+		await expect(chip(page)).toHaveCount(0);
+		await saveEvidenceScreenshot(page, info, '1440-done-woken', { fullPage: false });
+	} finally { await probe.close(); }
+});
+
+test('a sign-in step for a site with a long name reaches the person', async ({ page, request }, info) => {
+	test.setTimeout(150_000);
+	const phone = info.project.name === 'chromium-mobile';
+	if (phone) await page.setViewportSize({ width: 393, height: 852 });
+	const width = phone ? 393 : 1440;
+	const probe = await startProbeServer();
+	try {
+		// Chrome resolves any *.localhost name to this machine. The site's name is too long for the step's title as
+		// worded, so the title keeps the name's end behind an ellipsis.
+		const origin = probe.origin.replace('127.0.0.1', 'sign-in-step-long-site.localhost');
+		const title = `sign-in-long-${Date.now()}`;
+		const thread = await createSession(request, title);
+		await loginByUrl(page);
+		if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, title).click();
+		await reachPasswordPage(page, request, thread, origin);
+		await expect(chip(page)).toContainText('…-site.localhost');
+		await saveEvidenceScreenshot(page, info, `${width}-long-1-chip`, { fullPage: false });
+
+		// The step is on the person's list of what needs them.
+		if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		const row = page.locator('aside.sidebar .thread-item').filter({ hasText: title });
+		await row.getByRole('button', { name: /: 1 item$/ }).click();
+		const listed = page.getByRole('dialog').getByRole('button', { name: /Enter your password.*…-site\.localhost/ });
+		await expect(listed).toBeVisible();
+		await saveEvidenceScreenshot(page, info, `${width}-long-2-needs-you`, { fullPage: false });
+		await (phone ? listed.tap() : listed.click());
+		await expectPagePixels(page);
+		await saveEvidenceScreenshot(page, info, `${width}-long-3-browser`, { fullPage: false });
 	} finally { await probe.close(); }
 });
 

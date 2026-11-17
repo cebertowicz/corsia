@@ -45,6 +45,7 @@ from core.corrections_recording import (
     LABELS as CORRECTION_LABELS,
 )
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
+from core.machinery_cost import BUCKETS as MACHINERY_BUCKETS, RECORD_EVENT as MACHINERY_RECORD_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from core.usage_fields import ENUMS as USAGE_ENUMS
 from core.usage_fields import PATTERNS as USAGE_PATTERNS
@@ -191,6 +192,11 @@ _REVIEW_ATTRS = {
 }
 
 ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
+    MACHINERY_RECORD_EVENT: {
+        **{f"{prefix}_{bucket}": count_attr() for prefix in ("c", "b") for bucket in MACHINERY_BUCKETS},
+        "skill_count": count_attr(), "skill_bytes": count_attr(),
+        "fresh_tokens": pattern_attr(r"-?[0-9]+"),
+    },
     "test.outcome.recorded": {
         "ref_id": id_attr(),
         "count": count_attr(),

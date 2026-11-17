@@ -20,8 +20,8 @@ def parameters():
             "query": {"type": "string", "description": "search only: words describing the job to do"},
             "name": {"type": "string", "description": "exact name from a search result or your skill index"},
             "discard_local_edits": {"type": "boolean", "default": False,
-                                    "description": "update/remove only: set true only with the local_edits_token returned after reviewing affected files"},
-            "local_edits_token": {"type": "string", "description": "update/remove only: exact token returned by local_edits; it confirms the listed edits may be discarded"},
+                                    "description": "update/remove only: set true only with the local_edits_digest returned after reviewing affected files"},
+            "local_edits_digest": {"type": "string", "description": "update/remove only: exact digest returned by local_edits; it confirms the listed edits may be discarded"},
         },
         "required": ["action"],
     }

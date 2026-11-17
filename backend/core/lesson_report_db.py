@@ -8,6 +8,13 @@ from threading import Event
 
 from core.lesson_report_offers import LessonReportCollectionCancelled
 
+# SQLite VM steps between cancellation checks. Each check is a Python call, so it waits for the
+# GIL; while the server's other threads hold it, every wait can last a whole switch interval
+# (5 ms). At about 19M steps a second a report scan then checks every ~50 ms, so a busy server
+# slows it by a few percent instead of stalling it, and an abandoned report still stops within
+# a fraction of a second.
+CANCEL_CHECK_STEPS = 1_000_000
+
 
 @contextmanager
 def report_snapshot(*, cancellation_event: Event | None = None) -> Iterator[sqlite3.Connection]:
@@ -23,7 +30,7 @@ def report_snapshot(*, cancellation_event: Event | None = None) -> Iterator[sqli
     try:
         db.row_factory = sqlite3.Row
         if cancellation_event is not None:
-            db.set_progress_handler(cancellation_event.is_set, 1_000)
+            db.set_progress_handler(cancellation_event.is_set, CANCEL_CHECK_STEPS)
             if cancellation_event.is_set():
                 raise LessonReportCollectionCancelled
         db.execute("PRAGMA query_only=ON")

@@ -110,7 +110,10 @@ def test_cli_bad_json_and_transient_exit_contracts(emit_world, capsys, monkeypat
     bad_json, out, err = _run(_cli("qa.route", "--facts", "{"), capsys)
     assert bad_json == 1 and not out and err.startswith("error: bad_json:")
 
-    async def unavailable(**_kwargs):
+    calls = []
+
+    async def unavailable(**kwargs):
+        calls.append(kwargs["event_id"])
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr("events.intake.admit_event", unavailable)
@@ -120,6 +123,7 @@ def test_cli_bad_json_and_transient_exit_contracts(emit_world, capsys, monkeypat
     assert fresh == 3 and not fresh_out and fresh_err.startswith("error: intake_unreachable:")
     assert "Pass --id so a retry cannot duplicate the event." in fresh_err
     assert keyed == 3 and "Retry with the same event id." in keyed_err
+    assert len(calls) == 2  # one admission per CLI invocation
 
 
 @pytest.mark.parametrize("defect", [TypeError("bad call"), sqlite3.OperationalError("no such table: event_rules")])

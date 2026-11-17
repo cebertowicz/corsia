@@ -556,7 +556,7 @@ def test_an_application_progress_handler_neither_replaces_nor_clears_the_count(c
     baseline = run_heavy(counters, db)
     assert baseline > 100_000
     calls: list[int] = []
-    db.set_progress_handler(lambda: calls.append(1) or 0, 1_000)  # a deadline check, as the audit and log reads set
+    db.set_progress_handler(lambda: calls.append(1) or 0, 1_000)  # a deadline check, like the audit and log reads' (theirs is every 1,000,000 steps)
     assert run_heavy(counters, db) == baseline
     assert len(calls) == baseline // 1_000
     db.set_progress_handler(None, 0)  # the lesson report clears its handler when it is done

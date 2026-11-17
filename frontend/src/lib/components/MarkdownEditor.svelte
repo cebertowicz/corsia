@@ -154,11 +154,11 @@
 	}
 
 	/**
-	 * Whether the draft's text at `from` needs revealing now the sheet that overlays this editor came up (always) or moved (only when
-	 * it covered text the reader had in view); a reader's own scroll away from the draft is never undone.
+	 * Whether the text at `from` (a draft's, or an opened thread's) needs revealing now the sheet that overlays this editor came up
+	 * (always) or moved (only when it covered text the reader had in view); a reader's own scroll away from it is never undone.
 	 */
 	let bandBefore: { top: number; bottom: number } | null = null;
-	export function draftCovered(from: number, opening: boolean): boolean {
+	export function coveredBySheet(from: number, opening: boolean): boolean {
 		if (!view) return opening;
 		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore);
 		bandBefore = band;

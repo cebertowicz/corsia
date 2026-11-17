@@ -15,8 +15,9 @@ or a node state itself:
    mid-work: steps it already ran keep their own commitment.
 
 A step up for the parent's verdict on the old worker's return goes back to
-``active``: that return is no longer what the parent judges, and the harvest
-only takes up a step in work, so leaving it in review would drop the
+``active`` through the attach, which puts any step in review back in work for
+its new worker: that return is no longer what the parent judges, and the
+harvest only takes up a step in work, so leaving it in review would drop the
 replacement's return silently (#2310).
 
 Every wake and wait about a delegated step reads the node's attachment, so from
@@ -68,7 +69,7 @@ def replace_spawned_thread(
     so the old worker is never left closed with nobody attached. ``replaced``
     is the old worker; ``stranded`` its own workers whose steps this closed.
     """
-    from plans import delegation, delegation_child_lifecycle, delegation_harvest, plan_events
+    from plans import delegation, delegation_child_lifecycle, plan_events
 
     replaced: str | None = None
     stranded: list[str] = []
@@ -92,11 +93,6 @@ def replace_spawned_thread(
                 replacement_id=spawned_thread_id, actor_id=actor_id,
                 created_at=service._now(),
             )
-            if delegation_harvest.awaiting_owner_verdict(connection, node):
-                service.transition_node(
-                    node_id, "active", actor_id=actor_id,
-                    provenance=provenance, db=connection,
-                )
         attached = delegation.attach_spawned_thread(
             node_id, spawned_thread_id, actor_id=actor_id,
             provenance=provenance, db=connection,

@@ -53,7 +53,7 @@ def settled_or_debt(db, *, label: str) -> Iterator[None]:
     DEBT PAYMENT degrades — the terminal's own I/O still fails).
 
     The name is unique per unit because these nest — a Turn's terminal guards
-    its stranded-row sweep, which guards each row inside it — and ``ROLLBACK
+    its debt payment, which guards each call inside it — and ``ROLLBACK
     TO`` on a shared name targets the most recent savepoint holding it, which
     is a correctness question nobody should have to re-derive at a call site.
     """

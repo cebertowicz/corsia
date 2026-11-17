@@ -508,7 +508,8 @@ async def test_browser_opened_is_announced_only_when_an_open_starts_the_session(
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
-    monkeypatch.setattr(browser_control, "require_page_access", lambda *_args, **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(browser_control, "check_page_access",
+                        lambda *_args, **_kwargs: asyncio.sleep(0, result=browser_control.PageAccess(None, False)))
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _command: asyncio.sleep(0, result="ws://page"))
     await owner.run("thread-1", ("open", "https://example.test"), session="new")
     await owner.run("thread-1", ("open", "https://example.test"), session="existing")
@@ -601,7 +602,8 @@ async def test_relay_shows_page_frames_and_stops_the_screencast_when_the_pane_le
     relay = asyncio.create_task(browser_stream._relay(pane, "thread-1", "user-1"))
     while not pane.text:
         await asyncio.sleep(0)
-    assert [json.loads(text) for text in pane.text] == [frame]
+    # Each sent frame is numbered, so the pane can report which one it last painted.
+    assert [json.loads(text) for text in pane.text] == [{**frame, "seq": 1}]
     assert cast.stopped == []
     left.set()
     with pytest.raises(WebSocketDisconnect):
@@ -731,13 +733,13 @@ async def test_the_command_path_holds_pane_screencasts_during_an_agent_screensho
         return CommandResult(0, '{"success":true,"data":{}}', ""), False
 
     async def page_access(*_args, **_kwargs):
-        pass
+        return browser_control.PageAccess(None, False)
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
-    monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    monkeypatch.setattr(browser_control, "check_page_access", page_access)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
     browser_pane_state.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
     with pytest.raises(BrowserSessionError) if fails else contextlib.nullcontext():

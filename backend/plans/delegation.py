@@ -248,6 +248,13 @@ def attach_spawned_thread(
             provenance=provenance,
             db=connection,
         )
+        if node["state"] == "review_requested":
+            # The worker takes the step over, so it is in work again; left in
+            # review, the worker's return would never be harvested.
+            service._transition(
+                connection, node_id, "active", actor_id=actor_id, provenance=provenance,
+                verification_result=None, verified_by=None,
+            )
         _release_delegated_selection(connection, node, actor_id, provenance)
         _attachment_event(
             connection, node_id, spawned_thread_id, child_plan.id,

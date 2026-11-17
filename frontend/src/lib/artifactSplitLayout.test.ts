@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	computeSplitLayout, computeDefaultArtifactWidth, dragArtifactWidth, keyboardArtifactWidth,
-	clamp, shouldOverlayPane, CHAT_MIN, ARTIFACT_MIN, DIVIDER_WIDTH, COMBINED_MIN,
+	clamp, shouldOverlayPane, settledShell, CHAT_MIN, ARTIFACT_MIN, DIVIDER_WIDTH, COMBINED_MIN,
 	PANE_DRAWER_WIDTH, ARTIFACT_DEFAULT_FRACTION,
 } from './artifactSplitLayout';
 
@@ -153,5 +153,48 @@ describe('keyboardArtifactWidth', () => {
 	});
 	it('returns null for unrelated keys', () => {
 		expect(keyboardArtifactWidth(500, 'Tab', canvasWidth)).toBeNull();
+	});
+});
+
+describe('settledShell', () => {
+	// A row of sidebar, main and Workspace panel at `viewport`; the sidebar and panel are `sidebarAt` and `paneAt` of the way
+	// through their width transitions (an overlaid panel takes no flow). Main takes what the other two leave.
+	const shell = (viewport: number, sidebar: number, open: boolean, overlaid: boolean, sidebarAt: number, paneAt: number, sidebarOpen = true) => {
+		const sidebarTarget = sidebarOpen ? sidebar : 0;
+		const sidebarInFlow = sidebarTarget + (sidebarOpen ? -1 : 1) * sidebar * (1 - sidebarAt);
+		const paneInFlow = overlaid ? 0 : (open ? paneAt : 1 - paneAt) * PANE_DRAWER_WIDTH;
+		return { main: viewport - sidebarInFlow - paneInFlow, paneInFlow, sidebarInFlow, sidebarTarget, collapsed: !open, protectArtifactSplit: true, viewport };
+	};
+	const steps = [0, 0.25, 0.5, 0.75, 1];
+
+	for (const open of [true, false]) {
+		for (const overlaid of [false, true]) {
+			for (const sidebarOpen of [true, false]) {
+				it(`gives one width and one overlay through a ${open ? 'open' : 'close'}, panel ${overlaid ? 'overlaid' : 'in flow'}, sidebar ${sidebarOpen ? 'opening' : 'closing'}`, () => {
+					const seen = steps.flatMap((paneAt) => steps.map((sidebarAt) => settledShell(shell(1360, 260, open, overlaid, sidebarAt, paneAt, sidebarOpen))));
+					expect(new Set(seen.map((s) => s.visible))).toEqual(new Set([1360 - (sidebarOpen ? 260 : 0) - (open ? PANE_DRAWER_WIDTH : 0)]));
+					expect(new Set(seen.map((s) => s.overlay)).size).toBe(1);
+				});
+			}
+		}
+	}
+
+	it('equals the measured visible canvas at rest', () => {
+		// In flow, main is what is left beside the panel; overlaid, main is the whole row less the sidebar, and the panel covers its end.
+		const inFlow = shell(1600, 260, true, false, 1, 1);
+		expect(settledShell(inFlow).visible).toBe(inFlow.main);
+		const overlaid = shell(1360, 280, true, true, 1, 1);
+		expect(settledShell(overlaid).visible).toBe(overlaid.main - PANE_DRAWER_WIDTH);
+	});
+
+	it('keeps the overlay answer while the panel grows into a canvas too narrow for it', () => {
+		// 1360 less a 280 sidebar leaves the split under its minimum beside the panel: overlay from the first frame to the last.
+		const answers = steps.map((paneAt) => settledShell(shell(1360, 280, true, false, 1, paneAt)).overlay);
+		expect(answers).toEqual(steps.map(() => true));
+		expect(shouldOverlayPane(true, 1360, 1360 - 280 - PANE_DRAWER_WIDTH)).toBe(true);
+	});
+
+	it('does not count the panel as taking width where it is a drawer', () => {
+		expect(settledShell(shell(1000, 0, true, true, 1, 1, false))).toEqual({ overlay: false, visible: 1000 });
 	});
 });

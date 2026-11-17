@@ -5,7 +5,7 @@
 	import { uiScope } from '$lib/stores/uiScope';
 	import { paletteOpen } from '$lib/stores/palette';
 	import { paneOpen } from '$lib/stores/paneOpen';
-	import { paneCollapsed } from '$lib/stores/paneCollapsed';
+	import { isPaneShortcut, paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { installLinkTargetResolver } from '$lib/linkTargetResolver';
 	import { theme } from '$lib/stores/theme';
 	import { ACCENT_ROLE_TOKENS, accentRoles, type AccentRoles } from '$lib/utils/projectColors';
@@ -16,7 +16,7 @@
 		const meta = e.metaKey || e.ctrlKey;
 		if (!meta) return;
 		if (e.key === 'k') { e.preventDefault(); paletteOpen.update((v) => !v); }
-		else if (e.key === '\\') {
+		else if (isPaneShortcut(e)) {
 			e.preventDefault();
 			if (window.innerWidth <= 1024) paneOpen.update((v) => !v); else paneCollapsed.update((v) => !v);
 		}

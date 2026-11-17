@@ -20,7 +20,8 @@ def _require_current_evidence(connection, node) -> None:
     )
     if evidence is None:
         raise service.PlanError(
-            "acceptance requires review evidence for the current requirements"
+            "acceptance requires review evidence for the current requirements:"
+            " pass evidence (what you checked) with the accept"
         )
     for artifact_id in evidence["artifact_ids"]:
         link = connection.execute(

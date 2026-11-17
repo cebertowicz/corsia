@@ -26,6 +26,7 @@ from tools.tool_surface import (
 
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
+
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -36,9 +37,11 @@ _RESERVED_EXECUTION_PREFIXES = (
 
 # Tool names (resolved, post-dispatch) whose own execution enters
 # ``infra.repo_policy_transition.repo_policy_transition``. They are excused
-# from the registry's ``admit_repo_effect()`` wrapper because that effect would
-# be the active effect their own transition refuses. Nothing else is exempt:
-# effects, transitions and owned processes stay mutually exclusive.
+# from the registry's ``admit_repo_effect()`` wrapper and judged by their own
+# transition alone: project creation's transition refuses while an effect is
+# active, so admitting its own effect would collide with itself; a
+# registration's transition never looks at running effects. File tools that
+# only read are no effect either. Nothing else is exempt.
 _REPO_TRANSITION_OWNERS = frozenset({"project_create", "project_repo_register"})
 
 log = logging.getLogger(__name__)
@@ -105,7 +108,9 @@ class ToolRegistry(ToolStore):
             authorize_host_action,
             host_action_permit_scope,
             is_path_tool,
+            reads_only,
         )
+        from tools.repo_effect_reach import effect_reach
 
         if refusal := confined_reads.call_refusal(name, thread_context):
             return refusal
@@ -131,15 +136,23 @@ class ToolRegistry(ToolStore):
             )
         execution_params.update(parameter_overrides)
         # These two tools own the stronger repository-policy transition for
-        # the repository work they start, and they enter it themselves. The
-        # transition already refuses while any effect is active, so admitting
-        # this call's own effect would only make the tool collide with itself.
-        # Every other tool is still admitted as an effect, and the transition
-        # still excludes effects, other transitions and owned processes.
+        # the repository work they start, and they enter it themselves, so the
+        # transition alone judges them. Project creation's transition refuses
+        # while an effect meets it, so admitting its own effect would make it
+        # collide with itself; a registration's transition never looks at running
+        # effects. A file tool that only reads writes nothing a transition changes.
+        # Every other tool is still admitted as an effect carrying what it can
+        # write, and is refused while a transition it meets runs
+        # (``infra.repo_policy_transition``).
         repo_effect = (
             nullcontext()
-            if name in _REPO_TRANSITION_OWNERS
-            else admit_repo_effect()
+            if name in _REPO_TRANSITION_OWNERS or reads_only(name)
+            else admit_repo_effect(
+                await effect_reach(
+                    tool, name, execution_params, thread_context["id"], authorization,
+                ),
+                thread_id=thread_context["id"],
+            )
         )
         with repo_effect, confined_reads.scope(thread_context):
             with host_action_permit_scope(authorization):

@@ -45,14 +45,27 @@ def installed_digest_part(relative: str, data: bytes) -> bytes | None:
     ).encode("utf-8")
 
 
-def installed_digest(files: Mapping[str, bytes]) -> str:
-    """Digest an installed skill folder while excluding mutable origin metadata."""
-    digest = hashlib.sha256()
+def installed_file_digests(files: Mapping[str, bytes]) -> dict[str, str]:
+    """Return each installed file's SHA-256 over its digest input, excluding origin metadata."""
+    digests: dict[str, str] = {}
     for relative in sorted(files):
         part = installed_digest_part(relative, files[relative])
         if part is not None:
-            digest.update(relative.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
+            digests[relative] = hashlib.sha256(part).hexdigest()
+    return digests
+
+
+def folder_digest(file_digests: Mapping[str, str]) -> str:
+    """Combine per-file digests into the folder digest; a malformed entry raises ValueError."""
+    digest = hashlib.sha256()
+    for relative in sorted(file_digests):
+        digest.update(relative.encode("utf-8") + b"\0" + bytes.fromhex(file_digests[relative]))
     return digest.hexdigest()
+
+
+def installed_digest(files: Mapping[str, bytes]) -> str:
+    """Digest an installed skill folder while excluding mutable origin metadata."""
+    return folder_digest(installed_file_digests(files))
 
 
 def pointer_errors(metadata_field: Any) -> tuple[bool, list[str]]:

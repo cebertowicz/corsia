@@ -137,25 +137,26 @@ def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
     return [dict(row) for row in db.execute(sql, () if artifact_id is None else (artifact_id,))]
 
 
+def ask_exists_sql(artifact_id_sql: str, node_id_sql: str | None = None, *, deferred=True, paused=True) -> str:
+    """EXISTS an open ask on the artifact (from that node); ``False`` drops one the person or a pause defers."""
+    where = f"ask.owner_id={artifact_id_sql}" + ("" if node_id_sql is None else f" AND ask.node_id={node_id_sql}")
+    if not deferred:
+        where += " AND NOT EXISTS (SELECT 1 FROM plan_ask_deferrals d WHERE d.hold_id=ask.hold_id)"
+    if not paused:
+        where += f" AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}"
+    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
+    return f"EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where})"
+
+
 def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = None) -> str:
     """Return the one SQL scalar for an ask's derived attention state.
 
     ``node_id_sql`` keeps link projections scoped to their own asking node;
     without it, the scalar summarizes every open ask for the artifact.
     """
-    node_scope = "" if node_id_sql is None else f" AND ask.node_id={node_id_sql}"
-    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
-    where = f"ask.owner_id={artifact_id_sql}{node_scope}"
-    return f"""CASE
-        WHEN EXISTS (
-            SELECT 1 FROM ({asks}) ask
-            LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
-            WHERE {where} AND deferred.hold_id IS NULL
-              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
-        ) THEN 'raised'
-        WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
-        ELSE 'cleared'
-    END"""
+    raised = ask_exists_sql(artifact_id_sql, node_id_sql, deferred=False, paused=False)
+    return f"""CASE WHEN {raised} THEN 'raised'
+        WHEN {ask_exists_sql(artifact_id_sql, node_id_sql)} THEN 'deferred' ELSE 'cleared' END"""
 
 
 def ask_attention_state(db, artifact_id: str) -> str | None:

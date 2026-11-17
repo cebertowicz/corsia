@@ -28,7 +28,7 @@ _ENUM_VALUES = {
     "liveness": frozenset({"idle", "advancing", "waiting", "blocked", "paused"}),
     "assignee": frozenset({"user", "coordinator", "subagent"}),
     "size": frozenset({"XS", "S", "M", "L", "XL", "XXL", "unknown"}),
-    "section": frozenset({"current", "recent"}),
+    "section": frozenset({"current", "recent", "later"}),
     "severity": frozenset({"idle", "moving", "waiting", "blocked"}),
     "spawn_kind": frozenset({"delegated", "claude-code", "codex", "native"}),
 }

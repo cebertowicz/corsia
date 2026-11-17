@@ -268,6 +268,22 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('cost')).toBeNull();
 	});
 
+	it('hides a token count of exactly zero on a step that never ran', async () => {
+		const amount = {
+			tokens: { known: 0, unknown_rows: 0 },
+			model_cost_usd: { known: 0, unknown_rows: 0 },
+			usage_recording_failures: 0,
+			execution: {
+				settled_seconds: 0, open_starts: [], unknown_turns: 0,
+				turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 },
+			},
+			waiting: { settled_seconds: 0, open_starts: [] },
+		};
+		await open(node({ id: 'never-ran', node_cost: { own: amount, rolled: amount } }));
+		expect(line('tokens')).toBeNull();
+		expect(line('cost')).toBeNull();
+	});
+
 	it('omits an unpriced-call count when it is the only cost input', async () => {
 		const amount = {
 			tokens: { known: null, unknown_rows: 0 },

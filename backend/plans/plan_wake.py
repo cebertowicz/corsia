@@ -47,6 +47,8 @@ INTENT_INPUT = "intent_input"
 PREREQUISITE_SETTLED = "prerequisite_settled"
 #: A conductor-added task in another agent's plan reached a terminal outcome.
 CONDUCTOR_TASK_SETTLED = "conductor_task_settled"
+#: The weekly review of this thread's plan's Later pile (``plans.later_review``).
+LATER_REVIEW = "later_review"
 
 def wake_id(kind: str, subject_id: str, revision: int | str, about: str | None = None) -> str:
     """The durable identity of one wake, so a reader can ask whether it was sent."""

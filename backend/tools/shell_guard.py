@@ -33,11 +33,13 @@ from tools.sandbox_config import (
     is_safehouse_available,
     list_registered_repo_policies,
     list_unsupported_pinned_repos,
-    list_repo_worktrees,
+    policy_enforceable as _enforceable,
+    policy_has_verified_worktree as _has_verified_worktree,
+    policy_verified_worktrees as _verified_worktrees,
     registered_repo_for_path,
     repo_worktree_root,
 )
-from tools.sandbox_git import sandbox_literal
+from tools.sandbox_git import sandbox_literal, worktree_folder_rules, worktree_pointer_rules
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.workspace_git_paths import workspace_git_rules
@@ -633,13 +635,6 @@ def _git_dir_grant(repo: Path) -> str:
     )
 
 
-def _verified_worktrees(policy: RepoPolicy, repo: Path) -> list[Path]:
-    """Return linked worktrees whose reciprocal Git metadata proves ownership."""
-    if not policy.source_binding_valid or policy.enforcement_error:
-        return []
-    return list_repo_worktrees(repo)
-
-
 def pinned_repo_sandbox_profile(
     command: str, cwd: str,
     *,
@@ -692,28 +687,29 @@ def pinned_repo_sandbox_profile(
     if not policies:
         return ""
     rules: list[str] = []
-    seen: set[Path] = set()
     grant_repos = {
         policy.path.resolve(strict=False) for policy in (grant_policies or [])
         if policy.source_binding_valid and not policy.enforcement_error
     }
-    verified_worktrees_by_repo: dict[Path, list[Path]] = {}
+    policy_by_repo: dict[Path, RepoPolicy] = {}
+    listed_worktrees: dict[Path, list[Path]] = {}  # unprotected repos only
     for policy in policies:
         repo = policy.path.resolve(strict=False)
-        if repo in seen:
+        if repo in policy_by_repo:
             continue
-        seen.add(repo)
-        worktrees = _verified_worktrees(policy, repo)
-        verified_worktrees_by_repo[repo] = worktrees
+        policy_by_repo[repo] = policy
+        if not policy.protect_base_checkout:
+            listed_worktrees[repo] = _verified_worktrees(policy, repo)
         if (
             policy.protect_base_checkout
             or policy.enforcement_error
             or not policy.source_binding_valid
         ):
             rules.append(f'(deny file-write* (subpath "{_sandbox_path(repo)}"))')
-            for worktree in worktrees:  # resolved roots proved by this request's listing
+            if _enforceable(policy):
+                # One grant at any worktree count; constant denies follow below.
                 rules.append(
-                    f'(allow file-read* file-write* (subpath "{sandbox_literal(worktree)}"))'
+                    f'(allow file-read* file-write* (subpath "{sandbox_literal(repo / ".worktrees")}"))'
                 )
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
@@ -785,8 +781,9 @@ def pinned_repo_sandbox_profile(
                 )
     elif controlled_policy is None:
         rules.extend(
-            _git_dir_grant(repo) for repo, worktrees
-            in verified_worktrees_by_repo.items() if worktrees and repo in grant_repos
+            _git_dir_grant(repo) for repo, policy in policy_by_repo.items()
+            if repo in grant_repos and (_has_verified_worktree(policy, repo) if policy.protect_base_checkout
+                                        else bool(listed_worktrees[repo]))
         )
     for policy in policies:
         repo = policy.path.resolve(strict=False)
@@ -807,12 +804,8 @@ def pinned_repo_sandbox_profile(
         # Any case: a base checkout has no commondir, and a literal rule misses a new spelling.
         any_case = (repo / ".git" / "commondir", repo / ".git" / "hooks")
         rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
-        if repo != worktree_control_repo:
-            rules.extend(
-                f'(deny file-write* '
-                f'(literal "{sandbox_literal(worktree / ".git")}"))'
-                for worktree in verified_worktrees_by_repo.get(repo, ())  # .git proved a plain file
-            )
+        if repo != worktree_control_repo and _enforceable(owner := policy_by_repo[repo]):
+            rules.extend(worktree_folder_rules(repo) if owner.protect_base_checkout else worktree_pointer_rules(listed_worktrees[repo]))
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
             f'(deny file-write* (subpath "{_sandbox_path(root)}"))'

@@ -7,8 +7,10 @@ from typing import AsyncIterator
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from ws.browser_pane_stats import PaneStats
 
-async def pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
+
+async def pane_messages(pane: WebSocket, stats: PaneStats | None = None) -> AsyncIterator[dict]:
     """The pane's messages in the order sent, less each pointer move a later queued move replaces.
 
     Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
@@ -22,7 +24,7 @@ async def pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
     received: collections.deque[dict | Exception] = collections.deque()
     arrived = asyncio.Event()
 
-    reader = asyncio.create_task(_receive_pane_messages(pane, received, arrived))
+    reader = asyncio.create_task(_receive_pane_messages(pane, received, arrived, stats))
     try:
         while True:
             await arrived.wait()
@@ -38,7 +40,7 @@ async def pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
 
 
 async def _receive_pane_messages(pane: WebSocket, received: collections.deque[dict | Exception],
-                                 arrived: asyncio.Event) -> None:
+                                 arrived: asyncio.Event, stats: PaneStats | None = None) -> None:
     try:
         while True:
             try:
@@ -48,6 +50,8 @@ async def _receive_pane_messages(pane: WebSocket, received: collections.deque[di
             if isinstance(data, dict):
                 if _is_move(data) and received and _is_move(received[-1]):
                     received[-1] = data
+                    if stats is not None:
+                        stats.input_coalesced()
                 elif len(received) >= _MAX_QUEUED_INPUT:
                     received.clear()
                     with contextlib.suppress(Exception):
@@ -55,6 +59,8 @@ async def _receive_pane_messages(pane: WebSocket, received: collections.deque[di
                     raise WebSocketDisconnect(code=1013)
                 else:
                     received.append(data)
+                    if stats is not None:
+                        stats.backlog(len(received))
                 arrived.set()
     except Exception as exc:
         received.append(exc)

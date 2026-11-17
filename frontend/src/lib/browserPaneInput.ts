@@ -22,6 +22,14 @@ export function keyText(event: KeyboardEvent) {
 	return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 }
 
+/** The keyboard message the shared page receives for one key event. */
+export function keyMessage(event: KeyboardEvent) {
+	return {
+		type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
+		key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
+	};
+}
+
 type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number; button?: number };
 
 /** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */

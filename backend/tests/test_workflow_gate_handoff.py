@@ -11,7 +11,7 @@ import pytest
 from infra.database import get_db
 from plans import decision_fields, decisions, gate_handoff, gate_handoff_record, holds, service
 from plans.boundary import PlanActor
-from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, SPOT_DENOMINATORS
+from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, HANDED_OFF_STEP, SPOT_DENOMINATORS
 from tests.test_workflow_runs import Run, SHIP_BODY
 import tools.workflow_task_fields as workflow_task_fields
 
@@ -233,6 +233,8 @@ async def test_none_builds_a_reviewer_step_and_never_a_spot_check(isolated_db, t
         assert _run_db("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'", gate)[0][
             "payload_json"
         ].count('"workflow_gate_mode": "agent"') == 1
+        # Every read of the step, not only the run's start reply, says the person is not asked.
+        assert _run_db("SELECT description FROM plan_nodes WHERE id=?", gate)[0]["description"].startswith(HANDED_OFF_STEP)
     assert GATE_NOTICE.format(step="gate", how=GATE_HOW["agent"]) in reply["notice"]
 
 

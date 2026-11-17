@@ -95,9 +95,15 @@ def first_answer(db, node_ids: list[str]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def latest_verdict(db, node_ids: list[str]) -> str | None:
-    """The person's most recent verdict across a step's nodes, or None."""
-    for _node, verdict, _stamp in _answers(db, node_ids, "DESC"):
+def latest_verdict(db, step) -> str | None:
+    """The person's most recent verdict on a workflow step's node row, across its rounds, or None.
+
+    A step's rounds are the nodes under the same parent with the same step id.
+    """
+    rounds = [row["id"] for row in db.execute(
+        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?", (step["parent_id"], step["workflow_step"]),
+    )]
+    for _node, verdict, _stamp in _answers(db, rounds, "DESC"):
         return verdict
     return None
 

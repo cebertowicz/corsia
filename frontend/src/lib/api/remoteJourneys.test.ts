@@ -7,7 +7,8 @@ import { loadRunRange } from '$lib/focusRunLoader';
 import { fetchContent, fetchComments, fetchArtifactPane, postComment } from './docs';
 import { answerReview, fetchReviewBar } from './reviewBar';
 import { resetUploadLimits, uploadInputFile } from '$lib/components/inputBarHelpers';
-import { loadUpdateStatus, resetUpdateStoreForTests, saveUpdateSchedule } from '$lib/update/store';
+import { saveUpdateSchedule } from '$lib/update/schedule';
+import { loadUpdateStatus, resetUpdateStoreForTests } from '$lib/update/store';
 import { loadSettings, updateSettings } from '$lib/stores/settings';
 import contract from './remoteJourneyCalls.json';
 

@@ -457,10 +457,7 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
 
     def active_process_count(self) -> int:
         """Return owned process groups that still require lifecycle cleanup."""
-        return sum(
-            runtime.record.terminal_state in _OUTSTANDING_STATES
-            for runtime in self._runtimes.values()
-        )
+        return len(self.outstanding_records())
 
     @staticmethod
     def _lifecycle_cleanup_pending(runtime: _RuntimeProcess) -> bool:
@@ -487,12 +484,13 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
             else 0
         )
 
+    def outstanding_records(self) -> tuple[ProcessRecord, ...]:
+        """The records of owned process groups that still require lifecycle cleanup."""
+        runtimes = self._runtimes.values()
+        return tuple(r.record for r in runtimes if r.record.terminal_state in _OUTSTANDING_STATES)
+
     def running_records(self) -> tuple[ProcessRecord, ...]:
-        return tuple(
-            runtime.record
-            for runtime in self._runtimes.values()
-            if runtime.record.terminal_state == "running"
-        )
+        return tuple(r.record for r in self._runtimes.values() if r.record.terminal_state == "running")
 
     def record(self, handle: str) -> ProcessRecord:
         runtime = self._runtimes.get(handle)
@@ -714,9 +712,7 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
                 description=(description or "").strip() or None,
                 started_at=self._clock(),
                 stall_after_seconds=stall_after_seconds if long_running else None,
-                max_lifetime_seconds=(
-                    max_lifetime_seconds if long_running else None
-                ),
+                max_lifetime_seconds=max_lifetime_seconds if long_running else None,
             )
             runtime = _RuntimeProcess(
                 record=record,

@@ -21,6 +21,8 @@ from api.measurement_workflow_share import workflow_share_family
 from api.measurement_workflows import router as workflows_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_corrections import COVERAGE_METRICS, corrections_family, coverage_value
+from api.measurement_machinery import machinery_family, machinery_value, recorded_periods
+from core.machinery_cost import METRICS as MACHINERY_METRICS
 from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
     next_comparability_boundary, period_comparable,
@@ -121,6 +123,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "asks_plus_corrections_per_outcome":
         value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
     elif metric in COVERAGE_METRICS: value, n = coverage_value(metric, source)
+    elif metric in MACHINERY_METRICS: value, n = machinery_value(metric, source)
     elif metric == "took_recommendation_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("recommendation", 0) / n if n else None
@@ -166,7 +169,6 @@ async def measurement_series(
     return await series_payload(requested, project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
-
 def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user_id: str) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]]]:
     db = get_db()
     try:
@@ -183,6 +185,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                 corrections_family(db, page_grain, decision_rows) if family == "corrections" else
+                                machinery_family(db, page_grain) if family == "machinery" else
                                 decision_rows if family == "decisions" else
                                 workflow_share_family(db, user_id, selected_scope, page_grain.periods) if family == "workflows" else
                                 query_family(db, family, params))
@@ -221,8 +224,9 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         sources = by_period if family != "tokens" else {}
         source_start = first_availability_period(breaks[metric])
         eligible_periods = metric_spine(metric, spine, first_limit_period, first_presence, source_start, page_grain)
-        eligible, first_row = set(eligible_periods), len(rows)
         drawn = [period for period in eligible_periods if period in page_grain.served]
+        eligible_periods = recorded_periods(family, eligible_periods, by_period)
+        eligible, first_row = set(eligible_periods), len(rows)
         # Sized hours run from the instrument's start, but the size rate divides them by presence
         # time, which exists only from the first recorded presence. Before that the rate is not
         # measured: no row or window may divide earlier work by later time.
@@ -236,7 +240,6 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
                                   lambda name, period: next_comparability_boundary(period, breaks[name]), rate_measured,
                                   data_start=rate_period))
         elif family == "tokens":
-            by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
             if metric == "fresh_tokens":
                 started = next((period for period in eligible_periods if (by_period.get(period) or {}).get("usage_rows")), None)
@@ -395,4 +398,3 @@ async def measurement_models(
 
 
 register_cost_route(router, require_user=require_user, resolve_grain=resolve_grain)
-

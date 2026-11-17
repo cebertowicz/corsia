@@ -56,22 +56,29 @@ def test_codex_rebind_retires_the_session_and_an_unchanged_binding_keeps_it(acco
 
 
 @pytest.mark.asyncio
-async def test_pinned_move_keeps_context_boundary_effects(monkeypatch):
+async def test_pinned_move_emits_boundary_and_receipt_without_retiring_live(monkeypatch):
     from connections.account_moves import _post_effects
 
     boundary, receipt = [], []
 
-    async def record_boundary(thread_id, *, user_id, reason):
-        boundary.append((thread_id, user_id, reason))
+    def record_boundary(domain, event, *, thread_id, user_id, properties):
+        boundary.append((domain, event, thread_id, user_id, properties))
 
     async def record_receipt(value):
         receipt.append(value)
 
-    monkeypatch.setattr('thread.runtime_boundary.post_context_boundary_effects', record_boundary)
+    from unittest.mock import AsyncMock
+
+    retire = AsyncMock(side_effect=AssertionError('a move must not retire a successor runtime'))
+    monkeypatch.setattr('subagents.cc_runtime.retire', retire)
+    monkeypatch.setattr('subagents.codex_runtime.retire', retire)
+    monkeypatch.setattr('thread.runtime_boundary.emit_product_event', record_boundary)
     monkeypatch.setattr('thread.model_runtime.post_account_switch_effects', record_receipt)
     value = {'thread_id': 'thread', 'user_id': 'user'}
     await _post_effects(value)
-    assert boundary == [('thread', 'user', 'vendor_account_changed')]
+    assert boundary == [('context', 'boundary_changed', 'thread', 'user',
+                         {'reason': 'vendor_account_changed', 'cc_stopped': False, 'codex_retired': False})]
+    retire.assert_not_awaited()
     assert receipt == [value]
 
 

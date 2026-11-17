@@ -111,6 +111,8 @@ TASK_STATE = "task is {state}"
 NODE_KIND = "node is a {kind}"
 DECISION_OWNED = "owned by an open user decision"
 USER_ASSIGNED = "assigned to the user"
+#: A person's gate step named to start next; fits ``close_next_bounds.REASON_MAX_BYTES``.
+PERSON_GATE_NAMED = "the person's review: ask with block_node (owner_kind user, ask_artifact_id: what they review)"
 OTHER_EXECUTOR = "run by a different executor"
 
 HAS_CHILDREN = "task has child nodes"

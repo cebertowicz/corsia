@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
 import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
 import imageSource from './documentImagePlace.ts?raw';
+import marginSource from './docMarginHold.svelte.ts?raw';
 
 let root: HTMLElement;
 // Editors `pane` made. A live editor's resize timer asks for a frame after the test, when jsdom has none left to give.
@@ -42,7 +43,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const frameEl = document.createElement('div');
 	frameEl.className = 'doc';
 	root.appendChild(frameEl);
-	const screen = { header, height, offset: 0 };
+	const screen = { header, height, offset: 0, width: 800 };
 	let scrolled = false;
 	let queued: FrameRequestCallback[] = [];
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => queued.push(callback));
@@ -65,6 +66,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	Object.defineProperties(scroller, {
 		scrollHeight: { configurable: true, get: () => view.contentHeight },
 		clientHeight: { configurable: true, get: () => screen.height - screen.header },
+		clientWidth: { configurable: true, get: () => screen.width },
 		scrollTop: {
 			configurable: true,
 			get: () => screen.offset,
@@ -89,7 +91,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const follow = (text: string) => { reading = text; painted.length = 0; };
 	const painted: number[] = [];
 	let laidOut = '';
-	const size = () => [screen.header, screen.height, view.contentHeight].join();
+	const size = () => [screen.header, screen.height, screen.width, view.contentHeight].join();
 	laidOut = size();
 	/** Runs one frame; `layout` changes the page (a header growing) after the frame's callbacks, as a CSS transition does. */
 	const frame = async (layout?: () => void) => {
@@ -134,6 +136,15 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 const off = (painted: number[], top: number, px = 1) => painted.filter((at) => Math.abs(at - top) > px);
 
 describe('keepPlaceWhenEditorMoves', () => {
+	it('anchors after a clipped paragraph when that paragraph can rewrap above the first whole line', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		const block = page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop);
+		const anchor = placeAnchorAt(page.view, page.screen.header, page.screen.height);
+		expect(anchor.from).toBe(page.view.lineBlockAt(block.to + 1).from);
+		page.stop();
+	});
+
 	it('holds the reader\'s line on screen while the review bar eases open mid-document', async () => {
 		const page = pane();
 		const top = await page.readAt(2000);
@@ -186,6 +197,114 @@ describe('keepPlaceWhenEditorMoves', () => {
 			});
 		}
 	}
+
+	it('takes the place from the reader\'s own scroll at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.dispatchEvent(new Event('wheel'));
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A keyboard reader on a margin card: Space or Page Down scrolls the scroller natively, with no editor transaction.
+	it('takes the place from a key pressed on a card inside the scroller at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		const card = document.createElement('button');
+		page.scroller.appendChild(card);
+		card.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }));
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		card.remove();
+		page.stop();
+	});
+
+	// A key pressed before the text rewraps is not a scroll by hand at the new width: a scroll the next width change brings,
+	// seen before that change's resize observation, is still laid back.
+	it('still lays the place again over a key pressed before the width changes', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		page.scroller.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await page.frame(() => { page.screen.width = 500; });
+		page.screen.width = 450;
+		page.scroller.scrollTop += 37;
+		await page.frame();
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A panel opened and closed again, with a scroll with no input while it was open: the place taken from that scroll holds
+	// through the rewrap back, and the width it is then held at is the one it came back to.
+	it('holds the place through a rewrap back to the first width, and takes a scroll with no input there', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.width = 800; });
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		const back = page.scroller.scrollTop;
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(back + 300);
+		page.stop();
+	});
+
+	// The browser's find bar or a screen reader moves the document with no input on the page.
+	it('takes a scroll with no input as the reader\'s place once the rewrap at the new width is laid', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A jump to a comment can start while a panel is still sliding: it lets go of the place, scrolls, and the place is taken
+	// from where it lands.
+	it('keeps where a jump lands while the width is still changing, and takes a later scroll with no input at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 700; });
+		releasePlace(page.view);
+		page.scroller.scrollTop = 4000;
+		await page.frame();
+		await page.frame(() => { page.screen.width = 600; });
+		await page.frame(() => { page.screen.width = 500; });
+		expect(page.scroller.scrollTop).toBe(4000);
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(4300);
+		page.stop();
+	});
 
 	it('observes the scroller and its text through one resize observation', () => {
 		const page = pane();
@@ -462,6 +581,11 @@ describe('one place, one writer', () => {
 		expect(both.match(/\.scrollTop\s*[-+]?=(?!=)/g)).toHaveLength(1);
 		const applyPlace = /export function applyPlace[\s\S]*?\n}\n/.exec(code(readingSource))![0];
 		expect(applyPlace).toMatch(/\.scrollTop\s*=(?!=)/);
+	});
+
+	it('leaves the margin column\'s hold to the keeper: it sets the place and writes no offset of its own', () => {
+		expect(code(marginSource).match(/\.scrollTop\s*[-+]?=(?!=)/g)).toBeNull();
+		expect(code(marginSource)).toMatch(/holdPlace\(/);
 	});
 
 	it('has one place type and one way to read a place', () => {

@@ -270,13 +270,6 @@ def models_probe_url(base: str, *, dialect: str = "openai") -> str:
     return f"{base.rstrip('/')}/models"
 
 
-def chat_request_url(base: str, *, dialect: str = "openai") -> str:
-    """Where a turn is sent, composed like :func:`models_probe_url`."""
-    if dialect == "anthropic":
-        return f"{anthropic_root(base)}/v1/messages"
-    return f"{base.rstrip('/')}/chat/completions"
-
-
 def external_probe_url(
     meta: dict | None, *, dialect: str, host: str, port: int | None
 ) -> str | None:

@@ -249,3 +249,108 @@ def test_bash_descriptor_accepts_valid_bounded_values(
     descriptor["timeout_seconds"] = timeout_seconds
 
     validate_action_descriptor("bash", descriptor)
+
+
+# Credential-shaped words are assembled so tool layers that hide
+# credential text cannot rewrite these fixtures.
+_CRED = "Cred" + "ential"
+_TOK = "Tok" + "en"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "date -u +%H:%M:%S",
+        "git ls-remote origin x; date -u +%H:%M",
+        "sort -u a:b",
+        "echo ready | date -u +%H:%M",
+        "ts=$(date -u +%H:%M)",
+        "ts=`date -u +%H:%M`",
+        "echo $(date -u +%H:%M)",
+        "(date -u +%H:%M)",
+        "TZ=UTC /bin/date -u +%H:%M",
+        "sort -r -u a:b",
+        "echo \"$(date -u +%H:%M:%S)\"",
+        "grep -n '" + _CRED + ":' notes.md",
+        "python3 -c \"print(b'**" + _CRED + ":** any')\"",
+        "python3 -c 'def f(" + _TOK.lower() + ": str): pass'",
+    ],
+)
+def test_switches_and_code_text_are_not_literal_credentials(
+    command: str,
+) -> None:
+    from host_access.redaction import (
+        redact_shell_command,
+        validate_shell_command_descriptor,
+    )
+    from tools.shell_guard import check_command_safety
+
+    rendered = redact_shell_command(command)
+    assert rendered.literal_credentials == 0
+    validate_shell_command_descriptor(rendered.descriptor())
+    assert check_command_safety(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -ualice:not-a-ref https://example.test",  # gitleaks:allow
+        "sudo curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "$CURL -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "fetch -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "sudo sort -u alice:not-a-ref",  # gitleaks:allow
+        "curl -d '(date' -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d \\(date -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl ';' date -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "ffuf -u https://alice:not-a-ref@example.test/FUZZ",  # gitleaks:allow
+        "ffuf -u 'https://example.test/?" + _TOK.lower() + "=abc123'",
+        "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
+        "curl -H \"X-${P}-" + _TOK + ": abc123\" https://example.test",
+        "curl -H\"X-${P}-" + _TOK + ": abc123\" https://example.test",
+        "curl --header=\"X-${P}-" + _TOK + ": abc123\" https://example.test",
+        "http example.test '" + _TOK + ":abc123'",
+    ],
+)
+def test_curl_user_and_header_literals_are_still_refused(
+    command: str,
+) -> None:
+    from host_access.redaction import redact_shell_command
+    from tools.shell_guard import check_command_safety
+
+    assert redact_shell_command(command).literal_credentials == 1
+    assert check_command_safety(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "out=$(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "out=`curl -u alice:not-a-ref https://example.test`",  # gitleaks:allow
+        "out=$($CURL -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "echo `fetch -u alice:not-a-ref`",  # gitleaks:allow
+        "curl -d t=$(date +%s) -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "T=$(date +%s) curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d t=`date +%s` -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d '`date' -u alice:not-a-ref https://example.test",  # gitleaks:allow
+    ],
+)
+def test_short_u_literal_inside_a_substitution_is_refused(command: str) -> None:
+    from host_access.redaction import CommandRedactionError, redact_shell_command
+    from tools.shell_guard import check_command_safety
+
+    with pytest.raises(CommandRedactionError):
+        redact_shell_command(command)
+    assert check_command_safety(command) is not None
+
+
+def test_short_u_is_a_switch_only_for_commands_known_to_use_it_so() -> None:
+    from host_access.redaction import redact_shell_command
+
+    rendered = redact_shell_command("sort -u a:b")
+    assert rendered.tokens == ("sort", "-u", "a:b")
+    assert rendered.literal_credentials == 0
+    hidden = redact_shell_command("fetch -u a:b")
+    assert "a:b" not in hidden.tokens
+    assert hidden.literal_credentials == 1

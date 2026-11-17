@@ -24,14 +24,16 @@ SCOPE = ReportScope("user", ("owner",), "self", "2026-09-21", "2026-09-28")
 # Strings that exercise every escape decision between SQLite's and Python's canonical JSON.
 AWKWARD = ["plain", 'quo"te', "back\\slash", "sl/ash", "ctl\x01\x1f\t\n\r", "del\x7f", "unié中\U0001f600",
            "sep  ", "", "tab\ttab"]
-# Digests of what origin/dev (merge-base 8468cd650) produced for each label below.
+# Digests of what origin/dev (merge-base 8468cd650) produced for each label below. The full-* labels
+# were re-frozen when the body-read coverage line began naming the receipt-Turn scope; with the
+# earlier line they still matched origin/dev exactly.
 FROZEN: dict[str, str] = {
-    "full-list": "8bb8fd673086eb9c18c8d1564381be93611038524cdc01c1e17bdf0543c8d716",
-    "full-preview": "8bb8fd673086eb9c18c8d1564381be93611038524cdc01c1e17bdf0543c8d716",
-    "full-subject-a": "3cd396ea5cfe47c2b8fca93ac8ff852f6bf10f80d2e7f46023fc05d50c5af4e2",
-    "full-other-b": "24c178a94c459b728037696364913da5bb9a0f96ef4e2295469466c69871192e",
-    "full-subject": "f68058f51912dcc769c6d44a0e9a2728644fbd49d3ff34726c4f7255a66503da",
-    "full-current": "8bd6cd065a86d4b3d074f9157823d82df85261d3f35216a6b5ac13f90a3fa104",
+    "full-list": "461c29c2b7738b752b441b1a55aa6fca71c446593ec69c818c5c3272e4c747fd",
+    "full-preview": "461c29c2b7738b752b441b1a55aa6fca71c446593ec69c818c5c3272e4c747fd",
+    "full-subject-a": "025ae9bd0c700ad0252e9dba0418c03c1e4c7ce8d73f9328e557ea4f665375ff",
+    "full-other-b": "fa3351c8929d0401f1c615bb30af74194388afbbc95c36d31c1de7058d075ef0",
+    "full-subject": "13c675e891b8a3498dacc82f5f6a305780b62409c70a656fcad30c4f34b91a35",
+    "full-current": "b134d570740cba74e12036f97ca1027f5ab9bf0bc28b912a5a7d6dd65aae56d7",
     "shape-list": "292d3f92d7ba125c0cd9e9dde2275d91801e657dfd8c7806ddca5286c955d7ac",
     "shape-preview": "292d3f92d7ba125c0cd9e9dde2275d91801e657dfd8c7806ddca5286c955d7ac",
     "shape-subject-a": "9d05788418c43dfb69e13183c14c2b30bdd6a1f904c857bb6653ce1ce95eb567",
@@ -115,12 +117,17 @@ def test_a_review_less_report_equals_origin_dev_byte_for_byte(db, monkeypatch):
     assert all(row["delivered"] == 0 for row in new_report["rows"])
     assert new_report["snapshot"] == _report(db, lesson_id="subject", **options)["snapshot"]
 
-    # Reconstruct the historical fingerprint, including the snapshot embedded in cursors;
-    # the new fingerprint's delivery sensitivity is tested with real receipts separately.
-    fingerprint = module.snapshot_fingerprint
+    # Reconstruct the historical fingerprint, including the snapshot embedded in cursors: no
+    # deliveries, and the offers' own canonical text, listed by the row-by-row reference scan.
+    # The current fingerprint's sensitivity to deliveries and to offers is tested separately.
+    from tests.test_lesson_report_scan_equivalence import old_read_offer_evidence
+
+    eager = old_read_offer_evidence(db, user_id=SCOPE.user_id, thread_ids=SCOPE.thread_ids,
+                                    from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)["period"]["offers"]
     def historical_fingerprint(snapshot, canonical):
         assert snapshot["deliveries"] == []
-        return fingerprint({key: value for key, value in snapshot.items() if key != "deliveries"}, canonical)
+        old = {key: value for key, value in snapshot.items() if key != "deliveries"}
+        return hashlib.sha256(canonical({**old, "period": {**old["period"], "offers": eager}})).hexdigest()
     monkeypatch.setattr(module, "snapshot_fingerprint", historical_fingerprint)
 
     def historical(page):
@@ -203,7 +210,7 @@ def test_no_usage_yields_empty_offers_and_the_same_fingerprint(db):
     _expect("no-usage-detail", _shape(_report(db, lesson_id="subject", version="a" * 64)))
 
 
-def test_sqlite_canonical_text_equals_python_canonical_json(db):
+def test_grouped_counts_equal_the_row_by_row_scan_with_awkward_values(db):
     from tests.test_lesson_report_scan_equivalence import assert_materialized_equals_the_scan, old_read_offer_evidence
     from core.lesson_report_receipts import read_offer_evidence
 
@@ -211,23 +218,124 @@ def test_sqlite_canonical_text_equals_python_canonical_json(db):
     kwargs = dict(user_id="user", thread_ids=("owner",), from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
     old = old_read_offer_evidence(db, **kwargs)
     assert any("sep  " in json.dumps(offer, ensure_ascii=False) for offer in old["period"]["offers"]), \
-        "awkward values reached the compared text"
+        "awkward values reached the compared offers"
     assert_materialized_equals_the_scan(read_offer_evidence(db, **kwargs), old)
 
 
-def test_chunk_boundaries_do_not_change_the_text(db, monkeypatch):
+def _offers_digest(db):
+    from core.lesson_report import collect_report
+
+    digest = hashlib.sha256()
+    collect_report(db, scope=SCOPE, sources=[])["period"]["offers"].feed(digest)
+    return digest.hexdigest()
+
+
+def test_chunk_boundaries_do_not_change_the_fingerprint(db, monkeypatch):
     from core import lesson_report_offers as offers_module
     from core.lesson_report import collect_report
 
     _seed(db, calls=40)
-    whole = collect_report(db, scope=SCOPE, sources=[])["period"]["offers"]
+    whole = _offers_digest(db)
     monkeypatch.setattr(offers_module, "CHUNK_ROWS", 3)
-    split = collect_report(db, scope=SCOPE, sources=[])["period"]["offers"]
-    first, second = hashlib.sha256(), hashlib.sha256()
-    whole.feed(first)
-    split.feed(second)
-    assert first.hexdigest() == second.hexdigest()
-    assert len(split._chunks) > 1
+    assert _offers_digest(db) == whole
+    assert collect_report(db, scope=SCOPE, sources=[])["period"]["offers"].text_chunks > 1
+
+
+@pytest.mark.parametrize("change", [
+    "UPDATE llm_usage SET plan_node_id='moved' WHERE id='call-001'",
+    "UPDATE llm_usage SET plan_id=NULL,plan_node_id=NULL,plan_attempt_id=NULL,plan_commitment_id=NULL,"
+    "plan_usage_role=NULL WHERE id='call-001'",
+    "UPDATE llm_usage SET plan_attempt_id='moved' WHERE id='call-003'",
+    "UPDATE llm_usage SET plan_commitment_id='moved' WHERE id='call-003'",
+    "UPDATE llm_usage SET turn_id='moved' WHERE id='call-004'",
+    "UPDATE llm_usage SET model='moved' WHERE id='call-004'",
+    "UPDATE llm_usage SET created_at='2026-09-26T23:59:59' WHERE id='call-004'",
+    "UPDATE llm_usage SET context_manifest_id='one' WHERE id='call-004'",
+    "UPDATE context_manifests SET harness='moved' WHERE id='one'",
+    "UPDATE context_manifests SET entries_json=json_array(json_object('source_id','dynamic:skills-index',"
+    "'lessons',json_array(json_object('id','subject','behavioral_sha256','c')))) WHERE id='one'",
+    "DELETE FROM llm_usage WHERE id='call-005'",
+    "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+    "VALUES('added','owner','turn','m','one','2026-09-23T00:00:00')",
+])
+def test_the_fingerprint_changes_with_every_fact_an_offer_carries(db, change):
+    """The fingerprint digests calls and identities, not offers, so it must still move with each offer field."""
+    _seed(db, calls=40)
+    before = _offers_digest(db)
+    assert _offers_digest(db) == before
+    db.execute(change)
+    assert _offers_digest(db) != before
+
+
+def test_a_page_lists_offers_in_an_order_the_fingerprint_covers_past_one_owner_chunk(db):
+    """A cursor is accepted while the fingerprint holds, so the page order must follow from what it digests.
+
+    Adding an owner with no calls leaves every digested fact alone. If the order depended on an owner's
+    position in the owner list, that owner would shift later owners across a chunk boundary and reorder
+    the pages under an unchanged fingerprint, so a cursor would repeat or skip offers.
+    """
+    from core import lesson_report_offers as offers_module
+
+    _manifest(db, "one", [_lesson("subject")])
+    owners = [f"t{index:03d}" for index in range(1, offers_module.OWNER_CHUNK + 2)]
+    for thread_id in ["t000", *owners]:
+        db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES(?,'user','test/model','t','t')",
+                   (thread_id,))
+    # The owner at the last chunk-0 position calls after the first chunk-1 owner does.
+    for call_id, thread_id, created_at in (("late", owners[-2], "2026-09-23T00:00:00"),
+                                           ("early", owners[-1], "2026-09-22T00:00:00")):
+        db.execute("INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+                   "VALUES(?,?,'turn','m','one',?)", (call_id, thread_id, created_at))
+    identity = ("subject", "a" * 64)
+    ident = [["one", 0, *identity]]
+
+    def read(owner_list):
+        offers = offers_module.DeferredOffers(owner_list, ident, "user", SCOPE.from_ts, SCOPE.to_ts)
+        offers.collect(db)
+        offers.prefetch(db, offers_module.DetailRequest(*identity, offset=0), reviews_at_most=0)
+        digest = hashlib.sha256()
+        offers.feed(digest)
+        return digest.hexdigest(), [offer["usage_id"] for offer in offers.page(identity, 0, 2)]
+
+    fingerprint, order = read(owners)
+    assert read(["t000", *owners]) == (fingerprint, order)
+    assert order == ["early", "late"]
+
+
+def test_offer_collection_cost_does_not_grow_with_lessons_per_manifest(db):
+    """Counts and fingerprint read calls, not offers: SQLite work stays flat as a manifest's lessons grow.
+
+    The offer-row read did work in proportion to calls times lessons; at production scale
+    (about 1.9 million calls of manifests carrying about 15 lessons) that took over 20 minutes.
+    """
+    from core.lesson_report_receipts import read_offer_evidence
+
+    def steps(lessons):
+        db.execute("DELETE FROM llm_usage")
+        db.execute("DELETE FROM context_manifests")
+        _manifest(db, "wide", [_lesson(f"lesson-{index}") for index in range(lessons)])
+        for index in range(400):
+            db.execute("INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at,plan_id,"
+                       "plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) "
+                       "VALUES(?,'owner','turn','m','wide',?,'plan',?,?,'c','execution')",
+                       (f"call-{index:03d}", f"2026-09-{22 + index % 5:02d}T00:00:00",
+                        f"task-{index % 7}", f"attempt-{index % 11}"))
+        ticks = [0]
+        def tick():
+            ticks[0] += 1
+            return 0
+        db.set_progress_handler(tick, 100)
+        try:
+            result = read_offer_evidence(db, user_id="user", thread_ids=("owner",),
+                                         from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
+        finally:
+            db.set_progress_handler(None, 0)
+        counts = result["period"]["offers"].counts
+        assert len(counts) == lessons and all(row["n"] == 400 and row["tasks"] == 7 for row in counts.values())
+        return ticks[0]
+
+    narrow, wide = steps(1), steps(40)
+    assert wide < 2 * narrow, (narrow, wide)
 
 
 def test_the_owner_list_is_probed_by_an_index_not_rescanned_per_candidate_row(db):

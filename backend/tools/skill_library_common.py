@@ -89,7 +89,7 @@ def bundle_token(owner_id: str, name: str, files: dict[str, bytes], problems: li
     return digest.hexdigest()
 
 
-def local_edits_token(owner_id: str, name: str, folder: Path) -> str | None:
+def local_edits_digest(owner_id: str, name: str, folder: Path) -> str | None:
     """Return the confirmation token for the current visible bundle."""
     from library.installed import local_bundle
 
@@ -107,18 +107,24 @@ def confirmed_bundle(owner_id: str, name: str, folder: Path, token: object) -> d
     return None
 
 
+def edits_lead(paths: list[str], exact: bool) -> str:
+    """Name an edited copy's files, saying so when CORSIA can't tell which one changed."""
+    listed = ", ".join(paths) or "skill folder"
+    return f"your changed files: {listed}" if exact else f"this copy was edited, but CORSIA can't tell which file; its files: {listed}"
+
+
 def discard_confirmation(
-    owner_id: str, name: str, folder: Path, paths: list[str], token: object,
+    owner_id: str, name: str, folder: Path, paths: list[str], exact: bool, token: object,
 ) -> dict[str, Any]:
     """Return the actionable refusal when current bytes no longer match the token."""
-    current = local_edits_token(owner_id, name, folder)
+    current = local_edits_digest(owner_id, name, folder)
     if confirmed_bundle(owner_id, name, folder, token) is not None:
         return {}
     return {
         "error": "discard_confirmation_required",
-        "message": "review the changed files first; repeat with discard_local_edits: true and the local_edits_token from that response",
-        "changed_files": paths,
-        "local_edits_token": current,
+        "message": f"{edits_lead(paths, exact)}; review them, then repeat with discard_local_edits: true and the local_edits_digest from this response",
+        "changed_files": paths if exact else [],
+        "local_edits_digest": current,
     }
 
 

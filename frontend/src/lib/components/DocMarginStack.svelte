@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { focusWhenPlaced, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
@@ -10,14 +10,30 @@
 	 * picked card does, and the cards around it make room. A `head` (the column's Accept all) is the column's first card, at its
 	 * top, so a change in its height moves the cards with a fresh placement, never under it. No card goes above it, a pick included.
 	 */
-	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null } = $props();
-	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
-	const takeFocus = (node: HTMLElement) => { queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
+	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null, focusComposer = true }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null;
+		/** False for a composer the layout redrew rather than one the reader opened: it leaves focus where it is. */
+		focusComposer?: boolean } = $props();
+	/** A composer opens ready to type, as its popover does, once its card is placed, unless the reader has moved on by then; the column brings it into view, so focusing it never scrolls. */
+	const takeFocus = (node: HTMLElement) => {
+		let stop = () => {}, gone = false;
+		const from = document.activeElement;
+		if (focusComposer) queueMicrotask(() => { const field = node.querySelector<HTMLElement>('textarea, [contenteditable="true"]'); if (field && !gone) stop = focusWhenPlaced(field, from); });
+		return { destroy: () => { gone = true; stop(); } };
+	};
 	let stackEl = $state<HTMLElement>();
 	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});
 	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
 	let pickedBefore: string | null = null;
+	/**
+	 * The picked card's height at the last placement. It outlives a re-run of the setup below (new comment objects from a
+	 * refresh, another card coming or going), so a re-layout never reads as the card growing.
+	 */
+	let pickedHeight = -1;
+	/** When the reader last put input into the picked card: typing, an Enter, a paste, a cut. */
+	let inputAt = -Infinity;
+	/** A card that grew this soon after the reader's own input grew from it; the field refits within a frame or two of its input. */
+	const OWN_INPUT_MS = 500;
 	/** The head's place among the cards' tops; no comment has an empty id. */
 	const HEAD = '';
 	// One scroll. The column is drawn inside the scroller's own content (marginOnCanvas, the document's and the chat's), so the
@@ -30,18 +46,24 @@
 		const ids = [...pinned.map((comment) => comment.id), ...(writing ? [writing.id] : [])], selected = writing?.id ?? selectedId;
 		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in view by scrolling the text, which the cards ride with. Its view is the scroller's, where the reader sees the content.
 		const revealUntil = selected !== null && selected !== pickedBefore ? performance.now() + 800 : 0;
+		if (selected !== pickedBefore) { pickedHeight = -1; inputAt = -Infinity; }
 		pickedBefore = selected;
 		// It reads the card's place from the placement just made, not from the card's box: `tops` is drawn after this frame's read,
 		// so the box still holds the card where it sat before the pick (lower, in the stack at rest), which would scroll the text for nothing.
-		// After the pick, a reader inside the card is kept at its end only when the card itself grew (they typed into it): one who
-		// scrolled up to read a card taller than the screen is not pulled back down when the scroller re-measures.
-		let height = -1;
+		// After the pick, the card's end is kept in view only when it grew from the reader's own input in it. A card that grew
+		// because a reply arrived, or a re-layout, never scrolls the text: focus resting in the card (a click on its text) is
+		// reading, not typing, and one who scrolled up to read a card taller than the screen is not pulled back down.
+		const stack = stackEl;
+		const pickedCard = () => (selected ? stack.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null);
+		const onInput = (event: Event) => { if (event.target instanceof Node && pickedCard()?.contains(event.target)) inputAt = performance.now(); };
+		stack.addEventListener('input', onInput);
 		const reveal = (placed: Record<string, number>, columnTop: number) => {
-			const el = selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null;
+			const el = pickedCard();
 			const top = selected ? placed[selected] : undefined, typing = !!el?.contains(document.activeElement);
-			const grew = el !== null && el.offsetHeight !== height;
-			height = el?.offsetHeight ?? -1;
-			if (!el || !(performance.now() < revealUntil || (grew && typing))) return;
+			const grew = el !== null && el.offsetHeight !== pickedHeight;
+			pickedHeight = el?.offsetHeight ?? -1;
+			const ownInput = typing && performance.now() - inputAt < OWN_INPUT_MS;
+			if (!el || !(performance.now() < revealUntil || (grew && ownInput))) return;
 			// While the reader types in it, the box follows each keystroke at once (a smooth scroll would trail the caret); a card with
 			// no placement yet is read from its box. Once placed, the placement and the box agree, except on the pick's own frame.
 			const bottom = top === undefined ? (typing ? el.getBoundingClientRect().bottom : undefined) : columnTop + top + el.offsetHeight;
@@ -91,7 +113,7 @@
 		for (const el of [scroller, column, ...(heading ? [heading] : []), ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
 		// Untracked: read() both reads and writes `tops`, which would otherwise rerun this setup on every placement it makes.
 		untrack(read);
-		return () => { cancelAnimationFrame(frame); mutations.disconnect(); sizes.disconnect(); };
+		return () => { cancelAnimationFrame(frame); mutations.disconnect(); sizes.disconnect(); stack.removeEventListener('input', onInput); };
 	});
 </script>
 

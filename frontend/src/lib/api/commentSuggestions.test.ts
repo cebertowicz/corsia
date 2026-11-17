@@ -15,9 +15,31 @@ describe('decideSuggestion', () => {
 		await expect(refusal).rejects.toMatchObject({ status: 409, kind: 'stale' });
 	});
 
-	it('leaves the kind empty when the server sends none', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, json: vi.fn().mockResolvedValue({ detail: 'Bad' }) }));
-		await expect(decideSuggestion('comment-1', 'accept')).rejects.toMatchObject({ status: 400, kind: null });
+	it('shows the server’s text for a bare `{detail}` with no kind (a document-save refusal, as on dev)', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: vi.fn().mockResolvedValue({ detail: 'Document was not saved' }) }));
+		const refusal = decideSuggestion('comment-1', 'accept');
+		await expect(refusal).rejects.toBeInstanceOf(SuggestionRefused);
+		await expect(refusal).rejects.toMatchObject({ status: 403, kind: null });
+		await expect(refusal).rejects.toThrow('Document was not saved');
+	});
+
+	it('shows a structured detail’s `line` when the detail is not a string', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 422, json: vi.fn().mockResolvedValue({ detail: { line: 'That suggestion is out of date' } }) }));
+		await expect(decideSuggestion('comment-1', 'accept')).rejects.toThrow('That suggestion is out of date');
+	});
+
+	it('shows the fallback sentence when the answer carries no string detail', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: vi.fn().mockResolvedValue({}) }));
+		const refusal = decideSuggestion('comment-1', 'accept');
+		await expect(refusal).rejects.toMatchObject({ status: 500, kind: null });
+		await expect(refusal).rejects.toThrow('Couldn’t accept this suggestion. Try again.');
+	});
+
+	it('shows the fallback sentence for a crash page with no JSON, for either decision', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token <')) }));
+		await expect(decideSuggestion('comment-1', 'reject')).rejects.toThrow('Couldn’t reject this suggestion. Try again.');
+		await expect(decideSuggestion('comment-1', 'accept')).rejects.toThrow('Couldn’t accept this suggestion. Try again.');
+		await expect(decideSuggestion('comment-1', 'accept', true)).rejects.toThrow('Couldn’t accept the suggestions. Try again.');
 	});
 
 	it('lets a request that got no answer fail as itself, not as a refusal', async () => {

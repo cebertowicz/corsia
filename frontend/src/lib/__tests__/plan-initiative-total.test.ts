@@ -91,12 +91,14 @@ describe('initiativeLine copy', () => {
 		expect(text(initiative({ cost: nothing }))).toBe('Initiative total: 3 follow-ups');
 	});
 
-	it('reads a recorded zero as 0 tokens', () => {
+	it('drops a recorded zero with no gap, like every other empty detail fact', () => {
 		const zero = amount({
 			tokens: { known: 0, unknown_rows: 0 },
 			execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: NO_TURNS },
 		});
-		expect(text(initiative({ cost: zero }))).toBe('Initiative total: 0 tokens · 3 follow-ups');
+		expect(text(initiative({ cost: zero }))).toBe('Initiative total: 3 follow-ups');
+		const gap = { ...zero, usage_recording_failures: 1 };
+		expect(text(initiative({ cost: gap }))).toBe('Initiative total: at least 0 tokens · 3 follow-ups');
 	});
 });
 

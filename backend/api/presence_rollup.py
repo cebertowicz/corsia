@@ -151,10 +151,15 @@ def slices(db, start: datetime, end: datetime) -> Totals:
 # --- Refresh ---------------------------------------------------------------------
 
 
+def oldest_open_visit(db) -> str | None:
+    """When the oldest visit still open began, normalized by ``datetime()``; None when none is open."""
+    return db.execute("SELECT MIN(datetime(last_entered_at)) FROM thread_presence WHERE present=1").fetchone()[0]
+
+
 def build_limit(db, now: datetime | None = None) -> datetime:
     """The first bucket the rollup may not cover yet: ``now - GRACE``, or the start of the oldest open visit."""
     limit = (now or utc_now()) - GRACE
-    opened = db.execute("SELECT MIN(datetime(last_entered_at)) FROM thread_presence WHERE present=1").fetchone()[0]
+    opened = oldest_open_visit(db)
     return _floor(min(limit, canonical(opened)) if opened else limit)
 
 

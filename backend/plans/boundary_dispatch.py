@@ -228,7 +228,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     # settlement touches learns about it.
     acting = actor.thread_id if actor.kind == "thread" else None
     from plans import workflow_fields
-    workflow_fields.refuse_unready_close(db, node_id, operation)
+    workflow_fields.refuse_unready_close(db, node_id, operation, by_agent=actor.kind == "thread")
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":

@@ -1,8 +1,8 @@
 """External image support is detected per model, and a user's choice sticks.
 
-A generic model list reports no input types, so every External row used to say
-text-only. Each model is now asked once, with a test image; rediscovery keeps
-the answer, and a user's choice outranks detection.
+A generic model list reports no input types. Connection and discovery leave
+image support unchecked; first use or explicit detection can send a test image. Rediscovery
+keeps saved answers, and a user's choice outranks detection.
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ def test_replies_are_classified(reply: str, failed: bool, result: str) -> None:
 
 # ── detection, storage, and rediscovery ──────────────────────────────────────
 
-def test_each_new_model_is_probed_once_and_the_answer_lands_on_the_row(
+def test_each_model_is_probed_once_and_the_answer_lands_on_the_row(
     isolated_db, monkeypatch,
 ) -> None:
     _seed(isolated_db, "deepseek-v4.1-flash", "glm-5.3")
@@ -122,38 +122,33 @@ def test_each_new_model_is_probed_once_and_the_answer_lands_on_the_row(
         "glm-5.3": _failed("This model does not support image input"),
     })
 
-    assert asyncio.run(eii.detect_image_input(_SID)) == 2
+    assert asyncio.run(eii.set_image_input(_SID, "deepseek-v4.1-flash", "auto")) is True
+    assert asyncio.run(eii.set_image_input(_SID, "glm-5.3", "auto")) is True
     assert _row(isolated_db, "deepseek-v4.1-flash")[0] == 1
     assert _row(isolated_db, "glm-5.3")[0] == 0
     assert _row(isolated_db, "glm-5.3")[1]["result"] == "no"
     assert all(c["retry_transient_errors"] is False for c in calls)
 
-    # Already checked: a later discovery pass probes nothing.
-    assert asyncio.run(eii.detect_image_input(_SID)) == 0
-    assert len(calls) == 2
+    # One explicit Detect is one probe: nothing batches a second pass behind it.
+    assert [c["model"] for c in calls] == ["openai/deepseek-v4.1-flash", "openai/glm-5.3"]
 
 
-def test_a_model_the_user_turned_off_is_never_probed(isolated_db, monkeypatch) -> None:
+def test_a_detection_never_replaces_a_user_choice(isolated_db) -> None:
     # On a local server a probe makes it load the model, which can evict the
-    # one the person is using; a model they turned off is never called.
-    _seed(isolated_db, "kept", "turned-off")
-    with closing(sqlite3.connect(str(isolated_db))) as db:
-        db.execute(
-            "UPDATE models SET enabled = 0 WHERE litellm_model = ?",
-            (f"external@{_SID}/turned-off",),
-        )
-        db.commit()
-    calls = _answers(monkeypatch, {"kept": _said("green")})
+    # one the person is using, so only their own action ever re-checks a model.
+    _seed(isolated_db, "kept")
+    assert asyncio.run(eii.set_image_input(_SID, "kept", "no")) is True
 
-    assert asyncio.run(eii.detect_image_input(_SID)) == 1
-    assert [c["model"] for c in calls] == ["openai/kept"]
-    assert _row(isolated_db, "turned-off")[1] == {}
+    assert eii.record_image_input(_SID, "kept", "yes", "probed.", eii.DETECTED) is False
+
+    vision, state = _row(isolated_db, "kept")
+    assert (vision, state["source"], state["result"]) == (0, "user", "no")
 
 
 def test_rediscovery_keeps_the_detected_answer(isolated_db, monkeypatch) -> None:
     _seed(isolated_db, "deepseek-v4.1-flash")
     _answers(monkeypatch, {"deepseek-v4.1-flash": _said("green")})
-    asyncio.run(eii.detect_image_input(_SID))
+    asyncio.run(eii.set_image_input(_SID, "deepseek-v4.1-flash", "auto"))
 
     _rediscover(["deepseek-v4.1-flash"])
 
@@ -161,25 +156,10 @@ def test_rediscovery_keeps_the_detected_answer(isolated_db, monkeypatch) -> None
     assert vision == 1 and state["source"] == "detected" and state["result"] == "yes"
 
 
-def test_a_recheck_probes_each_detected_model_exactly_once(isolated_db, monkeypatch) -> None:
-    _seed(isolated_db, "m")
-    calls = _answers(monkeypatch, {"m": _said("green")})
-    asyncio.run(eii.detect_image_input(_SID))
-
-    eii.mark_for_recheck(_SID)
-    # Until the new answer lands, the last one stays in force.
-    assert _row(isolated_db, "m")[0] == 1
-    assert asyncio.run(eii.detect_image_input(_SID)) == 1
-    assert asyncio.run(eii.detect_image_input(_SID)) == 0
-
-    assert len(calls) == 2
-    assert "recheck" not in _row(isolated_db, "m")[1]
-
-
 def test_an_inconclusive_probe_keeps_the_row_as_it_was(isolated_db, monkeypatch) -> None:
     _seed(isolated_db, "m")
     _answers(monkeypatch, {"m": _failed("Rate limited by the API provider.")})
-    asyncio.run(eii.detect_image_input(_SID))
+    asyncio.run(eii.set_image_input(_SID, "m", "auto"))
 
     vision, state = _row(isolated_db, "m")
     assert vision == 0 and state["result"] == "unknown"
@@ -195,9 +175,6 @@ def test_a_user_choice_outranks_detection_and_survives_rediscovery(
     assert asyncio.run(eii.set_image_input(_SID, "m", "yes")) is True
     assert calls == []
     _rediscover(["m"])
-    # Even a test that re-checks every model leaves the user's choice alone.
-    eii.mark_for_recheck(_SID)
-    assert asyncio.run(eii.detect_image_input(_SID)) == 0
 
     vision, state = _row(isolated_db, "m")
     assert vision == 1 and state["source"] == "user"
@@ -219,7 +196,7 @@ def test_an_unknown_model_is_reported_not_created(isolated_db, monkeypatch) -> N
     assert asyncio.run(eii.set_image_input(_SID, "nope", "no")) is False
 
 
-def test_discovery_of_an_external_endpoint_probes_its_unchecked_models(monkeypatch) -> None:
+def test_discovery_of_an_external_endpoint_never_probes_unchecked_models(monkeypatch) -> None:
     from llm import external_provider as ep
     from llm import network_discovery as nd
 
@@ -228,21 +205,21 @@ def test_discovery_of_an_external_endpoint_probes_its_unchecked_models(monkeypat
     async def discover(_sid):
         return {"ok": True}
 
-    async def detect(sid, **_kw):
-        probed.append(sid)
-        return 1
+    async def probe(sid, pmid, **_kw):
+        probed.append(f"{sid}/{pmid}")
+        return "no", "must not be reached"
 
     async def server(*_a, **_k):
         return {"id": _SID, "kind": "external"}
 
     monkeypatch.setattr(ep, "discover_external_models", discover)
-    monkeypatch.setattr(eii, "detect_image_input", detect)
+    monkeypatch.setattr(eii, "probe_image_input", probe)
     monkeypatch.setattr(nd, "run_in_db", server)
     monkeypatch.setattr(nd, "_notify_models_changed_safe", lambda: None)
 
     asyncio.run(nd._discover_and_notify(_SID))
 
-    assert probed == [_SID]
+    assert probed == []
 
 
 def test_the_route_pins_a_choice_and_refuses_an_unknown_model(isolated_db) -> None:
@@ -260,11 +237,29 @@ def test_the_route_pins_a_choice_and_refuses_an_unknown_model(isolated_db) -> No
     assert missing.value.status_code == 404
 
 
+def test_unchecked_image_support_is_not_reported_as_text_only(isolated_db) -> None:
+    _seed(isolated_db, "loaded", "unloaded")
+
+    assert eii.image_input_summary(_SID) == "Images: not determined for loaded, unloaded."
+    assert _row(isolated_db, "loaded")[1] == {}
+    assert _row(isolated_db, "unloaded")[1] == {}
+
+
+def test_a_rejected_model_does_not_make_unchecked_models_text_only(isolated_db) -> None:
+    _seed(isolated_db, "a", "b")
+    asyncio.run(eii.set_image_input(_SID, "a", "no"))
+
+    assert eii.image_input_summary(_SID) == "Images: not determined for b."
+    asyncio.run(eii.set_image_input(_SID, "b", "no"))
+    assert eii.image_input_summary(_SID) == "Images: no model accepts them."
+
+
 def test_the_summary_names_the_models_that_accept_images(isolated_db, monkeypatch) -> None:
     _seed(isolated_db, "a", "b", "c")
     _answers(monkeypatch, {
         "a": _said("green"), "b": _said("no image"), "c": _failed("timeout"),
     })
-    asyncio.run(eii.detect_image_input(_SID))
+    for pmid in ("a", "b", "c"):
+        asyncio.run(eii.set_image_input(_SID, pmid, "auto"))
 
     assert eii.image_input_summary(_SID) == "Images: a. Not determined: c."

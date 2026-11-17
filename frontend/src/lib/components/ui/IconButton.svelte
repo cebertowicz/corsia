@@ -6,6 +6,8 @@
 		variant?: 'default' | 'ghost' | 'danger' | 'shell';
 		size?: 'sm' | 'md' | 'lg';
 		disabled?: boolean;
+		/** Sets `aria-busy` while the action it starts is in flight. */
+		busy?: boolean;
 		title?: string;
 		type?: 'button' | 'submit';
 		class?: string;
@@ -16,7 +18,7 @@
 
 	const {
 		ariaLabel, variant = 'default', size = 'md',
-		disabled = false, title, type = 'button',
+		disabled = false, busy = false, title, type = 'button',
 		class: extraClass = '', style,
 		onclick, children,
 	}: Props = $props();
@@ -27,6 +29,7 @@
 	class="ico-btn {variant} {size} {extraClass}"
 	{style}
 	aria-label={ariaLabel}
+	aria-busy={busy || undefined}
 	{title}
 	{disabled}
 	{onclick}

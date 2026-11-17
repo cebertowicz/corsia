@@ -1,11 +1,11 @@
 import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { visibleRegion, type Box } from './visible-region';
+import { overlaySheet, sheetOverlays, visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
-import { keptWhole } from '$lib/sheetClearance';
+import { keptWhole, sheetRaised } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -102,9 +102,13 @@ export const commentMarks = [
 // Check in a later frame, once the scroll is applied and the revealed lines are
 // measured, and jump again until the target stays on screen.
 export const MAX_SCROLL_PASSES = 8;
+const centreKey = {};
 const STEADY_CHECKS = 2;
 
-/** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
+/**
+ * `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. `comment-save` never scrolls a
+ * target already in view (a saved comment, a draft, or an opened thread brought out from under the phone sheet).
+ */
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 
 const QUOTE_MARGIN = 8;
@@ -129,7 +133,9 @@ function spanBoxAt(current: EditorView, from: number, to: number, widget: Return
 export function pressSpan(view: EditorView, range: { from: number; to: number }, at: number): { top: number; bottom: number; height: number; regionTop: number } | null {
 	const length = view.state.doc.length;
 	const whole = spanBoxAt(view, Math.min(range.from, length), Math.min(range.to, length), widgetTarget(view, Math.min(range.from, length)));
-	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
+	const widget = widgetTarget(view, Math.min(at, length)), drawn = boxAt(view, Math.min(at, length), widget);
+	// A table row or a diagram is one box with no lines of its own: it is measured in the document's lines, and past three of them only its top line is kept.
+	const line = widget && drawn ? { top: drawn.top, bottom: drawn.top + view.defaultLineHeight } : drawn;
 	if (!whole || !line) return null;
 	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
 	const box = keptWhole(whole.bottom - whole.top, lineHeight) ? whole : line;
@@ -175,6 +181,16 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 			releasePlace(view);
 			return;
 		}
+		// With a sheet over the pane CodeMirror's own centre is the pane's, which a short band (a phone held sideways) leaves under the sheet: centre in the band instead.
+		if (!widget && !quote && sheetOverlays(view) && boxOf(view)) {
+			view.requestMeasure({
+				key: centreKey,
+				read: (current) => ({ box: boxAt(current, target, null), ...visibleRegion(current) }),
+				write: ({ box, band, scroller }) => { if (!done && box) scroller.scrollTop += (box.top + box.bottom) / 2 - (band.top + band.bottom) / 2; },
+			});
+			releasePlace(view);
+			return;
+		}
 		view.dispatch({ effects: EditorView.scrollIntoView(widget?.start ?? target, quote || widget ? { y: 'start', yMargin: QUOTE_MARGIN } : { y: 'center' }) });
 	};
 	const nextFrame = (run: () => void) => view.dom.ownerDocument.defaultView?.requestAnimationFrame(() => {
@@ -199,6 +215,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
 		if (!seenSize) { seenSize = true; return; }
 		if (done) return;
+		// A sheet the reader pulled up is their own move, as a scroll is: the keyboard that follows it moves nothing.
+		if (sheetRaised(overlaySheet(view))) { stop(); return; }
 		steady = 0;
 		check(settledPass);
 	}) : null;

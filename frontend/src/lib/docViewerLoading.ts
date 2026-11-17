@@ -146,3 +146,8 @@ async function load(options: LoadOptions): Promise<void> {
 	const content = viewerContent(response, effective.artifactId);
 	options.onReady({ ...content, liveUnavailable: content.liveUnavailable ?? live });
 }
+
+/** Every signal carries the tab instance that started the load, so a result that lands after the user switched tabs updates the tab that asked for it, not whichever tab is active when it settles. */
+export function loadSignal(onSignal: ((signal: TabLoadSignal) => void) | undefined, target: DocViewerTarget) {
+	return (signal: Omit<TabLoadSignal, 'instanceId'>) => onSignal?.({ ...signal, instanceId: target.instanceId });
+}

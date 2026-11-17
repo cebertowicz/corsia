@@ -10,6 +10,7 @@ from loguru import logger
 from automation.continuation import execution, state, triggers
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from automation.continuation.sources.harvest import HarvestSource
+from automation.continuation.sources.later_review import LaterReviewSource
 from automation.continuation.sources.liveness import LivenessSource
 from automation.continuation.sources.owed_verdict import OwedVerdictSource
 from automation.continuation.sources.schedules import ScheduleSource
@@ -65,6 +66,7 @@ def default_sources() -> list[TriggerSource]:
         HarvestSource(),
         SilentChildSource(),
         OwedVerdictSource(),
+        LaterReviewSource(),
     ]
 
 

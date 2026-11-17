@@ -6,7 +6,7 @@ registered, ``project_repo_register`` attaches an existing checkout so
 settings for every repository.
 
 The procedure itself is not reimplemented here. This is a thin, deliberately
-narrower front door onto ``api.project_repos.register_source_repo`` — the same
+narrower front door onto ``api.project_repo_add_entry.register_source_repo_async`` — the same
 compensated flow Project settings uses — with two agent-specific restrictions:
 
 * the target must already be a Git repository, so the tool cannot pull an
@@ -25,6 +25,7 @@ compensated flow Project settings uses — with two agent-specific restrictions:
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,8 @@ class ProjectRepoRegisterTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from fastapi import HTTPException
 
-        from api.project_repos import RepoAdd, register_source_repo
+        from api.project_repo_add_entry import register_source_repo_async
+        from api.project_repos import RepoAdd
         from infra.db_async import run_in_db
         from infra.repo_config_allowlist import repo_config_refusal
 
@@ -112,11 +114,13 @@ class ProjectRepoRegisterTool(Tool):
         if refusal := await asyncio.to_thread(repo_config_refusal, target):
             return f"Error: {refusal}"
 
-        body = RepoAdd(mode="link", path=str(target), name=name)
+        # The path as written, made absolute, so a link entry already in the project's
+        # source/ is recognised as that entry. The procedure resolves it again and
+        # registers it only if it is still the folder checked above.
+        written = os.path.normpath(Path(raw_path).expanduser().absolute())
+        body = RepoAdd(mode="link", path=written, name=name)
         try:
-            repo = await run_in_db(
-                lambda: register_source_repo(project_id, body)
-            )
+            repo = await register_source_repo_async(project_id, body, checked=target)
         except HTTPException as exc:
             return f"Error: {exc.detail}"
         except (ValueError, OSError, RuntimeError) as exc:

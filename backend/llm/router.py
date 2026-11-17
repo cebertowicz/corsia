@@ -235,7 +235,10 @@ async def _dispatch_anthropic(
     )
 
 
-async def _observed(api_base: str | None, dispatch: Awaitable[LLMResponse]) -> LLMResponse:
+async def _observed(
+    api_base: str | None, dispatch: Awaitable[LLMResponse],
+    external_model_identity: tuple[str, str] | None = None,
+) -> LLMResponse:
     """Return one dispatch's outcome unchanged, handing a copy to the endpoint observer.
 
     Every External dispatch passes here; the observer records it in a separate
@@ -249,6 +252,10 @@ async def _observed(api_base: str | None, dispatch: Awaitable[LLMResponse]) -> L
         observe_dispatch(api_base, exc)
         raise
     observe_dispatch(api_base, response)
+    if external_model_identity and response.finish_reason != "error":
+        from llm.external_image_input import schedule_first_use_detection
+
+        schedule_first_use_detection(*external_model_identity)
     return response
 
 
@@ -272,6 +279,7 @@ async def chat_completion(
     destination_fit_target_catalog_id: str | None = None,
     destination_fit_input_identity: str = "",
     destination_fit_current_input: Any = None,
+    external_model_identity: tuple[str, str] | None = None,
 ) -> LLMResponse:
     """Route to provider-specific implementation based on model prefix."""
     if not model or not str(model).strip():
@@ -286,13 +294,10 @@ async def chat_completion(
             model, messages, tools, destination_fit_input_identity,
             destination_fit_current_input,
         )
-    requested_max_tokens = (
-        max(1, int(max_tokens)) if max_tokens is not None else None
-    )
-
     is_omlx = api_key == "omlx"
-
-    output_budget = _resolve_output_budget(model, requested_max_tokens)
+    output_budget = _resolve_output_budget(
+        model, max(1, int(max_tokens)) if max_tokens is not None else None,
+    )
 
     if model.startswith("openai/") and api_base is None:
         return await _dispatch_openai(
@@ -310,7 +315,7 @@ async def chat_completion(
             on_reasoning_chunk=on_reasoning_chunk, on_content_chunk=on_content_chunk,
             on_tool_call_chunk=on_tool_call_chunk, on_response_started=on_response_started,
             retry_transient_errors=retry_transient_errors,
-        ))
+        ), external_model_identity)
 
     extra_body = (
         _omlx_prompt_extras(messages, reasoning_effort, preserve_thinking, model)
@@ -329,6 +334,6 @@ async def chat_completion(
         thread_id=thread_id,
         extra_body=extra_body,
         retry_transient_errors=retry_transient_errors,
-    ))
+    ), external_model_identity)
     response.effort_sent = (extra_body or {}).get("reasoning_effort")
     return await mark_own_server(response, omlx_server_id)

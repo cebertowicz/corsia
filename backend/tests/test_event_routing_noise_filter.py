@@ -145,6 +145,43 @@ class TestConductorNoiseFilter:
         )
 
     @pytest.mark.asyncio
+    async def test_noise_parking_records_row_without_error_log(self, isolated_db):
+        from events import dead_letter
+        from events.router import RouteOutcome
+        from loguru import logger
+
+        records = []
+        sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+        try:
+            res = await _route(
+                "webhook.github.check_suite_completed", _check_suite_payload("o/r", 155)
+            )
+        finally:
+            logger.remove(sink)
+
+        assert res.outcome == RouteOutcome.PARKED
+        assert res.reason == "check_suite_noise_suppressed"
+        assert res.thread_id is None
+        assert any(row["reason"] == "check_suite_noise_parked" for row in dead_letter.list_parked())
+        assert not [record for record in records if record["name"] == "events.dead_letter"]
+
+    def test_other_parking_reason_records_row_and_error_log(self, isolated_db):
+        from events import dead_letter
+        from loguru import logger
+
+        records = []
+        sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+        try:
+            row_id = dead_letter.park("test.event", {"value": 1}, "no_owner", "test-id")
+        finally:
+            logger.remove(sink)
+
+        assert any(row["id"] == row_id and row["reason"] == "no_owner"
+                   for row in dead_letter.list_parked())
+        assert any(record["level"].name == "ERROR" and "reason=no_owner" in record["message"]
+                   for record in records)
+
+    @pytest.mark.asyncio
     async def test_check_suite_failure_with_no_owner_is_parked(self, isolated_db):
         conductor_thread = _mk_session("cond-fail-1")
         from infra import conductor

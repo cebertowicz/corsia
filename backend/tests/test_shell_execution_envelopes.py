@@ -927,7 +927,7 @@ def test_leased_envelope_omits_protected_base_and_git_identity_policy(
     )
 
     base_deny = f'(deny file-write* (subpath "{repo.resolve()}"))'
-    worktree_allow = f'(allow file-read* file-write* (subpath "{worktree.resolve()}"))'
+    worktree_allow = f'(allow file-read* file-write* (subpath "{repo.resolve() / ".worktrees"}"))'
     head_deny = f'(deny file-write* (literal "{git_dir.resolve() / "HEAD"}"))'
     assert "(allow default)" in profile
     assert base_deny not in profile

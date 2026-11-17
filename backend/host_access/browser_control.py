@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_cdp_frames, browser_pane_state, browser_step_lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
@@ -15,9 +16,9 @@ from infra import state
 log = logging.getLogger(__name__)
 
 PASSWORD_PAGE = (
-    "This page asks for a password, so it is the person's to complete. They already see a notice on the "
-    "page and a task in their attention list, and you get a turn once they finish or decline it; end your "
-    "turn. If they decline, tell them in chat what you needed the page for and stop."
+    "This page asks for a password, so it is the person's to complete. A task for it is in their Needs you "
+    "list, and you get a turn once they finish or decline it; end your turn. If they decline, tell them in "
+    "chat what you needed the page for and stop."
 )
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
@@ -25,11 +26,30 @@ PASSWORD_READ_REFUSED = (
     "Other commands still work."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
-PERSON_STEP = (
-    "This browser step is the person's to complete. They already see a task in their attention list, and you "
-    "get a turn once they finish or decline it; end your turn. If they decline, tell them in chat what you "
-    "needed the page for and stop."
+# A failed plan write loses at most the person's task for the page, never the browser itself. What became of
+# the row is unknown (a failed read or emit leaves it in place), so the wording claims neither state.
+STEP_NOT_RECORDED = (
+    "Note: the sign-in task for this page may not have been recorded. If you need the person to sign in and "
+    "haven't told them, say so in chat."
 )
+DECLARATION_NOT_RECORDED = (
+    "The person step may not have been recorded, so the person may have no task for this page. "
+    "Tell them in chat what you need from the page and stop."
+)
+# A visible password field is the person's to fill in; with no task recorded for it, the command is refused.
+PASSWORD_PAGE_UNRECORDED = (
+    "This page is waiting for the person to sign in, and their sign-in task couldn't be recorded. "
+    "Ask them in chat to sign in in the shared browser, then try again."
+)
+PERSON_STEP = (
+    "This browser step is the person's to complete. A task for it is in their Needs you list, and you get a "
+    "turn once they finish or decline it; end your turn. If they decline, tell them in chat what you needed "
+    "the page for and stop."
+)
+# What the person can see right now: the page itself only in an open pane (where the password notice shows), else
+# only the task. A hand-off reply states which, so the agent never relies on a page the person can't see.
+PANE_OPEN = " The page is open in their browser pane."
+NO_PANE = " No browser pane is open, so they see the page only once they open that task."
 PASSWORD_DECLINED = (
     "The person declined to enter a password on this page. Tell them in chat what you needed the page for and stop."
 )
@@ -37,6 +57,42 @@ PERSON_STEP_DECLINED = (
     "The person declined this step on this page, so it can't be given to them again. "
     "Tell them in chat what you needed the page for and stop."
 )
+FILLED_FIELD_REFUSED = (
+    "The person filled in a password field on this page, so until you open another page or reload this one, "
+    "only commands that can't show what they typed run here: open, back, forward, reload, click, dblclick, "
+    "hover, focus, fill, type, press, select, check, uncheck, scroll, scrollintoview, "
+    "wait (but not --fn or --download), tab, snapshot (field values hidden), "
+    "get (but not get html, get value or a value attribute), and is. Name each element by its @ref from a "
+    "snapshot, not by a CSS selector."
+)
+FILLED_FIELD_SNAPSHOT_WITHHELD = (
+    "Error: this snapshot was withheld. The person filled in a password field on this page, and "
+    "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
+)
+# Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
+# display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
+# new text input the probe can't tell from any other. So for the rest of the visit only commands that never
+# render a field's value or run a page script run, even after the field is gone.
+_FILLED_FIELD_COMMANDS = frozenset({
+    "open", "back", "forward", "reload", "click", "dblclick", "hover", "focus", "fill", "type", "press",
+    "select", "check", "uncheck", "scroll", "scrollintoview", "tab", "is",
+    # Only session teardown checks with close (an agent's own close is refused before any page check).
+    "close",
+})
+_FILLED_FIELD_GETS = frozenset({"title", "url", "text", "count", "attr", "box", "styles"})
+# wait's options that take one operand and run no script; --fn evaluates one and --download writes a file.
+_FILLED_FIELD_WAIT_OPTIONS = frozenset({"--load", "--url", "--text", "--state"})
+_FILLED_FIELD_SNAPSHOTS = frozenset({("snapshot",), ("snapshot", "-i")})
+# Where each command takes its element. A CSS selector can test a value attribute some frameworks keep in step
+# with what was typed (input[value^=a]), so any command's match or failure would answer it; a snapshot ref can't.
+_FILLED_FIELD_TARGET_AT = {"click": 1, "dblclick": 1, "hover": 1, "focus": 1, "fill": 1, "type": 1, "select": 1,
+                           "check": 1, "uncheck": 1, "scrollintoview": 1, "get": 2, "is": 2}
+_SNAPSHOT_REF = re.compile(r"@e\d+")
+# Snapshot roles that hold typed text; the value follows the line's ref and attributes after ": ".
+_FIELD_LINE = re.compile(r"^(?P<indent>\s*)- (?:textbox|searchbox|combobox|spinbutton)\b")
+_REF = re.compile(r"\[ref=e\d+\]")
+_ATTRIBUTES = re.compile(r"(?:\s*\[[a-z-]+(?:=[^\]\s]*)?\])*")
+VALUE_HIDDEN = "[value hidden]"
 # Locates an agent's ref or CSS selector on the page as a backendNodeId, or None when it can't.
 Resolve = Callable[[str], Awaitable[int | None]]
 
@@ -78,12 +134,92 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
     )
 
 
+@dataclass(frozen=True)
+class PageAccess:
+    """What a command the guard let through must carry: its note, and whether a snapshot hides field values."""
+
+    note: str | None
+    filled_field_visit: bool
+
+
 async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
-                              resolve: Resolve | None = None, session: str | None = None) -> None:
-    """Enforce page ownership, then the independent password-visit read guard."""
-    result = await _guarded_probe(thread_id, probe, session=session)
+                              resolve: Resolve | None = None, session: str | None = None) -> str | None:
+    """Enforce page ownership, then the independent password-visit read guard.
+
+    Returns STEP_NOT_RECORDED when no step is held and the page has no password field but its step couldn't
+    be written; the command still runs.
+    """
+    return (await check_page_access(thread_id, probe, args, resolve=resolve, session=session)).note
+
+
+async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
+                            resolve: Resolve | None = None, session: str | None = None) -> PageAccess:
+    """require_page_access, also saying whether a snapshot's field values must be hidden (hide_field_values).
+
+    A command passes with a password field visible only once the person marked it done (R14): every other
+    path with one showing refuses first. Once a password step ended on the visit (finished_visit), only
+    _filled_field_allows commands run until the visit ends, with or without a visible field.
+    """
+    result, note = await _guarded_probe(thread_id, probe, session=session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
+    filled = bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
+    if filled and not _filled_field_allows(args):
+        raise BrowserSessionError(FILLED_FIELD_REFUSED)
+    return PageAccess(note, filled)
+
+
+def _filled_field_allows(args: tuple[str, ...]) -> bool:
+    at = _FILLED_FIELD_TARGET_AT.get(args[0])
+    if at is not None and len(args) > at and not _SNAPSHOT_REF.fullmatch(args[at]):
+        return False
+    if args[0] == "snapshot":
+        return tuple(args) in _FILLED_FIELD_SNAPSHOTS
+    if args[0] == "get":
+        if args[1:2] == ("attr",):
+            return len(args) == 4 and args[3].strip().casefold() != "value"
+        return len(args) >= 2 and args[1] in _FILLED_FIELD_GETS
+    if args[0] == "wait":
+        position = 1
+        while position < len(args):
+            if args[position] in _FILLED_FIELD_WAIT_OPTIONS:
+                # An operand that looks like an option (wait --text --fn ...) may parse as one.
+                if position + 1 >= len(args) or args[position + 1].startswith("-"):
+                    return False
+                position += 2
+            elif args[position].startswith("-") or not (
+                    args[position].isdigit() or _SNAPSHOT_REF.fullmatch(args[position])):
+                return False
+            else:
+                position += 1
+        return True
+    return args[0] in _FILLED_FIELD_COMMANDS
+
+
+def hide_field_values(snapshot: str) -> str:
+    """Replace every text field's value in a snapshot, and drop the text nodes beneath it.
+
+    Reads no value and needs no node identity: anything after a field's ref and attributes is hidden, so a
+    line it can't parse fails closed.
+    """
+    lines, field_indent = [], None
+    for line in snapshot.split("\n"):
+        indent = len(line) - len(line.lstrip())
+        if field_indent is not None and indent > field_indent and line.strip():
+            continue
+        field_indent = None
+        if (match := _FIELD_LINE.match(line)) is None:
+            lines.append(line)
+            continue
+        field_indent = len(match.group("indent"))
+        ref = _REF.search(line, match.end())
+        if ref is None:
+            lines.append(f"{line[:match.end()]} {VALUE_HIDDEN}")
+            continue
+        attributes = _ATTRIBUTES.match(line, ref.end())
+        kept = attributes.end() if attributes is not None else ref.end()
+        lines.append(line if not line[kept:].strip() else f"{line[:kept]}: {VALUE_HIDDEN}")
+    return "\n".join(lines)
 
 
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
@@ -92,12 +228,20 @@ async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, i
     instruction = str(instruction).strip()
     if not instruction:
         raise BrowserSessionError("browser person step needs an instruction")
-    await _guarded_probe(thread_id, probe, session=session, instruction=instruction)
+    _, note = await _guarded_probe(thread_id, probe, session=session, instruction=instruction)
+    if note is not None:
+        raise BrowserSessionError(DECLARATION_NOT_RECORDED)
 
 
 async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, session: str | None = None,
-                         instruction: str | None = None) -> PasswordProbe:
-    """Share the agent probe and failure mapping between commands and declarations."""
+                         instruction: str | None = None) -> tuple[PasswordProbe, str | None]:
+    """Share the agent probe and failure mapping between commands and declarations.
+
+    A step that can't be written is logged and a live step is kept (the next call or re-probe recovers it);
+    the page's password guard still applies. A held step refuses every command, close included, as an
+    open step does (R7): its task exists, so its normal refusal is true. With no step held, a page showing a
+    password field refuses the command, and any other page runs it and the agent gets STEP_NOT_RECORDED.
+    """
     try:
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
@@ -109,12 +253,27 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         "declare" if instruction is not None else "probe", result,
         session=session, instruction=instruction or "",
     )
-    decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
-    messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,
+    try:
+        decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
+    except Exception:
+        log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
+                    thread_id, exc_info=True)
+        _observe_read_guard(thread_id, result, False, False)
+        # A held step means its task exists (a failed row read, settle or emit leaves it), so the page is the
+        # person's and its normal refusal is true; the kind comes from in-memory state, not the store that failed.
+        if browser_step_lifecycle.has_step(thread_id):
+            if browser_step_lifecycle.password_page(thread_id):
+                raise BrowserSessionError(PASSWORD_PAGE + _ending(thread_id))
+            raise BrowserSessionError(PERSON_STEP + seen_by_person(thread_id))
+        # With no step held, the lifecycle's own visible-password test (R9) still marks the page as the person's.
+        if result.visible_nodes:
+            raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
+        return result, STEP_NOT_RECORDED
+    messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP + seen_by_person(thread_id),
                 "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
-    return result
+    return result, None
 
 
 def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_session: bool, guard_present: bool) -> None:
@@ -125,10 +284,16 @@ def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_sess
         _guard(thread_id, result, nodes=result.present_nodes | result.visible_nodes)
 
 
+def seen_by_person(thread_id: str) -> str:
+    """Whether the person can see the page now or only its task."""
+    return PANE_OPEN if browser_pane_state.has_pane(thread_id) else NO_PANE
+
+
 def _ending(thread_id: str) -> str:
-    if browser_pane_state.has_pane(thread_id):
-        return " Post nothing in chat."
-    return " If you reply, use one short line; don't restate the task or say you made it."
+    seen = seen_by_person(thread_id)
+    if seen == PANE_OPEN:
+        return seen + " Post nothing in chat."
+    return seen + " If you reply, use one short line pointing them to it in Needs you; don't restate the task or say you made it."
 
 
 def _guard(thread_id: str, result: PasswordProbe, *, nodes: frozenset[int] | None = None) -> None:
@@ -168,8 +333,9 @@ async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...
         except Exception as exc:
             log.info("password-visit read target for %s could not be located: %s", guarded.visit, exc)
             node = None
-        # A target that can't be located may be the hidden password input itself, so it fails closed.
-        if node is None or node in guarded.seen_nodes:
+        # A target that can't be located may be the hidden password input itself, so it fails closed. A ref
+        # inside a cross-origin frame locates the frame's element, which holds the frame's guarded fields.
+        if node is None or node in {browser_cdp_frames.frame_owner(seen) for seen in guarded.seen_nodes}:
             raise BrowserSessionError(PASSWORD_READ_REFUSED)
 
 

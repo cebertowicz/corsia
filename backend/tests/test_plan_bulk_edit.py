@@ -81,6 +81,21 @@ def _reparents(db, node_id: str) -> list[dict]:
     ]
 
 
+def test_unknown_bulk_operation_is_refused_without_writes(db):
+    from plans import bulk_nodes
+
+    plan = owner_plan(db)
+    task = _node(db, plan.id, "Keep this task")
+    before = db.total_changes
+    with pytest.raises(service.PlanError, match="Unsupported bulk operation"):
+        bulk_nodes.dispatch(
+            plan.id, "unknown", {"node_ids": [task.id], "reason": "Not a close"},
+            {"db": db, "actor_id": OWNER.thread_id, "provenance": "test"}, db, OWNER,
+        )
+    assert db.total_changes == before
+    assert row(db, task.id)["state"] == "pending"
+
+
 # --- bulk edit ---------------------------------------------------------------
 
 

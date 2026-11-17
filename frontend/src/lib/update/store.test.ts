@@ -6,8 +6,8 @@ import { settingsNavigation } from '$lib/stores/settingsNavigation';
 import {
 	loadUpdateStatus,
 	resetUpdateStoreForTests,
-	saveUpdateSchedule,
 	startUpdate,
+	updateConfirmed,
 	updateFailureVerdict,
 	updateInFlight,
 	updateOperation,
@@ -17,6 +17,7 @@ import {
 	updateToastSuppressed,
 	updateUnreachable,
 } from './store';
+import { saveUpdateSchedule } from './schedule';
 
 const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | 'verifying') => ({
 	branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1, available: true,
@@ -300,6 +301,33 @@ describe('update store', () => {
 		expect(get(updateFailureVerdict)).toBeNull();
 		expect(seen).toEqual([]);
 		expect(versionReads(fetchMock)).toBe(0);
+	});
+
+	it('checks the versions itself for an update it followed, though another device showed the outcome', async () => {
+		const state: { status: unknown; versions?: unknown } = { status: running('restarting') };
+		const { fetchMock, seen } = backend(state);
+		vi.stubGlobal('fetch', fetchMock);
+		await loadUpdateStatus();
+		state.status = completed({ outcome_seen_at: '2026-10-13T22:05:00Z' });
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(get(updateConfirmed)).toEqual({ operationId: 'update-1', version: '2026.10.13' });
+		expect(pinned()).toEqual([]);
+		expect(seen).toEqual([]);
+		const reads = versionReads(fetchMock);
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(versionReads(fetchMock)).toBe(reads);
+
+		resetUpdateStoreForTests();
+		state.status = running('restarting');
+		state.versions = otherVersions;
+		await loadUpdateStatus();
+		state.status = completed({ outcome_seen_at: '2026-10-13T22:05:00Z' });
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(12_000);
+		expect(get(updateConfirmed)).toBeNull();
+		expect(get(updateFailureVerdict)?.kind).toBe('version_mismatch');
 	});
 
 	it('judges the running versions of an unseen completed update once per page', async () => {

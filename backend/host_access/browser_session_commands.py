@@ -181,16 +181,18 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
+    note, filled_field_visit = None, False
     if guarded:
-        await browser_control.require_page_access(
+        access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
+        note, filled_field_visit = access.note, access.filled_field_visit
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
     if shared_write:
         try:
-            return await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id))
+            return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
         except browser_dom_write.DomWriteRefused as exc:
             await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
                                     properties={"command": args[0], "reason": exc.reason})
@@ -204,7 +206,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
-            return browser_cli.WAIT_TIMED_OUT
+            return _noted(browser_cli.WAIT_TIMED_OUT, note)
+    if filled_field_visit and args[0] == "snapshot":
+        hidden = hidden_snapshot(result)
+        if hidden is None:
+            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+        result = hidden
     rendered = owner._model_result(result, runtime.record)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
@@ -212,7 +219,27 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     # the next session instead of coming back on every later open.
     if opening_unlaunched_session and runtime.record.shared and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
-    return rendered
+    return _noted(rendered, note)
+
+
+def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandResult | None:
+    """A snapshot taken while a filled field shows: only `data.snapshot`, its values hidden; None for other output.
+
+    Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
+    """
+    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
+        return None
+    data = browser_cli.json_object(result.stdout).get("data")
+    snapshot = data.get("snapshot") if isinstance(data, dict) else None
+    if not isinstance(snapshot, str):
+        return None
+    stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
+    return replace(result, stdout=stdout, stderr="")
+
+
+def _noted(text: str, note: str | None) -> str:
+    """The command's result, with the one line about a step that couldn't be recorded."""
+    return f"{text}\n{note}" if note else text
 
 
 async def page_endpoint(owner: Any, thread_id: str) -> str:

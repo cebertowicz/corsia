@@ -7,7 +7,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from core.skill_sidecar import installed_digest, parse_sidecar, read_sidecar
+from core.skill_sidecar import folder_digest, installed_digest, installed_file_digests, parse_sidecar, read_sidecar
 
 
 def local_bundle(folder: Path) -> tuple[dict[str, bytes] | None, list[str]]:
@@ -53,22 +53,45 @@ def local_bundle(folder: Path) -> tuple[dict[str, bytes] | None, list[str]]:
     return files, problems
 
 
-def local_edits(folder: Path, origin: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Compare a live installed folder with the writer's immutable bundle digest."""
+def local_edits(folder: Path, origin: dict[str, Any]) -> tuple[bool, list[str], bool]:
+    """Compare a live installed folder with the writer's bundle digest.
+
+    Returns whether the copy was edited, the paths to review, and whether those
+    paths are exactly the changed ones. The whole-folder digest alone decides
+    whether the copy was edited; the per-file map only narrows the list, and
+    only when it recomposes that digest.
+    """
     files, problems = local_bundle(folder)
     if files is None:
-        return True, problems
+        return True, problems, True
     expected = origin.get("installed_digest")
     try:
+        current = installed_file_digests(files)
         actual = installed_digest(files)
     except (UnicodeDecodeError, ValueError):
-        return True, sorted(set([*problems, "corsia.yaml"]))
+        return True, sorted(set([*problems, "corsia.yaml"])), True
     if isinstance(expected, str) and actual == expected and not problems:
-        return False, []
-    # The origin stores one whole-folder digest, not a separate mutable file map.
-    # Return each visible path as the concrete recovery surface rather than
-    # guessing which one changed.
-    return True, sorted(set([*files, *problems]))
+        return False, [], True
+    recorded = _file_map(origin.get("installed_files"), expected)
+    if recorded is not None:
+        changed = {path for path in {*recorded, *current} if recorded.get(path) != current.get(path)}
+        if changed or problems:
+            return True, sorted(changed | set(problems)), True
+    # A copy installed before per-file digests (or whose map no longer matches
+    # its digest) cannot say which file changed; list every file to review.
+    return True, sorted(set([*files, *problems])), False
+
+
+def _file_map(recorded: object, expected: object) -> dict[str, str] | None:
+    """Return the recorded per-file digests only when they recompose the folder digest."""
+    if not isinstance(recorded, dict) or not isinstance(expected, str):
+        return None
+    if not all(isinstance(path, str) and isinstance(value, str) for path, value in recorded.items()):
+        return None
+    try:
+        return recorded if folder_digest(recorded) == expected else None
+    except ValueError:
+        return None
 
 
 def read_origin(skill_folder: Path) -> dict[str, Any] | None:

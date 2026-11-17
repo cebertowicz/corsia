@@ -32,6 +32,20 @@ def debt_log():
     logger.remove(sink)
 
 
+def _closed_steps(db):
+    """Steps whose call the terminal closed as never recorded; fails on a real row."""
+    import json
+
+    from infra.delivery_states import TURN_ENDED_WITHOUT_RESULT_REASON
+
+    steps = []
+    for row in db.execute("SELECT metadata FROM messages WHERE role='tool' ORDER BY seq"):
+        metadata = json.loads(row["metadata"])
+        assert metadata["synthetic_reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
+        steps.append(metadata["assistant_step_id"])
+    return steps
+
+
 def _turn_state(db, turn_id):
     return tuple(db.execute(
         "SELECT status,error FROM active_turns WHERE id=?", (turn_id,),
@@ -158,7 +172,8 @@ def test_terminal_leaves_completed_output_without_its_exact_step_as_debt(isolate
     """Duplicate Step rows cannot be told apart, so only the captured id binds.
 
     The unbindable result is refused as one named unit of debt; the terminal
-    still applies and writes no row for it.
+    still applies, stores none of its output, and closes the call once on each
+    Step that declared it.
     """
     from core.turn_core import persist_turn_terminal
     from infra.database import get_db
@@ -192,7 +207,7 @@ def test_terminal_leaves_completed_output_without_its_exact_step_as_debt(isolate
 
     status, error = _turn_state(db, identity.turn_id)
     assert status == "error" and "completed output" not in error
-    assert db.execute("SELECT COUNT(*) FROM messages WHERE role='tool'").fetchone()[0] == 0
+    assert sorted(_closed_steps(db)) == sorted([step, "ambiguous-step"])
     [line] = debt_log
     assert "lacks exact Assistant Step identity" in line and "'call'" in line
     assert identity.turn_id in line and THREAD in line and "completed output" not in line
@@ -202,9 +217,10 @@ def test_terminal_leaves_completed_output_without_its_exact_step_as_debt(isolate
 def test_terminal_result_storage_failure_does_not_claim_durability(
     isolated_db, monkeypatch, debt_log,
 ):
-    """A storage failure that leaves the savepoint intact is debt, never a row.
+    """A storage failure that leaves the savepoint intact is debt, never a real row.
 
-    The terminal applies without claiming the result is durable. A failure that
+    The terminal applies without claiming the result is durable: the call is
+    closed by a row saying no result was recorded. A failure that
     takes the transaction with it still raises:
     ``test_retained_unit_debt.test_terminal_lost_savepoint_raises_and_the_turn_stays_running``.
     """
@@ -237,7 +253,7 @@ def test_terminal_result_storage_failure_does_not_claim_durability(
 
     status, error = _turn_state(db, identity.turn_id)
     assert status == "error" and "completed output" not in error
-    assert db.execute("SELECT COUNT(*) FROM messages WHERE role='tool'").fetchone()[0] == 0
+    assert _closed_steps(db) == [step]
     [line] = debt_log
     assert "OSError" in line and "result storage unavailable" in line
     assert "stays unpaid debt" in line and "completed output" not in line

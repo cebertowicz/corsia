@@ -203,8 +203,8 @@ describe('a suggestion card and the text it replaces', () => {
 	});
 
 	it.each([
-		{ failure: 'the save before it', setup: () => mocks.flushDraft.mockResolvedValue(false), message: "Couldn't save the document before accepting this suggestion" },
-		{ failure: 'no answer from the server', setup: () => mocks.decideSuggestion.mockRejectedValue(new TypeError('Failed to fetch')), message: 'Failed to fetch' },
+		{ failure: 'the save before it', setup: () => mocks.flushDraft.mockResolvedValue(false), message: 'Couldn’t save the document before accepting. Try again.' },
+		{ failure: 'no answer from the server', setup: () => mocks.decideSuggestion.mockRejectedValue(new TypeError('Failed to fetch')), message: 'Couldn’t accept this suggestion. Try again.' },
 		{ failure: 'a refusal that is not about the text', setup: () => mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('Only the owner can decide', 400)), message: 'Only the owner can decide' },
 	])('leaves a card attached after an accept that failed on $failure, and keeps the reason', async ({ setup, message }) => {
 		await serverAnswers(serverRow(false));
@@ -229,11 +229,11 @@ describe('a suggestion card and the text it replaces', () => {
 		expectOrphaned();
 		mocks.decideSuggestion.mockRejectedValue(new Error('Network down'));
 		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
-		await vi.waitFor(() => expect(alert()).toBe('Network down'));
+		await vi.waitFor(() => expect(alert()).toBe('Couldn’t reject this suggestion. Try again.'));
 		// A failed reject says nothing about the text, so restoring the words does not answer it.
 		edit(6, 7, 'i');
 		expectAttached();
-		expect(alert()).toBe('Network down');
+		expect(alert()).toBe('Couldn’t reject this suggestion. Try again.');
 	});
 });
 
@@ -262,7 +262,7 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 	const failedReject = async () => {
 		mocks.decideSuggestion.mockRejectedValue(new Error('Network down'));
 		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
-		await vi.waitFor(() => expect(alert()).toBe('Network down'));
+		await vi.waitFor(() => expect(alert()).toBe('Couldn’t reject this suggestion. Try again.'));
 	};
 	const typeAndSave = async () => {
 		editAfter();
@@ -292,8 +292,8 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 		{ row: 'refused accept, then an edit that breaks the quote', server: false, drive: refusedThen(breakQuote), sees: LOST, alert: STALE },
 		{ row: 'refused accept, then the quote broken and restored exactly', server: false, drive: refusedThen(breakAndRestore), sees: ORPHANED, alert: STALE },
 		{ row: 'refused accept, then typing and a save', server: false, drive: refusedThen(typeAndSave), sees: ORPHANED, alert: STALE },
-		{ row: 'refused accept, then a failed reject (its error shows over the refusal)', server: false, drive: refusedThen(failedReject), sees: ORPHANED, alert: 'Network down' },
-		{ row: 'server-orphaned, then a failed reject', server: true, drive: failedReject, sees: ATTACHED, alert: 'Network down' },
+		{ row: 'refused accept, then a failed reject (its error shows over the refusal)', server: false, drive: refusedThen(failedReject), sees: ORPHANED, alert: 'Couldn’t reject this suggestion. Try again.' },
+		{ row: 'server-orphaned, then a failed reject', server: true, drive: failedReject, sees: ATTACHED, alert: 'Couldn’t reject this suggestion. Try again.' },
 	])('$row', async ({ server, drive, sees, alert: expected }) => {
 		await load(server);
 		openCard();

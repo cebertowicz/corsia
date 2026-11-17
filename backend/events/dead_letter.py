@@ -23,9 +23,21 @@ def park(
     external_id: str | None = None,
     *,
     db=None,
+    expected: bool = False,
+    code_named: bool = False,
 ) -> str:
-    """Park an unroutable event and return the row id."""
-    logger.error(
+    """Park an unroutable event and return the row id.
+
+    ``expected`` is for a caller that parks on purpose (known noise); the row
+    is stored the same, but the line is logged at INFO instead of ERROR.
+    ``code_named`` is true only when CORSIA's code chose ``internal_event``
+    (a built-in connector's or the platform's own kind), never a name a person
+    or an agent wrote; install-wide reads show only those names. The platform
+    path passes whether the envelope's connector is a registered connector: a
+    declared namespace is refused when it equals one (``rule_declarations``).
+    """
+    logger.log(
+        "INFO" if expected else "ERROR",
         "event-routing: UNROUTABLE {} (external_id={!r}, reason={}) — "
         "parked in dead-letter, NOT delivered to any thread",
         internal_event, external_id, reason,
@@ -36,10 +48,10 @@ def park(
             connection.execute(
                 """INSERT INTO dead_letter_events
                    (id, internal_event, external_id, reason, payload_json,
-                    status, created_at)
-                   VALUES (?, ?, ?, ?, ?, 'parked', ?)""",
+                    status, created_at, code_named)
+                   VALUES (?, ?, ?, ?, ?, 'parked', ?, ?)""",
                 (row_id, internal_event, external_id, reason,
-                 json.dumps(payload), _now()),
+                 json.dumps(payload), _now(), int(code_named)),
             )
         return row_id
     except Exception as exc:  # noqa: BLE001 — never let parking raise into routing

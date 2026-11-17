@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.measurement_scope import Grain
+from core.machinery_cost import METRICS as MACHINERY_METRICS
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,9 @@ REGISTRY: dict[str, MetricDefinition] = {
     "under_workflow_pct": MetricDefinition("workflows", "ratio", 20),
     "limit_hits": MetricDefinition("limits", "count", 0),
     "dollar_trend": MetricDefinition("unavailable", "usd", 0, available=False),
+    **{name: MetricDefinition("machinery", "fresh_tokens_per_outcome" if name.endswith("_tokens_per_outcome") else "ratio", 20,
+                              proxy=name.endswith(("_token_pct", "_tokens_per_outcome")) or name in {"skill_read_returned_pct", "machinery_returned_pct"})
+       for name in MACHINERY_METRICS},
 }
 
 
