@@ -24,6 +24,14 @@ def validate_client_id(v: str | None) -> str | None:
     return v
 
 
+class CommentAccessDenied(PermissionError):
+    """The validated target stopped being accessible before its DB create; routes answer it as not found."""
+
+
+class ReplyParentNotFound(CommentAccessDenied):
+    """A reply named a parent that is not a comment on the reply's document, answered like an unknown comment."""
+
+
 class CrossArtifactIdError(ValueError):
     """Raised when a client_id collides with a comment on a different artifact
     or created by a different author. Maps to HTTP 409 at the API layer so the
@@ -51,12 +59,15 @@ def _rows_to_threads(rows: list[dict]) -> list[dict]:
     return list(tops.values())
 
 
-def _thread_root_id(connection, comment_id: str | None) -> str | None:
-    """Normalize a reply parent to its top-level comment in one database hop."""
-    if not comment_id:
-        return comment_id
-    row = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
-    return row["parent_id"] if row is not None and row["parent_id"] else comment_id
+def thread_root_on(connection, comment_id: str, artifact_id: str) -> str | None:
+    """The top-level comment of ``comment_id``'s thread, or None when it is not a comment on ``artifact_id``.
+
+    The one check that a comment id a caller names belongs to the document it acts on.
+    """
+    row = connection.execute(
+        "SELECT id, parent_id FROM doc_comments WHERE id=? AND artifact_id=?", (comment_id, artifact_id),
+    ).fetchone()
+    return None if row is None else (row["parent_id"] or row["id"])
 
 
 def get_comment(comment_id: str, *, db=None) -> dict | None:
@@ -233,8 +244,10 @@ def create_with_status(
     now = _now()
     x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
+        root_id = thread_root_on(connection, parent_id, artifact_id) if parent_id else parent_id
+        if parent_id and root_id is None:
+            raise ReplyParentNotFound("Comment not found")
         number = _next_region_number(connection, cid, artifact_id, image_src, region)
-        root_id = _thread_root_id(connection, parent_id)
         replier = author_thread_id if author_kind == "agent" else comment_acks.PERSON
         inserted = connection.execute(
             """INSERT INTO doc_comments
