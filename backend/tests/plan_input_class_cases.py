@@ -748,11 +748,11 @@ _CASES = {
     ): partial(_user_block, owner_id="someone-else"),
     ("user_ask.py", "NO_ASK"): _user_block,
     (
-        "user_ask.py",
-        'f"ask_artifact_id {ask!r} names no registered artifact"',
+        "artifact_links.py",
+        'f"ask_artifact_id {artifact_id!r} names no registered artifact"',
     ): partial(_user_block, ask_artifact_id="missing-artifact"),
     (
-        "user_ask.py",
+        "artifact_links.py",
         '"ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises"',
     ): _user_block_on_foreign_document,
     (

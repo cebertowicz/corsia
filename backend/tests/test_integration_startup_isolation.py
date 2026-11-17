@@ -7,7 +7,7 @@ import threading
 def test_session_startup_recovery_cannot_reach_a_later_isolated_db(request, monkeypatch):
     from automation import restart_startup
     from infra.database import get_db
-    from plans import person_comment_recovery
+    from plans import public as plans
 
     release = threading.Event()
     queried = threading.Event()
@@ -28,7 +28,7 @@ def test_session_startup_recovery_cannot_reach_a_later_isolated_db(request, monk
         recovery_queried.set()
 
     monkeypatch.setattr(restart_startup, "run_startup_drive", delayed_drive)
-    monkeypatch.setattr(person_comment_recovery, "run", delayed_comment_recovery)
+    monkeypatch.setattr(plans, "recover_person_comments", delayed_comment_recovery)
     request.getfixturevalue("integration_client")
     isolated_path = request.getfixturevalue("isolated_db")
     release.set()
