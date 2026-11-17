@@ -8,19 +8,20 @@
 	/**
 	 * Cancel keeps the focus through its request: while the request is pending the button refuses presses instead of
 	 * being disabled, and once the row goes the focus moves to the next Cancel, else the one before, else back into the
-	 * surface (its search field when there is one), so Escape still reaches the surface and never the page beneath it.
+	 * surface (its search field when there is one, else the popover card or the drawer panel), so Escape still reaches the
+	 * surface and never the page beneath it. Positions count Cancel buttons only, since rows that can't be cancelled have none.
 	 */
 	async function cancel(event: MouseEvent, id: string) {
 		if (model.cancelPending.includes(id)) return;
 		const button = event.currentTarget as HTMLElement;
 		const surface = button.closest<HTMLElement>('[data-review-surface]');
-		const index = model.requests.findIndex((request) => request.id === id);
+		const index = model.requests.filter((request) => request.may_cancel).findIndex((request) => request.id === id);
 		await model.cancel(id);
 		await tick();
 		const active = document.activeElement;
 		if (button.isConnected || !surface?.isConnected || (active && active !== document.body && active.isConnected)) return;
 		const cancels = [...surface.querySelectorAll<HTMLElement>('[data-review-request] .cancel')];
-		const next = cancels[index] ?? cancels[index - 1] ?? surface.querySelector<HTMLElement>('[data-review-autofocus]') ?? surface.closest<HTMLElement>('[data-popover]');
+		const next = cancels[index] ?? cancels[index - 1] ?? surface.querySelector<HTMLElement>('[data-review-autofocus]') ?? surface.closest<HTMLElement>('[data-popover], [data-adaptive-drawer] [role="dialog"]');
 		next?.focus({ preventScroll: true });
 	}
 </script>

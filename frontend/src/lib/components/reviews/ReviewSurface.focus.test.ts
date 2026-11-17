@@ -15,9 +15,9 @@ vi.mock('$lib/api/docReviews', () => ({
 	reviewFailure: (_error: unknown, fallback: string) => fallback,
 }));
 
-const review = (id: string): DocumentReview => ({
+const review = (id: string, may_cancel = true): DocumentReview => ({
 	id, reviewer_thread_id: `thread-${id}`, reviewer_name: `Agent ${id}`, requester_name: 'Person', created_at: '2026-11-16T10:00:00Z',
-	may_cancel: true, state: 'forked', outcome: 'open', comment_count: 0,
+	may_cancel, state: 'forked', outcome: 'open', comment_count: 0,
 } as DocumentReview);
 
 let host: HTMLElement;
@@ -27,16 +27,16 @@ let component: { $destroy(): void } | null = null;
 let closeDocument: Mock<() => void>;
 const documentEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) closeDocument(); };
 
-async function render(canRequest: boolean) {
+async function render(canRequest: boolean, narrow = false) {
 	const model = createDocumentReviewState();
 	model.setTarget('doc', 'thread', 'key');
 	await model.load();
 	host = document.createElement('div'); document.body.appendChild(host);
 	anchor = document.createElement('button'); anchor.textContent = 'Request review'; document.body.appendChild(anchor);
 	const onHide = vi.fn();
-	component = createClassComponent({ target: host, component: ReviewSurface, props: { model, id: 'reviews', anchor, narrow: false, canRequest, onSent: vi.fn(), onHide, restoreFocus: vi.fn() } });
+	component = createClassComponent({ target: host, component: ReviewSurface, props: { model, id: 'reviews', anchor, narrow, canRequest, onSent: vi.fn(), onHide, restoreFocus: vi.fn() } });
 	flushSync();
-	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
+	await vi.waitFor(() => expect(document.querySelector(narrow ? '[data-adaptive-drawer] [role="dialog"]' : '[data-popover]')).not.toBeNull());
 	return { model, onHide };
 }
 const cancelButton = (id: string) => document.querySelector<HTMLButtonElement>(`[aria-label="Cancel request to Agent ${id}"]`);
@@ -116,6 +116,37 @@ describe('review list Cancel keeps the focus in the surface', () => {
 		await vi.waitFor(() => expect(document.querySelector('[data-review-request]')).toBeNull());
 		await settle();
 		expect(document.activeElement).toBe(document.querySelector('[data-review-autofocus]'));
+	});
+
+	it('moves the focus to the next Cancel when rows that cannot be cancelled come first', async () => {
+		server = [review('x', false), review('y', false), review('a'), review('b')];
+		await render(false);
+		const first = cancelButton('a')!;
+		first.focus();
+		first.click();
+		await settle();
+		answers.shift()!();
+		await vi.waitFor(() => expect(cancelButton('a')).toBeNull());
+		await settle();
+		expect(document.activeElement).toBe(cancelButton('b'));
+	});
+
+	it('in the drawer, after the last request is cancelled, Escape closes the drawer and not the document', async () => {
+		server = [review('a')];
+		await render(false, true);
+		const only = cancelButton('a')!;
+		only.focus();
+		only.click();
+		await settle();
+		answers.shift()!();
+		await vi.waitFor(() => expect(document.querySelector('[data-review-request]')).toBeNull());
+		await settle();
+		const panel = document.querySelector<HTMLElement>('[data-adaptive-drawer] [role="dialog"]')!;
+		expect(document.activeElement).toBe(panel);
+		const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+		document.activeElement!.dispatchEvent(escape);
+		expect(escape.defaultPrevented).toBe(true);
+		expect(closeDocument).not.toHaveBeenCalled();
 	});
 
 	it('leaves the focus where the person moved it while the request was pending', async () => {
