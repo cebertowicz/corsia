@@ -1694,7 +1694,7 @@ def test_recovery_commands_receive_only_narrow_write_exceptions(tmp_path, monkey
     assert git_allow not in uppercase_lock_fetch
     # Folder writes are now constant; denied immediate entries still prevent
     # these commands from acquiring the base worktree-management exception.
-    folder_deny = worktree_folder_rules(repo, protected_base=True)[1]
+    folder_deny = worktree_folder_rules(repo)[1]
     for profile in (fetch, upstream_fetch, trailing_dot_fetch, uppercase_lock_fetch):
         assert worktrees_allow in profile
         assert folder_deny in profile
@@ -2191,7 +2191,7 @@ def test_worktree_git_access_does_not_reopen_base_git_identity(
         assert worktree_commit.index(deny) > worktree_commit.index(git_allow)
         assert deny in base_pull
     hooks_deny = workspace_git_rules((repo / ".git" / "hooks",))[0]
-    marker_deny = worktree_folder_rules(repo, protected_base=True)[-1]
+    marker_deny = worktree_folder_rules(repo)[-1]
     assert worktree_commit.index(hooks_deny) > worktree_commit.index(git_allow)
     assert worktree_commit.index(marker_deny) > worktree_commit.index(git_allow)
     assert hooks_deny in base_pull

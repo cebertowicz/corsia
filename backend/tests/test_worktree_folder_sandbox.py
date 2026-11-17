@@ -19,7 +19,7 @@ from infra.project_repo_policy import RepoPolicy
 from tools import shell_guard
 from tools.base_git_paths import base_git_control_paths, base_git_identity_paths
 from tests.worktree_sandbox_baseline import (
-    ConfinementBreach, compare_per_worktree, per_worktree_renderer, unchanged,
+    ConfinementBreach, per_worktree_renderer, unchanged,
 )
 
 
@@ -97,7 +97,12 @@ def repo_name():
 
 
 @pytest.fixture
-def repository_sandbox(monkeypatch, repo_name):
+def protect_base():
+    return True
+
+
+@pytest.fixture
+def repository_sandbox(monkeypatch, repo_name, protect_base):
     required = os.environ.get("CORSIA_REQUIRE_SAFEHOUSE") == "1"
     reason = None
     if os.environ.get("CORSIA_THREAD_ID"):
@@ -115,7 +120,7 @@ def repository_sandbox(monkeypatch, repo_name):
             root = Path(directory).resolve()
             repo = root / repo_name
             repo.mkdir()
-            policy = RepoPolicy("project", "repo", repo, "main", True)
+            policy = RepoPolicy("project", "repo", repo, "main", protect_base)
             sandbox = RepositorySandbox(root, policy, safehouse, renderer)
             sandbox.setup_git("init", "-b", "main")
             (repo / "base.txt").write_text("base\n")
@@ -143,7 +148,6 @@ def repository_sandbox(monkeypatch, repo_name):
     ".git/commondir", ".git/config", ".git/config.lock", ".git/packed-refs",
     ".git/packed-refs.lock", ".git/COMMONDIR", ".git/HoOkS/pre-commit",
 ])
-@compare_per_worktree
 def test_real_worktree_folder_keeps_base_and_git_controls_readonly(repository_sandbox, relative):
     sandbox = repository_sandbox
     target = sandbox.repo / relative
@@ -155,7 +159,6 @@ def test_real_worktree_folder_keeps_base_and_git_controls_readonly(repository_sa
 
 @pytest.mark.integration
 @pytest.mark.parametrize("attack", ["rename", "delete-empty", "replace-empty"])
-@compare_per_worktree
 def test_real_worktree_folder_container_cannot_move_or_disappear(repository_sandbox, attack):
     sandbox = repository_sandbox
     trees = shlex.quote(str(sandbox.trees))
@@ -180,7 +183,6 @@ def test_real_worktree_folder_container_cannot_move_or_disappear(repository_sand
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
 @pytest.mark.parametrize("attack", ["write", "unlink", "replace", "rename-away"])
-@compare_per_worktree
 def test_real_worktree_folder_existing_pointer_cannot_mutate(repository_sandbox, spelling, attack):
     sandbox = repository_sandbox
     marker = sandbox.own / ".git"
@@ -206,7 +208,6 @@ def test_real_worktree_folder_existing_pointer_cannot_mutate(repository_sandbox,
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
 @pytest.mark.parametrize("kind", ["file", "directory"])
-@compare_per_worktree
 def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, spelling, kind):
     sandbox = repository_sandbox
     fresh = sandbox.trees / "fresh"
@@ -220,7 +221,6 @@ def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
-@compare_per_worktree
 def test_real_worktree_folder_prepared_pointer_cannot_be_renamed_up(repository_sandbox, spelling):
     sandbox = repository_sandbox
     parent = sandbox.own
@@ -237,7 +237,6 @@ def test_real_worktree_folder_prepared_pointer_cannot_be_renamed_up(repository_s
 @pytest.mark.parametrize("destination", ["base", "base-git", "peer"])
 @pytest.mark.parametrize("location", ["immediate", "nested"])
 @pytest.mark.parametrize("attack", ["write", "unlink", "replace"])
-@compare_per_worktree
 def test_real_worktree_folder_symlink_cannot_bypass_denies(repository_sandbox, destination, location, attack):
     sandbox = repository_sandbox
     link = (sandbox.trees if location == "immediate" else sandbox.own) / "alias"
@@ -264,7 +263,6 @@ def test_real_worktree_folder_symlink_cannot_bypass_denies(repository_sandbox, d
 
 
 @pytest.mark.integration
-@compare_per_worktree
 def test_real_worktree_folder_preserves_worktree_git_and_nested_repositories(repository_sandbox):
     sandbox = repository_sandbox
     snapshot = {path: path.read_bytes() if path.exists() else None for path in (
@@ -297,7 +295,6 @@ def test_real_worktree_folder_preserves_worktree_git_and_nested_repositories(rep
 
 
 @pytest.mark.integration
-@compare_per_worktree
 def test_real_worktree_folder_preserves_authorized_base_worktree_add_remove(repository_sandbox):
     sandbox = repository_sandbox
     sandbox.setup_git("branch", "existing")
@@ -309,7 +306,6 @@ def test_real_worktree_folder_preserves_authorized_base_worktree_add_remove(repo
 
 
 @pytest.mark.integration
-@compare_per_worktree
 def test_real_worktree_folder_symlink_container_cannot_grant_the_base(repository_sandbox):
     sandbox = repository_sandbox
     sandbox.trees.rename(sandbox.root / "original-trees")

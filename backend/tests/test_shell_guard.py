@@ -71,7 +71,7 @@ def _assert_verified_worktree_grant_keeps_controls_denied(
         deny = f'(deny file-write* (literal "{path}"))'
         assert profile.index(deny) > profile.index(git_allow)
     commondir_deny, hooks_deny = workspace_git_rules((repo / ".git" / "commondir", repo / ".git" / "hooks"))
-    marker_deny = worktree_folder_rules(repo, protected_base=True)[-1]
+    marker_deny = worktree_folder_rules(repo)[-1]
     assert profile.index(hooks_deny) > profile.index(git_allow)
     assert profile.index(commondir_deny) > profile.index(git_allow)
     assert profile.index(marker_deny) > profile.index(git_allow)
@@ -712,7 +712,7 @@ def test_base_checkout_chained_git_uses_verified_grant_and_keeps_teaching(
         f'(subpath "{repo.resolve() / ".worktrees"}"))'
         in profile
     )
-    assert worktree_folder_rules(repo.resolve(), protected_base=True)[1] in profile
+    assert worktree_folder_rules(repo.resolve())[1] in profile
 
     teaching = shell_guard.chained_base_git_denial_guidance(command, str(repo))
     assert teaching is not None

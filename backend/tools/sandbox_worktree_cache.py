@@ -66,15 +66,19 @@ def forget_worktree(repo: Path, entry: Path) -> None:
     _worktree_proofs.pop((repo, entry), None)
 
 
-def _verified_entries(repo_root: Path, verify, root_for_path, seen: set):
-    """Yield verified worktree roots; raises ``OSError`` from the listing."""
+def _listing(repo_root: Path) -> tuple[Path, list[Path]]:
+    """The ``.worktrees`` folder and its entries; raises ``OSError`` from the listing."""
     parent = repo_root.expanduser().resolve(strict=False) / ".worktrees"
-    if not parent.is_dir():
-        return
+    return parent, list(parent.iterdir()) if parent.is_dir() else []
+
+
+def _verified_entries(repo_root: Path, parent: Path, entries: list[Path],
+                      verify, root_for_path, seen: set):
+    """Yield verified worktree roots among an already-complete listing."""
     cache: dict = {}
     repo = parent.parent
     plain_parent = not parent.is_symlink()
-    for entry in parent.iterdir():
+    for entry in entries:
         resolved = (entry if plain_parent and not entry.is_symlink()
                     else entry.resolve(strict=False))
         cache[("sandbox-resolved-path", str(entry))] = resolved
@@ -91,7 +95,10 @@ def _verified_entries(repo_root: Path, verify, root_for_path, seen: set):
 def list_worktrees(repo_root: Path, verify, root_for_path) -> list[Path]:
     seen: set = set()
     try:
-        worktrees = list(_verified_entries(repo_root, verify, root_for_path, seen))
+        parent, entries = _listing(repo_root)
+        worktrees = list(_verified_entries(
+            repo_root, parent, entries, verify, root_for_path, seen,
+        ))
     except OSError:
         return []
     repo = repo_root.expanduser().resolve(strict=False)
@@ -104,15 +111,22 @@ def list_worktrees(repo_root: Path, verify, root_for_path) -> list[Path]:
 def has_worktree(repo_root: Path, verify, root_for_path) -> bool:
     """Whether ``list_worktrees`` would be non-empty, stopping at the first proof.
 
-    A still-valid cached proof answers without listing the folder, so a shell
-    command pays one proof check, not one per worktree.
+    The folder is always read in full first, so a listing error fails closed
+    exactly as ``list_worktrees`` does. A still-valid cached proof for a listed
+    entry then answers, so a shell command pays one proof check, not one per
+    worktree.
     """
-    repo = repo_root.expanduser().resolve(strict=False)
-    for (cached_repo, entry), (gitdir, signature) in list(_worktree_proofs.items()):
-        # The signature requires a plain .worktrees and entry, as listing does.
-        if cached_repo == repo and _proof_signature(repo, entry, gitdir) == signature:
-            return True
     try:
-        return next(_verified_entries(repo_root, verify, root_for_path, set()), None) is not None
+        parent, entries = _listing(repo_root)
+        repo = parent.parent
+        listed = set(entries)
+        for (cached_repo, entry), (gitdir, signature) in list(_worktree_proofs.items()):
+            # The signature requires a plain .worktrees and entry, as listing does.
+            if (cached_repo == repo and entry in listed
+                    and _proof_signature(repo, entry, gitdir) == signature):
+                return True
+        return next(_verified_entries(
+            repo_root, parent, entries, verify, root_for_path, set(),
+        ), None) is not None
     except OSError:
         return False

@@ -42,7 +42,7 @@
     "backend/tools/filesystem_effects.py": 658,
     "backend/tools/host_access_gate.py": 892,
     "backend/tools/shell.py": 500,
-    "backend/tools/shell_guard.py": 1174,
+    "backend/tools/shell_guard.py": 1167,
     "frontend/src/lib/components/DocumentsView.svelte": 519,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 509,
     "frontend/src/lib/ws/handlersTurns.ts": 452,

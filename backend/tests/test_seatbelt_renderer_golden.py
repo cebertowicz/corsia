@@ -31,6 +31,7 @@ def render_baseline(monkeypatch: MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(shell_guard, '_canonical_paths', lambda paths: list(dict.fromkeys(paths)))
     monkeypatch.setattr(shell_guard, '_sandbox_path', lambda path: shell_guard.sandbox_literal(path))
     monkeypatch.setattr(shell_guard, '_has_verified_worktree', lambda *_: False)
+    monkeypatch.setattr(shell_guard, '_verified_worktrees', lambda *_: [])
     monkeypatch.setattr(shell_guard, 'list_unsupported_pinned_repos', lambda _: [])
     monkeypatch.setattr(shell_guard, 'unix_socket_sandbox_rules', lambda _: '(deny network-bind (literal "/golden/socket"))')
     monkeypatch.setattr(shell_guard, 'agent_account_deny_rule', lambda *_: None)

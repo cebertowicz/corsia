@@ -115,7 +115,7 @@ def test_profile_worktree_rules_pin_lexical_container_under_resolved_repo(tmp_pa
         trees = repo / ".worktrees"
         assert f'(allow file-read* file-write* (subpath "{trees}"))' in profile
         assert f'(deny file-write* (literal "{trees}"))' in profile
-        for rule in sandbox_git.worktree_folder_rules(repo, protected_base=True):
+        for rule in sandbox_git.worktree_folder_rules(repo):
             assert rule in profile
     assert profile.count("(allow file-read* file-write* (subpath") == len(policies)
     assert str(behind_link.resolve()) not in profile

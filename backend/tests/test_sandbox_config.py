@@ -875,7 +875,7 @@ def test_profile_folder_grant_covers_legacy_worktrees_and_keeps_invalid_repos_cl
 
     grant = lines.index(f'(allow file-read* file-write* (subpath "{trees}"))')
     marker_deny = lines.index(
-        worktree_folder_rules(repos["protected"], protected_base=True)[-1]
+        worktree_folder_rules(repos["protected"])[-1]
     )
     assert base_deny < grant < marker_deny
 

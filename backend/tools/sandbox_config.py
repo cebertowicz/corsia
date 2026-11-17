@@ -174,6 +174,20 @@ def repo_has_verified_worktree(repo_root: Path) -> bool:
     return has_worktree(repo_root, _verified_worktree_root_and_gitdir, repo_worktree_root)
 
 
+def policy_enforceable(policy: RepoPolicy) -> bool:
+    return policy.source_binding_valid and not policy.enforcement_error
+
+
+def policy_has_verified_worktree(policy: RepoPolicy, repo: Path) -> bool:
+    """Whether a linked worktree's reciprocal Git metadata proves ownership."""
+    return policy_enforceable(policy) and repo_has_verified_worktree(repo)
+
+
+def policy_verified_worktrees(policy: RepoPolicy, repo: Path) -> list[Path]:
+    """Return linked worktrees whose reciprocal Git metadata proves ownership."""
+    return list_repo_worktrees(repo) if policy_enforceable(policy) else []
+
+
 
 def _repo_write_check(
     path: Path,

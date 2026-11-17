@@ -26,16 +26,16 @@ def sandbox_literal(path: Path) -> str:
     return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def worktree_folder_rules(repo: Path, *, protected_base: bool) -> list[str]:
-    """Constant denies for ``<repo>/.worktrees``, whatever its worktree count.
+def worktree_folder_rules(repo: Path) -> list[str]:
+    """Constant denies for a protected base's ``.worktrees``, at any worktree count.
 
     Each pattern is the exact literal subtree intersected with an any-case,
     depth-anchored regex. The literal pins the repository spelling (the regex
     root uses ``sandbox_any_case`` wildcards, never escapes), and the regex pins
     the depth, so neither a similarly named sibling nor a deeper ``.worktrees``
-    matches. Every immediate entry's ``.git`` (file, directory, any case) stays
-    unwritable. A protected base also pins the folder and its immediate
-    entries, so a ``.git`` prepared deeper cannot be renamed into place.
+    matches. The folder and its immediate entries are pinned, so a ``.git``
+    prepared deeper cannot be renamed into place, and every immediate entry's
+    ``.git`` (file, directory, any case) stays unwritable.
     """
     trees = repo / ".worktrees"
     subtree = f'(subpath "{sandbox_literal(trees)}")'
@@ -44,10 +44,20 @@ def worktree_folder_rules(repo: Path, *, protected_base: bool) -> list[str]:
     def deny(regex: str) -> str:
         return f'(deny file-write* (require-all {subtree} (regex #"^{pattern}/{regex}")))'
 
-    rules = [deny("[^/]+/[.][Gg][Ii][Tt](/|$)")]
-    if protected_base:
-        rules[:0] = [f'(deny file-write* (literal "{sandbox_literal(trees)}"))', deny("[^/]+$")]
-    return rules
+    return [
+        f'(deny file-write* (literal "{sandbox_literal(trees)}"))',
+        deny("[^/]+$"),
+        deny("[^/]+/[.][Gg][Ii][Tt](/|$)"),
+    ]
+
+
+def worktree_pointer_rules(repo: Path, worktrees: list[Path] | None) -> list[str]:
+    """Worktree ``.git`` denies: the constant folder rules for a protected base
+    (``worktrees`` is None), else one literal per worktree the listing proved,
+    as unprotected repositories have always had."""
+    if worktrees is None:
+        return worktree_folder_rules(repo)
+    return [f'(deny file-write* (literal "{sandbox_literal(tree / ".git")}"))' for tree in worktrees]
 
 
 def sandbox_any_case(path: Path) -> str:

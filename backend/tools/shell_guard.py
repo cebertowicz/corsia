@@ -33,11 +33,13 @@ from tools.sandbox_config import (
     is_safehouse_available,
     list_registered_repo_policies,
     list_unsupported_pinned_repos,
+    policy_enforceable as _enforceable,
+    policy_has_verified_worktree as _has_verified_worktree,
+    policy_verified_worktrees as _verified_worktrees,
     registered_repo_for_path,
-    repo_has_verified_worktree,
     repo_worktree_root,
 )
-from tools.sandbox_git import sandbox_literal, worktree_folder_rules
+from tools.sandbox_git import sandbox_literal, worktree_pointer_rules
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.workspace_git_paths import workspace_git_rules
@@ -633,15 +635,6 @@ def _git_dir_grant(repo: Path) -> str:
     )
 
 
-def _enforceable(policy: RepoPolicy) -> bool:
-    return policy.source_binding_valid and not policy.enforcement_error
-
-
-def _has_verified_worktree(policy: RepoPolicy, repo: Path) -> bool:
-    """Whether a linked worktree's reciprocal Git metadata proves ownership."""
-    return _enforceable(policy) and repo_has_verified_worktree(repo)
-
-
 def pinned_repo_sandbox_profile(
     command: str, cwd: str,
     *,
@@ -694,18 +687,19 @@ def pinned_repo_sandbox_profile(
     if not policies:
         return ""
     rules: list[str] = []
-    seen: set[Path] = set()
     grant_repos = {
         policy.path.resolve(strict=False) for policy in (grant_policies or [])
         if policy.source_binding_valid and not policy.enforcement_error
     }
     policy_by_repo: dict[Path, RepoPolicy] = {}
+    listed_worktrees: dict[Path, list[Path]] = {}  # unprotected repos only
     for policy in policies:
         repo = policy.path.resolve(strict=False)
-        if repo in seen:
+        if repo in policy_by_repo:
             continue
-        seen.add(repo)
         policy_by_repo[repo] = policy
+        if not policy.protect_base_checkout:
+            listed_worktrees[repo] = _verified_worktrees(policy, repo)
         if (
             policy.protect_base_checkout
             or policy.enforcement_error
@@ -788,7 +782,8 @@ def pinned_repo_sandbox_profile(
     elif controlled_policy is None:
         rules.extend(
             _git_dir_grant(repo) for repo, policy in policy_by_repo.items()
-            if repo in grant_repos and _has_verified_worktree(policy, repo)
+            if repo in grant_repos and (bool(listed_worktrees[repo]) if repo in listed_worktrees
+                                        else _has_verified_worktree(policy, repo))
         )
     for policy in policies:
         repo = policy.path.resolve(strict=False)
@@ -810,9 +805,7 @@ def pinned_repo_sandbox_profile(
         any_case = (repo / ".git" / "commondir", repo / ".git" / "hooks")
         rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
         if repo != worktree_control_repo and _enforceable(policy_by_repo[repo]):
-            rules.extend(worktree_folder_rules(
-                repo, protected_base=policy_by_repo[repo].protect_base_checkout,
-            ))
+            rules.extend(worktree_pointer_rules(repo, listed_worktrees.get(repo)))
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
             f'(deny file-write* (subpath "{_sandbox_path(root)}"))'

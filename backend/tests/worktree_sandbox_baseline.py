@@ -1,19 +1,20 @@
-"""Replay successful sandbox attacks against the pinned pre-change producer."""
+"""The pinned pre-change producer, for parity checks where behavior must not change.
+
+No attack is excused by it: there is no known-gap list, so every breach fails.
+"""
 from __future__ import annotations
 
 import ast
-from functools import cache, wraps
+from functools import cache
 from pathlib import Path
 import subprocess
-
-import pytest
 
 # The dev commit from which the folder-rule replacement was created.
 BASELINE_SHA = "5b5a0e303722de09d9e8994528376e9a424ef7ea"
 
 
 class ConfinementBreach(AssertionError):
-    """The shell changed protected state or completed a forbidden operation."""
+    """The shell changed protected state or completed a forbidden operation; always a failure."""
 
 
 @cache
@@ -41,23 +42,6 @@ def per_worktree_renderer():
     namespace = {**vars(shell_guard), "list_repo_worktrees": list_repo_worktrees}
     exec(compile(ast.Module(body=functions, type_ignores=[]), "per_worktree_baseline.py", "exec"), namespace)
     return namespace["pinned_repo_sandbox_profile"]
-
-
-def compare_per_worktree(test):
-    """Classify a real breach only after replaying the complete attack afresh."""
-    @wraps(test)
-    def compare(**kwargs):
-        try:
-            test(**kwargs)
-        except ConfinementBreach as candidate:
-            sandbox = kwargs["repository_sandbox"]
-            legacy = sandbox.make_baseline()
-            try:
-                test(**{**kwargs, "repository_sandbox": legacy})
-            except ConfinementBreach:
-                pytest.xfail(f"Existing per-worktree sandbox gap: {test.__name__}: {candidate}")
-            raise candidate
-    return compare
 
 
 def unchanged(actual, expected):
