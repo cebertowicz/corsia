@@ -1585,6 +1585,10 @@ async def test_shell_state_refusal_names_scoped_route(tmp_path, monkeypatch, lea
         ("touch: {root}/child: Operation not permitted", False),
         ("touch: {container}X: Operation not permitted", False),
         ("touch: /unrelated: Operation not permitted", False),
+        ("rmdir: {root}: Operation not permitted", False),
+        ("rm: {root}: Operation not permitted", False),
+        ("mkdir: {container}/new: Operation not permitted", False),
+        ("ln: {container}/link: Operation not permitted", False),
     ],
 )
 @pytest.mark.asyncio
@@ -1633,6 +1637,29 @@ async def test_shell_worktree_root_refusal(tmp_path, monkeypatch, reported, matc
         assert "request_host_access" not in result
     else:
         assert "request_host_access" in result
+
+
+@pytest.mark.parametrize(
+    ("protect", "enforcement_error", "binding_valid", "matches"),
+    [
+        (True, None, True, True),
+        (False, None, True, False),
+        (True, "broken", True, False),
+        (False, "broken", True, False),
+        (True, None, False, False),
+    ],
+)
+def test_worktree_root_refusal_needs_enforced_protection(tmp_path, protect, enforcement_error,
+                                                         binding_valid, matches):
+    from infra.project_repo_policy import RepoPolicy
+    from tools.repo_worktree_guidance import worktree_root_denial_guidance
+
+    repo = tmp_path / "repo"
+    root = repo / ".worktrees" / "task"
+    root.mkdir(parents=True)
+    policy = RepoPolicy("project", "repo", repo, "dev", protect, enforcement_error, binding_valid)
+    guidance = worktree_root_denial_guidance("touch: .: Operation not permitted", root, [policy])
+    assert bool(guidance) is matches
 
 
 @pytest.mark.asyncio

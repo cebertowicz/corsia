@@ -8,27 +8,33 @@ from tools.host_path_resolution import containment_key
 
 
 def worktree_root_denial_guidance(output: str, cwd: Path, policies: list[RepoPolicy]) -> str | None:
-    """Recognize macOS refusals on protected worktree container metadata."""
+    """Recognize macOS refusals to set times on a protected repository's worktree folders.
+
+    Only ``touch`` and ``utimensat`` lines (``cp -p``) count: the same folder
+    rules also refuse creating, removing and linking these folders, which this
+    reply does not describe.
+    """
+    from tools.sandbox_config import policy_enforceable
+
     suffix = ": Operation not permitted"
     for line in output.splitlines():
-        if not line.endswith(suffix):
+        if not line.endswith(suffix) or not (line.startswith("touch: ") or "utimensat: " in line):
             continue
         head = line[:-len(suffix)]
-        if ": " not in head:
-            continue
         candidate = head.rsplit(": ", 1)[1].strip()
         if not candidate:
             continue
         path = Path(os.path.abspath(cwd / candidate))
         for policy in policies:
-            if not policy.source_binding_valid or not (policy.protect_base_checkout or policy.enforcement_error):
+            # The folder rules exist only for an enforceable, protected repository.
+            if not (policy_enforceable(policy) and policy.protect_base_checkout):
                 continue
             container = Path(os.path.abspath(policy.path / ".worktrees"))
             if (containment_key(path) == containment_key(container)
                     or containment_key(path.parent) == containment_key(container)):
                 return (
-                    "A worktree's own folder and the .worktrees folder cannot have their times or "
-                    "attributes changed from an agent shell; files inside remain writable. "
+                    "A worktree's own folder and the .worktrees folder cannot have their times "
+                    "set from an agent shell; files inside remain writable. "
                     "Copy without preserving the folder's times (for example, `cp -R` without "
                     "`-p`), or touch the files rather than the folder. Host access is not needed."
                 )
