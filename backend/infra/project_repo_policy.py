@@ -505,12 +505,9 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
             mutation,
             operation=f"branch switch to {target}",
         )
-        # Only the branch is checked: git refuses to overwrite local changes, so any
-        # change now in the tree is a running writer's own, carried as it is.
+        # Branch only: git won't overwrite local changes, so new dirt is a running writer's.
         if current_repo_branch(repo) != target:
-            raise ValueError(
-                f"branch switch to {target} did not leave the requested branch"
-            )
+            raise ValueError(f"branch switch to {target} did not leave the requested branch")
     except Exception as exc:
         try:
             if current_repo_branch(repo) != previous:
