@@ -39,9 +39,9 @@ QUEUED_ROWS_SQL = ("SELECT id,write_outcome,delivery_error FROM messages "
                    "WHERE input_order IS NOT NULL ORDER BY id")
 FROZEN_NOW = "2026-10-06T00:00:00+00:00"
 #: Distinct facts one projection's scope stores, per vendor, in the fixture below.
-# The model row's availability is derived from the vendor's accounts, so the account list and
-# its projection are two of the shared answers; the account's home check is another.
-EXPECTED_ANSWERS = {"claude-code": 8, "codex": 8}
+# The model row's availability is derived from the vendor's stored account rows, so that
+# projection is one of the shared answers; the account's home check is another.
+EXPECTED_ANSWERS = {"claude-code": 7, "codex": 7}
 
 
 def _thread(db, thread_id, *, project="destination-project", model="codex/test"):
@@ -393,16 +393,16 @@ def test_memoized_readers_run_once_however_many_threads_are_affected(accounts, m
     counted_calls, counted = list(calls), list(reads)
 
     # Six threads share one project, model and binding, so whether they are subjects is judged
-    # once; their own hold evaluations still ask per thread. The wrapped readers are asked 37
-    # times and the memo answers from eight real reads, two of them the vendor's accounts and the
-    # model availability derived from them, and one the account's home check.
-    assert len(counted_calls) == 37, counted_calls
-    assert len(counted) == 8, counted
+    # once; their own hold evaluations still ask per thread. The wrapped readers are asked 36
+    # times and the memo answers from seven real reads, one of them the model availability
+    # derived from the vendor's stored account rows, and one the account's home check.
+    assert len(counted_calls) == 36, counted_calls
+    assert len(counted) == 7, counted
     assert len(_family(counted_calls, "effective_policy")) == 8, counted_calls
     assert len(_family(counted_calls, "project_exists")) == 7, counted_calls
     assert len(_family(counted_calls, "missing_home_reason")) == 6, counted_calls
     for fact in ("effective_policy", "project_exists", "get_account", "model_vendor", "account_selection_facts",
-                 "list_accounts", "account_rows", "missing_home_reason"):
+                 "account_rows", "missing_home_reason"):
         assert len(_family(counted, fact)) == 1, (fact, counted)
     # A thread's own facts are its own: nothing thread-specific is ever memoized.
     assert not [key for key in counted_calls if "thread" in key[1]]
@@ -443,7 +443,7 @@ def test_the_same_reads_scale_with_the_population_once_the_scope_is_disabled(acc
     _without_scope(monkeypatch)
     _project(db, second["id"])
 
-    assert len(calls) == len(reads) == 47, (calls, reads)
+    assert len(calls) == len(reads) == 41, (calls, reads)
     assert len(_family(reads, "effective_policy")) == 8, reads
     assert len(_family(reads, "project_exists")) == 7, reads
     assert len(_family(reads, "missing_home_reason")) == 6, reads

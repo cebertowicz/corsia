@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- The browser chip in chat and the browser's address bar now lead with the site's real domain, so a long web address cut short no longer hides which site the agent is on; before, the cut-off end was the part that named the site.
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
@@ -21,6 +22,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A comment card in the margin now appears once its place is ready, instead of flashing in the wrong place first. A new comment's field takes focus then, unless you have moved to another field.
 - A comment list full of comments and long threads now stays usable on a phone and a computer: Accept all stays at the top while the list scrolls, a long thread shows a replies row and opens whole with Back, unread comments and replies always show in full, and nothing inside a comment card scrolls on its own, the reply field included. Before, controls could sit off screen and text was cut off inside small scrolling boxes.
 - A comment reply field stays on screen after you jump to it on a phone and as you type at the end of a reply in a short popover, so Send stays in reach; an unread long comment in the margin shows whole instead of behind Show more; and Escape inside a thread in the comment list goes back to the list. Before, the field and Send could sit off screen, and Escape closed the whole list.
+- A comment sheet on a phone that opens short, to leave the text you tapped in view, now grows to full height when you pull its grabber up, and stays there until you close it; the page does not move while you pull, as it grows, or when the keyboard opens. A comment in a tall table row or a diagram keeps only the row's top line in view, so its sheet no longer opens short. Opening the navigation on a phone now covers any open drawer or sheet until the navigation closes, keeping its place and any draft, so it no longer sits over the navigation's rows; Back or Escape closes the navigation first and brings the drawer back as it was.
 - A document that is open live no longer refuses other reads and writes of it while a save is in progress on a busy disk; before, they could fail with a database error.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
@@ -142,6 +144,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Plan task details no longer show a token count of zero when nothing was used; an incomplete recording still says so.
 - Plan Working and Waiting timers now account for the difference between your browser's clock and the computer running CORSIA.
 - A repository an agent attaches to a project is now refused if its Git settings go beyond a short safe list, since some settings can run a program; the refusal names each setting to remove, and adding that repository yourself in Project settings still works.
+- A website open in the shared browser can no longer make your computer ask for camera or microphone access; the site gets a stand-in camera and microphone instead.
 - A workflow step where you approve the result now reaches you as a review you answer; before, the agent could ask in chat and mark the step approved on your reply, so your answer was not counted.
 - Reading the last new reply on a document no longer drops keyboard focus out of the document when the button that takes you to the next new comment goes away.
 - Registering a repository that sits inside a project's own folder now works while agents in other projects are working, and one already in the project's source folder is registered where it is. Before, it was refused while any agent was working, and one already in the source folder was always refused.

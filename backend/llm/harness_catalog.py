@@ -16,21 +16,47 @@ _LIVE_COLUMNS = ('available', 'context_window', 'supports_vision', 'supports_rea
                  'description', 'last_error')
 
 
+#: provider argument -> (the stored account rows last projected, their projection). Model
+#: resolution calls ``account_rows`` on every turn, and parsing every account's discovery
+#: record cost more than the rest of it; one entry per argument, replaced when the rows change.
+_projected: dict[str | None, tuple[tuple, dict[str, dict]]] = {}
+_SCALARS = (str, int, float, bool, type(None))
+
+
 @fact_memo.memoized_reader
 def account_rows(*, db, provider: str | None = None) -> dict[str, dict]:
-    """Project models from current signed-in account evidence."""
-    from connections.vendor_accounts import list_accounts
+    """Project models from current signed-in account evidence.
 
-    accounts = [account for vendor in ((provider,) if provider else ('claude-code', 'codex'))
-                for account in list_accounts(provider=vendor, db=db)]
-    return account_rows_from_accounts(accounts)
+    The projection is a function of the stored rows ``list_accounts`` parses, so it is
+    reused while every column of every row reads exactly as before and rebuilt from
+    those same rows when any differs. Each caller gets its own row dicts.
+    """
+    from connections.account_row_shape import project_row
+    from connections.vendor_accounts import stored_account_rows
+
+    stored = [row for vendor in ((provider,) if provider else ('claude-code', 'codex'))
+              for row in stored_account_rows(vendor, db=db)]
+    key = tuple(tuple(row) for row in stored)
+    kept = _projected.get(provider)
+    if kept is not None and kept[0] == key:
+        rows = kept[1]
+    else:
+        rows = account_rows_from_accounts([project_row(row) for row in stored])
+        if all(isinstance(value, _SCALARS) for row in rows.values() for value in row.values()):
+            _projected[provider] = (key, rows)
+        else:  # a value a caller could change in place is never shared
+            _projected.pop(provider, None)
+            return rows
+    return {model: dict(row) for model, row in rows.items()}
 
 
 def account_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
     """Project discovery from account rows a caller already read.
 
     A model any account lists available is available, with the smallest window those
-    accounts report; its order is where an account first listed it.
+    accounts report; its order is where an account first listed it. ``account_rows``
+    keeps this answer while the stored rows are unchanged, so it must stay a function
+    of the account rows alone (no clock, file or other table).
     """
     from connections.account_evidence import current_ready_discovery
     from llm.context_window import discovered_window

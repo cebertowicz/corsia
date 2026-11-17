@@ -48,7 +48,7 @@ function insertStep(threadId: string, content: string, metadata: Record<string, 
 	const stored = {
 		...metadata,
 		...(calls.length && { llm_tool_calls: calls.map(({ chip: _, ...call }) => call) }),
-		...(chip !== undefined && { browser_chip: { host: chip } }),
+		...(chip !== undefined && { browser_chip: { host: chip, domain: chip } }),
 	};
 	const stepId = insertRow(threadId, 'assistant', content, stored);
 	for (const call of calls) {
