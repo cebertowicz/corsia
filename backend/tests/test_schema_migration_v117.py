@@ -11,6 +11,7 @@ from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.migration_116_to_117_script_schedules import migrate_116_to_117
 from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
+from infra.settings_schema import SETTINGS_SCHEMA_SQL
 
 _V116_TABLE = """
     CREATE TABLE automation_schedules (
@@ -43,7 +44,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
     assert SCHEMA_VERSION == 200 and MIGRATIONS[116] is migrate_116_to_117
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
-        db.executescript(DOC_FEEDBACK_SCHEMA_SQL + _V116_TABLE + """
+        db.executescript(SETTINGS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + _V116_TABLE + """
             CREATE TABLE threads (id TEXT PRIMARY KEY);
             INSERT INTO threads VALUES ('t');
             INSERT INTO automation_schedules VALUES
@@ -71,7 +72,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
 def test_migrated_table_matches_a_fresh_database(tmp_path) -> None:
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
-        db.executescript(DOC_FEEDBACK_SCHEMA_SQL + _V116_TABLE + "PRAGMA user_version=116;")
+        db.executescript(SETTINGS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + _V116_TABLE + "PRAGMA user_version=116;")
     with sqlite3.connect(path) as migrated, sqlite3.connect(":memory:") as fresh:
         migrate_to_current(migrated, SCHEMA_VERSION)
         fresh.executescript(SCHEMA_SQL)

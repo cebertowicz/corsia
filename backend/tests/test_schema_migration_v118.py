@@ -161,7 +161,7 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
         _setting(connection, OLD_KEY, "ws")
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)
-        rows = connection.execute("SELECT key, value FROM settings").fetchall()
+        rows = connection.execute("SELECT key, value FROM settings WHERE key != 'person_comment_recovery_pending'").fetchall()
         title = connection.execute("SELECT title FROM threads").fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert result.migrated is True
