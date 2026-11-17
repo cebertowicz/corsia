@@ -3,8 +3,9 @@
 A promote moves a document's comments to the identity it hands the document to, so new
 comments never stay on a retired identity. Older rows can: promotes made before that move
 existed, and comments an old pane saved on a retired id. A read of the document asks which
-identities name it as their successor (``registry.predecessors``) to find them; the index and
-that read are deleted once the startup count of retired identities holding comments reads zero.
+identities name it as their successor (``registry.predecessors``) to find them. That read is
+permanent: nothing moves rows off an identity that is already retired, because it would relocate
+people's comments on existing installs and needs its own design.
 Without this index that question scans every identity. The index is partial and covers only identities a promote retired.
 Adds the index only; no row changes, and a second run does nothing. Runs inside
 the runner's transaction; it never commits.

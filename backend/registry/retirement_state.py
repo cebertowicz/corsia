@@ -34,11 +34,13 @@ def successor_id(artifact_id: str, *, db) -> str | None:
 def predecessors(artifact_id: str, *, db) -> list[str]:
     """Every identity whose successor chain ends at ``artifact_id``, in no promised order.
 
-    Only for comment rows that already sit on a retired identity, which no later move can reach:
-    promotes made before ``retire`` moved comments to the successor, and comments an old pane saved
-    on a retired id before #2798. ``retire`` stays the only place a promote puts comments
-    (``doceditor.comment_transfer``). Delete this function and its index once the startup count of
-    retired identities that still hold comments reads zero on a released build.
+    The permanent read path for comment rows that already sit on a retired identity: promotes made
+    before ``retire`` moved comments to the successor, and comments an old pane saved on a retired
+    id before #2798. ``retire`` stays the only place a promote puts comments
+    (``doceditor.comment_transfer``); nothing moves rows off an identity that is already retired.
+    There is no such move because it would relocate people's comments on existing installs and
+    needs its own design, including the case where both identities hold comments
+    (``refuse_if_occupied``). There is no hop cap; the ``UNION`` below ends the walk.
     One indexed lookup per identity found
     (``idx_artifact_identities_successor``). The recursion is a ``UNION``, so an id it has already
     reached adds no row and a loop of successors ends; ``artifact_id`` itself is never in the answer.
@@ -61,9 +63,9 @@ def lineage_counts(db) -> tuple[int, int]:
     """What the lineage read still serves, read-only: (retired identities with a successor that hold
     comments, held feedback batches not yet sent that sit on a retired identity).
 
-    The first is the removal condition for reading earlier identities' comments: at zero no retired
-    identity holds any, so the read can go. The second is feedback that cannot close (its artifact is
-    not active) and so never reaches its agent; zero means nothing to re-key.
+    A diagnostic only; it gates nothing. The first is how many retired identities the lineage read
+    still serves. The second is feedback that cannot close (its artifact is not active) and so never
+    reaches its agent; zero means nothing to re-key.
     """
     stray_comments = db.execute(
         "SELECT COUNT(*) FROM artifact_identities i"
