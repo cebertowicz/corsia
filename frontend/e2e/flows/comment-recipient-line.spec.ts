@@ -155,3 +155,56 @@ for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { 
 		});
 	});
 }
+
+// Three names on the 1440 card: the line takes more than one row and breaks between names, never inside one ("Release" / "lane").
+test.describe('recipient line with three names 1440', () => {
+	test('the line breaks between names, not inside a name', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name === 'chromium-mobile', 'desktop only');
+		test.setTimeout(90_000);
+		const made: string[] = [];
+		try {
+			await setMockCorsiaAgentModel(request);
+			await setDebugVersionOverlay(request, false);
+			const owner = await createSession(request, 'Docs lane'); made.push(owner);
+			const reviewer = await createSession(request, 'Agent Substrate'); made.push(reviewer);
+			const release = await createSession(request, 'Release lane'); made.push(release);
+			const viewer = await createSession(request, 'Rollout review'); made.push(viewer);
+			for (const [id, responsibility] of [[owner, 'Owns the rollout plan.'], [reviewer, 'Reviews the rollout plan.'], [release, 'Ships the rollout plan.']]) {
+				const done = await request.patch(`/api/agents/${id}`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { active: true, responsibility } });
+				expect(done.ok(), await done.text()).toBeTruthy();
+			}
+			const roots: Array<{ kind: string; path: string }> = (await (await request.get('/api/files/tree', { params: auth })).json()).roots;
+			const folder = path.join(roots.find((root) => root.kind === 'workspace')!.path, `recipient-three-${Date.now()}`);
+			const docPath = path.join(folder, 'Rollout plan.md');
+			fs.mkdirSync(folder, { recursive: true });
+			const put = await request.put('/api/files/content', { params: auth, data: { path: docPath, text: TEXT, thread_id: owner, create: true } });
+			expect(put.ok(), await put.text()).toBeTruthy();
+			const artifactId = (await put.json()).artifact.id as string;
+			const from = TEXT.indexOf(WORD);
+			const asAgent = (commentId: string, name: string, threadId: string) => isolatedDb(['connection.execute("UPDATE doc_comments SET author_kind=\'agent\', author=?, author_thread_id=? WHERE id=?", (sys.argv[2], sys.argv[3], sys.argv[4]))'], name, threadId, commentId);
+			const posted = await request.post(`/api/artifacts/${artifactId}/comments`, { params: auth, data: { delivery_policy: 'immediate', body: 'Should ring two wait for the checks?', anchor_text: WORD, from_off: from, to_off: from + WORD.length } });
+			expect(posted.ok(), await posted.text()).toBeTruthy();
+			const rootId = (await posted.json()).comment.id as string;
+			asAgent(rootId, 'Agent Substrate', reviewer);
+			const answered = await request.post(`/api/artifacts/${artifactId}/comments`, { params: auth, data: { delivery_policy: 'immediate', body: 'Ring three depends on Release lane.', parent_id: rootId } });
+			expect(answered.ok(), await answered.text()).toBeTruthy();
+			asAgent((await answered.json()).comment.id as string, 'Release lane', release);
+
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await installWorkspace(page, viewer, [{ artifactId, path: docPath, fileName: 'Rollout plan.md' }], 0, { visible: true, splitWidth: 700 });
+			await openThread(page, viewer, 'Rollout review');
+			await expect(page.locator('.cm-content')).toContainText(WORD);
+			await page.locator('.cm-comment-anchor').first().click();
+			await settled(page);
+			const line = page.locator('.ct-compose .rl');
+			await expect(line.locator('.rl-name')).toContainText(['Docs lane', 'Agent Substrate', 'Release lane']);
+			// Each name is one box of one row of text, and the three do not all sit on one row, so the case really wraps.
+			const items = await line.locator('.rl-item').evaluateAll((els) => els.map((el) => ({ top: Math.round(el.getBoundingClientRect().top), height: el.getBoundingClientRect().height, row: parseFloat(getComputedStyle(el).lineHeight) || 0, text: el.textContent })));
+			expect(items.map((item) => item.text)).toEqual(['Docs lane,', 'Agent Substrate', 'Release lane']);
+			for (const item of items) expect(item.height, `${item.text} stays on one row`).toBeLessThanOrEqual(item.row + 2);
+			expect(new Set(items.map((item) => item.top)).size, 'the three names take more than one row at this width').toBeGreaterThan(1);
+		} finally {
+			for (const id of made) await request.delete(`/api/threads/${id}`, { params: auth }).catch(() => undefined);
+		}
+	});
+});

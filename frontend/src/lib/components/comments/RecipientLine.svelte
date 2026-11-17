@@ -21,10 +21,10 @@
 			{:else if empty}
 				<span class="rl-text">{none}</span>
 			{:else}
-				<!-- One run of text, so a name wraps like any words, a comma follows its name with nothing between, and a screen reader hears "Docs lane, Agent and Release". -->
+				<!-- One run of text for a screen reader ("Docs lane, Agent and Release"). A name and the comma after it are one unit, so the line breaks between names, never inside one and never before a comma. -->
 				<span class="rl-text">Goes to</span>
 				{#each names as name, index (name + index)}
-					{' '}{#if index > 0 && index === names.length - 1}<span class="rl-text">and</span>{' '}{/if}<span class="rl-name">{name}</span>{#if index < names.length - 2}<span class="rl-text">,</span>{/if}
+					{' '}{#if index > 0 && index === names.length - 1}<span class="rl-text">and</span>{' '}{/if}<span class="rl-item"><span class="rl-name">{name}</span>{#if index < names.length - 2}<span class="rl-text">,</span>{/if}</span>
 				{/each}
 			{/if}
 		</span>
@@ -38,8 +38,10 @@
 	.rl { flex: none; margin-top: var(--space-1); }
 	/* Two columns: the names wrap inside the first, Retry (when the check failed) stays at the top of the second. */
 	.rl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-2); min-height: var(--space-5); }
-	/* Names are never cut, in any window: they wrap to the next line, and one wider than the row breaks inside the name, so no name lives only in a hover. */
+	/* Names are never cut, in any window: the line breaks between names, and only a name wider than the whole line breaks inside itself, so no name lives only in a hover. */
 	.rl-who { display: block; min-width: 0; padding-top: var(--space-px-3); font-size: var(--text-caption); color: var(--text-secondary); overflow-wrap: anywhere; }
+	/* A name with its comma is one box: it moves to the next row whole, and wraps inside itself only when it alone is wider than the line. */
+	.rl-item { display: inline-block; max-width: 100%; }
 	.rl-name { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	/* The link owns its padding and leaves room for its 2px focus ring and 2px offset, so the ring touches no text and no border beside it. */
 	.rl-link { background: none; border: none; padding: var(--space-px-3) var(--space-2); font: inherit; font-size: var(--text-caption); color: var(--text-secondary); cursor: pointer; text-decoration: underline; text-underline-offset: var(--space-px-2); white-space: nowrap; border-radius: var(--radius-xs); }

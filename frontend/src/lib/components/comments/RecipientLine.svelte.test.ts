@@ -19,6 +19,13 @@ describe('RecipientLine', () => {
 		expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Agent Substrate', 'Release lane']);
 	});
 
+	it('makes each name and the comma after it one unit, so the line can only break between names', () => {
+		render({ names: ['Docs lane', 'Agent Substrate', 'Release lane'] });
+		expect(Array.from(host.querySelectorAll('.rl-item'), (item) => item.textContent)).toEqual(['Docs lane,', 'Agent Substrate', 'Release lane']);
+		// The words between the units ("Goes to", "and") are the only places the line may break besides inside a name wider than the line.
+		expect(host.querySelector('.rl-item')?.querySelector('.rl-name')?.textContent).toBe('Docs lane');
+	});
+
 	it('says nobody gets it in its own sentence', () => {
 		render({ names: [], none: 'No agent gets this reply.' });
 		expect(host.textContent).toContain('No agent gets this reply.');
