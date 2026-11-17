@@ -169,6 +169,10 @@ def reanchor_edited(
     return start16, end16
 
 
+_BLANK_LINES_AT_START = re.compile(r"\A(?:[ \t\r]*\n)+")
+_BLANK_LINES_AT_END = re.compile(r"(?:\n[ \t\r]*)+\Z")
+
+
 def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suffix: str | None) -> bool:
     """Whether the quote at ``start``/``end`` sits on the line beside the commented one, not on the commented one.
 
@@ -194,19 +198,26 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
     if (before_in_line or after_in_line) and text[max(0, start - len(before_in_line)):start] == before_in_line \
             and text[end:end + len(after_in_line)] == after_in_line:
         return False
-    # Blank lines between items are skipped on both sides, so paragraphs and loose lists work too.
+    # Blank lines (nothing but spaces, tabs or a carriage return) between items are skipped on both sides, so
+    # paragraphs, loose lists and CRLF files work too.
     next_start = line_end + 1
-    while next_start < len(text) and text[next_start] == "\n":
-        next_start += 1
+    while next_start < len(text):
+        stop = text.find("\n", next_start)
+        if stop < 0 or text[next_start:stop].strip(" \t\r"):
+            break
+        next_start = stop + 1
     prev_end = max(line_start - 1, 0)
-    while prev_end > 0 and text[prev_end - 1] == "\n":
-        prev_end -= 1
+    while prev_end > 0:
+        seg_start = text.rfind("\n", 0, prev_end) + 1
+        if seg_start == 0 or text[seg_start:prev_end].strip(" \t\r"):
+            break
+        prev_end = seg_start - 1
     if suffix and "\n" in suffix:
-        below = suffix.split("\n", 1)[1].lstrip("\n")
+        below = _BLANK_LINES_AT_START.sub("", suffix.split("\n", 1)[1])
         if below and text.startswith(below, line_start) and not text.startswith(below, next_start):
             return True
     if prefix and "\n" in prefix:
-        above = prefix.rsplit("\n", 1)[0].rstrip("\n")
+        above = _BLANK_LINES_AT_END.sub("", prefix.rsplit("\n", 1)[0])
         if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
             return True
     return False

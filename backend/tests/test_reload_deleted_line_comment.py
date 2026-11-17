@@ -72,6 +72,26 @@ def test_a_blank_line_between_the_items_does_not_hide_the_one_above():
     assert (comment["from_off"], comment["to_off"]) == stored_place
 
 
+@pytest.mark.parametrize("gap", ["  \t\n", "\r\n"], ids=["spaces-and-tab", "crlf"])
+def test_a_whitespace_only_or_crlf_blank_line_does_not_hide_the_neighbour(gap):
+    eol = "\r\n" if gap == "\r\n" else "\n"
+    old = HEAD + f"- deploy queue merge{eol}{gap}- deploy docs test{eol}" + TAIL
+    new = HEAD + f"- deploy docs test{eol}" + TAIL
+    below = _stored(old, "deploy")
+    stored_place = (below["from_off"], below["to_off"])
+    resolve_threads([below], new)
+    assert below["orphaned"] is True
+    assert (below["from_off"], below["to_off"]) == stored_place
+
+    old = HEAD + f"- a deploy docs{eol}{gap}- b deploy docs{eol}" + TAIL
+    new = HEAD + f"- a deploy docs{eol}" + TAIL
+    above = _stored(old, "deploy", nth=1)
+    stored_place = (above["from_off"], above["to_off"])
+    resolve_threads([above], new)
+    assert above["orphaned"] is True
+    assert (above["from_off"], above["to_off"]) == stored_place
+
+
 def test_a_comment_whose_line_stays_keeps_it_across_a_blank_line_when_the_neighbour_goes():
     old = HEAD + "- deploy queue merge\n\n- deploy docs test\n" + TAIL
     new = HEAD + "- deploy queue merge\n" + TAIL
