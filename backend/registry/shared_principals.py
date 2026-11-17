@@ -102,8 +102,8 @@ def may_edit_document(
     """Decide whether this actor may change a document ``owner`` owns.
 
     The one decision for every write path. The owner, the owner's temporary
-    subagents, the conductor of the scope that holds the document and its
-    temporary subagents, and the user may edit; every other agent suggests.
+    subagents, and the user may edit. The scope conductor and its temporary
+    subagents may edit unless the person owns the document; other agents suggest.
     One ``acting_owner`` walk serves both subagent exceptions. ``conductor`` is
     the document's scope conductor, never the actor's. A mechanical
     ``INDEX.md`` entry is allowed to anyone, and an unowned document is
@@ -119,12 +119,12 @@ def may_edit_document(
         return decide("unowned", thread_id)
     if thread_id == owner:
         return decide("owner", thread_id)
-    if thread_id == conductor:
+    if thread_id == conductor and owner != UI_PRINCIPAL:
         return decide("conductor", thread_id)
     principal = acting_owner(thread_id, False, db=db)
     if principal is not None and principal == owner:
         return decide("owner_subagent", principal)
-    if principal is not None and principal == conductor:
+    if principal is not None and principal == conductor and owner != UI_PRINCIPAL:
         return decide("conductor_subagent", principal)
     if mechanical_index:
         return decide("index_entry", principal or thread_id)

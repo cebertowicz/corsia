@@ -105,7 +105,9 @@ def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -
         header = resolve_header_owner(header_value, project_id, db) if header_value else None
         conflict = bool(header and registered and header != registered)
         trigger = fields.get("review")
-        owner, rule = (header, "header") if header else _registry_rule(registered, db)
+        owner, rule = _registry_rule(registered, db) if registered == "ui" else (
+            (header, "header") if header else _registry_rule(registered, db)
+        )
         if owner is None:
             category = path.relative_to(shared_root).parts[0]
             if category in directory_owners:
@@ -275,13 +277,14 @@ def apply_shared_ownership(
                     connection, artifact_id=str(artifact["id"]),
                     thread_id=str(initial_owner), trigger="ownership_assignment",
                 )
-            rehome_artifact(
-                integration=str(artifact["integration"]), type=str(artifact["type"]),
-                external_id=str(artifact["external_id"]),
-                new_owner_thread_id=str(row.owner), actor_thread_id=None,
-                authority="system", reason="ownership_assignment",
-                source_path=str(path), db=connection, show_to_new_owner=False,
-            )
+            if artifact_owner(str(artifact["id"]), db=connection) != "ui":
+                rehome_artifact(
+                    integration=str(artifact["integration"]), type=str(artifact["type"]),
+                    external_id=str(artifact["external_id"]),
+                    new_owner_thread_id=str(row.owner), actor_thread_id=None,
+                    authority="system", reason="ownership_assignment",
+                    source_path=str(path), db=connection, show_to_new_owner=False,
+                )
             if row.trigger:
                 merge_identity_metadata(
                     connection, str(artifact["id"]), {"update_trigger": row.trigger},
