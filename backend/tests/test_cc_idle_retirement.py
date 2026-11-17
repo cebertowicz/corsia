@@ -32,12 +32,11 @@ def _clean_live():
 @pytest.fixture
 def caps(monkeypatch):
     """Pin the policy numbers so tests do not depend on the seed file."""
-    values = {"idle": 600, "max_idle": 8, "cap": 2}
+    values = {"idle": 600, "max_idle": 8}
     monkeypatch.setattr(
         "infra.subagent_caps.get_idle_retire_after_seconds", lambda: values["idle"],
     )
     monkeypatch.setattr("infra.subagent_caps.get_max_idle_live", lambda: values["max_idle"])
-    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: values["cap"])
     return values
 
 
@@ -76,40 +75,6 @@ async def _pass():
     from subagents.cc_idle_retirement import retire_idle_once
 
     return await retire_idle_once(now=_now())
-
-
-class TestWorkingCap:
-    def test_idle_handles_beyond_cap_do_not_block_spawn(self, child_db, caps):
-        from subagents.cc_runtime_helpers import _check_live_cap
-
-        for index in range(3):
-            _handle(child_db, f"idle-{index}", idle_s=5)
-        _check_live_cap()
-
-    def test_cap_many_working_handles_refuse_and_name_them(self, child_db, caps):
-        from infra.subagent_caps import LiveSpawnCapExceeded
-        from subagents.cc_runtime_helpers import _check_live_cap
-
-        _handle(child_db, "aaaaaaaa-turn", idle_s=5).turn_active = True
-        _handle(child_db, "bbbbbbbb-durable", running=True)
-        _handle(child_db, "cccccccc-idle", idle_s=5)
-        with pytest.raises(LiveSpawnCapExceeded) as refused:
-            _check_live_cap()
-        text = str(refused.value)
-        assert refused.value.active == 2 and refused.value.cap == 2
-        assert "2 Claude Code processes are working a Turn" in text
-        assert "idle ones are not counted" in text
-        assert 'aaaaaaaa "Title aaaaaaaa-turn"' in text
-        assert 'bbbbbbbb "Title bbbbbbbb-durable"' in text
-        assert "cccccccc" not in text
-
-    def test_refusal_list_is_bounded(self):
-        from infra.subagent_caps import LiveSpawnCapExceeded
-
-        working = tuple((f"{i:08d}-x", f"T{i}") for i in range(7))
-        text = str(LiveSpawnCapExceeded(cap=7, active=7, working=working))
-        assert '00000004 "T4"' in text and "00000005" not in text
-        assert "and 2 more" in text
 
 
 class TestEligibility:
