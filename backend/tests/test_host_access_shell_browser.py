@@ -1589,6 +1589,8 @@ async def test_shell_state_refusal_names_scoped_route(tmp_path, monkeypatch, lea
         ("rm: {root}: Operation not permitted", False),
         ("mkdir: {container}/new: Operation not permitted", False),
         ("ln: {container}/link: Operation not permitted", False),
+        # Another refusal in the same output keeps the general reply and its guidance.
+        ("touch: .: Operation not permitted\ntouch: /unrelated: Operation not permitted", False),
     ],
 )
 @pytest.mark.asyncio
