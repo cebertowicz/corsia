@@ -113,6 +113,13 @@ def _supervisor(
     return None, "none"
 
 
+def effective_supervisor(db, artifact: dict[str, Any], *, owner: str | None, workspace: Path):
+    """Resolve the same effective supervisor for the header and other consumers."""
+    return _supervisor(
+        db, owner, stored_pick(artifact), lambda: (_scope(db, artifact, workspace) or (None, None))[1],
+    )
+
+
 def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tuple[str, ...]:
     """Who every comment on a document goes to, and exactly who a re-open goes to.
 
@@ -121,9 +128,7 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
     document with neither still reaches the agent that last owned it.
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
-    row, _source = _supervisor(
-        db, owner, stored_pick(artifact), lambda: (_scope(db, artifact, workspace) or (None, None))[1],
-    )
+    row, _source = effective_supervisor(db, artifact, owner=owner, workspace=workspace)
     recipient_owner = UI_PRINCIPAL if owner_kind(owner) == "person" else owner
     found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, recipient_owner) if who))
     released_owner = artifact.get("parent_thread_id")
@@ -157,7 +162,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     owner_user_id = parse_metadata(artifact.get("metadata")).get("owner_user_id")
     scope = _scope(db, artifact, workspace)
     owner_row = _thread(db, owner) if kind == "agent" else None
-    row, source = _supervisor(db, owner, stored_pick(artifact), lambda: scope[1] if scope is not None else None)
+    row, source = effective_supervisor(db, artifact, owner=owner, workspace=workspace)
     agents = [] if scope is None else pickable_agents(scope[0], user_id, db=db)
     paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
     status = _status(row, paused)
