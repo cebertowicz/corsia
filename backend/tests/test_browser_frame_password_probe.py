@@ -13,12 +13,17 @@ from tests.test_browser_password_guard import clean_password_guard  # noqa: F401
 SHOWN, HIDDEN = [0, 0, 10, 0, 10, 10, 0, 10], [0] * 8
 
 
-def key(*path: int) -> int:
-    """The probe's key for a node reached through frame elements: key(frame, frame, ..., node)."""
-    owner = browser_cdp_frames.node_key(None, path[0])
-    for node in path[1:]:
-        owner = browser_cdp_frames.node_key(owner, node)
-    return owner
+def key(*path) -> int:
+    """The probe's key for a node reached through frames: key((element, session), ..., node).
+
+    Each frame is its element's backendNodeId and the session of the document it shows, whose loader id is
+    FramedPage's default for that session unless one is given: (element, session, loader).
+    """
+    document = None
+    for element, session, *loader in path[:-1]:
+        element_key = browser_cdp_frames.node_key(document, element)
+        document = browser_cdp_frames.document_key(element_key, loader[0] if loader else f"loader-{session}")
+    return browser_cdp_frames.node_key(document, path[-1])
 
 
 class FramedPage:
@@ -67,8 +72,10 @@ class FramedPage:
         if method == "DOM.getBoxModel":
             shown = {**doc.get("passwords", {}), **doc.get("boxes", {}), **{owner: up for _, owner, up in frames}}
             return {"model": {"border": SHOWN if shown.get(params["backendNodeId"]) else HIDDEN}}
+        if method == "Page.getFrameTree":
+            loader = doc.get("loader", "visit" if session_id is None else f"loader-{session_id}")
+            return {"frameTree": {"frame": {"loaderId": loader, "url": "https://shop.example/"}}}
         return {
-            "Page.getFrameTree": {"frameTree": {"frame": {"loaderId": "visit", "url": "https://shop.example/"}}},
             "DOM.getDocument": {"root": {"nodeId": 1}},
             "DOM.performSearch": {"searchId": "search", "resultCount": len(doc.get("passwords", {}))},
             "DOM.discardSearchResults": {},
@@ -89,7 +96,7 @@ async def test_password_fields_in_cross_origin_and_nested_frames_are_found_under
         "outer": {"passwords": {5: True}, "frames": [("inner", 11, True)]},
         "inner": {"passwords": {5: True}},
     })
-    assert probe.visible_nodes == probe.present_nodes == frozenset({5, key(10, 5), key(10, 11, 5)})
+    assert probe.visible_nodes == probe.present_nodes == frozenset({5, key((10, "outer"), 5), key((10, "outer"), (11, "inner"), 5)})
     assert {browser_cdp_frames.frame_owner(node) for node in probe.visible_nodes} == {5, 10}
     # Each document is searched on its own session, and the search is discarded there.
     for session in (None, "outer", "inner"):
@@ -104,21 +111,21 @@ async def test_a_field_counts_as_visible_only_while_every_frame_element_above_it
         "outer": {"passwords": {5: True}, "frames": [("inner", 11, hidden != "inner")]},
         "inner": {"passwords": {5: True}},
     })
-    assert probe.present_nodes == frozenset({key(10, 5), key(10, 11, 5)})
-    assert probe.visible_nodes == (frozenset() if hidden == "outer" else frozenset({key(10, 5)}))
+    assert probe.present_nodes == frozenset({key((10, "outer"), 5), key((10, "outer"), (11, "inner"), 5)})
+    assert probe.visible_nodes == (frozenset() if hidden == "outer" else frozenset({key((10, "outer"), 5)}))
 
 
 @pytest.mark.asyncio
 async def test_a_known_frame_field_stays_guarded_on_its_visit_after_it_stops_matching(monkeypatch):
     """A reveal toggle can turn the frame's field into a text input; the visit still counts it while it shows."""
     probe, _ = await _probe(monkeypatch, {None: {"frames": [("outer", 10, True)]}, "outer": {"boxes": {5: True}}},
-                            known={"visit": frozenset({key(10, 5)}), "other-visit": frozenset({key(10, 6)})})
-    assert probe.visible_nodes == frozenset({key(10, 5)}) and probe.present_nodes == frozenset()
+                            known={"visit": frozenset({key((10, "outer"), 5)}), "other-visit": frozenset({key((10, "outer"), 6)})})
+    assert probe.visible_nodes == frozenset({key((10, "outer"), 5)}) and probe.present_nodes == frozenset()
 
 
 @pytest.mark.asyncio
 async def test_a_known_field_in_a_frame_that_went_away_is_not_reported(monkeypatch):
-    probe, _ = await _probe(monkeypatch, {None: {}}, known={"visit": frozenset({key(10, 5)})})
+    probe, _ = await _probe(monkeypatch, {None: {}}, known={"visit": frozenset({key((10, "outer"), 5)})})
     assert probe.visible_nodes == frozenset()
 
 
@@ -150,12 +157,42 @@ async def test_a_frame_attached_under_another_session_is_not_taken_for_a_child(m
     assert await browser_cdp_frames.child_frames(page, page) == []
 
 
+@pytest.mark.asyncio
+async def test_a_known_frame_field_is_dropped_once_its_frame_navigates_to_a_new_document(monkeypatch):
+    """A new document in the frame restarts its node ids, so the left document's field must not match one of them.
+
+    Node 5 was the password field of the frame's earlier document; in the document it shows now, 5 is a shown
+    element that is not a password field. Matching it would keep the step open until the top page navigates.
+    """
+    left = key((10, "outer", "earlier-document"), 5)
+    probe, _ = await _probe(monkeypatch, {None: {"frames": [("outer", 10, True)]}, "outer": {"boxes": {5: True}}},
+                            known={"visit": frozenset({left})})
+    assert probe.visible_nodes == frozenset() and probe.present_nodes == frozenset()
+    # The same frame, still on the document the field was seen in, keeps it guarded.
+    probe, _ = await _probe(monkeypatch, {None: {"frames": [("outer", 10, True)]},
+                                          "outer": {"boxes": {5: True}, "loader": "earlier-document"}},
+                            known={"visit": frozenset({left})})
+    assert probe.visible_nodes == frozenset({left})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loader", ["", None, 7])
+async def test_a_frame_whose_document_cant_be_named_fails_the_page_check(monkeypatch, loader):
+    with pytest.raises(BrowserSessionError, match="couldn't be checked"):
+        await _probe(monkeypatch, {None: {"frames": [("outer", 10, True)]}, "outer": {"loader": loader}})
+
+
 def test_node_keys_round_trip_and_reject_ids_out_of_range():
-    nested = key(10, 11, 5)
-    assert browser_cdp_frames.split_key(nested) == (key(10, 11), 5)
-    assert browser_cdp_frames.split_key(key(10, 5)) == (10, 5) and browser_cdp_frames.split_key(5) == (None, 5)
+    nested = key((10, "outer"), (11, "inner"), 5)
+    outer = browser_cdp_frames.document_key(10, "loader-outer")
+    inner = browser_cdp_frames.document_key(browser_cdp_frames.node_key(outer, 11), "loader-inner")
+    assert browser_cdp_frames.split_key(nested) == (inner, 5)
+    assert browser_cdp_frames.split_key(key((10, "outer"), 5)) == (outer, 5)
+    assert browser_cdp_frames.split_key(5) == (None, 5)
     assert browser_cdp_frames.frame_owner(nested) == 10 and browser_cdp_frames.frame_owner(5) == 5
-    assert key(10, 5) != key(5, 10) != 5
+    assert browser_cdp_frames.frame_owner(key((10, "outer"), 5)) == 10
+    assert key((10, "outer"), 5) != key((5, "outer"), 10) != 5
+    assert key((10, "outer"), 5) != key((10, "outer", "another-document"), 5)
     for node in (0, -1, 1 << 32, True, "5", None, 5.0):
         with pytest.raises(BrowserSessionError, match="couldn't be checked"):
             browser_cdp_frames.node_key(None, node)
@@ -164,7 +201,7 @@ def test_node_keys_round_trip_and_reject_ids_out_of_range():
 @pytest.mark.asyncio
 async def test_a_read_that_lands_on_a_guarded_fields_frame_element_is_refused(monkeypatch):
     """The hit test can only reach a cross-origin field through its frame element in the page, so that is refused."""
-    field = key(10, 5)
+    field = key((10, "outer"), 5)
     shown = PasswordProbe("visit", "shop.example", frozenset({field}), present_nodes=frozenset({field}))
     hidden = PasswordProbe("visit", "shop.example", frozenset(), present_nodes=frozenset({field}))
     responses = iter((shown,))

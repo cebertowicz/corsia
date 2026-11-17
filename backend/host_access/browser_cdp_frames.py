@@ -2,12 +2,15 @@
 
 A cross-origin frame runs in its own renderer, so the page target's DOM search never reaches it. The probe
 auto-attaches to each one on its own connection and searches its document as a flattened child session.
-Node ids restart in every renderer, so a node inside a frame is keyed by its frame element's key and its own
-backendNodeId: the key of a top-document node is its backendNodeId, and `frame_owner` recovers the
-top-document frame element the read guard's hit test lands on for any node inside that frame.
+Node ids restart in every renderer, so a node inside a frame is keyed by its document and its own backendNodeId:
+the key of a top-document node is its backendNodeId, and a frame's document is keyed by its frame element's key
+and a tag of the document's loader id. A navigation inside the frame commits a new loader, so the nodes known in
+the document it left never match a node of the new one. `frame_owner` recovers the top-document frame element the
+read guard's hit test lands on for any node inside that frame.
 """
 from __future__ import annotations
 
+import zlib
 from typing import Awaitable, Callable, Protocol
 
 from host_access.browser_session_state import BrowserSessionError
@@ -41,7 +44,7 @@ class Page(Session, Attaching, Protocol):
     """The page's own connection: the top document's session, which also carries every frame's session."""
 
 
-# Each document by its frame element's key (None: the top document), with whether every frame element above it shows.
+# Each document by its key (None: the top document), with whether every frame element above it shows.
 Documents = dict[int | None, tuple[Session, bool]]
 
 
@@ -57,23 +60,31 @@ class FrameSession:
         return await self.client.call_in(self.session_id, method, **params)
 
 
-def node_key(owner: int | None, node: object) -> int:
-    """The probe's key for `node`, a backendNodeId in the document `owner` (a frame element's key) holds."""
+def node_key(document: int | None, node: object) -> int:
+    """The probe's key for `node`, a backendNodeId in `document` (a `document_key`; None: the top document)."""
     if not isinstance(node, int) or isinstance(node, bool) or not 0 < node < 1 << _NODE_BITS:
         raise BrowserSessionError(PAGE_CHECK_FAILED)
-    return node if owner is None else owner << _NODE_BITS | node
+    return node if document is None else document << _NODE_BITS | node
+
+
+def document_key(element: int, loader: object) -> int:
+    """The key of the document loaded by `loader` in the frame whose element has the key `element`."""
+    if not isinstance(loader, str) or not loader:
+        raise BrowserSessionError(PAGE_CHECK_FAILED)
+    return element << _NODE_BITS | zlib.crc32(loader.encode())
 
 
 def split_key(key: int) -> tuple[int | None, int]:
-    """A key's frame element key (None in the top document) and its backendNodeId in that frame."""
-    owner = key >> _NODE_BITS
-    return (owner or None), key & ((1 << _NODE_BITS) - 1)
+    """A key's document key (None: the top document) and its backendNodeId in that document."""
+    document = key >> _NODE_BITS
+    return (document or None), key & ((1 << _NODE_BITS) - 1)
 
 
 def frame_owner(key: int) -> int:
     """The top-document element holding a key's frame; a top-document node is its own."""
+    # Each frame level adds a loader tag and a backendNodeId, so a level is two node widths.
     while key >> _NODE_BITS:
-        key >>= _NODE_BITS
+        key >>= 2 * _NODE_BITS
     return key
 
 
@@ -84,11 +95,11 @@ async def search_page(page: Page, find: Callable[[Session], Awaitable[set[int]]]
     documents: Documents = {None: (page, True)}
     pending: list[int | None] = [None]
     while pending:
-        owner = pending.pop()
-        session, shown = documents[owner]
-        found |= {node_key(owner, node) for node in await find(session)}
-        for child, element in await child_frames(page, session):
-            key = node_key(owner, element)
+        document = pending.pop()
+        session, shown = documents[document]
+        found |= {node_key(document, node) for node in await find(session)}
+        for child, element, loader in await child_frames(page, session):
+            key = document_key(node_key(document, element), loader)
             documents[key] = (child, shown and await visible(session, element))
             pending.append(key)
         if len(documents) > FRAME_LIMIT:
@@ -101,18 +112,20 @@ async def shown_keys(documents: Documents, keys: set[int] | frozenset[int],
     """The keys whose node shows, in a document still in the page whose frame elements all show."""
     shown_now = set()
     for key in keys:
-        owner, node = split_key(key)
-        session, shown = documents.get(owner, (None, False))
+        document, node = split_key(key)
+        # A key from a document its frame has since navigated away from names no document here.
+        session, shown = documents.get(document, (None, False))
         if session is not None and shown and await visible(session, node):
             shown_now.add(key)
     return frozenset(shown_now)
 
 
-async def child_frames(client: Attaching, session: Session) -> list[tuple[FrameSession, int]]:
-    """Each out-of-process frame directly inside `session`'s document, with its frame element's backendNodeId.
+async def child_frames(client: Attaching, session: Session) -> list[tuple[FrameSession, int, object]]:
+    """Each out-of-process frame directly inside `session`'s document: its session, its frame element's
+    backendNodeId and the loader id of the document it shows.
 
     Chrome reports every existing child frame before answering the auto-attach. A frame that appears later is
-    found by the next probe; one whose owner can't be read fails the page check.
+    found by the next probe; one whose owner or loader can't be read fails the page check.
     """
     start = len(client.attached)
     await session.call("Target.setAutoAttach", autoAttach=True, waitForDebuggerOnStart=False, flatten=True)
@@ -125,5 +138,8 @@ async def child_frames(client: Attaching, session: Session) -> list[tuple[FrameS
         if not isinstance(child, str) or not child:
             raise BrowserSessionError(PAGE_CHECK_FAILED)
         owner = (await session.call("DOM.getFrameOwner", frameId=info.get("targetId"))).get("backendNodeId")
-        frames.append((FrameSession(client, child), node_key(None, owner)))
+        frame = FrameSession(client, child)
+        tree = await frame.call("Page.getFrameTree")
+        loader = ((tree.get("frameTree") or {}).get("frame") or {}).get("loaderId")
+        frames.append((frame, node_key(None, owner), loader))
     return frames

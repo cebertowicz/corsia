@@ -12,6 +12,7 @@ import time
 import app_startup_runtime
 import pytest
 from infra import cpu_sampler, thread_cpu
+from tools import log_read
 
 
 def _busy_worker(started: threading.Event, release: threading.Event) -> None:
@@ -105,15 +106,18 @@ def test_summary_reports_cpu_deltas_threads_stacks_sampler_and_tick_lag(caplog) 
 
     sampler.emit_summary(window_seconds=60)
 
-    message = caplog.records[-1].getMessage()
-    assert message == (
+    summary, stack = (record.getMessage() for record in caplog.records[-2:])
+    assert summary == (
         "cpu sampler: process_cpu_seconds=1.250000 window_seconds=60.000 "
         "sampler_cpu_seconds=0.050000 max_tick_lag_seconds=0.012000 "
-        "top_threads=[1.200000s worker] "
-        "top_stacks=[1.200000s thread_group=worker sample=active "
-        "stack=backend/x.py:work:1; other=0.050000s]"
+        "top_stacks=1 other=0.050000s "
+        "top_threads=[1.200000s worker]"
     )
-    assert len(message) <= cpu_sampler.MAX_SUMMARY_CHARS
+    assert stack == (
+        "cpu sampler stack: rank=1 seconds=1.200000 "
+        "thread_group=worker sample=active stack=backend/x.py:work:1"
+    )
+    assert len(summary) <= cpu_sampler.MAX_SUMMARY_CHARS
     assert not sampler._thread_cpu_seconds
     assert not sampler._stack_cpu_seconds
 
@@ -276,7 +280,36 @@ def test_summary_building_stays_cheap_with_sixty_thread_groups(caplog) -> None:
     sampler.emit_summary(window_seconds=60)
 
     assert time.process_time() - started < 0.1
-    assert len(caplog.records[-1].getMessage()) <= cpu_sampler.MAX_SUMMARY_CHARS
+    messages = [record.getMessage() for record in caplog.records]
+    stacks = [message for message in messages if message.startswith("cpu sampler stack:")]
+    assert len(stacks) == cpu_sampler.SUMMARY_ENTRY_COUNT
+    assert [message.split()[3] for message in stacks] == [
+        f"rank={rank}" for rank in range(1, cpu_sampler.SUMMARY_ENTRY_COUNT + 1)
+    ]
+    assert all(len(message) <= log_read.MESSAGE_MAX_CHARS for message in messages)
+
+
+def test_every_record_fits_log_read_cap_with_oversized_labels_and_stacks(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="infra.cpu_sampler")
+    sampler = cpu_sampler.CpuSampler()
+    sampler._process_cpu_seconds = 6.0
+    sampler._thread_cpu_seconds = {f"{index:02d}-" + "t" * 500: 0.1 for index in range(60)}
+    sampler._stack_cpu_seconds = {
+        f"thread_group=db_N sample=active stack={index:02d} " + "s" * 5_000: 0.1
+        for index in range(60)
+    }
+
+    sampler.emit_summary(window_seconds=60)
+
+    messages = [record.getMessage() for record in caplog.records]
+    summary = messages[0]
+    stacks = [message for message in messages if message.startswith("cpu sampler stack:")]
+    assert len(stacks) == cpu_sampler.SUMMARY_ENTRY_COUNT
+    # The reader cuts any record longer than its cap; none may reach it.
+    assert all(len(message) <= log_read.MESSAGE_MAX_CHARS for message in messages)
+    assert all(stack.endswith("...") for stack in stacks)
+    # The window totals survive; only the lowest-ranked threads are dropped.
+    assert "top_stacks=15 other=4.500000s top_threads=[" in summary
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc format")
