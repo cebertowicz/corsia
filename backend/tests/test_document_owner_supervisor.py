@@ -19,6 +19,14 @@ PERSON = {"id": OWNER_USER, "token_kind": "session"}
 SECOND_PERSON = OTHER_USER
 
 
+@pytest.mark.parametrize(("owner", "kind"), [(None, "none"), ("", "none"), ("ui", "person"),
+                                              ("project:p1", "person"), ("agent-1", "agent")])
+def test_owner_kind_classifies_owner_principals(owner, kind):
+    from registry.document_supervisor import owner_kind
+
+    assert owner_kind(owner) == kind
+
+
 def _view(artifact_id: str):
     """The ownership payload as the document load builds it."""
     import infra.config as config

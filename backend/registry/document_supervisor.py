@@ -67,7 +67,7 @@ def _status(row, paused: set[str]) -> str:
 
 def owner_kind(owner: str | None) -> str:
     """Classify both person sentinels consistently for display, routing and authority."""
-    if owner is None:
+    if not owner:
         return "none"
     if is_owner_sentinel(owner):
         return "person"
