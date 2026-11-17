@@ -451,7 +451,7 @@ def test_a_person_owned_document_with_no_supervisor_closes_its_task_as_ownerless
         seed_thread(db, 'owner')
         artifact, _, _ = _waiting_document(db)
         [task] = _open_tasks(db, artifact)
-        monkeypatch.setattr(person_comment_task, '_supervisor', lambda _db, _artifact: None)
+        monkeypatch.setattr(person_comment_task, 'effective_supervisor', lambda _db, _artifact, **_kwargs: None)
         with write_transaction(db, scope='test_ui_owner') as connection:
             connection.execute("UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?",
                                (artifact,))
