@@ -8,7 +8,9 @@ import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread
  * once the input is stored; a slow provider start after that must not hold the box open while the
  * thread already shows the text.
  */
-test.use({ viewport: { width: 1440, height: 900 } });
+// Wide enough that the comment column stands in the margin once the Workspace panel is closed: that card is
+// where a sent comment shows up while it is also still in its box.
+test.use({ viewport: { width: 1920, height: 1000 } });
 const DELAY_SECONDS = 2;
 
 /** Sample every frame until `act` resolves; count the frames that showed `note` in a field and in a thread at once. */
@@ -47,6 +49,7 @@ test('a sent comment and its reply are never in the box and the thread together'
   await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
   await sidebarThread(page, title).click();
   await waitForWsConnected(page);
+  await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
   const row = page.locator(`[data-message-id="${id}"]`);
   await expect(row).toBeVisible();
   await row.evaluate((el, phrase) => {
