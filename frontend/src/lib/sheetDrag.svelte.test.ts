@@ -31,6 +31,26 @@ describe('createSheetDrag', () => {
 		expect(sheet.dragging).toBe(true);
 	});
 
+	it('a press in the sheet drags only from a handle, and never from a control inside one', () => {
+		const { sheet, onExpand } = drag(true);
+		const panel = document.createElement('div');
+		panel.innerHTML = '<div data-drawer-handle><h2>Comments <span>3</span></h2><button type="button"><svg><path /></svg></button><div role="menu"><span>Open</span></div></div><p>A card</p>';
+		const at = (target: Element) => ({ ...pointer('pointerdown', 100), target, currentTarget: panel }) as unknown as PointerEvent;
+		for (const target of [panel.querySelector('path')!, panel.querySelector('button')!, panel.querySelector('[role="menu"] span')!, panel.querySelector('p')!]) {
+			const event = at(target);
+			sheet.press(event);
+			expect(sheet.dragging, target.nodeName).toBe(false);
+			expect(event.preventDefault).not.toHaveBeenCalled();
+		}
+		const title = at(panel.querySelector('h2 span')!);
+		sheet.press(title);
+		expect(sheet.dragging).toBe(true);
+		expect(title.preventDefault).toHaveBeenCalledOnce();
+		// A quick tap on the head row grows the sheet as a tap on the grabber does.
+		sheet.finish(pointer('pointerup', 101));
+		expect(onExpand).toHaveBeenCalledOnce();
+	});
+
 	it('follows the pointer down, never up, and snaps a short drag back', () => {
 		const { sheet, onDismiss } = drag();
 		sheet.start(pointer('pointerdown', 100));

@@ -3,9 +3,13 @@ import { holdSheet } from '$lib/sheetClearance';
 
 /** How long a let-go sheet takes to settle: its transform and max-height transitions run 220 ms (AdaptiveDrawer), plus a frame or two. */
 const SETTLE_MS = 300;
+/** What a drag starts from: the grabber, or a head row the sheet's content marks as a handle too. */
+const HANDLE = '[data-drawer-handle]';
+/** A press on a control inside a handle is the control's: it never starts a drag, so its click is never taken for a tap on the grabber. */
+const CONTROL = 'button, a, input, textarea, select, label, [role="menu"], [contenteditable]';
 
 /**
- * A drag on a sheet's grabber: how far the sheet follows the pointer down, how far up it is pulled while it can grow,
+ * A drag on a sheet's grabber, or on a head row its content marks as a handle: how far the sheet follows the pointer down, how far up it is pulled while it can grow,
  * and what letting go does (`releaseSheetDrag`). One pointer at a time; a press with any button but the primary one is ignored.
  * From the press until the sheet settles the sheet is held (`holdSheet`), so nothing moves the page or re-caps the sheet under the finger.
  */
@@ -58,6 +62,12 @@ export function createSheetDrag(props: {
 		handle.setPointerCapture?.(event.pointerId);
 	}
 
+	/** A press anywhere in the sheet: only one on a handle, and not on a control in it, starts the drag. */
+	function press(event: PointerEvent): void {
+		const target = event.target instanceof Element ? event.target : null;
+		if (target?.closest(HANDLE) && !target.closest(CONTROL)) startDrag(event);
+	}
+
 	function moveDrag(event: PointerEvent): void {
 		if (!dragging || dragPointer !== event.pointerId) return;
 		dragRaw = event.clientY - dragStartY;
@@ -84,6 +94,7 @@ export function createSheetDrag(props: {
 		get pull() { return pullY; },
 		get dragging() { return dragging; },
 		start: startDrag,
+		press,
 		move: moveDrag,
 		finish: finishDrag,
 		/** Back to the resting place. A dismissing drag leaves the sheet where it was let go, for its outro. */
