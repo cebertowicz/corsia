@@ -40,24 +40,42 @@ def _event(name="probe", visible=False, **kwargs):
     (_state(_person()), lifecycle.Event("probe", _probe("visit-two"), session="session-two"),
      {"rules": ("R2",), "end": "unsettled", "clear_answers": True}),
     (_state(_person(), row_state="accepted"), _event(),
-     {"rules": ("R3",), "end": "done", "answer": lifecycle.Answer(1)}),
+     {"rules": ("R3",), "end": "done", "answer": lifecycle.Answer(1), "forget_done": "visit-one"}),
     (_state(_person(), row_state="closed"), _event(),
      {"rules": ("R4",), "end": "declined", "answer": lifecycle.Answer(1, True)}),
     (_state(_person()), lifecycle.Event("probe", _probe("visit-two"), session="session-one"),
      {"rules": ("R5",), "end": "settle", "answer": lifecycle.Answer(1)}),
-    (_state(_password()), _event(), {"rules": ("R6",), "end": "settle", "answer": lifecycle.Answer(1)}),
-    (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person"}),
+    (_state(_password()), _event(), {"rules": ("R6",), "end": "settle", "answer": lifecycle.Answer(1, finished=True)}),
+    (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person", "forget_done": "visit-one"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, True)}), _event(visible=True),
      {"rules": ("R8",), "refusal": "password_declined"}),
-    (_state(answers={("password", "visit-one"): lifecycle.Answer(1)}), _event(visible=True),
-     {"rules": ("R9",), "open_kind": "password", "occurrence": 2, "refusal": "password"}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({7}))}), _event(visible=True),
+     {"rules": ("R9",), "open_kind": "password", "occurrence": 2, "refusal": "password", "forget_done": None}),
     (_state(answers={("person", "visit-one"): lifecycle.Answer(1, True)}), _event("declare"),
      {"rules": ("R10",), "refusal": "person_declined"}),
     (_state(answers={("person", "visit-one"): lifecycle.Answer(1)}), _event("declare"),
      {"rules": ("R11",), "open_kind": "person", "occurrence": 2}),
     (_state(_person()), _event("declare", visible=True), {"rules": ("R12",)}),
     (_state(_password()), _event("declare"), {"rules": ("R13", "R7"), "refusal": "password"}),
-], ids=[f"R{i}" for i in range(1, 14)])
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42}))}), _event(visible=True),
+     {"rules": ("R14",), "open_kind": None, "refusal": None, "forget_done": None}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42}))}), _event("declare", visible=True),
+     {"rules": ("R11",), "open_kind": "person", "occurrence": 1, "refusal": None}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42})),
+                     ("person", "visit-one"): lifecycle.Answer(1, True)}), _event("declare", visible=True),
+     {"rules": ("R10",), "open_kind": None, "refusal": "person_declined"}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42, 43}))}),
+     lifecycle.Event("probe", None, session="session-one"),
+     {"rules": (), "forget_done": None}),
+    (_state(_password(), row_state="accepted"), _event(),
+     {"rules": ("R3",), "end": "done", "forget_done": "visit-one", "answer": lifecycle.Answer(1, finished=True)}),
+    # A password step that ends on its own visit leaves the visit restricted; one whose visit changed doesn't.
+    (_state(_password(), row_state="closed"), _event(),
+     {"rules": ("R4",), "end": "declined", "answer": lifecycle.Answer(1, True, finished=True)}),
+    (_state(_password()), lifecycle.Event("probe", _probe("visit-two"), session="session-one"),
+     {"rules": ("R5",), "end": "settle", "answer": lifecycle.Answer(1)}),
+], ids=[f"R{i}" for i in range(1, 15)] + ["R14-declare-opens-person", "R14-declare-declined", "no-result-keeps-done",
+                                          "forget-on-done-path", "R4-password-finishes-visit", "R5-password-new-visit"])
 def test_decide_rule_table_is_pure(state, event, expected):
     before = repr(state)
     decision = lifecycle.decide(state, event)
@@ -169,6 +187,12 @@ async def test_answers_end_live_steps_and_only_done_allows_a_new_occurrence(plan
         assert len(_steps(db)) == 1
         assert THREAD not in lifecycle._steps
         assert plan["events"].count(f"{kind}_step_declined") == 1
+    elif kind == "password" and not hide_then_show:
+        # R14: the person marked the field they were asked about done, so it no longer holds the agent.
+        await ask()
+        assert len(_steps(db)) == 1
+        assert THREAD not in lifecycle._steps
+        assert not browser_control.password_page(THREAD)
     else:
         if kind == "password":
             with pytest.raises(BrowserSessionError, match="asks for a password"):
@@ -180,6 +204,245 @@ async def test_answers_end_live_steps_and_only_done_allows_a_new_occurrence(plan
         assert lifecycle._steps[THREAD].node_id == second["id"]
         assert lifecycle._steps[THREAD].occurrence == 2
         assert not any(event.endswith("_declined") for event in plan["events"])
+
+
+async def _done_with_field_showing(plan, page, nodes=frozenset({42})):
+    """Open a sign-in step on a visible field, then have the person mark it done with the field still showing."""
+    page.show("visit-one", nodes)
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [original] = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "mark_done", close_params(plan["db"], "mark_done", original["id"]),
+                actor=HUMAN)
+
+
+@pytest.mark.asyncio
+async def test_a_done_answer_releases_snapshot_and_click_while_the_field_still_shows(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    for command in (("snapshot",), ("tab", "list"), ("click", "@e3")):
+        assert await browser_control.require_page_access(THREAD, page.agent_probe, command) is None
+    assert len(_steps(plan["db"])) == 1 and THREAD not in lifecycle._steps
+
+
+@pytest.mark.asyncio
+async def test_while_a_done_field_still_shows_only_commands_that_cannot_show_it_run(plan):
+    """A field may display what the person typed (text type, show-password toggle), so reads that render it or run
+    a page script stay refused and a snapshot hides field values, for the rest of the visit."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    allowed = (("snapshot",), ("snapshot", "-i"), ("click", "@e3"), ("get", "text", "@e3"), ("get", "attr", "@e3", "href"),
+               ("wait", "2000"), ("wait", "@e3", "--state", "hidden"), ("wait", "--load", "networkidle"),
+               ("wait", "--url", "**/home"), ("wait", "--text", "Welcome"), ("get", "title"), ("is", "visible", "@e3"),
+               ("fill", "@e3", "x"), ("scroll", "down", "300"))
+    # A CSS selector could test a value attribute that holds what was typed, by matching or failing to.
+    probe = "input[value^=a]"
+    by_selector = (("click", probe), ("dblclick", probe), ("hover", probe), ("focus", probe), ("fill", probe, "x"),
+                   ("type", probe, "x"), ("select", probe, "x"), ("check", probe), ("uncheck", probe),
+                   ("scrollintoview", probe), ("get", "count", probe), ("get", "text", probe), ("get", "box", probe),
+                   ("get", "styles", probe), ("get", "attr", probe, "href"), ("is", "visible", probe), ("wait", probe),
+                   ("wait", "#next", "--state", "hidden"), ("wait", "--load", "load", probe))
+    refused = (("screenshot", "shot.png"), ("pdf", "page.pdf"), ("get", "html", "body"), ("read",),
+               ("snapshot", "--json"), ("keyboard", "type", "x"), ("diff", "snapshot"), ("find", "role", "textbox"),
+               ("eval", "1"), ("get", "value", "@e7"), ("get", "attr", "@e7", "value"), ("get", "attr", "@e7", " Value"),
+               ("get", "attr", "@e7"), ("wait", "--fn", "window.x"), ("wait", "-f", "window.x"),
+               ("wait", "--download", "f.zip"), ("wait", "--text", "--fn", "window.x"), ("wait", "--load"),
+               *by_selector)
+
+    async def other_field(_target):
+        return 7
+
+    async def check_visit():
+        for command in allowed:
+            access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+            assert access.filled_field_visit and access.note is None, command
+        for command in refused:
+            with pytest.raises(BrowserSessionError) as refusal:
+                await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+            assert "attention list" not in str(refusal.value), command
+
+    await check_visit()
+    # A show-password control can swap the field for a new text input holding what was typed: the probe then sees
+    # no password field, so the visit itself stays restricted, and its new input's value with it.
+    page.show("visit-one")
+    await check_visit()
+    page.show("visit-two")
+    for command in (("snapshot",), ("screenshot", "shot.png"), ("get", "value", "@e7"), ("wait", "--fn", "window.x")):
+        access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+        assert not access.filled_field_visit
+    assert len(_steps(plan["db"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_step_settled_by_its_field_hiding_leaves_the_visit_restricted(plan):
+    """The person types, then presses the page's own show-password control (or the page hides the form) before
+    marking done: the step settles (R6), and a text input the page swapped in may hold what they typed."""
+    page = Page()
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    page.show("visit-one")
+
+    async def swapped_input(_target):
+        return 77
+
+    access = await browser_control.check_page_access(THREAD, page.agent_probe, ("snapshot",), resolve=swapped_input)
+    assert access.filled_field_visit and THREAD not in lifecycle._steps
+    for command in (("get", "value", "@e9"), ("get", "attr", "@e9", "value"), ("screenshot", "shot.png"), ("eval", "1")):
+        with pytest.raises(BrowserSessionError):
+            await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=swapped_input)
+    page.show("visit-two")
+    for command in (("snapshot",), ("get", "value", "@e9"), ("screenshot", "shot.png")):
+        access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=swapped_input)
+        assert not access.filled_field_visit
+
+
+@pytest.mark.parametrize("snapshot, expected", [
+    # Real agent-browser 0.31.2 lines: a text-type field and a toggled field show the value, a password field bullets.
+    ("- textbox [ref=e1]: plain one\n- textbox [ref=e2]: Typed1", "- textbox [ref=e1]: [value hidden]\n- textbox [ref=e2]: [value hidden]"),
+    ("- textbox [ref=e2]: Typed1\n  - StaticText \"Typed1\"\n- button \"Show\" [ref=e3]",
+     "- textbox [ref=e2]: [value hidden]\n- button \"Show\" [ref=e3]"),
+    ("- Iframe [ref=e2]\n  - textbox [ref=e3]: Typed1\n    - StaticText \"Typed1\"\n  - button \"Go\" [ref=e4]",
+     "- Iframe [ref=e2]\n  - textbox [ref=e3]: [value hidden]\n  - button \"Go\" [ref=e4]"),
+    ("- textbox \"Email\" [ref=e1] [required]: me]: x [ref=e9]", "- textbox \"Email\" [ref=e1] [required]: [value hidden]"),
+    ("- textbox \"Email\" [ref=e1]\n- searchbox [ref=e2]", "- textbox \"Email\" [ref=e1]\n- searchbox [ref=e2]"),
+    ("- combobox: Typed1", "- combobox [value hidden]"),
+    ("- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\"", "- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\""),
+])
+def test_hide_field_values_hides_every_value_and_the_text_beneath_it(snapshot, expected):
+    assert browser_control.hide_field_values(snapshot) == expected
+
+
+_SNAPSHOT_JSON = '{"success": true, "data": {"snapshot": "- textbox [ref=e2]: Typed1\\n- button \\"Go\\" [ref=e3]"}}'
+
+
+def test_a_snapshot_with_a_filled_field_showing_keeps_only_hidden_values():
+    from host_access.browser_cli import CommandResult, render_model_result
+    from host_access.browser_session_commands import hidden_snapshot
+
+    hidden = hidden_snapshot(CommandResult(0, _SNAPSHOT_JSON, "warning on stderr: Typed1"))
+    assert render_model_result(hidden, redactions={}) == "- textbox [ref=e2]: [value hidden]\n- button \"Go\" [ref=e3]"
+    # Anything but one JSON object carrying data.snapshot could carry the value, so none of it is returned.
+    for result in (
+        CommandResult(0, f"warning: daemon restarted\n{_SNAPSHOT_JSON}", ""),
+        CommandResult(0, "- textbox [ref=e2]: Typed1", ""),
+        CommandResult(0, '{"success": true, "data": {"result": "Typed1"}}', ""),
+        CommandResult(1, _SNAPSHOT_JSON, "Typed1"),
+        CommandResult(0, _SNAPSHOT_JSON, "", timed_out=True),
+        CommandResult(0, _SNAPSHOT_JSON, "", completion="interrupted"),
+    ):
+        assert hidden_snapshot(result) is None
+
+
+@pytest.mark.asyncio
+async def test_a_new_field_after_done_asks_the_person_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    page.show("visit-one", frozenset({42, 43}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    first, second = _steps(plan["db"])
+    assert second["state"] == "pending" and lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("while_open", [frozenset({42, 43}), frozenset({44})], ids=["confirm_field", "replaced_input"])
+async def test_a_field_shown_while_the_step_is_open_is_finished_with_it(plan, while_open):
+    page = Page()
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    # A confirm field appears, or the page swaps its input, while the person still has the step.
+    page.show("visit-one", while_open)
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [original] = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "mark_done", close_params(plan["db"], "mark_done", original["id"]),
+                actor=HUMAN)
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    assert len(_steps(plan["db"])) == 1 and THREAD not in lifecycle._steps
+
+
+@pytest.mark.asyncio
+async def test_a_field_hidden_then_shown_again_after_done_asks_the_person_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    page.show("visit-one")
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_with_the_same_fields_showing_opens_a_person_step(plan):
+    """The password part is finished; an e-signature or MFA step the agent declares still reaches the person."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    first, second = _steps(plan["db"])
+    assert first["state"] != "pending" and second["state"] == "pending"
+    assert isinstance(lifecycle._steps[THREAD], PersonStep)
+    assert lifecycle._steps[THREAD].node_id == second["id"]
+    with pytest.raises(BrowserSessionError, match="person"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_when_a_new_field_shows_asks_the_password_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    page.show("visit-one", frozenset({42, 43}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    first, second = _steps(plan["db"])
+    assert second["state"] == "pending" and isinstance(lifecycle._steps[THREAD], PasswordStep)
+    assert lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_and_a_declined_person_step_stays_declined(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    _, person = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "close_node",
+                {**close_params(plan["db"], "close_node", person["id"]), "reason": "Not now"}, actor=HUMAN)
+    with pytest.raises(BrowserSessionError, match="declined"):
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    assert len(_steps(plan["db"])) == 2 and THREAD not in lifecycle._steps
+
+
+@pytest.mark.asyncio
+async def test_a_done_field_stays_read_guarded(plan):
+    """The agent runs on the page again, but scripts and value reads of the field the person filled in stay refused."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+
+    async def locate(node):
+        async def resolve(_target):
+            return node
+        return resolve
+
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"))
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e1"),
+                                                  resolve=await locate(42))
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e1"),
+                                                  resolve=await locate(None))
+    # Another field on the visit may be one a show-password control swapped in, so it doesn't read either; on
+    # the next visit it reads as before.
+    with pytest.raises(BrowserSessionError, match="filled in a password field"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e2"),
+                                                  resolve=await locate(7))
+    page.show("visit-two")
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e2"),
+                                                     resolve=await locate(7)) is None
 
 
 def test_other_target_never_settles_and_declare_cannot_end_a_password_step():
