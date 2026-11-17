@@ -183,3 +183,30 @@ def test_real_worktree_patterns_are_escaped_and_anchored(repository_sandbox, rep
     if result.returncode == 0:
         raise ConfinementBreach("a deeper unrelated .worktrees directory gained a write allow")
     unchanged(target.exists(), False)
+
+
+@pytest.mark.parametrize("kind", ["protected", "pinned-only", "error", "unbound"])
+def test_folder_rules_only_for_enforceable_repositories(tmp_path, monkeypatch, kind):
+    from tools.sandbox_git import worktree_folder_rules
+
+    repo = tmp_path.resolve() / "repo"
+    policy = RepoPolicy(
+        "project", "repo", repo, "main", kind != "pinned-only",
+        enforcement_error="broken" if kind == "error" else None,
+        source_binding_valid=kind != "unbound",
+    )
+    monkeypatch.setattr(shell_guard, "_has_verified_worktree", lambda *_: False)
+    monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
+    text = shell_guard.pinned_repo_sandbox_profile("printf probe", str(repo), policies=[policy])
+    folder_allow = f'(allow file-read* file-write* (subpath "{repo / ".worktrees"}"))'
+    container, immediate, pointer = worktree_folder_rules(repo, protected_base=True)
+    if kind == "protected":
+        assert all(rule in text for rule in (folder_allow, container, immediate, pointer))
+    elif kind == "pinned-only":
+        assert worktree_folder_rules(repo, protected_base=False) == [pointer]
+        assert pointer in text and folder_allow not in text
+        assert container not in text and immediate not in text
+    else:
+        # Not enforceable: the whole-repository deny stays, with no folder rules.
+        assert f'(deny file-write* (subpath "{repo}"))' in text
+        assert ".worktrees" not in text
