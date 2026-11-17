@@ -11,7 +11,7 @@ import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread
 test.use({ viewport: { width: 1440, height: 900 } });
 const DELAY_SECONDS = 2;
 
-/** Sample every frame until `until` resolves; count the frames that showed `note` in a field and in a thread at once. */
+/** Sample every frame until `act` resolves; count the frames that showed `note` in a field and in a thread at once. */
 async function framesWithBoth(page: Page, note: string, act: () => Promise<void>) {
   await page.evaluate((text) => {
     const state = { both: 0, inBox: 0, inThread: 0, running: true };

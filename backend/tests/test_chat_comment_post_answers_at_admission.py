@@ -126,6 +126,26 @@ def test_a_refusal_before_the_row_is_stored_still_answers_with_its_code(
     assert target.execute("SELECT 1 FROM messages WHERE id='box-1'").fetchone() is None
 
 
+def test_a_refusal_before_the_row_is_stored_logs_no_background_failure(target, frames, delivery):
+    from loguru import logger
+
+    errors: list[str] = []
+    sink = logger.add(lambda message: errors.append(message.record["message"]), level="ERROR")
+
+    async def scenario():
+        delivery["delivery"] = Delivery()
+        with pytest.raises(HTTPException):
+            await _post(_comment(seq=99))
+        await _settled()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        logger.remove(sink)
+    # The person is told; the task observer must not also log it as failed work.
+    assert errors == []
+
+
 def test_a_comment_check_that_fails_still_answers_with_its_reference(target, frames, delivery, monkeypatch):
     import infra.reply_context as reply_context
     from infra.failure_reference import ReferencedHTTPException

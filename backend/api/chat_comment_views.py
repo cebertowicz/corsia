@@ -145,6 +145,8 @@ async def _admit(start) -> None:
     is its own and lasts until delivery settles, so a restart drain still waits for it. A
     refusal before the row is stored raises here, so the box keeps its text and the reason. A
     failure after it is logged; the comment's thread shows its delivery state and Retry.
+    A failure before it is stored is the route's answer, so the task ends without it and the
+    task observer logs nothing for what the person is told.
     """
     from ws.ingress import track_background_task
 
@@ -154,19 +156,24 @@ async def _admit(start) -> None:
         if not admitted.done():
             admitted.set_result(None)
 
+    before_stored: list[Exception] = []
+
     async def run() -> None:
         try:
             await start(on_admitted)
-        except SendRejected as exc:
+        except Exception as exc:
             if not admitted.done():
+                before_stored.append(exc)
+            elif isinstance(exc, SendRejected):
+                logger.warning('Comment delivery rejected after it was stored: {}', exc.detail)
+            else:
                 raise
-            logger.warning('Comment delivery rejected after it was stored: {}', exc.detail)
 
     task = asyncio.create_task(run())
     track_background_task(task)
     await asyncio.wait({task, admitted}, return_when=asyncio.FIRST_COMPLETED)
-    if task.done() and not admitted.done():
-        task.result()  # a refusal, or any failure, before the input was stored
+    if before_stored:
+        raise before_stored[0]  # a refusal, or any failure, before the input was stored
 
 
 @router.post('/threads/{thread_id}/chat-comments')
