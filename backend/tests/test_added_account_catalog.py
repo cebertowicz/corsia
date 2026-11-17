@@ -56,20 +56,176 @@ def test_account_rows_read_once_per_fact_scope(accounts, monkeypatch):
     from llm.harness_catalog import account_rows
 
     db = accounts[0]
-    original = vendor_accounts.list_accounts
+    original = vendor_accounts.stored_account_rows
     calls = []
 
-    def counted(*args, **kwargs):
-        calls.append(kwargs['provider'])
-        return original(*args, **kwargs)
+    def counted(provider, **kwargs):
+        calls.append(provider)
+        return original(provider, **kwargs)
 
-    monkeypatch.setattr(vendor_accounts, 'list_accounts', counted)
+    monkeypatch.setattr(vendor_accounts, 'stored_account_rows', counted)
     with fact_memo.fact_reads():
         first = account_rows(db=db)
         assert account_rows(db=db) is first
     assert calls == ['claude-code', 'codex']
     account_rows(db=db)
     assert calls == ['claude-code', 'codex', 'claude-code', 'codex']
+
+
+def _fresh_rows(db, provider=None):
+    """``account_rows`` as computed with no kept projection: parse and project every read."""
+    from connections.vendor_accounts import list_accounts
+    from llm.harness_catalog import account_rows_from_accounts
+
+    return account_rows_from_accounts([account for vendor in ((provider,) if provider else ('claude-code', 'codex'))
+                                       for account in list_accounts(provider=vendor, db=db)])
+
+
+# Each stored column account_rows reads, and a write that changes it without touching any other
+# column: no revision or updated_at bump, as several real writers leave them.
+_COLUMN_WRITES = {
+    'name': "UPDATE vendor_accounts SET name=name||'.' WHERE id=?",
+    'source_home': "UPDATE vendor_accounts SET source_home=source_home||'.' WHERE id=?",
+    'runtime_home': "UPDATE vendor_accounts SET runtime_home=runtime_home||'.' WHERE id=?",
+    # One default per connection: clear the provider's current default rather than add a second.
+    'is_default': "UPDATE vendor_accounts SET is_default=0 WHERE is_default=1 AND connection_id="
+                  "(SELECT connection_id FROM vendor_accounts WHERE id=?)",
+    'state': "UPDATE vendor_accounts SET state='signed_out' WHERE id=?",
+    'revision': "UPDATE vendor_accounts SET revision=revision+1 WHERE id=?",
+    'identity_json': "UPDATE vendor_accounts SET identity_json=json_set(identity_json,'$.probe','x') WHERE id=?",
+    'auth_cleanup_json': "UPDATE vendor_accounts SET auth_cleanup_json="
+                         "'{\"status\":\"done\",\"cause\":null,\"at\":\"t\"}' WHERE id=?",
+    'discovery_json': "UPDATE vendor_accounts SET discovery_json="
+                      "json_set(discovery_json,'$.discovery.models.\"codex/probe\"',json('{\"available\":true}')) WHERE id=?",
+    'created_at': "UPDATE vendor_accounts SET created_at=created_at||'.' WHERE id=?",
+    'updated_at': "UPDATE vendor_accounts SET updated_at=updated_at||'.' WHERE id=?",
+    'removed_at': "UPDATE vendor_accounts SET removed_at='t' WHERE id=?",
+    'connection_id': "UPDATE vendor_accounts SET connection_id=(SELECT id FROM connections WHERE provider='claude-code') "
+                     "WHERE id=?",
+    'id': "UPDATE vendor_accounts SET id=id||'x' WHERE id=?",
+}
+
+
+def test_every_stored_account_column_has_a_write_case():
+    from connections.account_row_shape import COLUMNS
+
+    assert {name[2:] for name in COLUMNS.split(',') if name.startswith('a.')} == set(_COLUMN_WRITES)
+
+
+@pytest.mark.parametrize('column', sorted(_COLUMN_WRITES))
+def test_account_rows_sees_a_write_to_any_column_on_the_next_read(accounts, monkeypatch, column):
+    """The kept projection is keyed on every stored column, so no write can leave it stale."""
+    from connections.models import upsert_connection
+    from llm import harness_catalog
+    from vendor_account_fixtures import _ready
+
+    db, _default, second, _third = accounts
+    upsert_connection(type='cli', provider='claude-code', status='available', config={'binary': '/bin/test'})
+    _ready(db, second)
+    db.execute('PRAGMA foreign_keys=OFF')
+    harness_catalog.account_rows(db=db)
+    harness_catalog.account_rows(db=db, provider='codex')
+    projected = []
+    original = harness_catalog.account_rows_from_accounts
+    monkeypatch.setattr(harness_catalog, 'account_rows_from_accounts',
+                        lambda accounts: projected.append(1) or original(accounts))
+    harness_catalog.account_rows(db=db)
+    assert projected == []  # unchanged rows are not projected again
+
+    db.execute(_COLUMN_WRITES[column], (second['id'],))
+    db.commit()
+    for provider in (None, 'codex'):
+        projected.clear()
+        answer = harness_catalog.account_rows(db=db, provider=provider)
+        assert projected == [1], (column, provider)
+        assert answer == _fresh_rows(db, provider)
+
+
+def test_discovery_written_without_a_revision_bump_is_listed_next_read(accounts):
+    """``store_record`` changes discovery without revision or updated_at; the next read lists it."""
+    from llm.harness_catalog import account_rows
+    from vendor_account_fixtures import _ready
+
+    db, _default, second, _third = accounts
+    _ready(db, second)
+    assert 'codex/added-later' not in account_rows(db=db, provider='codex')
+    before = db.execute('SELECT revision,updated_at FROM vendor_accounts WHERE id=?', (second['id'],)).fetchone()
+    _ready(db, second, model='codex/added-later')
+    assert tuple(db.execute('SELECT revision,updated_at FROM vendor_accounts WHERE id=?',
+                            (second['id'],)).fetchone()) == tuple(before)
+    assert account_rows(db=db, provider='codex')['codex/added-later']['available'] is True
+
+
+def test_kept_projections_do_not_grow_with_account_churn(accounts):
+    """One kept entry per provider argument; an added or removed account replaces it."""
+    from connections.vendor_accounts import add_account, set_account_state
+    from llm import harness_catalog
+
+    db = accounts[0]
+    for index in range(12):
+        account = add_account('codex', f'Churn {index}')
+        for provider in (None, 'codex'):
+            harness_catalog.account_rows(db=db, provider=provider)
+        set_account_state(account['id'], 'removed', expected_revision=account['revision'])
+        for provider in (None, 'codex'):
+            harness_catalog.account_rows(db=db, provider=provider)
+            kept = harness_catalog._projected[provider][0]
+            assert account['id'] not in {row[0] for row in kept}
+    assert set(harness_catalog._projected) <= {None, 'claude-code', 'codex'}
+
+
+def test_concurrent_callers_each_get_their_own_rows(accounts):
+    """Threads on their own connections read at once; none sees another caller's change."""
+    import threading
+    from infra.database import get_db
+    from llm.harness_catalog import account_rows
+    from vendor_account_fixtures import _ready
+
+    db, _default, second, _third = accounts
+    _ready(db, second)
+    expected = _fresh_rows(db, 'codex')
+    answers, errors = [], []
+    start = threading.Barrier(8)
+
+    def call():
+        connection = get_db()
+        try:
+            start.wait()
+            for _ in range(25):
+                answer = account_rows(db=connection, provider='codex')
+                answers.append(answer)
+                if answer != expected:
+                    errors.append(answer)
+                answer['codex/test']['available'] = False
+                answer.pop('codex/test')
+        except BaseException as error:  # surfaced below, not swallowed
+            errors.append(error)
+        finally:
+            connection.close()
+
+    workers = [threading.Thread(target=call) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert errors == []
+    assert len({id(answer) for answer in answers}) == len(answers) == 200
+    assert account_rows(db=db, provider='codex') == expected
+
+
+def test_a_caller_changing_account_rows_cannot_change_a_later_read(accounts):
+    from llm.harness_catalog import account_rows
+    from vendor_account_fixtures import _ready
+
+    db, _default, second, _third = accounts
+    _ready(db, second)
+    first = account_rows(db=db, provider='codex')
+    expected = _fresh_rows(db, 'codex')
+    first['codex/test']['available'] = False
+    first['codex/test']['display_name'] = 'changed'
+    first['codex/injected'] = {'id': 'codex/injected'}
+    del first['codex/test']
+    assert account_rows(db=db, provider='codex') == expected
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
