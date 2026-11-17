@@ -46,6 +46,6 @@ for (const [label, width, height] of [['wide', 1440, 900], ['phone', 393, 852]] 
   await page.locator('.palette').getByRole('button', { name, exact: true }).click();
   await page.getByText('Garden planner', { exact: true }).first().click();
   await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
-  expect(isolatedDb(["print(connection.execute(\"SELECT parent_thread_id FROM artifact_registrations WHERE artifact_id=? AND relationship_state='active'\", (sys.argv[2],)).fetchone()[0])"], artifact).trim()).toBe('ui');
+  expect(isolatedDb(["print(connection.execute(\"SELECT parent_thread_id FROM artifact_registrations WHERE artifact_id=? AND relationship_state IN ('owner-active','owner-pinned')\", (sys.argv[2],)).fetchone()[0])"], artifact).trim()).toBe('ui');
  });
 }
