@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app_shutdown_idle_timers import fold_idle_checkpoint_shutdown, remaining_idle_timers
 from app_shutdown_join import join_cleanup_owner, count_shutdown_owner
+from app_startup_background import run_startup_background as _run_startup_background
 from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tasks
 from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
@@ -88,23 +89,6 @@ async def _begin_startup(app: FastAPI, logger) -> None:
     except BaseException:
         stop_runtime_logs(logger)
         raise
-
-
-async def _run_startup_background(drive) -> None:
-    """Own and join recovery alongside the existing finite startup drive."""
-    from plans.person_comment_recovery import run as recover_person_comments
-
-    tasks = [asyncio.create_task(drive), asyncio.create_task(recover_person_comments())]
-    try:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @asynccontextmanager
