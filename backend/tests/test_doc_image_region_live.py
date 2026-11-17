@@ -52,27 +52,62 @@ async def test_agent_region_in_a_live_doc_tracks_the_whole_image_markdown(owners
         app_loop.clear()
 
 
+def _browser_state(live) -> dict:
+    """The state a browser hashes before it asks: its vector, digest and UTF-16 length."""
+    return dict(vector=live.doc.get_state(), digest=live.digest, length=len(live.text.encode("utf-16-le")) // 2)
+
+
+async def _post_region(entry, start: int, end: int):
+    """POST the browser's region the way the browser does, with the offsets it captured."""
+    app = FastAPI()
+    app.include_router(doc_comments.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        return await client.post(
+            f"/api/artifacts/{entry.artifact_id}/comments", params={"token": OWNER_TOKEN},
+            json=dict(delivery_policy="immediate", body="Too dark.", anchor_text=MARKDOWN, from_off=start, to_off=end, live_capture=True,
+                      client_id="user-box", region={"x": 0.2, "y": 0.2}))
+
+
 @pytest.mark.asyncio
 async def test_browser_region_in_a_live_doc_adopts_its_captured_image_range(ownership_scope, tmp_path, monkeypatch):
     manager, entry, image = await _live_doc_with_image(ownership_scope, tmp_path, monkeypatch)
     live = entry.live
     start = live.text.index(MARKDOWN)
     end = start + len(MARKDOWN)
-    assert live.reserve("user-box", start, end, user_id(ownership_scope), object(), vector=live.doc.get_state(),
-                        digest=live.digest, length=len(live.text.encode("utf-16-le")) // 2)
-    app = FastAPI()
-    app.include_router(doc_comments.router)
+    assert live.reserve("user-box", start, end, user_id(ownership_scope), object(), **_browser_state(live))
     try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post(
-                f"/api/artifacts/{entry.artifact_id}/comments", params={"token": OWNER_TOKEN},
-                json=dict(delivery_policy="immediate", body="Too dark.", anchor_text=MARKDOWN, from_off=start, to_off=end, live_capture=True,
-                          client_id="user-box", region={"x": 0.2, "y": 0.2}))
+        response = await _post_region(entry, start, end)
 
         assert response.status_code == 200, response.text
         comment = response.json()["comment"]
         assert comment["image_src"] == str(image) and comment["region_number"] == 1
         assert live.range_text("user-box") == MARKDOWN
+    finally:
+        await manager.close()
+        app_loop.clear()
+
+
+@pytest.mark.asyncio
+async def test_browser_region_attaches_while_someone_types(ownership_scope, tmp_path, monkeypatch):
+    manager, entry, image = await _live_doc_with_image(ownership_scope, tmp_path, monkeypatch)
+    live = entry.live
+    start = live.text.index(MARKDOWN)
+    end = start + len(MARKDOWN)
+    try:
+        before_any_ask = _browser_state(live)
+        typing(entry, 0, insert="A")
+        # The first ask names a state nothing kept yet; the browser catches up and asks again while typing goes on.
+        assert not live.reserve("user-box", start, end, user_id(ownership_scope), object(), quote=MARKDOWN, **before_any_ask)
+        asked = _browser_state(live)
+        typing(entry, 0, insert="New intro. ")
+        typing(entry, len(live.text), insert=" more")
+        assert live.reserve("user-box", start + 1, end + 1, user_id(ownership_scope), object(), quote=MARKDOWN, **asked)
+        response = await _post_region(entry, start + 1, end + 1)
+
+        assert response.status_code == 200, response.text
+        comment = response.json()["comment"]
+        assert comment["image_src"] == str(image) and comment["region_number"] == 1
+        assert live.range_text("user-box") == MARKDOWN and live.ranges["user-box"][0] == start + 1 + len("New intro. ")
     finally:
         await manager.close()
         app_loop.clear()
