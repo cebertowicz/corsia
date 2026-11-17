@@ -140,3 +140,29 @@ def test_accepting_a_suggestion_on_a_deleted_line_is_refused_as_stale():
         suggestion_span(comment, NEW)
     assert refused.value.kind == "stale"
     assert refused.value.message == STALE_MESSAGE
+
+
+def test_a_short_start_of_the_next_line_is_not_evidence_that_the_commented_line_is_the_next_one():
+    # The stored context window is filled by the commented line, so only "- " of the next line was stored. The
+    # commented line itself starts with "- " too: a marker is not proof of whose line this is.
+    line = "- deploy queue merge and rebuild all.\n"
+    old = HEAD + line + "- docs\n" + TAIL
+    new = HEAD + "- deploy queue merge and rebuild everything.\n" + TAIL
+    comment = _stored(old, "deploy")
+    assert comment["anchor_suffix"].endswith("\n- ")
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
+    assert new[comment["from_off"]:comment["to_off"]] == "deploy"
+
+
+def test_a_short_end_of_the_line_above_is_not_evidence_that_the_commented_line_is_the_one_above():
+    # The line above and the start of the commented line were edited, so only its end still matches; that
+    # line also ends with a full stop, like the stored "." of the line above.
+    lead = "- " + "w" * 27 + " "
+    old = HEAD + "Alpha line one.\n" + lead + "deploy tail.\n" + TAIL
+    new = HEAD + "Alpha line two\n" + "- " + "x" * 27 + " " + "deploy tail.\n" + TAIL
+    comment = _stored(old, "deploy")
+    assert comment["anchor_prefix"].split("\n")[0] == "."
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
+    assert new[comment["from_off"]:comment["to_off"]] == "deploy"

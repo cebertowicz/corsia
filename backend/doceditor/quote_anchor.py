@@ -171,6 +171,15 @@ def reanchor_edited(
 
 _BLANK_LINES_AT_START = re.compile(r"\A(?:[ \t\r]*\n)+")
 _BLANK_LINES_AT_END = re.compile(r"(?:\n[ \t\r]*)+\Z")
+_MIN_IDENTIFYING_CHARS = 3
+
+
+def _identifies_a_line(fragment: str) -> bool:
+    """Whether a stored piece of the neighbouring line says which line it was.
+
+    A list marker, a ``#``, an indent or a closing full stop is shared by many lines, so it is no evidence.
+    """
+    return sum(ch.isalnum() for ch in fragment) >= _MIN_IDENTIFYING_CHARS
 
 
 def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suffix: str | None) -> bool:
@@ -186,7 +195,10 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
     whatever happened to its neighbours.
 
     Limit: it needs a line break inside the stored context (up to 32 characters each side), so a comment
-    inside a long line has none and the caller's matching rule stands unchanged. When the neighbouring
+    inside a long line has none and the caller's matching rule stands unchanged. So does a comment whose
+    context window is filled by its own line: what is left of the neighbouring line is then a marker or a
+    character or two (fewer than three letters or digits), which many lines share, so it counts for nothing.
+    When the neighbouring
     line was edited in the same rewrite its stored start no longer matches and this cannot tell it apart
     from the commented line itself edited.
     """
@@ -214,11 +226,11 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
         prev_end = seg_start - 1
     if suffix and "\n" in suffix:
         below = _BLANK_LINES_AT_START.sub("", suffix.split("\n", 1)[1])
-        if below and text.startswith(below, line_start) and not text.startswith(below, next_start):
+        if _identifies_a_line(below) and text.startswith(below, line_start) and not text.startswith(below, next_start):
             return True
     if prefix and "\n" in prefix:
         above = _BLANK_LINES_AT_END.sub("", prefix.rsplit("\n", 1)[0])
-        if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
+        if _identifies_a_line(above) and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
             return True
     return False
 
