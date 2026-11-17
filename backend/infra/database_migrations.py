@@ -256,6 +256,7 @@ from infra.migration_194_to_195_update_replacements import migrate_194_to_195
 from infra.migration_195_to_196_later_review_arm import migrate_195_to_196
 from infra.migration_196_to_197_closing_text_answers import migrate_196_to_197
 from infra.migration_197_to_198_browser_chip_domain import migrate_197_to_198
+from infra.migration_198_to_199_restart_dead_letter_codes import migrate_198_to_199
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -941,6 +942,7 @@ MIGRATIONS[194] = migrate_194_to_195
 MIGRATIONS[195] = migrate_195_to_196
 MIGRATIONS[196] = migrate_196_to_197
 MIGRATIONS[197] = migrate_197_to_198
+MIGRATIONS[198] = migrate_198_to_199
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
