@@ -305,6 +305,7 @@ def integration_client(integration_workspace):
     import llm.live_cost_map as live_cost_map
     import ws.presence_control as presence_control
     import infra.bulletin_live as bulletin_live
+    import plans.person_comment_recovery as person_comment_recovery
     from main import app
     from fastapi.testclient import TestClient
     from unittest.mock import patch
@@ -325,6 +326,7 @@ def integration_client(integration_workspace):
     _BACKGROUND_LOOPS = (
         (plan_liveness, "plan_liveness_sweep_loop"),
         (restart_startup, "run_startup_drive"),
+        (person_comment_recovery, "run"),
         (network_discovery, "health_sweep_loop"),
         (app_startup_runtime, "nightly_job_loop"),
         (app_startup_runtime, "idle_retirement_loop"),
