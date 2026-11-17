@@ -96,12 +96,13 @@ def _with_policy(repo: dict, policies: dict[str, RepoPolicy]) -> dict:
         and policy.path
         == Path(str(repo["path"])).expanduser().resolve(strict=False)
     )
+    bound_policy = policy if bound else None
     row["registered"] = bound
-    row["pinned_branch"] = policy.pinned_branch if bound else None
-    row["protect_base_checkout"] = policy.protect_base_checkout if bound else False
+    row["pinned_branch"] = bound_policy.pinned_branch if bound_policy else None
+    row["protect_base_checkout"] = bound_policy.protect_base_checkout if bound_policy else False
     # Current clients still render this derived response field. Mutations use
     # only the two canonical controls above.
-    row["branch_pinned"] = bool(bound and policy.branch_pinned)
+    row["branch_pinned"] = bool(bound_policy and bound_policy.branch_pinned)
     return row
 
 
