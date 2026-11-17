@@ -72,6 +72,14 @@
 	/** The comments control the list opened from; a list the canvas opened on load hangs from the header's control. */
 	const listEntry = $derived(anchor instanceof HTMLElement ? anchor : commentsEntry ?? bounds?.querySelector<HTMLElement>('[data-comments-entry]') ?? null);
 	const resolvedEntry = () => resolvedAnchor ?? bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null;
+	/** The list popover's area: the canvas, reaching across to a comments control drawn outside it (the app bar) and up only to that control's bottom edge, so the popover never reads the control as scrolled out and closes, and never rides up over the bar. */
+	const listBounds = () => {
+		const area = bounds?.getBoundingClientRect() ?? null;
+		const entry = listEntry && !bounds?.contains(listEntry) ? listEntry.getBoundingClientRect() : null;
+		if (!area || !entry) return area;
+		const left = Math.min(area.left, entry.left), top = Math.min(area.top, entry.bottom);
+		return new DOMRect(left, top, Math.max(area.right, entry.right) - left, area.bottom - top);
+	};
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: resolvedEntry, sheet: () => resolvedPlace === 'sheet' });
 	// A comment the reader picked, wrote or listed while the resolved list holds the column's place or a popover takes the canvas back; a change nobody asked for (the shown thread resolved elsewhere, a picked card let go) leaves the list open.
 	let lastOpened: number | undefined;
@@ -288,7 +296,7 @@
 		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list' && !image && !columnFits}
 		<!-- Below the column's threshold on a desktop canvas: a popover from the comments control, so nothing is dimmed or covered but the list itself. -->
-		<Popover anchor={listEntry} placement="bottom-end" {bounds} fill {covered} initialFocus={form.handoff ?? undefined} takeFocus={!form.redrawn || !!form.handoff} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isShellControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
+		<Popover anchor={listEntry} placement="bottom-end" bounds={listBounds} fill {covered} initialFocus={form.handoff ?? undefined} takeFocus={!form.redrawn || !!form.handoff} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isShellControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
 	{:else if surfaceState?.kind === 'list' && image}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer keepsText fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} ariaLabel={stackedTitle ?? "Document comments"} heading={sheet.state.kind === 'draft' ? 'New comment' : stackedTitle} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} actions={threadHead ? threadActions : undefined} compact={phone === true} doneIcon>{#if sheet.state.kind === 'thread'}<div class="sheet-thread" data-sheet-thread>{@render content()}</div>{:else}{@render content()}{/if}</AdaptiveDrawer>

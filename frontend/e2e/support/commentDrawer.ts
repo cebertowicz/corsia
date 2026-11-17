@@ -99,7 +99,7 @@ async function pressResolved(drawer: Locator): Promise<void> {
 }
 
 /** Closes the "Resolved" list: its sheet's Close button on a phone, otherwise its control in Details again. */
-async function closeResolved(drawer: Locator): Promise<void> {
+export async function closeResolved(drawer: Locator): Promise<void> {
 	const page = drawer.page();
 	const sheet = page.locator('[data-adaptive-drawer]').filter({ has: page.locator('.resolved-drawer') });
 	if (await sheet.count()) await sheet.getByRole('button', { name: 'Close', exact: true }).click();
