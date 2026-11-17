@@ -315,21 +315,6 @@ async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitab
                   "title": title if isinstance(title, str) else None})
 
 
-async def reopen_fresh(endpoint: str) -> None:
-    """Navigate the page to its own address again, replacing its history entry.
-
-    Nothing of the old entry is restored: not the back-forward cache's document, not form values.
-    """
-    async with CdpClient(endpoint) as cdp:
-        history = await cdp.call("Page.getNavigationHistory")
-        entries = history.get("entries")
-        index = protocol_int(history.get("currentIndex"))
-        url = entries[index].get("url") if isinstance(entries, list) and 0 <= index < len(entries) else None
-        if not isinstance(url, str) or not url:
-            raise BrowserSessionError("This page couldn't be checked")
-        await cdp.call("Page.navigate", url=url)
-
-
 async def page_endpoint(run: RunCommand) -> str:
     """The one resolver of a session's shared page target, for agent commands, probes and the pane.
 

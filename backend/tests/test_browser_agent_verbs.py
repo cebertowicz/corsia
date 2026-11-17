@@ -125,7 +125,7 @@ async def test_history_after_a_held_page_loads_the_page_fresh(saved, monkeypatch
     async def reopen_fresh(endpoint):
         reopened.append(endpoint)
 
-    monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
     visible = frozenset({7}) if held == "visible_password" else frozenset()
 
     async def probe(endpoint, _known):
@@ -157,7 +157,7 @@ async def test_history_in_a_session_that_held_no_page_does_not_reload(saved, mon
     async def reopen_fresh(_endpoint):
         raise AssertionError("a page nobody held is not reloaded")
 
-    monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
     assert await saved.owner.run("a", [direction]) == verbs.ACKNOWLEDGED
     await saved.owner.shutdown()
 
@@ -182,7 +182,7 @@ async def _held_page(saved, monkeypatch, reopened):
     async def reopen_fresh(endpoint):
         reopened.append(endpoint)
 
-    monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
     browser_step_lifecycle._answers["a"] = {("person", "earlier"): browser_step_lifecycle.Answer(1)}
     monkeypatch.setattr(browser_control, "require_page_access", _allow)
 
@@ -233,7 +233,7 @@ async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, 
         async def reopen_fresh(_endpoint):
             raise RuntimeError("target gone")
 
-        monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+        monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
     else:
         # The guard resolves the page once before the verb (the probe is skipped by _allow); the history check is next.
         monkeypatch.setattr(browser_cdp, failing, _fail_after(failing, browser_cdp, calls, 1 if failing == "page_endpoint" else 0))

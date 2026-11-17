@@ -232,6 +232,21 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     return _noted(rendered, note)
 
 
+async def reopen_fresh(endpoint: str) -> None:
+    """Navigate the page to its own address again, replacing its history entry.
+
+    Nothing of the old entry is restored: not the back-forward cache's document, not form values.
+    """
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        history = await cdp.call("Page.getNavigationHistory")
+        entries = history.get("entries")
+        index = browser_cdp.protocol_int(history.get("currentIndex"))
+        url = entries[index].get("url") if isinstance(entries, list) and 0 <= index < len(entries) else None
+        if not isinstance(url, str) or not url:
+            raise BrowserSessionError("This page couldn't be checked")
+        await cdp.call("Page.navigate", url=url)
+
+
 async def _fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:
     """Load a held page again after back or forward; if that can't be done, leave nothing readable.
 
@@ -241,7 +256,7 @@ async def _fresh_after_history(owner: Any, runtime: Any, thread_id: str, command
     try:
         endpoint = await browser_cdp.page_endpoint(command)
         await browser_control.reopen_held_page(
-            thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(browser_cdp.reopen_fresh, endpoint))
+            thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(reopen_fresh, endpoint))
     except BaseException:
         try:
             await command(("open", "about:blank"), 10)
