@@ -209,8 +209,9 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		// A narrow canvas, whatever the screen, gives the delivery Toggle its 44px target; a wide one keeps the desktop Toggle.
-		if (expectedNarrow) {
+		// The delivery Toggle is in Details: a window up to 768 px gives it its 44px target; a wider window keeps the desktop Toggle,
+		// whatever the canvas's width.
+		if (width <= 768) {
 			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 			// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
 			const hit = toggle.locator('.hit');
@@ -219,6 +220,8 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
 			console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
 			expect(track).toEqual({ width: 30, height: 17 });
+			const button = (await toggle.boundingBox())!;
+			expect({ width: button.width, height: button.height }, 'the switch button stays its track; only its hit area grows').toEqual({ width: 30, height: 17 });
 			expect(targetBox.height, 'actual delivery hit area').toBe(44);
 			expect(targetBox.width).toBe(44);
 			// The hit area outside the painted track activates the same single control.

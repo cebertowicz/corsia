@@ -6,9 +6,9 @@ import { createSession, loadPastFirstRunLanding } from '../support/corsia';
 import {
 	chatSend, chatSendGroup, deliveredBatches, headerSend, heldIn, imageBarSend, installWorkspace,
 	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, headerSent, headerSentStatus, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
-	shownHeaderSend,
+	shownHeaderSend, labelLines,
 } from '../support/heldComments';
-import { closeDetails, openDetails } from '../support/documentBar';
+import { backToChat, closeDetails, openDetails } from '../support/documentBar';
 import {
 	bar, commentOnRegion, expectBarFits, openDocument, openImage, overlay, putSheetAway, seedImageDocument,
 } from '../support/docImageComments';
@@ -526,7 +526,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await installWorkspace(page, threadId, [doc], 0);
 		await openThread(page, threadId, title);
 		await turnOffDocumentComments(page);
-		if (width === 393) await page.getByRole('button', { name: 'Chat', exact: true }).click();
+		if (width === 393) await backToChat(page).click();
 		else await page.getByRole('button', { name: 'Collapse Files' }).click();
 		const dock = page.locator('.chat-attention-stack .attention-dock');
 		await expect(dock).toBeVisible();
@@ -639,7 +639,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectSenders(page, ['header: Send 101 comments']);
 
 		// Back to chat: the document is no longer on screen, so the chat is the sender, on one line.
-		await page.getByRole('button', { name: 'Chat', exact: true }).click();
+		await backToChat(page).click();
 		await expect(chatSend(page)).toHaveText('Send 101 comments');
 		await expectOneLine(chatSend(page), 393);
 		await captureFrame(page, 'chat-101', '393');
@@ -707,17 +707,16 @@ async function expectOneLine(send: Locator, width: number) {
 		const box = button.getBoundingClientRect();
 		const text = range.getBoundingClientRect();
 		return {
-			// The words on screen: the short "Send 99+" in a tight row, the full label otherwise (the hidden one is display:none, so it is not in innerText).
+			// The words on screen: the short "Send 99+" in a tight row ("Send · 99+" in Details), the full label otherwise (the hidden one is display:none, so it is not in innerText).
 			visibleLabel: (button as HTMLElement).innerText.trim(),
-			lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
 			clipped: Math.max(text.right - box.right, box.left - text.left, 0),
 			right: box.right,
 			left: box.left,
 			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
 		};
 	});
-	expect(fit.visibleLabel, 'a purposeful Send label is visible').toMatch(/^Send (?:\d+|99\+)(?: comments?)?$/);
-	expect(fit.lines, 'the full accessible label is one line').toBe(1);
+	expect(fit.visibleLabel, 'a purposeful Send label is visible').toMatch(/^Send(?: | · )(?:\d+|99\+)(?: comments?)?$/);
+	expect(await labelLines(send), 'the full accessible label is one line').toBe(1);
 	expect(fit.clipped, 'the full accessible label is not clipped').toBeLessThanOrEqual(0);
 	expect(fit.left, 'inside the screen on the left').toBeGreaterThanOrEqual(0);
 	expect(fit.right, 'inside the screen on the right').toBeLessThanOrEqual(width + 0.5);

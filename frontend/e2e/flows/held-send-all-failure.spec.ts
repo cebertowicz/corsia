@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { test } from '../support/test';
 import { expect, type TestInfo } from '@playwright/test';
 import { createSession } from '../support/corsia';
-import { openDetails } from '../support/documentBar';
+import { backToChat, openDetails } from '../support/documentBar';
 import {
 	batchRows, chatSend, chatSendGroup, heldIn, installWorkspace, isolatedDb, openThread, seedHeldComments, seedTextDocument,
 	setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments, watchSendRequests,
@@ -53,7 +53,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			await installWorkspace(page, threadId, second ? [first, second] : [first], 0, { visible: false });
 			await openThread(page, threadId, title);
 			// On a phone the open document fills the screen; the chat is one tap away.
-			if (width === 393) await page.getByRole('button', { name: 'Chat', exact: true }).click();
+			if (width === 393) await backToChat(page).click();
 			await expect(chatSend(page)).toHaveText(many ? 'Send all 5 comments' : 'Send 2 comments');
 			if (refused) await page.route('**/api/doc-feedback/thread/send', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"Internal error"}' }));
 			else makeOwnerUnaddressable(threadId);
@@ -100,7 +100,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			await openThread(page, threadId, title);
 			if (width === 393) {
 				await turnOffDocumentComments(page);
-				await page.getByRole('button', { name: 'Chat', exact: true }).click();
+				await backToChat(page).click();
 			}
 			await expect(chatSend(page)).toHaveText('Send 2 comments');
 			makeOwnerUnaddressable(threadId);

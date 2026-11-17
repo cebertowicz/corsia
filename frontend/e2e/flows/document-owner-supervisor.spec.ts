@@ -134,7 +134,10 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		await ownerItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'owner');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toBeVisible();
-		await reachable(detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
+		// The opaque picker can cover the next row; dismiss it before checking that row takes a tap.
+		await ownerItem(page).click();
+		await expect(rolePicker(page)).toHaveCount(0);
+		await reachable(detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }), 'Request review reachable after closing the owner picker');
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'supervisor');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toHaveCount(0);

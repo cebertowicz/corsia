@@ -26,7 +26,7 @@ const FRAMES = process.env.CORSIA_SHEET_FRAMES;
 /** A table row many lines tall at 393: the press keeps only its top line above the sheet. */
 const TALL_CELL = 'The crossing at the second bridge needs a new sign, a wider step down to the gravel, a railing on the creek side, and a second look at the drainage after the spring rains have passed.';
 /** A paragraph two or three lines tall at 393: the press keeps all of it above the sheet. */
-const PASSAGE = 'Volunteers meet at the north gate at eight and bring their own gloves and water.';
+const PASSAGE = 'Volunteers meet at the north gate at eight and bring their own gloves and water, then check the trail signs together before the morning walk begins.';
 const FILLER = Array.from({ length: 24 }, (_, i) => `Section ${i + 1}: the crew walked this stretch, noted the surface, and moved on to the next marker without stopping.`);
 const DOC = [
 	'# Trail survey', '',
@@ -261,6 +261,7 @@ test.describe(`${TAG} document`, () => {
 		await tapOpen(page, passageMark(page));
 		const rest = await sheetNow(page), at = await place(passageMark(page));
 		expect(rest.cap, 'the sheet is held below its height to leave the passage room above it').not.toBe('');
+		expect(Number.parseFloat(rest.cap), 'the text cap is lower than the 82dvh ceiling').toBeLessThan(PHONE.height * 0.82);
 		expect(Math.abs(rest.height - Number.parseFloat(rest.cap)), `the sheet rests at its cap (${rest.height} vs ${rest.cap})`).toBeLessThanOrEqual(1);
 		expect(rest.hidden, 'and its thread runs on past what it shows').toBeGreaterThan(1);
 		await frame(page, 'capped-at-rest');

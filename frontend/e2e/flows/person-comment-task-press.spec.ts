@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -63,7 +64,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 		if (!narrow) return;
 		// A phone shows one surface; reopening the chat brings back the document it last showed, which replaces the chat
 		// header (and its plan chip) a moment after the chat paints. Go back to the chat, then open the plan from its chip.
-		const chat = page.getByRole('button', { name: 'Chat', exact: true });
+		const chat = backToChat(page);
 		await expect(async () => {
 			if (await chat.isVisible()) await chat.click({ timeout: 2000 });
 			await page.getByRole('button', { name: /^Open plan —/ }).click({ timeout: 2000 });
@@ -99,6 +100,10 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await openFromRow();
 	// The document opens with the task's bar: what waits, and only Dismiss all. No Done, no Won't do.
 	await expect(bar).toContainText('2 comments, 2 suggestions to review');
+	if (narrow) {
+		await expect(backToChat(page)).toHaveAccessibleName('Chat · Needs you');
+		await expect(page.getByTestId('back-needs-you-dot')).toBeVisible();
+	}
 	await expect(bar.getByRole('button', { name: 'Done', exact: true })).toHaveCount(0);
 	await expect(bar.getByRole('button', { name: 'Won’t do' })).toHaveCount(0);
 	await expect(bar.getByRole('button', { name: 'Dismiss all' })).toBeVisible();

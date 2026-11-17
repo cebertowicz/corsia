@@ -314,7 +314,8 @@ test('@flow:doc-margin-cards the column comes back when version history closes, 
 	await expect(page.locator('.cm-scroller')).toBeVisible();
 	await widen(page, doc);
 	await expect(card(page, doc, FIRST)).toBeVisible();
-	const history = page.getByRole('button', { name: 'History', exact: true });
+	// History sits in the Details panel and toggles the history drawer: open Details, as a person does, then press it.
+	const history = { click: async () => (await openDetails(page)).getByRole('button', { name: 'History', exact: true }).click() };
 	for (const close of ['the History button', 'the history drawer Close button'] as const) {
 		await history.click();
 		await expect(page.locator('[data-doc-history-drawer]')).toBeVisible();

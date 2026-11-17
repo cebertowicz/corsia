@@ -118,13 +118,13 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill.textContent).not.toContain('0');
 	});
 
-	it('names unsent feedback on the Comments button, with no dot; Send waits for held document comments', () => {
+	it('marks and names unsent feedback on the Comments button; Send waits for held document comments', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		const pill = host.querySelector('[data-comments-entry]');
 		expect(pill?.getAttribute('aria-label')).toBe('2 comments, 3 waiting for Send');
-		expect(pill?.querySelector('.unsent-dot')).toBeNull();
+		expect(pill?.querySelector('.unsent-dot')).not.toBeNull();
 		expect(host.textContent).not.toContain('Send 3 comments');
 		// Nothing is held back for the document, so no Send shows, not even clipped.
 		expect(host.querySelector('.sending-now')).toBeNull();

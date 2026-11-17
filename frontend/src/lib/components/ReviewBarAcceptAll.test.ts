@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
+import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
 
@@ -22,6 +23,7 @@ function read(comments = 0): ReviewBarRead {
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+let cardsComponent: Record<string, unknown> | null = null;
 async function render(pendingSuggestions: number, onAcceptAll?: () => Promise<number | void>) {
 	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', pendingSuggestions, onAcceptAll } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
@@ -38,7 +40,9 @@ beforeEach(() => {
 });
 afterEach(() => {
 	if (component) unmount(component);
+	if (cardsComponent) unmount(cardsComponent);
 	component = null;
+	cardsComponent = null;
 	host.remove();
 });
 
@@ -100,9 +104,11 @@ describe('ReviewBar accept all and approve', () => {
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']));
 	});
 
-	it('leaves pending suggestions undecided when sending back', async () => {
-		api.fetchReviewBar.mockResolvedValue(read(1));
-		api.answerReview.mockResolvedValue({ verdict: 'changes_requested', note: 'Tighten it', feedback_counts: counts(1) });
+	it('leaves pending suggestions undecided when sending back and shows the returned counts on the card', async () => {
+		const feedback = { comments: 2, suggestions: 1, edits: 0 };
+		api.fetchReviewBar.mockResolvedValue({ ...read(2), round_feedback_counts: feedback });
+		api.answerReview.mockResolvedValue({ verdict: 'changes_requested', note: 'Tighten it', feedback_counts: feedback });
+		cardsComponent = mount(MessageArtifactCards, { target: host, props: { threadId: 't1', cards: [{ kind: 'ask', artifact_id: 'doc-1', title: 'Launch plan', type: 'document', name: 'launch-plan.md', path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' }] } });
 		const accept = vi.fn(async () => {});
 		await render(2, accept);
 		button('Send back')!.click();
@@ -111,6 +117,7 @@ describe('ReviewBar accept all and approve', () => {
 		note.value = 'Tighten it'; note.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		[...host.querySelectorAll<HTMLButtonElement>('.rb-actions button')].find((b) => b.textContent?.trim() === 'Send back')!.click();
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'changes_requested', 'Tighten it', ['h1']));
+		await vi.waitFor(() => expect(host.querySelector('.tile .name')?.textContent).toBe('2 comments, 1 suggestion'));
 		expect(accept).not.toHaveBeenCalled();
 	});
 

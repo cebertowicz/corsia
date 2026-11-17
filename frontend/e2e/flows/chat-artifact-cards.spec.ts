@@ -230,7 +230,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await screenshot(page, `chat-chips-1440-${theme}-wrapped`);
 		});
 
-		test(`@surface:chat-cards settled counts show and yield at the phone width (${theme})`, async ({ page, request }, info) => {
+		test(`@surface:chat-cards an approved card settles at the phone width (${theme})`, async ({ page, request }, info) => {
 			test.skip(info.project.name !== 'chromium-mobile', 'phone is proved by the mobile project');
 			await setFocusMode(request, true);
 			const artifact = await seedArtifact(request, `Chat settled ${theme}`);
@@ -238,14 +238,15 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.route('**/api/attention/*/clear', (route) => route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ review: { verdict: 'approved_with_changes', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }),
+				body: JSON.stringify({ review: { verdict: 'approved', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }),
 			}));
 			await openTranscript(page, artifact, 393, theme);
 			const row = card(page, artifact);
 			await row.click();
 			await page.locator('[data-ask-card]').getByRole('button', { name: 'Approve', exact: true }).click();
-			await expect(row).toHaveAttribute('data-card-state', 'approved_with_changes');
-			await expect(row).toContainText('2 comments, 1 suggestion');
+			await expect(row).toHaveAttribute('data-card-state', 'approved');
+			await expect(row).toContainText('Approved');
+			await expect(row).not.toContainText('2 comments, 1 suggestion');
 			await screenshot(page, `chat-card-settled-counts-${theme}`);
 		});
 

@@ -177,6 +177,21 @@ const SEND_NAME = /^Send( all)? \d+ comments?( to .+)?$/;
  * `shownHeaderSend` (or `openDetails`) has opened Details.
  */
 export const headerSend = (page: Page): Locator => page.locator('.document-header').getByRole('button', { name: SEND_NAME, includeHidden: true });
+/**
+ * How many lines a control's label is drawn on: the distinct tops of its text's own line boxes. Element boxes are left out, since a
+ * span's box starts above its text by the half-leading whenever the line height is taller than the font's (a 1.5 line height puts
+ * them 2px apart), which would count one line twice. Hidden text (display:none) draws no box.
+ */
+export const labelLines = (control: Locator): Promise<number> => control.evaluate((root) => {
+	const tops = new Set<number>();
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+		const range = document.createRange();
+		range.selectNodeContents(node);
+		for (const rect of range.getClientRects()) if (rect.width > 0) tops.add(Math.round(rect.top));
+	}
+	return tops.size;
+});
 /** Opens the open document's Details, as a person does to reach its Send, and returns that Send. */
 export async function shownHeaderSend(page: Page): Promise<Locator> {
 	await openDetails(page);

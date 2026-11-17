@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import {
@@ -80,7 +81,7 @@ for (const [width, label, project] of [[1440, 'desktop', 'chromium-desktop'], [3
 		// The kept draft is the one that reaches the server.
 		await expect.poll(() => serverText(request, a), { timeout: 10_000 }).toContain(' edited A still A');
 		if (label === 'compact') {
-			await page.getByRole('button', { name: 'Chat', exact: true }).click();
+			await backToChat(page).click();
 			await revealWorked(page);
 			await expect(page.getByText('Already open.', { exact: true })).toBeVisible();
 		}

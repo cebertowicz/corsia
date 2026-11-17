@@ -165,7 +165,8 @@ for (const { width, scheme, resolved } of CASES) {
 			expect.soft(fit.sideways, `${label}: Details does not scroll sideways`).toBeLessThanOrEqual(1);
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), fullPage: false });
 			await closeDetails(page);
-			await expectCountsWhole(page, await measureBar(page), label, { threads: resolved, unread: 0, needs: 1 });
+			// The Comments button counts open threads, and all three are resolved.
+			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1 });
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			return;
 		}
@@ -354,8 +355,8 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
  * enough to split); an ask whose card is hidden under the comment sheet (a touch screen: a phone, or one held sideways). So it
  * reads 1 at every width (Overdue), 2 where the canvas splits (File changed joins), at most 2 on a compact canvas (File changed is
  * the bar's own mark there), and 3 only on a touch screen held sideways whose canvas splits. File changed comes from a second
- * writer: a skill file opens without live editing (an agent saving an instruction file the reader has open), so the save is a
- * change the reader is told about rather than merged into their text.
+ * writer: a document in a skill's evals folder is guidance and opens without live editing (an agent saving a file the reader has
+ * open), so the save is a change the reader is told about rather than merged into their text.
  */
 const NEEDS_CASES = [
 	{ name: 'a split canvas on a desktop window', project: 'chromium-desktop', width: 1440, height: 900, split: true, sheet: false, max: 2 },
@@ -363,22 +364,26 @@ const NEEDS_CASES = [
 	{ name: 'a phone held sideways (split canvas)', project: 'chromium-mobile', width: 915, height: 412, split: true, sheet: true, max: 3 },
 ] as const;
 
-/** A skill file the thread owns: it opens without live editing, so another writer's save shows File changed. */
+/**
+ * A document in a skill's evals folder that the thread owns, with one comment: guidance, so it opens without live editing and another
+ * writer's save shows File changed; a document, so an ask can name it (a SKILL.md registers as a skill, which an ask cannot).
+ */
 async function seedSkillDocument(page: Page, threadId: string, title: string) {
 	const params = { token: TEST_TOKEN };
 	const tree = await page.request.get('/api/files/tree', { params });
 	const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
-	const folder = path.join(workspace, '.threads', threadId, 'skills', title);
+	const folder = path.join(workspace, '.threads', threadId, 'skills', title, 'evals');
 	mkdirSync(folder, { recursive: true });
-	const docPath = path.join(folder, 'SKILL.md');
-	const text = `---\nname: ${title}\ndescription: A skill whose header counts what needs the reader.\n---\n\n${TEXT}`;
+	const docPath = path.join(folder, 'review-notes.md');
+	const text = TEXT;
 	const seeded = await page.request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
-	const artifactId: string = (await seeded.json()).artifact.id;
+	const artifact = (await seeded.json()).artifact;
+	const artifactId: string = artifact.id;
 	const quoted = 'ordinary prose', from = text.indexOf(quoted);
 	const comment = await page.request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 	expect(comment.ok(), await comment.text()).toBeTruthy();
-	return { artifactId, path: docPath, fileName: 'SKILL.md', text };
+	return { artifactId, path: docPath, fileName: 'review-notes.md', text };
 }
 
 /** The canvas's measured mode, as the bar reads it: compact puts File changed in the bar. */

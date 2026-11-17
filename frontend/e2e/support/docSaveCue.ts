@@ -61,10 +61,10 @@ export async function observeSaveCue(page: Page) {
 	await page.evaluate(() => {
 		const samples: Array<{ at: number; cue: string; visible: boolean; stale: boolean; disconnected: boolean }> = [];
 		const sample = () => {
-			// The save line is in the Details panel; it counts as seen only while a person could see it (the panel open).
-			const cue = document.querySelector<HTMLElement>('.document-header .p-quiet');
-			samples.push({ at: performance.now(), cue: cue?.textContent?.trim() ?? '',
-				visible: Boolean(cue?.checkVisibility({ visibilityProperty: true })),
+			const cue = document.querySelector<HTMLElement>('.save-ghost');
+			const style = cue ? getComputedStyle(cue) : null;
+			samples.push({ at: performance.now(), cue: cue?.textContent ?? '',
+				visible: Boolean(cue && style?.display !== 'none' && style?.visibility !== 'hidden'),
 				stale: Boolean(document.querySelector('.stale-control')),
 				disconnected: document.body.textContent?.includes('Disconnected') ?? false });
 			(window as any).__saveCueSamples = samples;
@@ -79,5 +79,5 @@ export async function cueSamples(page: Page): Promise<Array<{ at: number; cue: s
 export async function expectQuietSave(page: Page) {
 	const frames = await cueSamples(page);
 	expect(frames.filter(frame => frame.visible && frame.cue !== ''), 'no cue appeared on any animation frame').toEqual([]);
-	await expect(page.locator('.document-header .p-quiet')).toHaveCount(0);
+	await expect(page.locator('.save-ghost')).toHaveCount(0);
 }

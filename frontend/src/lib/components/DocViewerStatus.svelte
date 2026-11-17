@@ -3,18 +3,16 @@
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import DocOwnerControl from './DocOwnerControl.svelte';
 	import MiddleName from './MiddleName.svelte';
-	import type { DocOwnership } from '$lib/api/docOwnership';
-	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
-	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
+	import type { DocViewerStatusProps } from './docViewerStatusProps';
 	import DocReviewControls from './DocReviewControls.svelte';
 	import { Button, Toggle } from '$lib/components/ui';
-	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
-	import { publishDocumentBar, type DocumentAsk } from '$lib/stores/documentBar';
+	import { publishDocumentBar } from '$lib/stores/documentBar';
 	import { canvasCompact } from '$lib/stores/artifactCanvas';
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
@@ -61,59 +59,7 @@
 		onOpenResolved,
 		commentsEntry = $bindable(null),
 		detailsEntry = $bindable(null),
-	}: {
-		presence?: import('svelte').Snippet;
-		/** The ask's card, docked to the canvas's bottom edge; its buttons come before the document in tab order. */
-		reviewBar?: import('svelte').Snippet;
-		ask?: DocumentAsk | null;
-		commentsOpen?: boolean;
-		commentsLoading?: boolean;
-		saveStatus?: 'idle' | 'saving' | 'saved';
-		ready: boolean;
-		stale: boolean;
-		readonly: boolean;
-		commentCount: number;
-		unreadCount?: number;
-		artifactId: string | null;
-		targetInstanceId: string | null;
-		viewingThreadId?: string | null;
-		reviewTargetKey?: string | null;
-		onReload?: () => void;
-		onOpenComments: (opener: HTMLElement) => void;
-		freshness: DocumentFreshness | null;
-		/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
-		ownership?: DocOwnership | null;
-		/** The row is the one this tab last showed, drawn before the load answered: its owner pickers and Mark verified wait for the load. */
-		headerStandIn?: boolean;
-		onOwnershipChanged?: (value: DocOwnership) => void;
-		onFeedbackChanged?: () => void | Promise<void>;
-		onMarkVerified?: () => Promise<void>;
-		liveSession?: LiveDocumentSession | null;
-		openRefusal?: DocOpenRefusal | null;
-		liveUnavailable?: LiveUnavailable | null;
-		tabText?: string;
-		onReopen?: () => void;
-		onRead?: () => void;
-		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
-		imageOpen?: boolean;
-		/** The document is not on screen (an image covers it, or it is still being put back): the bar draws none of its controls, as none of it takes input. */
-		offScreen?: boolean;
-		activityRoot?: HTMLElement | null;
-		/** The file has recorded versions (slice 1: instruction files). Without them there is no History, and no count. */
-		historyAvailable?: boolean;
-		historyOpen?: boolean;
-		onOpenHistory?: () => void;
-		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
-		resolvedCount?: number;
-		resolvedOpen?: boolean;
-		/** The resolved list opens in the margin column's place, a plain region rather than a dialog. */
-		resolvedInColumn?: boolean;
-		onOpenResolved?: () => void;
-		/** The Comments button wherever the bar draws it: the list the canvas opens on its own hangs from it. */
-		commentsEntry?: HTMLButtonElement | null;
-		/** The Details button: what a list or picker opened from inside the closed panel returns to. */
-		detailsEntry?: HTMLButtonElement | null;
-	} = $props();
+	}: DocViewerStatusProps = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
 	let verifying = $state(false);
@@ -259,11 +205,14 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
+	<!-- The transient save cue, in text, before Comments as on dev. Where File changed's reload mark is in the bar it yields to it, so the name keeps its room. -->
+	{#if saveStatus !== 'idle'}<span class="save-ghost bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
 		aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
 		<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
-		<!-- A count in text, never a dot: unread reads "25 new". -->
+		<!-- Unread is text; the separate dot marks comments waiting for Send. -->
 		{#if !ready || commentsLoading}<span>…</span>{:else if unreadCount}<span class="bar-new">{unreadCount} new</span>{:else}<span>{commentCount}</span>{/if}
+		{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
@@ -295,7 +244,8 @@
 				<span class="p-text"><span class="p-label">Status:</span> <time datetime={freshnessPresentation.datetime}>{statusText}{#if freshnessPresentation.dateText && !statusText.includes(freshnessPresentation.dateText)}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time></span>
 				{#if freshness && shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>{/if}
 			</div>{/if}
-			{#if saveStatus !== 'idle'}<div class="p-row p-quiet" role="status">{saveStatus === 'saving' ? 'Saving…' : 'Saved'}</div>{/if}
+			<!-- The bar says Saving… while it saves; Details keeps the settled state. -->
+			{#if saveStatus === 'saved'}<div class="p-row p-quiet" role="status">Saved</div>{/if}
 			{#if readonly && ready}<div class="p-row readonly-note">Read-only</div>{/if}
 		</div>
 		{#if ownership && artifactId}<div class="p-section p-owner" class:held={headerStandIn} data-ownership-row>{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
@@ -334,9 +284,14 @@
 	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
+	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
 	.bar-details { padding: 0 var(--space-2); }
 	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }
+	/* The save cue is text, not the old pill: no fill, border or padding. */
+	.bar-tools .bar-save { min-height: 0; padding: 0; border: 0; background: none; color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; }
+	.bar-tools .bar-save:not(.saving) { color: var(--green); }
+	.bar-tools .bar-save.yields { display: none; }
 	.bar-needs { color: var(--amber-text); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.bar-reload { width: var(--touch-target); height: var(--touch-target); padding: 0; color: var(--amber-text); }
 	.bar-reload svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -366,10 +321,17 @@
 	/* A remembered row waiting for its load is drawn exactly as the loaded one; its controls only don't act yet. */
 	.p-owner.held :global(button:disabled) { opacity: 1; cursor: default; }
 	/* Send and Request review are text actions in the panel, starting at its text edge: no outline, inset or centring. */
-	.doc-panel :global(button:not([role="switch"])) { justify-content: flex-start; }
+	/* The delivery switch (Toggle, class tg) keeps its own track-sized box; its hit area comes from --toggle-hit. */
+	.doc-panel :global(button:not(.tg)) { justify-content: flex-start; }
 	.doc-panel.doc-panel :global(.btn.btn) { padding-inline: 0; border-width: 0; }
 	.p-send :global(button), .p-review :global(.review-request) { min-height: inherit; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--text-primary); font: inherit; }
-	.p-review :global(.review-controls) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; }
+	.p-send :global(.sending-now) { flex: 1 1 auto; width: 100%; min-width: 0; }
+	.p-send :global(.sending-now > .btn) { width: 100%; min-width: 0; }
+	.p-send :global(.btn.btn) { background: none; color: var(--text-primary); }
+	.p-send :global(button) { font-weight: var(--fw-medium); line-height: normal; }
+	/* The review controls pass the row's height down, so Request review and the reviewers are row-tall targets, not text-tall. */
+	.p-review :global(.review-controls) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; min-height: inherit; }
+	.p-review :global(.reviewer-group) { min-height: inherit; }
 	.p-review :global(.review-request) { order: -1; }
 	.p-review :global(.review-request svg) { display: none; }
 	.p-review :global(.review-request .label) { display: inline; }
@@ -383,6 +345,6 @@
 	.p-presence:not(:has(:global(.presence-row))) { display: none; }
 	@media (max-width: 768px) {
 		.p-row { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
-		.doc-panel :global(button:not([role="switch"])), .p-review :global(.review-request) { min-height: var(--touch-target); min-width: var(--touch-target); }
+		.doc-panel :global(button:not(.tg)), .p-review :global(.review-request) { min-height: var(--touch-target); min-width: var(--touch-target); }
 	}
 </style>

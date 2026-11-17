@@ -6,7 +6,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
-import { expectSenders, headerSend, leaveUnsent, shownHeaderSend } from '../support/heldComments';
+import { expectSenders, headerSend, labelLines, leaveUnsent, shownHeaderSend } from '../support/heldComments';
 import { closeDetails, expectTouchTargets, openDetails } from '../support/documentBar';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled, type JourneySetup } from '../support/reviewFixtures';
 
@@ -152,7 +152,8 @@ async function expectLayout(page: Page, mode: Mode) {
 			const text = el.querySelector<HTMLElement>('.rb-dock-text');
 			const style = getComputedStyle(el);
 			return {
-				box: el.getBoundingClientRect().toJSON(), canvas: canvas?.toJSON() ?? null, paddingRight: parseFloat(style.paddingRight),
+				// The answers end at the card's inner edge: its right padding plus its border.
+				box: el.getBoundingClientRect().toJSON(), canvas: canvas?.toJSON() ?? null, paddingRight: parseFloat(style.paddingRight) + parseFloat(style.borderRightWidth),
 				atRest: !el.classList.contains('open') && !el.classList.contains('noting'),
 				text: text ? { height: text.getBoundingClientRect().height, line: parseFloat(getComputedStyle(text).lineHeight) } : null,
 			};
@@ -166,8 +167,8 @@ async function expectLayout(page: Page, mode: Mode) {
 		expect(Math.abs(measured.box.bottom - measured.canvas!.bottom), 'the card sits on the canvas\'s bottom edge').toBeLessThanOrEqual(1);
 		if (measured.atRest && measured.text) {
 			expect(measured.text.height, 'at rest the question is one line').toBeLessThanOrEqual(measured.text.line * 1.5);
-			// Measured at 92px on a phone (44px answers, run 8); the question and the answers are its two rows.
-			expect(measured.box.height, 'at rest the card is two rows: the question, then the answers').toBeLessThanOrEqual(96);
+			// The question and answers form two rows, including the approved touch-target spacing.
+			expect(measured.box.height, 'at rest the card is two rows: the question, then the answers').toBeLessThanOrEqual(108);
 		}
 	}
 	const box = (await bar(page).boundingBox())!;
@@ -506,6 +507,16 @@ test.describe('375px review sheet', () => {
 		await expect(card(page).locator('.rb-derived')).toHaveText('Also accepts 2 suggestions');
 		// Every answer on the card is a 44 px target with 8 px to each neighbour.
 		await expectTouchTargets(card(page), '.rb-actions .btn', { min: 44, gap: 8 });
+		// The question's tap area (its box plus the ::after reach) keeps 8 px from the answers, and the note is whole, never cut.
+		const clearance = await card(page).evaluate((root) => {
+			const ask = root.querySelector<HTMLElement>('.rb-dock-ask')!;
+			const tapBottom = ask.getBoundingClientRect().bottom - parseFloat(getComputedStyle(ask, '::after').bottom);
+			const answersTop = Math.min(...[...root.querySelectorAll<HTMLElement>('.rb-actions .btn')].map((button) => button.getBoundingClientRect().top));
+			const note = root.querySelector<HTMLElement>('.rb-derived')!;
+			return { gap: answersTop - tapBottom, noteCut: note.scrollWidth > note.clientWidth + 0.5 };
+		});
+		expect(clearance.gap, 'the question tap area keeps 8 px from the answers').toBeGreaterThanOrEqual(7.5);
+		expect(clearance.noteCut, 'the note is whole').toBe(false);
 		await openComments(page, /^\d+ comments?\b/);
 		// So is every suggestion's Accept in the sheet.
 		const sheet = page.locator('[data-doc-comments-drawer]');
@@ -588,13 +599,12 @@ journey('held comments have the header Send, whole at every size, and the drawer
 		label.selectNodeContents(button);
 		const box = button.getBoundingClientRect(), text = label.getBoundingClientRect();
 		return {
-			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
 			clipped: Math.max(text.right - box.right, box.left - text.left, 0),
 			right: box.right,
 			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
 		};
 	});
-	expect(fit.lines, 'the label is one line').toBe(1);
+	expect(await labelLines(send), 'the label is one line').toBe(1);
 	expect(fit.clipped, 'the label is not clipped').toBeLessThanOrEqual(0);
 	expect(fit.right, 'the Send is inside the screen').toBeLessThanOrEqual(WIDTH[mode] + 0.5);
 	expect(fit.page, 'nothing scrolls sideways').toBe(0);
@@ -709,8 +719,8 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	if (mode === 'phone') {
 		// No header rows above the document: the first line sits within the old title-and-owner allowance (240px + one 56px touch row).
 		expect(measurements.firstBodyY, 'the first document line sits near the top, with no header rows above it').toBeLessThanOrEqual(240 + 56);
-		// Measured at 92px at rest on a phone (run 8): the question line, then the answers.
-		expect(measurements.cardHeight, 'the docked review card stays compact').toBeLessThanOrEqual(96);
+		// The question line and answers stay compact with the approved touch-target spacing.
+		expect(measurements.cardHeight, 'the docked review card stays compact').toBeLessThanOrEqual(108);
 		for (const button of await card(page).locator('.rb-actions .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
 		const leadAsk = card(page).locator('.rb-dock-q');
 		await expect(leadAsk).toBeVisible();

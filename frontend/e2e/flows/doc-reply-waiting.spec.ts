@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'nod
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeComments } from '../support/commentDrawer';
+import { togglePanel } from '../support/documentBar';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import { createSession, loadPastFirstRunLanding, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
@@ -218,7 +219,9 @@ async function shot(page: Page, name: string, chatRows = 4): Promise<void> {
 // The document is on screen with its text drawn and its comment count read.
 async function documentReady(page: Page): Promise<void> {
 	await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ comments?\b/ })).toBeVisible();
+	// The Comments button sits in the bar that holds the canvas, outside the viewer.
+	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^\d+ comments?\b/);
+	await expect(page.locator('[data-comments-entry]')).toBeVisible();
 }
 
 // The frames belong to the replier's thread, not the conductor landing the app opens on.
@@ -452,9 +455,10 @@ for (const theme of ['light', 'dark'] as const) {
 				// The artifact row remains mounted in the hidden pane while the document is active.
 				await expect(replyMark).toHaveCount(1);
 				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
-				await page.getByRole('button', { name: 'Toggle panel' }).click();
+				// With the document open on a phone, Toggle panel is Show panel in Details until the panel is open.
+				await togglePanel(page);
 				await expect(replyMark).toBeVisible();
-				await page.getByRole('button', { name: 'Toggle panel' }).click();
+				await togglePanel(page);
 			} else {
 				await expect(replyMark).toBeVisible();
 				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);

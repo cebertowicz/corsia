@@ -1,9 +1,9 @@
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
-import { closeDetails, expectOneRow, openDetails } from '../support/documentBar';
+import { closeDetails, expectOneRow, openDetails, openFilesButton } from '../support/documentBar';
 import {
-	deliveredBatches, headerSend, heldIn, installWorkspace, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
+	deliveredBatches, headerSend, heldIn, installWorkspace, labelLines, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
 	type TextDocument,
 } from '../support/heldComments';
 
@@ -18,7 +18,7 @@ async function addUserComment(request: Parameters<typeof createSession>[0], arti
 // Narrow viewports keep tabs in the compact sheet; its close uses the same path.
 async function tabControl(page: Page, fileName: string, action: 'close' | 'select'): Promise<Locator> {
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: /^Files \(/ }).click();
+		await openFilesButton(page).click();
 		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		return action === 'close'
 			? sheet.getByRole('button', { name: `Close ${fileName}` })
@@ -80,19 +80,16 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	const layout = await headerSend(page).evaluate((send) => {
 		const panel = send.closest<HTMLElement>('.doc-panel')!;
 		const inside = (element: Element | null) => { if (!element) return false; const box = element.getBoundingClientRect(), bounds = panel.getBoundingClientRect(); return box.width > 0 && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5; };
-		const label = send.ownerDocument.createRange();
-		label.selectNodeContents(send);
 		return {
 			review: inside(panel.querySelector('.review-request')),
 			send: inside(send),
 			sideways: panel.scrollWidth - panel.clientWidth,
-			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
 		};
 	});
 	expect(layout.review, 'Request review sits whole inside Details').toBe(true);
 	expect(layout.send, 'the header Send sits whole inside Details').toBe(true);
 	expect(layout.sideways, 'Details does not scroll sideways').toBeLessThanOrEqual(1);
-	expect(layout.lines, 'the header Send reads on one line').toBe(1);
+	expect(await labelLines(headerSend(page)), 'the header Send reads on one line').toBe(1);
 	await expect(panel).toBeVisible();
 
 	// The header Send is the batch's own Send: one send, then it goes.

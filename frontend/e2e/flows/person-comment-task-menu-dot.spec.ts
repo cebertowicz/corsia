@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -53,7 +54,7 @@ test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, 
 
 	// Dismiss all from the file task's row menu (long-press), as a phone does.
 	await sidebarThread(page, title).click();
-	const chat = page.getByRole('button', { name: 'Chat', exact: true });
+	const chat = backToChat(page);
 	await expect(async () => {
 		if (await chat.isVisible()) await chat.click({ timeout: 2000 });
 		await page.getByRole('button', { name: /^Open plan —/ }).click({ timeout: 2000 });

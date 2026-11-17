@@ -14,13 +14,14 @@ const INSET = 24;
 const SAFE_TOP = 59;
 const TEXT = '# Heading padding probe\n\nA paragraph of ordinary prose that is long enough to wrap onto a second and a third line at phone width, so both edges of the text column are visible.\n\n| Name | Value |\n| --- | --- |\n| alpha | one |\n| beta | two |\n\nTail line here.\n';
 
-// A fine pointer keeps today's layout at any width, narrow windows included.
-const WIDTHS = [393, 1440, 560];
+// A fine pointer keeps today's layout at any width, narrow windows included. A touch pointer runs the phone widths.
+const PHONE_WIDTHS = [393, 375, 320];
+const WIDTHS = [...PHONE_WIDTHS, 1440, 560];
 
 for (const width of WIDTHS) {
 	test(`@flow:doc-canvas-phone-padding ${width}px: the text keeps equal side insets and the header clears the app header`, async ({ page }, info) => {
 		const mobile = info.project.name.includes('mobile');
-		test.skip(mobile !== (width === 393), 'a touch pointer runs the phone width; a fine pointer runs the desktop widths');
+		test.skip(mobile !== PHONE_WIDTHS.includes(width), 'a touch pointer runs the phone widths; a fine pointer runs the desktop widths');
 		await page.setViewportSize({ width, height: mobile ? 852 : 960 });
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		const request = page.request;
@@ -64,7 +65,8 @@ for (const width of WIDTHS) {
 			left: number; right: number; padLeft: number; padRight: number;
 			anchor: { left: number; top: number; height: number };
 			scrollerLeft: number; gutter: number;
-			headerTop: number; appHeaderBottom: number; toolsHit: boolean;
+			headerTop: number; headerHeight: number; appHeaderBottom: number; toolsHit: boolean;
+			textTop: number; canvasPadding: number;
 		}>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
 			const line = [...document.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.startsWith('A paragraph'))!;
 			const rect = line.getBoundingClientRect();
@@ -72,6 +74,8 @@ for (const width of WIDTHS) {
 			const content = getComputedStyle(document.querySelector('.cm-content')!);
 			const anchor = document.querySelector<HTMLElement>('.cm-comment-anchor')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
+			// The canvas's own top padding: the document's (.doc) and the leaf body's that holds it.
+			const padTop = (selector: string) => Number.parseFloat(getComputedStyle(document.querySelector(selector)!).paddingTop);
 			const tool = document.querySelector<HTMLElement>('[data-document-details]')!;
 			const tools = tool.getBoundingClientRect();
 			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
@@ -81,7 +85,9 @@ for (const width of WIDTHS) {
 				anchor: { left: anchor.left, top: anchor.top, height: anchor.height },
 				scrollerLeft: scroller.left,
 				gutter: Number.parseFloat(getComputedStyle(document.querySelector('.leaf-body.document-canvas')!).paddingLeft),
-				headerTop: header.top, appHeaderBottom: document.querySelector('.shell-header')!.getBoundingClientRect().bottom,
+				headerTop: header.top, headerHeight: header.height, appHeaderBottom: document.querySelector('.shell-header')!.getBoundingClientRect().bottom,
+				textTop: document.querySelector('.doc-main')!.getBoundingClientRect().top,
+				canvasPadding: padTop('.doc') + padTop('.leaf-body.document-canvas'),
 				toolsHit: !!hit?.closest('[data-document-details]'),
 			});
 		}))));
@@ -95,6 +101,10 @@ for (const width of WIDTHS) {
 			expect(measured.anchor.left, 'the highlight is inside the text column').toBeGreaterThanOrEqual(measured.scrollerLeft + measured.left);
 			expect(measured.appHeaderBottom, 'the app header is taller than its nominal height by the safe area').toBeGreaterThan(64);
 			expect(measured.headerTop, 'the document header starts below the app header').toBeGreaterThanOrEqual(measured.appHeaderBottom);
+			// Nothing waits here, so the document adds no row above its text: the text starts at the app header's bottom plus the
+			// canvas padding, with no empty header row or gap between.
+			expect(measured.headerHeight, 'the empty document header has no height').toBeLessThanOrEqual(1);
+			expect(Math.abs(measured.textTop - (measured.appHeaderBottom + measured.canvasPadding)), `the text (${measured.textTop}) starts at the app header (${measured.appHeaderBottom}) plus the canvas padding (${measured.canvasPadding})`).toBeLessThanOrEqual(0.5);
 			expect(measured.toolsHit, 'the document controls (Details) are not covered').toBe(true);
 			// A tap on the highlight opens the thread rather than placing a caret.
 			await page.mouse.click(measured.anchor.left + 6, measured.anchor.top + measured.anchor.height / 2);

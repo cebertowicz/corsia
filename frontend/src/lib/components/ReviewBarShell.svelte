@@ -226,12 +226,16 @@
 	.rb-dock .rb-status { flex: 1 0 100%; }
 	.rb-dock .rb-status:empty { display: none; }
 	.rb-dock.named .rb-status { order: 3; }
-	/* What Approve also does: left-aligned under the question, one line beside the answers at rest, whole when opened. */
-	.rb-dock :global(.rb-derived) { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	/* What Approve also does: left-aligned under the question and never cut. Beside the answers while its whole text fits there, else on its own line above them. */
+	.rb-dock :global(.rb-derived) { flex: 1 1 auto; width: max-content; max-width: 100%; min-width: 0; margin: 0; }
 	.rb-dock.open :global(.rb-derived) { flex-basis: 100%; white-space: normal; }
 	.rb-dock :global(.rb-actions) { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-4); flex: 0 0 auto; margin-left: auto; }
 	.rb-dock.noting :global(.rb-note) { flex: 1 0 100%; height: auto; min-height: var(--space-6); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
-	@media (any-pointer: coarse), (max-width: 48rem) { .rb-dock :global(.btn) { min-height: var(--touch-target); } }
+	/* Touch: 44px answers, and the question's tap area (8px below its line) keeps 8px clear of the answers' row. */
+	@media (any-pointer: coarse), (max-width: 48rem) {
+		.rb-dock :global(.btn) { min-height: var(--touch-target); }
+		.rb-dock:not(.named) .rb-dock-ask { margin-bottom: var(--space-3); }
+	}
 	.rb-dock.receipt, .rb-dock.stale { flex-wrap: nowrap; column-gap: var(--space-2); padding-top: var(--space-2); }
 	.rb-dock .rb-receipt { flex: 1 1 0; min-width: 0; color: var(--text-secondary); }
 	.rb-dock .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
