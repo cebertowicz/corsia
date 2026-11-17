@@ -3,7 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { setDeliveryPreference } from '../support/heldComments';
-import { editorPlace, openLiveDocument, type LiveDocument } from '../support/liveDocument';
+import { editorPlace, inEditorView, openLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, designateConductor } from '../support/sharedLiveDocument';
 import { layouts } from '../support/liveConcurrency';
 import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses, waitForThreadReply } from '../support/mock';
@@ -74,22 +74,36 @@ async function shownCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
 }
 
-/** Scrolls the editor to `text` in its document, then counts it where a reader would see it: CodeMirror draws only the lines near the view. */
-async function shownAtItsPlace(page: Page, text: string): Promise<number> {
-	await page.evaluate((text) => new Promise<void>((resolve) => {
-		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
-		const view = content?.cmTile?.root.view;
-		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+/**
+ * Scrolls the editor so `text` in its document sits mid-view, then waits two frames for CodeMirror to draw there.
+ * The scroll is a view effect only (no change, no selection), so it never reveals typed text.
+ */
+async function scrollToText(page: Page, text: string): Promise<void> {
+	await inEditorView(page, (view, text) => new Promise<void>((resolve) => {
 		const at = (view.state.doc.toString() as string).indexOf(text);
 		if (at >= 0) view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
 		requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 	}), text);
+}
+
+/** Scrolls the editor to `text` in its document, then counts it where a reader would see it: CodeMirror draws only the lines near the view. */
+async function shownAtItsPlace(page: Page, text: string): Promise<number> {
+	await scrollToText(page, text);
 	return shownCount(page, text);
 }
 
 /** A drawn count of 0 is the reveal hiding text only if the text is in the viewer's document and inside the drawn range. */
 async function expectHeldBack(page: Page, text: string): Promise<void> {
 	expect(await editorPlace(page, text), `${text} is in the document and drawn range, so its 0 is the reveal, not out of view`).toEqual({ count: 1, inDrawnRange: true });
+}
+
+/**
+ * Held back at its own place: scrolls to `text` first, so the read holds wherever other writes have pushed it, then
+ * requires a drawn count of 0 with the text in the document and drawn range.
+ */
+async function expectHeldBackAtItsPlace(page: Page, text: string, message: string): Promise<void> {
+	expect(await shownAtItsPlace(page, text), message).toBe(0);
+	await expectHeldBack(page, text);
 }
 
 /** The writing agent creates the document it then edits, so it owns it; the viewer opens it afterwards. */
@@ -286,9 +300,9 @@ for (const [width, height, project] of layouts) {
 			await expect(caret(viewer, second)).toHaveClass(/cm-presence-cursor-typing/);
 			await expect(caret(viewer, first).locator('.cm-presence-cursor-label')).toHaveText(first.title);
 			await expect(caret(viewer, second).locator('.cm-presence-cursor-label')).toHaveText(second.title);
-			expect(await shownCount(viewer, lastA) + await shownCount(viewer, lastB), 'neither write is complete yet').toBe(0);
-			await expectHeldBack(viewer, lastA);
-			await expectHeldBack(viewer, lastB);
+			// A's reveal runs on while B's turn completes, and its shown words push B's end down; each end is read at its own place.
+			await expectHeldBackAtItsPlace(viewer, lastA, 'neither write is complete yet: the first writer\'s end is not shown');
+			await expectHeldBackAtItsPlace(viewer, lastB, 'neither write is complete yet: the second writer\'s end is not shown');
 
 			await expect.poll(async () => [await shownAtItsPlace(viewer, lastA), await shownAtItsPlace(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
 			// The second writer's edit selects review work for the owner; settle it before another case seeds replies.

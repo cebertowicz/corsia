@@ -142,14 +142,34 @@ export async function documentCount(page: Page, text: string): Promise<number> {
 }
 
 /**
+ * Runs `fn` in the page on the document editor's CodeMirror view (not a table cell's editor). The view is read through
+ * CodeMirror's private `cmTile.root.view`; read it here rather than with another copy of that lookup.
+ */
+export async function inEditorView<R, A>(page: Page, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
+	const view = await page.evaluateHandle((): any => {
+		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
+		const view = content?.cmTile?.root.view;
+		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+		return view;
+	});
+	try {
+		return (await view.evaluate(fn as (view: any, arg: unknown) => R | Promise<R>, arg)) as R;
+	} finally {
+		await view.dispose();
+	}
+}
+
+/** The whole document from the editor's state; `.cm-content` holds only the lines CodeMirror has drawn, so its text can lack lines out of view. */
+export async function editorText(page: Page): Promise<string> {
+	return inEditorView(page, (view) => view.state.doc.toString() as string, null);
+}
+
+/**
  * How often `text` is in the editor's document, and whether every copy lies inside the range CodeMirror draws.
  * When both hold, a drawn count of 0 means the editor hides the text (a typed reveal), not that it is out of view.
  */
 export async function editorPlace(page: Page, text: string): Promise<{ count: number; inDrawnRange: boolean }> {
-	return page.evaluate((text) => {
-		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
-		const view = content?.cmTile?.root.view;
-		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+	return inEditorView(page, (view, text) => {
 		const doc = view.state.doc.toString() as string;
 		const { from, to } = view.viewport as { from: number; to: number };
 		let count = 0;
