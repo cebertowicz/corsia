@@ -90,6 +90,23 @@ async def _begin_startup(app: FastAPI, logger) -> None:
         raise
 
 
+async def _run_startup_background(drive) -> None:
+    """Own and join recovery alongside the existing finite startup drive."""
+    from plans.person_comment_recovery import run as recover_person_comments
+
+    tasks = [asyncio.create_task(drive), asyncio.create_task(recover_person_comments())]
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start and stop backend runtime services for the FastAPI app."""
@@ -139,8 +156,10 @@ async def lifespan(app: FastAPI):
 
         await run_in_db(record_current_install_week)
         startup_tasks[4] = asyncio.create_task(
-            restart_startup.run_startup_drive(
-                startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
+            _run_startup_background(
+                restart_startup.run_startup_drive(
+                    startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
+                ),
             ),
         )
         startup_progress.finish()

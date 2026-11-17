@@ -55,6 +55,9 @@ def _merge_open(db, source, target):
 
 def migrate_199_to_200(db):
     started = time.monotonic()
+    # Recovery writes plan nodes only after startup, never in the schema migration.
+    db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
+               "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
     normalized = merged = retained = 0
     rows = db.execute(
         """SELECT id,author_kind,author_id,artifact_id,delivery_policy,state

@@ -12,7 +12,8 @@ def _db():
         CREATE TABLE plan_nodes(id TEXT PRIMARY KEY);
         INSERT INTO artifact_identities VALUES ('a'),('b'),('c');
         INSERT INTO doc_comments VALUES ('c'),('c1'),('c2');""")
-    db.executescript(DOC_FEEDBACK_SCHEMA_SQL)
+    from infra.settings_schema import SETTINGS_SCHEMA_SQL
+    db.executescript(SETTINGS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL)
     return db
 
 
@@ -57,6 +58,7 @@ def test_unmergeable_collision_is_unchanged_and_does_not_prevent_other_rows(capl
     result = migrate_to_current(db, 200)
     assert result.migrated
     assert db.execute('PRAGMA user_version').fetchone()[0] == 200
+    assert db.execute("SELECT value FROM settings WHERE key='person_comment_recovery_pending'").fetchone() == ('1',)
     assert db.execute("SELECT * FROM doc_feedback_batches WHERE id IN ('old','new') ORDER BY id").fetchall() == before
     assert db.execute("SELECT * FROM doc_feedback_batch_items ORDER BY batch_id").fetchall() == items
     assert db.execute("SELECT recipient_id FROM doc_feedback_batches WHERE id='later'").fetchone()[0] == 'ui'
