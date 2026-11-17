@@ -3,10 +3,10 @@
 The task exists only while the person has comments waiting on a document and no open review
 of that document carries them. ``reconcile`` is the one owner of that rule: it never creates
 the task while an ask covers it, closes it when one opens, and creates it again when the last
-one ends with comments still waiting. For a person-owned document it sits in the header
-supervisor's plan and moves when the supervisor changes; otherwise it sits in the document
-owner's plan. It runs where an input changes (``user_ask.comment_tasks_changed``), when the
-holding plan resumes, and closes as deleted when the document's file is gone
+one ends with comments still waiting. For a person-owned document it sits in an available,
+enabled and unpaused header supervisor's plan, or the scope conductor's plan otherwise;
+for other documents it sits in the document owner's plan. It runs where an input changes
+(``user_ask.comment_tasks_changed``), when the holding plan resumes, and closes as deleted when the document's file is gone
 (``registry.models.retire``).
 """
 
@@ -20,7 +20,7 @@ from plans import artifact_links, node_states, notifications, review_evidence, r
 from plans.feedback_items import artifact_name
 from registry import models as registry_models
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
-from registry.document_supervisor import effective_supervisor, owner_kind
+from registry.document_supervisor import _paused_threads, _scope, effective_supervisor, owner_kind
 
 PROVENANCE = 'document.person_comment_task'
 # Close reasons, one per cause; each stays true on the closed node.
@@ -46,7 +46,12 @@ def _owner(db, artifact: dict | None):
     owner = artifact.get('parent_thread_id')
     if owner_kind(owner) == 'person':
         supervisor = effective_supervisor(db, artifact, workspace=WORKSPACE)
-        owner = supervisor['id'] if supervisor is not None else None
+        if (supervisor is not None and supervisor['agent_enabled']
+                and str(supervisor['id']) not in _paused_threads(db, [str(supervisor['id'])])):
+            owner = supervisor['id']
+        else:
+            scope = _scope(db, artifact, WORKSPACE)
+            owner = scope[1] if scope else None
     return db.execute('SELECT id, user_id, title FROM threads WHERE id=?', (owner,)).fetchone() if owner else None
 
 

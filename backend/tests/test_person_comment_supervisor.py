@@ -4,10 +4,40 @@ import pytest
 
 from doc_feedback_helpers import add_comment
 from infra.database import get_db, write_transaction
-from plans import person_comment_task
+from plans import lifecycle, person_comment_task, service
 from registry import models
 from registry.document_ownership_change import OwnershipBody, apply_change
 from tests.test_document_owner_supervisor import owned_document as owned_document, _add_agent
+
+
+@pytest.mark.parametrize('person_owner', ['ui', 'project:project-alpha'])
+@pytest.mark.parametrize('supervisor_state', ['active', 'paused', 'disabled'])
+def test_new_task_uses_available_supervisor_or_conductor(owned_document, person_owner, supervisor_state, monkeypatch):
+    _, artifact_id = owned_document
+    _add_agent('conductor', 'Conductor')
+    monkeypatch.setattr(person_comment_task, '_scope', lambda *args, **kwargs: (None, 'conductor'))
+    db = get_db()
+    try:
+        artifact = models.get_artifact(artifact_id, db=db)
+        with write_transaction(db, scope='test_person_owner') as conn:
+            models.rehome_artifact(integration=artifact['integration'], type=artifact['type'],
+                external_id=artifact['external_id'], new_owner_thread_id=person_owner,
+                actor_thread_id=None, authority='system', reason='test', source_path='test', db=conn)
+            artifact = models.get_artifact(artifact_id, db=conn)
+            apply_change(conn, artifact, OwnershipBody(supervisor_thread_id='agent-1'), person_owner)
+            if supervisor_state == 'paused':
+                plan = service.ensure_plan('thread', 'agent-1', db=conn)
+                lifecycle.transition(plan.id, 'paused', expected_revision=plan.revision,
+                                     actor_id=None, provenance='test', db=conn)
+            elif supervisor_state == 'disabled':
+                conn.execute("UPDATE threads SET agent_enabled=0 WHERE id='agent-1'")
+        root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
+        add_comment(db, artifact_id, author_id='agent-1', parent_id=root['id'])
+        task, holder = person_comment_task._open_task(db, artifact_id)
+        assert task
+        assert holder == ('agent-1' if supervisor_state == 'active' else 'conductor')
+    finally:
+        db.close()
 
 
 @pytest.mark.parametrize('person_owner', ['ui', 'project:project-alpha'])
