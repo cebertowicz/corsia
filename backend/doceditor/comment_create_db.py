@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
 from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
 from doceditor.comment_creation import Anchor, CreateReceipt
+from doceditor.comments import CommentAccessDenied  # storage raises it too, for a reply's parent
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
@@ -13,10 +14,6 @@ from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from infra.write_effects import after_commit
 from registry import models as registry_models, service as registry_service
-
-
-class CommentAccessDenied(PermissionError):
-    """The validated target stopped being accessible before its DB create."""
 
 
 @dataclass(frozen=True)
