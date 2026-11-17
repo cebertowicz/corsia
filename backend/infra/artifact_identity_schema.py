@@ -12,8 +12,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_identities_decision_source
     WHERE integration='local' AND type='plan-decision' AND json_valid(metadata);
 """
 
-#: A retired document's comments live on the identity its promote handed it to, so a read of the
-#: document finds every identity whose successor is a given one (``registry.retirement_state``).
+#: A promote moves comments to the successor, so only older rows (promotes before that move, old-pane
+#: saves on a retired id) sit on a retired identity; a read of the document finds them through every
+#: identity whose successor is a given one (``registry.retirement_state``). Removed with that read
+#: once the startup count of retired identities holding comments reads zero.
 #: Partial: only the few identities a promote retired carry a successor, and the guard on
 #: ``json_valid`` keeps the expression from being evaluated on a row that is not JSON.
 SUCCESSOR_INDEX_SQL = """\

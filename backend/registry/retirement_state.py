@@ -34,8 +34,12 @@ def successor_id(artifact_id: str, *, db) -> str | None:
 def predecessors(artifact_id: str, *, db) -> list[str]:
     """Every identity whose successor chain ends at ``artifact_id``, in no promised order.
 
-    The comments a document's earlier identities kept are part of it, so a read of the document
-    asks for them, however many times it was promoted. One indexed lookup per identity found
+    Only for comment rows that already sit on a retired identity, which no later move can reach:
+    promotes made before ``retire`` moved comments to the successor, and comments an old pane saved
+    on a retired id before #2798. ``retire`` stays the only place a promote puts comments
+    (``doceditor.comment_transfer``). Delete this function and its index once the startup count of
+    retired identities that still hold comments reads zero on a released build.
+    One indexed lookup per identity found
     (``idx_artifact_identities_successor``). The recursion is a ``UNION``, so an id it has already
     reached adds no row and a loop of successors ends; ``artifact_id`` itself is never in the answer.
     """
