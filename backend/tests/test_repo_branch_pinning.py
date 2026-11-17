@@ -685,6 +685,57 @@ def test_controlled_branch_switch_failure_preserves_checkout(tmp_path, failure):
     assert current_repo_branch(repo) == "main"
 
 
+def test_pinning_the_current_branch_of_a_dirty_checkout_moves_nothing(tmp_path):
+    from infra.project_repo_policy import switch_repo_branch
+
+    repo = _git_repo_with_commit(tmp_path / "repo")
+    (repo / "agent-wrote.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    switched = switch_repo_branch(repo, "main")
+
+    assert (switched.previous_branch, switched.selected_branch, switched.created_local_branch) == ("main", "main", False)
+    assert (repo / "agent-wrote.txt").read_text(encoding="utf-8") == "uncommitted\n"
+
+
+def _repo_with_diverging_target(path: Path) -> Path:
+    repo = _git_repo_with_commit(path)
+    _git(repo, "switch", "-q", "-c", "target")
+    (repo / "tracked.txt").write_text("target\n", encoding="utf-8")
+    _git(repo, "-c", "user.name=CORSIA Test", "-c", "user.email=test@corsia.local",
+         "commit", "-qam", "target")
+    _git(repo, "switch", "-q", "main")
+    return repo
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_a_writer_racing_the_branch_switch_keeps_its_work(tmp_path, monkeypatch, when):
+    """A running writer's change is never overwritten or lost by a pinned-branch switch."""
+    from infra import project_repo_policy
+
+    repo = _repo_with_diverging_target(tmp_path / "repo")
+    real_mutation = project_repo_policy._run_branch_mutation
+
+    def _writer_races(repo_path, args, *, operation):
+        if when == "before":
+            (repo / "tracked.txt").write_text("writer\n", encoding="utf-8")
+        real_mutation(repo_path, args, operation=operation)
+        if when == "after":
+            (repo / "tracked.txt").write_text("writer\n", encoding="utf-8")
+
+    monkeypatch.setattr(project_repo_policy, "_run_branch_mutation", _writer_races)
+
+    if when == "before":
+        # Git refuses to overwrite the change; the checkout stays put, with no rollback error.
+        with pytest.raises(ValueError) as raised:
+            project_repo_policy.switch_repo_branch(repo, "target")
+        assert "rollback" not in str(raised.value)
+        assert project_repo_policy.current_repo_branch(repo) == "main"
+    else:
+        project_repo_policy.switch_repo_branch(repo, "target")
+        assert project_repo_policy.current_repo_branch(repo) == "target"
+    assert (repo / "tracked.txt").read_text(encoding="utf-8") == "writer\n"
+
+
 def test_controlled_fast_forward_uses_one_upstream_and_exact_commit(
     tmp_path,
     monkeypatch,

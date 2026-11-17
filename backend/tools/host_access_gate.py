@@ -57,18 +57,9 @@ from tools.sandbox_config import check_repo_write_path, is_path_allowed
 
 _ACTION_DESCRIPTOR_VERSION = 1
 _RESERVED_PREFIXES = ("_session_", "_host_access_")
-_PATH_TOOLS = frozenset(
-    {
-        "read_file",
-        "write_file",
-        "edit_file",
-        "multi_edit",
-        "list_dir",
-        "glob",
-        "grep",
-        "browser_screenshot",
-    }
-)
+# File tools that write their ``path``; the other path tools only read it.
+_WRITE_PATH_TOOLS = frozenset({"write_file", "edit_file", "multi_edit", "browser_screenshot"})
+_PATH_TOOLS = _WRITE_PATH_TOOLS | {"read_file", "list_dir", "glob", "grep"}
 _HOST_ADAPTERS = _PATH_TOOLS | {
     "bash",
     "browser_open",
@@ -93,6 +84,19 @@ def _canonical_tool_name(name: str | None) -> str:
 
 def is_path_tool(name: str | None) -> bool:
     return _canonical_tool_name(name) in _PATH_TOOLS
+
+
+def reads_only(name: str | None) -> bool:
+    """Whether this tool only reads files: a path tool that writes nothing."""
+    canonical = _canonical_tool_name(name)
+    return canonical in _PATH_TOOLS and canonical not in _WRITE_PATH_TOOLS
+
+
+def written_path(name: str | None, params: Mapping[str, Any], *, tool: Any) -> tuple[Path, Path] | None:
+    """The path a file-writing tool writes (as written, resolved), read as the gate reads it."""
+    if _canonical_tool_name(name) not in _WRITE_PATH_TOOLS:
+        return None
+    return _absolute_path(params.get("path"), base=_tool_workspace(tool))
 
 
 def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -256,12 +260,7 @@ def _path_action(
     if canonical in {"glob", "grep"} and not raw_path:
         raw_path = "."
     lexical, resolved = _absolute_path(raw_path, base=base)
-    for_write = canonical in {
-        "write_file",
-        "edit_file",
-        "multi_edit",
-        "browser_screenshot",
-    }
+    for_write = canonical in _WRITE_PATH_TOOLS
     requires_elevation = _path_requires_elevation(
         lexical=lexical,
         resolved=resolved,

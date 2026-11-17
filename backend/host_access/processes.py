@@ -32,7 +32,6 @@ from host_access.managed_lifecycle import (
     ManagedLifecycleMixin,
 )
 from host_access.managed_runtime import read_log_tail
-from infra.repo_policy_transition import Reach, current_effect_reach
 from host_access.process_launch import (
     bind_process_launch,
     close_fd,
@@ -114,7 +113,6 @@ class ProcessRecord:
     stall_after_seconds: float | None = None
     max_lifetime_seconds: float | None = None
     log_truncated: bool = False
-    reach: Reach | None = field(default=None, repr=False)  # launching call's effect reach; None is everywhere
 
 
 @dataclass(frozen=True, slots=True)
@@ -715,7 +713,6 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
                 started_at=self._clock(),
                 stall_after_seconds=stall_after_seconds if long_running else None,
                 max_lifetime_seconds=max_lifetime_seconds if long_running else None,
-                reach=None if lease_id or permit_id else current_effect_reach(),
             )
             runtime = _RuntimeProcess(
                 record=record,
