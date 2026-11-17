@@ -262,8 +262,8 @@ for (const [width, height, project] of layouts) {
 			await designateConductor(request, second.id);
 			designated = true;
 			await openLiveDocument(viewer, live);
-			const textA = prose(`a${stamp}`, 500);
-			const textB = prose(`b${stamp}`, 500);
+			const textA = prose(`${stamp}a`, 500);
+			const textB = prose(`${stamp}b`, 500);
 			const lastA = textA.split(' ').at(-1)!;
 			const lastB = textB.split(' ').at(-1)!;
 			await agentWrites(request, first, live, MARKER_A, textA);
