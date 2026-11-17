@@ -104,9 +104,12 @@ class LiveDocument:
         self.snapshot: tuple[str, dict[str, tuple[int, int]]] = (self._before, {})
         # pycrdt builds a Text event's whole delta as Python objects before any
         # callback runs: for a distributed 1MB rewrite, tens of milliseconds and
-        # a full GC pass on the loop. Only range mapping reads it, so the Text
-        # observer exists only while ranges are tracked; otherwise each merge
-        # below refreshes the snapshot itself.
+        # a full GC pass on the loop. Only range mapping and the recent states
+        # read it, so the Text observer starts at the first tracked range or
+        # capture ask (a refused one too) and stays until ``close``. From then
+        # on each merge also reads the state vector and hashes the whole text
+        # (``_current_key``), so a capture can name the state it saw. Until
+        # then each merge below refreshes the snapshot itself.
         self._subscription = None
         self._updates = self.doc.observe(self._transaction_changed)
 

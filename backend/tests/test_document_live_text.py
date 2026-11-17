@@ -10,6 +10,13 @@ def document(text=""):
     return doc
 
 
+def map_spans(spans, before, delta):
+    """Spans through one UTF-8 Text delta over ``before``, as a held reservation follows an edit."""
+    from doceditor.live_text import shift_spans, utf16_delta
+
+    return shift_spans(spans, utf16_delta(before, delta))
+
+
 def test_agent_diff_preserves_concurrent_user_text():
     from doceditor.live_text import apply_text, clone
 
@@ -34,7 +41,7 @@ def test_unicode_diff_uses_pycrdt_byte_offsets():
 
 
 def test_utf16_range_maps_remote_unicode_delta():
-    from doceditor.live_text import clone, map_spans
+    from doceditor.live_text import clone
 
     doc = document("é hello 🙂 world")
     before = str(doc["text"])
@@ -49,7 +56,7 @@ def test_utf16_range_maps_remote_unicode_delta():
 
 
 def test_deletion_delta_collapses_without_quote_guess():
-    from doceditor.live_text import apply_text, map_spans
+    from doceditor.live_text import apply_text
 
     doc = document("one quote two")
     deltas = []
@@ -61,8 +68,6 @@ def test_deletion_delta_collapses_without_quote_guess():
 
 
 def test_exclusive_boundaries_and_single_point_association():
-    from doceditor.live_text import map_spans
-
     assert map_spans([(1, 2)], "abc", [{"retain": 1}, {"insert": "🙂"}]) == [(3, 4)]
     assert map_spans([(1, 2)], "abc", [{"retain": 2}, {"insert": "🙂"}]) == [(1, 2)]
     assert map_spans([(1, 1)], "abc", [{"retain": 1}, {"insert": "🙂"}]) == [(1, 1)]
@@ -81,7 +86,7 @@ def _edited(text, edit):
 
 
 def test_typing_over_a_whole_span_moves_it_onto_the_typed_text():
-    from doceditor.live_text import follow_spans, map_spans
+    from doceditor.live_text import follow_spans
 
     def type_over(text):
         del text[4:9]
@@ -159,7 +164,7 @@ def test_the_open_end_counts_utf16_like_the_browser():
 
 
 def test_deleting_a_whole_span_collapses_it_and_edges_stay_exclusive():
-    from doceditor.live_text import follow_spans, map_spans
+    from doceditor.live_text import follow_spans
 
     def delete(text):
         del text[4:9]
@@ -187,8 +192,6 @@ def test_utf16_boundary_conversion_and_digest_format():
 
 
 def test_multi_operation_delta_maps_skin_tone_and_combining_marks():
-    from doceditor.live_text import map_spans
-
     before = "é👍🏽a\u0301QUOTE中"
     delta = [{"retain": 2}, {"delete": 8}, {"insert": "🙂 "}, {"retain": 3}, {"insert": "X"}]
     assert map_spans([(7, 12)], before, delta) == [(7, 12)]

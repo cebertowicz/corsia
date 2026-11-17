@@ -161,11 +161,6 @@ def shift_offsets(edges: list[tuple[int, bool]], steps: Sequence[tuple[str, int]
     return mapped
 
 
-def map_offsets(edges: list[tuple[int, bool]], before: str, delta: list[dict]) -> list[int]:
-    """Map sorted UTF-16 edges through one UTF-8 Text delta over ``before``."""
-    return shift_offsets(edges, utf16_delta(before, delta))
-
-
 def _changes(steps: Sequence[tuple[str, int]]) -> list[tuple[int, int, int]]:
     """An edit's ``utf16_delta`` steps as ``(start, end, inserted)`` in the text before it, a delete and the insert beside it merged."""
     changes: list[list[int]] = []
@@ -195,11 +190,6 @@ def shift_spans(spans: Sequence[tuple[int, int]], steps: Sequence[tuple[str, int
     edges = [(offset, right) for start, end in spans for offset, right in ((start, start == end), (end, True))]
     mapped = shift_offsets(edges, steps) if edges else []
     return [(first, max(first, last)) for first, last in zip(mapped[::2], mapped[1::2])]
-
-
-def map_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict]) -> list[tuple[int, int]]:
-    """``shift_spans`` through one UTF-8 Text delta over ``before``."""
-    return shift_spans(spans, utf16_delta(before, delta)) if spans else []
 
 
 def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict],
