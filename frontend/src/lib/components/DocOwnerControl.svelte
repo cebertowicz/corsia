@@ -34,7 +34,7 @@
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
 	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
-	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
+	// Every person may take ownership, including when another person is recorded.
 	const ownerChoices = $derived([{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
@@ -59,7 +59,8 @@
 		if (!role || saving || inert) return;
 		picker = null;
 		restoreFocus();
-		if (choice.id === (role === 'owner' ? ownerId : supervisorId)) return;
+		if (choice.id === (role === 'owner' ? ownerId : supervisorId)
+			&& !(role === 'owner' && choice.id === 'user' && !ownership.owner.recorded_viewer)) return;
 		const settle = onChange; // what the row on screen does with the answer is fixed when the pick starts
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;

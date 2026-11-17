@@ -76,6 +76,20 @@ describe('DocOwnerControl', () => {
 		}
 		expect(changed).not.toHaveBeenCalled();
 	});
+	it.each([
+		['project owner with no recorded person', false, true],
+		['person owner with no recorded person', false, true],
+		['person owner recorded to someone else', false, true],
+		['person owner recorded to this viewer', true, false],
+	])('choosing You for %s sends only when needed', async (_case, recorded, shouldSend) => {
+		const value = ownership({ owner: { kind: 'person', id: null, name: null, label: 'You', recorded_viewer: recorded } });
+		changed.mockResolvedValue(value);
+		await render(value);
+		item('owner').click(); await settle();
+		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
+		if (shouldSend) expect(changed).toHaveBeenCalledWith('doc', { owner: 'user' });
+		else expect(changed).not.toHaveBeenCalled();
+	});
 	it('reads You when the person owns the document', async () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } }));
 		expect(item('owner').getAttribute('aria-label')).toBe('Owner: You');

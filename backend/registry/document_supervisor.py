@@ -148,6 +148,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
     kind = owner_kind(owner)
+    owner_user_id = parse_metadata(artifact.get("metadata")).get("owner_user_id")
     scope = _scope(db, artifact, workspace)
     owner_row = _thread(db, owner) if kind == "agent" else None
     row, source = _supervisor(db, owner, stored_pick(artifact), lambda: scope[1] if scope is not None else None)
@@ -166,7 +167,8 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None,
                   "label": person_owner_label(owner, db=db, multi_person=multi_person, user_id=user_id,
-                                              owner_user_id=parse_metadata(artifact.get("metadata")).get("owner_user_id"))},
+                                              owner_user_id=owner_user_id),
+                  "recorded_viewer": kind == "person" and bool(owner_user_id) and owner_user_id == user_id},
         "supervisor": supervisor,
         "can_act": status == "ready",
         "multi_person": multi_person,

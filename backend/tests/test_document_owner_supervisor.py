@@ -369,13 +369,17 @@ def test_each_person_can_take_a_person_owned_document(owned_document, person_own
     url = f"/api/artifacts/{artifact_id}/ownership"
     _set_owner(artifact_id, person_owner)
     assert _view(artifact_id)["owner"]["kind"] == "person"
+    assert _view(artifact_id)["owner"]["recorded_viewer"] is False
     assert client.put(url, json={"supervisor_thread_id": "agent-1"}).status_code == 200
     assert client.put(url, json={"owner": "user"}).status_code == 200
+    assert _view(artifact_id)["owner"]["recorded_viewer"] is True
     client.app.dependency_overrides[require_human_user] = lambda: {"id": SECOND_PERSON, "token_kind": "session"}
     other = client.put(url, json={"owner": "user"})
     assert other.status_code == 200, other.text
     assert other.json()["ownership"]["owner"]["label"] == "You"
+    assert other.json()["ownership"]["owner"]["recorded_viewer"] is True
     assert _view(artifact_id)["owner"]["label"] == SECOND_PERSON
+    assert _view(artifact_id)["owner"]["recorded_viewer"] is False
 
 
 def test_another_persons_document_reads_as_missing(owned_document):
