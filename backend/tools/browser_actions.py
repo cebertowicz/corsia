@@ -174,8 +174,9 @@ class BrowserPersonStepTool(Tool):
 
     name = "browser_person_step"
     description = (
-        "Share the current browser page in the person's CORSIA pane and ask them to complete it, then end your turn. "
-        "CORSIA puts the step in their attention list and wakes you when the page changes. "
+        "Give the current browser page to the person to complete, then end your turn. "
+        "CORSIA puts the step in their Needs you list, which opens the page in their CORSIA pane, and wakes you "
+        "when the page changes. The reply says whether their pane is already showing the page. "
         "Use this for sign-in, account choice, verification, passkeys, or phone prompts; never ask for or "
         "read a password or code."
     )
