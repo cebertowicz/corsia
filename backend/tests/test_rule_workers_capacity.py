@@ -42,6 +42,39 @@ async def test_every_queued_start_starts_while_many_agents_work(world):
     assert all(row[3] is not None for row in starts(rule))
 
 
+@pytest.mark.asyncio
+async def test_a_delegation_and_a_rule_start_succeed_with_nine_real_workers_working(world):
+    """Nine real Claude Code workers, delegated through the tool and never answering, are
+    working; a tenth delegation and a rule-started worker both start."""
+    import asyncio
+    import json
+
+    from automation import worker_runner
+    from subagents.cc_idle_retirement import working_thread_ids
+    from tools.delegate_task import DelegateTaskTool
+
+    world["reply"].write_text("HANG")
+
+    async def delegate(n: int) -> str:
+        receipt = json.loads(await DelegateTaskTool().execute(
+            task=f"Work {n}", model="claude-code/sonnet", plan_node_id="none", _thread_id=OWNER))
+        assert receipt["ok"], receipt
+        return receipt["thread_id"]
+
+    workers = [await delegate(n) for n in range(9)]
+    for _ in range(300):
+        if set(workers) <= set(working_thread_ids()):
+            break
+        await asyncio.sleep(0.02)
+    assert set(workers) <= set(working_thread_ids())
+    tenth = await delegate(9)
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 1
+    [(outcome, _reason, _identity, worker)] = starts(rule)
+    assert outcome == "started" and worker not in {*workers, tenth, None}
+
+
 # A delivery held by a filter or for its project (no worker) never reaches the claim.
 @pytest.mark.asyncio
 async def test_held_delivery_rows_never_affect_the_claim(world):
