@@ -9,7 +9,12 @@ const fit = (budget: number, singleOverlaps = false) => presenceMaximum({
 describe('document header presence fit', () => {
 	it('prefers three when the whole name fits, including at the boundary', () => {
 		expect(fit(240)).toBe(3);
-		expect(fit(239)).toBe(0);
+		expect(fit(239)).toBe(1);
+	});
+	it('shows one avatar when the whole name fits beside it and the controls do not overlap', () => {
+		expect(fit(205)).toBe(1);
+		expect(fit(204)).toBe(0);
+		expect(fit(205, true)).toBe(0);
 	});
 	it('prefers the whole name with the count over a cut name with an avatar', () => {
 		expect(fit(175)).toBe(0);
