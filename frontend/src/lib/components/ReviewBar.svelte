@@ -79,14 +79,12 @@
 		if (!draftOpen && bar.failure === DRAFT_OPEN) bar.failure = '';
 	});
 	onMount(() => {
-		bar.activate();
 		const refresh = () => {
 			clearTimeout(refreshTimer);
 			refreshTimer = setTimeout(() => void bar.load(), 150);
 		};
 		const visibilityChanged = () => {
 			if (document.visibilityState === 'visible') { clearTimeout(refreshTimer); void bar.load(); }
-			else bar.suspendRetry();
 		};
 		// A comment read or decided changes the counts a comment task's bar reads out.
 		const commentChanged = (message: unknown) => {
@@ -94,7 +92,8 @@
 		};
 		const offs = [on('artifacts_changed', refresh), on('plans_changed', refresh), on('doc_comment_changed', commentChanged), on('connected', refresh)];
 		document.addEventListener('visibilitychange', visibilityChanged);
-		return () => { clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibilityChanged); offs.forEach((off) => off?.()); bar.deactivate(); };
+		window.addEventListener('focus', refresh);
+		return () => { clearTimeout(refreshTimer); document.removeEventListener('visibilitychange', visibilityChanged); window.removeEventListener('focus', refresh); offs.forEach((off) => off?.()); bar.deactivate(); };
 	});
 	// The note grows with its text to the CSS cap, then keeps an ending caret visible while it scrolls.
 	$effect(() => {

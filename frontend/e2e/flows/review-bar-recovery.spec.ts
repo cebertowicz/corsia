@@ -34,7 +34,7 @@ test.describe('review bar recovery', () => {
 		await expect(ask(page, 'Reconnect recovery ask').getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	});
 
-	test('retries a failed read after service returns', async ({ page, request }) => {
+	test('recovers a failed read when the window regains focus', async ({ page, request }) => {
 		const doc = await seed(request, 'Retry review');
 		raiseAsk(doc.threadId, doc.artifactId, 'Retry recovery ask');
 		let failed = false;
@@ -43,8 +43,9 @@ test.describe('review bar recovery', () => {
 			else await route.continue();
 		});
 		await open(page, doc, 'default', 'light');
+		await expect.poll(() => failed).toBe(true);
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 		await expect(ask(page, 'Retry recovery ask')).toBeVisible({ timeout: 15_000 });
-		expect(failed).toBe(true);
 	});
 
 	test('foregrounding reads again while an earlier read is outstanding', async ({ page, request }) => {

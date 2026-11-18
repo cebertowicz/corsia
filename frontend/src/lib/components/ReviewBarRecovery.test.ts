@@ -34,27 +34,18 @@ describe('review bar recovery', () => {
   ws.listeners.get('connected')?.(); await vi.advanceTimersByTimeAsync(150); await settle();
   expect(show()).toBeTruthy();
  });
- it('retries a failed read and stops retrying on success', async () => {
+ it.each(['focus', 'visibility', 'reconnect'] as const)('recovers a failed read on %s', async (event) => {
   api.fetchReviewBar.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(ask);
   render(); await settle(); expect(show()).toBeFalsy();
-  await vi.advanceTimersByTimeAsync(1000); await settle(); expect(show()).toBeTruthy();
-  await vi.advanceTimersByTimeAsync(60000); expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
- });
- it('backs off through repeated failures and keeps trying while visible', async () => {
-  api.fetchReviewBar.mockRejectedValue(new Error('offline'));
-  render(); await settle();
-  for (const [index, delay] of [1000, 2000, 4000, 8000, 16000, 30000, 30000].entries()) {
-   await vi.advanceTimersByTimeAsync(delay - 1); expect(api.fetchReviewBar).toHaveBeenCalledTimes(index + 1);
-   await vi.advanceTimersByTimeAsync(1); await settle(); expect(api.fetchReviewBar).toHaveBeenCalledTimes(index + 2);
-  }
- });
- it('pauses retries while hidden, reloads on return, and stops on unmount', async () => {
-  api.fetchReviewBar.mockRejectedValue(new Error('offline'));
-  render(); await settle(); visible('hidden');
   await vi.advanceTimersByTimeAsync(60000); expect(api.fetchReviewBar).toHaveBeenCalledTimes(1);
-  visible('visible'); await settle(); expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
-  unmount(component!); component = null; visible('hidden'); visible('visible'); ws.listeners.get('connected')?.();
-  await vi.advanceTimersByTimeAsync(60000); expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
+  if (event === 'focus') window.dispatchEvent(new Event('focus'));
+  else if (event === 'visibility') { visible('hidden'); visible('visible'); }
+  else ws.listeners.get('connected')?.();
+  await vi.advanceTimersByTimeAsync(150); await settle(); expect(show()).toBeTruthy();
+  expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
+  unmount(component!); component = null;
+  window.dispatchEvent(new Event('focus')); visible('hidden'); visible('visible'); ws.listeners.get('connected')?.();
+  await vi.advanceTimersByTimeAsync(150); expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
  });
  it('reloads on visibility even when the previous read never settles', async () => {
   let finish!: (value: ReviewBarRead) => void;
@@ -65,7 +56,7 @@ describe('review bar recovery', () => {
  it('does not retry an old failed read after switching targets', async () => {
   let fail!: (error: Error) => void;
   api.fetchReviewBar.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; })).mockResolvedValueOnce(ask);
-  const bar = createReviewBarState(); bar.activate(); bar.setTarget('old'); void bar.load();
+  const bar = createReviewBarState(); bar.setTarget('old'); void bar.load();
   bar.setTarget('new'); await bar.load(); fail(new Error('late')); await settle();
   await vi.advanceTimersByTimeAsync(60000);
   expect(api.fetchReviewBar).toHaveBeenCalledTimes(2); expect(bar.read).toEqual(ask);

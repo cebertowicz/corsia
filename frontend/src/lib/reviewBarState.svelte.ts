@@ -20,21 +20,7 @@ export function createReviewBarState() {
 	let artifactId: string | null = null;
 	let generation = 0;
 	let loadSequence = 0;
-	let mounted = false;
-	let retryTimer: ReturnType<typeof setTimeout> | undefined;
-	let failures = 0;
-	let lastLoadFailed = false;
-	const retryDelays = [1000, 2000, 4000, 8000, 16000, 30000];
-	function cancelRetry() { clearTimeout(retryTimer); retryTimer = undefined; }
-	function scheduleRetry() {
-		if (!mounted || document.visibilityState !== 'visible' || !artifactId) return;
-		cancelRetry();
-		const delay = retryDelays[Math.min(failures - 1, retryDelays.length - 1)];
-		retryTimer = setTimeout(() => void load(), delay);
-	}
-	function activate() { mounted = true; if (lastLoadFailed) scheduleRetry(); }
-	function deactivate() { mounted = false; cancelRetry(); loadSequence += 1; }
-	function suspendRetry() { cancelRetry(); }
+	function deactivate() { loadSequence += 1; }
 	/** The raise time of the ask the receipt or the replaced notice belongs to. */
 	let settledAsk: string | null = null;
 	let read = $state<ReviewBarRead | null>(null);
@@ -55,19 +41,16 @@ export function createReviewBarState() {
 
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
-		cancelRetry(); failures = 0; lastLoadFailed = false;
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
 		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null; noteDemanded = false;
 		return true;
 	}
 	async function load() {
-		cancelRetry();
 		const id = artifactId, stamp = generation, sequence = ++loadSequence;
 		if (!id) return;
 		try {
 			const next = await fetchReviewBar(id);
 			if (!current(id, stamp) || sequence !== loadSequence) return;
-			failures = 0; lastLoadFailed = false;
 			read = next;
 			if ((phase === 'answered' || phase === 'stale') && next.ask_raised && next.ask_raised_at !== settledAsk) {
 				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null; noteDemanded = false;
@@ -75,8 +58,7 @@ export function createReviewBarState() {
 				phase = 'ask'; note = '';
 			}
 		} catch {
-			if (!current(id, stamp) || sequence !== loadSequence) return;
-			lastLoadFailed = true; failures += 1; scheduleRetry();
+			// The next connection, focus, visibility or change event reads again.
 		}
 	}
 	function openNote() { if (phase === 'ask') { failure = ''; phase = 'noting'; } }
@@ -130,7 +112,7 @@ export function createReviewBarState() {
 		get visible() { return visible(); },
 		get noteRequired() { return noteRequired(); },
 		get artifactId() { return artifactId; },
-		setTarget, load, activate, deactivate, suspendRetry, openNote, cancelNote, answer,
+		setTarget, load, deactivate, openNote, cancelNote, answer,
 	};
 }
 export type ReviewBarState = ReturnType<typeof createReviewBarState>;
