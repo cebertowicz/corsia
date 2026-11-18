@@ -14,6 +14,7 @@
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
 	import { onMount } from 'svelte';
+	import { returnFocus } from '$lib/focusReturn';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -109,7 +110,7 @@
 		const back = priorFocus?.isConnected ? priorFocus : openTrigger?.isConnected ? openTrigger
 			: heldDecision ? document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]') : null;
 		priorFocus = null;
-		back?.focus({ preventScroll: true });
+		returnFocus(back);
 	}
 
 	const deferredId = 'attention-dock-deferred';

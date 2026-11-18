@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import { returnFocus as restoreElementFocus } from '$lib/focusReturn';
 	import { messages } from '$lib/stores/threads';
 	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
@@ -90,7 +91,7 @@
 		pick = null; draft = null; viewing = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
-		if (focus) void tick().then(() => focus.focus({ preventScroll: true }));
+		if (focus) void tick().then(() => restoreElementFocus(focus));
 	}
 	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
 	/** Cancel lets the passage's typed text and any failure go, so they never come back on the next comment. */

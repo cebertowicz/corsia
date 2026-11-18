@@ -40,6 +40,7 @@
 
 <script lang="ts">
 	import { get } from 'svelte/store';
+	import { returnFocus } from '$lib/focusReturn';
 	import { onMount } from 'svelte';
 	import { Button, StatePill } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
@@ -150,7 +151,7 @@
 
 	function closeActiveDrawer(): void {
 		openActiveLeaseId = null;
-		openActiveTrigger?.focus({ preventScroll: true });
+		returnFocus(openActiveTrigger);
 		openActiveTrigger = null;
 	}
 
@@ -160,7 +161,7 @@
 
 	function closePendingDrawer(): void {
 		pendingOpen = false;
-		pendingTriggerEl?.focus({ preventScroll: true });
+		returnFocus(pendingTriggerEl);
 	}
 
 	async function reconcileAuthoritativeLeases(

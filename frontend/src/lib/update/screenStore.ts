@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { returnFocus } from '$lib/focusReturn';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
@@ -274,7 +275,7 @@ export function resetUpdateScreen(focusComposer = false): void {
 	updateConfirmed.set(null);
 	if (!focusComposer || typeof document === 'undefined') return;
 	void Promise.resolve(returnToChat?.()).then(tick).then(() => {
-		document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]')?.focus({ preventScroll: true });
+		returnFocus(document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]'));
 	});
 }
 

@@ -37,7 +37,8 @@ export function focusWithoutMoving(target: HTMLElement, focus: () => void): void
 }
 
 /** Restore CodeMirror's selection before focusing its editable DOM. */
-export function returnFocus(target: HTMLElement): void {
+export function returnFocus(target: HTMLElement | null | undefined): void {
+	if (!target) return;
 	focusWithoutMoving(target, () => {
 		const view = target.closest('.cm-editor') && EditorView.findFromDOM(target);
 		if (!view || target !== view.contentDOM) { target.focus({ preventScroll: true }); return; }

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { returnFocus } from '$lib/focusReturn';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { clearConnectedAppRequest, requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
@@ -192,7 +193,7 @@
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
 	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
-	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus({ preventScroll: true })); };
+	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => returnFocus([...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open'))); };
 
 	/** The button a chat link lands on: an account's Sign in or Where it works…, an app waiting on approval's Approve or Choose where it works…. */
 	function linkLabel(row: ConnectedAppsRow): string | null {

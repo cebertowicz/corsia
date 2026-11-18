@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { reviewStatus } from '$lib/reviewCopy';
+	import { returnFocus } from '$lib/focusReturn';
 	import { onMount, tick, untrack } from 'svelte';
 	import { on } from '$lib/ws/events';
 	import { andList, createDocumentReviewState } from '$lib/docReviewState.svelte';
@@ -45,7 +46,7 @@
 		// Capture the fallback before closing the last request removes this control's root.
 		const fallback = requestTrigger ?? root?.closest('.document-tools')?.querySelector<HTMLButtonElement>('.comment-status');
 		const trigger = anchor;
-		void tick().then(() => (trigger?.isConnected ? trigger : fallback)?.focus({ preventScroll: true }));
+		void tick().then(() => returnFocus(trigger?.isConnected ? trigger : fallback));
 	}
 	function sent() {
 		const reviewers = model.lastSent;
