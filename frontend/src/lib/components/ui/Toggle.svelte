@@ -58,8 +58,8 @@
 	.tg.row { width: 100%; min-height: calc(2 * var(--space-6)); text-align: left; margin: 0; font: inherit; color: inherit; }
 	.row-label { font: inherit; }
 	.tg.row::before { left: auto; right: var(--space-2); transform: translateY(-50%); }
-	.tg.row::after { left: auto; right: calc(var(--space-2) + var(--w) - var(--knob) - 2.5px); }
-	.tg.row.on::after { left: auto; right: calc(var(--space-2) + 1.5px); }
+	.tg.row::after { left: auto; right: calc(var(--space-2) + var(--w) - var(--knob) - (var(--h) - var(--knob)) / 2); }
+	.tg.row.on::after { left: auto; right: calc(var(--space-2) + (var(--h) - var(--knob)) / 2 - var(--space-1) / 4); }
 	.tg.md {
 		--w: 34px;
 		--h: 19px;

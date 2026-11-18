@@ -28,6 +28,33 @@ async function expectFirstCardAtColumnOrLine(page: Page, ids: string[]) {
 	}));
 	expect(Math.abs(first.card!.top - Math.max(first.line!, top)), 'first card is at its line or column top').toBeLessThanOrEqual(1);
 	expect(first.card!.top, 'first card does not overlap the preceding control').toBeGreaterThanOrEqual(aboveBottom);
+	const conflicts = await page.locator('.canvas-comment-drawer.margin').evaluate((drawer) => {
+		const column = drawer.querySelector('.drawer-comments.in-margin')!;
+		const heads = [...drawer.children].filter((el) => el !== column).flatMap((el) => [el, ...el.querySelectorAll('*')]);
+		const cards = [...column.querySelectorAll('[data-margin-card]')];
+		const overlaps: string[] = [];
+		for (const card of cards) {
+			const c = card.getBoundingClientRect();
+			for (const head of heads) {
+				const h = head.getBoundingClientRect();
+				if (h.width && h.height && c.left < h.right && c.right > h.left && c.top < h.bottom && c.bottom > h.top) overlaps.push(`${card.getAttribute('data-margin-card')} / ${head.tagName}.${head.className}`);
+			}
+			const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+			while (walker.nextNode()) {
+				const text = walker.currentNode;
+				if (!text.textContent?.trim()) continue;
+				const range = document.createRange(); range.selectNodeContents(text);
+				for (const rect of range.getClientRects()) {
+					const x = (rect.left + rect.right) / 2, y = (rect.top + rect.bottom) / 2;
+					if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) continue;
+					const hit = document.elementFromPoint(x, y);
+					if (hit && heads.some((head) => head === hit || head.contains(hit))) overlaps.push(`${card.getAttribute('data-margin-card')} text covered by ${hit.tagName}.${hit.className}`);
+				}
+			}
+		}
+		return overlaps;
+	});
+	expect(conflicts, 'column head does not cover any card or its visible text').toEqual([]);
 }
 
 test.beforeEach(async ({ page }, info) => {
