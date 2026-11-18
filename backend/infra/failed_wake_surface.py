@@ -133,7 +133,7 @@ def _report(
     dead_letter.park(
         REPORT_EVENT,
         {**failed, "summary": f"A wake {stage}; no live owner took the report."},
-        WAKE_FAILED_REASON, failed["message_id"], db=db,
+        WAKE_FAILED_REASON, failed["message_id"], db=db, code_named=True,
     )
 
 

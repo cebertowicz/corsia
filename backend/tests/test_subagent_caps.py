@@ -43,60 +43,44 @@ def caps_db(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_seed_writes_cap_from_data_file(caps_db):
+def test_seed_writes_fields_from_data_file(caps_db):
     from infra.settings import get_setting
     from infra.subagent_caps import seed_subagent_caps
 
     assert seed_subagent_caps() is True
     row = get_setting("subagents")
-    assert isinstance(row["max_concurrent_live"], int)
-    assert row["max_concurrent_live"] > 0
+    assert row["idle_retire_after_seconds"] > 0 and row["max_idle_live"] >= 0
 
 
 def test_seed_is_idempotent_and_non_clobbering(caps_db):
     from infra.settings import get_setting, set_setting
     from infra.subagent_caps import seed_subagent_caps
 
-    operator = {
-        "max_concurrent_live": 2, "idle_retire_after_seconds": 5, "max_idle_live": 1,
-    }
+    operator = {"idle_retire_after_seconds": 5, "max_idle_live": 1}
     set_setting("subagents", operator)
     assert seed_subagent_caps() is False                  # fields present → no-op
     assert get_setting("subagents") == operator
 
 
-def test_resolver_prefers_settings_then_seed(caps_db):
-    from infra.settings import set_setting
-    from infra.subagent_caps import _load_seed_cap, get_max_concurrent_live
+def test_seed_drops_the_retired_working_cap(caps_db):
+    from infra.settings import get_setting, set_setting
+    from infra.subagent_caps import seed_subagent_caps
 
-    set_setting("subagents", {"max_concurrent_live": 4})
-    assert get_max_concurrent_live() == 4
-
-    caps_db.execute("DELETE FROM settings")
-    caps_db.commit()
-    assert get_max_concurrent_live() == _load_seed_cap()
-    assert get_max_concurrent_live() >= 1
-
-
-def test_no_hardcoded_cap_literal_in_code(caps_db):
-    import json
-    from pathlib import Path
-
-    import infra.subagent_caps as caps
-    seed_path = Path(caps.__file__).parent / "subagent_caps.json"
-    data = json.loads(seed_path.read_text())
-    assert isinstance(data["max_concurrent_live"], int)
-    assert data["max_concurrent_live"] > 0
+    set_setting("subagents", {"max_concurrent_live": 8, "idle_retire_after_seconds": 5,
+                              "max_idle_live": 1, "other": True})
+    assert seed_subagent_caps() is True
+    assert get_setting("subagents") == {"idle_retire_after_seconds": 5, "max_idle_live": 1, "other": True}
+    assert seed_subagent_caps() is False
 
 
 def test_seed_fills_each_missing_idle_field_without_clobbering(caps_db):
     from infra.settings import get_setting, set_setting
     from infra.subagent_caps import _load_seed_value, seed_subagent_caps
 
-    set_setting("subagents", {"max_concurrent_live": 2, "max_idle_live": 0})
+    set_setting("subagents", {"max_idle_live": 0})
     assert seed_subagent_caps() is True
     row = get_setting("subagents")
-    assert row["max_concurrent_live"] == 2 and row["max_idle_live"] == 0
+    assert row["max_idle_live"] == 0
     assert row["idle_retire_after_seconds"] == _load_seed_value("idle_retire_after_seconds")
     assert seed_subagent_caps() is False
 

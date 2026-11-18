@@ -7,7 +7,7 @@ another account ready whose usage is not read yet: rollover never moves onto unr
 and reading it (one read per account per
 ``harness_usage_check.RECHECK_SECONDS``, scheduled by that same rollover check) may make that
 account the turn's. The runner puts such a start back in the queue at its place, where it
-takes no slot and is decided again on the next pass, and claims a younger start in its slot.
+is decided again on the next pass, and goes on to the younger starts.
 The wait ends when the read is in, either way, or after ``WAIT_SECONDS`` (a failed read, or
 none): then the start is refused in the same words. The workflow's time limit plays no part;
 it counts from the worker's start. A restart forgets the wait.
@@ -67,10 +67,6 @@ def still_waiting(decision_id: int) -> bool:
         return True
     _waiting.pop(decision_id, None)
     return False
-
-
-def is_waiting(decision_id: int) -> bool:
-    return decision_id in _waiting
 
 
 def forget(decision_id: int) -> None:

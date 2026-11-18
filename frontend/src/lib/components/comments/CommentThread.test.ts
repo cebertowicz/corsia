@@ -66,22 +66,31 @@ describe('CommentThread', () => {
 		expect(host.querySelector<HTMLTextAreaElement>('.ct-input')?.value).toBe('half a reply');
 	});
 
-	it('draws an unpicked document margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', () => {
+	it.each([
+		['thread opened on its own', { flat: true }, true],
+		['margin card', { flat: true, inMargin: true }, false],
+		['list row', { flat: true, inList: true }, false],
+		['nested card', {}, false],
+	])('watches for its sheet or popover closing and reopening only on a thread opened on its own: %s', (_label, extra, marked) => {
+		render(thread({ replies: [reply] }), false, extra);
+		expect(host.querySelector('[data-surface-mark]') !== null).toBe(marked);
+	});
+
+	it.each([
+		['document', {}, { focused: true, scrollOnFocus: false }],
+		['chat', { chatSurface: true }, { chatSurface: true, opened: true }],
+	])('draws an unpicked %s margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', (_surface, surface, picked) => {
 		const unread = { ...reply, id: 'r1' };
-		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { hideReply: true, inMargin: true });
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { hideReply: true, inMargin: true, ...surface });
 		expect(host.textContent).toContain('1 reply');
 		expect(host.textContent).not.toContain(reply.text);
 		expect(host.querySelector('.ct-head')?.textContent).toContain('New');
 		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(true);
 		unmount(component!); host.remove();
 		// Picked, it shows the whole conversation at the usual clamp.
-		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { inMargin: true, focused: true, scrollOnFocus: false });
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { inMargin: true, ...picked });
 		expect(host.textContent).toContain(reply.text);
 		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(false);
-		unmount(component!); host.remove();
-		// A chat card at rest keeps its answers showing: they are read by being seen.
-		render(thread({ replies: [unread] }), false, { hideReply: true, inMargin: true, chatSurface: true });
-		expect(host.textContent).toContain(reply.text);
 	});
 
 	it('keeps a draft typed while the previous reply was still sending', async () => {

@@ -329,11 +329,9 @@ def mark_thread_viewed(
 
     Returns the root's new reply ids that remain after the stamp.
     """
-    root = db.execute(
-        "SELECT id FROM doc_comments WHERE id=? AND artifact_id=? AND parent_id IS NULL",
-        (root_id, artifact_id),
-    ).fetchone()
-    if root is None:
+    from doceditor.comments import thread_root_on  # comments imports this module through comment_acks
+
+    if thread_root_on(db, root_id, artifact_id) != root_id:  # absent, on another document, or a reply
         raise ValueError("root_not_found")
     item = db.execute(
         """SELECT item.id,item.created_at FROM doc_comments item

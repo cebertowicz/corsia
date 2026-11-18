@@ -215,7 +215,10 @@ def wake_owner(
     try:
         enqueue_event_wake(owner, event, summary, payload, message_id=message_id, chip=chip, db=db)
     except ValueError:
-        dead_letter.park(event, {**payload, "summary": summary, "owner": owner}, "owner_inactive", park_key, db=db)
+        dead_letter.park(
+            event, {**payload, "summary": summary, "owner": owner},
+            "owner_inactive", park_key, db=db, code_named=True,
+        )
         return False
     return True
 

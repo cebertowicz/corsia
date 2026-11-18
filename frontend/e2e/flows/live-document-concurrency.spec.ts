@@ -2,7 +2,7 @@ import { inResolved, replyField, resolvedEntry, resolvedList, showAllThreads, op
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
-import { createComment, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
+import { createComment, documentCount, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import {
 	agentComment, holdPositionsAnswer, holdRequest, layouts, markTexts, openLivePair, recordMarkTexts, reviewerSession, suggest, textDigest, watchPlacementReports,
 } from '../support/liveConcurrency';
@@ -18,6 +18,7 @@ async function expectConverged(pages: Page[], document: LiveDocument, request: P
 	for (const page of pages) {
 		for (const text of once) await expect.poll(() => renderedCount(page, text), { message: `${text} renders once` }).toBe(1);
 		for (const text of absent) await expect.poll(() => renderedCount(page, text), { message: `${text} is gone` }).toBe(0);
+		for (const text of absent) await expect.poll(() => documentCount(page, text), { message: `${text} is gone from the document, not only from view` }).toBe(0);
 	}
 	await expect.poll(async () => {
 		const file = await serverText(request, document);
