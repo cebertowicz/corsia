@@ -47,6 +47,7 @@ def prepare_spawn(
     *,
     cwd: Path,
     cwd_fd: int | None,
+    inherited_fds: tuple[int, ...],
     cleanup_paths: Sequence[Path],
     error_type: type[Exception],
 ) -> SpawnSpec:
@@ -62,6 +63,20 @@ def prepare_spawn(
     launch_argv = tuple(argv)
     launch_cwd: str | None = str(Path(cwd).expanduser().resolve(strict=False))
     options: dict[str, Any] = {}
+    seen: set[int] = set()
+    for descriptor in inherited_fds:
+        if isinstance(descriptor, bool) or not isinstance(descriptor, int) or descriptor < 0:
+            raise error_type("transferred descriptor is invalid")
+        if descriptor in seen:
+            raise error_type("transferred descriptors must be distinct")
+        seen.add(descriptor)
+        try:
+            if os.get_inheritable(descriptor):
+                raise error_type("transferred descriptor must be non-inheritable")
+        except OSError as exc:
+            raise error_type("transferred descriptor is unavailable") from exc
+    if inherited_fds:
+        options["pass_fds"] = inherited_fds
     if cwd_fd is not None:
         if isinstance(cwd_fd, bool) or not isinstance(cwd_fd, int) or cwd_fd < 0:
             raise error_type("owned process cwd descriptor is invalid")
@@ -80,7 +95,9 @@ def prepare_spawn(
             *launch_argv,
         )
         launch_cwd = None
-        options["pass_fds"] = (cwd_fd,)
+        if cwd_fd in inherited_fds:
+            raise error_type("cwd and transferred descriptors must be distinct")
+        options["pass_fds"] = (*inherited_fds, cwd_fd)
     return SpawnSpec(launch_argv, launch_cwd, options, owned_cleanup_paths)
 
 
@@ -109,6 +126,50 @@ def close_fd(descriptor: int | None) -> None:
         os.close(descriptor)
     except OSError:
         pass
+
+
+async def launch_owned_process(
+    argv: Sequence[str], *, cwd: str | None, env: dict[str, str],
+    options: dict[str, Any], background: bool, gate_read_fd: int | None,
+    gate_write_fd: int | None, log_path: Path, handle: str,
+    fingerprint: Callable[[int], str], error_type: type[Exception],
+    transferred: Any,
+) -> tuple[asyncio.subprocess.Process, int, str]:
+    """Create and bind the child while releasing transferred parent copies."""
+    try:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT if background else asyncio.subprocess.PIPE,
+                cwd=cwd, env=env, start_new_session=True, **options,
+            )
+        finally:
+            transferred.close()
+    except BaseException:
+        close_fd(gate_read_fd)
+        close_fd(gate_write_fd)
+        log_path.unlink(missing_ok=True)
+        raise
+    close_fd(gate_read_fd)
+    pid = int(process.pid)
+    if pid <= 1:
+        close_fd(gate_write_fd)
+        try:
+            process.kill()
+        finally:
+            await process.wait()
+            log_path.unlink(missing_ok=True)
+        raise error_type("spawn returned an invalid process identity")
+    try:
+        identity = await bind_process_launch(
+            process, handle=handle, pid=pid, log_path=log_path,
+            fingerprint=fingerprint,
+        )
+    except BaseException:
+        close_fd(gate_write_fd)
+        raise
+    return process, pid, identity
 
 
 async def bind_process_launch(

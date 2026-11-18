@@ -18,7 +18,7 @@ import re
 import secrets
 import signal
 import time
-from typing import Any, Callable, Literal, Mapping, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence, cast
 
 import psutil
 from host_access.group_probe import current_control_plane_pids as _current_control_plane_pids, group_pids as _group_pids, is_zombie as _is_zombie
@@ -33,11 +33,12 @@ from host_access.managed_lifecycle import (
 )
 from host_access.managed_runtime import read_log_tail
 from host_access.process_launch import (
-    bind_process_launch,
     close_fd,
     gated_launch_spec,
+    launch_owned_process,
     prepare_spawn,
 )
+from host_access.transferred_descriptors import TransferredDescriptors, transfer_descriptors
 from host_access.redaction import (
     REDACTED,
     redact_process_arguments as _redact_arguments,
@@ -589,6 +590,7 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
             self._cleanup_runtime_paths(runtime)
         return runtime.record
 
+    @transfer_descriptors
     async def spawn(
         self,
         argv: Sequence[str],
@@ -597,6 +599,7 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
         turn_id: str,
         cwd: Path,
         cwd_fd: int | None = None,
+        inherited_fds: tuple[int, ...] = (),
         env: Mapping[str, str],
         timeout_seconds: float,
         background: bool,
@@ -609,9 +612,11 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
         stall_after_seconds: float = DEFAULT_STALL_AFTER_SECONDS,
         max_lifetime_seconds: float = LONG_RUNNING_MAX_LIFETIME_SECONDS,
     ) -> ForegroundProcessResult | BackgroundProcessResult:
-        """Spawn one owned group; persist background identity before exec."""
+        """Spawn an owned group, transferring inherited descriptors at entry."""
+        transferred = cast(TransferredDescriptors, inherited_fds)
         spec = prepare_spawn(
-            argv, cwd=cwd, cwd_fd=cwd_fd, cleanup_paths=cleanup_paths,
+            argv, cwd=cwd, cwd_fd=cwd_fd, inherited_fds=transferred.descriptors,
+            cleanup_paths=cleanup_paths,
             error_type=ProcessOwnerError,
         )
         if not thread_id or not turn_id:
@@ -653,48 +658,14 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
                     raise
             child_env = dict(env)
             child_env[PROCESS_OWNER_MARKER_ENV] = owner_marker
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    *launch_argv,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=(
-                        asyncio.subprocess.STDOUT
-                        if background
-                        else asyncio.subprocess.PIPE
-                    ),
-                    cwd=launch_cwd,
-                    env=child_env,
-                    start_new_session=True,
-                    **spawn_options,
-                )
-            except BaseException:
-                close_fd(gate_read_fd)
-                close_fd(gate_write_fd)
-                log_path.unlink(missing_ok=True)
-                raise
-            close_fd(gate_read_fd)
+            process, pid, creation_fingerprint = await launch_owned_process(
+                launch_argv, cwd=launch_cwd, env=child_env, options=spawn_options,
+                background=background, gate_read_fd=gate_read_fd,
+                gate_write_fd=gate_write_fd, log_path=log_path, handle=handle,
+                fingerprint=_process_creation_fingerprint, error_type=ProcessOwnerError,
+                transferred=transferred,
+            )
             gate_read_fd = None
-            pid = int(process.pid)
-            if pid <= 1:
-                close_fd(gate_write_fd)
-                try:
-                    process.kill()
-                finally:
-                    await process.wait()
-                    log_path.unlink(missing_ok=True)
-                raise ProcessOwnerError("spawn returned an invalid process identity")
-            try:
-                creation_fingerprint = await bind_process_launch(
-                    process,
-                    handle=handle,
-                    pid=pid,
-                    log_path=log_path,
-                    fingerprint=_process_creation_fingerprint,
-                )
-            except BaseException:
-                close_fd(gate_write_fd)
-                gate_write_fd = None
-                raise
             record = ProcessRecord(
                 handle=handle,
                 thread_id=thread_id,
