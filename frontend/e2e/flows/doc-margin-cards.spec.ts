@@ -20,6 +20,16 @@ import { editorText } from '../support/liveDocument';
 // A skill file must load as a skill, so the history document opens with its front matter.
 const SKILL_TEXT = `---\nname: demo\ndescription: A test skill.\n---\n\n${TEXT}`;
 
+async function expectFirstCardAtColumnOrLine(page: Page, ids: string[]) {
+	const [first] = await geometry(page, ids);
+	const { top, aboveBottom } = await page.locator('.drawer-comments.in-margin').evaluate((column) => ({
+		top: column.getBoundingClientRect().top,
+		aboveBottom: column.previousElementSibling!.getBoundingClientRect().bottom,
+	}));
+	expect(Math.abs(first.card!.top - Math.max(first.line!, top)), 'first card is at its line or column top').toBeLessThanOrEqual(1);
+	expect(first.card!.top, 'first card does not overlap the preceding control').toBeGreaterThanOrEqual(aboveBottom);
+}
+
 test.beforeEach(async ({ page }, info) => {
 	if (info.project.name === 'chromium-desktop') await page.setViewportSize({ width: 1440, height: 900 });
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
@@ -36,21 +46,18 @@ test('@flow:doc-margin-cards every open thread is a card beside its text, a clus
 	const rects = (await geometry(page, doc.ids)).filter((row) => row.card).map((row) => row.card!);
 	const sorted = [...rects].sort((a, b) => a.top - b.top);
 	for (let i = 1; i < sorted.length; i++) expect(sorted[i].top, 'cards do not overlap').toBeGreaterThanOrEqual(sorted[i - 1].bottom - 0.5);
-	// The first comment is alone on its line: its card sits level with the text.
-	const [first] = await geometry(page, doc.ids);
-	expect(Math.abs(first.card!.top - first.line!), 'a lone card sits beside its line').toBeLessThanOrEqual(12);
+	// The first card sits at its line unless the controls above the column block it.
+	await expectFirstCardAtColumnOrLine(page, doc.ids);
 	// Alpha and bravo share a line: bravo stacks below alpha instead of covering it.
 	const [, alpha, bravo] = await geometry(page, doc.ids);
 	expect(bravo.card!.top).toBeGreaterThanOrEqual(alpha.card!.bottom - 0.5);
 	expect(alpha.card!.left).toBeCloseTo(bravo.card!.left, 0);
-	// The stack rule, for every card at rest taken in order down the column: it sits level with its line (the lone first card shows the offset between a card's top and its line),
-	// or, where the card above reaches that line, directly under it with the 8 px gap (placeCards' GAP).
-	const offset = first.card!.top - first.line!;
+	// Each later card sits at its line or directly under the card above it with the 8 px gap (placeCards' GAP).
 	// The column places cards as the text lays out, so the rule is read once they have settled.
 	await expect.poll(async () => {
 		const rows = (await geometry(page, doc.ids)).filter((row) => row.card && row.line != null).sort((a, b) => a.card!.top - b.card!.top);
 		if (rows.length !== doc.ids.length) return Infinity;
-		return Math.max(...rows.map((row, i) => Math.abs(row.card!.top - Math.max(row.line! + offset, i ? rows[i - 1].card!.bottom + 8 : -Infinity))));
+		return Math.max(...rows.slice(1).map((row, i) => Math.abs(row.card!.top - Math.max(row.line!, rows[i].card!.bottom + 8))));
 	}, { message: 'every card level with its line, or directly under the card above it' }).toBeLessThan(0.5);
 	// At rest a card is the comment, its replies and a suggestion's diff and buttons: no reply field and no quote line until it is picked.
 	for (const id of doc.ids) {
@@ -107,8 +114,13 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 		return column.scrollTop;
 	});
 	expect(columnScroll, 'the column itself did not scroll').toBe(0);
-	const [first] = await geometry(page, doc.ids);
-	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
+	await expectFirstCardAtColumnOrLine(page, doc.ids);
+	const rows = (await geometry(page, doc.ids)).sort((a, b) => a.card!.top - b.card!.top);
+	for (let i = 1; i < rows.length; i++) {
+		if (rows[i].line! >= rows[i - 1].card!.bottom + 8) {
+			expect(Math.abs(rows[i].card!.top - rows[i].line!), 'unblocked card stays beside its line').toBeLessThanOrEqual(12);
+		}
+	}
 });
 
 test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in document order with a focus ring, and Escape goes back', async ({ page, request }, info) => {

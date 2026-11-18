@@ -86,7 +86,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 		});
 	}
 
-	for (const width of WIDTHS) for (const theme of THEMES) {
+	for (const width of [320, ...WIDTHS]) for (const theme of THEMES) {
 		test(`the held documents are kept on their own headers for Retry after the chat reports the failure (${width}, ${theme})`, async ({ page, request }, testInfo) => {
 			mockOnly(testInfo);
 			await page.setViewportSize({ width, height: width === 1440 ? 900 : 852 });
@@ -97,9 +97,9 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			await seedHeldComments(request, doc.artifactId, 2);
 			// A phone opens the document full screen, so delivery is turned off there, then the chat sends; on desktop the
 			// canvas is put away and the document's own toggle is reached after the failure.
-			await installWorkspace(page, threadId, [doc], 0, { visible: width === 393 });
+			await installWorkspace(page, threadId, [doc], 0, { visible: width !== 1440 });
 			await openThread(page, threadId, title);
-			if (width === 393) {
+			if (width !== 1440) {
 				await turnOffDocumentComments(page);
 				await backToChat(page).click();
 			}
@@ -109,7 +109,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			await expect(page.locator('.toast').filter({ hasText: 'couldn’t be delivered' })).toHaveCount(1);
 			await expect(chatSendGroup(page)).toHaveCount(0);
 			// On a phone the document is one pick from the workspace drawer, away from the chat; on desktop it is the split beside it.
-			if (width === 393) {
+			if (width !== 1440) {
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 				await page.getByRole('button', { name: new RegExp(doc.fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).click();
 			} else {
@@ -121,6 +121,21 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			const header = page.locator('[data-doc-comments-drawer]');
 			const retry = header.locator('.undelivered').getByRole('button', { name: /^Retry/ });
 			await expect(retry).toBeVisible();
+			// The delivery toast outlasts the panel's entrance; read and capture the settled drawer after it leaves.
+			await expect(page.locator('.toast')).toHaveCount(0, { timeout: 12000 });
+			await page.evaluate(async () => { await Promise.allSettled(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished)); });
+			const footGeometry = await header.locator('.drawer-foot').evaluate((foot) => {
+				const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+				return { foot: rect(foot), send: rect(foot.querySelector('.send')!), retry: rect(foot.querySelector('.undelivered button')!), scrollWidth: foot.scrollWidth, clientWidth: foot.clientWidth };
+			});
+			console.log('RETRY_FOOT_GEOMETRY', JSON.stringify({ width, theme, ...footGeometry }));
+			expect(footGeometry.scrollWidth).toBeLessThanOrEqual(footGeometry.clientWidth);
+			for (const box of [footGeometry.send, footGeometry.retry]) {
+				expect(box.left).toBeGreaterThanOrEqual(footGeometry.foot.left - 0.5);
+				expect(box.right).toBeLessThanOrEqual(footGeometry.foot.right + 0.5);
+				expect(box.top).toBeGreaterThanOrEqual(footGeometry.foot.top - 0.5);
+				expect(box.bottom).toBeLessThanOrEqual(footGeometry.foot.bottom + 0.5);
+			}
 			// The panel slides in on a phone: read the boxes once it has stopped. Each must sit inside the document's own
 			// Details panel, not just the window: a reason pushed past the panel's left edge is cut off while still on screen.
 			const inside = (locator: typeof retry) => async () => {
@@ -130,8 +145,9 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			};
 			await expect.poll(inside(retry), { message: 'Retry sits inside the comments drawer' }).toBe(true);
 			// The whole reason stays reachable: laid out whole inside Details, or, in a narrow bar, carried by Retry itself.
-			const reason = page.locator('.undelivered [role="status"]').filter({ hasText: 'not delivered' });
+			const reason = header.locator('.undelivered > span').filter({ hasText: 'not delivered' });
 			await expect(reason).toContainText("its owner can't be reached");
+			await expect(page.locator('[data-feedback-status][role="status"]')).toHaveText("2 comments not delivered: its owner can't be reached");
 			if (await reason.evaluate((node) => node.classList.contains('sr-only'))) {
 				await expect(retry).toHaveAttribute('aria-label', /not delivered: its owner can't be reached/);
 			} else {
@@ -140,7 +156,6 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 			if (framesOut) {
 				// Where the toast sends the person: the document's own Details holds the Retry, with the toast long gone.
 				mkdirSync(framesOut, { recursive: true });
-				await expect(page.locator('.toast')).toHaveCount(0, { timeout: 12000 });
 				await page.screenshot({ path: join(framesOut, `retry-on-document-${width}-${theme}.png`), animations: 'disabled', scale: 'css' });
 			}
 			expect(batchRows(doc.artifactId)).toEqual([{ policy: 'document-held', state: 'undelivered', items: 2 }]);

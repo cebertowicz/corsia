@@ -20,7 +20,7 @@
 
 <style>
 	.drawer-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--border-subtle); font-size: var(--text-footnote); }
-	.send { flex: none; order: 1; margin-left: auto; }
+	.send { min-width: 0; order: 1; margin-left: auto; }
 	.send:not(:has(*)) { display: none; }
 	.send :global(button) { min-height: var(--touch-target); font-weight: 500; }
 	.send :global(button.btn.sm)::after { inset: 0; }
