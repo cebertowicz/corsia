@@ -7,6 +7,7 @@ import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
 import { resolvedList } from '../support/commentDrawer';
+import { editorText } from '../support/liveDocument';
 
 /**
  * Margin comments: open threads sit as cards beside their text, a cluster stacks, a picked card keeps its own line and pushes its
@@ -115,7 +116,7 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 	const doc = await open(page, request);
 	await expect(card(page, doc, FIRST)).toBeVisible();
 	const text = page.locator('.cm-content');
-	const before = await text.textContent();
+	const before = await editorText(page);
 	await page.locator('.cm-line', { hasText: 'Handoff plan' }).click();
 	// Tab in the text indents, as in any editor; Escape first lets the next Tab leave it.
 	await page.keyboard.press('Escape');
@@ -132,7 +133,7 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 		if (reached.at(-1) !== at.card) reached.push(at.card);
 	}
 	expect(reached, 'the cards are reached in the order of their text').toEqual([doc.ids[FIRST], doc.ids[SUGGESTION]]);
-	expect(await text.textContent(), 'leaving the text typed nothing into it').toBe(before);
+	expect(await editorText(page), 'leaving the text typed nothing into it').toBe(before);
 	await page.keyboard.press('Escape');
 	await expect(text).toBeFocused();
 	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
@@ -141,7 +142,16 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 /** Selects a stretch of a line no comment is on, starts a comment on it (the composer opens in the column beside it), and cancels it. */
 async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open>>) {
 	const target = 'Paragraph 6 of the plan';
-	await page.locator('.cm-line', { hasText: target }).first().click({ position: { x: 4, y: 4 } });
+	const line = page.locator('.cm-line', { hasText: target }).first();
+	// Widening the panes and raising the column both reflow the text; a click aimed while it still moves lands on another line.
+	let last = Number.NaN;
+	await expect.poll(async () => {
+		const top = (await line.boundingBox())?.y ?? Number.NaN;
+		const still = top === last;
+		last = top;
+		return still;
+	}, { message: 'the line has stopped moving', intervals: [150] }).toBe(true);
+	await line.click({ position: { x: 4, y: 4 } });
 	await page.keyboard.press('Home');
 	for (let i = 0; i < target.length; i++) await page.keyboard.press('Shift+ArrowRight');
 	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toBe(target);
@@ -156,10 +166,9 @@ async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open
 
 /** Types one character with focus in the text and checks it lands inside or at an end of the commented selection, not at the top. */
 async function expectTypingAtSelection(page: Page, before: string, target: string) {
-	const text = page.locator('.cm-content');
-	expect(await text.textContent(), 'reaching the text typed nothing into it').toBe(before);
+	expect(await editorText(page), 'reaching the text typed nothing into it').toBe(before);
 	await page.keyboard.type('Z');
-	const after = (await text.textContent())!;
+	const after = await editorText(page);
 	let at = 0;
 	while (at < before.length && before[at] === after[at]) at++;
 	const from = before.indexOf(target), to = from + target.length;
@@ -173,7 +182,7 @@ test('@flow:doc-margin-cards after a new comment is cancelled and the column clo
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
 	const text = page.locator('.cm-content');
-	const before = (await text.textContent())!;
+	const before = await editorText(page);
 	const target = await cancelDraftOnLine(page, doc);
 	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
 	await pill(page).click();
@@ -189,7 +198,7 @@ test('@flow:doc-margin-cards after a new comment is cancelled, Escape in the col
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
 	const text = page.locator('.cm-content');
-	const before = (await text.textContent())!;
+	const before = await editorText(page);
 	const target = await cancelDraftOnLine(page, doc);
 	// Focus in a card in the column, as Tab from the text reaches it; Escape there gives focus back to the caret, and the column stays.
 	await card(page, doc, FIRST).getByRole('button').first().focus();
@@ -205,10 +214,10 @@ test('@flow:doc-margin-cards each suggestion is its own card with Accept and Rej
 	const doc = await open(page, request);
 	for (const i of [SUGGESTION, SUGGESTION + 1]) {
 		await expect(card(page, doc, i)).toHaveCount(1);
-		await expect(card(page, doc, i).getByRole('button', { name: 'Accept', exact: true })).toBeVisible();
-		await expect(card(page, doc, i).getByRole('button', { name: 'Reject', exact: true })).toBeVisible();
+		await expect(card(page, doc, i).getByRole('button', { name: /^Accept(:|$)/ })).toBeVisible();
+		await expect(card(page, doc, i).getByRole('button', { name: /^Reject(:|$)/ })).toBeVisible();
 	}
-	await card(page, doc, SUGGESTION).getByRole('button', { name: 'Reject', exact: true }).click();
+	await card(page, doc, SUGGESTION).getByRole('button', { name: /^Reject(:|$)/ }).click();
 	await expect(card(page, doc, SUGGESTION)).toHaveCount(0);
 });
 

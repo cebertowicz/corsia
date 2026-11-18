@@ -142,6 +142,20 @@ Source: `backend/infra/artifact_relocation_schema.py`.
 
 Indexes: `sqlite_autoindex_artifact_relocation_intents_1` (id, unique).
 
+### `comment_identity_moves`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `table_name` | TEXT | Yes | Yes | — | — |
+| `row_id` | TEXT | Yes | Yes | — | — |
+| `original` | TEXT | No | Yes | — | — |
+| `moved_to` | TEXT | No | Yes | — | — |
+| `moved_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_comment_identity_moves_1` (table_name, row_id, unique).
+
 ### `doc_comment_acks`
 
 Source: `backend/infra/doc_comments_schema.py`.

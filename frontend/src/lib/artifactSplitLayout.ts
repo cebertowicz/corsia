@@ -40,6 +40,29 @@ export function shouldOverlayPane(
 		&& inlineCanvasWidth < COMBINED_MIN;
 }
 
+/**
+ * The shell at rest: where the Workspace panel and the sidebar are going, not where their width transitions have them
+ * now. `main` and the two in-flow widths are measured together (an overlaid or fixed column takes no flow: 0); the
+ * targets are the stores' answers. Exact at rest, where rendered widths equal their targets, and through a transition,
+ * since main plus the columns beside it is constant. `visible` is the main column's width less what the panel covers
+ * or takes; `overlay` is decided from it, so it never flips with a mid-transition width.
+ */
+export function settledShell(shell: {
+	main: number; paneInFlow: number; sidebarInFlow: number; sidebarTarget: number;
+	collapsed: boolean; protectArtifactSplit: boolean; viewport: number;
+}): { overlay: boolean; visible: number } {
+	const full = shell.main + shell.paneInFlow + shell.sidebarInFlow - shell.sidebarTarget;
+	const panelUp = !shell.collapsed && shell.viewport > PANE_DRAWER_MAX_VIEWPORT;
+	const overlay = !shell.collapsed && shouldOverlayPane(shell.protectArtifactSplit, shell.viewport, full - PANE_DRAWER_WIDTH);
+	return { overlay, visible: full - (panelUp ? PANE_DRAWER_WIDTH : 0) };
+}
+
+/** The artifact leaf's width once the shell settles at a split-canvas width of `visible`: null where no leaf shows then. */
+export function settledLeafWidth(visible: number, hasTabs: boolean, leafVisible: boolean, preferredArtifactWidth: number | null, artifactSurface: boolean): number | null {
+	const layout = computeSplitLayout(visible, hasTabs, leafVisible, preferredArtifactWidth);
+	return layout.mode === 'split' ? layout.artifactWidth : layout.mode === 'compact' && artifactSurface ? visible : null;
+}
+
 export type SplitLayout =
 	| { mode: 'chat-only' }
 	| { mode: 'rail' }

@@ -16,6 +16,7 @@ from tools.skill_library_common import (
     confirmed_bundle as _confirmed_bundle,
     current_library_item as _current_library_item,
     discard_confirmation as _discard_confirmation,
+    edits_lead as _edits_lead,
     emit_action as _emit_action,
     effective as _effective,
     index as _index,
@@ -266,19 +267,14 @@ def _update(
     if _current_library_item(origin, item):
         return {"outcome": "up_to_date", "name": name, "version": item["version"]}
     folder = Path(local.path).parent
-    edited, local_paths = local_edits(folder, origin)
+    edited, local_paths, exact = local_edits(folder, origin)
     if edited and not discard:
-        return {
-            "error": "local_edits",
-            "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
-            "changed_files": local_paths,
-            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
-        }
+        return _local_edits_refusal(owner_id, name, folder, local_paths, exact)
     confirmed_files = None
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_digest)
+            return _discard_confirmation(owner_id, name, folder, local_paths, exact, local_edits_digest)
     try:
         bundle = fetch_bundle(item)
     except LibraryMainChangedError as error:
@@ -304,6 +300,15 @@ def _update(
     return _write_result(result)
 
 
+def _local_edits_refusal(owner_id: str, name: str, folder: Path, paths: list[str], exact: bool) -> dict[str, Any]:
+    return {
+        "error": "local_edits",
+        "message": f"{_edits_lead(paths, exact)}; review them before choosing whether to discard them",
+        "changed_files": paths if exact else [],
+        "local_edits_digest": _local_edits_digest(owner_id, name, folder),
+    }
+
+
 def _remove(
     name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_digest: object,
 ) -> dict[str, Any]:
@@ -318,19 +323,14 @@ def _remove(
     if origin is None:
         return _error("not_installed", f"{name} is not a library copy owned by this thread")
     folder = Path(local.path).parent
-    edited, local_paths = local_edits(folder, origin)
+    edited, local_paths, exact = local_edits(folder, origin)
     if edited and not discard:
-        return {
-            "error": "local_edits",
-            "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
-            "changed_files": local_paths,
-            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
-        }
+        return _local_edits_refusal(owner_id, name, folder, local_paths, exact)
     confirmed_files = None
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_digest)
+            return _discard_confirmation(owner_id, name, folder, local_paths, exact, local_edits_digest)
     result = remove_skill_bundle(
         _workspace(), name, author_thread_id=owner_id, thread_id=owner_id, project_id=project_id, db=db,
         reason="reviewed library skill removal", confirmed_files=confirmed_files,

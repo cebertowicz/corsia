@@ -60,7 +60,7 @@ def test_workflow_install_update_and_local_edits(library_skill):
     assert set(installed) == {"origin", "workflow"}
     assert installed["origin"]["source"] == "library/workflow"
     assert installed["workflow"] == {"steps": [{"id": "first"}]}
-    assert local_edits(target, installed["origin"]) == (False, [])
+    assert local_edits(target, installed["origin"]) == (False, [], True)
     current = {p.relative_to(target).as_posix(): p.read_bytes() for p in target.rglob("*") if p.is_file()}
     second = b"workflow:\n  steps:\n  - id: second\n"
     assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": second}) == ["corsia.yaml"]
@@ -72,10 +72,64 @@ def test_workflow_install_update_and_local_edits(library_skill):
     assert result["outcome"] == "updated"
     installed = yaml.safe_load((target / "corsia.yaml").read_text())
     assert installed["workflow"] == {"steps": [{"id": "second"}]}
-    assert local_edits(target, installed["origin"]) == (False, [])
+    assert local_edits(target, installed["origin"]) == (False, [], True)
     installed["workflow"]["steps"][0]["id"] = "edited"
     (target / "corsia.yaml").write_text(yaml.safe_dump(installed))
-    assert local_edits(target, installed["origin"])[0] is True
+    assert local_edits(target, installed["origin"]) == (True, ["corsia.yaml"], True)
+
+
+def test_local_edits_names_only_the_changed_files(library_skill):
+    from library.installed import local_edits
+
+    _, target = library_skill
+    origin = _origin(target)
+    assert set(origin["installed_files"]) == {"SKILL.md", "notes.md", "dropped.md", "scripts/lib/x.py"}
+    (target / "notes.md").write_bytes(b"my notes\n")
+    (target / "dropped.md").unlink()
+    (target / "added.md").write_bytes(b"mine\n")
+    assert local_edits(target, origin) == (True, ["added.md", "dropped.md", "notes.md"], True)
+
+
+def test_local_edits_without_a_file_map_lists_every_file_as_not_exact(library_skill):
+    from library.installed import local_edits
+
+    _, target = library_skill
+    origin = _origin(target)
+    (target / "notes.md").write_bytes(b"my notes\n")
+    legacy = {key: value for key, value in origin.items() if key != "installed_files"}
+    edited, paths, exact = local_edits(target, legacy)
+    assert (edited, exact) == (True, False)
+    assert paths == ["SKILL.md", "corsia.yaml", "dropped.md", "notes.md", "scripts/lib/x.py"]
+
+
+def test_a_wrong_file_map_never_hides_an_edit(library_skill):
+    from core.skill_sidecar import installed_file_digests
+    from library.installed import local_bundle, local_edits
+
+    _, target = library_skill
+    origin = _origin(target)
+    tampered = {**origin, "installed_files": {**origin["installed_files"], "SKILL.md": "0" * 64}}
+    assert local_edits(target, tampered) == (False, [], True)
+    (target / "notes.md").write_bytes(b"my notes\n")
+    files, _ = local_bundle(target)
+    rewritten = {**origin, "installed_files": installed_file_digests(files)}
+    edited, _paths, exact = local_edits(target, rewritten)
+    assert (edited, exact) == (True, False)
+
+
+def test_a_partly_rewritten_file_map_lists_every_file(library_skill):
+    from core.skill_sidecar import installed_file_digests
+    from library.installed import local_bundle, local_edits
+
+    _, target = library_skill
+    origin = _origin(target)
+    (target / "SKILL.md").write_bytes((target / "SKILL.md").read_bytes() + b"edited\n")
+    (target / "notes.md").write_bytes(b"my notes\n")
+    files, _ = local_bundle(target)
+    partial = {**origin, "installed_files": {**origin["installed_files"], "SKILL.md": installed_file_digests(files)["SKILL.md"]}}
+    edited, paths, exact = local_edits(target, partial)
+    assert (edited, exact) == (True, False)
+    assert {"SKILL.md", "notes.md"} <= set(paths)
 
 
 @pytest.mark.parametrize("sidecar, detail", [

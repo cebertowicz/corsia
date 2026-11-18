@@ -265,6 +265,37 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 	});
 }
 
+test('@surface:live-document a wheel after opening the column takes over the reading place', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name.endsWith('-mobile'), 'The column needs a wide canvas.');
+	test.setTimeout(120_000);
+	const document = await seedLiveDocument(request, 'table-click-wheel', body());
+	await createComment(request, document, `${CLICKED} title:`, 'Is this row right?');
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	try {
+		const page = await context.newPage();
+		await openLiveDocument(page, document, '# Briefing');
+		await widen(page, document as unknown as Doc);
+		await closeComments(page);
+		await page.locator('.cm-scroller').hover();
+		await page.mouse.wheel(0, 40);
+		await readAtRow(page, CLICKED, 300);
+		await page.locator('.cm-md-table tr', { hasText: `${CLICKED} title:` }).locator('strong').first().click();
+		await expectMarginColumnUp(page);
+		await page.waitForTimeout(1500);
+		const before = await placement(page, CLICKED);
+		await page.locator('.cm-scroller:not(.cm-md-cell-editor .cm-scroller)').hover();
+		await page.mouse.wheel(0, 120);
+		await expect.poll(async () => (await placement(page, CLICKED)).scrollTop).toBeGreaterThan(before.scrollTop + 80);
+		const after = await placement(page, CLICKED);
+		await page.setViewportSize({ width: 1460, height: 900 });
+		await page.waitForTimeout(1500);
+		const resized = await placement(page, CLICKED);
+		expect(Math.abs(resized.textTop - after.textTop), 'the wheel position stays after a layout change').toBeLessThanOrEqual(48);
+	} finally {
+		await context.close();
+	}
+});
+
 // The column opening holds the reader's top row, and the editor's own place holder holds it too: with a row cut off at the
 // top edge, both take the next row (the first one wholly in view), so the cut-off row growing as the text narrows moves only itself.
 test('@surface:live-document the column opening with a row cut off at the top keeps the next row in place at 1440', async ({ browser, request }, testInfo) => {

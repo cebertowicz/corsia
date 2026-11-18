@@ -15,7 +15,7 @@ from api.network_server_helpers import _probe_external
 from infra.db_async import run_in_db
 from llm import network_discovery as nd
 from llm.external_declared_models import declared_model_ids
-from llm.external_image_input import detect_image_input, image_input_summary, mark_for_recheck
+from llm.external_image_input import image_input_summary
 
 log = logging.getLogger(__name__)
 
@@ -43,25 +43,18 @@ async def check_external_server(server_id: str, server: dict) -> dict:
         return {"ok": False, "message": str(e.detail)}
 
     # Reachable: record it now and rediscover, rather than waiting for a sweep.
-    # A test re-checks image support too; rediscovery probes the marked rows.
-    try:
-        await run_in_db(mark_for_recheck, server_id)
-    except Exception:
-        log.warning("external image recheck could not be marked for %s", server_id)
     async with httpx.AsyncClient(timeout=5.0) as client:
         await nd._sweep_one(client, server)
     discovery = await nd.discover_and_notify(server_id)
     if not discovery.get("ok"):
         error = discovery.get("error") or "No completed model discovery result"
         return {"ok": False, "message": f"Reached, but model discovery failed: {error}"}
-    # Optional image enrichment must not hide the core check's actual receipt.
+    # Report saved image facts without running any model.
     images = ""
     try:
-        if await detect_image_input(server_id):
-            nd._notify_models_changed_safe()
         images = await run_in_db(image_input_summary, server_id)
     except Exception:
-        log.warning("external image support could not be checked for %s", server_id)
+        log.warning("external image support could not be read for %s", server_id)
     count = int(discovery.get("discovered") or 0) + int(discovery.get("updated") or 0)
     found = f"Reachable. {count} model{'' if count == 1 else 's'} found."
     return {"ok": True, "message": f"{found} {images}".strip()}

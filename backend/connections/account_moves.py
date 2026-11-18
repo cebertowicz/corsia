@@ -195,10 +195,14 @@ def apply_pending_accounts(thread_id: str, *, db) -> None:
 
 async def _post_effects(receipt) -> None:
     from thread.model_runtime import post_account_switch_effects
-    from thread.runtime_boundary import post_context_boundary_effects
+    from thread.runtime_boundary import emit_context_boundary_changed
 
-    await post_context_boundary_effects(
-        receipt['thread_id'], user_id=receipt['user_id'], reason='vendor_account_changed')
+    # The move already retired the old provider session and advanced the context
+    # epoch in its transaction. Feed replaces an old-epoch live under its lock.
+    # A delayed blanket retire can instead kill the Turn claimed by that move.
+    emit_context_boundary_changed(
+        receipt['thread_id'], user_id=receipt['user_id'], reason='vendor_account_changed',
+        effects={'cc_stopped': False, 'codex_retired': False})
     await post_account_switch_effects(receipt)
 
 

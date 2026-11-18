@@ -93,30 +93,48 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const tab = page.getByRole('tab', { name: fileName });
 		const divider = page.getByRole('separator', { name: 'Resize Files panel' });
 		const assertHeaderTracksArtifactWidth = async () => {
-			// The split's ResizeObserver follows the pane transition; wait for the
-			// actual minimum-width contract instead of sampling its first layout frame.
-			await expect.poll(async () => await page.evaluate(() => {
-				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
-				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
-				if (!leaf || !split) throw new Error('split width is unavailable');
-				return split.width - leaf.width - 8;
-			})).toBeGreaterThanOrEqual(420);
-			const geometry = await page.evaluate(() => {
-				const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
-				const divider = document.querySelector<HTMLElement>('[aria-label="Resize Files panel"]')?.getBoundingClientRect();
-				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
-				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
-				const main = document.querySelector<HTMLElement>('.main');
-				if (!title || !divider || !leaf || !split || !main) throw new Error('split header geometry is unavailable');
-				return {
-					headerInset: Number.parseFloat(getComputedStyle(main).getPropertyValue('--artifact-header-inset')),
-					titleRight: title.right,
-					dividerLeft: divider.left,
-					splitWidth: split.width,
-					artifactWidth: leaf.width,
-					occupiedWidth: leaf.width + divider.width,
+			// The split follows a panel or sidebar transition, and the chat column passes below its floor on the way
+			// (it dips for about 0.3 s after End, with or without the overlay panel). The floor is the contract for the
+			// settled layout, so read the geometry only once the split, the artifact pane and the header have held their
+			// rects for several consecutive frames, in the same frame the read is taken.
+			const geometry = await page.evaluate(() => new Promise<{
+				headerInset: number; titleRight: number; dividerLeft: number; splitWidth: number; artifactWidth: number; occupiedWidth: number;
+			}>((resolve, reject) => {
+				const read = () => {
+					const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
+					const divider = document.querySelector<HTMLElement>('[aria-label="Resize Files panel"]')?.getBoundingClientRect();
+					const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
+					const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
+					const main = document.querySelector<HTMLElement>('.main');
+					if (!title || !divider || !leaf || !split || !main) throw new Error('split header geometry is unavailable');
+					return {
+						headerInset: Number.parseFloat(getComputedStyle(main).getPropertyValue('--artifact-header-inset')),
+						titleRight: title.right,
+						dividerLeft: divider.left,
+						splitWidth: split.width,
+						artifactWidth: leaf.width,
+						occupiedWidth: leaf.width + divider.width,
+					};
 				};
-			});
+				const key = (geometry: ReturnType<typeof read>) => JSON.stringify(geometry);
+				const deadline = performance.now() + 8000;
+				let last = '';
+				let held = 0;
+				const frame = () => {
+					try {
+						const now = read();
+						held = key(now) === last ? held + 1 : 0;
+						last = key(now);
+						if (held >= 4) return resolve(now);
+						if (performance.now() > deadline) return reject(new Error(`split layout never settled: ${last}`));
+						requestAnimationFrame(frame);
+					} catch (error) {
+						reject(error);
+					}
+				};
+				requestAnimationFrame(frame);
+			}));
+			console.log(`settled chat column ${(geometry.splitWidth - geometry.artifactWidth - 8).toFixed(1)}px (split ${geometry.splitWidth}, artifact ${geometry.artifactWidth})`);
 			expect(geometry.headerInset).toBeCloseTo(geometry.occupiedWidth, 0);
 			expect(geometry.titleRight).toBeLessThanOrEqual(geometry.dividerLeft);
 			// This test keeps the plan pane open. The available width must preserve the
@@ -136,12 +154,15 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const drawer = page.locator('aside.pane');
 		// The strip ends before the first control, and each control takes its own pointer
 		// events (a trial click fails when the strip or an overlaid drawer would take them).
-		const assertControlsReachable = async () => {
-			await expect.poll(async () => {
+		// A compact canvas is one surface with no header strip.
+		const assertControlsReachable = async (expanded = true) => {
+			if (expanded) await expect.poll(async () => {
 				const [stripBox, measurementBox] = await Promise.all([strip.boundingBox(), measurement.boundingBox()]);
-				return stripBox!.x + stripBox!.width <= measurementBox!.x;
+				return !!stripBox && !!measurementBox && stripBox.x + stripBox.width <= measurementBox.x;
 			}).toBe(true);
-			for (const control of [measurement, settings, panelToggle]) await control.click({ trial: true });
+			else await expect(strip).toBeHidden();
+			// The compact surface's own header carries the panel toggle; measurement and chat settings live in the strip.
+			for (const control of expanded ? [measurement, settings, panelToggle] : [panelToggle]) await control.click({ trial: true });
 		};
 
 		await expect(drawer).not.toHaveClass(/(^|\s)(overlay|collapsed)(\s|$)/);
@@ -185,11 +206,12 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await saveEvidenceScreenshot(page, testInfo, 'header-icons-light-1440-drawer-collapsed', { fullPage: false });
 
 		// The drawer overlays the canvas only once inline it would leave less than the combined
-		// minimum; with the desktop sidebar open that first happens below 1440.
+		// minimum; with the desktop sidebar open that first happens below 1440. The canvas beside
+		// an overlaid drawer is laid out for the width the drawer leaves, so it is compact.
 		await page.setViewportSize({ width: 1300, height: 900 });
 		await panelToggle.click();
 		await expect(drawer).toHaveClass(/(^|\s)overlay(\s|$)/);
-		await assertControlsReachable();
+		await assertControlsReachable(false);
 		const [panelBox, drawerBox] = await Promise.all([panelToggle.boundingBox(), drawer.boundingBox()]);
 		expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(drawerBox!.x);
 		await saveEvidenceScreenshot(page, testInfo, 'header-icons-light-1300-drawer-overlaid', { fullPage: false });

@@ -118,14 +118,15 @@ def _make_line_boundaries_explicit(command: str) -> str:
     return "".join(rendered)
 
 
-def shell_words(text: str) -> tuple[str, ...]:
+def shell_words(text: str, *, posix: bool = True) -> tuple[str, ...]:
     """Split shell text into the reviewer's token view.
 
+    ``posix=False`` keeps each word's quotes and escapes as written.
     Raises ``ValueError`` when quoting is unbalanced.
     """
     lexer = shlex.shlex(
         _make_line_boundaries_explicit(text),
-        posix=True,
+        posix=posix,
         punctuation_chars=";&|<>",
     )
     lexer.whitespace_split = True

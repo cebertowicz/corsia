@@ -6,12 +6,13 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 
 	import { pushBackLayer } from '$lib/historyBackLayer';
-	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
+	import { setContext } from 'svelte';
+	import { canvasCompact, artifactTabSheetOpen, paneOverlay, shellCanvas, SETTLED_LEAF_WIDTH } from '$lib/stores/artifactCanvas';
 	import {
 		threadWorkspaces, splitWidth as splitWidthStore, emptyWorkspace, setActiveSurface,
 		setActiveTab, setLeafVisible,
 	} from '$lib/stores/artifactWorkspace';
-	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, isCompactCanvas } from '$lib/artifactSplitLayout';
+	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, PANE_DRAWER_WIDTH, isCompactCanvas, settledLeafWidth } from '$lib/artifactSplitLayout';
 	import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 	import { visibleDocumentArtifactId } from '$lib/heldDocFeedbackScope';
 	import { tabDocumentImage } from '$lib/stores/tabViewState';
@@ -42,24 +43,36 @@
 
 	let splitEl = $state<HTMLDivElement | undefined>(undefined);
 	let canvasWidth = $state(0);
+	/** What the main column has beside the split: the shell's settled width is the main column's. */
+	let besideSplit = $state(0);
 
 	$effect(() => {
 		const el = splitEl;
 		if (!el) return;
-		canvasWidth = el.getBoundingClientRect().width;
+		// The split's compact padding reserves the overlay, so measure its full box before subtracting it once below.
+		const measure = () => {
+			canvasWidth = el.getBoundingClientRect().width;
+			besideSplit = (el.parentElement?.getBoundingClientRect().width ?? canvasWidth) - canvasWidth;
+		};
+		measure();
 		if (typeof ResizeObserver === 'undefined') return;
-		const ro = new ResizeObserver((entries) => {
-			const entry = entries[0];
-			if (entry) canvasWidth = entry.contentRect.width;
-		});
-		ro.observe(el);
+		const ro = new ResizeObserver(measure);
+		// Watch the box that is kept: the compact padding can leave in the same re-layout
+		// that shrinks the box, so the content box alone may not change and never report.
+		ro.observe(el, { box: 'border-box' });
 		return () => ro.disconnect();
 	});
 
-	const layout = $derived(computeSplitLayout(canvasWidth, hasTabs, workspace.visible, $splitWidthStore));
+	const visibleCanvasWidth = $derived(canvasWidth > 0 && $paneOverlay ? Math.max(1, canvasWidth - PANE_DRAWER_WIDTH) : canvasWidth);
+	const layout = $derived(computeSplitLayout(visibleCanvasWidth, hasTabs, workspace.visible, $splitWidthStore));
 	// Requests can add the first tab, so retain the measured compact state even
 	// while the workspace is still chat-only.
-	const compact = $derived(isCompactCanvas(canvasWidth));
+	const compact = $derived(isCompactCanvas(visibleCanvasWidth));
+	// The leaf's width once the shell settles, for a layout decision inside it (the comment surface's form) that must not
+	// follow the widths a panel or sidebar transition passes through. The split itself keeps drawing the width it has now.
+	const settledLeaf = $derived($shellCanvas === null || canvasWidth <= 0 ? null
+		: settledLeafWidth($shellCanvas - besideSplit, hasTabs, workspace.visible, $splitWidthStore, workspace.activeSurface === 'artifact'));
+	setContext(SETTLED_LEAF_WIDTH, () => settledLeaf);
 	// Compact shows exactly one surface; the artifact takes the canvas only when
 	// it is the active surface, so Back always has chat to return to.
 	const artifactFullCanvas = $derived(compact && workspace.activeSurface === 'artifact');
@@ -198,6 +211,8 @@
 		flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden;
 		margin-top: calc(-1 * var(--status-banners-height, 0px)); padding-top: var(--status-banners-height, 0px);
 	}
+	/* In compact, the visible surface ends at the Workspace overlay. */
+	.split.compact { padding-inline-end: var(--pane-overlay-inset, 0px); }
 	.chat-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 	/* Hidden, not unmounted — see the comment on the element. */
 	.chat-col.offscreen { display: none; }

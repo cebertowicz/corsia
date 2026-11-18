@@ -39,7 +39,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 195
+SCHEMA_VERSION = 200
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -328,7 +328,7 @@ SCHEMA_SQL = f"""
         reason TEXT NOT NULL,
         payload_json TEXT,
         status TEXT NOT NULL DEFAULT 'parked',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL, code_named INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_dead_letter_status
         ON dead_letter_events(status, created_at);

@@ -6,6 +6,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import { headerStack } from '$lib/actions/headerStack';
 	import CommentsPill from './comments/CommentsPill.svelte';
 	import { Button, StatePill, Toggle } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
@@ -190,7 +191,7 @@
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
-<header class="document-header" use:detailsKeys>
+<header class="document-header" use:detailsKeys use:headerStack={reviewTargetKey}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
@@ -310,9 +311,8 @@
 	}
 
 	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
-	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
-	   The header is a container, so the ask's line 1 can rearrange when that leaves it too narrow (ReviewBar). */
-	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
+	/* The header is a container, so the ask's line 1 can rearrange when it is narrow (ReviewBar). */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); container: doc-header / inline-size; }
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
@@ -344,16 +344,16 @@
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
 	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
 	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
+	/* A receipt is its own row under the tools at every width (the ask shares its first line with them), as it already is on a phone-sized header. */
+	.document-header:has(:global(.review-bar.receipt)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
 	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
 	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
-	@container doc-header (width < 408px) {
-		/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. */
-		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
-		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
-	}
+	/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. `rb-stack` is set by headerStack when the review line cannot keep its floors beside the tools. */
+	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
+	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	/* History is a text button on a wide canvas and, like the Request review button beside it (DocReviewControls.svelte:97), an icon-only button once the canvas is phone-sized, so the row holds the same controls whatever the save state. */
 	.history-tool svg { display: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 	@container doc-canvas (max-width: 600px) {

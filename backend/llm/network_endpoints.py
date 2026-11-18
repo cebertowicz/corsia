@@ -6,13 +6,15 @@ import asyncio
 import ipaddress
 import logging
 import time
-import uuid
+
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from infra.db_async import run_in_db
-from infra.database import get_db, write_transaction
+from infra.database import get_db
+from llm.network_endpoint_store import store_endpoint
+from llm.network_urls import http_origin
 
 log = logging.getLogger(__name__)
 
@@ -63,52 +65,14 @@ def classify_host(host: str) -> str:
     return "public"
 
 
+
 def upsert_endpoint(
-    server_id: str,
-    host: str,
-    *,
-    ok: bool,
-    latency_ms: int | None = None,
-    db=None,
+    server_id: str, host: str, *, ok: bool, latency_ms: int | None = None,
+    supersede: bool = False, generation: int | None = None, db=None,
 ) -> None:
-    """Record or refresh a known host for a server.
-
-    Only bumps ``last_ok_at`` when ok is True — a failed probe leaves the
-    timestamp stale so freshness-based selection naturally rotates away.
-    """
-    with write_transaction(db, scope="upsert_network_endpoint") as connection:
-        now = _now_iso()
-        kind = classify_host(host)
-
-        row = connection.execute(
-            "SELECT id FROM network_server_endpoints WHERE server_id = ? AND host = ?",
-            (server_id, host),
-        ).fetchone()
-
-        if row:
-            sets = ["kind = ?", "updated_at = ?"]
-            vals: list = [kind, now]
-            if ok:
-                sets.append("last_ok_at = ?")
-                vals.append(now)
-                if latency_ms is not None:
-                    sets.append("last_latency_ms = ?")
-                    vals.append(latency_ms)
-            vals.append(row["id"])
-            connection.execute(
-                f"UPDATE network_server_endpoints SET {', '.join(sets)} WHERE id = ?",
-                vals,
-            )
-        else:
-            eid = f"ep-{uuid.uuid4().hex[:10]}"
-            connection.execute(
-                """INSERT INTO network_server_endpoints
-                       (id, server_id, host, kind, last_ok_at, last_latency_ms,
-                        created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (eid, server_id, host, kind,
-                 now if ok else None, latency_ms if ok else None, now, now),
-            )
+    """Store an endpoint observation through the shared transaction owner."""
+    store_endpoint(server_id, host, kind=classify_host(host), clock=_now_iso, ok=ok,
+                   latency_ms=latency_ms, supersede=supersede, generation=generation, db=db)
 
 
 def get_endpoints(server_id: str) -> list[dict]:
@@ -193,7 +157,7 @@ async def probe_endpoint(
 
 def lan_base(host: str, port: int) -> str:
     """The legacy LAN base managed oMLX and migrated localhost entries use."""
-    return f"http://{host}:{port}/v1"
+    return f"{http_origin(host, port)}/v1"
 
 
 def endpoint_base(
@@ -270,13 +234,6 @@ def models_probe_url(base: str, *, dialect: str = "openai") -> str:
     return f"{base.rstrip('/')}/models"
 
 
-def chat_request_url(base: str, *, dialect: str = "openai") -> str:
-    """Where a turn is sent, composed like :func:`models_probe_url`."""
-    if dialect == "anthropic":
-        return f"{anthropic_root(base)}/v1/messages"
-    return f"{base.rstrip('/')}/chat/completions"
-
-
 def external_probe_url(
     meta: dict | None, *, dialect: str, host: str, port: int | None
 ) -> str | None:
@@ -309,7 +266,7 @@ def configured_api_base(server_id: str, host: str = "") -> str | None:
 
 def mgmt_status_url(host: str, port: int) -> str:
     """The managed (oMLX) ``/api/status`` surface for one host — the only place it is built."""
-    return f"http://{host}:{port}/api/status"
+    return f"{http_origin(host, port)}/api/status"
 
 
 def build_mgmt_base(server_id: str) -> str | None:
@@ -318,7 +275,7 @@ def build_mgmt_base(server_id: str) -> str | None:
     if not ep:
         return None
     port = _server_port(server_id)
-    return f"http://{ep['host']}:{port}/api" if port else None
+    return f"{http_origin(ep['host'], port)}/api" if port else None
 
 
 async def freshness_guard(server_id: str, *, budget_s: float = 1.0) -> bool:
@@ -331,6 +288,9 @@ async def freshness_guard(server_id: str, *, budget_s: float = 1.0) -> bool:
     VPN toggle) by paying a one-time ~200ms tax only when staleness has
     actually happened.
     """
+    from llm.server_observation import observation_generation
+
+    generation = observation_generation(server_id)
     if await run_in_db(get_active_endpoint, server_id) is not None:
         return True
     endpoints = await run_in_db(get_endpoints, server_id)
@@ -377,6 +337,8 @@ async def freshness_guard(server_id: str, *, budget_s: float = 1.0) -> bool:
         else:
             from llm.providers.omlx_public_probe import probe_registered_statuses
             results = await probe_registered_statuses(client, server_id, endpoints, port)
+    if not is_external and observation_generation(server_id) != generation:
+        return await run_in_db(get_active_endpoint, server_id) is not None
     for result in results:
         if isinstance(result, tuple):
             host, latency_ms, _payload = result
@@ -386,14 +348,22 @@ async def freshness_guard(server_id: str, *, budget_s: float = 1.0) -> bool:
                 host,
                 ok=True,
                 latency_ms=latency_ms,
+                generation=None if is_external else generation,
             )
 
     reachable = await run_in_db(get_active_endpoint, server_id) is not None
     if not reachable:
-        try:
-            from llm.network_discovery import update_server_status, _LOADED_BY_SERVER
-            await run_in_db(update_server_status, server_id, status="offline")
-            _LOADED_BY_SERVER.pop(server_id, None)
-        except Exception as e:
-            log.warning(f"eager offline-status flip failed for {server_id}: {e}")
+        await _mark_guard_offline(server_id, None if is_external else generation)
     return reachable
+
+
+async def _mark_guard_offline(server_id: str, generation: int | None) -> None:
+    try:
+        from llm.network_discovery import update_server_status, _LOADED_BY_SERVER
+        from llm.server_observation import observation_generation
+
+        await run_in_db(update_server_status, server_id, status="offline", generation=generation)
+        if generation is None or observation_generation(server_id) == generation:
+            _LOADED_BY_SERVER.pop(server_id, None)
+    except Exception as exc:
+        log.warning("eager offline-status flip failed for %s: %s", server_id, exc)

@@ -117,7 +117,12 @@ receive the replacement failure. Cloud work can continue independently. Crash
 recovery and upgrade share the original bounded recovery task, including model
 restoration; this boundary covers CORSIA dispatch, not clients calling oMLX
 directly. Ordinary adoption failures are contained so cloud startup can continue;
-a version-read failure leaves already adopted processes watched.
+a version-read failure leaves already adopted processes watched. The managed
+listener uses the Host saved by oMLX, defaulting to loopback; readiness and
+endpoint selection use a concrete address derived from that listener. A newly
+confirmed managed endpoint supersedes earlier endpoint observations without
+removing their records. In-flight probes from an earlier server generation cannot
+publish over the replacement. Independent server listener policy is unchanged.
 Restart transitions tag the existing `models_updated` event with `server_id`,
 so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart
@@ -136,7 +141,11 @@ replaces the observation; it is removed when the turn that recorded it ends
 (`backend/llm/memory_fit.py`). External server
 selectors carry both server identity and served model id; the External provider
 routes requests without managing the server's models
-(`backend/llm/external_provider.py`).
+(`backend/llm/external_provider.py`). Registration, testing and rediscovery
+perform metadata requests only. The response observer in `backend/llm/router.py`
+triggers image detection after a chosen External model's first successful reply;
+`backend/llm/external_image_input.py` owns the durable per-model claim and result.
+Failed checks remain unknown without automatic retry; a saved user choice wins.
 
 The oMLX public authentication, managed oMLX replacement, and model and account
 resolution sections were checked against the code at
@@ -527,25 +536,38 @@ roster says why instead of omitting it.
 ### Repository policy fence
 
 `backend/infra/repo_policy_transition.py` is the one process-local owner of the
-mutual exclusion between repository *effects* (any tool call that may read or
-touch a working repository) and repository *policy transitions* (attaching,
-detaching, pinning or checkout-protecting a repository). The fence is global on
-purpose; it is not scoped per repository. A transition refuses while tool
-effects or owned processes are active, and tool effects refuse while a
-transition is active.
+mutual exclusion between repository *effects* (any tool call that may write)
+and repository *policy transitions* (attaching, detaching, pinning or
+checkout-protecting a repository). Each effect carries a `Reach`: the exact
+paths a file-writing tool writes, else the projects its caller was walled from,
+else everywhere. Owned processes are judged by count alone. Each transition
+carries a claim (its projects, or everywhere) and, when known, the folders it
+changes. They conflict only where the reach meets the claim; a file tool that
+only reads is no effect. Only a registration inside the registering project's
+own folder claims less than everywhere (`api/project_repo_claim.py`). A
+registration never waits for or refuses over in-flight effects or owned
+processes (`checks_running=False`): it proceeds at once. Calls started after it,
+and a file tool's own write check, see the protection it adds; a shell call or
+owned process already running keeps the sandbox write rules it launched with
+until it exits, so it can still write in a newly protected checkout. It is
+refused only while another transition is in progress.
+The other transitions (detach, policy update, project creation) still refuse
+against an effect or process they meet. Tool effects that meet an active
+transition refuse at once.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`
 except the tools whose own execution enters the stronger transition:
 `_REPO_TRANSITION_OWNERS` in `backend/tools/registry.py`, matched on the
 resolved post-dispatch name so a `tool_call` dispatch matches too. Those two are
 `project_create` (through `api.project_scaffolding.initialize_project`) and
-`project_repo_register` (through `api.project_repos.register_source_repo`);
-admitting their own effect would only make each collide with its own
-transition. The set is pinned in test to those two tool objects, so a rename or
+`project_repo_register` (through `api.project_repo_add_entry.register_source_repo_async`);
+each is judged by its own transition alone. Admitting project creation's own
+effect would make it collide with its transition, which refuses over effects it
+meets; a registration's transition never looks at running effects. The set is pinned in test to those two tool objects, so a rename or
 a re-point cannot silently widen the exemption. Everything else is still
-admitted as an effect and still refuses against an active transition. The
-detach and policy-update routes take the same transition from the HTTP surface,
-which is not a tool path and keeps its own admission, and
+admitted as an effect and still refuses against an active transition it meets.
+The detach and policy-update routes take the same transition, claiming
+everywhere and refusing at once rather than waiting, and
 `project_repo_register` still refuses a non-Git folder before it ever reaches
 the transition.
 

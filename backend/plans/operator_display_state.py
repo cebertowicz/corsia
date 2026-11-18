@@ -129,10 +129,7 @@ def row_asks_user(node: dict, review: dict | None, execution: dict) -> bool:
         str(node["state"]), str(execution["condition"]),
         None if node.get("assignee") is None else str(node["assignee"]),
         None if review is None else str(review["kind"]),
-        has_attention=any(
-            link["role"] == "attention" and link.get("attention_state") == "raised"
-            for link in node.get("artifact_links", [])
-        ),
+        has_attention=any(link.get("asks_person") for link in node.get("artifact_links", [])),
         causes=execution["causes"],
     )
 

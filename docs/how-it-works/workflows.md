@@ -40,7 +40,7 @@ The `by` field says who does a step (`backend/core/skill_workflow_validation.py`
 |---|---|---|
 | `agent` (default) | The agent that started the run | The agent closes it with evidence, or hands work back for review when a worker did it |
 | `reviewer` | A separate worker | The agent cannot mark it done itself. It hands the step to a worker with `delegate_task`, then accepts or sends back what returns |
-| `person` | The person | The step is assigned to them with its instruction and check. A person step that comes after others reaches them only once those are done |
+| `person` | The person | The step is assigned to them with its instruction and check. A person step that comes after others reaches them only once those are done. When the step is also a gate, the reply that closes the step before it tells the agent to ask now, and the agent asks for it with a review ask (`block_node` on the step, `owner_kind` user, the file they review); it cannot mark the step done before the person answers that ask, and a chat reply does not count |
 
 A person step's instruction and check must together fit 400 characters.
 
@@ -60,7 +60,7 @@ A step with a `workflow` field runs that workflow as a child phase, built the sa
 
 ### Acceptance gates
 
-A step with `gate: acceptance` is where the person approves the result. CORSIA counts a gate by the person's first answer in each run, and only Approve is clean. After 8 clean runs in a row on the current version, CORSIA offers the person four answers: hand the review to an agent with spot checks, hand it off with none, drop the review, or keep reviewing. A handed-off gate becomes a reviewer step. With spot checks, some runs are drawn (1 in 5, then 1 in 10, then 1 in 20 as clean spot checks accumulate, then none) to stay with the person. Dropping the review closes that step in later runs. A correction on the run's work, or a failed spot check, hands the gate back and restarts the count (`backend/plans/gate_handoff.py`).
+A step with `gate: acceptance` is where the person approves the result. CORSIA counts a gate by the person's first answer to the step's review ask in each run, and only Approve is clean. After 8 clean runs in a row on the current version, CORSIA offers the person four answers: hand the review to an agent with spot checks, hand it off with none, drop the review, or keep reviewing. A handed-off gate becomes a reviewer step. With spot checks, some runs are drawn (1 in 5, then 1 in 10, then 1 in 20 as clean spot checks accumulate, then none) to stay with the person. Dropping the review closes that step in later runs. A correction on the run's work, or a failed spot check, hands the gate back and restarts the count (`backend/plans/gate_handoff.py`).
 
 ### Why runs are comparable
 

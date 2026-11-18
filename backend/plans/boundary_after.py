@@ -103,6 +103,11 @@ def after_close(
     result = admission.result(node_id, db=db)
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
     result.update(_run_summary(db, node_id, run_open))
+    if executor is not None and reason == "accepted":
+        from plans import workflow_fields
+
+        if ready := workflow_fields.person_gates_ready(db, node_id):
+            result["person_gate"] = " ".join(ready)
     return result
 
 

@@ -127,6 +127,7 @@ describe('a swipe interrupted by a detached touch target still ends', () => {
 	let mainEl: HTMLElement;
 	let child: HTMLElement;
 	let sidebarOpen: boolean;
+	let sidebarDragging: boolean[];
 	let realWidth: number;
 
 	function touch(type: string, x: number, y: number, target: HTMLElement) {
@@ -141,6 +142,7 @@ describe('a swipe interrupted by a detached touch target still ends', () => {
 		realWidth = window.innerWidth;
 		Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 400 });
 		sidebarOpen = false;
+		sidebarDragging = [];
 		mainEl = document.createElement('main');
 		child = document.createElement('p');
 		mainEl.appendChild(child);
@@ -152,6 +154,7 @@ describe('a swipe interrupted by a detached touch target still ends', () => {
 			getPaneOpen: () => false,
 			setPaneOpen: () => {},
 			setPaneDragging: () => {},
+			setSidebarDragging: (dragging) => { sidebarDragging.push(dragging); },
 		});
 		mainEl.addEventListener('touchstart', drawer.onTouchStart);
 		mainEl.addEventListener('touchend', drawer.onTouchEnd);
@@ -204,5 +207,25 @@ describe('a swipe interrupted by a detached touch target still ends', () => {
 		touch('touchmove', 12, 140, child);
 		touch('touchend', 12, 140, child);
 		expect(mainEl.dataset.drawerDrag).toBeUndefined();
+	});
+
+	// HomeShell covers drawers the phone navigation comes over from the moment a drag starts to bring it in.
+	it('reports a sidebar drag from its first committed move until the drag ends', () => {
+		touch('touchstart', 10, 100, child);
+		expect(sidebarDragging).not.toContain(true);
+		touch('touchmove', 150, 102, child);
+		expect(sidebarDragging.at(-1)).toBe(true);
+		touch('touchend', 150, 102, child);
+		expect(sidebarDragging.at(-1)).toBe(false);
+	});
+
+	it('never reports a pane drag, or a touch that never became a drag, as a sidebar drag', () => {
+		touch('touchstart', 390, 100, child);
+		touch('touchmove', 250, 102, child);
+		touch('touchend', 250, 102, child);
+		touch('touchstart', 10, 100, child);
+		touch('touchmove', 12, 140, child);
+		touch('touchend', 12, 140, child);
+		expect(sidebarDragging).not.toContain(true);
 	});
 });

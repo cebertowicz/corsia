@@ -1,7 +1,6 @@
 """Lesson-report scans return fewer SQLite rows but exactly the rows the row-by-row scans did."""
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter
 
@@ -222,18 +221,6 @@ def _ordered(result):
     return json.dumps(result, sort_keys=True, default=str), list(result["period"]["unavailable_calls"].items())
 
 
-def _text(offers):
-    """The canonical document text of a list of offers, as the fingerprint hashes it."""
-    return ",".join(json.dumps(offer, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-                    for offer in offers).encode()
-
-
-def _fed(deferred):
-    digest = hashlib.sha256()
-    deferred.feed(digest)
-    return digest.hexdigest()
-
-
 def assert_materialized_equals_the_scan(new, old):
     """The materialized period offers carry exactly what the row-by-row list did."""
     deferred, scanned = new["period"].pop("offers"), old["period"].pop("offers")
@@ -242,8 +229,8 @@ def assert_materialized_equals_the_scan(new, old):
 
 
 def assert_offers_equal(deferred, scanned):
-    """A DeferredOffers hashes to the document text of ``scanned`` and counts what it lists."""
-    assert _fed(deferred) == hashlib.sha256(_text(scanned)).hexdigest()
+    """A DeferredOffers counts what ``scanned`` lists. Its fingerprint is tested on its own:
+    it digests what determines the offers, not the offers' text."""
     expected: dict = {}
     for offer in scanned:
         row = expected.setdefault((offer["id"], offer["version"]), {

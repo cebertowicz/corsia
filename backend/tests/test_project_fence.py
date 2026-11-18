@@ -460,12 +460,20 @@ def _git_repo(path: Path, *worktrees: str) -> None:
         git("worktree", "add", "-q", "--no-track", "-b", f"b-{name[:8]}", str(path / ".worktrees" / name), "main")
 
 
-def _register(world, project_id: str, repo: Path) -> None:
+def _register(world, project_id: str, repo: Path, *, link: bool = False) -> None:
+    """Insert a registration row; ``link`` also makes the project's ``source/`` link, a valid binding.
+
+    A valid binding stores the resolved path, as registration does.
+    """
     world.db.execute(
         "INSERT INTO project_repo_policies(project_id,repo_name,repo_path,pinned_branch,protect_base_checkout) "
-        "VALUES (?,?,?,NULL,0)", (project_id, repo.name, str(repo)),
+        "VALUES (?,?,?,NULL,0)", (project_id, repo.name, str(repo.resolve() if link else repo)),
     )
     world.db.commit()
+    if link:
+        source = world.workspace / "projects" / project_id.removeprefix("id-") / "source"
+        source.mkdir(exist_ok=True)
+        (source / repo.name).symlink_to(repo, target_is_directory=True)
 
 
 def test_a_repo_in_two_projects_belongs_to_both(world):
@@ -473,8 +481,8 @@ def test_a_repo_in_two_projects_belongs_to_both(world):
 
     repo = world.workspace / "repos" / "shared"
     _git_repo(repo, f"{ALPHA_AGENT}-feature", f"{BETA_AGENT}-fix", "made-by-hand")
-    _register(world, "id-alpha", repo)
-    _register(world, "id-beta", repo)
+    _register(world, "id-alpha", repo, link=True)
+    _register(world, "id-beta", repo, link=True)
     canonical_root = repo.resolve()
     for agent in (ALPHA_AGENT, BETA_AGENT):
         assert not [r for r in fence_for_thread(agent).roots if r.path.resolve().is_relative_to(canonical_root)]
@@ -501,10 +509,10 @@ def test_a_repo_two_local_only_projects_share_stays_open_to_both(world):
     world.db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('id-beta',1)")
     repo = world.workspace / "repos" / "shared"
     _git_repo(repo)
-    _register(world, "id-beta", repo)
-    _register(world, "id-secret", repo)
+    _register(world, "id-beta", repo, link=True)
+    _register(world, "id-secret", repo, link=True)
     assert not [r for r in fence_for_thread(BETA_AGENT).roots if r.path.name == "shared"]
-    assert [r.path for r in fence_for_thread(ALPHA_AGENT).roots if r.path.name == "shared"] == [repo]
+    assert [r.path for r in fence_for_thread(ALPHA_AGENT).roots if r.path.name == "shared"] == [repo.resolve()]
 
 
 def test_a_repo_only_another_project_registers_is_fenced_at_its_canonical_root(world):
@@ -553,6 +561,36 @@ def test_a_malformed_repo_row_still_fences_and_never_shares(world):
     world.db.commit()
     paths = _paths(fence_for_thread(ALPHA_AGENT))
     assert {fenced, unshared} <= paths
+
+
+def test_a_registration_whose_source_link_is_gone_opens_nothing(world):
+    from tools.project_fence import fence_for_thread
+
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-beta", repo, link=True)
+    _register(world, "id-alpha", repo)
+    refusal = fence_for_thread(ALPHA_AGENT).refusal(repo / "README")
+    assert refusal is not None and "is in project `beta`, outside your scope." in refusal
+    assert _forms(repo.resolve()) <= set(_policy(ALPHA_AGENT).sandbox_rules().splitlines())
+    assert fence_for_thread(BETA_AGENT).refusal(repo / "README") is None
+
+
+def test_the_fence_checks_bindings_without_loading_each_projects_policies(world, monkeypatch):
+    """The fence runs on every file-tool call: no per-project policy load or git branch read."""
+    from infra import project_repo_policy
+    from tools.project_fence import fence_for_thread
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("the fence loaded repo policies")
+
+    monkeypatch.setattr(project_repo_policy, "list_registered_repo_policies", refuse)
+    monkeypatch.setattr(project_repo_policy, "current_repo_branch", refuse)
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-beta", repo, link=True)
+    _register(world, "id-alpha", repo, link=True)
+    assert fence_for_thread(ALPHA_AGENT).refusal(repo / "README") is None
 
 
 def test_a_fence_refusal_is_counted(world, monkeypatch):
@@ -604,10 +642,38 @@ async def test_agent_cannot_register_a_repo_inside_another_projects_folder(world
 async def test_registering_a_repo_the_caller_already_shares_is_not_refused_by_the_fence(world, monkeypatch):
     repo = world.workspace / "repos" / "shared"
     _git_repo(repo)
-    _register(world, "id-alpha", repo)
-    _register(world, "id-beta", repo)
+    _register(world, "id-alpha", repo, link=True)
+    _register(world, "id-beta", repo, link=True)
     result = await _register_as_alpha(world, monkeypatch, repo)
     assert "outside your scope" not in result
+
+
+@pytest.mark.asyncio
+async def test_registering_again_replaces_a_registration_whose_source_link_is_gone(world, monkeypatch):
+    repo = world.workspace / "repos" / "mine"
+    _git_repo(repo)
+    _register(world, "id-alpha", repo)
+    result = await _register_as_alpha(world, monkeypatch, repo)
+    assert result.startswith("Registered repository"), result
+    assert _alpha_rows(world) == 1
+    assert (world.workspace / "projects" / "alpha" / "source" / "mine").resolve() == repo.resolve()
+
+
+@pytest.mark.asyncio
+async def test_the_person_can_restore_a_shared_registration_whose_source_link_is_gone(world, monkeypatch):
+    from api.project_repos import RepoAdd, register_source_repo
+    from infra.db_async import run_in_db
+    from tools.project_fence import fence_for_thread
+
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-beta", repo, link=True)
+    _register(world, "id-alpha", repo)
+    # Alpha's agent can't re-create a share with another project; the person can.
+    assert "is in project `beta`, outside your scope." in await _register_as_alpha(world, monkeypatch, repo)
+    await run_in_db(lambda: register_source_repo("id-alpha", RepoAdd(mode="link", path=str(repo))))
+    assert _alpha_rows(world) == 1
+    assert fence_for_thread(ALPHA_AGENT).refusal(repo / "README") is None
 
 
 @pytest.mark.asyncio

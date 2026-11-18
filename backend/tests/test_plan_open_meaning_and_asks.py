@@ -158,6 +158,27 @@ def test_the_decision_count_is_what_the_full_scan_counts(db) -> None:
     assert decision_projection.raised_decisions(plan_ids, db=db, open_nodes=True) == scanned
 
 
+def test_activity_decision_facts_read_the_open_rows_and_keep_every_ask(db) -> None:
+    raise_decision(db, "root", "root")
+    raise_decision(db, "child", "child")
+    plan_id = service.ensure_plan("thread", "root", db=db).id
+    _settled_children(db, plan_id)
+    plan_ids = [row["id"] for row in db.execute("SELECT id FROM plans")]
+    reads: list[str] = []
+    db.set_trace_callback(reads.append)
+    try:
+        facts = decision_projection.activity_facts(plan_ids, db=db)
+    finally:
+        db.set_trace_callback(None)
+
+    link_reads = [sql for sql in reads if "i.id AS artifact_id,i.metadata" in sql]
+    assert link_reads and all(decision_projection._OPEN_NODES.strip() in sql for sql in link_reads), link_reads
+    assert {str(item["node_id"]) for item in facts if item["answerable"]} == {
+        str(row["node_id"]) for row in decision_projection.raised_decisions(plan_ids, db=db)
+    }
+    assert len(facts) == 2
+
+
 def _user_failure(db, plan_id: str, title: str) -> str:
     node = _add(db, plan_id, title, assignee="user")
     _fail(db, node)

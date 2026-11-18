@@ -417,14 +417,18 @@ async def test_add_repo_response_failure_rolls_back_policy_and_source_link(
     db.close()
 
 
+@pytest.mark.parametrize("busy", ["effect", "owned process"])
 @pytest.mark.asyncio
-async def test_add_repo_rejects_registration_while_repo_effect_is_active(
+async def test_add_repo_registers_while_agents_are_running(
     monkeypatch,
     tmp_path,
     home_is_tmp,
+    busy,
 ):
+    """A running call or process never holds or refuses a registration."""
+    from contextlib import nullcontext
+
     from api import project_repos
-    from fastapi import HTTPException
     from infra.repo_policy_transition import admit_repo_effect
 
     workspace = tmp_path / "project"
@@ -433,54 +437,18 @@ async def test_add_repo_rejects_registration_while_repo_effect_is_active(
     _init_git_repo(repo)
     db = _policy_db()
     _configure_repo_api(monkeypatch, project_repos, workspace, db)
+    if busy == "owned process":
+        monkeypatch.setattr(project_repos, "_active_owned_process_count", lambda: 1)
 
-    with admit_repo_effect():
-        with pytest.raises(HTTPException) as raised:
-            await project_repos.add_repo(
-                "token",
-                "p1",
-                project_repos.RepoAdd(mode="link", path=str(repo), name="app"),
-            )
-
-    assert raised.value.status_code == 409
-    assert db.execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0] == 0
-    assert not (workspace / "source" / "app").exists()
-    assert not (workspace / "source" / "app").is_symlink()
-    db.close()
-
-
-@pytest.mark.asyncio
-async def test_add_repo_rejects_registration_while_owned_process_is_active(
-    monkeypatch,
-    tmp_path,
-    home_is_tmp,
-):
-    from api import project_repos
-    from fastapi import HTTPException
-
-    workspace = tmp_path / "project"
-    workspace.mkdir()
-    repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    db = _policy_db()
-    _configure_repo_api(monkeypatch, project_repos, workspace, db)
-    monkeypatch.setattr(
-        project_repos,
-        "_active_owned_process_count",
-        lambda: 1,
-    )
-
-    with pytest.raises(HTTPException) as raised:
+    with admit_repo_effect() if busy == "effect" else nullcontext():
         await project_repos.add_repo(
             "token",
             "p1",
             project_repos.RepoAdd(mode="link", path=str(repo), name="app"),
         )
 
-    assert raised.value.status_code == 409
-    assert db.execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0] == 0
-    assert not (workspace / "source" / "app").exists()
-    assert not (workspace / "source" / "app").is_symlink()
+    assert db.execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0] == 1
+    assert (workspace / "source" / "app").is_symlink()
     db.close()
 
 
@@ -1283,7 +1251,9 @@ async def test_repo_mutations_for_same_project_are_serialized(
     second_entered = threading.Event()
     call_guard = threading.Lock()
     call_count = 0
-    real_link = project_repos.link_repo_into_source
+    from api import project_repo_add_source
+
+    real_link = project_repo_add_source.link_repo_into_source
 
     def _controlled_link(*args, **kwargs):
         nonlocal call_count
@@ -1311,7 +1281,7 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "get_db", _connection)
     monkeypatch.setattr(project_repos, "sync_sources", lambda *_args: None)
 
-    monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
+    monkeypatch.setattr(project_repo_add_source, "link_repo_into_source", _controlled_link)
 
     first = asyncio.create_task(
         project_repos.add_repo(
@@ -1466,7 +1436,9 @@ async def test_add_replacement_before_ownership_capture_is_not_removed(
     _init_git_repo(registered)
     _init_git_repo(replacement)
     db = _policy_db()
-    real_link = project_repos.link_repo_into_source
+    from api import project_repo_add_source
+
+    real_link = project_repo_add_source.link_repo_into_source
 
     def _link_then_replace(*args, **kwargs):
         result = real_link(*args, **kwargs)
@@ -1478,7 +1450,7 @@ async def test_add_replacement_before_ownership_capture_is_not_removed(
 
     _configure_repo_api(monkeypatch, project_repos, workspace, db)
     monkeypatch.setattr(
-        project_repos,
+        project_repo_add_source,
         "link_repo_into_source",
         _link_then_replace,
     )

@@ -76,9 +76,18 @@
 		tick().then(() => document.querySelector('.palette .res.sel')?.scrollIntoView({ block: 'nearest' }));
 	});
 
+	// The palette is the top layer, so Escape is its own: from inside it the panel takes Escape before any window listener
+	// (the page's own Escape registers first and would close the navigation or pane under the palette), and preventing the
+	// default tells every later listener it was used.
+	function closeOnEscape(e: KeyboardEvent) {
+		if (e.key !== 'Escape' || e.defaultPrevented) return;
+		e.preventDefault();
+		close();
+	}
+
 	function onKey(e: KeyboardEvent) {
 		if (!$paletteOpen) return;
-		if (e.key === 'Escape') close();
+		if (e.key === 'Escape') closeOnEscape(e);
 		else if (e.key === 'ArrowDown' && items.length > 0) { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); }
 		else if (e.key === 'ArrowUp' && items.length > 0) { e.preventDefault(); sel = Math.max(sel - 1, 0); }
 		else if (e.key === 'Enter' && items.length > 0) { e.preventDefault(); items[sel]?.run(); }
@@ -91,7 +100,8 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="backdrop" transition:fade={{ duration: 120 }} onclick={close}></div>
-	<div class="palette" transition:fly={{ y: -10, duration: 380, easing: backOut }}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="palette" transition:fly={{ y: -10, duration: 380, easing: backOut }} onkeydown={closeOnEscape}>
 		<div class="search">
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
 			<input bind:this={inputEl} bind:value={query} oninput={resetSel} placeholder="Search or run an action…" />

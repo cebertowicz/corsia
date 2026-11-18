@@ -14,6 +14,7 @@ from typing import ClassVar
 from host_access import browser_pane_state
 from host_access.browser_domain import registrable_domain
 from infra import state
+from plans.public import MAX_NODE_TITLE
 
 PASSWORD_STEP_DESCRIPTION = (
     "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it.")
@@ -49,6 +50,18 @@ class BrowserStep:
     def title(self) -> str:
         raise NotImplementedError
 
+    def _titled(self, wording: str) -> str:
+        """``wording`` and the page's domain in parentheses, never over the plan's title cap.
+
+        The wording is fixed; a domain too long for the room left is clipped from its start (an ellipsis in front), so the
+        registrable end that names the site survives and the title is exactly the cap; the plan row is always written.
+        """
+        domain = self.domain()
+        room = MAX_NODE_TITLE - len(wording) - len(" ()")
+        if len(domain) > room:
+            domain = f"…{domain[-(room - 1):]}"
+        return f"{wording} ({domain})"
+
     def description(self) -> str:
         raise NotImplementedError
 
@@ -63,9 +76,11 @@ class PasswordStep(BrowserStep):
     provenance = "browser.password_guard"
     event_prefix = "password_step"
     settlement_evidence = "Password field no longer on the page"
+    # The visible password fields the step was opened for; a done answer keeps them (browser_step_lifecycle R14).
+    nodes: frozenset[int] = field(default=frozenset(), kw_only=True)
 
     def title(self) -> str:
-        return f"Enter your password in the shared browser ({self.domain()})"
+        return self._titled("Enter your password in the shared browser")
 
     def description(self) -> str:
         return PASSWORD_STEP_DESCRIPTION
@@ -88,7 +103,7 @@ class PersonStep(BrowserStep):
     settlement_evidence = "The shared browser moved on to a new page."
 
     def title(self) -> str:
-        return f"Your turn in the shared browser ({self.domain()})"
+        return self._titled("Your turn in the shared browser")
 
     def description(self) -> str:
         return (

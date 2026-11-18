@@ -50,8 +50,8 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="r1"),
     ))
 
-    # A script can't resend a line by id (the runner builds it), so its outage says to run it again.
-    fix = script_event_lines._RERUN_FIX if code == "intake_unreachable" else None
+    # A script can't resend a line by id (the runner builds it), so its outage gets the scheduled-run fix.
+    fix = script_event_lines._SCHEDULED_RUN_FIX if code == "intake_unreachable" else None
     message = f"event line refused: {intake_errors.format_event_error(code, text, fix)}"
     assert "same event id" not in message
     assert report.status == "error" and report.error == message
@@ -131,7 +131,7 @@ def test_a_line_the_intake_could_not_take_is_sent_again_under_one_id_and_routed_
 
 
 @pytest.mark.parametrize(("rule_decision_id", "fix"), [
-    (None, script_event_lines._RERUN_FIX),
+    (None, script_event_lines._SCHEDULED_RUN_FIX),
     (7, script_event_lines._RULE_RUN_FIX),
 ])
 def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
@@ -151,7 +151,9 @@ def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
     message = "event line refused: " + intake_errors.format_event_error(
         "intake_unreachable", "event intake is unavailable", fix)
     assert report.status == "error" and report.error == message
-    assert ("Run the script again" in message) == (rule_decision_id is None)
+    # Neither owner is told to run the script again: no tool starts it, and a run by hand sends no lines.
+    assert "Run the script again" not in message and "start it yourself" in message
+    assert ("If the schedule runs again" in message) == (rule_decision_id is None)
 
     # The wake the owner reads: the intake failed, not the script, so nothing in it says to fix the script.
     assert script_readings.emit_report(

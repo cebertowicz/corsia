@@ -195,7 +195,7 @@ async def test_the_owner_wake_and_event_carry_no_exception_text(world, monkeypat
         "reason": "the agent's turn failed (process_exited)"}
 
 
-# Each settled start is recorded once as a product event: rule, workflow, outcome, waited.
+# Each settled start is recorded once as a product event: rule, workflow, outcome.
 @pytest.mark.asyncio
 async def test_each_settled_start_emits_one_product_event(world, monkeypatch):
     from automation import worker_settle
@@ -210,9 +210,9 @@ async def test_each_settled_start_emits_one_product_event(world, monkeypatch):
     [(category, action, kw)] = emitted
     assert (category, action, kw["thread_id"]) == ("event_rule", "start_settled", OWNER)
     props = kw["properties"]
-    assert (props["rule_id"], props["outcome"], props["waited_for_capacity"]) == (rule, "returned", False)
+    assert (props["rule_id"], props["outcome"]) == (rule, "returned")
     assert props["workflow"].startswith("worker-flow@") and set(props) == {
-        "rule_id", "workflow", "outcome", "waited_for_capacity"}
+        "rule_id", "workflow", "outcome"}
 
 
 # A worker answers its owner only as a worker.* event while its start is open; once it has

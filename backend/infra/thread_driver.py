@@ -115,13 +115,12 @@ def _parent_completion(
 
     if has_open_structured_attachment(child_id, db=db):
         return None
-    existing = db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND json_valid(metadata) "
-        "AND json_extract(metadata,'$.completion')=1 "
-        "AND json_extract(metadata,'$.child_turn_id')=? LIMIT 1",
-        (str(parent), turn_id),
-    ).fetchone()
-    if existing is not None:
+    message_id = f"parent-completion:{turn_id}"
+    # Both completion writers (this one and delegate_send's completion intent)
+    # key the row by this id. Look it up by key: this runs inside the Turn's
+    # write transaction, and reading the parent's history here held every
+    # other writer for as long as that history took to read.
+    if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone() is not None:
         return None
     from infra.thread_confinement import ChildOutput
 
@@ -140,7 +139,7 @@ def _parent_completion(
         role="user",
         content=content,
         intent="apply_now",
-        message_id=f"parent-completion:{turn_id}",
+        message_id=message_id,
         metadata={
             "sender_kind": "agent",
             "from_thread": child_id,

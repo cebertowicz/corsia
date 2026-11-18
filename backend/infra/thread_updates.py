@@ -29,7 +29,7 @@ from typing import Literal, get_args
 
 from infra import presence
 from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, chat_not_drawn_sql
-from infra.thread_update_asks import ask_sql, asks_user_sql
+from infra.thread_update_asks import ask_sql, asks_user_joined_sql, asks_user_sql
 from infra.thread_update_summary import _summary
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -306,21 +306,25 @@ def read_newest_cards(
     the extra row proves that an older card was omitted, while the retained
     cards return in normal ``(after_seq, id)`` order for transcript merging.
     """
+    # The update's node is joined once; every node-derived column reads that row.
+    # Only a person step whose node is gone needs its saved outcome.
+    columns = ",".join(f"thread_updates.{column}" for column in _COLUMNS.split(","))
     rows = db.execute(
-        f"""SELECT {_COLUMNS}, EXISTS (
-                SELECT 1 FROM plan_nodes n
-                 WHERE n.id = thread_updates.node_id AND n.archived_at IS NULL
-             ) AS node_exists, {asks_user_sql()} AS asks_user,
-             {asks_user_sql(blocked=True)} AS blocked_asks_user,
+        f"""SELECT {columns}, (n.id IS NOT NULL AND n.archived_at IS NULL) AS node_exists,
+             {asks_user_joined_sql()} AS asks_user,
+             {asks_user_joined_sql(blocked=True)} AS blocked_asks_user,
              {ask_sql('id')} AS ask_hold_id, {ask_sql('owner_id')} AS ask_artifact_id,
-             (SELECT n.state FROM plan_nodes n WHERE n.id=thread_updates.node_id) AS step_node_state,
-             (SELECT n.archived_at FROM plan_nodes n WHERE n.id=thread_updates.node_id) AS step_archived_at,
-             (SELECT u.kind FROM thread_updates u WHERE u.node_id=thread_updates.node_id
+             n.state AS step_node_state,
+             n.archived_at AS step_archived_at,
+             CASE WHEN thread_updates.kind='person_step' AND n.id IS NULL THEN
+               (SELECT u.kind FROM thread_updates u WHERE u.node_id=thread_updates.node_id
                 AND u.kind IN ('done', 'done_follow_up', 'closed', 'failed')
-                ORDER BY u.id DESC LIMIT 1) AS step_outcome
+                ORDER BY u.id DESC LIMIT 1) END AS step_outcome
              FROM thread_updates
-             WHERE thread_id=? AND after_seq >= ? AND kind != 'marked'
-             ORDER BY after_seq DESC, id DESC LIMIT ?""",
+             LEFT JOIN plan_nodes n ON n.id = thread_updates.node_id
+             WHERE thread_updates.thread_id=? AND thread_updates.after_seq >= ?
+               AND thread_updates.kind != 'marked'
+             ORDER BY thread_updates.after_seq DESC, thread_updates.id DESC LIMIT ?""",
         (thread_id, min_seq, CARD_WINDOW_LIMIT + 1),
     ).fetchall()
     has_more = len(rows) > CARD_WINDOW_LIMIT

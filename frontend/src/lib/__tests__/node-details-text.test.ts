@@ -36,6 +36,8 @@ describe('node details wording', () => {
 		expect(costLine(amount(1.5, 0, 10, 4, 2))).toBe('at least $1.500 API-equivalent · at least 10 tokens');
 		expect(costLine(amount(0, 5, null))).toBeNull();
 		expect(costLine(amount(null, 5, null))).toBeNull();
+		expect(costLine(amount(0, 0, 0))).toBeNull();
+		expect(costLine(amount(null, 0, 0, 0, 1))).toBe('at least 0 tokens');
 	});
 
 	it('keeps working and waiting time out of the cost fact', () => {
@@ -104,5 +106,16 @@ describe('node details wording', () => {
 				model_cost_usd: { known: null, unknown_rows: 1 },
 			},
 		})).toBe('at least 100 tokens');
+		// A known zero is an empty fact here too, never a "0 tokens" follow-up line.
+		const idle = { ...base.node_cost.rolled, tokens: { known: 0, unknown_rows: 0 } };
+		const idleNode = { ...base, node_cost: { own: idle, rolled: idle } };
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: null, unknown_rows: 1 } },
+		})).toBeNull();
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: 0.5, unknown_rows: 0 } },
+		})).toBe('$0.5000 API-equivalent');
 	});
 });

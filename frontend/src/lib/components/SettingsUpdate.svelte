@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { Spinner, Toggle } from '$lib/components/ui';
-	import { saveUpdateSchedule, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
+	import { saveUpdateSchedule } from '$lib/update/schedule';
+	import { updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
 	import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf } from '$lib/update/failureCopy';
 	import { changeList, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, isFailedOperation, releaseNotesFor, stepMessage } from '$lib/update/model';
 	import SettingsUpdateChanges from './SettingsUpdateChanges.svelte';
@@ -102,6 +103,6 @@
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
 	.automatic-row { display: flex; align-items: center; gap: var(--space-3); min-height: var(--list-row-min-height); padding: var(--space-1) var(--space-2); }
 	.automatic-copy { display: grid; gap: var(--space-1); color: var(--text-primary); font-size: var(--text-subhead); }
-	.time-field { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-1); }
+	.time-field { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-1); }
 	@media (max-width: 768px) { .service-row, .automatic-row { flex-wrap: wrap; gap: var(--space-2); } .automatic-row .service-actions { width: auto; margin-left: auto; } .automatic-copy { flex: 1; min-width: min(250px, 100%); } }
 </style>

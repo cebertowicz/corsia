@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
-import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -17,6 +16,11 @@ from infra.backend_git import git_argv
 from infra.config import WORKSPACE
 from infra.database import get_db
 from infra.git_state_cache import cached_current_branch, cached_layout_error
+from infra.project_repo_binding import (
+    persisted_repo_path as _persisted_repo_path,
+    source_binding_error,
+    valid_repo_name as _valid_repo_name,
+)
 from infra.project_repo_lock_recovery import recover_stale_git_index_lock
 from infra.project_repo_policy_writes import (
     clear_repo_policy as clear_repo_policy,
@@ -458,7 +462,7 @@ def _switch_existing_local(repo: Path, branch: str) -> None:
 
 
 def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
-    """Move a clean named checkout to a local or unique cached remote branch."""
+    """Move a clean checkout to a local or unique remote branch; its own branch moves nothing, dirty or not."""
     repo = repo_path.expanduser().resolve(strict=False)
     target = target_branch.strip()
     if not target:
@@ -469,12 +473,12 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
         operation="branch validation",
     )
     previous = current_repo_branch(repo)
+    if target == previous:
+        return RepoBranchSwitch(previous, target, False)
     if not _repo_is_clean(repo):
         raise ValueError("dirty checkout cannot change branches")
     local, remote_branches = _branch_inventory(repo)
     created = False
-    if target == previous:
-        return RepoBranchSwitch(previous, target, False)
     if target in local:
         mutation = ["switch", "--", target]
     else:
@@ -501,15 +505,14 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
             mutation,
             operation=f"branch switch to {target}",
         )
-        if current_repo_branch(repo) != target or not _repo_is_clean(repo):
-            raise ValueError(
-                f"branch switch to {target} did not leave the requested clean checkout"
-            )
+        # Branch only: git won't overwrite local changes, so new dirt is a running writer's.
+        if current_repo_branch(repo) != target:
+            raise ValueError(f"branch switch to {target} did not leave the requested branch")
     except Exception as exc:
         try:
-            if not _repo_is_clean(repo):
-                raise RuntimeError("branch-switch rollback found a dirty checkout")
             if current_repo_branch(repo) != previous:
+                if not _repo_is_clean(repo):
+                    raise RuntimeError("branch-switch rollback found a dirty checkout")
                 _switch_existing_local(repo, previous)
             local_after_failure, _remote = _branch_inventory(repo)
             if created and target in local_after_failure:
@@ -730,35 +733,6 @@ def fast_forward_repo(
         current_oid=current_oid,
         updated=original_oid != current_oid,
     )
-
-
-def _persisted_repo_path(value: object) -> Path | None:
-    """Return a canonical absolute lexical identity without following it."""
-    if not isinstance(value, str):
-        return None
-    raw = value
-    path = Path(raw)
-    if (
-        not path.is_absolute()
-        or str(path) != raw
-        or os.path.normpath(raw) != raw
-    ):
-        return None
-    return path
-
-def _valid_repo_name(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    name = value
-    if (
-        not name
-        or name != name.strip()
-        or Path(name).name != name
-        or name in {".", ".."}
-        or name.startswith(".")
-    ):
-        return None
-    return name
 
 
 def _policy_from_row(project_id: str, row) -> RepoPolicy | None:
@@ -1041,7 +1015,7 @@ def list_registered_repo_policies(
             except ValueError as exc:
                 binding_error = f"project planning root is invalid: {exc}"
             else:
-                binding_error = _source_binding_error(planning_root, policy)
+                binding_error = source_binding_error(planning_root, policy.repo_name, policy.path)
             if binding_error is not None:
                 policy = replace(
                     policy, enforcement_error=binding_error, source_binding_valid=False,
@@ -1054,23 +1028,3 @@ def list_registered_repo_policies(
     finally:
         if owns_connection:
             connection.close()
-
-
-def _source_binding_error(
-    planning_root: Path | None,
-    policy: RepoPolicy,
-) -> str | None:
-    """Return why a policy is not bound through its canonical planning root."""
-    if planning_root is None:
-        return "project planning root is unresolved"
-    entry = planning_root / "source" / policy.repo_name
-    try:
-        current_target = entry.resolve(strict=True)
-    except OSError:
-        return f"source binding '{policy.repo_name}' is missing"
-    if current_target.is_dir() and current_target == policy.path:
-        return None
-    return (
-        f"source binding '{policy.repo_name}' no longer targets "
-        "the registered checkout"
-    )

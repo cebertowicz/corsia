@@ -366,10 +366,10 @@ async def test_registry_lets_project_repo_register_complete(registry_env, monkey
 
 @pytest.mark.parametrize("blocker", ["effect", "owned process"])
 @pytest.mark.asyncio
-async def test_registry_still_refuses_register_while_repo_access_is_active(
+async def test_registry_registers_while_repo_access_is_active(
     registry_env, monkeypatch, blocker,
 ):
-    """The exemption removes only self-collision, never real exclusion."""
+    """Through the registry too, a running call or process never holds a registration."""
     from infra.repo_policy_transition import admit_repo_effect
     from api import project_repos
 
@@ -389,16 +389,10 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
         if held is not None:
             held.__exit__(None, None, None)
 
-    expected = (
-        "Repository policy transition is blocked by an active tool effect."
-        if blocker == "effect"
-        else "Repository policy transition is blocked by an active owned process."
-    )
-    assert expected in result, result
+    assert "Registered repository 'app'" in result, result
     assert registry_env["db"].execute(
         "SELECT COUNT(*) FROM project_repo_policies"
-    ).fetchone()[0] == 0
-    assert not (registry_env["workspace"] / "source" / "app").exists()
+    ).fetchone()[0] == 1
 
 
 @pytest.mark.asyncio
@@ -417,7 +411,7 @@ async def test_registry_runs_non_git_refusal_before_the_transition(registry_env,
 
     assert result.startswith("Error:")
     assert "not a Git repository" in result, result
-    assert "Repository policy transition" not in result
+    assert "Repositories can't change" not in result
 
 
 @pytest.mark.asyncio

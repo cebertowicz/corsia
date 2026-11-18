@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { GAP, placeCards, revealShift } from './docMarginPlacement';
 import { MARGIN_MIN, hasRoomForMargin } from './docCommentSurfaceState.svelte';
-import { PANE_DRAWER_WIDTH } from './artifactSplitLayout';
-import { paneOverlay } from './stores/artifactCanvas';
 
 const card = (id: string, y: number, h = 100) => ({ id, y, h });
 const overlaps = (items: { id: string; h: number }[], tops: Record<string, number>) =>
@@ -89,23 +87,6 @@ describe('hasRoomForMargin: the one width rule', () => {
 		expect(hasRoomForMargin(MARGIN_MIN - 1)).toBe(false);
 		expect(hasRoomForMargin(1440)).toBe(true);
 		expect(hasRoomForMargin(393)).toBe(false);
-	});
-
-	describe('under a Workspace panel the shell shows over the canvas', () => {
-		afterEach(() => paneOverlay.set(false));
-
-		it('counts only the canvas the panel leaves uncovered', () => {
-			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH, true)).toBe(true);
-			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH - 1, true)).toBe(false);
-			expect(hasRoomForMargin(MARGIN_MIN, true)).toBe(false);
-		});
-
-		it('reads the shell\'s answer when none is passed', () => {
-			expect(hasRoomForMargin(800)).toBe(true);
-			paneOverlay.set(true);
-			expect(hasRoomForMargin(800)).toBe(false);
-			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH)).toBe(true);
-		});
 	});
 });
 

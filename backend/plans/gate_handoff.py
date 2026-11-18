@@ -42,8 +42,17 @@ OFFER_RECOMMENDATION = "A"
 DROP_REASON = "Dropped by you on {date}"
 GATE_REJECTED = "The person rejected this gate: ask for their review again, and close it only after a later answer."
 GATE_NOTICE = "Gate step {step} was handed off by the person, so {how}."
+#: The first line of a handed-off gate step's own description, so every read of the step says who checks it.
+#: It names both readers: the run's owner, who starts the reviewer, and the reviewer the step is handed to.
+HANDED_OFF_STEP = (
+    "The person handed this review to an agent. If you started this workflow, don't ask the person: once the work "
+    "is ready, hand this step to a reviewer (delegate_task with plan_node_id) and accept or send back what it "
+    "returns. If you are that reviewer, check the work and return your verdict."
+)
 GATE_HOW = {
-    "agent": "a reviewer checks it instead of them",
+    "agent": (
+        "don't ask them: once the work is ready, hand it to a reviewer you start (delegate_task with plan_node_id)"
+    ),
     "spot": "it is a spot check, so the person still reviews it",
     "dropped": "it is already closed",
 }
@@ -243,7 +252,8 @@ def after_correction(db, source_node_id: str) -> None:
 def refuse_rejected(db, node_id: str, operation: str) -> None:
     """Refuse closing an acceptance gate step whose latest answer is Reject, until a later answer replaces it.
 
-    No answer at all is not refused: some real workflows end a gate as N/A.
+    No answer at all is not refused here: the person may end their own gate as N/A. An agent
+    closing an unanswered person's gate is refused by ``workflow_fields.refuse_unasked_person_gate``.
     """
     if operation not in {"mark_done", "accept", "accept_with_follow_up"}:
         return
@@ -252,9 +262,5 @@ def refuse_rejected(db, node_id: str, operation: str) -> None:
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or creation_payload(db, node_id).get("workflow_gate") != "acceptance":
         return
-    siblings = [row["id"] for row in db.execute(
-        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
-        (node["parent_id"], node["workflow_step"]),
-    )]
-    if latest_verdict(db, siblings) == _REJECTED:
+    if latest_verdict(db, node) == _REJECTED:
         raise service.PlanError(GATE_REJECTED)

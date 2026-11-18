@@ -104,7 +104,8 @@ async def _declare_person_step(thread_id: str, instruction: str) -> str:
     except Exception:
         log.exception("browser person-step declaration failed for thread %s", thread_id)
         return "Error: browser person step could not be opened. Stop automatic retries and inform the user if browser work remains blocked."
-    return "Person step opened; end your turn."
+    return ("Person step opened: a task for it is in their Needs you list."
+            f"{browser_control.seen_by_person(thread_id)} End your turn.")
 
 
 class BrowserCloseTool(Tool):

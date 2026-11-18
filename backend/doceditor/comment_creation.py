@@ -10,6 +10,7 @@ from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
+from doceditor.live_text import utf16_slice
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from infra import app_loop, write_effects
 from infra.db_async import run_in_db
@@ -47,18 +48,10 @@ class CreateReceipt:
                 self.rolled_back = True
 
 
-def _text_at(text: str, start: int, end: int) -> str | None:
-    """The text of a UTF-16 span, or None when it splits a character."""
-    try:
-        return text.encode("utf-16-le")[start * 2:end * 2].decode("utf-16-le")
-    except UnicodeDecodeError:
-        return None
-
-
 def browser_anchor(live, identifier: str | None) -> Anchor:
     """The span this comment's own capture reserved, anchored on the text the live document holds there now."""
     span = live.held_span(identifier)
-    quote = _text_at(live.text, *span) if span is not None else None
+    quote = utf16_slice(live.text, *span) if span is not None else None
     context = anchor_context(live.text, *span, quote) if span is not None and quote else None
     if span is None or not quote or context is None:
         live.release(identifier)

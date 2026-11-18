@@ -126,6 +126,34 @@ def undelivered_note(
     )
 
 
+UNREACHABLE = "document_unreachable"
+
+
+def _live_document(db, batch: Any, artifact: dict | None, items: list[dict[str, Any]]):
+    """The batch and document to deliver on, or the result that settles a batch whose document is gone.
+
+    A batch left on a retired identity is re-keyed to the document's live identity and delivered there. With no
+    live identity (the document was deleted, or the chain ends nowhere) delivery cannot link a task to it and
+    would fail on every sweep; the batch settles once as undelivered and an agent author hears it once.
+    """
+    if artifact is not None and artifact.get("state") == "active":
+        return batch, artifact, None
+    artifact_id = str(_value(batch, "artifact_id"))
+    live = registry_models.live_identity(artifact_id, db=db)
+    live_artifact = registry_models.get_artifact(live, db=db) if live and live != artifact_id else None
+    if live_artifact is not None and live_artifact.get("state") == "active":
+        db.execute("UPDATE doc_feedback_batches SET artifact_id=? WHERE id=?", (live, _value(batch, "id")))
+        return db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (_value(batch, "id"),)).fetchone(), live_artifact, None
+    document = (artifact.get("path") or artifact.get("title") or artifact_id) if artifact else artifact_id
+    comment_ids = ", ".join(str(item["id"]) for item in items if item.get("kind") == "comment")
+    undelivered_note(
+        db, batch,
+        f"Feedback on {document}, comment {comment_ids}, was not delivered: the document was deleted or can no longer be reached.",
+        items=items, final=True,
+    )
+    return batch, artifact, DeliveryResult(reason=UNREACHABLE)
+
+
 def deliver_claimed(db, batch: Any) -> DeliveryResult:
     """Deliver a batch already conditionally claimed by its state owner."""
     items = load_feedback_items(db, batch)
@@ -135,6 +163,9 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     if recipient == "ui":
         return DeliveryResult(outcome="ui")
     artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
+    batch, artifact, unreachable = _live_document(db, batch, artifact, items)
+    if unreachable is not None:
+        return unreachable
     before_filter = items
     items = comment_recipients.filter_stopped_replies(
         db, items, recipient,

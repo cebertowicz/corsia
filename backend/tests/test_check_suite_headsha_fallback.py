@@ -428,7 +428,7 @@ class TestNoOwnerMainFailureRouting:
         monkeypatch.setattr(
             router.dead_letter,
             "park",
-            lambda internal_event, payload, reason, external_id: dead_letters.append(
+            lambda internal_event, payload, reason, external_id, **_kw: dead_letters.append(
                 (reason, external_id)
             )
             or "dl-1",
@@ -484,7 +484,7 @@ class TestNoOwnerMainFailureRouting:
         monkeypatch.setattr(
             router.dead_letter,
             "park",
-            lambda internal_event, payload, reason, external_id: dead_letters.append(
+            lambda internal_event, payload, reason, external_id, **_kw: dead_letters.append(
                 (reason, external_id)
             )
             or "dl-1",
@@ -540,7 +540,7 @@ class TestNoOwnerMainFailureRouting:
         monkeypatch.setattr(
             router.dead_letter,
             "park",
-            lambda internal_event, payload, reason, external_id: parked.append(
+            lambda internal_event, payload, reason, external_id, **_kw: parked.append(
                 reason
             )
             or "dl-1",

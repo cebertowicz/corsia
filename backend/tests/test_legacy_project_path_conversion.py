@@ -41,7 +41,8 @@ def test_startup_converter_preserves_old_resolver_choices_and_is_idempotent(
     from core.project_context import load_project_context, resolve_project_paths
     from core.skill_resolution import project_dir
     from infra.database import get_db
-    from infra.project_repo_policy import _source_binding_error, get_project_repo_policies
+    from infra.project_repo_binding import source_binding_error
+    from infra.project_repo_policy import get_project_repo_policies
 
     monkeypatch.setattr(scaffolding.Path, "home", classmethod(lambda cls: tmp_path))
 
@@ -130,7 +131,8 @@ def test_startup_converter_preserves_old_resolver_choices_and_is_idempotent(
     assert logged[first_log_count:] == []
     assert list(policies) == ["elsewhere"]
     assert policies["elsewhere"].path == external / "code" / "elsewhere"
-    assert _source_binding_error(projects / "by-slug", policies["elsewhere"]) is None
+    elsewhere = policies["elsewhere"]
+    assert source_binding_error(projects / "by-slug", elsewhere.repo_name, elsewhere.path) is None
     # The selected folder supersedes a stored project-folder path: never a repo.
     assert not foreign_shape_policies
     assert not (projects / "copied" / "source").exists()

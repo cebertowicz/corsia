@@ -10,7 +10,7 @@
 		required?: boolean;
 		layout?: 'row' | 'stacked';
 		/**
-		 * `chip`: the control drawn as the composer's chip (glass fill, large radius), label above and no divider, for a
+		 * `chip`: the control drawn as the composer's chip (glass fill, the buttons' small corners), label above and no divider, for a
 		 * field sitting straight on a pane. `nested`: the same shape with a plain outline and no fill, for a field inside a card or sheet.
 		 */
 		variant?: 'default' | 'chip' | 'nested';
@@ -88,7 +88,7 @@
 	.c :global(textarea) {
 		background: var(--bg-tertiary);
 		border: 1px solid var(--border);
-		border-radius: var(--radius-xs);
+		border-radius: var(--radius-sm);
 		color: var(--text-primary);
 		padding: 0 10px;
 		font-size: var(--text-subhead);

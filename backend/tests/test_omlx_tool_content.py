@@ -58,7 +58,7 @@ async def test_other_provider_keeps_assistant_text(monkeypatch):
         seen.append(messages)
         return router.LLMResponse(content="ok")
 
-    async def observed(_base, dispatch):
+    async def observed(_base, dispatch, _external_model_identity=None):
         return await dispatch
 
     async def mark(response, _server_id):

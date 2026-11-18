@@ -17,13 +17,16 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 
 - **The chat view is the reference screen (§0).** Each role (row, label,
   status, action, card, accent) has one treatment taken from it. New and
-  converted screens match it and never use a treatment §0.2 lists as out. A
-  screen not yet converted keeps its own look for anything added to it until
-  its pass, except §0.2 items 7 and 9, which no addition may use (§0).
+  converted screens match it and never use a treatment §0.2 lists as out. On
+  a screen not yet converted, no §0.2 treatment appears in the area a change
+  touches, controls the change keeps there included; the rest of that screen
+  keeps its own look until its pass. No addition anywhere may use §0.2
+  items 7 and 9 (§0).
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
   `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
   Don't roll your own. (`StatePill` still exists; on new and converted
-  screens status is a dot or coloured text, never a pill: §0.2.)
+  screens, and in any area a change touches, status is a dot or coloured
+  text, never a pill: §0.2.)
 - **All design values are tokens** in `frontend/src/app-tokens.css` (imported
   by `app.css`). Never hardcode colors, spacing, type, blurs, radii, motion,
   press behavior, elevations, or scrim alphas.
@@ -47,8 +50,12 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 **Status:** approved look, 2026-10-15. Every other screen is brought into line
 with it, one screen at a time. Until a screen is, anything added to it matches
 that screen's own current look, element by element, and moves to §0 only when
-the whole screen does. The two exceptions are §0.2 items 7 and 9, which are
-refused on every screen. Where the screen already uses both looks for the
+the whole screen does, with one limit: no §0.2 treatment appears anywhere in
+the area a change touches, including controls the change keeps there
+(2026-11-15). That area is the bar, row group, panel or dialog holding what
+the change adds or alters. Outside it the screen keeps its look until its
+pass. No addition on any screen may use §0.2 items 7 and 9, outside a changed
+area included. Where the screen already uses both looks for the
 same role (an error as coloured text in one place and a banner in another),
 the addition uses §0's. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
@@ -87,7 +94,7 @@ first needs it, from what that screen gets approved with.
 | Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
-| Text field | One shape for every free-text control: 1px `--border`, `--radius-lg`, transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-lg` at every height, a capsule only at one line). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
+| Text field | One shape for every free-text control, select and code box: 1px `--border`, `--radius-sm` (the buttons' corners, so a field and its Cancel and Save match), transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-sm` at every height). Never a capsule. An inline rename inside a list row is the one exception: `--radius-2xs`, by the concentricity rule (§2.3). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
 | Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
@@ -97,9 +104,17 @@ first needs it, from what that screen gets approved with.
 ### 0.2 Treatments that are out
 
 These are the old treatments the chat view removed. Review refuses them on
-new and converted screens; a screen not yet converted keeps them until its
-pass, except items 7 and 9, which CI's design-token ratchet
-(`scripts/design_token_ratchet.py`) refuses on every screen:
+new and converted screens, and on an unconverted screen anywhere in the area
+a change touches, controls the change keeps there included. Outside a changed
+area, an unconverted screen keeps them until its pass. No addition on any
+screen may use items 7 and 9.
+
+CI's design-token ratchet (`scripts/design_token_ratchet.py`) detects only
+part of this, and only stops a file's count from rising: borders of 2px or
+more and `box-shadow` values that aren't tokens (item 7), and buttons
+whose label is an ellipsis or whose `aria-label` or `title` says "more
+actions" or "more options" (item 9). Every other item, and any
+instance the scan can't see, is caught in review:
 
 1. A box around content (a border, tint or shadow) that isn't a pane, an input or a frosted card.
 2. A tinted alert banner.
@@ -231,8 +246,8 @@ project scope every role is derived from the project's colour
 | Token | Value | Use |
 |---|---|---|
 | `--radius` | `12px` | Modals, major containers, drawers |
-| `--radius-sm` | `8px` | Buttons, inputs (when not stripped), code-block wrappers, cards |
-| `--radius-xs` | `6px` | IconButton, StatePill, Message banner, Field input |
+| `--radius-sm` | `8px` | Buttons, every text field, select and code box (§0.1 Text field), code-block wrappers, cards |
+| `--radius-xs` | `6px` | IconButton, StatePill, Message banner |
 | `--radius-2xs` | `4px` | Micro chips, badges, kbd hints |
 | `--radius-lg` | `16px` | Large cards (pairs with `--lg-card-radius: 14px`) |
 | `--radius-xl` | `24px` | Floating input chip |
@@ -900,7 +915,7 @@ trailing col. Mobile (≤720px) collapses to single column.
 
 **Native control styling** (provided via `:global()` selectors): in the
 `default` variant, inputs/selects/textareas get `--bg-tertiary` bg,
-`--border` border, `--radius-xs` (6px), 32px height, 12.5px font. Focus ring
+`--border` border, `--radius-sm` (8px, the Text field corners of §0.1), 32px height, 12.5px font. Focus ring
 is 3px `--accent-wash` box-shadow.
 
 **Variants.** `chip` and `nested` draw the Text field role of §0.1 from
