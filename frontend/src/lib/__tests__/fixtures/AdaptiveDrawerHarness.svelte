@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 
-	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false, keepMounted = false, covered = false, contextLabel = null, draft = false }: { draft?: boolean; onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean; keepMounted?: boolean; covered?: boolean; contextLabel?: string | null } = $props();
+	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false, keepMounted = false, covered = false, contextLabel = null, draft = false, head = null, onDetent }: { head?: (() => void) | null; onDetent?: (next: 'full' | 'half') => void; draft?: boolean; onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean; keepMounted?: boolean; covered?: boolean; contextLabel?: string | null } = $props();
 	let surfaceOpen = $state(false);
 	let drawerOpen = $state(false);
 
@@ -33,7 +33,9 @@
 		</AdaptiveDrawer>
 	{/if}
 {:else}
-	<AdaptiveDrawer ariaLabel="Focused action" {onClose} {fill} {followKeyboard} {modal} {detent} {covered} {contextLabel}>
+	<AdaptiveDrawer ariaLabel="Focused action" {onClose} {fill} {followKeyboard} {modal} {detent} {onDetent} {covered} {contextLabel} headless={!!head}>
+		<!-- A headless sheet's own head row, marked as a handle, with a control in it. -->
+		{#if head}<div class="own-head" data-drawer-handle><h2>Own head</h2><button type="button" data-head-control onclick={head}>Close</button></div>{/if}
 		<button type="button" data-drawer-autofocus>Primary action</button>
 		{#if draft}<textarea data-draft aria-label="Comment"></textarea>{/if}
 		{#if tall}
