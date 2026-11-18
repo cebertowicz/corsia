@@ -155,7 +155,7 @@ function buildTableDecorations(state: EditorState, prior?: DecorationSet): Decor
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
 	if (doc.toString().startsWith('# Long and wide')) (window as any).__tableDebug = () => {
-		const view = EditorView.findFromDOM(document.querySelector('.cm-md-table')!);
+		const view = EditorView.findFromDOM(document.querySelector('.cm-md-table')!.closest('.cm-editor')!);
 		if (!view) return null;
 		const tree = syntaxTree(view.state), tables: Array<{ from: number; to: number }> = [];
 		tree.iterate({ enter: (node) => { if (node.name === 'Table') { tables.push({ from: node.from, to: node.to }); return false; } } });
