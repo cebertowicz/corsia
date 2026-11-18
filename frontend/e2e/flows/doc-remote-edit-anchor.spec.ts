@@ -50,7 +50,7 @@ async function readAt(page: Page, heading: string, margin = 40): Promise<void> {
 }
 
 /**
- * The first line whose top is inside the pane: its text and where it is on screen. It is read against the viewport,
+ * The first line whose top is inside the pane (else the first line still showing): its text and where it is on screen. It is read against the viewport,
  * as the reader sees it, never against the pane: a notice or the review bar growing above the pane moves the pane too.
  * It is read in a painted frame, like every sample after it. A read from a task can land between a notice coming or
  * going in the header and the frame that holds the text against it, and take a place no frame ever painted.
@@ -60,7 +60,9 @@ async function anchorLine(page: Page): Promise<{ text: string; top: number }> {
 		(window as Win).__eachPaintedFrame!(() => {
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
 			const box = scroller.getBoundingClientRect();
-			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => el.getBoundingClientRect().top >= box.top && (el.textContent ?? '').trim().length > 12);
+			const lines = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].filter((el) => (el.textContent ?? '').trim().length > 12);
+			// At the end of the document, at the phone's 16px text, the last paragraph is one wrapped line that starts above the pane: the first line still showing is the anchor, and its top can be negative.
+			const line = lines.find((el) => el.getBoundingClientRect().top >= box.top) ?? lines.find((el) => el.getBoundingClientRect().bottom > box.top);
 			return line ? { text: (line.textContent ?? '').trim(), top: line.getBoundingClientRect().top } : null;
 		}, (line) => {
 			resolve(line);
