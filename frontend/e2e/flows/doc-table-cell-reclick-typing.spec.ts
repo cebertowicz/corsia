@@ -262,11 +262,15 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await settled(page);
 		await page.keyboard.type('XYZ');
 
-		// A tap in the table's own padding, above the Notes header: off every cell, nearest that one.
+		// Center the table below the document header before tapping its padding, above the Notes header.
+		const table = page.locator('.cm-md-table');
+		await table.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 		const notes = (await page.locator('.cm-md-table th', { hasText: 'Notes' }).boundingBox())!;
-		const widget = (await page.locator('.cm-md-table').boundingBox())!;
+		const widget = (await table.boundingBox())!;
 		expect(notes.y - widget.y, 'setup: the table has padding above its header').toBeGreaterThan(4);
-		await page.touchscreen.tap(notes.x + notes.width / 2, widget.y + 2);
+		const point = { x: notes.x + notes.width / 2, y: widget.y + 2 };
+		expect(await table.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), point), 'setup: the padding is unobstructed').toBe(true);
+		await page.touchscreen.tap(point.x, point.y);
 		await settled(page);
 		// The tap opened the nearest header cell, and its editor holds the caret.
 		await caretInCell(page, 'the padding tap left the caret in the nearest cell');
