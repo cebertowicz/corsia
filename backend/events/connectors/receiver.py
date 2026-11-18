@@ -50,11 +50,14 @@ class ReceiverDecl:
     signature_prefix: str
     delivery_id_header: str
     max_body_bytes: int = DEFAULT_BODY_LIMIT
+    #: Non-secret headers that say which of this connector's senders a delivery came from
+    #: (never a signature or delivery id); a refused delivery logs each one's value.
+    sender_headers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.max_body_bytes <= 0:
             raise ValueError("a receiver's body limit must be positive")
-        for name in (self.signature_header, self.delivery_id_header):
+        for name in (self.signature_header, self.delivery_id_header, *self.sender_headers):
             if name != name.lower():
                 raise ValueError(f"declare header names in lowercase: {name!r}")
 
