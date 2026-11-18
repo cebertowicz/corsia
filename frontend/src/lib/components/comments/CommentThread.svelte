@@ -6,6 +6,7 @@
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import SuggestedEdit from './SuggestedEdit.svelte';
 	import { openAtNewestReply } from './openAtNewestReply';
+	import { surfaceOpen } from '$lib/surfaceOpen.svelte';
 	import { changedLabel } from '$lib/docImageComments';
 	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
@@ -147,7 +148,8 @@
 	const { openThread, openFromFocus, focusQuietly } = createThreadOpen(() => comment, () => chatSurface, stamp);
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	$effect(() => { if (flat && !inMargin && !inList && newestReply && el) openAtNewestReply(el, newestReply); });
+	const openCount = surfaceOpen();
+	$effect(() => { const open = openCount(); if (flat && !inMargin && !inList && newestReply && el) openAtNewestReply(el, newestReply, open); });
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
 	// Opening reads what is unread at that moment: a chat thread its caller opened, or a thread the person picked (a click
