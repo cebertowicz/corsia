@@ -44,6 +44,8 @@ EXCLUDED: dict[str, str] = {
     "system_bulletin_identity": _small(1),
     "outcome_event_counters": _small(1),
     "users": _small(1),
+    "comment_identity_moves": ("written once by schema step 199 -> 200 and read only by its reverse script; "
+                               "no request path reads it"),
     **{table: NOT_IN_CENSUS for table in (
         "action_drafts", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views", "chat_comments",
         "chat_visible_content",
