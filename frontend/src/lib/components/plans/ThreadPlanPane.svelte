@@ -300,6 +300,7 @@
 					paneView={paneView.view}
 					{userActionBusy}
 					onUserAction={applyUserAction}
+					onRefresh={() => query.retry()}
 					{onOpenChild}
 					onOpenArtifact={openAsk}
 					{onOpenLegacyDiscussion}

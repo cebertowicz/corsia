@@ -22,6 +22,7 @@ export function createTaskMenu(canAct: (node: OperatorNode) => boolean) {
 			return open && { node: open.item, x: open.x, y: open.y, trigger: open.trigger };
 		},
 		close: menu.close,
+		openFor: menu.openFor,
 		onContextMenu: menu.onContextMenu,
 		onKeydown: menu.onKeydown,
 		onPointerDown: menu.onPointerDown,
