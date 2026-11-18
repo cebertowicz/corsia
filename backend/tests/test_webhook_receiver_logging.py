@@ -183,11 +183,10 @@ async def test_a_rejected_delivery_names_the_sender_in_one_line(_isolated_db, _w
     assert fields["connector"] == "github"
     assert fields["status"] == "401"
     assert fields["reason"] == "missing_signature"
-    assert fields["ua"] == "curl/8.4.0"
-    assert fields["gh_event"] == "pull_request"
-    assert fields["gh_hook_id"] == "4711"
-    assert fields["gh_target"] == "Repository"
-    assert fields["has_sha1_sig"] == "yes"
+    assert fields["agent"] == "curl"
+    assert fields["x-github-event"] == "pull_request"
+    assert fields["x-github-hook-id"] == "4711"
+    assert fields["x-github-hook-installation-target-type"] == "Repository"
     assert fields["declared_length"] == str(len(body))
     assert fields["body_bytes"] == str(len(body))
     assert DELIVERY_ID not in lines[0]
@@ -271,3 +270,57 @@ async def test_a_fault_in_admission_is_still_logged_as_slow_and_propagates(
     assert fields["status"] == "500"
     assert float(fields["handler_ms"]) >= GAP_SECONDS * 1_000 * 0.8
     assert fields["agent"] == "SlowFault"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_slow_delivery_is_logged_as_cancelled_not_500(
+    _isolated_db, _warn_caplog, caplog, monkeypatch,
+):
+    """A request cancelled mid-admission answered nothing, so its slow line must not say 500."""
+
+    async def translate(delivery):
+        await asyncio.sleep(GAP_SECONDS)
+        raise asyncio.CancelledError
+
+    monkeypatch.setitem(key_store.BUILTINS, TEST_KEY.name, TEST_KEY)
+    register(_test_manifest("slowcancel", translate))
+    body = b"{}"
+    headers = {
+        "x-test-signature": _make_signature(body),
+        "x-test-delivery": "slowcancel-delivery",
+        "content-length": str(len(body)),
+    }
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await webhook_receivers.handle_receiver("slowcancel", _streaming_request([body], headers))
+    finally:
+        _REGISTRY.pop("slowcancel", None)
+
+    lines = _lines(caplog, "slow webhook")
+    assert len(lines) == 1
+    assert _fields(lines[0])["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_a_connector_without_sender_headers_logs_no_empty_sender_fields(
+    _isolated_db, _warn_caplog, caplog, monkeypatch,
+):
+    """The rejection line carries only the sender headers the connector declared."""
+
+    async def translate(delivery):
+        raise AssertionError("an unsigned delivery never reaches the translator")
+
+    monkeypatch.setitem(key_store.BUILTINS, TEST_KEY.name, TEST_KEY)
+    register(_test_manifest("plain", translate))
+    body = b"{}"
+    headers = {"content-length": str(len(body)), "x-github-event": "push"}
+    try:
+        response = await webhook_receivers.handle_receiver("plain", _streaming_request([body], headers))
+    finally:
+        _REGISTRY.pop("plain", None)
+
+    assert response.status_code == 401
+    lines = _lines(caplog, "webhook rejected")
+    assert len(lines) == 1
+    assert "x-github-event" not in lines[0]
+    assert _fields(lines[0])["agent"] == "-"

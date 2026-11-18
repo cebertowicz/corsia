@@ -12,6 +12,7 @@ is the connector admission's own cancellation join, not this route's.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -37,10 +38,6 @@ _HEADER_CLIP = 60
 _PRODUCT_TOKEN_MAX = 40
 _ABSENT = "-"
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
-_REJECTED_FORMAT = (
-    "webhook rejected connector=%s status=%s reason=%s ua=%s gh_event=%s gh_hook_id=%s gh_target=%s "
-    "has_sha1_sig=%s declared_length=%s body_bytes=%s"
-)
 
 
 @dataclass
@@ -64,16 +61,9 @@ def _product_token(user_agent: str | None) -> str:
     return token[:_PRODUCT_TOKEN_MAX] or _ABSENT
 
 
-def _identity(headers: Mapping[str, str]) -> tuple[str, ...]:
-    """Who sent this delivery, from non-secret headers only: never a client IP, delivery id, signature or body."""
-    return (
-        _header_field(headers.get("user-agent")),
-        _header_field(headers.get("x-github-event")),
-        _header_field(headers.get("x-github-hook-id")),
-        _header_field(headers.get("x-github-hook-installation-target-type")),
-        "yes" if headers.get("x-hub-signature") else "no",
-        _header_field(headers.get("content-length")),
-    )
+def _sender(decl: ReceiverDecl, headers: Mapping[str, str]) -> str:
+    """The connector's declared sender headers as ``name=value`` fields: never a client IP, delivery id, signature or body."""
+    return " ".join(f"{name}={_header_field(headers.get(name))}" for name in decl.sender_headers)
 
 
 def receiver_secret(decl: ReceiverDecl) -> str | None:
@@ -85,14 +75,19 @@ def receiver_secret(decl: ReceiverDecl) -> str | None:
 
 
 def _reject(
-    status: int, error: str, reason: str, connector: str, headers: Mapping[str, str], body_bytes: int,
+    status: int, error: str, reason: str, connector: str, decl: ReceiverDecl, headers: Mapping[str, str],
+    body_bytes: int,
 ) -> JSONResponse:
     """Refuse one delivery, with one attributed warning line naming who sent it."""
     if status == 401:
         emit_product_event(
             "webhook", "signature_invalid", properties={"reason": reason, "connector": connector},
         )
-    log.warning(_REJECTED_FORMAT, connector, status, reason, *_identity(headers), body_bytes)
+    log.warning(
+        "webhook rejected connector=%s status=%s reason=%s agent=%s declared_length=%s body_bytes=%s %s",
+        connector, status, reason, _product_token(headers.get("user-agent")),
+        _header_field(headers.get("content-length")), body_bytes, _sender(decl, headers),
+    )
     return JSONResponse(content={"error": error}, status_code=status)
 
 
@@ -135,12 +130,13 @@ def _check_signature(
 ) -> JSONResponse | None:
     if not secret:
         log.error("%s webhook secret not configured — rejecting delivery", connector)
-        return _reject(401, "webhook secret not configured", "secret_not_configured", connector, headers, body_bytes)
+        return _reject(401, "webhook secret not configured", "secret_not_configured", connector, decl, headers,
+            body_bytes)
     signature = headers.get(decl.signature_header, "")
     if not signature:
-        return _reject(401, "missing signature", "missing_signature", connector, headers, body_bytes)
+        return _reject(401, "missing signature", "missing_signature", connector, decl, headers, body_bytes)
     if not verify_hmac_sha256(body, signature, decl.signature_prefix, secret):
-        return _reject(401, "invalid signature", "invalid_signature", connector, headers, body_bytes)
+        return _reject(401, "invalid signature", "invalid_signature", connector, decl, headers, body_bytes)
     return None
 
 
@@ -149,14 +145,14 @@ async def handle_receiver(connector: str, request: Request) -> JSONResponse | di
 
     Every exit path is timed, including a translator fault: a slow delivery logs how much of
     it was the body arriving (``body_ms``, which the request timer cannot separate) and how
-    much was this process's own work. ``status`` is the code answered, or 500 when the
-    delivery produced no response of its own (a translator fault, which the route answers
-    500). A body the sender abandoned mid-way is logged by ``_read_body`` instead.
+    much was this process's own work. ``status`` is the code answered, 500 for a translator
+    fault (which the route answers 500), or ``cancelled`` when the request was cancelled
+    before any answer. A body the sender abandoned mid-way is logged by ``_read_body`` instead.
     """
     started = time.perf_counter()
     stats = _BodyStats()
     body_ms = 0.0
-    status = 500  # a fault that reaches no response is answered 500 by the route
+    status: int | str = 500  # a fault that reaches no response is answered 500 by the route
     try:
         connector = connector.lower()
         try:
@@ -175,7 +171,7 @@ async def handle_receiver(connector: str, request: Request) -> JSONResponse | di
             body_ms = (time.perf_counter() - body_started) * 1_000
         if body is None:
             status = 413
-            return _reject(status, "body too large", "body_too_large", connector, headers, stats.size)
+            return _reject(status, "body too large", "body_too_large", connector, decl, headers, stats.size)
 
         secret = receiver_secret(decl)
         rejection = _check_signature(decl, connector, headers, body, secret, stats.size)
@@ -193,11 +189,14 @@ async def handle_receiver(connector: str, request: Request) -> JSONResponse | di
         if outcome.status_code == 200:
             return outcome.content
         return JSONResponse(content=outcome.content, status_code=outcome.status_code)
+    except asyncio.CancelledError:
+        status = "cancelled"  # nothing answered; the sender may have timed out
+        raise
     finally:
         handler_ms = (time.perf_counter() - started) * 1_000 - body_ms
         if not stats.aborted and body_ms + handler_ms > SLOW_DELIVERY_MS:
             log.warning(
-                "slow webhook connector=%s status=%d body_ms=%.0f handler_ms=%.0f body_bytes=%d "
+                "slow webhook connector=%s status=%s body_ms=%.0f handler_ms=%.0f body_bytes=%d "
                 "chunks=%d declared_length=%s agent=%s",
                 connector, status, body_ms, handler_ms, stats.size, stats.chunks,
                 _header_field(request.headers.get("content-length")),
