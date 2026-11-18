@@ -66,7 +66,7 @@ def _merge_open(db, source, target):
     db.execute('DELETE FROM doc_feedback_batches WHERE id=?', (source,))
 
 
-def migrate_199_to_200(db):
+def migrate_200_to_201(db):
     started = time.monotonic()
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
@@ -107,6 +107,6 @@ def migrate_199_to_200(db):
              int((time.monotonic() - started) * 1000))
 
 
-def reverse_200_to_199(db):
+def reverse_201_to_200(db):
     """Restore recorded feedback rows only if none changed after this migration."""
     reverse(db)

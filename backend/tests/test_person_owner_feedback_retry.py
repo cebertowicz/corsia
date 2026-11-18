@@ -10,7 +10,7 @@ from registry.identity_metadata import merge_identity_metadata
 def test_collision_preserves_send_count_until_due_then_reverse_refuses(isolated_db, monkeypatch):
     import pytest
     from doceditor import feedback_state
-    from infra.migration_199_to_200_feedback_recipients import migrate_199_to_200, reverse_200_to_199
+    from infra.migration_200_to_201_feedback_recipients import migrate_200_to_201, reverse_201_to_200
 
     db = get_db()
     try:
@@ -30,14 +30,14 @@ def test_collision_preserves_send_count_until_due_then_reverse_refuses(isolated_
         add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER, delivery_policy='document-held')
         before = feedback_state.open_counts_for_document(db, artifact)
         assert before['document_held_count'] == 2
-        migrate_199_to_200(db)
+        migrate_200_to_201(db)
         assert feedback_state.open_counts_for_document(db, artifact) == before
         assert tuple(db.execute('SELECT state,recipient_id FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('open', 'project:example')
         db.commit()
         feedback_batches.close_due('9999-01-01T00:00:00+00:00', db=db)
         assert tuple(db.execute('SELECT state,recipient_id,delivery_outcome FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('delivered', 'ui', 'ui')
         with pytest.raises(RuntimeError, match='changed after migration'):
-            reverse_200_to_199(db)
+            reverse_201_to_200(db)
     finally:
         db.close()
 

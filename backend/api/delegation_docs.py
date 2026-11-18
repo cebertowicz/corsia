@@ -15,8 +15,8 @@ from api.doc_comment_models import TaggedAgentMention
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError
 from doceditor.comment_actions import SUGGESTION_REASON_MAX_CHARS, CommentActionError, validate_create
-from doceditor.comment_action_errors import decision_only_error
-from doceditor.comments import CrossArtifactIdError, validate_client_id
+from doceditor.comment_action_errors import decision_only_error, not_active_message
+from doceditor.comments import CommentTargetMoved, CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import authenticate, may_access_artifact
 from infra.database import get_db, write_transaction
@@ -33,8 +33,7 @@ def _resolve_target(body: "AgentCommentCreate", user_id: str, db) -> tuple[str |
     if body.artifact_id:
         art = registry_models.get_artifact(body.artifact_id, db=db)
         if art is None or art["state"] != "active":
-            raise HTTPException(
-                422, f"artifact_id does not resolve to an active artifact: {body.artifact_id}")
+            raise HTTPException(422, not_active_message(body.artifact_id))
         if not may_access_artifact(art["parent_thread_id"], user_id, db=db):
             raise HTTPException(404, "Artifact not found")
         return art["id"], art["path"], None
@@ -162,6 +161,9 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
     )
     try:
         created = await agent_comment_writes.reply(request, body.client_id)
+    except CommentTargetMoved as exc:
+        # The same answer the preflight gives a retired artifact_id; a promote landed after it.
+        raise HTTPException(422, str(exc)) from exc
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:

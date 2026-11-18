@@ -316,18 +316,17 @@ def _apply_branches(
     return plan
 
 
-#: Open nodes past which a plan has stopped being a plan and become a list. A
-#: soft signal, never a refusal: the pane header and the digest say so once the
-#: count is above it, and the owner decides what to close, accept or archive.
-#: Nothing sweeps.
+#: Open top-level nodes past which a plan has become a list: a phase or run is one
+#: piece of work however many steps it holds. A soft signal, never a refusal: the
+#: pane header and the digest say so above it; the owner decides what to close,
+#: accept or archive. Nothing sweeps.
 OPEN_NODE_BUDGET = 40
 
 
 def oversize(nodes: list[dict]) -> dict[str, int] | None:
-    """Name a plan whose open nodes exceed the budget, or ``None`` within it."""
-    open_nodes = sum(
-        1 for node in nodes if node["state"] not in service._TERMINAL_STATES
-    )
+    """Name a plan whose open top-level nodes exceed the budget, or ``None`` within it."""
+    open_nodes = sum(1 for node in nodes if node["parent_id"] is None
+                     and node["state"] not in service._TERMINAL_STATES)
     if open_nodes <= OPEN_NODE_BUDGET:
         return None
     return {"open": open_nodes, "budget": OPEN_NODE_BUDGET}

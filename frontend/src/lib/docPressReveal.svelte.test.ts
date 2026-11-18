@@ -89,8 +89,9 @@ describe('createPressReveal', () => {
 		let drag!: ReturnType<typeof createSheetDrag>;
 		const stopDrag = $effect.root(() => { drag = createSheetDrag({ expandable: () => sheetCapped(panel), panel: () => panel, onExpand, onDismiss: vi.fn() }); });
 		const handle = document.createElement('div');
-		drag.start({ type: 'pointerdown', clientY: 760, pointerId: 3, button: 0, currentTarget: handle, preventDefault: () => {} } as unknown as PointerEvent);
-		drag.finish({ type: 'pointerup', clientY: 760, pointerId: 3, button: 0, currentTarget: handle, preventDefault: () => {} } as unknown as PointerEvent);
+		handle.setAttribute('data-drawer-handle', '');
+		drag.press({ type: 'pointerdown', clientY: 760, pointerId: 3, button: 0, target: handle, currentTarget: handle, preventDefault: () => {} } as unknown as PointerEvent);
+		drag.finish({ type: 'pointerup', clientY: 760, pointerId: 3, button: 0, target: handle, currentTarget: handle, preventDefault: () => {} } as unknown as PointerEvent);
 		stopDrag();
 		expect(onExpand).not.toHaveBeenCalled();
 		expect(sheetRaised(panel)).toBe(false);
@@ -147,8 +148,9 @@ describe('createPressReveal', () => {
 		};
 		const drag = createSheetDrag({ expandable: () => true, panel: () => panel, onExpand: () => liftSheetCap(panel), onDismiss: vi.fn() });
 		const handle = document.createElement('div');
-		const at = (type: string, clientY: number) => ({ type, clientY, pointerId: 3, button: 0, currentTarget: handle, preventDefault: () => {} }) as unknown as PointerEvent;
-		drag.start(at('pointerdown', 760));
+		handle.setAttribute('data-drawer-handle', '');
+		const at = (type: string, clientY: number) => ({ type, clientY, pointerId: 3, button: 0, target: handle, currentTarget: handle, preventDefault: () => {} }) as unknown as PointerEvent;
+		drag.press(at('pointerdown', 760));
 		// Each 10 px step grows the sheet over the pressed text before any lift: its top climbs past the text's bottom.
 		for (let step = 1; step <= 3; step++) {
 			drag.move(at('pointermove', 760 - step * 10));

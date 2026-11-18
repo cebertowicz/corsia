@@ -67,6 +67,16 @@ describe('CommentThread', () => {
 	});
 
 	it.each([
+		['thread opened on its own', { flat: true }, true],
+		['margin card', { flat: true, inMargin: true }, false],
+		['list row', { flat: true, inList: true }, false],
+		['nested card', {}, false],
+	])('watches for its sheet or popover closing and reopening only on a thread opened on its own: %s', (_label, extra, marked) => {
+		render(thread({ replies: [reply] }), false, extra);
+		expect(host.querySelector('[data-surface-mark]') !== null).toBe(marked);
+	});
+
+	it.each([
 		['document', {}, { focused: true, scrollOnFocus: false }],
 		['chat', { chatSurface: true }, { chatSurface: true, opened: true }],
 	])('draws an unpicked %s margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', (_surface, surface, picked) => {

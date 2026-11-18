@@ -28,6 +28,10 @@ class CommentAccessDenied(PermissionError):
     """The validated target stopped being accessible before its DB create; routes answer it as not found."""
 
 
+class CommentTargetMoved(CommentAccessDenied):
+    """A promote retired the target document between the route's check and the write; its comments live on the successor."""
+
+
 class ReplyParentNotFound(CommentAccessDenied):
     """A reply named a parent that is not a comment on the reply's document, answered like an unknown comment."""
 

@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
+from llm.network_urls import http_origin
+
 
 _CACHE_TTL_SECONDS = 3600.0
 _FETCH_TIMEOUT = 3.0
@@ -88,7 +90,7 @@ async def warm_cache(
     if cached is not None:
         return cached
 
-    url = f"http://{host}:{port}/openapi.json"
+    url = f"{http_origin(host, port)}/openapi.json"
     try:
         headers = {}
         if server_id:

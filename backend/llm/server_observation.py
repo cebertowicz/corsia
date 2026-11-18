@@ -76,7 +76,8 @@ def observation_generation(server_id: str) -> int:
     return _GENERATION.get(server_id, 0)
 
 
-def _new_generation(server_id: str) -> None:
+def advance_observation_generation(server_id: str) -> None:
+    """Invalidate asynchronous observations from an earlier server instance."""
     _GENERATION[server_id] = observation_generation(server_id) + 1
 
 
@@ -84,7 +85,7 @@ def forget_loaded_on_exit(server_id: str) -> set[str]:
     """Clear the observed set on process exit and return it for reload."""
     from llm import network_discovery as nd
 
-    _new_generation(server_id)
+    advance_observation_generation(server_id)
     loaded = nd._LOADED_BY_SERVER.get(server_id, set())
     nd._LOADED_BY_SERVER[server_id] = set()
     nd._notify_models_changed_safe()
@@ -105,6 +106,8 @@ async def record_reachable(
     sid = server["id"]
     if generation is not None and observation_generation(sid) != generation:
         return
+    if generation is not None:
+        status["generation"] = generation
     await run_in_db(nd.update_server_status, sid, status="online", **status)
     if generation is not None and observation_generation(sid) != generation:
         return
@@ -120,13 +123,16 @@ async def record_reachable(
         _schedule(nd._discover_and_notify(sid))
 
 
-async def record_unreachable(server: dict) -> None:
+async def record_unreachable(server: dict, *, generation: int | None = None) -> None:
     """A source could not reach ``server``, or was refused by it."""
     from llm import network_discovery as nd
 
     provider = server.get("provider") or ("external" if server.get("kind") == "external" else "omlx")
-    await run_in_db(nd._record_server_offline, server, provider)
-    _new_generation(server["id"])
+    args = (server, provider) if generation is None else (server, provider, generation)
+    committed = await run_in_db(nd._record_server_offline, *args)
+    if committed is False or (generation is not None and observation_generation(server["id"]) != generation):
+        return
+    advance_observation_generation(server["id"])
     nd._LOADED_BY_SERVER.pop(server["id"], None)
     if server.get("kind") != "external":
         _UNLISTED.setdefault(server["id"], None)

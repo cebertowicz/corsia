@@ -859,9 +859,12 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 198 -> 199 adds dead_letter_events.code_named.
         from infra.migration_198_to_199_restart_dead_letter_codes import migrate_198_to_199
         migrate_198_to_199(db)
-        # 199 -> 200 adds the feedback recipient recovery journal.
-        from infra.migration_199_to_200_feedback_recipients import migrate_199_to_200
+        # 199 -> 200 adds the ledger of comment state moved off retired identities.
+        from infra.migration_199_to_200_comments_off_retired_identities import migrate_199_to_200
         migrate_199_to_200(db)
+        # 200 -> 201 adds the feedback recipient recovery journal.
+        from infra.migration_200_to_201_feedback_recipients import migrate_200_to_201
+        migrate_200_to_201(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -995,7 +998,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 200
+    assert SCHEMA_VERSION == 201
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

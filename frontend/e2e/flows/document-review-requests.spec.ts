@@ -184,8 +184,10 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 	}
 }
 
+// At 1280 the Workspace panel overlays the canvas, so the canvas is one compact surface laid out for the width the
+// panel leaves: wider than 600, so not narrow.
 const composedFixtures = [
-	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: true },
+	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: false },
 	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: true },
 	{ viewport: 'phone-393', width: 393, height: 852, splitWidth: 500, expectedNarrow: true },
 	{ viewport: 'wide-desktop-1920', width: 1920, height: 1000, splitWidth: 820, expectedNarrow: false },

@@ -7,13 +7,14 @@ import { injectMessage, seedMockResponses } from '../support/mock';
 import { commentEditor, commentOnMessage, openCommentThread } from '../support/chatComments';
 import { selectPhrase } from '../support/chatCommentFrames';
 import { waitForMainSlideToSettle } from '../support/sidebar';
+import { fingerDrag } from '../support/sheetFinger';
 
 /**
  * A phone comment sheet held short to leave its text room above it grows when the reader pulls its grabber up, and stays up
  * until it closes: nothing moves the text under the reader while they pull, nothing caps it again when the keyboard comes up,
  * and every message, the reply box and the controls of a tall thread can be reached. The phone navigation slides over an open
- * sheet without dismissing it. Chromium with touch at 393 wide stands in for the phone (WebKit is not run here); the keyboard is
- * stood in for by shrinking the viewport to the height a phone keyboard leaves.
+ * sheet without dismissing it. The phone is Chromium with touch at 393 wide, and WebKit at 393 when it is run (webkit-mobile); the
+ * keyboard is stood in for by shrinking the viewport to the height a phone keyboard leaves.
  */
 
 const TAG = '@flow:doc-comment-sheet-pull-up @surface:documents';
@@ -42,7 +43,7 @@ const reply = (n: number) => `Reply ${n}: we walked it again this morning and th
 
 test.use({ viewport: PHONE, hasTouch: true, isMobile: true });
 test.beforeEach(({}, testInfo) => {
-	test.skip(testInfo.project.name !== 'chromium-mobile', 'The phone sheet is taken at 393 in the touch project');
+	test.skip(!['chromium-mobile', 'webkit-mobile'].includes(testInfo.project.name), 'The phone sheet is taken at 393 in the touch projects');
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	test.setTimeout(180_000);
 });
@@ -169,18 +170,7 @@ async function tapOpen(page: Page, mark: Locator) {
 async function pull<T>(page: Page, steps: number[], each: () => Promise<T>, hold = 0): Promise<T[]> {
 	const grabber = await sheet(page).last().locator('.drawer-drag-region').boundingBox();
 	expect(grabber, 'the sheet has a grabber').not.toBeNull();
-	const x = grabber!.x + grabber!.width / 2, y = grabber!.y + grabber!.height / 2;
-	const touch = await page.context().newCDPSession(page);
-	const seen: T[] = [];
-	await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
-	for (const dy of steps) {
-		await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + dy, id: 1 }] });
-		await painted(page);
-		seen.push(await each());
-	}
-	if (hold) await page.waitForTimeout(hold);
-	await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-	await touch.detach();
+	const seen = await fingerDrag(page, { x: grabber!.x + grabber!.width / 2, y: grabber!.y + grabber!.height / 2 }, steps, each, hold);
 	await sheetSettled(page);
 	return seen;
 }

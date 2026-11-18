@@ -117,7 +117,12 @@ receive the replacement failure. Cloud work can continue independently. Crash
 recovery and upgrade share the original bounded recovery task, including model
 restoration; this boundary covers CORSIA dispatch, not clients calling oMLX
 directly. Ordinary adoption failures are contained so cloud startup can continue;
-a version-read failure leaves already adopted processes watched.
+a version-read failure leaves already adopted processes watched. The managed
+listener uses the Host saved by oMLX, defaulting to loopback; readiness and
+endpoint selection use a concrete address derived from that listener. A newly
+confirmed managed endpoint supersedes earlier endpoint observations without
+removing their records. In-flight probes from an earlier server generation cannot
+publish over the replacement. Independent server listener policy is unchanged.
 Restart transitions tag the existing `models_updated` event with `server_id`,
 so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart
