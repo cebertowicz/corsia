@@ -19,12 +19,12 @@ _KEY_VALUE_RE = re.compile(
     r"\s*[:=]?\s*"
 )
 # What a value may hold and still be an expression: jq paths, variables,
-# numbers, arithmetic, pipes and grouping, and a value the redactor already
-# replaced with its marker (a descriptor checked again). Anything else (a
+# numbers, arithmetic, pipes, grouping and ``,`` inside it, and a value the
+# redactor already replaced with its marker (a descriptor checked again). Anything else (a
 # quote, a bare word, ``@format``) is literal text.
 _EXPRESSION_PIECE_RE = re.compile(
     r"\s+|(?P<ref>\.(?:[A-Za-z_]\w*)?|\$[A-Za-z_]\w*|\[REDACTED\])"
-    r"|\d+(?:\.\d+)?|//|[-+*/%|()\[\]]"
+    r"|\d+(?:\.\d+)?|//|[-+*/%|,()\[\]]"
 )
 
 Redaction = tuple[str, int, int]
@@ -96,8 +96,8 @@ def _value_span(text: str, start: int) -> str:
         char = text[index]
         if char in "([":
             depth += 1
-        elif char in ")]" and depth:
-            depth -= 1
+        elif depth:
+            depth -= char in ")]"
         elif char in ")],};":
             return text[start:index]
     return text[start:]
