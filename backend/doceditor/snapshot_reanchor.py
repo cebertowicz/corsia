@@ -5,7 +5,7 @@ from collections import Counter
 import json
 import logging
 
-from doceditor import comment_anchoring, comment_snapshots, live_diff, live_text, snapshot_showing
+from doceditor import comment_anchoring, comment_snapshots, live_diff, live_text, snapshot_mapping_cache, snapshot_showing
 
 
 log = logging.getLogger(__name__)
@@ -100,6 +100,9 @@ def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None)
     if versions is None:
         versions = comment_snapshots.read_many(db, groups)
     new_index = snapshot_showing.TextIndex(text)
+    digest = snapshot_mapping_cache.destination_digest(text) if any(
+        versions[snapshot_id] != text for snapshot_id in groups) else None
+    line_context = []
     for snapshot_id, comments in groups.items():
         valid = []
         for comment in comments:
@@ -115,7 +118,8 @@ def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None)
             else:
                 valid.append(comment)
         expected = {c['id']: tuple(c.get(field) for field in _ANCHOR_FIELDS) for c in valid}
-        for update in resolve(valid, versions[snapshot_id], text, new_index=new_index):
+        for update in resolve(valid, versions[snapshot_id], text, new_index=new_index,
+                              snapshot_id=snapshot_id, destination_digest=digest, line_context=line_context):
             update['expected_snapshot_id'] = snapshot_id
             update['expected_anchor'] = expected[update['id']]
             versioned_updates.append(update)
@@ -138,7 +142,8 @@ def _map_spans(old: str, new: str, spans: list[tuple[int, int]]) -> list[tuple[i
     return live_text.follow_spans(spans, old, delta)[0] if delta else spans
 
 
-def resolve(threads: list[dict], old: str, new: str, *, new_index=None) -> list[dict]:
+def resolve(threads: list[dict], old: str, new: str, *, new_index=None,
+            snapshot_id=None, destination_digest=None, line_context=None) -> list[dict]:
     """Map and judge candidates; rejected anchors retain their persisted evidence.
 
     The caller groups rows by snapshot and owns persistence of accepted updates.
@@ -179,12 +184,22 @@ def resolve(threads: list[dict], old: str, new: str, *, new_index=None) -> list[
         live_text.apply_text(doc, new)
         mapped = spans
     else:
-        mapped = _map_spans(old, new, spans)
+        digest = destination_digest
+        if snapshot_id is not None and digest is None:
+            digest = snapshot_mapping_cache.destination_digest(new)
+        mapped = snapshot_mapping_cache.map_spans(snapshot_id, old, new, spans, digest, _map_spans)
     ranges = dict(zip((c['id'] for c in eligible), mapped))
     candidates = [dict(c) for c in eligible]
     updates = comment_anchoring.resolve_threads(candidates, new, ranges=ranges)
     accepted = set()
-    line_pairs = snapshot_showing._line_pairs(old, new)
+    if line_context is None:
+        line_pairs = snapshot_showing._line_pairs(old, new)
+    else:
+        if not line_context:
+            lines = new.splitlines(keepends=True)
+            line_context.append((lines, live_diff._line_positions(lines)))
+        lines, positions = line_context[0]
+        line_pairs = snapshot_showing._line_pairs(old, new, new_lines=lines, new_positions=positions)
     line_counts = (Counter(old.splitlines()), Counter(new.splitlines()))
     for original, candidate, old_span in zip(eligible, candidates, spans):
         quote = comment_anchoring._anchored_quote(original)

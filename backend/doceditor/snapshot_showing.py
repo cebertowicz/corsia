@@ -44,9 +44,11 @@ def _unnumber(line: str) -> str:
     return re.sub(r'^(\s*)\d+([.)]\s+)', r'\1#\2', line)
 
 
-def _line_pairs(old: str, new: str) -> dict[int, tuple[str, int | None]]:
-    before, after, result = old.splitlines(keepends=True), new.splitlines(keepends=True), {}
-    for tag, i, j, k, end in live_diff._line_opcodes(before, after):
+def _line_pairs(old: str, new: str, *, new_lines=None, new_positions=None) -> dict[int, tuple[str, int | None]]:
+    before = old.splitlines(keepends=True)
+    after = new.splitlines(keepends=True) if new_lines is None else new_lines
+    result = {}
+    for tag, i, j, k, end in live_diff._line_opcodes(before, after, positions=new_positions):
         if tag == 'equal':
             for n in range(j - i):
                 result[i + n] = ('equal', k + n)

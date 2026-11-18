@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 from doceditor import comment_anchoring, comment_snapshots, snapshot_reanchor
@@ -33,6 +34,74 @@ def test_direct_span_mapping_matches_crdt_for_edits_and_utf16_boundaries():
         finally:
             text.unobserve(observer)
         assert snapshot_reanchor._map_spans(old, new, spans) == state['spans']
+
+
+def test_restored_text_after_intermediate_deletion_matches_direct_source_mapping():
+    source = 'head\ntarget\nother\ntail\n'
+    deleted = 'head\ntail\n'
+    restored = 'head\ntarget\ntail\n'
+    original = row(source, 'target', source.index('target'))
+    first = dict(original)
+    snapshot_reanchor.resolve([first], source, deleted, snapshot_id=7)
+    assert first['orphaned']
+    cached, uncached = dict(original), dict(original)
+    cached_updates = snapshot_reanchor.resolve([cached], source, restored, snapshot_id=7)
+    uncached_updates = snapshot_reanchor.resolve([uncached], source, restored)
+    assert (cached, cached_updates) == (uncached, uncached_updates)
+    assert not cached['orphaned'] and (cached['from_off'], cached['to_off']) == (5, 11)
+
+
+def test_repeated_deleted_quote_matches_uncached_result_and_reuses_mapping(monkeypatch):
+    source = 'head\ntarget\nother\ntail\n'
+    current = 'head\ntail\n'
+    original = row(source, 'target', 5)
+    calls = []
+    real_map = snapshot_reanchor._map_spans
+    def counted(*args):
+        calls.append(1)
+        return real_map(*args)
+    monkeypatch.setattr(snapshot_reanchor, '_map_spans', counted)
+    first, second, control = dict(original), dict(original), dict(original)
+    first_updates = snapshot_reanchor.resolve([first], source, current, snapshot_id=891)
+    second_updates = snapshot_reanchor.resolve([second], source, current, snapshot_id=891)
+    assert len(calls) == 1
+    control_updates = snapshot_reanchor.resolve([control], source, current)
+    assert first['orphaned'] and (first, first_updates) == (second, second_updates) == (control, control_updates)
+
+
+def test_cache_matches_uncached_bytes_across_deletion_repetition_and_restoration():
+    source = 'head\ntarget\nother\ntail\n'
+    original = row(source, 'target', 5)
+    for current in ('head\ntail\n', 'head\ntail\n', 'head\ntarget\ntail\n',
+                    source, 'head\ntail\n', 'head\ntarget\ntail\n'):
+        cached, uncached = dict(original), dict(original)
+        cached_updates = snapshot_reanchor.resolve([cached], source, current, snapshot_id=931)
+        uncached_updates = snapshot_reanchor.resolve([uncached], source, current)
+        encode = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+        assert encode((cached, cached_updates)) == encode((uncached, uncached_updates))
+
+
+def test_reused_line_index_matches_independent_pairing_with_duplicates():
+    from doceditor import live_diff, snapshot_showing
+    destinations = ('a\nb\na\n', 'a\nchanged\nc\n', '', 'a\nb\nc\n')
+    sources = ('a\na\nb\n', 'a\nb\nc\n', '', 'c\nb\na\n')
+    for destination in destinations:
+        lines = destination.splitlines(keepends=True)
+        positions = live_diff._line_positions(lines)
+        for source in sources:
+            assert snapshot_showing._line_pairs(source, destination, new_lines=lines, new_positions=positions) == snapshot_showing._line_pairs(source, destination)
+
+
+def test_mapping_cache_confirms_full_text_on_digest_and_snapshot_id_collision():
+    from doceditor import snapshot_mapping_cache
+    calls = []
+    def calculate(old, new, spans):
+        calls.append((old, new))
+        return [(len(old), len(new))]
+    first = snapshot_mapping_cache.map_spans(991, 'source A', 'destination A', [(0, 1)], b'same', calculate)
+    second = snapshot_mapping_cache.map_spans(991, 'source B', 'destination B', [(0, 1)], b'same', calculate)
+    assert len(calls) == 2
+    assert first == [(8, 13)] and second == [(8, 13)]
 
 
 def test_versioned_rows_resolve_from_their_own_source_and_legacy_uses_existing_rules():

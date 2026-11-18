@@ -517,6 +517,39 @@ async def test_stale_snapshot_update_loses_without_changing_any_pair(ownership_s
 
 
 @pytest.mark.asyncio
+async def test_snapshot_mapping_cache_does_not_prevent_retry_after_failed_write(ownership_scope, tmp_path, monkeypatch):
+    import sqlite3
+    from doceditor import comment_anchoring, snapshot_reanchor
+    manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
+    app_loop.capture(asyncio.get_running_loop())
+    try:
+        await invoke('http', ownership_scope, entry, 'cache-retry')
+        await manager.close()
+        db = ownership_scope['db']
+        current = 'prefix\na b\nsecond\n'
+        persist = snapshot_reanchor.persist_updates
+        calls = []
+        def fail_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise sqlite3.OperationalError('injected write failure')
+            return persist(*args, **kwargs)
+        monkeypatch.setattr(snapshot_reanchor, 'persist_updates', fail_once)
+        first, anchored = comment_anchoring.anchored_threads(entry.artifact_id, str(entry.live.path), db, text=current)
+        assert anchored
+        original_source = db.execute('SELECT snapshot_id FROM doc_comments WHERE id=?', ('cache-retry',)).fetchone()[0]
+        second, anchored = comment_anchoring.anchored_threads(entry.artifact_id, str(entry.live.path), db, text=current)
+        assert anchored and len(calls) == 2
+        assert (first[0]['from_off'], first[0]['to_off']) == (second[0]['from_off'], second[0]['to_off'])
+        new_source = db.execute('SELECT snapshot_id FROM doc_comments WHERE id=?', ('cache-retry',)).fetchone()[0]
+        assert new_source != original_source
+        assert snapshot_reanchor.comment_snapshots.read_many(db, [new_source])[new_source] == current
+    finally:
+        await manager.close()
+        app_loop.clear()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_updates_verify_all_rows_in_one_query(ownership_scope, tmp_path, monkeypatch):
     from doceditor import snapshot_reanchor
     manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
