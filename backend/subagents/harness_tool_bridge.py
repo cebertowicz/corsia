@@ -287,7 +287,9 @@ async def _with_notice_and_marker(
     # The notice classifies the tool the call dispatches to, not its
     # ``tool_call`` wrapper.
     dispatched_name, dispatched_args, _dispatcher = resolve_dispatch(name, arguments)
-    result_text = projected
+    # A bounded model projection can truncate decision JSON. The canonical
+    # receipt carries the id needed to read the saved decision through Plans.
+    result_text = delivery.content if dispatched_name == "plan_decision" else projected
     notice = await asyncio.to_thread(
         plan_notice,
         thread_id=thread_id,

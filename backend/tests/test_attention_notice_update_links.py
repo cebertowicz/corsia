@@ -49,13 +49,14 @@ def test_an_update_that_links_one_document_states_its_words(db, events, workspac
 
     notice = _notice(db, "The plan is ready: [plan](plan.md).")
 
-    assert notice == (
-        "[CORSIA attention notice] Your update links 'plan.md' for the person to read: "
+    assert (
+        "Your update links 'plan.md' for the person to read: "
         "6,200 words, at least 27 minutes to read. If they could act on less, cut the "
         "file now, before they open it: put first what they must decide or do, and keep "
         "only what they need for it."
-    )
-    assert events == [{
+    ) in notice
+    assert [{**event, "properties": {key: value for key, value in event["properties"].items()
+                                      if not key.startswith("update_")}} for event in events] == [{
         "category": "attention_notice", "action": "notice_emitted", "thread_id": "owner",
         "properties": {
             "handover": "update", "measured": True, "words": 6200, "characters": 0,
@@ -75,14 +76,15 @@ def test_several_linked_documents_are_totalled_and_the_longest_named(db, events,
         db, "Read [one](one.md), then notes/two.md and three.txt. Again: [one](one.md), one.md.",
     )
 
-    assert notice == (
-        "[CORSIA attention notice] Your update links 3 documents for the person to read: "
+    assert (
+        "Your update links 3 documents for the person to read: "
         "5,500 words and at least 24 minutes in all. The longest is 'two.md': 4,000 words, "
         "at least 17 minutes to read. If they could act on less, link fewer or cut them "
         "now, before they open them: put first what they must decide or do, and keep only "
         "what they need for it."
-    )
-    assert events[-1]["properties"] == {
+    ) in notice
+    assert {key: value for key, value in events[-1]["properties"].items()
+            if not key.startswith("update_")} == {
         "handover": "update", "measured": True, "words": 5500, "characters": 0,
         "images": 0, "waiting_documents": 3, "linked_documents": 3,
     }
@@ -124,27 +126,22 @@ def test_files_the_person_is_not_handed_to_read_are_not_counted(db, events, work
 
     notice = _notice(db, f"Fixed in runner.py:12, see frame.png, gone.md and {outside}.")
 
-    assert notice is None
-    assert events == []
+    assert notice is not None and "Your update links" not in notice
+    assert events[-1]["properties"]["linked_documents"] == 0
 
 
 def test_text_in_a_code_fence_links_nothing(db, events, workspace):  # noqa: F811
     _document(db, workspace / "plan.md", _words(1000))
 
-    assert _notice(db, "Ran:\n```\ncat plan.md\n```\nDone.") is None
+    notice = _notice(db, "Ran:\n```\ncat plan.md\n```\nDone.")
+    assert notice is not None and "Your update links" not in notice
 
 
-def test_an_update_that_names_no_file_reads_nothing(monkeypatch):
-    """Most updates link nothing: those must not open the database."""
-    def _no_database():
-        raise AssertionError("the notice opened the database for an update that links nothing")
-
-    monkeypatch.setattr(mod, "get_db", _no_database)
-
-    assert mod.attention_notice(
-        thread_id="owner", tool_name="post_update", arguments={"text": "Merged. Nothing needs you."},
-        result=result_text("m-1", [], [], "owner"),
-    ) is None
+def test_an_update_that_names_no_file_counts_its_words(db, events, workspace):  # noqa: F811
+    notice = _notice(db, "Merged. Nothing needs you.")
+    assert "Your update: 4 words" in notice
+    assert events[-1]["properties"]["update_words"] == 4
+    assert events[-1]["properties"]["linked_documents"] == 0
 
 
 @pytest.mark.parametrize("result", [
@@ -192,10 +189,10 @@ def test_a_linked_document_that_cannot_be_read_as_text_says_so(db, events, works
 
     notice = _notice(db, "See scan.md.")
 
-    assert notice == (
-        "[CORSIA attention notice] Your update links 'scan.md' for the person to read: its "
+    assert (
+        "Your update links 'scan.md' for the person to read: its "
         "length could not be measured, because the file could not be read as text."
-    )
+    ) in notice
     assert events[-1]["properties"]["measured"] is False
 
 
