@@ -108,7 +108,7 @@ describe('ReviewBar accept all and approve', () => {
 		const feedback = { comments: 2, suggestions: 1, edits: 0 };
 		api.fetchReviewBar.mockResolvedValue({ ...read(2), round_feedback_counts: feedback });
 		api.answerReview.mockResolvedValue({ verdict: 'changes_requested', note: 'Tighten it', feedback_counts: feedback });
-		cardsComponent = mount(MessageArtifactCards, { target: host, props: { threadId: 't1', cards: [{ kind: 'ask', artifact_id: 'doc-1', title: 'Launch plan', type: 'document', name: 'launch-plan.md', path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' }] } });
+		cardsComponent = mount(MessageArtifactCards, { target: host, props: { threadId: 't1', cards: [{ kind: 'ask', artifact_id: 'doc-1', title: 'Launch plan', type: 'document', icon: 'file-text', name: 'launch-plan.md', path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' }] } });
 		const accept = vi.fn(async () => {});
 		await render(2, accept);
 		button('Send back')!.click();

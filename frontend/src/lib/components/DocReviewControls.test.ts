@@ -71,7 +71,7 @@ afterEach(() => { if (bar) { unmount(bar); bar = null; } component?.$destroy(); 
 describe('document review toolbar and popover', () => {
 	it('requires artifactId without hiding the comment control', async () => {
 		render({ commentCount: 2 }); await settle(); expect(button('Request review')).toBeTruthy();
-		component.$set({ artifactId: null }); flushSync();
+		component!.$set({ artifactId: null }); flushSync();
 		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 comments')).toBeTruthy();
 	});
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
@@ -226,7 +226,7 @@ describe('document review toolbar and popover', () => {
 			expect(trigger.getAttribute('aria-expanded')).toBe('true'); expect(document.body.querySelector('[data-popover]')).toBeTruthy();
 			if (close === 'Escape') key(search, 'Escape'); else document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
 			await settle(); expect(document.body.querySelector('[role="combobox"]')).toBeNull(); expect(document.activeElement).toBe(trigger);
-			if (close === 'Escape') { component.$destroy(); host.remove(); }
+			if (close === 'Escape') { component!.$destroy(); host.remove(); }
 		}
 	});
 	it('uses a titled drawer for a narrow canvas and an icon-only trigger', async () => {
@@ -274,14 +274,14 @@ describe('document review toolbar and popover', () => {
 	it('removes its narrow review drawer synchronously when its caller is destroyed', async () => {
 		width = 393; render(); await picker();
 		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(1);
-		component.$destroy();
+		component!.$destroy();
 		component = undefined;
 		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 	});
 	it('says plainly when nobody can review, and offers Retry rather than an empty claim on a roster failure', async () => {
 		reviewers = []; render(); await picker();
 		expect(document.body.textContent).toContain('No agents in this project can review right now.');
-		component.$destroy(); host.remove();
+		component!.$destroy(); host.remove();
 		rosterError = true; render(); await picker();
 		expect(document.body.textContent).toContain("Couldn't load reviewers"); expect(document.body.textContent).not.toContain('No agents in this project');
 		expect(maybeButton('Retry')).toBeTruthy();
@@ -299,7 +299,7 @@ describe('document review toolbar and popover', () => {
 	it('drops a late load when the same document and thread have a new target generation', async () => {
 		let finish!: (response: Response) => void;
 		fetchMock.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
-		render(); component.$set({ reviewTargetKey: 'target-b' }); flushSync(); await settle();
+		render(); component!.$set({ reviewTargetKey: 'target-b' }); flushSync(); await settle();
 		finish(json({ reviews: [row()], reviewers })); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 	});
@@ -309,7 +309,7 @@ describe('document review toolbar and popover', () => {
 		let finish!: (response: Response) => void;
 		fetchMock.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
 		button('Send').click(); flushSync();
-		component.$set({ artifactId: 'doc-b', reviewTargetKey: 'target-b' }); flushSync(); await settle();
+		component!.$set({ artifactId: 'doc-b', reviewTargetKey: 'target-b' }); flushSync(); await settle();
 		const newSearch = await picker(); choose(newSearch, 'product'); await settle();
 		type(document.body.querySelector('textarea')!, 'New note');
 		const calls = fetchMock.mock.calls.length;
@@ -348,7 +348,7 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (Ended without comments)');
 		rows = []; emit('doc-a'); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
-		component.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);
+		component!.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);
 		host.remove(); render(); await settle(); expect(events.get('plans_changed')?.size).toBe(1);
 	});
 });
