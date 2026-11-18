@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PresenceView } from './DocPresenceStatus.svelte';
 	import AvatarStack from './ui/AvatarStack.svelte';
+	import { presenceMaximum } from './docPresenceFit';
 
 	let { view, artifactId, instanceId, ready }: { view: PresenceView | null; artifactId: string | null; instanceId?: string; ready: boolean } = $props();
 	let row = $state<HTMLElement | null>(null);
@@ -24,7 +25,8 @@
 			const nameCell = title.querySelector<HTMLElement>('.name-size, .name') ?? title;
 			canvas.font = getComputedStyle(nameCell).font;
 			const shortened = name.length > 6 ? `${name.slice(0, 1)}…${name.slice(-5)}` : name;
-			const needed = canvas.measureText(shortened).width + 18; // name plus the title's chevron and gap
+			const needed = canvas.measureText(name).width + 18; // whole name plus the title's chevron and gap
+			const floor = canvas.measureText(shortened).width + 18;
 			const titleBox = title.getBoundingClientRect();
 			const cellBox = titleCell.getBoundingClientRect();
 			const toolsBox = tools.getBoundingClientRect();
@@ -35,7 +37,7 @@
 			const avatar = single?.querySelector<HTMLElement>('.participant-trigger, .participant-slot');
 			const more = single?.querySelector<HTMLElement>('.more');
 			const singleOverlaps = !!avatar && !!more && avatar.getBoundingClientRect().right > more.getBoundingClientRect().left;
-			maximum = budget - width(3) >= needed ? 3 : !singleOverlaps && budget - width(1) >= needed ? 1 : 0;
+			maximum = presenceMaximum(budget, width(3), width(1), needed, floor, singleOverlaps);
 		};
 		const observer = new ResizeObserver(fit);
 		observer.observe(bar); observer.observe(titleCell); observer.observe(tools);
