@@ -7,6 +7,9 @@ from pathlib import Path
 import sqlite3
 
 from core.workspace_layout import resolve_project_root
+from infra.database import SchemaVersionError, TransactionOwnershipError
+from infra.db_connection import LaneWriteError
+from infra.db_loop_guard import LoopThreadWriteError
 from registry import service
 from registry.shared_principals import artifact_owner
 from registry.shared_target import SharedTarget
@@ -16,18 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 def recover_intents(db, workspace: Path, recover_one) -> None:
-    """Isolate document recovery failures while propagating database failures."""
+    """Hold document failures; propagate database faults. Cleanup remains best effort."""
     rows = db.execute(
         "SELECT * FROM durable_write_intents ORDER BY created_at,id"
     ).fetchall()
     for raw in rows:
         try:
             recover_one(dict(raw), workspace=workspace, db=db)
-        except Exception as exc:
+        except (sqlite3.Error, TransactionOwnershipError, SchemaVersionError, LaneWriteError, LoopThreadWriteError):
             if db.in_transaction:
                 db.rollback()
-            if isinstance(exc, sqlite3.OperationalError):
-                raise
+            raise
+        except Exception:
+            if db.in_transaction:
+                db.rollback()
             logger.exception(
                 "Could not recover durable write intent %s for %s.",
                 raw["id"], raw["target_path"],

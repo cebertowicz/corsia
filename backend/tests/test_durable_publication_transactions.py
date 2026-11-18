@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from core.workspace_layout import resolve_thread_working_root
-from infra.database import TransactionOwnershipError
+from infra.database import SchemaVersionError, TransactionOwnershipError
+from infra.db_connection import LaneWriteError
+from infra.db_loop_guard import LoopThreadWriteError
 from registry import durable_writes, models, service
 from tests.test_durable_writes import durable_scope as durable_scope
 
@@ -160,20 +162,35 @@ def test_failed_first_commit_is_rolled_back_before_connection_cleanup(
     assert target.exists() == (operation == "recover")
 
 
-def test_recovery_propagates_operational_error_after_rollback(durable_scope, monkeypatch):
+@pytest.mark.parametrize("error", [sqlite3.OperationalError, sqlite3.DatabaseError,
+                                  TransactionOwnershipError, SchemaVersionError, LaneWriteError, LoopThreadWriteError])
+def test_recovery_propagates_database_failure_after_rollback(durable_scope, monkeypatch, caplog, error):
     workspace, _project, thread, db = durable_scope
     _seed_applied(durable_scope)
+    db.execute(
+        "INSERT INTO durable_write_intents "
+        "(id, operation, phase, actor_thread_id, artifact_type, external_id, target_path, stage_path, "
+        "description, content_sha256, created_at, updated_at) "
+        "SELECT 'later', operation, phase, actor_thread_id, artifact_type, external_id, target_path || '.later', "
+        "stage_path || '.later', description, content_sha256, 'z', updated_at "
+        "FROM durable_write_intents WHERE id='g34-applied'"
+    )
+    db.commit()
     probe = ConnectionProbe(db)
     monkeypatch.setattr(durable_writes, "get_db", lambda: probe)
+    seen = []
 
     def fail_row(row, *, workspace, db):
+        seen.append(row['id'])
         db.execute("UPDATE threads SET title='uncommitted' WHERE id=?", (thread,))
-        raise sqlite3.OperationalError("injected row failure")
+        raise error("injected row failure")
 
     monkeypatch.setattr(durable_writes, "_recover_one_intent", fail_row)
-    with pytest.raises(sqlite3.OperationalError, match="injected row failure"):
+    with pytest.raises(error, match="injected row failure"):
         durable_writes.recover_write_intents(workspace=workspace)
 
+    assert seen == ['g34-applied']
+    assert "Could not recover durable write intent" not in caplog.text
     assert probe.closed_dirty == [False]
     assert not db.in_transaction
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents WHERE id='g34-applied'").fetchone()[0] == 1
@@ -259,6 +276,9 @@ def test_cleanup_commit_failure_keeps_committed_publication_recoverable(
         assert identity["id"] == original["id"]
         assert models.get_artifact(original["id"], db=db)["state"] == "active"
     retained = target.read_bytes()
+    def no_second_write(*args, **kwargs):
+        pytest.fail("recovery must not replace an already committed target")
+    monkeypatch.setattr(durable_writes, "replace_bound_file", no_second_write)
     durable_writes.recover_write_intents(workspace=workspace)
     assert target.read_bytes() == retained
     assert service.find_file_identity(str(target), db=db)["id"] == identity["id"]
