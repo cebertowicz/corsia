@@ -25,7 +25,6 @@ export interface PlanTreeProps {
 	onOpenLegacyDiscussion?: (artifactId: string, title: string) => void;
 	userActionBusy?: boolean;
 	onUserAction?: UserActionHandler;
-	onRefresh?: () => void;
 	/** What the user has seen of this plan in the pane; only the pane's own tree passes it. */
 	paneView?: PaneView | null;
 	/** The server's folds and where older finished rows are read from. */

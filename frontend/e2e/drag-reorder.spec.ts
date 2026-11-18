@@ -25,7 +25,7 @@ async function openPlan(page: Page, request: APIRequestContext, width: number, r
   }) }));
   await page.route(`**/api/plans/plan-${threadId}/mutations`, async (route) => {
     const body = route.request().postDataJSON(); calls.push(body);
-    if (refusal) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Test refusal detail' }) });
+    if (refusal) return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ detail: 'Test refusal detail' }) });
     const moved = nodes.find((node) => node.id === body.params.node_id)!;
     const indexes = nodes.map((node, index) => node.parent_id === moved.parent_id ? index : -1).filter((index) => index >= 0);
     const siblings = indexes.map((index) => nodes[index]);
@@ -56,16 +56,9 @@ for (const width of [1440, 393]) {
       const { tree, calls, title } = await openPlan(page, request, width);
       const source = tree.locator('[data-node-id="task-0"]');
       const target = tree.locator('[data-node-id="task-2"]');
-      // Capture the original hit point before waiting for the drawer's entrance motion.
-      const initial = (await source.boundingBox())!;
-      const initialHit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-node-id]')?.getAttribute('data-node-id') ?? null, { x: initial.x + initial.width / 2, y: initial.y + initial.height / 2 });
       await source.hover({ trial: true });
       await target.hover({ trial: true });
       const a = (await source.boundingBox())!, b = (await target.boundingBox())!;
-      if (width === 393) {
-        const oldPointHit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-node-id]')?.getAttribute('data-node-id') ?? null, { x: initial.x + initial.width / 2, y: initial.y + initial.height / 2 });
-        console.log('touch geometry', JSON.stringify({ initial, initialHit, settled: a, oldPointHit }));
-      }
       if (width === 393) {
         const cdp = await context.newCDPSession(page);
         await source.evaluate((row) => {
@@ -75,9 +68,10 @@ for (const width of [1440, 393]) {
         });
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x + a.width / 2, y: a.y + a.height / 2 }] });
         await expect(source).toHaveAttribute('data-test-pointerdown', 'seen');
-        await page.waitForTimeout(650);
-        await expect(page.getByRole('menu')).toHaveCount(0);
+        // The hold opens the row's menu, as every row menu does; moving the finger closes it and drags.
+        await expect(page.getByRole('menu')).toHaveCount(1, { timeout: 2000 });
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b.x + b.width / 2, y: b.y + b.height * 0.75 }] });
+        await expect(page.getByRole('menu')).toHaveCount(0);
         await expect(source).not.toHaveAttribute('data-test-pointercancel', 'seen');
         await expect(source).toHaveAttribute('data-test-pointermove', 'seen');
         await expect(source).toHaveClass(/dragging/);
@@ -122,7 +116,8 @@ for (const width of [1440, 393]) {
         await expect(source).toHaveClass(/dragging/);
         await page.mouse.up();
       }
-      const error = page.getByRole('alert').filter({ hasText: "Couldn't move this task. Try again." });
+      // The server's own refusal, as every other row action shows it.
+      const error = page.getByRole('alert').filter({ hasText: 'Test refusal detail' });
       await expect(error).toBeVisible();
       await expect(page.getByRole('menu')).toHaveCount(0);
       const hit = (selector: string) => page.locator(selector).evaluate((element) => {
@@ -137,15 +132,12 @@ for (const width of [1440, 393]) {
       await expect.poll(() => tree.evaluate((element) => element.getAnimations({ subtree: true }).filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
       const errorHit = await hit('[role="alert"] span');
       const rowHit = await hit('[data-node-id="task-0"] .row-title');
-      console.log('hit probe', width, JSON.stringify({ glidingErrorHit, errorHit, rowHit }));
       expect(errorHit.matches).toBe(true);
       expect(rowHit.matches).toBe(true);
       await expect.poll(order).toEqual(before);
       await expect(source.locator('.row-body')).toBeFocused();
       await target.hover({ trial: true });
-      console.log('refusal evidence', JSON.stringify({ before, after: await order(), errorHit, rowHit }));
       await page.screenshot({ path: info.outputPath(`refusal-${width}.png`) });
-      await expect(error.getByRole('button', { name: 'Dismiss' })).toHaveAttribute('title', 'Test refusal detail');
       await error.getByRole('button', { name: 'Dismiss' }).click();
       await expect(error).toHaveCount(0);
     });
@@ -170,4 +162,14 @@ test('keyboard menu moves a row to the top', async ({ page, request }) => {
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0]).toMatchObject({ operation: 'reorder', params: { node_id: 'task-2', order_key: 0, expected_revision: 1 } });
   await expect(tree.locator('[data-node-id="task-2"] .row-body')).toBeFocused();
+});
+
+test('a refused Move from the menu shows its reason in the menu, not above the plan', async ({ page, request }) => {
+  const { tree, calls } = await openPlan(page, request, 1440, true);
+  await tree.locator('[data-node-id="task-2"] .row-body').focus();
+  await page.keyboard.press('Shift+F10');
+  await page.getByRole('menuitem', { name: 'Move to top' }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  await expect(page.getByRole('menu')).toContainText('Test refusal detail');
+  await expect(page.locator('.reorder-error')).toHaveCount(0);
 });

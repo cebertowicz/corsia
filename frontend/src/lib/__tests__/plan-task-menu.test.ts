@@ -272,11 +272,9 @@ describe('PlanTree task context menu', () => {
 		expect(menu()).toBeNull();
 		vi.advanceTimersByTime(2);
 		flushSync();
-		expect(menu()).toBeNull();
+		expect(labels()).toEqual(['Pause', 'Won’t do']);
 
 		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
-		flushSync();
-		expect(labels()).toEqual(['Pause', 'Won’t do']);
 		body.click();
 		expect(toggled).not.toHaveBeenCalled();
 	});
@@ -289,10 +287,8 @@ describe('PlanTree task context menu', () => {
 		row.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, clientX: 10, clientY: 10 }));
 		vi.advanceTimersByTime(501);
 		flushSync();
-		expect(menu()).toBeNull();
-		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
-		flushSync();
 		const first = () => menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement;
+		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
 		first().click();
 		expect(onAction).not.toHaveBeenCalled();
 		expect(menu()).not.toBeNull();

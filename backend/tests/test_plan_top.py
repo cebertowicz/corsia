@@ -275,3 +275,20 @@ def test_the_owners_own_move_and_a_move_to_the_same_place_tell_nobody(db):
     _reorder(db, plan.id, first.id, 1, actor=WORKSPACE_CONDUCTOR)
 
     assert _lines(db, plan.id, "plan.moved_by_other") == []
+
+
+def test_a_move_to_the_same_place_tells_nobody_once_a_sibling_has_settled(db):
+    from plans import closure
+
+    _owner_thread(db)
+    _conductor(db)
+    plan = owner_plan(db)
+    settled = task(db, plan.id, "Settled")
+    first = task(db, plan.id, "First")
+    task(db, plan.id, "Second")
+    closure.close_node(settled.id, reason="Not needed", db=db)  # the open keys are now 1 and 2
+
+    _reorder(db, plan.id, first.id, 0, actor=WORKSPACE_CONDUCTOR)
+
+    assert _lines(db, plan.id, "plan.moved_by_other") == []
+    assert db.execute("SELECT order_key FROM plan_nodes WHERE id=?", (first.id,)).fetchone()[0] == 0

@@ -1,12 +1,12 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	let { error, detail, announcement, dismiss }: { error: string | null; detail: string | null; announcement: string; dismiss: () => void } = $props();
+	let { error, announcement, dismiss }: { error: string | null; announcement: string; dismiss: () => void } = $props();
 </script>
 
 {#if error}
 	<div class="reorder-error" role="alert">
 		<span>{error}</span>
-		<Button variant="ghost" size="sm" title={detail ?? undefined} description={detail ?? undefined} onclick={dismiss}>Dismiss</Button>
+		<Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button>
 	</div>
 {/if}
 <div class="sr-only" aria-live="polite">{announcement}</div>

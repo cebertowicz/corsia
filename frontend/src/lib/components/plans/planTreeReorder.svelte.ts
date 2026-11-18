@@ -1,6 +1,5 @@
 import { onDestroy, tick } from 'svelte';
 import type { OperatorNode } from '$lib/api/plans';
-import { apiFetch } from '$lib/api/request';
 import { LONG_PRESS_MS } from '$lib/components/ui/rowMenu.svelte';
 import { captureFold, playFold, prefersReducedMotion } from './foldWave';
 import { planOrderGroup } from './planTreeFold';
@@ -10,15 +9,16 @@ import type { createTaskMenu } from './taskMenu.svelte';
 type Draft = { id: string; targetId: string; position: number; before: boolean };
 type Drag = { id: string; offsets: Record<string, number>; position: number; count: number };
 type Press = { node: OperatorNode; pointerId: number; x: number; y: number; lastY: number; scroll: HTMLElement | null; armed: boolean; scrolling: boolean; timer: ReturnType<typeof setTimeout> | null };
+/** Saves one move through the pane's user-action path; the server's refusal, or null once it landed. */
+type ApplyMove = (node: OperatorNode, position: number) => Promise<string | null> | void;
 
 interface Options {
 	nodes: () => OperatorNode[];
 	now: () => number;
 	openBlocked: () => Set<string>;
 	element: () => HTMLElement | null;
-	planId: () => string;
+	apply: ApplyMove;
 	enabled: () => boolean;
-	refresh: () => void;
 	focusRow: (id: string) => boolean;
 	menu: ReturnType<typeof createTaskMenu>;
 }
@@ -35,7 +35,6 @@ export function createPlanTreeReorder(options: Options) {
 	let drag = $state<Drag | null>(null);
 	let announcement = $state('');
 	let error = $state<string | null>(null);
-	let detail = $state<string | null>(null);
 	let moving = $state(false);
 	let suppressClick = false;
 	let scrollFrame = 0;
@@ -78,26 +77,26 @@ export function createPlanTreeReorder(options: Options) {
 		draft = null;
 		if (snapshot) void tick().then(() => { const tree = options.element(); if (tree) playFold(tree, snapshot); });
 	}
-	async function saveMove(node: OperatorNode, position: number): Promise<void> {
-		moving = true; error = null; detail = null;
+	/**
+	 * Save a move and return its refusal, or null. A Move chosen in the row menu shows
+	 * its refusal in the menu, as every other menu action does; a drag has no menu, so
+	 * its refusal shows above the plan.
+	 */
+	async function saveMove(node: OperatorNode, position: number, fromMenu: boolean): Promise<string | null> {
+		moving = true; error = null;
+		let refusal: string | null;
 		try {
-			const result = await apiFetch(`/api/plans/${encodeURIComponent(options.planId())}/mutations`, {
-				method: 'POST', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ operation: 'reorder', mutation_id: crypto.randomUUID(), params: { node_id: node.id, expected_revision: node.revision, order_key: position } }),
-			});
-			if (!result.ok) {
-				const body = await result.json().catch(() => null);
-				if (result.status === 409) { error = "Couldn't save the move because the plan had a newer change. The latest plan is showing; try again."; options.refresh(); }
-				else { error = "Couldn't move this task. Try again."; detail = typeof body?.detail === 'string' ? body.detail : `Request failed (${result.status}).`; }
-				await tick(); clearDraftWithGlide(); announcement = error;
-			} else options.refresh();
-		} catch (cause) {
-			error = "Couldn't move this task. Try again.";
-			detail = cause instanceof Error ? cause.message : 'The request could not be completed.';
-			await tick(); clearDraftWithGlide(); announcement = error;
+			refusal = (await options.apply(node, position)) ?? null;
 		} finally {
-			moving = false; await tick(); options.focusRow(node.id);
+			moving = false;
 		}
+		if (refusal) {
+			// The banner renders before the glide measures, so rows glide back below it.
+			if (!fromMenu) error = refusal;
+			await tick(); clearDraftWithGlide(); announcement = refusal;
+		}
+		await tick(); options.focusRow(node.id);
+		return refusal;
 	}
 	async function moveRow(node: OperatorNode, direction: 'up' | 'down' | 'top'): Promise<string | null> {
 		const group = peers(node);
@@ -108,9 +107,10 @@ export function createPlanTreeReorder(options: Options) {
 		const position = positionBeside(siblings(node), node.id, group[target].id, before);
 		if (position === null) return null;
 		draft = { id: node.id, targetId: group[target].id, position, before };
-		await tick(); await saveMove(node, position);
-		if (!error) announcement = `${node.title} moved to ${target + 1} of ${group.length}`;
-		return null;
+		await tick();
+		const refusal = await saveMove(node, position, true);
+		if (!refusal) announcement = `${node.title} moved to ${target + 1} of ${group.length}`;
+		return refusal;
 	}
 	function scrollWhileDragging() {
 		const scroller = press?.scroll;
@@ -153,16 +153,18 @@ export function createPlanTreeReorder(options: Options) {
 			...menu,
 			onpointerdown(event: PointerEvent) {
 				suppressClick = false;
-				if (event.pointerType !== 'touch') menu.onpointerdown(event);
+				// A touch hold opens the row's menu at LONG_PRESS_MS, as on every row menu;
+				// moving the held finger after that closes it and starts the drag.
+				menu.onpointerdown(event);
 				const movable = options.enabled() && eligible(node) && !moving;
-				const touchMenu = event.pointerType === 'touch' && options.enabled() && hasMenu(node);
-				if (event.button !== 0 || (!movable && !touchMenu)) return;
+				if (event.button !== 0 || !movable) return;
 				const row = event.currentTarget as HTMLElement;
 				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, lastY: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
 				if (event.pointerType === 'touch') press.timer = setTimeout(() => { if (press?.pointerId === event.pointerId && !press.scrolling) press.armed = true; }, LONG_PRESS_MS);
 				(event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 			},
 			onpointermove(event: PointerEvent) {
+				menu.onpointermove(event);
 				const current = press;
 				if (!current || current.pointerId !== event.pointerId) return;
 				const distance = Math.hypot(event.clientX - current.x, event.clientY - current.y);
@@ -183,22 +185,21 @@ export function createPlanTreeReorder(options: Options) {
 				if (!current || current.pointerId !== event.pointerId) return;
 				if (current.timer) clearTimeout(current.timer);
 				press = null; cancelAnimationFrame(scrollFrame);
-				if (event.pointerType === 'touch' && current.armed && !current.scrolling && !drag) { suppressClick = true; options.menu.openFor(node, event.currentTarget as HTMLElement, true); return; }
 				if (!drag) return;
 				const next = draft, count = drag.count, visualPosition = drag.position;
 				drag = null;
 				if (!next || next.id === next.targetId) { draft = null; return; }
-				await tick(); await saveMove(current.node, next.position);
-				if (!error) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
+				await tick();
+				if (!(await saveMove(current.node, next.position, false))) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
 			},
 			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); press = null; drag = null; draft = null; },
 		};
 	}
 	return {
 		get draft() { return draft; }, get drag() { return drag; }, get announcement() { return announcement; },
-		get error() { return error; }, get detail() { return detail; },
+		get error() { return error; },
 		hasMenu, eligible, availability, moveRow, rowHandlers, orderedNodes,
 		consumeClick() { if (!suppressClick) return false; suppressClick = false; return true; },
-		dismissError() { error = null; detail = null; },
+		dismissError() { error = null; },
 	};
 }

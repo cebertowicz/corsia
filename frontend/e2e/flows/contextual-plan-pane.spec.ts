@@ -166,8 +166,6 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       });
       await page.waitForTimeout(510);
       const menu = page.getByRole("menu", { name: `Actions for ${taskTitle}` });
-      await expect(menu).toHaveCount(0);
-      await row.dispatchEvent("pointerup", { pointerType: "touch" });
       await expect(menu).toBeVisible();
       // The menu scales in; judge the targets once the entrance settles.
       for (const item of await menu.getByRole("menuitem").all()) {
@@ -176,6 +174,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
           .toBeGreaterThanOrEqual(44);
       }
       await saveEvidenceScreenshot(page, testInfo, "task-actions-390px", { fullPage: false });
+      await row.dispatchEvent("pointerup", { pointerType: "touch" });
     }
   });
 

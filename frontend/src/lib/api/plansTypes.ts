@@ -153,8 +153,9 @@ export type OperatorNodeAction = OperatorUserAction | 'reorder';
  */
 export type UserActionHandler = (
 	node: OperatorNode,
-	action: OperatorUserAction,
+	action: OperatorNodeAction,
 	reason?: string,
+	orderKey?: number,
 ) => Promise<string | null> | void;
 
 /** A document's comments and suggestions waiting for the person; `system_task` marks the document's own comment task. */

@@ -52,7 +52,6 @@
 		onOpenLegacyDiscussion = () => {},
 		userActionBusy = false,
 		onUserAction,
-		onRefresh = () => {},
 		paneView = null,
 		folded = null,
 	}: PlanTreeProps = $props();
@@ -150,8 +149,8 @@
 	}
 	const reorder = createPlanTreeReorder({
 		nodes: () => nodes, now: () => now.getTime(), openBlocked: () => index.openBlocked,
-		element: () => treeElement, planId: () => planId || folded?.planId || '',
-		enabled: () => !!onUserAction && !userActionBusy, refresh: () => onRefresh(),
+		element: () => treeElement, apply: (node, position) => onUserAction?.(node, 'reorder', undefined, position),
+		enabled: () => !!onUserAction && !userActionBusy,
 		focusRow: (id) => rowControls.focusRow(id), menu: taskMenu,
 	});
 	const { hasMenu, eligible: canMove, availability: moveAvailability, moveRow, rowHandlers } = reorder;
@@ -275,7 +274,7 @@
 		{/if}
 {/snippet}
 
-<PlanReorderFeedback error={reorder.error} detail={reorder.detail} announcement={reorder.announcement} dismiss={reorder.dismissError} />
+<PlanReorderFeedback error={reorder.error} announcement={reorder.announcement} dismiss={reorder.dismissError} />
 <div class="plan-tree" role="list" aria-label="Plan steps" bind:this={treeElement}>
 	<!-- Every item carries an out transition: Svelte 5 destroys a keyed batch only when all its removed items have one, so a bare Scheduled or fold row would keep a closed group's rows on screen. -->
 	{#each items as item (item.key)}

@@ -68,9 +68,8 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 		},
 		close,
 		/** Opens the menu for a row from code (a link that lands on it), below the row as the menu key does. */
-		openFor(item: T, row: HTMLElement, swallowTap = false) {
+		openFor(item: T, row: HTMLElement) {
 			if (!canAct(item)) return;
-			if (swallowTap) swallowEndingTap();
 			const box = row.getBoundingClientRect();
 			show(item, box.left, box.bottom, row);
 		},
