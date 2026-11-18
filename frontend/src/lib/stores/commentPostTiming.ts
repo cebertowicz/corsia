@@ -13,7 +13,8 @@ let posts = 0;
 const running = new Map<string, Running>();
 /** Presses of Comment per draft id, until that draft's comment shows. */
 const attempts = new Map<string, number>();
-/** The last finished post's after-POST parts, until a comment request carries them. */
+/** The last finished post's after-POST parts, until a comment request carrying them gets a successful answer. A post
+ * that finishes later replaces them: the last one wins. */
 let report: string | null = null;
 
 const ms = (value: number) => Math.max(0, Math.round(value));
@@ -75,15 +76,22 @@ export function forgetDraft(clientId: string | undefined): void {
 	if (clientId) attempts.delete(clientId);
 }
 
-/** The header a comment request carries, if any: a POST's own before-POST parts, and the last finished post's report. */
-export function timingHeaders(clientId?: string): Record<string, string> {
+/**
+ * The header a comment request carries, if any: a POST's own before-POST parts, and the last finished post's report.
+ * The report stays pending until `answered` sees this request succeed, so a failed request (a post that failed, then a
+ * close, is the case it matters for) leaves it for the next one. A report that replaced it meanwhile stays.
+ */
+export function timingHeaders(clientId?: string): { headers: Record<string, string>; answered: (response: Response) => void } {
 	const post = clientId ? running.get(clientId) : undefined;
 	const parts = post ? [`n=${post.n}`, `a=${post.a}`] : [];
 	if (post?.cap !== undefined) parts.push(`cap=${post.cap}`);
 	if (post?.ens !== undefined) parts.push(`ens=${post.ens}`);
-	if (report) parts.push(report);
-	report = null;
-	return parts.length ? { [COMMENT_TIMING_HEADER]: parts.join(',') } : {};
+	const carried = report;
+	if (carried) parts.push(carried);
+	return {
+		headers: parts.length ? { [COMMENT_TIMING_HEADER]: parts.join(',') } : {},
+		answered: (response) => { if (response.ok && carried !== null && report === carried) report = null; }
+	};
 }
 
 /** Tests only: a fresh tab. */

@@ -11,6 +11,7 @@ from api.comment_post_timing import COMMENT_TIMING_HEADER, MAX_HEADER_BYTES, par
 from auth_fixtures import OWNER_TOKEN
 from doceditor.live_document import IdentityInUse
 from infra import app_loop
+from infra.otel_logs.capture import CaptureQueue, LogCapture
 from tests.test_document_live_file_tools import opened
 from tests.test_live_comment_creation import invoke, reserve
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
@@ -39,8 +40,11 @@ def test_parse_drops_a_malformed_header_whole(raw):
 
 
 @pytest.mark.asyncio
-async def test_get_and_post_log_a_good_header_and_ignore_a_bad_one(ownership_scope, tmp_path, monkeypatch, caplog):
+async def test_get_and_post_log_a_good_header_and_ignore_a_bad_one(ownership_scope, tmp_path, monkeypatch):
+    """Read from the log capture as production attaches it: a line logged through stdlib at INFO never reaches it."""
     _, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    capture = LogCapture(CaptureQueue())
     app_loop.capture(asyncio.get_running_loop())
     app = FastAPI()
     app.include_router(doc_comments.router)
@@ -49,8 +53,9 @@ async def test_get_and_post_log_a_good_header_and_ignore_a_bad_one(ownership_sco
     reserve(ownership_scope, entry, "timed")
     body = dict(delivery_policy="immediate", body="Timing evidence", anchor_text="b", from_off=2, to_off=3,
                 live_capture=True, client_id="timed")
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        with caplog.at_level(logging.INFO, logger="api.comment_post_timing"):
+    capture.attach()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get(url, params={"token": OWNER_TOKEN}, headers={COMMENT_TIMING_HEADER: GOOD})).status_code == 200
             posted = await client.post(url, params={"token": OWNER_TOKEN}, headers={COMMENT_TIMING_HEADER: "n=4,cap=9"}, json=body)
             assert posted.status_code == 200, posted.text
@@ -58,7 +63,11 @@ async def test_get_and_post_log_a_good_header_and_ignore_a_bad_one(ownership_sco
             assert bad.status_code == 200
             assert (await client.post(url, params={"token": OWNER_TOKEN}, headers={COMMENT_TIMING_HEADER: "x" * 600},
                                       json=body)).status_code == 200
-    lines = [record.getMessage() for record in caplog.records if record.name == "api.comment_post_timing"]
+    finally:
+        capture.detach()
+    records = [r for r in capture.queue.drain(10_000, 1 << 40) if r.body.startswith("comment_post_timing")]
+    assert {(r.severity_text, r.logger) for r in records} == {("INFO", "api.comment_post_timing")}
+    lines = [r.body for r in records]
     assert lines == [
         f"comment_post_timing method=GET artifact={entry.artifact_id} n=3 a=2 cap=41 ens=0 pn=12007 out=timeout",
         f"comment_post_timing method=POST artifact={entry.artifact_id} n=4 cap=9",

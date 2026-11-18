@@ -100,4 +100,41 @@ describe('the timing header', () => {
 		await timedPost('draft-1', () => postTop('artifact', 'draft-1', fields));
 		expect(headerOf(fetch.mock.calls[0])).toMatch(/^n=2,a=2,pn=1,rec=1,out=timeout,total=\d+,post=\d+,recms=\d+$/);
 	});
+
+	it('keeps a failed post\'s report on every comment request until one carrying it is answered successfully', async () => {
+		vi.useRealTimers();
+		await timedPost('draft-1', () => Promise.reject(new Error('refused'))).catch(() => {});
+		const answers = [
+			() => Promise.resolve(new Response('{}', { status: 500 })),
+			() => Promise.reject(new TypeError('Failed to fetch')),
+			() => Promise.resolve(new Response(JSON.stringify({ comments: [], feedback: {} }), { status: 200 })),
+			() => Promise.resolve(new Response(JSON.stringify({ comments: [], feedback: {} }), { status: 200 }))
+		];
+		const fetch = vi.fn(() => answers[fetch.mock.calls.length - 1]());
+		vi.stubGlobal('fetch', fetch);
+		for (let i = 0; i < 4; i++) await fetchComments('artifact').catch(() => {});
+		const headers = fetch.mock.calls.map(headerOf);
+		for (const header of headers.slice(0, 3)) expect(header).toMatch(/^pn=1,rec=0,out=failed,total=\d+$/);
+		expect(headers[3]).toBeNull();
+	});
+
+	it('lets the last finished post win: an earlier request\'s late success does not clear a newer report', async () => {
+		vi.useRealTimers();
+		await timedPost('draft-1', () => Promise.reject(new Error('refused'))).catch(() => {});
+		let answer!: (response: Response) => void;
+		const list = () => new Response(JSON.stringify({ comments: [], feedback: {} }), { status: 200 });
+		const fetch = vi.fn(() => fetch.mock.calls.length === 1 ? new Promise<Response>((resolve) => { answer = resolve; }) : Promise.resolve(list()));
+		vi.stubGlobal('fetch', fetch);
+		const first = fetchComments('artifact');
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+		await timedPost('draft-2', () => Promise.reject(new Error('refused'))).catch(() => {});
+		answer(list());
+		await first;
+		await fetchComments('artifact');
+		await fetchComments('artifact');
+		const headers = fetch.mock.calls.map(headerOf);
+		expect(headers[0]).toMatch(/^pn=1,/);
+		expect(headers[1]).toMatch(/^pn=2,rec=0,out=failed,total=\d+$/);
+		expect(headers[2]).toBeNull();
+	});
 });

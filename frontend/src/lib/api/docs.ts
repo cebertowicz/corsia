@@ -160,8 +160,10 @@ export async function markArtifactVerified(artifactId: string): Promise<Artifact
 
 /** With `within`, the answer and its body come inside that many milliseconds or it fails with `PostTimeoutError`. */
 export async function fetchComments(artifactId: string, within?: number): Promise<CommentList> {
-	const init = { sessionInAddress: true, headers: timingHeaders() };
-	return within ? readWithin(`/api/artifacts/${artifactId}/comments`, init, within, ok) : ok(await apiFetch(`/api/artifacts/${artifactId}/comments`, init));
+	const timing = timingHeaders();
+	const init = { sessionInAddress: true, headers: timing.headers };
+	const read = (response: Response) => { timing.answered(response); return ok(response); };
+	return within ? readWithin(`/api/artifacts/${artifactId}/comments`, init, within, read) : read(await apiFetch(`/api/artifacts/${artifactId}/comments`, init));
 }
 
 export async function postComment(
@@ -169,11 +171,12 @@ export async function postComment(
 	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	// The answer and its body share one deadline: a post never waits on either without end.
+	const timing = timingHeaders(c.client_id);
 	const data = await timed(c.client_id, 'post', () => readWithin(
 		`/api/artifacts/${artifactId}/comments`,
-		{ sessionInAddress: true, method: 'POST', headers: { 'Content-Type': 'application/json', ...timingHeaders(c.client_id) }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
+		{ sessionInAddress: true, method: 'POST', headers: { 'Content-Type': 'application/json', ...timing.headers }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
 		COMMENT_POST_TIMEOUT_MS,
-		(response) => { noteServerTiming(c.client_id, response.headers.get('server-timing')); return ok(response); }
+		(response) => { timing.answered(response); noteServerTiming(c.client_id, response.headers.get('server-timing')); return ok(response); }
 	));
 	return data.comment;
 }

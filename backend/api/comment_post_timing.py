@@ -5,14 +5,16 @@ The parts known before a POST ride on that POST; the parts known after it ride o
 comment request. A header that is too long, names an unknown key, repeats a key or carries a value
 of the wrong shape is dropped whole, so the log line never carries anything the browser was not
 meant to send.
+
+The line goes through loguru: CORSIA's stdlib root handler and its log capture take only WARNING and above,
+so an INFO line logged through stdlib ``logging`` would reach neither.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 
-log = logging.getLogger(__name__)
+from loguru import logger
 
 COMMENT_TIMING_HEADER = "X-Corsia-Comment-Timing"
 MAX_HEADER_BYTES = 512
@@ -48,4 +50,4 @@ def log_comment_timing(raw: str | None, method: str, artifact_id: str) -> None:
         return
     fields = " ".join(f"{key}={value}" for key, value in parsed.items())
     artifact = artifact_id if _ARTIFACT_ID.fullmatch(artifact_id) else "-"
-    log.info("comment_post_timing method=%s artifact=%s %s", method, artifact, fields)
+    logger.info("comment_post_timing method={} artifact={} {}", method, artifact, fields)
