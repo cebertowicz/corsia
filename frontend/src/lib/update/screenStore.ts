@@ -1,5 +1,4 @@
-import { tick } from 'svelte';
-import { returnFocus } from '$lib/focusReturn';
+import { focusComposerAfterUpdate } from './screenFocus';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
@@ -274,9 +273,7 @@ export function resetUpdateScreen(focusComposer = false): void {
 	updateScreenView.set(null);
 	updateConfirmed.set(null);
 	if (!focusComposer || typeof document === 'undefined') return;
-	void Promise.resolve(returnToChat?.()).then(tick).then(() => {
-		returnFocus(document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]'));
-	});
+	focusComposerAfterUpdate(returnToChat);
 }
 
 /** Follow update state while mounted; the static shell shares this clock for its native progress reading. */
