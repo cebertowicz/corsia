@@ -118,6 +118,14 @@ FRAME_TWINS_SCROLLED = """<!doctype html><title>Frame twins scrolled</title><bod
 <div style="height:60px">top</div>
 <iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
 <iframe src="/frame-link.html" style="width:300px;height:20px;border:0;display:block"></iframe>"""
+# The same embed twice: once in the page, and once inside a cross-site wrapper at its corner, as embed wrappers
+# and ad slots nest it. __WRAP__ is the wrapper's address.
+FRAME_NESTED = """<!doctype html><title>Frame nested</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="__WRAP__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+FRAME_WRAP = """<!doctype html><title>Frame wrapper</title><body style="margin:0">
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -160,6 +168,15 @@ def fixture_server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
             body = pages.get(self.path)
+            port = self.server.server_port
+            if self.path in ("/frame-nested-same.html", "/frame-nested-cross.html"):
+                # The wrapper is on another site (localhost); its own frame is on the wrapper's site, in the
+                # wrapper's process, or back on the page's site, in a process of its own.
+                inner = "same" if self.path.endswith("-same.html") else "cross"
+                body = FRAME_NESTED.replace("__WRAP__", f"http://localhost:{port}/frame-wrap-{inner}.html").encode()
+            elif self.path in ("/frame-wrap-same.html", "/frame-wrap-cross.html"):
+                inner = "/frame-link.html" if self.path.endswith("-same.html") else f"http://127.0.0.1:{port}/frame-link.html"
+                body = FRAME_WRAP.replace("__FRAME__", inner).encode()
             if body is None and self.path in frame_pages:
                 # localhost is another site than 127.0.0.1, so Chrome runs that frame in its own process.
                 frame = {"same": "/frame-link.html", "covered": "/frame-covered.html",
@@ -628,6 +645,29 @@ async def test_a_link_below_its_own_frames_fold_is_never_written_in_a_look_alike
             # Refused as ambiguous, or written in the short frame if measuring the box scrolled it into its view.
             assert (refused is not None and refused.reason == "ambiguous" and clicks == [0, 0]) or (
                 refused is None and clicks == [0, 1]), (refused, clicks)
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-nested-same.html", "frame-nested-cross.html"])
+async def test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike(page):
+    """The ref names the nested embed's link; the page's own look-alike embed, laid out alike, is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-nested-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-nested", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            # The snapshot lists the page's embed first and the nested one last.
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks") == 0
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

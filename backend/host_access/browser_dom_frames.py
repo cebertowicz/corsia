@@ -71,8 +71,9 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
     both the frame's own viewport and the page's, and the page must hold still between the box and the hit
     test, as on the page.
 
-    The search stops one level down: a frame nested inside a cross-site frame has its owner in that frame's
-    process, not in this page, so it is never listed here and its elements are still refused.
+    Only the frames whose owner element is in this page are hit. A frame nested inside a cross-site frame has its
+    owner in that frame's process, so its elements are still refused; but it is a document an agent's ref can
+    name, so one holding an element with the box makes a look-alike nearer the page ambiguous.
     """
     for read in range(browser_dom_hit.SETTLE_READS):
         # The first box is the page path's last read; later ones are fresh, after the page moved.
@@ -90,6 +91,9 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
             located, cover = await _hit_in_frame(page, frame, box, placed, targets) if shown else (None, None)
             if located is not None or await _frame_holds(page, frame, box, targets):
                 held.append((located, cover, shown))
+        for cdp, frame_id in await _nested_documents(frames, endpoint, targets):
+            if cdp is None or await _holds(cdp, frame_id, box):
+                held.append((None, None, False))
         page_holds = in_viewport(view, box) and await _holds(page, None, box)
         # A frame may have moved while it was hit, so the answer holds only if its place and the box did not.
         if await read_box(run, selector) == box and [_place(view, frame.viewport, box) for frame in frames] == [
@@ -204,6 +208,44 @@ async def _child_frames(page: CdpClient, endpoint: str) -> list[ChildFrame]:
         if viewport is not None:
             frames.append(ChildFrame(frame_id, owner, viewport, frame_endpoint))
     return frames
+
+
+async def _nested_documents(frames: list[ChildFrame], endpoint: str,
+                            targets: FrameTargets) -> list[tuple[CdpClient | None, str | None]]:
+    """Every document below a cross-site frame, as the target it is read through and the frame to name in it.
+
+    Such a document is in the cross-site frame's own process (in that target's frame tree), or in a target of its
+    own whose owner element is in a frame above it. A frame whose target can't be read is skipped: it already
+    counts as holding the element, so a doubt refuses. One found deeper that can't be read counts the same way.
+    """
+    found: list[tuple[CdpClient | None, str | None]] = []
+    parents = [frame.endpoint for frame in frames if frame.endpoint is not None]
+    if not parents:
+        return found
+    unplaced = {frame_id: frame_endpoint for frame_id, frame_endpoint in
+                (await asyncio.to_thread(frame_targets, endpoint)).items()
+                if frame_id not in {frame.id for frame in frames}}
+    while parents:
+        try:
+            parent = await targets.open(parents.pop())
+            tree = await parent.call("Page.getFrameTree")
+        except BrowserSessionError:
+            continue
+        found += [(parent, frame_id) for frame_id in _descendants(tree.get("frameTree", {}))]
+        for frame_id, frame_endpoint in list(unplaced.items()):
+            try:
+                await parent.call("DOM.getFrameOwner", frameId=frame_id)
+            except BrowserSessionError:
+                # Its owner is elsewhere: deeper still, or in another tab.
+                continue
+            del unplaced[frame_id]
+            try:
+                found.append((await targets.open(frame_endpoint), None))
+            except BrowserSessionError:
+                found.append((None, None))
+                continue
+            parents.append(frame_endpoint)
+    return found
 
 
 async def _owner_viewport(page: CdpClient, owner: int) -> Rect | None:

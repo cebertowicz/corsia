@@ -275,6 +275,46 @@ async def test_a_cross_site_frame_off_screen_that_cannot_be_opened_counts_as_hol
     assert refused.value.reason == "ambiguous" and page.written == []
 
 
+DEEP_URL = "ws://deep.test/devtools/page/deep"
+
+
+def _wrapped(monkeypatch, *, inner_holds, deep_holds=None):
+    """The page's own frame holds the element; a cross-site wrapper below the fold holds a frame of its own.
+
+    The wrapper's frame is in the wrapper's process (``inner``), or, with ``deep_holds``, a target of its own
+    (``deep``) whose owner element is in the wrapper, not in the page.
+    """
+    page = _twin_off_screen(BELOW_THE_FOLD, holds={"child"})
+    page.frame_tree = {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}]}
+    wrapper = Target({}, {}, {"frame": {"id": "twin"}, "childFrames": [{"frame": {"id": "inner"}}]},
+                     owners={"deep": 60}, holds={"inner"} if inner_holds else ())
+    listed = {"twin": FRAME_URL}
+    targets = {PAGE_URL: page, FRAME_URL: wrapper}
+    if deep_holds is not None:
+        listed["deep"] = DEEP_URL
+        targets[DEEP_URL] = Target({}, {}, {"frame": {"id": "deep"}}, holds={"deep"} if deep_holds else ())
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: listed)
+    _connect(monkeypatch, **targets)
+    return page
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("inner_holds", "deep_holds"), [(True, None), (False, True)], ids=["in-wrapper", "own-target"])
+async def test_a_look_alike_nested_in_a_cross_site_frame_makes_the_ref_ambiguous(monkeypatch, inner_holds, deep_holds):
+    """The ref may name the nested embed's link: the page's own frame's look-alike is not assumed to be the one."""
+    page = _wrapped(monkeypatch, inner_holds=inner_holds, deep_holds=deep_holds)
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_frames_nested_in_a_cross_site_frame_that_hold_no_such_element_do_not_stop_the_write(monkeypatch):
+    page = _wrapped(monkeypatch, inner_holds=False, deep_holds=False)
+    assert await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.written == ["field"]
+
+
 @pytest.mark.asyncio
 async def test_an_off_screen_frame_that_alone_holds_the_element_keeps_the_pages_own_refusal(monkeypatch):
     """Nothing on screen holds the element and the off-screen frame can't be hit: refused as before frames were searched."""
