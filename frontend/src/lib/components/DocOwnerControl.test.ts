@@ -92,9 +92,9 @@ describe('DocOwnerControl', () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } }));
 		expect(item('owner').getAttribute('aria-label')).toBe('Owner: You');
 	});
-	it('reads No owner for a released document', async () => {
-		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'No owner' } }));
-		expect(item('owner').textContent).toContain('No owner');
+	it('reads Owner: None for a released document', async () => {
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'None' } }));
+		expect(item('owner').getAttribute('aria-label')).toBe('Owner: None');
 	});
 	it('merges the two when one agent holds both roles, and its picker still reaches the supervisor', async () => {
 		await render(ownership({ supervisor: { id: 'a1', name: 'Release planning', source: 'owner', status: 'ready' } }));

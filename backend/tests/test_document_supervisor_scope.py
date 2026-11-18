@@ -139,7 +139,7 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     try:
         assert person_owner_label("ui", db=db) == "You"
         assert person_owner_label("project:p1", db=db) == "You"
-        assert person_owner_label(None, db=db) == "No owner"
+        assert person_owner_label(None, db=db) == "None"
         assert person_owner_label("agent-1", db=db) == "Document agent"
     finally:
         db.close()
@@ -265,7 +265,7 @@ def test_a_person_can_take_a_released_document(owned_document):
     finally:
         db.close()
     view = _view(artifact_id)
-    assert view["owner"]["label"] == "No owner"
+    assert view["owner"]["label"] == "None"
     assert [choice["id"] for choice in view["choices"]] == ["agent-1"]
     taken = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
     assert taken.status_code == 200, taken.text

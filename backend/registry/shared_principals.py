@@ -255,7 +255,7 @@ def person_owner_label(owner: str | None, *, db, user_id: str | None = None, own
     from infra.auth import is_owner_sentinel
 
     if owner is None:
-        return "No owner"
+        return "None"
     if is_owner_sentinel(owner):
         return str(owner_user_id) if owner_user_id and user_id and owner_user_id != user_id else "You"
     return owner_label(owner, db=db)
