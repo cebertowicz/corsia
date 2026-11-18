@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.skill_workflow_validation import declares_workflow
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.measure_registry import WorkflowOwner, workflow_problem
@@ -22,11 +23,9 @@ def workflow_owners(thread_id: str, project_id: str | None, db: Any) -> dict[str
     resolution = resolve_effective_skills(thread_id=thread_id, project_id=project_id, workspace=config.WORKSPACE, db=db)
     owners: dict[str, WorkflowOwner] = {}
     for skill in resolution.included:
-        data = skill.corsia.get("workflow") if isinstance(skill.corsia, dict) else None
-        if not isinstance(data, dict) or not (
-            isinstance(data.get("steps"), list) or "result" in data or "worker" in data
-        ):
+        if not declares_workflow(skill.corsia):
             continue
+        data = skill.corsia["workflow"]
         name = skill.name
         key = data.get("owner")
         key = str(key) if key not in (None, "") else None

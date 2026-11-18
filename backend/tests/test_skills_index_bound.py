@@ -232,3 +232,48 @@ def test_overflow_names_share_a_root_header_and_an_odd_path_keeps_its_own(monkey
     assert "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md): " in overflow
     assert "odd (/elsewhere/renamed/SKILL.md)" in overflow
     assert "/first/SKILL.md" not in overflow
+
+
+_WORKFLOW = {"workflow": {"steps": [{"id": "draft", "instruction": "## Draft"}]}}
+
+
+def test_a_workflow_keeps_its_description_whatever_its_name_sorts_to(monkeypatch):
+    ordinary = [_row(f"skill-{number:02}", "workspace", "workspace") for number in range(45)]
+    workflow = _row("zz-weekly-report", "workspace", "workspace", "Run the weekly report.", corsia=_WORKFLOW)
+    index = _index(monkeypatch, [*ordinary, workflow])
+    lines = (index.prompt_content or "").splitlines()
+
+    assert "- zz-weekly-report (workflow): Run the weekly report." in lines
+    listed = {skill["name"]: skill for skill in index.metadata["skills"]}
+    assert listed["zz-weekly-report"]["listed"] == "full"
+    assert listed["zz-weekly-report"]["workflow"] is True
+    assert sum(skill["listed"] == "full" for skill in listed.values()) == 40
+    assert listed["skill-39"]["listed"] == "name"
+    assert "workflow" not in listed["skill-00"]
+    header = "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md):"
+    assert lines.count(header) == 1
+
+
+def test_a_worker_workflow_with_no_steps_is_marked_a_workflow(monkeypatch):
+    worker = {"workflow": {"result": {"type": "object"}}}
+    workflow = _row("zz-worker-run", "workspace", "workspace", "Run the worker.", corsia=worker)
+    lines = (_index(monkeypatch, [workflow]).prompt_content or "").splitlines()
+
+    assert "- zz-worker-run (workflow): Run the worker." in lines
+
+
+def test_workflows_past_the_limit_are_marked_in_the_names_only_list(monkeypatch):
+    workflows = [
+        _row(f"flow-{number:02}", "workspace", "workspace", corsia=_WORKFLOW) for number in range(41)
+    ]
+    overflow = (_index(monkeypatch, workflows).prompt_content or "").splitlines()[-1]
+
+    assert overflow.startswith("Also installed, listed by name only")
+    assert overflow.endswith("flow-40 (workflow)")
+
+
+def test_a_workflow_line_is_charged_its_own_tokens(monkeypatch):
+    workflow = _row("weekly", "workspace", "workspace", "Run it.", corsia=_WORKFLOW)
+    inventory = _index(monkeypatch, [workflow]).to_inventory_dict()
+
+    assert inventory["metadata"]["skills"][0]["prompt_tokens"] == line_tokens("- weekly (workflow): Run it.")
