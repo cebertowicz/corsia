@@ -253,5 +253,6 @@ jobs:
           export CORSIA_WORKSPACE CORSIA_STATE_DIR
           export CORSIA_TEST_MODE=1
           cd backend
-          ../.venv/bin/python -m pytest tests/test_host_access_reviewer_live_inference.py \
+          ../.venv/bin/python -m pytest tests/test_managed_connection_boundary_macos.py \
+            tests/test_host_access_reviewer_live_inference.py \
             --tb=short -q
