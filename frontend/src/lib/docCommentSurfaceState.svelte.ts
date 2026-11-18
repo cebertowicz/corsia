@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import { Transaction } from '@codemirror/state';
 import { focusWithoutMoving, returnFocus } from '$lib/focusReturn';
 import { get } from 'svelte/store';
 import { tick, untrack } from 'svelte';
@@ -22,13 +23,14 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
  */
 export function focusDocumentEditor(root: HTMLElement | undefined, touch = false) {
 	const host = root?.querySelector<HTMLElement>('.md-editor');
-	if (touch) { if (host) returnFocus(host); return; }
 	// Look up the outer view first: a cell has its own nested CodeMirror view.
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
 	const view = dom && EditorView.findFromDOM(dom);
-	if (!view) return;
+	if (!view) { if (touch && host) returnFocus(host); return; }
 	const cell = view.state.field(openCellState, false) && view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
 	const cellView = cell && EditorView.findFromDOM(cell);
+	if (!cellView && !view.state.selection.main.empty) view.dispatch({ selection: { anchor: view.state.selection.main.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
+	if (touch) { if (host) returnFocus(host); return; }
 	returnFocus((cellView || view).contentDOM);
 }
 

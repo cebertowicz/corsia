@@ -103,6 +103,20 @@ it('collapses the selected text before returning focus on dismissal', async () =
 	view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
 	expect(view.state.doc.toString()).toBe('alpha bet gamma');
 });
+it.each([['Escape', 'keyboard'], ['outside', 'touch'], ['outside', 'mouse'], ['Close', 'touch'], ['Close', 'mouse']] as const)('collapses to the selection head on %s with %s', async (exit, input) => {
+	phone.store!.set(true);
+	await open(); await select(); await compose();
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	if (exit === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	else {
+		const control = document.querySelector<HTMLElement>(exit === 'outside' ? '.drawer-backdrop' : '[aria-label="Close"]')!;
+		control.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: input }));
+		control.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+	}
+	flushSync();
+	await vi.waitFor(() => expect(view.state.selection.main.empty).toBe(true));
+	expect(view.state.selection.main.head).toBe(10);
+});
 it('keeps an open draft focused when a live session is replaced', async () => {
 	await open(); await select(); await compose();
 	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
@@ -178,9 +192,12 @@ it('keeps the focused draft and explains a changed selection after an agent dele
 	expect(document.activeElement).toBe(input);
 	expect(input.value).toBe('Keep my body');
 });
-it('captures original selection before Comment and submits its reserved range after remote prefix', async () => {
+it.each([false, true])('captures and collapses the selection after Post (touch=%s)', async (touch) => {
+	phone.store!.set(touch);
 	await open(); await select(); remote(text => text.insert(0, 'NEW ')); await compose();
-	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: touch ? 'touch' : 'mouse' }));
+	submit.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
 	await answer(ask, { request_id: 'unrelated' });
@@ -193,6 +210,8 @@ it('captures original selection before Comment and submits its reserved range af
 		body: 'Keep my body', live_capture: true });
 	expect(released()).toEqual([]);
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	await vi.waitFor(() => expect(view.state.selection.main.empty).toBe(true));
 });
 it('retains body across outside-close/reselection, rejects deleted identity and Cancel discards', async () => {
 	phone.store!.set(true);
