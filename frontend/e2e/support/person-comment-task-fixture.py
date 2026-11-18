@@ -143,6 +143,12 @@ try:
             'carried_comments': carried, 'comments_before': left,
             'comment_task': task_id, 'comment_task_plan_owner': task_plan_owner,
         }))
+    elif mode == 'file-gone':
+        # The document's file is deleted: its identity is retired, as when the file leaves the disk.
+        from registry import models
+
+        models.retire(artifact_id, tombstone=True, cause='file_gone', db=db)
+        print('FIXTURE_RESULT=' + json.dumps({'state': db.execute('SELECT state FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0]}))
     elif mode == 'agent-root':
         # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
         # them only through the agent's open ask on that document.

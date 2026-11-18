@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import Popover, { ANCHOR_MOVED } from './Popover.svelte';
 
 let host: HTMLElement;
@@ -126,6 +126,49 @@ describe('Popover', () => {
 		const { onClose } = render();
 		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+	describe('a press on the card\'s own text', () => {
+		/** What a browser does with a press: focus moves to the nearest focusable element holding the target, else off any element. */
+		function press(target: Element) {
+			target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			const focusable = target.closest<HTMLElement>('button, input, textarea, select, a[href], [tabindex]');
+			if (focusable) focusable.focus(); else (document.activeElement as HTMLElement | null)?.blur();
+		}
+		const card = createRawSnippet(() => ({ render: () => '<div><p class="card-text">Agreed, ship it.</p><textarea aria-label="Reply"></textarea></div>' }));
+		let closeDocument: Mock<() => void>;
+		const documentEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) closeDocument(); };
+		beforeEach(() => { closeDocument = vi.fn(); window.addEventListener('keydown', documentEscape); });
+		afterEach(() => window.removeEventListener('keydown', documentEscape));
+		const open = async () => {
+			host = document.createElement('div'); document.body.appendChild(host);
+			const onClose = vi.fn();
+			component = mount(Popover, { target: host, props: { anchor: anchor(), open: true, onClose, takeFocus: false, children: card } });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe(''));
+			return { surface, onClose };
+		};
+		it('puts the focus on the card, so Escape closes the card and not the page beneath it', async () => {
+			const { surface, onClose } = await open();
+			press(surface.querySelector('.card-text')!);
+			expect(document.activeElement).toBe(surface);
+			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).toHaveBeenCalledOnce();
+			expect(closeDocument).not.toHaveBeenCalled();
+		});
+		it('moves the focus from a reply field to the card, as a press on text blurs a field, and Escape still closes only the card', async () => {
+			const { surface, onClose } = await open();
+			surface.querySelector<HTMLTextAreaElement>('textarea')!.focus();
+			press(surface.querySelector('.card-text')!);
+			expect(document.activeElement).toBe(surface);
+			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).toHaveBeenCalledOnce();
+			expect(closeDocument).not.toHaveBeenCalled();
+		});
+		it('shows no focus ring on the card itself', () => {
+			const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Popover.svelte'), 'utf8');
+			expect(source).toMatch(/\.popover:focus \{ outline: none; \}/);
+		});
 	});
 	it('repositions on resize and closes when the anchor leaves the viewport', async () => {
 		const { onClose } = render({ anchor: anchor(-50, -50) });
