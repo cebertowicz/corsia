@@ -41,7 +41,7 @@ async def test_live_deleted_document_refuses_decision(ownership_scope, tmp_path,
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
             response = await client.post(f'/api/comments/{row["id"]}/decision', params={'token': 'test'}, json={'decision': 'accept'})
         assert response.status_code == 404, response.text
-        assert response.json()['detail'] == 'This file no longer exists.'
+        assert response.json()['detail'] == "This file no longer exists, so the suggestion wasn't applied. Restore the file and try again."
         assert not path.exists()
         assert comments.get_comment(row['id'], db=scope['db'])['decision'] is None
         if timing == 'publication':

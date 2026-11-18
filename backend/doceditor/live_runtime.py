@@ -299,26 +299,32 @@ class LiveDocuments:
             owner.closing = None
 
     async def evict(self, artifact_id: str, entry: LiveEntry, *, can_evict: Callable[[], bool],
-                    before_close: Callable[[], Awaitable] | None = None) -> None:
-        """The path owner completes cleanup even when its last viewer is cancelled."""
+                    before_close: Callable[[], Awaitable] | None = None, retain_busy: bool = False) -> bool:
+        """Complete one cleanup attempt; return true when a busy flush needs another attempt."""
         owner = entry.lifetime or self._lifetime(entry.live.path)
         if owner.closing is None or owner.closing.done():
-            owner.closing = asyncio.create_task(self._retire(owner, artifact_id, entry, can_evict, before_close))
-        await asyncio.shield(owner.closing)
+            owner.closing = asyncio.create_task(self._retire(owner, artifact_id, entry, can_evict, before_close, retain_busy))
+        return await asyncio.shield(owner.closing)
 
     async def _retire(self, owner: DocumentLifetime, artifact_id: str, entry: LiveEntry,
-                      can_evict, before_close) -> None:
+                      can_evict, before_close, retain_busy) -> bool:
         async with owner.lock, entry.live.comment_mutex:
             if self.documents.get(artifact_id) is not entry or not can_evict():
-                return
+                return False
+            busy = False
             try:
                 if before_close is not None:
                     await before_close()
             except Exception as error:
-                log.error("Document close left uncommitted updates unacknowledged for client resend: %s", error)
+                busy = isinstance(error, StoreRefused) and getattr(error, "code", None) == "history_lock_busy"
+                if busy and not retain_busy:
+                    log.warning("Final document flush remained busy for artifact %s; edits remain in the live store", artifact_id)
+                elif not busy:
+                    log.error("Document close left uncommitted updates unacknowledged for client resend: %s", error)
             finally:
-                if can_evict():
+                if not (busy and retain_busy) and can_evict():
                     await self.release(artifact_id, entry)
+            return busy and retain_busy
 
     async def release(self, artifact_id: str, entry: LiveEntry) -> None:
         """Close one entry's lane, squash its journal and drop it; the caller holds its path's lock."""

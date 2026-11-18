@@ -20,7 +20,7 @@ from doceditor.live_text import utf16_length
 from infra.db_async import run_in_db
 from infra.state import send_to_client
 from ws import document_email, section_turn
-from ws.document_close_flush import flush_last_viewer
+from ws.document_close_flush import CLOSE_LOCK_WAIT_SECONDS, flush_last_viewer
 from ws.document_failures import failure_state
 from ws.document_send import closed_socket_error, observe_send
 
@@ -364,11 +364,13 @@ async def _leave(socket, artifact_id: str) -> None:
             await asyncio.shield(task)
         await subscription.entry.live.commit_received()
         if subscription.writable:
-            await flush_last_viewer(subscription, artifact_id)
+            result = await subscription.entry.lane.submit(Operation(
+                "flush", actor=subscription.actor, history_lock_wait=CLOSE_LOCK_WAIT_SECONDS))
+            result.require_landed()
     manager = get_documents()
     if manager is not None:
-        await manager.evict(artifact_id, subscription.entry, before_close=flush,
-                            can_evict=lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
+        await flush_last_viewer(manager, subscription, artifact_id, flush,
+                                lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
 
 
 async def disconnect(socket) -> None:

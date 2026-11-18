@@ -42,9 +42,11 @@ it('retries a busy flush once without showing an error when it succeeds', async 
 it('shows busy after two automatic attempts fail and keeps retrying with backoff', async () => {
 	setup(); await vi.advanceTimersByTimeAsync(700); busy(); await vi.advanceTimersByTimeAsync(1000); busy();
 	await vi.advanceTimersByTimeAsync(0);
-	expect(session.failureLines).toContain('Not saved to the file: The document is busy. Try saving again.');
+	expect(session.failureLines).toContain('Not saved to the file: This document is busy. Your changes are still here; trying again.');
+	expect(session.failureLines.join(' ')).not.toContain('Try saving again.');
 	await vi.advanceTimersByTimeAsync(2000); busy(); await vi.advanceTimersByTimeAsync(0);
 	expect(calls.toast).toHaveBeenCalledTimes(1);
+	expect(calls.toast).toHaveBeenCalledWith('This document is busy. Your changes are still here; trying again.', 'error');
 	await vi.advanceTimersByTimeAsync(4000); expect(flushes()).toHaveLength(4); busy();
 	await vi.advanceTimersByTimeAsync(0); expect(existingDraft(target)?.status).toBe('error');
 	await vi.advanceTimersByTimeAsync(8000); expect(flushes()).toHaveLength(5); await saved();
@@ -63,8 +65,9 @@ it('shows the busy reason immediately when a close attempt fails, and keeps retr
 	const closing = closeTabWithSaveGate(target, { onClose, onBringIntoView });
 	busy(); expect(await closing).toEqual({ closed: false });
 	expect(onBringIntoView).toHaveBeenCalledOnce(); expect(onClose).not.toHaveBeenCalled();
-	expect(session.failureLines).toContain('Not saved to the file: The document is busy. Try saving again.');
-	expect(existingDraft(target)).toMatchObject({ status: 'error', error: 'The document is busy. Try saving again.' });
+	expect(session.failureLines).toContain('Not saved to the file: This document is busy. Your changes are still here; trying again.');
+	expect(session.failureLines.join(' ')).not.toContain('Try saving again.');
+	expect(existingDraft(target)).toMatchObject({ status: 'error', error: 'This document is busy. Your changes are still here; trying again.' });
 	await vi.advanceTimersByTimeAsync(1000); expect(flushes()).toHaveLength(2); await saved();
 	expect(session.failureLines).toEqual([]); expect(existingDraft(target)?.status).toBe('saved');
 	expect(onClose).not.toHaveBeenCalled();

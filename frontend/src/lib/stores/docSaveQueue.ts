@@ -26,6 +26,7 @@ export interface DocSaveDraft {
 type TargetIdentity = Pick<DocViewerTarget, 'instanceId'>;
 
 const SAVE_DEBOUNCE_MS = 700;
+const BUSY_RETRY_MESSAGE = 'This document is busy. Your changes are still here; trying again.';
 
 /**
  * The owning tab instance — never a global per-user or per-artifact key.
@@ -49,8 +50,8 @@ const reconnectWaits = new Map<string, () => void>();
 const confirmationsOwed = new Map<string, true>();
 const busyRetries = createBusyRetries({
 	run: key => { void runSave(key); },
-	show: (_key, live, error) => { live.showBusy(error.message); toasts.show(saveErrorMessage(error), 'error'); },
-	failed: (key, error, visible) => patchDraft(key, visible ? { status: 'error', error: error.message } : { status: 'dirty' }),
+	show: (_key, live) => { live.showBusy(BUSY_RETRY_MESSAGE); toasts.show(BUSY_RETRY_MESSAGE, 'error'); },
+	failed: (key, _error, visible) => patchDraft(key, visible ? { status: 'error', error: BUSY_RETRY_MESSAGE } : { status: 'dirty' }),
 });
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;

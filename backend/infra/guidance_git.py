@@ -124,7 +124,7 @@ def git_dir(repo: Path) -> Path:
     return known
 
 
-def _acquire(repo: Path, directory: Path | None = None) -> tuple[int, float]:
+def _acquire(repo: Path, directory: Path | None = None, *, wait_seconds: float | None = None) -> tuple[int, float]:
     try:
         handle = os.open((directory or git_dir(repo)) / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
     except OSError as exc:
@@ -135,7 +135,7 @@ def _acquire(repo: Path, directory: Path | None = None) -> tuple[int, float]:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return handle, (time.monotonic() - started) * 1000
         except BlockingIOError:
-            if time.monotonic() - started >= _LOCK_WAIT_SECONDS:
+            if time.monotonic() - started >= (_LOCK_WAIT_SECONDS if wait_seconds is None else wait_seconds):
                 os.close(handle)
                 raise _LockBusy("the guidance lock stayed busy") from None
             time.sleep(0.02)
@@ -278,7 +278,7 @@ def save_with_history(
     lesson_gate: bool = True,
     lesson_observation_thread_id: str | None = None,
     accepted_suggestions: tuple[str, ...] = (),
-    require_history_lock: bool = False,
+    require_history_lock: bool = False, lock_wait_seconds: float | None = None,
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one history commit; ``accepted_suggestions`` marks
     a version that applies those accepted suggestions, and nothing else can.
@@ -309,7 +309,7 @@ def save_with_history(
     done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
     subject = f"{target.kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = unforgeable(message) if message else commit_message(subject, target.scope, reason, evidence, accepted_suggestions)
-    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing, require_history_lock)
+    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing, require_history_lock, lock_wait_seconds)
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
         lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
@@ -319,7 +319,7 @@ def save_with_history(
 def _save(
     writes: dict[Path, bytes | None], workspace: Path, target: HistoryTarget, author: str, message: str, done: str,
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
-    write: Callable[[Path, bytes], object], timing: dict[str, float], require_history_lock: bool,
+    write: Callable[[Path, bytes], object], timing: dict[str, float], require_history_lock: bool, lock_wait_seconds: float | None,
 ) -> SaveResult:
     from infra.history_record import Version, put_back, record, write_checked
 
@@ -349,7 +349,7 @@ def _save(
     except (GitFault, ValueError) as exc:
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
     try:
-        handle, timing["lock_wait_ms"] = _acquire(repo, directory)
+        handle, timing["lock_wait_ms"] = _acquire(repo, directory, wait_seconds=lock_wait_seconds)
     except (_LockBusy, GitFault, ValueError) as exc:
         if require_history_lock and expected and any(value is not None for value in expected.values()):
             return conditional_lock_refusal(exc)

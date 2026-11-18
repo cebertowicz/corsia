@@ -229,16 +229,19 @@ def _person_writer(user: dict, saved: dict):
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
         _suggestion_author: str | None, accepted: tuple[str, ...],
     ) -> dict:
-        try:
-            receipt = await save_document_text(
-                DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-                expected_sha256=expected_sha256, accepted=accepted,
-            )
-        except DocumentSaveError as exc:
-            raise document_save_http_exception(exc) from exc
+        receipt = await save_document_text(
+            DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
+            expected_sha256=expected_sha256, accepted=accepted,
+        )
         saved.update(text=text, revision=receipt["revision"])
         return receipt
     return write
+
+
+def _decision_save_error(exc: DocumentSaveError) -> HTTPException:
+    if exc.kind == "no_such_file":
+        return HTTPException(404, "This file no longer exists, so the suggestion wasn't applied. Restore the file and try again.")
+    return document_save_http_exception(exc)
 
 
 @router.post("/artifacts/{artifact_id}/suggestions/accept-all")
@@ -255,7 +258,7 @@ async def accept_all_suggestions(artifact_id: str, token: str):
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
-        raise document_save_http_exception(exc) from exc
+        raise _decision_save_error(exc) from exc
     return {**result, **saved}
 
 
@@ -277,7 +280,7 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
-        raise document_save_http_exception(exc) from exc
+        raise _decision_save_error(exc) from exc
     if body.all_from_author:
         return {**row, **saved}
     receipt = row.pop("_live_receipt", None)
