@@ -159,7 +159,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         quote="A unique tail sentence",
         replacement="A new tail sentence",
     )
-    original_read = comment_batch_actions.read_doc_text
+    original_read = comment_batch_actions.read_suggestion_text
     concurrent_text = doc.read_text() + "\nConcurrent edit.\n"
     read_threads: list[int] = []
 
@@ -169,7 +169,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         doc.write_text(concurrent_text)
         return snapshot
 
-    monkeypatch.setattr(comment_batch_actions, "read_doc_text", read_then_change)
+    monkeypatch.setattr(comment_batch_actions, "read_suggestion_text", read_then_change)
     status, result = await _decide(
         adapter,
         integration_client,

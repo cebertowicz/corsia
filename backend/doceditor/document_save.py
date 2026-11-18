@@ -128,6 +128,12 @@ def _guided_write(
             raise DocumentSaveError("lesson-outside-placement", saved.line, {"errors": list(saved.errors), "line": saved.line})
         raise _invalid_skill_save_error(saved.errors, saved.line)
     if saved.outcome == "stale":
+        from registry.durable_write_preconditions import check_expected_content
+
+        try:
+            check_expected_content(path, expected_sha256)
+        except FileChangedOutside:
+            pass
         raise DocumentSaveError("stale", STALE_MESSAGE)
     if history_required and saved.outcome not in {"written", "unchanged"}:
         kind = "history_off" if saved.outcome in {"history-off", "ordinary"} else "save_failed"
@@ -219,16 +225,18 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
     rename, in this same synchronous call, and a changed file is never replaced.
     """
     from tools.filesystem_effects import (
-        bound_file_mode, replace_bound_file, stage_bound_bytes, unlink_bound_file,
+        replace_bound_file, stage_bound_bytes, unlink_bound_file,
     )
 
     leaf = f".corsia-live-{path.name}.stage"
     stage = path.with_name(leaf)
     unlink_bound_file(stage, missing_ok=True)
     try:
-        stage_bound_bytes(path, text.encode("utf-8"), leaf=leaf, mode=bound_file_mode(path))
-        if prior_sha256 is not None and hashlib.sha256(path.read_bytes()).hexdigest() != prior_sha256:
-            raise FileChangedOutside()
+        from registry.durable_write_preconditions import check_expected_content, checked_file_mode
+
+        mode = checked_file_mode(path, prior_sha256)
+        stage_bound_bytes(path, text.encode("utf-8"), leaf=leaf, mode=mode)
+        check_expected_content(path, prior_sha256)
         replace_bound_file(stage, path)
     finally:
         unlink_bound_file(stage, missing_ok=True)
@@ -241,9 +249,12 @@ def _write_document(
     """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
     owner report is left there for the caller to run once it holds no lock."""
     if expected_sha256 is not None:
-        current_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
-        if current_sha256 != expected_sha256:
-            raise DocumentSaveError("stale", STALE_MESSAGE)
+        from registry.durable_write_preconditions import check_expected_content
+
+        try:
+            check_expected_content(resolved, expected_sha256)
+        except FileChangedOutside as exc:
+            raise DocumentSaveError("stale", STALE_MESSAGE) from exc
     try:
         decision = write_text(
             resolved,

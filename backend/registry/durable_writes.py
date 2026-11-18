@@ -17,7 +17,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_preconditions import check_expected_content
+from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode
 from registry.durable_write_recovery import recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
@@ -29,7 +29,6 @@ from registry.promotion_source import promotion_source
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
 from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
-    bound_file_mode,
     claim_bound_file,
     copy_bound_file,
     replace_bound_file,
@@ -370,7 +369,7 @@ def _complete_publication(
 def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha256: str | None) -> None:
     check_expected_content(target, expected_sha256)
     if backup is not None:
-        copy_bound_file(target, backup)
+        checked_copy_target(target, backup, expected_sha256)
     check_expected_content(target, expected_sha256)
     if backup is not None:
         replace_bound_file(stage, target)
@@ -437,7 +436,7 @@ def _publish_bytes(
             intents.record_source_hash(db, intent_id, content_hash)
         else:
             assert content is not None
-            target_mode = bound_file_mode(shared.path) if backup is not None else 0o600
+            target_mode = checked_file_mode(shared.path, expected_sha256) if backup is not None else 0o600
             stage_bound_bytes(
                 shared.path,
                 content,

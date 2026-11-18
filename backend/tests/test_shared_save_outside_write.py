@@ -38,8 +38,9 @@ async def test_outside_edit_between_hash_check_and_publication_survives(durable_
     expected = hashlib.sha256(b'original').hexdigest()
     with pytest.raises(DocumentSaveError) as exc:
         await save_document_text(body, user_id, expected_sha256=expected)
-    assert exc.value.kind == 'stale'
+    assert exc.value.kind == ('no_such_file' if outside_content is None else 'stale')
     if outside_content is None:
+        assert exc.value.message.startswith('No such file: ')
         assert not target.exists()
     else:
         assert target.read_text(encoding='utf-8') == outside_content

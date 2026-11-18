@@ -26,8 +26,9 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
     Text whose bytes equal the file's is not written: a flush with nothing new (the last viewer
     leaving) renames nothing and records no version. The lane still records and publishes it."""
     if hashlib.sha256(text.encode("utf-8")).hexdigest() == prior_sha256:
-        if hashlib.sha256(path.read_bytes()).hexdigest() != prior_sha256:
-            raise FileChangedOutside()
+        from registry.durable_write_preconditions import check_expected_content
+
+        check_expected_content(path, prior_sha256)
         return
     target = history_target(path, Path(config.WORKSPACE))
     if target is None or not target.document:
@@ -42,6 +43,9 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         write=lambda _path, data: document_save.write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
     )
     if saved.outcome == "stale":
+        from registry.durable_write_preconditions import check_expected_content
+
+        check_expected_content(path, prior_sha256)
         raise FileChangedOutside()
     if saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")

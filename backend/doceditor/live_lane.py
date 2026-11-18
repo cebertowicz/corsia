@@ -212,7 +212,12 @@ class DocumentLane:
 
     async def _import(self) -> str:
         live = self.live
-        data = await asyncio.to_thread(live.path.read_bytes)
+        try:
+            data = await asyncio.to_thread(live.path.read_bytes)
+        except FileNotFoundError as exc:
+            from doceditor.document_save_errors import DocumentSaveError
+
+            raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
         current_hash = file_hash(data)
         mirror = await asyncio.to_thread(live.store.mirror)
         if current_hash != mirror.file_hash:
