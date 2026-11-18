@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside
+from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside, MISSING_DOCUMENT_MESSAGE
 from registry.identity_metadata import sha256_file
 
 
@@ -13,7 +13,7 @@ def check_expected_content(path: Path, expected_sha256: str | None) -> None:
     try:
         actual = sha256_file(path)
     except FileNotFoundError as exc:
-        raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
+        raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
     except IsADirectoryError:
         raise FileChangedOutside() from None
     if actual != expected_sha256:

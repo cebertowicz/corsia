@@ -55,7 +55,7 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
 
         check_expected_content(path, prior_sha256)
         raise FileChangedOutside()
-    if saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
+    if saved.reason == "history-lock-failed" or saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
     if saved.line:
         _log.warning("live document %s saved without its version: %s", path, saved.line)

@@ -2,6 +2,8 @@
 
 from typing import Any
 
+MISSING_DOCUMENT_MESSAGE = "The document no longer exists. Reopen or choose another file."
+
 
 class DocumentSaveError(ValueError):
     """A domain refusal mapped by each transport adapter."""

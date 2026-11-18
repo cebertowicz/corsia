@@ -52,6 +52,7 @@ async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=No
     actor = WriteActor(actor_thread_id or UI_THREAD, project_id, direct_user=actor_thread_id is None, user_id=user_id,
                        suggestion_accept=suggestion_accept)
     from doceditor.document_save import DocumentSaveError
+    from doceditor.document_save_errors import MISSING_DOCUMENT_MESSAGE
     from doceditor.live_lane import LaneRefused
     from doceditor.live_store import StoreRefused
     from registry.shared_write_errors import DurableWritePolicyError
@@ -62,7 +63,7 @@ async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=No
     except FileNotFoundError as exc:
         if exc.filename != str(live.path):
             raise
-        raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
+        raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
     except (LaneRefused, StoreRefused) as exc:
         raise CommentActionError("save_refused", str(exc)) from exc
     except DurableWritePolicyError as exc:

@@ -38,12 +38,12 @@ def read_suggestion_text(path: str | None) -> str:
     try:
         return read_doc_text(path)
     except FileNotFoundError as exc:
-        from doceditor.document_save_errors import DocumentSaveError
+        from doceditor.document_save_errors import DocumentSaveError, MISSING_DOCUMENT_MESSAGE
 
-        raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
+        raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
     except ValueError as exc:
         if path and not Path(path).exists():
-            from doceditor.document_save_errors import DocumentSaveError
+            from doceditor.document_save_errors import DocumentSaveError, MISSING_DOCUMENT_MESSAGE
 
-            raise DocumentSaveError("no_such_file", f"No such file: {path}") from exc
+            raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
         raise
