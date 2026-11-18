@@ -72,6 +72,25 @@ def listen_host(resolved: str) -> str:
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
 
 
+def managed_bind_host() -> str:
+    """Read the native managed listener choice, defaulting to a private listener."""
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    try:
+        raw = json.loads(managed_omlx_paths().settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "127.0.0.1"
+    server = raw.get("server") if isinstance(raw, dict) else None
+    host = server.get("host") if isinstance(server, dict) else None
+    return host if isinstance(host, str) and host.strip() else "127.0.0.1"
+
+
+def client_host(bind: str) -> str:
+    """Choose a concrete target from the native comma-separated listener list."""
+    host = next((part.strip() for part in bind.split(",") if part.strip()), bind)
+    return {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+
+
 def _ssd_cache_folder(settings_path: Path, default: Path) -> str | None:
     """The SSD cache folder oMLX's own settings name, ``default`` when they name none, None when off.
 

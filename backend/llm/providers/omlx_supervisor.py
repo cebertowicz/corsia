@@ -19,25 +19,17 @@ from llm.omlx_release import OMLX_VERSION
 from llm.providers import omlx_process as process
 from llm.providers import omlx_restart as restart
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
+from llm.providers.omlx_supervisor_endpoints import mark_endpoint_alive as _mark_endpoint_alive
 from llm.providers.omlx_supervisor_config import (
+    client_host as _client_host,
     listen_host as _listen_host,
+    managed_bind_host as _managed_bind_host,
     managed_launch_settings as _managed_launch_settings,
     resolve_endpoint as _resolve_endpoint,
     resolve_settings as _resolve_settings,
 )
 
 log = logging.getLogger("llm.providers.omlx.supervisor")
-
-
-def _mark_endpoint_alive(server_id: str, host: str, port: int) -> None:
-    """Refresh endpoint freshness after supervisor-owned health succeeds."""
-    try:
-        from llm.network_endpoints import upsert_endpoint
-        from llm.network_discovery import update_server_status
-        upsert_endpoint(server_id, host, ok=True, latency_ms=0)
-        update_server_status(server_id, status="online", latency_ms=0)
-    except Exception as e:
-        log.warning("_mark_endpoint_alive failed for %s: %s", server_id, e)
 
 # Managed first spawn pays Gatekeeper and cold Metal startup; other servers keep the caller's timeout.
 MANAGED_HEALTH_STARTUP_CAP_S = 600.0
@@ -213,6 +205,7 @@ def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from 
 
 async def _confirm_ready(
     sid: str, host: str, port: int, pid: int, *, timeout_s: float | None = None, require_preload: bool = False,
+    managed: bool = False,
 ) -> dict[str, Any] | None:
     """Complete startup or adoption through the same readiness and watch owner."""
     try:
@@ -225,7 +218,7 @@ async def _confirm_ready(
                 if require_preload and health == "timed_out":
                     await restart.require_stopped(lambda: _stop_server({"server_id": sid, "host": host, "port": port}))
                 return _failed_boot_result(sid, host, port, pid, reason=health, timeout_s=timeout_s)
-        await run_in_db(_mark_endpoint_alive, sid, host, port)
+        await run_in_db(_mark_endpoint_alive, sid, host, port, managed)
         watch(sid, pid)
         return None
     except asyncio.CancelledError:
@@ -257,7 +250,8 @@ async def _start_server(cfg: dict, sid: str, *, require_preload: bool) -> dict[s
     host, port = await run_in_db(_resolve_endpoint, cfg)
     if not host or not port:
         return {"ok": False, "message": "start_server: cfg has no host/port"}
-    host = _listen_host(host)
+    managed = await run_in_db(_is_managed_omlx_server, sid)
+    host = _client_host(host) if managed else _listen_host(host)
 
     existing_pid = _read_pid(sid, host=host, port=int(port))
     if existing_pid and _process_alive(existing_pid):
@@ -266,6 +260,7 @@ async def _start_server(cfg: dict, sid: str, *, require_preload: bool) -> dict[s
             failure = await _confirm_ready(
                 sid, host, int(port), existing_pid,
                 timeout_s=MANAGED_HEALTH_STARTUP_CAP_S if require_preload else None, require_preload=require_preload,
+                managed=managed,
             )
             if failure is not None:
                 return failure
@@ -278,6 +273,8 @@ async def _start_server(cfg: dict, sid: str, *, require_preload: bool) -> dict[s
         return {"ok": False, "pid": existing_pid,
                 "message": "The local model isn't responding. Stop it in Settings › Providers, then retry."}
 
+    bind_host = _managed_bind_host() if managed else host
+    host = _client_host(bind_host) if managed else host
     owner = _port_owner_pid(host, port)
     if isinstance(owner, int) and (existing_pid is None or owner != existing_pid):
         return {
@@ -289,10 +286,9 @@ async def _start_server(cfg: dict, sid: str, *, require_preload: bool) -> dict[s
         }
 
     settings = await run_in_db(_resolve_settings, cfg)
-    managed = await run_in_db(_is_managed_omlx_server, sid)
     if managed:
         settings = _managed_launch_settings(settings)
-    argv = process.managed_omlx_argv(host, int(port), settings, managed=managed)
+    argv = process.managed_omlx_argv(bind_host, int(port), settings, managed=managed)
     if isinstance(argv, dict):
         return argv
 
@@ -309,6 +305,7 @@ async def _start_server(cfg: dict, sid: str, *, require_preload: bool) -> dict[s
     timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else DEFAULT_HEALTH_TIMEOUT_S
     failure = await _confirm_ready(
         sid, host, int(port), proc.pid, timeout_s=timeout_s, require_preload=bool(managed and require_preload),
+        managed=managed,
     )
     if failure is not None:
         return failure
@@ -334,7 +331,8 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
 async def _stop_server(cfg: dict) -> dict[str, Any]:
     sid = cfg["server_id"]
     host, port = await run_in_db(_resolve_endpoint, cfg)
-    host = _listen_host(host) if host else None
+    managed = await run_in_db(_is_managed_omlx_server, sid)
+    host = (_client_host(host) if managed else _listen_host(host)) if host else None
     had_record = _pid_path(sid).exists()
     pid = _read_pid(sid, host=host, port=int(port) if port else None)
     if not pid:
@@ -394,7 +392,8 @@ def reconcile(cfg: dict) -> dict[str, Any]:
         return {"adopted": False, "cleared": had_record, "pid": None}
     if _process_alive(pid):
         if host and port:
-            _mark_endpoint_alive(sid, host, int(port))
+            managed = _is_managed_omlx_server(sid)
+            _mark_endpoint_alive(sid, _client_host(host) if managed else host, int(port), managed)
         return {"adopted": True, "cleared": False, "pid": pid}
     _clear_pid(sid)
     return {"adopted": False, "cleared": True, "pid": pid}
