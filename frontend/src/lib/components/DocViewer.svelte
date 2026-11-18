@@ -127,6 +127,8 @@
 	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
 	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
+	// The text shows the hovered thread's mark focused; its card only wears the focused ring (`ringId`). The pick alone opens,
+	// places and reads a card, so a passing pointer neither holds a New mark nor moves the margin nor takes the writer turn.
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	// The list over the text, as the sheet or (below the margin width) the popover: the selection's Comment button waits for it to close.
 	const listOverText = $derived(commentUI.sheetUp || (commentUI.state?.kind === 'list' && commentSurface?.cardMode() === 'popover'));
@@ -355,7 +357,8 @@
 		quiet={commentUI.quiet}
 		comments={listedComments}
 		widgetLabel={{ read: (from, to, quote) => editorSurface?.widgetLabel(from, to, quote), stamp: () => editorSurface?.widgetLabelStamp() }}
-		focusedId={shownFocus}
+		focusedId={focusedComment}
+		ringId={commentUI.hovered}
 		draft={draftController.draft}
 		draftReason={draftController.reason}
 		onDraftBody={(body) => setCommentBody(body, targetKey)}

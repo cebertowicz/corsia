@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatPickKey, pickedComments } from '$lib/stores/docComments';
+import { messages } from '$lib/stores/threads';
 
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 const openAtNewest = vi.hoisted(() => vi.fn());
@@ -115,4 +116,32 @@ it('reads an answer that arrived while its margin card stayed picked at the next
 	expect(fetcher.mock.calls[0][0]).toContain('/messages/second/comments/two/viewed');
 	expect(get(pickedComments).size).toBe(0);
 	delete (document as unknown as Record<string, unknown>).visibilityState;
+});
+
+it('reads an answer that arrived while a popover thread was open when it closes, even once its opener has let go of the message', async () => {
+	const fetcher = vi.fn().mockResolvedValue({ ok: true });
+	vi.stubGlobal('fetch', fetcher);
+	host = document.createElement('div'); document.body.appendChild(host);
+	const base = { from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', id: 'root', cid: 'root', user_message_id: 'first', quote: 'quote', note: 'note', created_at: '2026-10-27T00:00:00Z' };
+	const read = { author_kind: 'agent' as const, user_message_id: 'first', cid: 'root', assistant_message_id: 'a1', text: 'first answer', created_at: '2026-10-27T00:01:00Z', unread: false };
+	const arrived = { ...read, assistant_message_id: 'a2', text: 'second answer', created_at: '2026-10-27T00:02:00Z', unread: true };
+	const row = (answers: Array<typeof read>) => [{ id: 'target', thread_id: 'thread', role: 'assistant', content: 'x', chat_comments: [{ ...base, answers }] }] as never;
+	const answersInStore = () => (get(messages) as unknown as Array<{ chat_comments: Array<{ answers: Array<{ unread: boolean }> }> }>)[0].chat_comments[0].answers.map((answer) => answer.unread);
+	messages.set(row([read]));
+	const props = $state({ messageId: 'target', threadId: 'thread', opened: true, comments: [{ ...base, answers: [read] }] });
+	const opened = mount(ChatCommentThreads, { target: host, props });
+	flushSync();
+	// The answer arrives while the popover is open: arriving reads nothing.
+	messages.set(row([read, arrived]));
+	props.comments = [{ ...base, answers: [read, arrived] }];
+	flushSync();
+	await Promise.resolve();
+	expect(fetcher).not.toHaveBeenCalled();
+	// Closing: the opener lets go of the message it showed, then the popover leaves; the store shows the answer read.
+	props.messageId = 'closed';
+	unmount(opened);
+	await vi.waitFor(() => expect(answersInStore()).toEqual([false, false]));
+	expect(fetcher).toHaveBeenCalledTimes(1);
+	expect(String(fetcher.mock.calls[0][0])).toContain('/messages/first/comments/root/viewed');
+	messages.set([]);
 });

@@ -1,14 +1,37 @@
 import type { CommentThreadData } from './CommentThreadData';
 
 /**
- * Opening a thread is what reads it: a press on its card, the person moving focus into its reply field, or the caller
- * opening it (a picked margin card, a popover). Being on screen reads nothing, and neither does focus the thread puts in
- * its own reply field (`focusQuietly`): that follows a selection, which may be a restored tab's landing rather than a pick.
+ * A press that is not an engagement with the thread it lands in: one on a link in the body, or one that ends a text selection.
+ * Every card that reads on a press checks this first, so a link or a selection reads on no surface.
+ */
+export function notEngaging(event: Event): boolean {
+	return !!(event.target as Element | null)?.closest?.('a') || !(window.getSelection()?.isCollapsed ?? true);
+}
+
+/**
+ * The one place a thread decides it is read. `engage` is every way the person engages with it: a press anywhere on its card
+ * (its number disc and controls included), a press on its highlight, marker, image tag or jump control (a pick), opening it
+ * from a list, sheet, popover or drawer, or moving focus into its reply field. Each reads what is unread at that moment,
+ * so a reply that arrived while the thread stayed open is read by the next engagement.
+ * Being on screen reads nothing, and neither does focus the thread puts in its own reply field (`focusQuietly`): that
+ * follows a selection, which may be a restored tab's landing rather than a pick.
+ * `close` (the thread rests again or leaves the page) reads it once more, only if it was engaged, so a reply that arrived
+ * while it was open is read when the person lets it go; closing a thread nobody engaged with reads nothing.
  * A chat thread stamps each unread answer; a document thread stamps its latest unread item.
  */
-export function createThreadOpen(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
+export function createThreadEngagement(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
 	let quiet = false;
-	function openThread() {
+	let engaged = false;
+	function engage() {
+		engaged = true;
+		readUnread();
+	}
+	function close() {
+		if (!engaged) return;
+		engaged = false;
+		readUnread();
+	}
+	function readUnread() {
 		const current = comment();
 		const unread = new Set(current.newReplyIds ?? []);
 		if (chat()) { for (const id of unread) stamp(id); return; }
@@ -17,14 +40,14 @@ export function createThreadOpen(comment: () => CommentThreadData, chat: () => b
 		else if (current.newComment) stamp(current.id);
 	}
 	function openFromFocus(event: FocusEvent) {
-		if (!quiet && (event.target as Element).closest('textarea')) openThread();
+		if (!quiet && (event.target as Element).closest('textarea')) engage();
 	}
 	/** Focus moved by the thread itself; `focusin` fires inside the call, so it is told apart there. */
 	function focusQuietly(focus: () => void) {
 		quiet = true;
 		try { focus(); } finally { quiet = false; }
 	}
-	return { openThread, openFromFocus, focusQuietly };
+	return { engage, openFromFocus, focusQuietly, close };
 }
 
 /**
