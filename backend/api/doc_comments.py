@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
 from api.doc_comment_models import CommentCreate
@@ -275,6 +276,8 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            return JSONResponse({"detail": exc.message, "kind": exc.kind}, status_code=404)
         raise document_save_http_exception(exc) from exc
     if body.all_from_author:
         return {**row, **saved}

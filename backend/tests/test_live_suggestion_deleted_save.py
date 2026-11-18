@@ -42,6 +42,7 @@ async def test_live_deleted_document_refuses_decision(ownership_scope, tmp_path,
             response = await client.post(f'/api/comments/{row["id"]}/decision', params={'token': 'test'}, json={'decision': 'accept'})
         assert response.status_code == 404, response.text
         assert response.json()['detail'] == "This file no longer exists, so nothing was changed. You can close it."
+        assert response.json()['kind'] == 'no_such_file'
         assert not path.exists()
         assert comments.get_comment(row['id'], db=scope['db'])['decision'] is None
         if timing == 'publication':

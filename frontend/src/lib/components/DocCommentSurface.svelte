@@ -37,7 +37,7 @@
 	import { marginOut } from '$lib/docCommentDrawerMotion';
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import { imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
-	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+	import { refusalMessage, suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
@@ -308,7 +308,7 @@
 	});
 	// A refused accept (kind `stale`) goes to `suggestionRefusals` instead, which also shows its card as orphaned.
 	const cardErrors = $derived({
-		...(artifactId ? $suggestionRefusals[artifactId] : undefined),
+		...Object.fromEntries(Object.entries(artifactId ? $suggestionRefusals[artifactId] ?? {} : {}).map(([id, refusal]) => [id, refusalMessage(refusal)])),
 		...Object.fromEntries(Object.entries(decisions.outcome.errors).filter(([, message]) => message)),
 	});
 </script>

@@ -96,10 +96,10 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 				if (artifact) clearRefusal(artifact, id);
 			} catch (error) {
 				// The saved file no longer has the quote: the card stays orphaned with this reason until it is decided or the surface resets.
-				const stale = decision === 'accept' && error instanceof SuggestionRefused && error.kind === 'stale';
+				const kind = decision === 'accept' && error instanceof SuggestionRefused && (error.kind === 'stale' || error.kind === 'no_such_file') ? error.kind : null;
 				const text = reason(error, `Couldn’t ${decision} this suggestion. Try again.`, { id, decision });
 				settle(started, (current) => {
-					if (stale && artifact) recordRefusal(artifact, id, text);
+					if (kind && artifact) recordRefusal(artifact, id, text, kind);
 					else current.errors = { ...current.errors, [id]: text };
 				});
 			}

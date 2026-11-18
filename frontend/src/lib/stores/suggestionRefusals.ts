@@ -7,10 +7,15 @@ import { writable } from 'svelte/store';
  * this card's Accept cannot work. It lasts until that suggestion is decided or the comment surface
  * resets (the document changes or its comments close); edits, saves and comment loads leave it.
  */
-export const suggestionRefusals = writable<Record<string, Record<string, string>>>({});
+export type RefusalKind = 'stale' | 'no_such_file';
+// A legacy string has no kind and means stale, the only refusal previously recorded.
+export type SuggestionRefusal = string | { message: string; kind?: RefusalKind };
+export const refusalMessage = (refusal: SuggestionRefusal) => typeof refusal === 'string' ? refusal : refusal.message;
+export const refusalKind = (refusal: SuggestionRefusal): RefusalKind => typeof refusal === 'string' ? 'stale' : refusal.kind ?? 'stale';
+export const suggestionRefusals = writable<Record<string, Record<string, SuggestionRefusal>>>({});
 
-export function recordRefusal(artifactId: string, commentId: string, message: string) {
-	suggestionRefusals.update((all) => ({ ...all, [artifactId]: { ...all[artifactId], [commentId]: message } }));
+export function recordRefusal(artifactId: string, commentId: string, message: string, kind: RefusalKind) {
+	suggestionRefusals.update((all) => ({ ...all, [artifactId]: { ...all[artifactId], [commentId]: { message, kind } } }));
 }
 
 export function clearRefusal(artifactId: string, commentId: string) {
