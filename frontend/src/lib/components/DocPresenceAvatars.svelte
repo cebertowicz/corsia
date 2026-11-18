@@ -37,7 +37,7 @@
 			const avatar = single?.querySelector<HTMLElement>('.participant-trigger, .participant-slot');
 			const more = single?.querySelector<HTMLElement>('.more');
 			const singleOverlaps = !!avatar && !!more && avatar.getBoundingClientRect().right > more.getBoundingClientRect().left;
-			maximum = presenceMaximum(budget, width(3), width(1), needed, floor, singleOverlaps);
+			maximum = presenceMaximum({ budget, fullStackWidth: width(3), singleWidth: width(1), countWidth: width(0), fullTitleWidth: needed, floorTitleWidth: floor, singleOverlaps });
 		};
 		const observer = new ResizeObserver(fit);
 		observer.observe(bar); observer.observe(titleCell); observer.observe(tools);

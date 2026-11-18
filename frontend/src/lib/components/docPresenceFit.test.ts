@@ -1,25 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { presenceMaximum } from './docPresenceFit';
 
+const fit = (budget: number, singleOverlaps = false) => presenceMaximum({
+	budget, fullStackWidth: 90, singleWidth: 55, countWidth: 25,
+	fullTitleWidth: 150, floorTitleWidth: 55, singleOverlaps,
+});
+
 describe('document header presence fit', () => {
-	it('collapses and restores each rung as the available width changes', () => {
-		const budgets = [240, 180, 100, 180, 240];
-		expect(budgets.map((budget) => presenceMaximum(budget, 90, 55, 150, 55, false))).toEqual([3, 1, 0, 1, 3]);
+	it('prefers three when the whole name fits, including at the boundary', () => {
+		expect(fit(240)).toBe(3);
+		expect(fit(239)).toBe(0);
 	});
-
-	it('collapses three readers before cutting a long document name', () => {
-		expect(presenceMaximum(210, 90, 55, 150, 55, false)).toBe(1);
+	it('prefers the whole name with the count over a cut name with an avatar', () => {
+		expect(fit(175)).toBe(0);
+		expect(fit(174)).toBe(1);
 	});
-
-	it('keeps all readers when a short name fits', () => {
-		expect(presenceMaximum(210, 90, 55, 80, 55, false)).toBe(3);
+	it('shows one avatar only when the floor fits and does not overlap', () => {
+		expect(fit(110)).toBe(1);
+		expect(fit(109)).toBe(0);
+		expect(fit(110, true)).toBe(0);
 	});
-
-	it('uses the count alone when the avatar would overlap it', () => {
-		expect(presenceMaximum(150, 90, 55, 150, 55, true)).toBe(0);
-	});
-
-	it('uses the count alone when one avatar leaves less than the name floor', () => {
-		expect(presenceMaximum(105, 90, 55, 150, 55, false)).toBe(0);
+	it('resolves narrowing and widening without a latched state', () => {
+		expect([240, 174, 109, 174, 240].map((budget) => fit(budget))).toEqual([3, 1, 0, 1, 3]);
 	});
 });
