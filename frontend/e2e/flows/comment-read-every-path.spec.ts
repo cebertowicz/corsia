@@ -479,6 +479,10 @@ for (const way of ['card', 'tag'] as const) {
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const seeded = await seedImageDocument(page, request, `read-every-path-image-${way}`, 5000);
+		// An agent's top-level note counts as unread only on a document the person has already commented on.
+		const own = 'Paragraph 1: the walkthrough';
+		const mine = await request.post(`/api/artifacts/${seeded.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { delivery_policy: 'immediate', body: 'A note of my own.', anchor_text: own, from_off: DOC.indexOf(own), to_off: DOC.indexOf(own) + own.length } });
+		expect(mine.ok(), await mine.text()).toBeTruthy();
 		const markdown = '![Mock screen](shots/screen.png)';
 		const from = DOC.indexOf(markdown);
 		const created = await request.post(`/api/artifacts/${seeded.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { delivery_policy: 'immediate', body: 'An agent note on the image.', region: { x: 0.2, y: 0.25, w: 0.25, h: 0.25 }, anchor_text: markdown, from_off: from, to_off: from + markdown.length } });
@@ -539,13 +543,19 @@ async function docWithUnread(page: Page, request: APIRequestContext, width: numb
 
 /**
  * Goes to the chat titled `title` from the sidebar, opening the sidebar first when it is folded away. A folded sidebar keeps
- * its rows laid out beside the screen, so a row counts as shown only when it is inside the viewport.
+ * its rows laid out, beside the screen or clipped to nothing, so a row counts as shown only when a press at its centre lands on it.
  */
 async function goToChat(page: Page, title: string) {
 	const item = page.locator('.thread-item').filter({ hasText: title }).first();
-	const shown = () => item.evaluate((el) => { const box = el.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth; }).catch(() => false);
+	const shown = () => item.evaluate((el) => {
+		const box = el.getBoundingClientRect();
+		const hit = box.width > 0 && box.height > 0 ? document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) : null;
+		return !!hit && el.contains(hit);
+	}).catch(() => false);
+	// An open sidebar may only have the row scrolled out of its list; bring it in before deciding the sidebar is folded.
+	if (!(await shown())) await item.evaluate((el) => el.scrollIntoView({ block: 'nearest' })).catch(() => undefined);
 	if (!(await shown())) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
-	await expect(item).toBeInViewport();
+	await expect.poll(shown, { timeout: 10_000 }).toBe(true);
 	await item.click();
 }
 
