@@ -42,7 +42,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, require_user_header_only
 from infra.database import get_db, write_transaction
-from api.doc_comment_access import NOT_COMMENTABLE, _artifact_for_read, _artifact_for_write, _assert_owns_artifact
+from api.doc_comment_access import NotCommentable, _artifact_for_read, _artifact_for_write, _assert_owns_artifact, not_commentable_response
 from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
@@ -113,7 +113,10 @@ async def create_comment(
         finally:
             db.close()
 
-    artifact_id, path = await run_in_db(_access)
+    try:
+        artifact_id, path = await run_in_db(_access)
+    except NotCommentable:
+        return not_commentable_response()
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
@@ -131,8 +134,8 @@ async def create_comment(
     )
     try:
         row, _registered, feedback, _created = await create_validated_comment(request, body.client_id)
-    except CommentTargetMoved as exc:
-        raise HTTPException(409, NOT_COMMENTABLE) from exc
+    except CommentTargetMoved:
+        return not_commentable_response()
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except TagValidationError as exc:

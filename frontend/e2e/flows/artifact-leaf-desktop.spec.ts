@@ -93,30 +93,48 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const tab = page.getByRole('tab', { name: fileName });
 		const divider = page.getByRole('separator', { name: 'Resize Files panel' });
 		const assertHeaderTracksArtifactWidth = async () => {
-			// The split's ResizeObserver follows the pane transition; wait for the
-			// actual minimum-width contract instead of sampling its first layout frame.
-			await expect.poll(async () => await page.evaluate(() => {
-				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
-				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
-				if (!leaf || !split) throw new Error('split width is unavailable');
-				return split.width - leaf.width - 8;
-			})).toBeGreaterThanOrEqual(420);
-			const geometry = await page.evaluate(() => {
-				const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
-				const divider = document.querySelector<HTMLElement>('[aria-label="Resize Files panel"]')?.getBoundingClientRect();
-				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
-				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
-				const main = document.querySelector<HTMLElement>('.main');
-				if (!title || !divider || !leaf || !split || !main) throw new Error('split header geometry is unavailable');
-				return {
-					headerInset: Number.parseFloat(getComputedStyle(main).getPropertyValue('--artifact-header-inset')),
-					titleRight: title.right,
-					dividerLeft: divider.left,
-					splitWidth: split.width,
-					artifactWidth: leaf.width,
-					occupiedWidth: leaf.width + divider.width,
+			// The split follows a panel or sidebar transition, and the chat column passes below its floor on the way
+			// (it dips for about 0.3 s after End, with or without the overlay panel). The floor is the contract for the
+			// settled layout, so read the geometry only once the split, the artifact pane and the header have held their
+			// rects for several consecutive frames, in the same frame the read is taken.
+			const geometry = await page.evaluate(() => new Promise<{
+				headerInset: number; titleRight: number; dividerLeft: number; splitWidth: number; artifactWidth: number; occupiedWidth: number;
+			}>((resolve, reject) => {
+				const read = () => {
+					const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
+					const divider = document.querySelector<HTMLElement>('[aria-label="Resize Files panel"]')?.getBoundingClientRect();
+					const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
+					const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
+					const main = document.querySelector<HTMLElement>('.main');
+					if (!title || !divider || !leaf || !split || !main) throw new Error('split header geometry is unavailable');
+					return {
+						headerInset: Number.parseFloat(getComputedStyle(main).getPropertyValue('--artifact-header-inset')),
+						titleRight: title.right,
+						dividerLeft: divider.left,
+						splitWidth: split.width,
+						artifactWidth: leaf.width,
+						occupiedWidth: leaf.width + divider.width,
+					};
 				};
-			});
+				const key = (geometry: ReturnType<typeof read>) => JSON.stringify(geometry);
+				const deadline = performance.now() + 8000;
+				let last = '';
+				let held = 0;
+				const frame = () => {
+					try {
+						const now = read();
+						held = key(now) === last ? held + 1 : 0;
+						last = key(now);
+						if (held >= 4) return resolve(now);
+						if (performance.now() > deadline) return reject(new Error(`split layout never settled: ${last}`));
+						requestAnimationFrame(frame);
+					} catch (error) {
+						reject(error);
+					}
+				};
+				requestAnimationFrame(frame);
+			}));
+			console.log(`settled chat column ${(geometry.splitWidth - geometry.artifactWidth - 8).toFixed(1)}px (split ${geometry.splitWidth}, artifact ${geometry.artifactWidth})`);
 			expect(geometry.headerInset).toBeCloseTo(geometry.occupiedWidth, 0);
 			expect(geometry.titleRight).toBeLessThanOrEqual(geometry.dividerLeft);
 			// This test keeps the plan pane open. The available width must preserve the
