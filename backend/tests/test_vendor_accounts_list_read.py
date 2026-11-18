@@ -31,6 +31,26 @@ def _make(db, account, state):
                                      source='rate_limit_update', db=db)
 
 
+async def _prior_shown(account, rows=None, numbered=None, billing=None, no_model=None):
+    """The former single-account composition, including its separate read jobs."""
+    if billing is None:
+        billing = await api.run_in_db(api._billing_views)
+    if no_model is None:
+        no_model = await api._no_usable_model([account['provider']])
+    if rows is None:
+        rows = await api._read(api.accounts.list_accounts, provider=account['provider'])
+    if numbered is None:
+        numbered = await api._read(api.accounts.list_accounts, provider=account['provider'], include_removed=True)
+    return api._safe(account) | {
+        'duplicate_of': await api._read(api.accounts.duplicate_of, account, rows=rows),
+        'allow_overage': await api.run_read(api._allow_overage, account),
+        'no_usable_model': account['id'] in no_model,
+        'label': api.account_label(account, rows=numbered),
+        **billing.get(account['id'], {'billing': None, 'billing_revision': 0}),
+        'usage': await api.run_read(api._usage, account),
+    }
+
+
 async def _prior_response(provider=None, include_removed=False):
     """The former composition pins every field and JSON byte."""
     rows = await api._read(api.accounts.list_accounts, provider=provider, include_removed=include_removed)
@@ -38,7 +58,7 @@ async def _prior_response(provider=None, include_removed=False):
         api.accounts.list_accounts, provider=provider, include_removed=True)
     billing = await api.run_read(api._billing_views)
     no_model = await api._no_usable_model((row['provider'] for row in rows), rows)
-    return {'accounts': [await api._shown(row, rows, numbered, billing, no_model) for row in rows]}
+    return {'accounts': [await _prior_shown(row, rows, numbered, billing, no_model) for row in rows]}
 
 
 @pytest.fixture
@@ -85,6 +105,36 @@ def test_later_ready_model_and_invalid_provider(accounts, client):
     invalid = client.get('/api/vendor-accounts', params={'provider': 'invalid-provider'})
     assert invalid.status_code == 409
     assert invalid.json() == {'detail': 'account provider is not registered'}
+
+
+def test_single_account_response_keeps_previous_bytes(accounts, client):
+    db, _, work, _ = accounts
+    response = client.patch(f"/api/vendor-accounts/{work['id']}",
+                            json={'name': 'Renamed', 'expected_revision': work['revision']})
+    assert response.status_code == 200
+    account = get_account(work['id'], db=db)
+    expected = JSONResponse(asyncio.run(_prior_shown(account))).body
+    assert response.content == expected
+
+
+def test_list_and_single_view_each_use_one_read_job(accounts, client, monkeypatch):
+    calls = []
+    original = api.run_read
+
+    async def count(fn, *args, **kwargs):
+        calls.append(fn.__name__)
+        return await original(fn, *args, **kwargs)
+
+    monkeypatch.setattr(api, 'run_read', count)
+    assert client.get('/api/vendor-accounts').status_code == 200
+    assert calls == ['_list_vendor_accounts']
+    calls.clear()
+    _, _, work, _ = accounts
+    response = client.patch(f"/api/vendor-accounts/{work['id']}",
+                            json={'name': 'Renamed', 'expected_revision': work['revision']})
+    assert response.status_code == 200
+    assert calls.count('_account_view') == 1
+    assert not {'duplicate_of', '_allow_overage', '_usage'} & set(calls)
 
 
 def test_unexpected_usage_failure_is_not_translated(accounts, client, monkeypatch):

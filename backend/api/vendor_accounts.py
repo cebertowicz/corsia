@@ -134,12 +134,7 @@ async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_
         rows = await _read(accounts.list_accounts, provider=account["provider"])
     if numbered_rows is None:
         numbered_rows = await _read(accounts.list_accounts, provider=account["provider"], include_removed=True)
-    return _safe(account) | {"duplicate_of": await _read(accounts.duplicate_of, account, rows=rows),
-                             "allow_overage": await run_read(_allow_overage, account),
-                             "no_usable_model": account["id"] in no_model,
-                             "label": account_label(account, rows=numbered_rows),
-                             **billing_views.get(account["id"], {"billing": None, "billing_revision": 0}),
-                             "usage": await run_read(_usage, account)}
+    return await run_read(_account_view, account, rows, numbered_rows, billing_views, no_model)
 
 
 def _list_read(fn, *args, **kwargs):
@@ -150,6 +145,16 @@ def _list_read(fn, *args, **kwargs):
         raise HTTPException(409, str(error)) from error
 
 
+def _account_view(row, rows, numbered_rows, billing_views, no_model):
+    """Compose the shared account view on the read lane."""
+    return _safe(row) | {"duplicate_of": _list_read(accounts.duplicate_of, row, rows=rows),
+                         "allow_overage": _allow_overage(row),
+                         "no_usable_model": row["id"] in no_model,
+                         "label": account_label(row, rows=numbered_rows),
+                         **billing_views.get(row["id"], {"billing": None, "billing_revision": 0}),
+                         "usage": _usage(row)}
+
+
 def _list_vendor_accounts(provider: str | None, include_removed: bool):
     """Build the list on the read lane without a separate worker handoff per field."""
     rows = _list_read(accounts.list_accounts, provider=provider, include_removed=include_removed)
@@ -158,15 +163,7 @@ def _list_vendor_accounts(provider: str | None, include_removed: bool):
     billing_views = _billing_views()
     wanted = {row["provider"] for row in rows if row["provider"] in accounts.VENDORS}
     no_model = accounts_without_usable_model(wanted, rows) if wanted else set()
-    return {"accounts": [
-        _safe(row) | {"duplicate_of": _list_read(accounts.duplicate_of, row, rows=rows),
-                      "allow_overage": _allow_overage(row),
-                      "no_usable_model": row["id"] in no_model,
-                      "label": account_label(row, rows=numbered_rows),
-                      **billing_views.get(row["id"], {"billing": None, "billing_revision": 0}),
-                      "usage": _usage(row)}
-        for row in rows
-    ]}
+    return {"accounts": [_account_view(row, rows, numbered_rows, billing_views, no_model) for row in rows]}
 
 
 @router.get("/vendor-accounts")
