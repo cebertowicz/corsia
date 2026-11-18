@@ -180,6 +180,10 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     guarded = not pane and not opening_unlaunched_session
     # A pane command is never a DOM write (_PANE_COMMANDS), so a marked field is always the agent's.
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
+    if not pane and args[0] in browser_agent_verbs.PERSON_INPUT and browser_pane_state.has_pane(thread_id):
+        await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
+                                properties={"command": args[0], "reason": "person_input"})
+        raise BrowserSessionError(browser_agent_verbs.PANE_INPUT_REFUSAL)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
     note, filled_field_visit = None, False

@@ -87,12 +87,13 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_installed_setup_steps_run_in_native_browser" \
             "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
             "backend/tests/test_browser_shared_e2e.py::test_a_saved_sign_in_selects_an_option_and_submits_with_enter" \
+            "backend/tests/test_browser_shared_e2e.py::test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document" \
             "backend/tests/test_browser_shared_e2e.py::test_a_saved_sign_in_shows_an_agent_no_page_text_in_a_target_verbs_error" \
             "backend/tests/test_browser_shared_e2e.py::test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_cannot_prove" \
             "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_opens_the_popup_its_button_opens" \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all six must actually run.
-          grep -q " 6 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all seven must actually run.
+          grep -q " 7 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'

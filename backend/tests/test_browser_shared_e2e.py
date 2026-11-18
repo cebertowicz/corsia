@@ -310,6 +310,36 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document(tmp_path, monkeypatch):
+    """F1: going back to an address with a #fragment can't restore what was typed, once the session held a page."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verbs-back-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-back", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            await owner.run(thread_id, ("open", f"{origin}/form.html#step"))
+            await owner.run(thread_id, ("fill", "#field", "typed"), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "typed"
+            await owner.run(thread_id, ("open", f"{origin}/plain.html"), session="existing")
+            # The session has held a page (the password guard applied to an earlier visit).
+            browser_control._guarded_visits[thread_id] = {"earlier": browser_control.PasswordReadGuard("earlier", frozenset())}
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, "location.pathname + location.hash") == "/form.html"
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "old"
+    finally:
+        browser_control._guarded_visits.pop(thread_id, None)
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_a_saved_sign_in_shows_an_agent_no_page_text_in_a_target_verbs_error(tmp_path, monkeypatch):
     """F1: agent-browser names the element covering a target; the agent gets a fixed text for it."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":

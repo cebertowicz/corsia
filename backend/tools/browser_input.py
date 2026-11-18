@@ -16,7 +16,9 @@ class BrowserInputTool(Tool):
     name = "browser_input"
     description = (
         "Do one input on the current browser page that browser_click and browser_fill can't. "
-        "These actions work alongside the person; password pages are for the person to handle.\n\n"
+        "Password pages are for the person to handle. While the person has the browser open, press, hover and "
+        "scrolling by direction are refused, since they would act as the person's own input; select, scroll with "
+        "a selector, back and forward still work.\n\n"
         "Actions:\n"
         "- press: one key for the focused element, from the key list only. Enter submits a search or form, "
         "Tab and Shift+Tab move focus, arrows drive a date picker or list, Escape closes a popup. "

@@ -34,6 +34,9 @@ REFUSED = [
     # Playwright's internal engines carry a colon in the prefix
     ["hover", "internal:text=Pay"], ["scrollintoview", "internal:control=enter-frame"],
     ["select", "internal:role=button", "v"], ["hover", "internal:attr=[id=a]"],
+    # the parser trims parts and allows space before '='; a quoted selector is text, '..' is XPath
+    ["hover", " text=Pay"], ["hover", "text =Pay"], ["hover", "xpath =//a"], ["hover", "#pay "],
+    ["select", '"Sign in"', "v"], ["hover", "'Pay'"], ["scrollintoview", ".."], ["hover", "../a"],
     # shape: several values, extra arguments, bad directions and amounts
     ["select", "@e5", "a", "b"], ["select", "@e5"], ["hover", "@e1", "@e2"], ["scrollintoview"],
     ["scroll"], ["scroll", "sideways"], ["scroll", "down", "lots"], ["scroll", "down", "0"],
@@ -150,6 +153,80 @@ async def test_history_after_a_held_page_loads_the_page_fresh(saved, monkeypatch
 
 async def _allow(*_args, **_kwargs):
     return browser_control.PageAccess(None, False)
+
+
+class _ScriptedCdp:
+    """A CDP connection that answers Page.navigate from a script and records each navigation."""
+
+    def __init__(self, url, navigations):
+        self.url, self.navigations, self.sent = url, list(navigations), []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def call(self, method, **params):
+        if method == "Page.getNavigationHistory":
+            return {"currentIndex": 0, "entries": [{"url": self.url}]}
+        self.sent.append(params["url"])
+        return self.navigations.pop(0)
+
+
+NEW_DOCUMENT = {"frameId": "f", "loaderId": "L2"}
+SAME_DOCUMENT = {"frameId": "f"}
+
+
+@pytest.mark.parametrize(("url", "navigations", "sent"), [
+    ("https://bank.test/pay", [NEW_DOCUMENT], ["https://bank.test/pay"]),
+    # A #fragment address is a same-document navigation that keeps the restored page, so it loads without it.
+    ("https://bank.test/#/pay", [SAME_DOCUMENT, NEW_DOCUMENT], ["https://bank.test/#/pay", "https://bank.test/"]),
+])
+async def test_reopen_fresh_ends_on_a_new_document(monkeypatch, url, navigations, sent):
+    cdp = _ScriptedCdp(url, navigations)
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
+    await browser_history.reopen_fresh("ws://page")
+    assert cdp.sent == sent
+
+
+@pytest.mark.parametrize(("url", "navigations"), [
+    ("https://bank.test/pay", [SAME_DOCUMENT]),
+    ("https://bank.test/pay", [{"frameId": "f", "loaderId": "L2", "errorText": "net::ERR_ABORTED"}]),
+    ("https://bank.test/#/pay", [SAME_DOCUMENT, SAME_DOCUMENT]),
+    ("https://bank.test/#/pay", [SAME_DOCUMENT, {"frameId": "f", "errorText": "net::ERR_ABORTED"}]),
+])
+async def test_reopen_fresh_raises_when_no_new_document_commits(monkeypatch, url, navigations):
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: _ScriptedCdp(url, navigations))
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await browser_history.reopen_fresh("ws://page")
+
+
+@pytest.mark.parametrize("owner_key", ["owner", None])
+@pytest.mark.parametrize("args", [["press", "Enter"], ["hover", "@e4"], ["scroll", "down", "300"]])
+async def test_with_the_pane_open_input_verbs_are_refused_before_anything_runs(
+        synthetic_browser, monkeypatch, owner_key, args):
+    from host_access import browser_pane_state
+
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda _: owner_key)
+    monkeypatch.setattr(browser_pane_state, "has_pane", lambda _thread: True)
+    monkeypatch.setattr(browser_control, "check_page_access", _allow)
+    events = []
+    monkeypatch.setattr(commands, "emit_product_event", lambda *a, **k: events.append((a, k["properties"])))
+    with pytest.raises(BrowserSessionError, match="has this browser open"):
+        await synthetic_browser.owner.run("a", args)
+    assert not [call for call in synthetic_browser.calls if call[-len(args):] == tuple(args)]
+    assert events == [(("browser_pane", "agent_write_refused"), {"command": args[0], "reason": "person_input"})]
+    await synthetic_browser.owner.shutdown()
+
+
+async def test_with_the_pane_open_scrolling_to_an_element_still_runs(saved, monkeypatch):
+    from host_access import browser_pane_state
+
+    monkeypatch.setattr(browser_pane_state, "has_pane", lambda _thread: True)
+    monkeypatch.setattr(browser_control, "check_page_access", _allow)
+    assert await saved.owner.run("a", ["scrollintoview", "@e9"]) == verbs.ACKNOWLEDGED
+    await saved.owner.shutdown()
 
 
 @pytest.mark.parametrize("direction", ["back", "forward"])

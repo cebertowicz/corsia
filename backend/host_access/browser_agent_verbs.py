@@ -26,10 +26,19 @@ COVERED = ("Error: agent-browser command failed: that element is covered by anot
            "Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header).")
 UNUSABLE = "Error: agent-browser command failed: that element couldn't be used."
 TARGETED = frozenset({"select", "hover", "scrollintoview"})
+# Verbs agent-browser sends as real keyboard, pointer or wheel input. While the person has the pane open they
+# would land in the person's focus or move their pointer, so they are refused (AR1: a write runs inside the
+# page or not at all). select runs as a page-context write and scrollintoview moves no input, so both stay.
+PERSON_INPUT = frozenset({"press", "hover", "scroll"})
+PANE_INPUT_REFUSAL = (
+    "The person has this browser open, so keys, hover and scrolling by direction would act as their own input, "
+    "and nothing was sent. Click the control instead (for Enter, the form's submit button), scroll with a "
+    "selector to bring an element into view, or ask the person in chat.")
 
 _REF = re.compile(r"(?:@|ref=)?e\d+")
-# Other selector engines: a prefix such as text=, xpath= or js=, an XPath, a chained locator, or a script URL.
-_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_:-]*=")
+# Other selector engines: a prefix such as text=, xpath= or js= (the parser allows space before '='), an XPath,
+# a quoted text selector, a chained locator, or a script URL.
+_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_:-]*\s*=")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -38,8 +47,9 @@ def plain_target(selector: str) -> bool:
     if _REF.fullmatch(selector):
         return True
     lowered = selector.lower()
-    return not (not selector or selector.startswith("-") or _ENGINE.match(selector) or
-                selector.startswith(("/", "(")) or ">>" in selector or _CONTROL.search(selector) or
+    # The selector parser trims each part, so a check on the untrimmed text could miss a prefix.
+    return not (not selector or selector != selector.strip() or selector.startswith(("-", "/", "(", "..", '"', "'")) or
+                _ENGINE.match(selector) or ">>" in selector or _CONTROL.search(selector) or
                 "javascript:" in lowered or "eval(" in lowered)
 
 

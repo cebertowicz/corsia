@@ -11,9 +11,12 @@ from host_access.browser_session_state import BrowserSessionError
 
 
 async def reopen_fresh(endpoint: str) -> None:
-    """Navigate the page to its own address again, replacing its history entry.
+    """Navigate the page to its own address again, as a new document.
 
-    Nothing of the old entry is restored: not the back-forward cache's document, not form values.
+    Nothing of the old entry is restored: not the back-forward cache's document, not form values. An address
+    with a #fragment is a same-document navigation that keeps the restored document, so it loads without the
+    fragment. A navigation that starts no new document (no loaderId) or doesn't commit (errorText: a 204, a
+    download) raises, so the caller blanks the page.
     """
     async with browser_cdp.CdpClient(endpoint) as cdp:
         history = await cdp.call("Page.getNavigationHistory")
@@ -22,7 +25,11 @@ async def reopen_fresh(endpoint: str) -> None:
         url = entries[index].get("url") if isinstance(entries, list) and 0 <= index < len(entries) else None
         if not isinstance(url, str) or not url:
             raise BrowserSessionError("This page couldn't be checked")
-        await cdp.call("Page.navigate", url=url)
+        result = await cdp.call("Page.navigate", url=url)
+        if not result.get("loaderId") and not result.get("errorText") and "#" in url:
+            result = await cdp.call("Page.navigate", url=url.split("#", 1)[0])
+        if result.get("errorText") or not result.get("loaderId"):
+            raise BrowserSessionError("This page couldn't be loaded again")
 
 
 async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:
