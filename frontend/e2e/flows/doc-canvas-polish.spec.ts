@@ -5,7 +5,7 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TES
 import { deleteRenderedLine, openLiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { expectCommentsShown, openComments } from '../support/commentDrawer';
-import { closeDetails, expectBarHitAreas, openDetails } from '../support/documentBar';
+import { expectBarHitAreas } from '../support/documentBar';
 
 async function chooseThread(page: Page, title: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -110,15 +110,14 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	// below shows its arrival pill. Chat replies sit in Focus-mode groups whose
 	// labels vary by viewport, so they are not asserted here.
 	await reader.close();
-	// Who has been in the document is in Details: three readers, evenly spaced.
-	const details = await openDetails(page);
-	await expect(details.getByRole('group', { name: '3 participants', exact: true })).toBeVisible();
-	const avatars = await details.locator('.p-presence .presence-row .avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
+	// The document bar shows three readers, evenly spaced.
+	const presence = page.getByRole('group', { name: '3 participants', exact: true });
+	await expect(presence).toBeVisible();
+	const avatars = await presence.locator('.avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
 	await testInfo.attach('presence-avatar-lefts', { body: JSON.stringify(avatars), contentType: 'application/json' });
 	expect(avatars).toHaveLength(3);
 	expect(Math.abs((avatars[1] - avatars[0]) - (avatars[2] - avatars[1]))).toBeLessThanOrEqual(1);
-	await saveEvidenceScreenshot(page, testInfo, 'canvas-details-presence', { fullPage: false });
-	await closeDetails(page);
+	await saveEvidenceScreenshot(page, testInfo, 'canvas-bar-presence', { fullPage: false });
 	const pill = page.getByRole('button', { name: '1 new below, go to nearest', exact: true });
 	await expect(pill).toBeVisible();
 	await pill.focus();

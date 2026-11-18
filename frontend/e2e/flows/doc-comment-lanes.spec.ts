@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
@@ -5,6 +7,9 @@ import { openLiveDocument } from '../support/liveDocument';
 import { layouts } from '../support/liveConcurrency';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
 import { seedMockResponses } from '../support/mock';
+import { openComments, closeComments } from '../support/commentDrawer';
+import { clickDocImage } from '../support/docImageComments';
+import { syntheticPng } from '../support/syntheticImages';
 
 /**
  * An agent comment is posted, not typed: its anchor highlights in the agent colour, the comment stays out of
@@ -32,13 +37,16 @@ async function openAgent(request: APIRequestContext, viewer: Page, title: string
 }
 
 /** The viewer has the owner document open; the reviewer reads it, then comments on the closing line with `body`. */
-async function reviewerComments(browser: Browser, request: APIRequestContext, width: number, height: number, label: string, body: string) {
+async function reviewerComments(browser: Browser, request: APIRequestContext, width: number, height: number, label: string, body: string, withImage = false) {
 	const stamp = `${width}-${Date.now()}`;
 	const quote = `closing line ${stamp}`;
 	const context = await browser.newContext({ viewport: { width, height } });
 	const viewer = await context.newPage();
 	const owner = await openAgent(request, viewer, `Lane Owner ${label} ${stamp}`, true);
-	const live = await agentCreatesSharedDocument(request, owner, `lanes-${stamp}`, `# Lanes ${stamp}\n\nlead line ${stamp}\n\n${quote}\n`);
+	const imageName = `presence-${stamp}.png`;
+	const image = withImage ? `\n\n![Presence fixture](${imageName})\n` : '';
+	const live = await agentCreatesSharedDocument(request, owner, `lanes-${stamp}`, `# Lanes ${stamp}\n\nlead line ${stamp}\n\n${quote}\n${image}`);
+	if (withImage) fs.writeFileSync(path.join(path.dirname(live.docPath), imageName), syntheticPng(320, 200));
 	await openLiveDocument(viewer, live);
 	const reviewer = await openAgent(request, viewer, `Lane Reviewer ${label} ${stamp}`, false);
 	await seedMockResponses(request, [
@@ -55,7 +63,7 @@ async function reviewerComments(browser: Browser, request: APIRequestContext, wi
 	await sendChatMessage(reviewer.page, 'Comment on the closing line.');
 	// The editor's select step draws the pending anchor; a click inside it ends the step and shows the comment.
 	const anchor = viewer.locator(`.cm-presence-select[data-thread-id="${reviewer.id}"]`);
-	return { context, viewer, reviewer, owner, anchor };
+	return { context, viewer, reviewer, owner, anchor, live };
 }
 
 for (const [width, height, project] of layouts) {
@@ -98,6 +106,40 @@ test('@surface:live-document clicking a pending comment anchor shows the comment
 		await expect(viewer.getByRole('button', { name: /^1 comment\b/ })).toBeVisible({ timeout: 2_000 });
 		expect(Date.now() - clicked, 'shown by the click, not by the full wait').toBeLessThan(POST_CAP_MS - 1_500);
 		await viewer.screenshot({ path: testInfo.outputPath('comment-lanes-clicked-1440.png') });
+	} finally {
+		await context.close();
+	}
+});
+
+test('@surface:live-document a pending remote comment survives opening and closing the phone sheet', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name !== 'chromium-mobile', 'Phone sheet only.');
+	test.setTimeout(120_000);
+	const body = 'Tighten this closing line so it lands. '.repeat(75);
+	const { context, viewer, anchor } = await reviewerComments(browser, request, 393, 852, 'sheet', body);
+	try {
+		await expect(anchor).toBeVisible({ timeout: 20_000 });
+		await openComments(viewer, /^0 comments\b/);
+		await closeComments(viewer);
+		await expect(anchor).toBeVisible();
+		await expect(viewer.getByRole('button', { name: /^0 comments\b/ })).toBeVisible();
+		await expect(viewer.getByRole('button', { name: /^1 comment\b/ })).toBeVisible({ timeout: POST_CAP_MS + SLACK_MS });
+	} finally {
+		await context.close();
+	}
+});
+
+test('@surface:live-document a pending remote comment survives opening and closing a document image', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name !== 'chromium-mobile', 'Phone image overlay.');
+	test.setTimeout(120_000);
+	const body = 'Tighten this closing line so it lands. '.repeat(75);
+	const { context, viewer, anchor, live } = await reviewerComments(browser, request, 393, 852, 'image', body, true);
+	try {
+		await expect(anchor).toBeVisible({ timeout: 20_000 });
+		await clickDocImage(viewer);
+		await viewer.getByRole('button', { name: `Back to ${live.fileName}` }).click();
+		await expect(anchor).toBeVisible();
+		await expect(viewer.getByRole('button', { name: /^0 comments\b/ })).toBeVisible();
+		await expect(viewer.getByRole('button', { name: /^1 comment\b/ })).toBeVisible({ timeout: POST_CAP_MS + SLACK_MS });
 	} finally {
 		await context.close();
 	}

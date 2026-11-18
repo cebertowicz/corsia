@@ -22,7 +22,7 @@
 	import type { DocComment } from '$lib/stores/docComments';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PresenceParticipant = {
+	export type PresenceParticipant = {
 		id: string;
 		name: string;
 		color: string;
@@ -46,6 +46,8 @@
 		onArrival,
 		projectComment = (comment: DocComment) => comment,
 		textCurrent = true,
+		participantsOut = $bindable<PresenceParticipant[]>([]),
+		showView = true,
 	}: {
 		target: DocViewerTarget;
 		artifactId?: string | null;
@@ -59,6 +61,8 @@
 		projectComment?: (comment: DocComment) => DocComment;
 		/** False while the canvas's live text is away (opening or reconnecting), when an arrival cannot type in it. */
 		textCurrent?: boolean;
+		participantsOut?: PresenceParticipant[];
+		showView?: boolean;
 	} = $props();
 
 	let clock = $state(Date.now());
@@ -79,6 +83,8 @@
 			active: agent.arrivalActive,
 		}));
 	});
+
+	$effect(() => { participantsOut = participants; });
 
 	$effect(() => {
 		ranges = recentAgents
@@ -197,7 +203,7 @@
 	onDestroy(() => { ranges = []; });
 </script>
 
-{#if docState === 'ready' && participants.length}
+{#if showView && docState === 'ready' && participants.length}
 	<div class="presence-row" aria-label="Recent document activity">
 		<AvatarStack people={participants} max={3} />
 	</div>
