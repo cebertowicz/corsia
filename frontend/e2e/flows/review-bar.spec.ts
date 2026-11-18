@@ -527,10 +527,14 @@ test.describe('375px review sheet', () => {
 		const accepts = sheet.locator('.ct-suggestion-accept');
 		await expect(accepts).toHaveCount(2);
 		await expect(accepts.first()).toBeVisible();
-		await expectTouchTargets(sheet, '.ct-suggestion-accept', { min: 44, gap: 8 });
+		await expect(accepts.first()).toBeInViewport({ ratio: 1 });
+		expect(await hitAtCentre(accepts.first())).toBe(true);
+		await expectTouchTargets(sheet.locator('[data-comment-id]').first(), '.ct-suggestion-accept', { min: 44, gap: 8 });
 		const secondAccept = accepts.nth(1);
 		await secondAccept.scrollIntoViewIfNeeded();
+		await expect(secondAccept).toBeVisible();
 		await expect(secondAccept).toBeInViewport({ ratio: 1 });
+		await expectTouchTargets(sheet.locator('[data-comment-id]').nth(1), '.ct-suggestion-accept', { min: 44, gap: 8 });
 		expect(await hitAtCentre(secondAccept)).toBe(true);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
 		await expect(page.locator('[data-doc-comments-drawer] [data-ask-card], [data-doc-comments-drawer] .review-bar')).toHaveCount(0);

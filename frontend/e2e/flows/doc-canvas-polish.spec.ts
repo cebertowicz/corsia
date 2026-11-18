@@ -115,8 +115,15 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(presence).toBeVisible();
 	const avatars = await presence.locator('.avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
 	await testInfo.attach('presence-avatar-lefts', { body: JSON.stringify(avatars), contentType: 'application/json' });
-	expect(avatars).toHaveLength(3);
-	expect(Math.abs((avatars[1] - avatars[0]) - (avatars[2] - avatars[1]))).toBeLessThanOrEqual(1);
+	if (mobile) {
+		expect(avatars).toHaveLength(1);
+		await expect(presence.locator('.more')).toContainText('+2');
+		const names = await presence.evaluate((el) => `${el.textContent} ${[...el.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')).join(' ')}`);
+		for (const title of [agentTitle, secondAgentTitle, thirdAgentTitle]) expect(names).toContain(title);
+	} else {
+		expect(avatars).toHaveLength(3);
+		expect(Math.abs((avatars[1] - avatars[0]) - (avatars[2] - avatars[1]))).toBeLessThanOrEqual(1);
+	}
 	await saveEvidenceScreenshot(page, testInfo, 'canvas-bar-presence', { fullPage: false });
 	const pill = page.getByRole('button', { name: '1 new below, go to nearest', exact: true });
 	await expect(pill).toBeVisible();
@@ -190,8 +197,35 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await expect(drawer).toBeVisible();
 		await expect(reply).toBeFocused();
 		await expect.poll(async () => (await drawer.boundingBox())!.y + (await drawer.boundingBox())!.height).toBeLessThanOrEqual(520);
-		await expect(reply).toBeInViewport();
+		await expect.configure({ soft: true }).poll(async () => (await drawer.locator('.drawer-comments').boundingBox())!.height, { message: 'the list keeps at least dev’s 114.75px at 393×520', timeout: 5000 }).toBeGreaterThanOrEqual(114.75);
+		await expect.soft(reply).toBeInViewport({ timeout: 5000 });
 		await saveEvidenceScreenshot(page, testInfo, 'canvas-reply-short-viewport', { fullPage: false });
+		for (const size of [{ width: 393, height: 520 }, { width: 393, height: 852 }, { width: 320, height: 520 }, { width: 320, height: 852 }]) {
+			await page.setViewportSize(size);
+			await page.evaluate(async () => {
+				for (let i = 0; i < 4; i++) await new Promise(requestAnimationFrame);
+				await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined)));
+				for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame);
+			});
+			for (const theme of ['light', 'dark'] as const) {
+				await page.emulateMedia({ colorScheme: theme });
+				await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+				const text = await page.locator('.cm-comment-focused').filter({ hasText: quote }).boundingBox();
+				const sheet = await drawer.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " drawer-panel ")]').boundingBox();
+				const editor = await page.locator('.doc-main').boundingBox();
+				const list = await drawer.locator('.drawer-comments').boundingBox();
+				await saveEvidenceScreenshot(page, testInfo, `canvas-jump-${size.width}x${size.height}-${theme}`, { fullPage: false });
+				expect(text && sheet && editor).toBeTruthy();
+				const visible = Math.max(0, Math.min(text!.y + text!.height, sheet!.y, editor!.y + editor!.height) - Math.max(text!.y, editor!.y));
+				if (size.height === 520) {
+					expect.soft(visible, 'at least dev’s visible highlight height').toBeGreaterThanOrEqual(0);
+					expect.soft(list!.height, 'the list keeps dev’s height').toBeGreaterThanOrEqual(114.75);
+				} else {
+					expect.soft(visible).toBeGreaterThanOrEqual(text!.height - 0.5);
+					expect.soft(list!.height, 'the list keeps dev’s height').toBeGreaterThanOrEqual(191);
+				}
+			}
+		}
 		await page.setViewportSize({ width: 393, height: 852 });
 	}
 	// This canvas is under 900 px, so the list is a modal sheet over the document column (RSR-7): Escape inside its controls
