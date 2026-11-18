@@ -126,6 +126,12 @@ def test_a_reply_is_idempotent_across_a_promote(client, isolated_db):
         db.close()
 
 
+def _refusal(response):
+    """The status, sentence and machine code the comment-create route answers a NOT_COMMENTABLE write with."""
+    body = response.json()
+    return response.status_code, body["detail"], body.get("kind")
+
+
 def test_a_write_is_refused_when_the_chain_ends_in_a_retired_document(client, isolated_db):
     db = get_db()
     try:
@@ -134,7 +140,7 @@ def test_a_write_is_refused_when_the_chain_ends_in_a_retired_document(client, is
         models.retire(successor, tombstone=True, cause="file_gone", db=db)
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
+        assert _refusal(response) == (409, NOT_COMMENTABLE, "not_commentable")
         assert _rows(db, artifact) == [] and _rows(db, successor) == before
     finally:
         db.close()
@@ -149,7 +155,7 @@ def test_a_write_is_refused_when_the_caller_cannot_use_the_successor(client, iso
         successor = _promote(db, artifact, owner="stranger")
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
+        assert _refusal(response) == (409, NOT_COMMENTABLE, "not_commentable")
         assert _rows(db, successor) == before
     finally:
         db.close()
@@ -181,7 +187,7 @@ def test_a_promote_between_the_check_and_the_write_refuses_instead_of_writing_to
         monkeypatch.setattr(access, "_accessible_live_id", lambda artifact_id, user_id, db: artifact_id)
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE), response.text
+        assert _refusal(response) == (409, NOT_COMMENTABLE, "not_commentable"), response.text
         assert _rows(db, artifact) == [] and _rows(db, successor) == before
     finally:
         db.close()
@@ -288,6 +294,7 @@ def test_accept_all_from_a_pane_on_a_document_promoted_nowhere_is_refused(client
         models.retire(successor, tombstone=True, cause="file_gone", db=db)
         response = client.post(f"/api/artifacts/{artifact}/suggestions/accept-all", params=TOKEN)
         assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
+        assert "kind" not in response.json()
     finally:
         db.close()
 
