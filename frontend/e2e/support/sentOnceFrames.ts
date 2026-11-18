@@ -9,21 +9,28 @@ export async function framesWithBoth(page: Page, note: string, act: () => Promis
     const state = { both: 0, inBox: 0, inThread: 0, running: true };
     (window as any).__sentOnce = state;
     const holds = (node: Element) => /^(TEXTAREA|INPUT)$/.test(node.tagName) && (node as HTMLTextAreaElement).value.includes(text);
-    const tick = () => {
+    const sample = () => {
       const inBox = [...document.querySelectorAll('textarea, input')].some(holds);
       const inThread = [...document.querySelectorAll('.chat-margin-card, [role="dialog"][aria-label="Comment"]')]
         .some((card) => (card.textContent ?? '').includes(text));
       if (inBox) state.inBox++;
       if (inThread) state.inThread++;
       if (inBox && inThread) state.both++;
+    };
+    const tick = () => {
+      sample();
       if (state.running) requestAnimationFrame(tick);
     };
+    (state as any).sample = sample;
     requestAnimationFrame(tick);
   }, note);
   await act();
   return page.evaluate(() => {
     const state = (window as any).__sentOnce;
+    // A slow runner can paint no frame between the move and the end of the act; the last sample reads the layout the act left.
+    state.sample();
     state.running = false;
-    return state as { both: number; inBox: number; inThread: number };
+    const { both, inBox, inThread } = state;
+    return { both, inBox, inThread } as { both: number; inBox: number; inThread: number };
   });
 }
