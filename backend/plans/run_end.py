@@ -60,10 +60,40 @@ def open_nodes(db, phase_id: str) -> list[str]:
     )]
 
 
-def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[str], list[str]]:
-    """After a required step ends not done, close the run's other open work with the reason.
+def _affected_ids(db, node, include_subwork: bool) -> set[str]:
+    """Snapshot dependent step subtrees before closing any of them removes edges.
+
+    A person's Won't do has already removed edges touching the closed step. Its
+    removal events immediately follow that step's transition in the same write.
+    CROSS JOIN keeps the tree lookup indexed by both plan and parent, rather
+    than scanning all nodes in the plan for each affected subtree.
+    """
+    rows = db.execute(
+        "WITH RECURSIVE downstream(id) AS ("
+        " SELECT d.node_id FROM plan_node_dependencies d JOIN plan_nodes n ON n.id=d.node_id"
+        " WHERE d.depends_on_node_id=? AND n.parent_id=? AND n.workflow_step IS NOT NULL"
+        " UNION SELECT e.node_id FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id"
+        " WHERE ?='closed' AND e.event='dependency_removed' AND json_extract(e.payload_json,'$.depends_on_node_id')=?"
+        " AND e.rowid>(SELECT COALESCE(MAX(rowid),0) FROM plan_node_events WHERE node_id=? AND event='state_transition')"
+        " AND n.parent_id=? AND n.workflow_step IS NOT NULL"
+        " UNION SELECT d.node_id FROM plan_node_dependencies d JOIN downstream x ON d.depends_on_node_id=x.id"
+        " JOIN plan_nodes n ON n.id=d.node_id WHERE n.parent_id=? AND n.workflow_step IS NOT NULL),"
+        " affected(id) AS (SELECT id FROM downstream UNION SELECT ? WHERE ?"
+        " UNION SELECT n.id FROM affected a CROSS JOIN plan_nodes n ON n.parent_id=a.id AND n.plan_id=?)"
+        " SELECT id FROM affected",
+        (node["id"], node["parent_id"], node["state"], node["id"], node["id"], node["parent_id"],
+         node["parent_id"], node["id"], include_subwork, node["plan_id"]),
+    )
+    return {str(row["id"]) for row in rows}
+
+
+def fail_run(
+    node_id: str, common: dict, how: str | None = None, *, include_subwork: bool = True,
+) -> tuple[list[str], list[str]]:
+    """After a required step ends not done, close its dependent work with the reason.
 
     A run that is itself a required step of an outer run fails that run too, for the same ``how``.
+    Its independent inner work remains open while the outer dependents close.
     Returns the ids closed and the ids whose close was refused. The closes carry
     this module's provenance, which is how the run's record tells a step never
     reached from one an agent chose to skip. Work whose close is refused (a
@@ -86,11 +116,12 @@ def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[s
     reason = RUN_FAILED.format(title=node["title"], how=how)
     closed: list[str] = []
     refused: set[str] = set()
+    affected = _affected_ids(db, node, include_subwork)
     progress = True
     while progress:
         progress = False
         for open_id in open_nodes(db, node["parent_id"]):
-            if open_id in refused or service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
+            if open_id not in affected or open_id in refused or service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
                 continue
             try:
                 closure.close_node(
@@ -103,7 +134,7 @@ def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[s
             closed.append(open_id)
             progress = True
     still_open = [open_id for open_id in refused if service._node_row(db, open_id)["state"] not in service._TERMINAL_STATES]
-    outer_closed, outer_open = fail_run(node["parent_id"], common, how)
+    outer_closed, outer_open = fail_run(node["parent_id"], common, how, include_subwork=False)
     return closed + outer_closed, still_open + outer_open
 
 
