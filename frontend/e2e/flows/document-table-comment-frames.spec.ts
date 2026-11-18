@@ -3,7 +3,7 @@ import { closeComments, expectCommentsShown, openComments } from '../support/com
 import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { longPressOn } from '../support/tableCells';
+import { longPressThenSelect } from '../support/tableCells';
 
 /**
  * Where a comment's text lands. With the comment list open beside the editor (desktop), a navigation brings a table row and a
@@ -227,7 +227,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents phone', ()
 		await cell.tap();
 		const content = page.locator('.cm-md-cell-editor .cm-content');
 		await expect(content).toBeFocused();
-		await longPressOn(content, 'owner');
+		await longPressThenSelect(content, 'owner');
 		await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? ''), { message: 'the cell editor has selected text' }).not.toBe('');
 		await page.locator('.sel-comment').tap();
 		const panel = page.locator('.drawer-panel');

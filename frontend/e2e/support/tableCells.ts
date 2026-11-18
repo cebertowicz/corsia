@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
-import { inEditorView } from './liveDocument';
+import { inContentEditorView, inEditorView } from './liveDocument';
 
 /**
  * The document, layouts and helpers the table-cell editing specs share (`flows/doc-table-cell-*.spec.ts`). Frames for the
@@ -165,7 +165,7 @@ export const cellContent = (page: Page) => page.locator('.cm-md-cell-editor .cm-
 
 /** Send a long touch to the cell, then select the same word through the editor. The plain contenteditable control in
  * CI run 44216464622 shows that synthetic touch alone does not select text in this environment. */
-export async function longPressOn(root: Locator, words: string) {
+export async function longPressThenSelect(root: Locator, words: string) {
 	const page = root.page();
 	const point = await root.evaluate((el, words) => {
 		const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -209,9 +209,7 @@ export async function longPressOn(root: Locator, words: string) {
 		{ type: 'touchstart', inside: true, prevented: false },
 		{ type: 'touchend', inside: true, prevented: false },
 	]);
-	await root.evaluate((el, text) => {
-		const view = (el as any).cmTile?.root.view;
-		if (!view) throw new Error('Cell editor view is unavailable');
+	await inContentEditorView(root, (view, text) => {
 		const at = view.state.doc.toString().indexOf(text);
 		if (at < 0) throw new Error(`No "${text}" in cell editor`);
 		view.dispatch({ selection: { anchor: at, head: at + text.length } });
