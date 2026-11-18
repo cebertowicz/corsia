@@ -55,6 +55,15 @@ class Measure:
         return self.words >= self.unspaced
 
 
+def measure_text(text: str) -> Measure:
+    """Count the visible text of an update or decision."""
+    return Measure(
+        words=len(_WORD.findall(_UNSPACED.sub(" ", text))),
+        unspaced=len(_UNSPACED.findall(text)),
+        images=len(_IMAGE.findall(text)),
+    )
+
+
 def measure_file(path: Path) -> Measure | None:
     """Count what the file asks of a reader, or None when it cannot be read as text."""
     decoder = codecs.getincrementaldecoder("utf-8")()

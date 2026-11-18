@@ -145,15 +145,15 @@ async def test_native_path_reads_document_opens_outcome_from_the_canonical_resul
     assert mod.LABEL not in refused
 
 
-async def _bridge_result(name: str, arguments: dict, text: str, *, workspace=None) -> str:
+async def _bridge_result(name: str, arguments: dict, text: str, *, workspace=None, projected=None) -> str:
     from subagents.harness_tool_bridge import _with_notice_and_marker
     from subagents.harness_tool_publication import _foreground_result
     from tools.recorded_call import CompletedToolCall
 
     async def persist_delivery(**_kwargs):
         return SimpleNamespace(
-            invocation_id="inv", assistant_step_id="step",
-            render_for_model=lambda **_kw: text,
+            invocation_id="inv", assistant_step_id="step", content=text,
+            render_for_model=lambda **_kw: projected if projected is not None else text,
         )
 
     async def media_delivery(_delivery, _model):
@@ -215,6 +215,26 @@ async def test_harness_bridge_attaches_the_notice_to_an_update_that_links_a_docu
 
     assert result.startswith(receipt)
     assert "Your update links 'report.md' for the person to read: 100 words" in result
+
+
+@pytest.mark.asyncio
+async def test_harness_bridge_reads_decision_from_canonical_result_when_projection_is_bounded(db, monkeypatch):
+    from plans import public
+    from tests.test_plan_decisions import _draft_kwargs
+
+    monkeypatch.setattr("core.plan_notice.plan_notice", lambda **_kwargs: None)
+    plan = owner_plan(db)
+    source = task(db, plan.id, "Decision source")
+    decision = public.draft_decision(
+        plan.id, source_node_id=source.id, mutation_id="notice-draft",
+        actor=public.PlanActor("owner", "user", None), provenance="test", db=db,
+        **_draft_kwargs(),
+    ).result["decision"]
+    receipt = json.dumps({"decision": decision})
+    result = await _bridge_result("plan_decision", {"operation": "draft"}, receipt, projected="[bounded result]")
+    assert result.startswith("[bounded result]")
+    assert "Your decision:" in result
+    assert mod._CHECK in result
 
 
 @pytest.mark.asyncio

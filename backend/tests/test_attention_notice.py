@@ -88,9 +88,12 @@ def test_an_ask_states_the_documents_words_and_reading_time(db, events, tmp_path
     plan = owner_plan(db)
     document = _document(db, tmp_path / "proposal.md", _words(500))
 
-    notice = _notice(_ask(db, plan.id, "Proposal", document))
+    arguments = _ask(db, plan.id, "Proposal", document)
+    notice = _notice(arguments)
+    assert _notice(arguments, result="Error: refused") is None
+    assert notice.endswith(mod._CHECK)
 
-    assert notice == (
+    assert notice.split("\n", 1)[0] == (
         "[CORSIA attention notice] The person now has 'proposal.md' to read before they "
         "can answer: 500 words, at least 3 minutes to read. If they could act on less, "
         "cut the file now, before they open it: put first what they must decide or do, "
@@ -246,7 +249,7 @@ def test_opening_a_document_for_the_person_states_it(db, events, tmp_path, outco
     )
 
     # It is already open in front of them, so the close does not say "before they open it".
-    assert notice == (
+    assert notice.split("\n", 1)[0] == (
         "[CORSIA attention notice] You put 'report.md' in front of the person: "
         "476 words, at least 2 minutes to read. If they could act on less, cut the file "
         "now: put first what they must decide or do, and keep only what they need for it."
@@ -304,7 +307,7 @@ def test_a_file_that_cannot_be_read_says_so(db, events, tmp_path, content):  # n
 
     notice = _notice(_ask(db, plan.id, "Frame", document))
 
-    assert notice == (
+    assert notice.split("\n", 1)[0] == (
         "[CORSIA attention notice] The person now has 'frame.png' to read before they can "
         "answer: its length could not be measured, because the file could not be read as text."
     )
