@@ -2,7 +2,10 @@ import { untrack } from 'svelte';
 import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
 import { commentDraft, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
-import { captureComment, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
+import { selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
+import { postLive } from '$lib/stores/liveCommentPost';
+import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';
+import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
@@ -54,30 +57,25 @@ function refusalMessage(wire: string): string {
 // Once Comment is pressed the post goes on whether or not its composer is still open: closing it, another card, another
 // tab or the viewer going away never aborts it. Only Cancel does (`discardCommentDraft`), and a reconnect, whose old
 // session can no longer place the comment (the composer says so).
-async function postLiveComment(draft: CommentDraft, text: string, context: Context, taggedAgentIds: string[], threadId: string | null, mentions: MentionOccurrence[]): Promise<string> {
+async function postLiveComment(draft: CommentDraft, text: string, context: Context, press: { clientId: string; again: boolean }, taggedAgentIds: string[], threadId: string | null, mentions: MentionOccurrence[]): Promise<string> {
 	const selection = draft.selection!;
 	cancelCommentCapture(draft.scope);
 	const controller = new AbortController(), sequence = (draft.sequence ?? 0) + 1;
 	commentDraft.update(value => value && value.identity === draft.identity ? { ...value, request: controller, sequence } : value);
 	const session = selection.session;
-	const attempt = async (): Promise<string> => {
-		const captured = await captureComment(selection, sequence, controller.signal);
-		try {
-			if (controller.signal.aborted) throw aborted();
-			return await addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId, taggedAgentIds, threadId, mentions);
-		} catch (error) {
-			session.releaseReservation(captured.clientId);
-			throw error;
-		}
-	};
+	const version = { body: text, tagged_agent_ids: taggedAgentIds };
+	const attempt = (again: boolean) => postLive({ selection, clientId: press.clientId, again, seq: sequence, signal: controller.signal, version }, (captured) => {
+		if (controller.signal.aborted) throw aborted();
+		return addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId, taggedAgentIds, threadId, mentions, press.again);
+	});
 	try {
-		return await attempt();
+		return await attempt(press.again);
 	} catch (error) {
 		// The server lost the range between capture and save: capture the still-tracked selection again before giving up.
 		// A document that no longer takes comments is not a lost range: a second attempt would only be refused again.
 		const refused = error instanceof Error && error.message.startsWith('409 ') && !isNotCommentable(error);
 		if (!refused || !selectionRange(selection) || controller.signal.aborted) throw error;
-		return attempt();
+		return attempt(false);
 	}
 }
 
@@ -127,7 +125,11 @@ export function createViewerCommentDraft(context: Context) {
 	});
 	$effect(() => { if (posted && !context.awaitsMark(posted.id)) posted = null; });
 	/** Cancel, the one way to drop typed text. */
-	function cancel(): void { posted = null; keptCommentDrafts.forget(context.keepKey()); discardCommentDraft(context.scope()); context.onClose(); }
+	function cancel(): void {
+		posted = null;
+		forgetDraft(keptCommentDrafts.get(context.keepKey())?.clientId);
+		keptCommentDrafts.forget(context.keepKey()); discardCommentDraft(context.scope()); context.onClose();
+	}
 	/** What the composer holds, kept for this document until it posts or is cancelled. */
 	function setBody(body: string): void {
 		setCommentBody(body, context.scope());
@@ -155,17 +157,20 @@ export function createViewerCommentDraft(context: Context) {
 		const mine = (update: (value: CommentDraft) => CommentDraft | null) => commentDraft.update(value => value && value.identity === draft.identity ? update(value) : value);
 		keptCommentDrafts.clearError(key);
 		mine(value => ({ ...value, error: undefined }));
-		const id = await submitDocumentComment(async () => {
-			if (draft.selection) return postLiveComment(draft, text, context, taggedAgentIds, threadId, mentions);
-			const artifactId = await context.ensureArtifactId();
+		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
+		const press = keptCommentDrafts.claim(key, text, tags);
+		const id = await timedPost(press.clientId, () => submitDocumentComment(async () => {
+			if (draft.selection) return postLiveComment(draft, text, context, press, taggedAgentIds, threadId, mentions);
+			const artifactId = await timed(press.clientId, 'ens', () => context.ensureArtifactId());
 			if (!artifactId) throw new Error('Document artifact is unavailable.');
-			return addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, undefined, taggedAgentIds, threadId, mentions);
+			return addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again);
 		}, (toastId, message) => {
 			// Open or closed, the composer keeps the text with why it did not post, here and in the next composer on this document.
-			keptCommentDrafts.fail(key, text, tags, message);
+			// Text changed since an earlier version was stored goes out as a new comment on the next press.
+			keptCommentDrafts.fail(key, text, tags, message, message === EARLIER_VERSION_POSTED);
 			mine(value => ({ ...value, error: message }));
 			context.onFailure(toastId, message);
-		}, draft.selection ? liveFailureMessage : undefined);
+		}, draft.selection ? liveFailureMessage : undefined));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not.
 		keptCommentDrafts.forget(key);
 		if (!current()) mine(() => null);

@@ -124,7 +124,7 @@ describe('ImageCommentLightbox', () => {
 		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep this');
 		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		expect(post.mock.calls.map((args) => args[6])).toEqual(['old', 'new']);
+		expect(post.mock.calls.map((args) => args[7])).toEqual(['old', 'new']);
 		clearTabViewState('thread', 'tab');
 	});
 	it('shows the document jump control for replies arriving while its image is open', async () => {
@@ -557,7 +557,7 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
-			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], []);
+			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], [], { clientId: expect.any(String), again: false });
 		});
 
 		it('opens at the comment it was opened on, its card at its tag', async () => {

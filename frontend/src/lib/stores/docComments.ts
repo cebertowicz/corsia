@@ -6,11 +6,15 @@ import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { copyStamp, heldIds, shownStamp, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
+import { COMMENT_LOOKUP_TIMEOUT_MS } from '$lib/api/boundedRequest';
+import { timed } from './commentPostTiming';
+import { checkVersion, EarlierVersionPosted, type DraftVersion, type PostFields } from './commentVersion';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapCommentRange } from '$lib/cm/comment-range';
 
 export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
+export { EARLIER_VERSION_POSTED, EarlierVersionPosted, type DraftVersion } from './commentVersion';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
 	for (const r of rows) {
@@ -21,19 +25,55 @@ function findById(rows: ServerComment[], id: string): ServerComment | null {
 	return null;
 }
 
-export async function postReconciled(
-	artifactId: string,
-	clientId: string,
-	c: Parameters<typeof postComment>[1]
-): Promise<ServerComment> {
+/**
+ * The comment stored under `clientId`, looked for within COMMENT_LOOKUP_TIMEOUT_MS; null when there is none or the look
+ * failed. With `again` (an earlier press used the id) it must hold this press's version (`checkVersion`).
+ */
+async function findPosted(artifactId: string, clientId: string, c: DraftVersion, again: boolean): Promise<ServerComment | null> {
+	const result = await timed(clientId, 'rec', () => fetchComments(artifactId, COMMENT_LOOKUP_TIMEOUT_MS)).catch(() => null);
+	const found = result && findById(result.comments, clientId);
+	return found && again ? checkVersion(found, c) : found;
+}
+
+/**
+ * Post under `clientId`; a POST that fails looks for the comment it may have stored. Only when `again` (an earlier press
+ * of Comment used the id) can the stored comment be another press's, so only then is its version checked.
+ */
+export async function postReconciled(artifactId: string, clientId: string, c: PostFields, again = false): Promise<ServerComment> {
+	let row: ServerComment;
 	try {
-		return await postComment(artifactId, { ...c, client_id: clientId });
+		row = await postComment(artifactId, { ...c, client_id: clientId });
 	} catch (e) {
-		const result = await fetchComments(artifactId).catch(() => null);
-		const found = result && findById(result.comments, clientId);
+		const found = await findPosted(artifactId, clientId, c, again);
 		if (found) return found;
 		throw e;
 	}
+	return again ? checkVersion(row, c) : row;
+}
+
+/**
+ * A new comment's stored row, shown. When the comment stored under the draft's id was posted from other text or tags,
+ * that one shows and this fails with `EarlierVersionPosted`, so the draft keeps the changes.
+ */
+async function showing(artifactId: string, find: () => Promise<ServerComment | null>): Promise<string | null> {
+	try {
+		const row = await find();
+		if (row) upsertTop(artifactId, row);
+		return row?.id ?? null;
+	} catch (error) {
+		if (error instanceof EarlierVersionPosted) upsertTop(artifactId, error.row);
+		throw error;
+	}
+}
+
+/** Post a new comment under its draft's id and show it (`showing`). */
+export async function postTop(artifactId: string, clientId: string, c: PostFields, again = false): Promise<string> {
+	return (await showing(artifactId, () => postReconciled(artifactId, clientId, c, again)))!;
+}
+
+/** Show the comment an earlier press of Comment stored under `clientId`, if one did (`showing`); null when none is found. */
+export function showPosted(artifactId: string, clientId: string, c: DraftVersion): Promise<string | null> {
+	return showing(artifactId, () => findPosted(artifactId, clientId, c, true));
 }
 
 
@@ -141,14 +181,16 @@ export function upsertTop(artifactId: string, row: ServerComment) {
 	});
 }
 
-export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
-	const cid = clientId ?? newClientId();
-	const row = await postReconciled(artifactId, cid, {
+export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], again = false): Promise<string> {
+	return postTop(artifactId, clientId ?? newClientId(), commentFields(anchor, from, to, text, author, liveCapture, taggedAgentIds, threadId, mentions), again);
+}
+
+/** What `addComment` posts; a live retry looks for its stored comment with the same fields (`findPosted`). */
+export function commentFields(anchor: string, from: number, to: number, text: string, author: CommentAuthor = 'you', liveCapture = false, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): PostFields {
+	return {
 		body: text, anchor_text: anchor, from_off: from, to_off: to, ...(liveCapture ? { live_capture: true } : {}),
 		author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
-	});
-	upsertTop(artifactId, row);
-	return row.id;
+	};
 }
 
 

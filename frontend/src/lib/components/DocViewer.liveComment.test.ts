@@ -315,7 +315,8 @@ it('after a store mismatch, reopening the composer and submitting sends one rese
 	await answer(retry);
 	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
 	expect(api.postComment.mock.calls[0][1]).toMatchObject({ client_id: retry.reserve.client_id, anchor_text: 'beta', body: 'Keep my body', live_capture: true });
-	expect(retry.reserve.client_id).not.toBe(refused.reserve.client_id);
+	// One id per draft: the press after a refused capture reserves under the same id, which the refusal released.
+	expect(retry.reserve.client_id).toBe(refused.reserve.client_id);
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(asks()).toHaveLength(2);
 	expect(api.postComment).toHaveBeenCalledOnce();

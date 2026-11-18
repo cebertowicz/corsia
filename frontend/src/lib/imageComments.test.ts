@@ -47,7 +47,7 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, [], { clientId: expect.any(String), again: false });
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
@@ -60,7 +60,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
 		await comments.submit('@Agent', ['agent'], mentions);
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions, { clientId: expect.any(String), again: false });
 	});
 
 	it('keeps a tagged draft and explains a missing viewing thread', async () => {
@@ -132,7 +132,7 @@ describe('image comments', () => {
 		// The kept draft keeps its picked tags with its text.
 		expect(clearTags).not.toHaveBeenCalled();
 		await comments.submit('Keep this');
-		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], []);
+		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], [], expect.objectContaining({ clientId: expect.any(String) }));
 		expect(comments.selectedId).toBe('new');
 	});
 

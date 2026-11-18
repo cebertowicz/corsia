@@ -1,7 +1,7 @@
 import { fetchContent, markArtifactVerified, RequestRefused } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
+import { ackComment, addReply, EarlierVersionPosted, loadComments, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -42,7 +42,8 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 		console.error('comment failed', error);
 		// A refusal with a named reason has the same cause on every surface, so its message comes before the surface's own.
 		// The not-commentable sentence is the server's, shown as given: it is never the surface's "try again".
-		const message = notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again";
+		// An earlier version stored under the draft's id is shown, so its sentence says the changes are kept, on every surface.
+		const message = (error instanceof EarlierVersionPosted ? error.message : undefined) ?? notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again";
 		const toastId = toasts.show(message, 'error');
 		onFailure?.(toastId, message);
 		throw error;

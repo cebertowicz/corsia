@@ -7,7 +7,9 @@ import { createCommentRetryToast, createThreadActions, submitDocumentComment } f
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
-import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
+import { addRegionComment, moveRegion, type ImagePress } from '$lib/stores/imageRegionComments';
+import { forgetDraft, timedPost } from '$lib/stores/commentPostTiming';
+import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
 import { toasts } from '$lib/stores/toast';
 
@@ -45,7 +47,7 @@ export function createImageComments(context: {
 	 * Posts a new region comment; an image inside a document anchors it on the image's markdown. Without it the
 	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
 	 */
-	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>; failure?: (error: unknown) => string } | null;
+	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: ImagePress) => Promise<string>; failure?: (error: unknown) => string } | null;
 }) {
 	const ui = createCommentSurfaceState(context.restoreFocus);
 	const key = () => context.draftKey?.() ?? imageDraftKey(context.artifactId());
@@ -81,6 +83,7 @@ export function createImageComments(context: {
 	}
 	/** The composer's Cancel, the one way to drop typed text. */
 	function cancel() {
+		forgetDraft(keptCommentDrafts.get(key())?.clientId);
 		keptCommentDrafts.forget(key());
 		close();
 		draftBody = '';
@@ -134,12 +137,14 @@ export function createImageComments(context: {
 		keptCommentDrafts.clearError(key());
 		draftError = undefined;
 		let id: string, failure = '';
+		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
+		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags);
 		try {
-			id = await submitDocumentComment(
-				() => (post ? post.create(region, text, taggedAgentIds, mentions) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions)),
+			id = await timedPost(press.clientId, () => submitDocumentComment(
+				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
 				(toastId, message) => { retryToast.remember(toastId); failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
-			);
+			));
 		} catch (error) {
 			if (await refreshAfterStale(error)) {
 				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next.
@@ -150,7 +155,7 @@ export function createImageComments(context: {
 				ui.close();
 				boxMode = true;
 			} else if (failure) {
-				keptCommentDrafts.fail(key(), text, tags, failure);
+				keptCommentDrafts.fail(key(), text, tags, failure, failure === EARLIER_VERSION_POSTED);
 				if (mentionSelection === tags) draftError = failure;
 			}
 			throw error;

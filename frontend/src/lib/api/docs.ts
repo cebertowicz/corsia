@@ -4,7 +4,11 @@ import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes';
-import { apiFetch, type ApiInit } from './request';
+import { apiFetch } from './request';
+import { COMMENT_POST_TIMEOUT_MS, readWithin } from './boundedRequest';
+import { noteServerTiming, timed, timingHeaders } from '$lib/stores/commentPostTiming';
+
+export { COMMENT_POST_TIMEOUT_MS, fetchWithTimeout, PostTimeoutError } from './boundedRequest';
 
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
@@ -27,28 +31,6 @@ export async function ok(res: Response) {
 		throw new RequestRefused(`${res.status} ${wellFormed ? detail : detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
-}
-
-export class PostTimeoutError extends Error {
-	constructor(ms: number) {
-		super(`request timed out after ${ms}ms (may have committed server-side)`);
-		this.name = 'PostTimeoutError';
-	}
-}
-
-export const COMMENT_POST_TIMEOUT_MS = 12_000;
-
-export async function fetchWithTimeout(input: string, init: ApiInit, ms: number): Promise<Response> {
-	const ctrl = new AbortController();
-	const timer = setTimeout(() => ctrl.abort(), ms);
-	try {
-		return await apiFetch(input, { ...init, signal: ctrl.signal });
-	} catch (e) {
-		if (e instanceof DOMException && e.name === 'AbortError') throw new PostTimeoutError(ms);
-		throw e;
-	} finally {
-		clearTimeout(timer);
-	}
 }
 
 export interface TreeNode {
@@ -145,13 +127,15 @@ export async function writeContent(path: string, text: string, opts: { projectId
 	}));
 }
 
-export async function registerArtifact(path: string, opts: { projectId?: string | null; threadId?: string | null } = {}): Promise<ArtifactRow> {
-	const data = await ok(await apiFetch(`/api/files/register`, {
+/** With `within`, the answer and its body come inside that many milliseconds or it fails with `PostTimeoutError`. */
+export async function registerArtifact(path: string, opts: { projectId?: string | null; threadId?: string | null; within?: number } = {}): Promise<ArtifactRow> {
+	const init = {
 		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path, project_id: opts.projectId ?? null, thread_id: opts.threadId ?? null })
-	}));
+	};
+	const data = opts.within ? await readWithin(`/api/files/register`, init, opts.within, ok) : await ok(await apiFetch(`/api/files/register`, init));
 	return data.artifact;
 }
 
@@ -174,19 +158,22 @@ export async function markArtifactVerified(artifactId: string): Promise<Artifact
 	return (await response.json()).artifact;
 }
 
-export async function fetchComments(artifactId: string): Promise<CommentList> {
-	const data = await ok(await apiFetch(`/api/artifacts/${artifactId}/comments`, { sessionInAddress: true }));
-	return data;
+/** With `within`, the answer and its body come inside that many milliseconds or it fails with `PostTimeoutError`. */
+export async function fetchComments(artifactId: string, within?: number): Promise<CommentList> {
+	const init = { sessionInAddress: true, headers: timingHeaders() };
+	return within ? readWithin(`/api/artifacts/${artifactId}/comments`, init, within, ok) : ok(await apiFetch(`/api/artifacts/${artifactId}/comments`, init));
 }
 
 export async function postComment(
 	artifactId: string,
 	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
-	const data = await ok(await fetchWithTimeout(
+	// The answer and its body share one deadline: a post never waits on either without end.
+	const data = await timed(c.client_id, 'post', () => readWithin(
 		`/api/artifacts/${artifactId}/comments`,
-		{ sessionInAddress: true, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
-		COMMENT_POST_TIMEOUT_MS
+		{ sessionInAddress: true, method: 'POST', headers: { 'Content-Type': 'application/json', ...timingHeaders(c.client_id) }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
+		COMMENT_POST_TIMEOUT_MS,
+		(response) => { noteServerTiming(c.client_id, response.headers.get('server-timing')); return ok(response); }
 	));
 	return data.comment;
 }
