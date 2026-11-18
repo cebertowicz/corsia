@@ -76,7 +76,11 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(first).toBeVisible();
 			await expect(first.locator('.ct-orphan')).toHaveCount(0);
 			await expect(second).toBeVisible();
-			await expect(second.locator('.ct-orphan')).toBeVisible();
+			const secondId = await second.getAttribute('data-comment-id');
+			expect(secondId).toBeTruthy();
+			await expect(reader.locator(`.cm-comment-anchor[data-comment-ids*="${secondId}"]`)).toHaveCount(0);
+			await expect(second.locator('[data-comment-jump]')).toHaveAttribute('aria-label', 'Show comment: text unavailable');
+			await expect(second.locator('[data-comment-jump]')).toHaveText(`Text changed: “${quote}”`);
 		} finally {
 			await writerContext.close();
 			await readerContext.close();
