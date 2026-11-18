@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import authenticate
@@ -159,6 +163,66 @@ async def get_messages(
         "turn_summaries": turn_summaries,
         **({'chat_reply_items': chat_replies} if chat_replies else {}),
     }
+
+
+_CARD_REFRESH_LIMITS = json.loads(Path(__file__).with_name("card_refresh_limits.json").read_text())
+
+
+class CardRefreshRange(BaseModel):
+    from_id: str
+    to_id: str
+
+
+class CardRefreshRequest(BaseModel):
+    message_ids: list[str] = Field(default_factory=list)
+    turn_range: CardRefreshRange | None = None
+
+
+@router.post("/threads/{thread_id}/messages/refresh")
+async def refresh_message_cards(thread_id: str, body: CardRefreshRequest, token: str):
+    """Read the same individual ranges as card refresh, in one request."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    if len(body.message_ids) > _CARD_REFRESH_LIMITS["max_carded"]:
+        raise HTTPException(400, detail="Too many carded message IDs")
+
+    def _query():
+        db = get_db()
+        try:
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            if thread is None:
+                return None
+            restriction = transcript_restriction(Reader.from_user(user), thread)
+            if restriction is not None:
+                return restriction
+            ranges = []
+            if body.turn_range is not None:
+                ranges.append((body.turn_range.from_id, body.turn_range.to_id))
+            ranges.extend((mid, mid) for mid in body.message_ids)
+            rows = []
+            for start, end in ranges:
+                page = read_authorized_run_range(
+                    db, thread_id, _CARD_REFRESH_LIMITS["turn_range_limit"],
+                    start, end, None, user_id=user["id"],
+                )
+                if page is None:
+                    return None
+                _attach_page_extras(db, thread_id, user["id"], page)
+                rows.extend(page["messages"])
+            return rows
+        finally:
+            db.close()
+
+    try:
+        result = await run_read(_query)
+    except InvertedRange as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(404)
+    if isinstance(result, RestrictedRead):
+        return {"messages": [], **result.payload()}
+    return {"messages": result}
 
 
 @router.get(

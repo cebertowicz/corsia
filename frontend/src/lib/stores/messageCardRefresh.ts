@@ -13,37 +13,47 @@ import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHis
 import { token } from './auth';
 import { activeThreadId, messages, type Message } from './threads';
 import { apiFetch } from '$lib/api/request';
-
 const DEBOUNCE_MS = 400;
 /** The newest carded messages re-read per nudge; older ones refresh when scrolled to and re-read. */
-const MAX_CARDED = 12;
-const TURN_RANGE_LIMIT = 50;
+export const MAX_CARDED = 12;
+export const TURN_RANGE_LIMIT = 50;
 
 type Range = { from: string; to: string };
-/** The messages to re-read: those showing cards, and after a turn ends, that turn's own steps. */
-export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
+type Selection = { messageIds: string[]; turn: Range | null };
+
+function selectionToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Selection {
 	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic);
-	const ranges: Range[] = [];
 	let turnFirst = -1;
+	let turn: Range | null = null;
 	if (turnEnded) {
 		const lastUser = own.map((row) => row.role).lastIndexOf('user');
 		turnFirst = own.findIndex((row, index) => index > lastUser && row.role === 'assistant');
-		const turn = turnFirst >= 0 ? own.slice(turnFirst).slice(-TURN_RANGE_LIMIT) : [];
-		if (turn.length) ranges.push({ from: turn[0].id, to: turn.at(-1)!.id });
+		const steps = turnFirst >= 0 ? own.slice(turnFirst).slice(-TURN_RANGE_LIMIT) : [];
+		if (steps.length) turn = { from: steps[0].id, to: steps.at(-1)!.id };
 	}
-	for (const row of own.filter((row, index) => (
+	const messageIds = own.filter((row, index) => (
 		row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst)
-	)).slice(-MAX_CARDED)) {
-		ranges.push({ from: row.id, to: row.id });
-	}
-	return ranges;
+	)).slice(-MAX_CARDED).map((row) => row.id);
+	return { messageIds, turn };
 }
 
-async function read(threadId: string, range: Range): Promise<unknown[]> {
-	const params = new URLSearchParams({
-		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to,
+/** The same page contexts as the previous individual range reads. */
+export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
+	const selection = selectionToRefresh(rows, threadId, turnEnded);
+	return [
+		...(selection.turn ? [selection.turn] : []),
+		...selection.messageIds.map((id) => ({ from: id, to: id })),
+	];
+}
+
+async function read(threadId: string, selection: Selection): Promise<unknown[]> {
+	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages/refresh`, {
+		method: 'POST', sessionInAddress: true, headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			message_ids: selection.messageIds,
+			turn_range: selection.turn ? { from_id: selection.turn.from, to_id: selection.turn.to } : null,
+		}),
 	});
-	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
 	if (!res.ok) return [];
 	const page = await res.json();
 	return Array.isArray(page?.messages) ? page.messages : [];
@@ -51,26 +61,38 @@ async function read(threadId: string, range: Range): Promise<unknown[]> {
 
 let pending: ReturnType<typeof setTimeout> | null = null;
 let turnEnded = false;
+let inFlight = false;
+let trailing = false;
 
 async function refresh(): Promise<void> {
 	const threadId = get(activeThreadId);
 	const ended = turnEnded;
 	turnEnded = false;
 	if (!threadId || !get(token)) return;
-	const ranges = rangesToRefresh(get(messages), threadId, ended);
-	if (!ranges.length) return;
+	const selection = selectionToRefresh(get(messages), threadId, ended);
+	if (!selection.turn && !selection.messageIds.length) return;
+	inFlight = true;
 	try {
-		const pages = await Promise.all(ranges.map((range) => read(threadId, range)));
+		const rows = await read(threadId, selection);
 		// A read that returns after the thread on screen changed is dropped.
 		if (get(activeThreadId) !== threadId) return;
-		const rows = pages.flat();
 		if (rows.length) messages.update((current) => mergeFetchedHistoryRows(current, hydrateFetchedMessages(rows as never)));
 	} catch (error) {
 		console.error('[message cards] refresh failed', threadId, error);
+	} finally {
+		inFlight = false;
+		if (trailing) {
+			trailing = false;
+			void refresh();
+		}
 	}
 }
 
 function schedule(): void {
+	if (inFlight) {
+		trailing = true;
+		return;
+	}
 	if (pending) clearTimeout(pending);
 	pending = setTimeout(() => {
 		pending = null;
@@ -83,6 +105,7 @@ export function _cancelPendingMessageCardRefreshForTests(): void {
 	if (pending) clearTimeout(pending);
 	pending = null;
 	turnEnded = false;
+	trailing = false;
 }
 
 let watching = false;
