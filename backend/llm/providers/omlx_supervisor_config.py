@@ -11,6 +11,14 @@ from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_
 log = logging.getLogger("llm.providers.omlx.supervisor")
 
 
+def is_managed_server(server_id: str) -> bool:
+    """Resolve launch ownership from the canonical registered server classification."""
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_server
+
+    return is_corsia_managed_server(get_server(server_id) or {})
+
+
 def resolve_settings(cfg: dict) -> dict:
     """Merge row metadata and stored credentials, with explicit configuration winning."""
     sid = cfg.get("server_id")

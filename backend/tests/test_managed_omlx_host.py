@@ -228,3 +228,29 @@ def test_delayed_success_status_write_cannot_overwrite_replacement(monkeypatch):
 
     asyncio.run(race())
     assert network_discovery.get_server(sid)["memory_used_mb"] != 999
+
+
+@pytest.mark.parametrize("host", ["::1", "192.0.2.5"])
+@pytest.mark.parametrize("preload", [True, False])
+def test_new_managed_target_is_registered_before_authenticated_readiness(monkeypatch, host, preload):
+    import httpx
+    from llm import network_discovery, network_endpoints
+    from llm.providers import omlx_supervisor as sup
+
+    sid = network_discovery.upsert_server("omlx", "host-readiness-origin", "Managed", "127.0.0.1", 9876, "online")
+    monkeypatch.setattr(sup, "_process_exited", lambda _: False)
+    monkeypatch.setattr(sup, "watch", lambda *_: None)
+    seen = []
+
+    def respond(request):
+        candidate = next(ep for ep in network_endpoints.get_endpoints(sid) if ep["host"] == host)
+        assert candidate["last_ok_at"] is None
+        assert network_endpoints.get_active_endpoint(sid)["host"] == "127.0.0.1"
+        seen.append(request.url)
+        return httpx.Response(200, json={"status": "ok", "data": []})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(sup.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    assert asyncio.run(sup._confirm_ready(sid, host, 9876, 12345, timeout_s=1, require_preload=preload, managed=True)) is None
+    assert len(seen) == 1 and seen[0].host == host
+    assert network_endpoints.get_active_endpoint(sid)["host"] == host

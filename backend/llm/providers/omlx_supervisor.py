@@ -14,7 +14,7 @@ import httpx
 
 from infra.config import RUNTIME_DIR
 from infra.db_async import run_in_db
-from llm.network_endpoints import lan_base, models_probe_url
+from llm.network_endpoints import lan_base, models_probe_url, upsert_endpoint
 from llm.omlx_release import OMLX_VERSION
 from llm.providers import omlx_process as process
 from llm.providers import omlx_restart as restart
@@ -22,6 +22,7 @@ from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_
 from llm.providers.omlx_supervisor_endpoints import mark_endpoint_alive as _mark_endpoint_alive
 from llm.providers.omlx_supervisor_config import (
     client_host as _client_host,
+    is_managed_server as _is_managed_omlx_server,
     listen_host as _listen_host,
     managed_bind_host as _managed_bind_host,
     managed_launch_settings as _managed_launch_settings,
@@ -99,13 +100,6 @@ async def _await_exit(pid: int, seconds: float) -> bool:
             return False
         await asyncio.sleep(0.2)
     return True
-
-
-def _is_managed_omlx_server(server_id: str) -> bool:
-    from llm.managed_omlx_binary import is_corsia_managed_server
-    from llm.network_discovery import get_server
-
-    return is_corsia_managed_server(get_server(server_id) or {})
 
 
 async def _wait_for_healthy(
@@ -209,6 +203,8 @@ async def _confirm_ready(
 ) -> dict[str, Any] | None:
     """Complete startup or adoption through the same readiness and watch owner."""
     try:
+        if managed:
+            await run_in_db(upsert_endpoint, sid, host, ok=False)
         if timeout_s is not None:
             health = await _wait_for_healthy(
                 host, port, timeout_s=timeout_s, server_id=sid, pid=pid,
