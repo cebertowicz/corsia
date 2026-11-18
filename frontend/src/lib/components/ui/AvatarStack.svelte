@@ -10,7 +10,7 @@
 		active?: boolean;
 	};
 
-	let { people, max = 3, measure = false }: { people: AvatarParticipant[]; max?: number; measure?: boolean } = $props();
+	let { people, max = 3, measure = false, separateMore = false }: { people: AvatarParticipant[]; max?: number; measure?: boolean; separateMore?: boolean } = $props();
 	const visible = $derived(people.slice(0, max));
 	const remaining = $derived(Math.max(0, people.length - visible.length));
 	const remainingNames = $derived(people.slice(max).map((person) => person.name).join(', '));
@@ -30,7 +30,7 @@
 	}
 </script>
 
-<div class="stack" role="group" aria-label={`${people.length} participants`} onfocusout={closeWhenFocusLeaves}>
+<div class="stack" class:separate-more={separateMore && max === 1} role="group" aria-label={`${people.length} participants`} onfocusout={closeWhenFocusLeaves}>
 	{#each visible as person (participantId(person))}
 		{#if person.detail}
 			<button
@@ -67,6 +67,7 @@
 	.stack { display: inline-flex; align-items: center; }
 	.stack > .participant-trigger, .stack > .participant-slot, .stack > .more { margin-left: -5px; }
 	.stack > :first-child { margin-left: 0; }
+	.stack.separate-more > .more { margin-left: var(--space-1); }
 	.stack :global(.avatar) { border: 2px solid var(--bg-primary); }
 	.participant-slot { display: inline-flex; }
 	.participant-trigger { display: inline-flex; margin: 0; padding: 0; border: 0; border-radius: var(--radius-circle); background: none; cursor: pointer; }

@@ -49,9 +49,9 @@
 
 {#if ready && artifactId && view?.artifactId === artifactId && view.instanceId === instanceId && view.participants.length}
 	<span class="presence-row" aria-label="Recent document activity" bind:this={row}>
-		<AvatarStack people={view.participants} max={maximum} />
+		<AvatarStack people={view.participants} max={maximum} separateMore />
 		<span class="measures" aria-hidden="true" inert>
-			{#each [3, 1, 0] as max}<span data-presence-measure={max}><AvatarStack people={view.participants} {max} measure /></span>{/each}
+			{#each [3, 1, 0] as max}<span data-presence-measure={max}><AvatarStack people={view.participants} {max} measure separateMore /></span>{/each}
 		</span>
 	</span>
 {/if}
