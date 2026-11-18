@@ -306,7 +306,7 @@
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
 		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
-	// A refused accept (kind `stale`) goes to `suggestionRefusals` instead, which also shows its card as orphaned.
+	// Stale and missing-file accept refusals go to `suggestionRefusals`, which also shows the card as orphaned.
 	const cardErrors = $derived({
 		...Object.fromEntries(Object.entries(artifactId ? $suggestionRefusals[artifactId] ?? {} : {}).map(([id, refusal]) => [id, refusalMessage(refusal)])),
 		...Object.fromEntries(Object.entries(decisions.outcome.errors).filter(([, message]) => message)),
