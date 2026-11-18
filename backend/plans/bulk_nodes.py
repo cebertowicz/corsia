@@ -96,7 +96,7 @@ def close_many(
         ``{"closed": [{"node_id", "revision"}], "refused": [{"node_id", "reason"}]}``,
         each in the caller's order, plus ``next`` when the call freed a slot.
     """
-    from plans import boundary_after, closure
+    from plans import boundary_after, closure, run_end
     from plans.workflow_fields import refuse_required_skip
 
     held = _held_slots(db, node_ids)
@@ -108,9 +108,10 @@ def close_many(
         # being done also fails its run (``plans.run_end``), so refusing it here is
         # what keeps a bulk cleanup from quietly ending a run.
         refuse_required_skip(db, node_id)
+        below = run_end.close_run(node_id, reason, common)
         node = closure.close_node(node_id, reason=reason, **common)
         summaries[node_id] = boundary_after.after_close(
-            node_id, service.CLOSED, {}, common, executor=acting, bulk=True,
+            node_id, service.CLOSED, {}, common, executor=acting, bulk=True, closed_below=below,
         )
         return node
 
