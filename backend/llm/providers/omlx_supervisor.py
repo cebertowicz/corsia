@@ -214,7 +214,7 @@ async def _confirm_ready(
                 if require_preload and health == "timed_out":
                     await restart.require_stopped(lambda: _stop_server({"server_id": sid, "host": host, "port": port}))
                 return _failed_boot_result(sid, host, port, pid, reason=health, timeout_s=timeout_s)
-        await run_in_db(_mark_endpoint_alive, sid, host, port, managed)
+        await run_in_db(_mark_endpoint_alive, sid, host, port, managed and timeout_s is not None)
         watch(sid, pid)
         return None
     except asyncio.CancelledError:
@@ -389,7 +389,7 @@ def reconcile(cfg: dict) -> dict[str, Any]:
     if _process_alive(pid):
         if host and port:
             managed = _is_managed_omlx_server(sid)
-            _mark_endpoint_alive(sid, _client_host(host) if managed else host, int(port), managed)
+            _mark_endpoint_alive(sid, _client_host(host) if managed else host, int(port), False)
         return {"adopted": True, "cleared": False, "pid": pid}
     _clear_pid(sid)
     return {"adopted": False, "cleared": True, "pid": pid}
