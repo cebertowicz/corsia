@@ -30,7 +30,7 @@
 	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, unfocused = 'input', opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -52,6 +52,7 @@
 		inMargin?: boolean;
 		/** Scroll this reply into its owning sheet when a short visual viewport could hide it. */
 		keepReplyVisible?: boolean;
+		unfocused?: 'input' | 'card-top';
 		/** A chat thread the person opened (picked its margin card, opened its popover or sheet): that reads its unread replies, as picking a document thread does. */
 		opened?: boolean;
 		/** This thread's key in `pickedComments`: a press on its highlight reads it, even while it is already open. A document thread's own id by default; a chat thread has one only as a margin card (`chatPickKey`). */
@@ -221,7 +222,7 @@
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} {unfocused} wholeCard={el} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -281,7 +282,7 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} {unfocused} wholeCard={el} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
 			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->

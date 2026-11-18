@@ -52,6 +52,45 @@ function sheet() {
 }
 
 describe('keepInView', () => {
+	it('keeps an unfocused oversized list card below the controls as the sheet shrinks', () => {
+		const { owner, card, field, shrink } = sheet();
+		card.scrollIntoView = vi.fn((options) => {
+			if ((options as ScrollIntoViewOptions).block === 'start') scrollTop = CARD.top;
+		});
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: false, whole: card, unfocused: 'card-top' });
+		action.update({ enabled: true, whole: card, unfocused: 'card-top' });
+		shrink(150);
+		expect(card.scrollIntoView).toHaveBeenLastCalledWith({ block: 'start' });
+		expect(card.getBoundingClientRect().top).toBeGreaterThanOrEqual(owner.getBoundingClientRect().top);
+		action.destroy();
+	});
+
+	it('reveals an oversized list card’s input when focused or when typing turned the action on', () => {
+		height = 150;
+		const { card, field } = sheet();
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: false, whole: card, unfocused: 'card-top' });
+		field.focus();
+		action.update({ enabled: true, whole: card, unfocused: 'card-top' });
+		expect(field.scrollIntoView).toHaveBeenCalledTimes(1);
+		field.blur();
+		action.update({ enabled: true, whole: card, unfocused: 'card-top', typing: true });
+		expect(field.scrollIntoView).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	it('keeps the chat sheet’s unfocused input reveal and the default unchanged', () => {
+		height = 150;
+		const { card, field } = sheet();
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card, unfocused: 'input' });
+		action.update({ enabled: true, whole: card });
+		expect(field.scrollIntoView).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
 	it('keeps a picked card in view while its sheet shrinks, though its own scroll is read only after a further shrink', () => {
 		const { owner, card, field, reveals, shrink } = sheet();
 		const action = keepInView(field, { enabled: false, whole: card });

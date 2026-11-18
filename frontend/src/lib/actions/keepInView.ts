@@ -43,7 +43,8 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * instead of the node, so bringing a field into view never pushes the top of the
  * block it sits at the end of out of sight above and never clips the ring drawn
  * around that block; a block too tall for the scroller keeps the node-into-view
- * behaviour, and a node itself taller than the scroller shows its end.
+ * behaviour, and a node itself taller than the scroller shows its end. A caller may instead choose `card-top` for an
+ * unfocused, oversized block; focus or typing still keeps the field in view.
  *
  * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: while the node is revealed alone the
  * scroller carries that row's height as scroll padding, so the browser's own caret reveal after each typed character leaves it clear too, and
@@ -64,8 +65,10 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * over it: while the field has focus and the viewport got shorter, a field now outside the scroller's visible band is
  * scrolled back by the least that shows it. The person tapped to type, so that move is theirs.
  */
-export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
-	let { enabled, whole } = options;
+type Options = { enabled: boolean; whole?: HTMLElement; unfocused?: 'input' | 'card-top'; typing?: boolean };
+
+export function keepInView(node: HTMLElement, options: Options) {
+	let { enabled, whole, unfocused = 'input', typing = false } = options;
 	let frame = 0;
 	const owner = scroller(node);
 	const reading = owner?.matches('[data-reading-scroller]') ?? false;
@@ -87,15 +90,16 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		if (!enabled) return;
 		const room = owner ? roomOf(owner) + held : window.visualViewport?.height ?? window.innerHeight;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
-		const target = fits ? whole! : node;
-		const pinned = owner && !fits ? pinnedBottom(owner) : 0;
+		const showTop = !fits && !!whole && unfocused === 'card-top' && !typing && document.activeElement !== node;
+		const target = fits || showTop ? whole! : node;
+		const pinned = owner && !fits && !showTop ? pinnedBottom(owner) : 0;
 		if (owner && pinned !== held) {
 			const own = (parseFloat(getComputedStyle(owner).scrollPaddingBottom) || 0) - held;
 			owner.style.scrollPaddingBottom = `${own + pinned}px`;
 			held = pinned;
 		}
 		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
-		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
+		const block = showTop ? 'start' : !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
 		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
 		if (owner && pinned && target === node) {
 			// The box's rectangle includes its border, which is not scrollable room.
@@ -154,8 +158,8 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	queueMicrotask(reveal);
 
 	return {
-		update(next: { enabled: boolean; whole?: HTMLElement }) {
-			({ enabled, whole } = next);
+		update(next: Options) {
+			({ enabled, whole, unfocused = 'input', typing = false } = next);
 			reveal();
 		},
 		destroy() {
