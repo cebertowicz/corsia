@@ -74,6 +74,21 @@ def owed(db, node, executor: str) -> bool:
     return bool(description) and written_by_another(db, str(node["id"]), executor)
 
 
+def step_hint(db, node) -> dict:
+    """The just-selected agent step's delegation and sub-task affordances."""
+    if node["kind"] != "task" or node["workflow_step"] is None:
+        return {}
+    from plans.workflow_fields import creation_payload
+
+    if creation_payload(db, node["id"]).get("workflow_by") == "person":
+        return {}
+    node_id = str(node["id"])
+    return {"step_hint": (
+        f"You can hand this step to a worker (delegate_task with plan_node_id {node_id}) "
+        f"and add its smaller tasks under it (add with parent_id {node_id})."
+    )}
+
+
 def fact(db, node_id: str, executor: str) -> dict:
     """Return the description fact one handoff of a task carries.
 
@@ -88,12 +103,13 @@ def fact(db, node_id: str, executor: str) -> dict:
     from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap
 
     node = service._node_row(db, node_id)
-    if not owed(db, node, executor):
-        return {}
-    description = str(node["description"])
-    own_plan = service.ensure_plan("thread", executor, db=db)
-    text = bounded_field(db, node, own_plan.id)(description, cap, what="description")
-    return {RESULT_KEY: {"node_id": node_id, "text": text, "cut": text != description}}
+    result = step_hint(db, node)
+    if owed(db, node, executor):
+        description = str(node["description"])
+        own_plan = service.ensure_plan("thread", executor, db=db)
+        text = bounded_field(db, node, own_plan.id)(description, cap, what="description")
+        result[RESULT_KEY] = {"node_id": node_id, "text": text, "cut": text != description}
+    return result
 
 
 def measured(result: dict) -> dict:

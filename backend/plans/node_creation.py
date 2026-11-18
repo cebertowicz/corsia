@@ -33,7 +33,14 @@ def _validate_parent(
             "use add_follow_up on it"
         )
     if parent["kind"] == "task":
-        raise service.PlanInputError("task nodes are leaves and cannot contain children")
+        if parent["workflow_step"] is None:
+            raise service.PlanInputError("task nodes are leaves and cannot contain children unless they are workflow steps")
+        from plans.workflow_fields import creation_payload
+
+        if creation_payload(connection, parent_id).get("workflow_by") == "person":
+            raise service.PlanInputError(
+                "The person does that step, so the agent's work goes in its own step or task."
+            )
 
 
 def _next_order(

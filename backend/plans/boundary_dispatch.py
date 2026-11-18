@@ -74,10 +74,15 @@ def _dispatch_admission(operation: str, params: dict[str, Any], actor, common: d
     jump = triage_lines.jump_for_start(
         common["db"], node, actor_id=actor.thread_id if actor.kind == "thread" else None,
     )
+    was_selected = admission.attempts.open_attempt(common["db"], node["id"]) is not None
     reply = admission.make_current(
         params["node_id"], **fields.expected(params), **common,
         payload=None if jump is None else jump.payload,
     )
+    if not was_selected and reply["admission"].get("selection") is not None:
+        from plans.handoff_brief import step_hint
+
+        reply.update(step_hint(common["db"], node))
     if jump is not None and reply["admission"].get("selection") is not None:
         reply["jumped"] = jump.line
     conflict = reply["admission"].get("conflict") or {}
