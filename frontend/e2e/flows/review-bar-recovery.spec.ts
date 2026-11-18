@@ -2,7 +2,7 @@ import { test, expect } from '../support/test';
 import { comment, open, seed } from '../support/reviewFixtures';
 import { raiseAsk } from '../support/reviewAsk';
 
-const ask = (page: import('@playwright/test').Page, text: string) => page.getByRole('region', { name: new RegExp(text) });
+const ask = (page: import('@playwright/test').Page, text: string) => page.getByRole('region', { name: 'Review request' }).filter({ hasText: text });
 const reviewUrl = (id: string) => `**/api/attention/${id}/review*`;
 
 test.describe('review bar recovery', () => {
