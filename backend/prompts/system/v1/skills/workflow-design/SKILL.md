@@ -5,7 +5,7 @@ description: Use when making or improving a workflow, the steps for one kind of 
 
 # Workflow design
 
-A workflow is how one kind of work gets done each time it comes back, at any interval: the steps, who does each one, and where the person is asked. Work done in a step or two gets none. A one-off that is not a kind of anything is a plan, however big; most big jobs are a kind (a design doc, a PR review) and get one.
+A workflow is how one kind of work gets done each time it comes back, at any interval: the steps, who does each one, and where the person is asked. Work done in a step or two gets none. A one-off that is not a kind of anything runs skill `general-work`, however big; most big jobs are a kind (a letter to a client, a weekly order, a review of someone's draft) and get their own.
 
 Make one yourself when you will do a kind of work again and none fits (skill `task-discipline`), or when the person asks. Nobody approves it. Tell the person in one line inside your next message, never as a message of its own: `I'll handle these the same way each time, so I can tell what works. You can see or change the steps any time.` Taking work off the person's own plate is different: that needs their yes, through the weekly review of their time (skill `time-to-agent`). Each way, this is the method.
 
