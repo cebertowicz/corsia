@@ -4,8 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
-from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
+from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed, not_active_message
 from doceditor.comment_creation import Anchor, CreateReceipt
+from doceditor.comments import CommentAccessDenied, CommentTargetMoved  # storage raises the first too, for a reply's parent
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
@@ -13,10 +14,6 @@ from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from infra.write_effects import after_commit
 from registry import models as registry_models, service as registry_service
-
-
-class CommentAccessDenied(PermissionError):
-    """The validated target stopped being accessible before its DB create."""
 
 
 @dataclass(frozen=True)
@@ -119,6 +116,12 @@ def _record_tags(connection, request: CommentInput, row: dict) -> None:
         comment_recipients.reset_action(connection, row, request.author_thread_id)
 
 
+def _refuse_retired_target(request: CommentInput, connection) -> None:
+    """A promote retired the document after the caller's check; its comments live on the successor."""
+    if request.artifact_id is not None and registry_models.successor_id(request.artifact_id, db=connection) is not None:
+        raise CommentTargetMoved(not_active_message(request.artifact_id))  # the reason an agent's tool shows
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -141,6 +144,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                                         insert_after=request.insert_after)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
+            _refuse_retired_target(request, connection)
             if request.registration is not None:
                 artifact_id = registry_service.register_write_strict(
                     request.author_thread_id, request.registration["path"], db=connection,

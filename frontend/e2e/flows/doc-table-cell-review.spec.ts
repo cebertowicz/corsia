@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { routeDocumentSaves } from '../support/docSaveCue';
 import {
-	cell, cellContent, editorIn, editorInCell, firstTable, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, settled, sheetAtRest
+	cell, cellContent, editorIn, editorInCell, firstTable, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, scrollEditorToText, settled, sheetAtRest
 } from '../support/tableCells';
 
 /**
@@ -309,6 +309,8 @@ for (const layout of LAYOUTS) {
 			await frame(page, `u1-failed-save-${at}`);
 			link.restore();
 
+			// The editor virtualizes offscreen widgets, so bring the source into view before finding the table.
+			await scrollEditorToText(page, '| Column 1 | Column 2');
 			// A table wider than the pane: its last cell opens in place.
 			const wide = page.locator('.cm-md-table table').nth(1);
 			await wide.scrollIntoViewIfNeeded();

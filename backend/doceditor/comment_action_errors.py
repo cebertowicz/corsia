@@ -28,6 +28,11 @@ def diagram_changed() -> CommentSelectionChanged:
     return CommentSelectionChanged('Place the pin on the current diagram; your draft is kept.', 'diagram_changed')
 
 
+def not_active_message(artifact_id: str) -> str:
+    """The sentence every caller gives an artifact_id that no longer names an active document."""
+    return f"artifact_id does not resolve to an active artifact: {artifact_id}"
+
+
 def decision_only_error(*, decision: str | None, all_from_author: bool, reason: str | None) -> str | None:
     """Name a decision-only field sent without a decision, so no adapter drops it silently."""
     if decision is None and (all_from_author or reason is not None):

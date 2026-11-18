@@ -2,11 +2,14 @@ import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
+import { frameLayoutTop, frameTop } from '$lib/documentPlaceFrame';
 
 /**
  * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
  * starts. The pane holds the header row and the editor, so a notice or the review bar growing in the header moves the
- * editor and its text but not this edge, and the place still says where the reader had the line on screen. The line is
+ * editor and its text but not this edge, and the place still says where the reader had the line on screen. Something
+ * laid out above the pane (a status banner) moves the edge itself; the keeper moves its place the other way by as much,
+ * so the line stays where the reader had it. The line is
  * found and laid through CodeMirror's height map, so it is known for text the editor has not drawn yet. A table is one
  * block to the editor, so inside a drawn table the place is the row at the edge, found and laid from the drawn rows: a
  * row above it growing, shrinking or inserted in the same table then moves the place with the text.
@@ -19,11 +22,6 @@ export interface TextDocumentPlace {
 	top: number;
 	scrollTop: number;
 	end?: boolean;
-}
-
-/** The edge places are measured from: the document pane's top, or the scroller's for an editor outside one. */
-function frameTop(view: EditorView): number {
-	return (view.dom.closest<HTMLElement>('.doc') ?? view.scrollDOM).getBoundingClientRect().top;
 }
 
 /** How far below the frame edge the line block holding `from` starts, or inside a drawn table the row holding it. */
@@ -85,13 +83,17 @@ interface Keeper {
 	frame: boolean;
 	/** The scroller width the place was taken or set at; null before the first. */
 	width: number | null;
+	contentWidth: number | null;
+	hand: boolean;
+	/** Where the pane was laid out on the page when the place was last taken, set or laid. */
+	edge: number;
 }
 
 const keepers = new WeakMap<EditorView, Keeper>();
 
 function keeperOf(view: EditorView): Keeper {
 	let keeper = keepers.get(view);
-	if (!keeper) keepers.set(view, keeper = { target: null, applied: Number.NaN, frame: false, width: null });
+	if (!keeper) keepers.set(view, keeper = { target: null, applied: Number.NaN, frame: false, width: null, contentWidth: null, hand: false, edge: 0 });
 	return keeper;
 }
 
@@ -101,12 +103,18 @@ export function heldPlace(view: EditorView): TextDocumentPlace | null {
 }
 
 /** Makes `place` the one the editor holds (a tab return, an image Back) and lays it; returns the place held. */
-export function holdPlace(view: EditorView, place: TextDocumentPlace): TextDocumentPlace {
+export function holdPlace(view: EditorView, place: TextDocumentPlace, selectedSubject = false): TextDocumentPlace {
 	const keeper = keeperOf(view);
-	const held = keeper.target = { ...place };
-	keeper.width = view.scrollDOM.clientWidth;
+	if (selectedSubject) keeper.hand = false;
+	const held = take(view, keeper, { ...place });
 	applyPlace(view);
 	return held;
+}
+
+/** Makes `place` the keeper's, as it stands in the pane and the scroller now. */
+function take(view: EditorView, keeper: Keeper, place: TextDocumentPlace): TextDocumentPlace {
+	[keeper.target, keeper.width, keeper.contentWidth, keeper.edge] = [place, view.scrollDOM.clientWidth, view.contentDOM.clientWidth, frameLayoutTop(view)];
+	return place;
 }
 
 /**
@@ -117,7 +125,7 @@ export function releasePlace(view: EditorView): void {
 	const keeper = keeperOf(view);
 	keeper.target = null;
 	requestAnimationFrame(() => {
-		if (keeper.target === null && view.dom.isConnected) [keeper.target, keeper.width] = [captureDocumentPlace(view), view.scrollDOM.clientWidth];
+		if (keeper.target === null && view.dom.isConnected) take(view, keeper, captureDocumentPlace(view));
 	});
 }
 
@@ -128,13 +136,18 @@ const MAX_PASSES = 4;
  * The one writer of a document's scroll offset. Lays the held place where it belongs: the start at 0, the end at the
  * end, a line where the height map puts it less its distance from the frame edge. The offset is worked out whole each
  * time, never added to the one before, so the pixel the browser rounds off one write is not carried into the next.
- * It is clamped to the scroll range and written only when it is half a pixel or more off. Returns whether it moved.
+ * It is clamped to the scroll range and written only when it is half a pixel or more off. When the pane is laid out lower or
+ * higher (a status banner above it), the place first moves the other way by as much; a page scroll is left alone, since
+ * it moves the pane and its text together. Returns whether it moved.
  */
 export function applyPlace(view: EditorView): boolean {
 	const keeper = keepers.get(view);
 	const target = keeper?.target;
 	if (!keeper || !target || !view.dom.isConnected) return false;
 	const scroller = view.scrollDOM;
+	const edge = frameLayoutTop(view);
+	// A pane laid out at no height (hidden) has no place on the page to hold the line against.
+	if (scroller.clientHeight > 0 && edge !== keeper.edge) [target.top, keeper.edge] = [target.top - (edge - keeper.edge), edge];
 	let moved = false;
 	for (let pass = 0; pass < MAX_PASSES; pass++) {
 		measureNow(view);
@@ -229,31 +242,29 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	const scroller = view.scrollDOM;
 	const keeper = keeperOf(view);
-	keeper.target = captureDocumentPlace(view);
+	take(view, keeper, captureDocumentPlace(view));
 	keeper.applied = scroller.scrollTop;
-	keeper.width = scroller.clientWidth;
-	let hand = false;
-	const byHand = () => { hand = true; };
+	const byHand = () => { keeper.hand = true; };
+	const widthChanged = () => scroller.clientWidth !== keeper.width || view.contentDOM.clientWidth !== keeper.contentWidth;
 	const onScroll = () => {
 		// The editor grew back past the text below the view and the browser cut the offset to the new end: that scroll is
 		// the browser's, and the resize observation that follows lays the place again.
 		const max = scroller.scrollHeight - scroller.clientHeight;
 		if (keeper.applied > max && scroller.scrollTop >= max - 1) return;
 		if (Math.abs(scroller.scrollTop - keeper.applied) < 1) return;
-		if (keeper.target && !hand && scroller.clientWidth !== keeper.width) {
+		if (keeper.target && !keeper.hand && widthChanged()) {
 			applyPlace(view);
 			return;
 		}
-		keeper.target = captureDocumentPlace(view);
+		take(view, keeper, captureDocumentPlace(view));
 		keeper.applied = scroller.scrollTop;
-		keeper.width = scroller.clientWidth;
 	};
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-		const widthChanged = scroller.clientWidth !== keeper.width;
+		const changed = widthChanged();
 		// The text rewrapping under an earlier press is the layout's move, not the reader's.
-		if (widthChanged) hand = false;
+		if (changed) keeper.hand = false;
 		applyPlace(view);
-		if (widthChanged) keeper.width = scroller.clientWidth;
+		if (changed) [keeper.width, keeper.contentWidth] = [scroller.clientWidth, view.contentDOM.clientWidth];
 	}) : null;
 	observer?.observe(scroller);
 	observer?.observe(view.contentDOM);

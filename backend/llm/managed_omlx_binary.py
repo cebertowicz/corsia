@@ -110,17 +110,21 @@ def managed_omlx_paths() -> ManagedOmlxPaths:
     return ManagedOmlxPaths(base, base / "models", base / "settings.json")
 
 
+def _read_settings(settings: Path) -> dict:
+    try:
+        raw = json.loads(settings.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 def reserve_managed_omlx_port() -> tuple[ManagedOmlxPaths, int]:
     """Prepare private directories and record a port for the managed launch."""
     from llm.providers.omlx_process import port_is_free
 
     paths = managed_omlx_paths()
     base, models, settings = paths.base_path, paths.model_dir, paths.settings_path
-    try:
-        raw = json.loads(settings.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raw = {}
-    raw = raw if isinstance(raw, dict) else {}
+    raw = _read_settings(settings)
     server_value = raw.get("server")
     server = server_value if isinstance(server_value, dict) else {}
     configured = server.get("port")
@@ -140,9 +144,12 @@ def reserve_managed_omlx_port() -> tuple[ManagedOmlxPaths, int]:
         port = free_port
     base.mkdir(parents=True, exist_ok=True)
     models.mkdir(parents=True, exist_ok=True)
-    raw["server"] = {**server, "port": port}
-    model_value = raw.get("model")
+    # Native settings may have been saved while port ownership was probed.
+    raw = _read_settings(settings)
+    server_value, model_value = raw.get("server"), raw.get("model")
+    server = server_value if isinstance(server_value, dict) else {}
     model = model_value if isinstance(model_value, dict) else {}
-    raw["model"] = {**model, "model_dir": str(models)}
-    settings.write_text(json.dumps(raw, sort_keys=True), encoding="utf-8")
+    updated = {**raw, "server": {**server, "port": port}, "model": {**model, "model_dir": str(models)}}
+    if updated != raw:
+        settings.write_text(json.dumps(updated, sort_keys=True), encoding="utf-8")
     return paths, port

@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_store import BrowserMessage, LiveStore
-from doceditor.live_text import clone, create, follow_spans, map_spans, state_clocks, text_digest, utf16_length
+from doceditor.live_states import PastStates, StateKey, state_key
+from doceditor.live_text import clone, create, follow_steps, shift_spans, text_digest, utf16_delta, utf16_length
 from doceditor.section_log import SectionLog
 
 if TYPE_CHECKING:
@@ -71,6 +72,9 @@ class LiveDocument:
         # Selections a capture tracks before their comment exists, oldest first. They move with the text
         # but stay out of ``ranges``, which only comments own.
         self._reservations: dict[str, Reservation] = {}
+        # The states the text held recently, oldest first, newest the current one; kept while the Text
+        # observer runs, so a capture that names one of them maps its selection forward (``reserve``).
+        self.states = PastStates()
         # A recent base is an in-memory merge aid, never a durability claim.
         self.base_limit = 8
         self.bases: dict[str, bytes] = {}
@@ -100,9 +104,12 @@ class LiveDocument:
         self.snapshot: tuple[str, dict[str, tuple[int, int]]] = (self._before, {})
         # pycrdt builds a Text event's whole delta as Python objects before any
         # callback runs: for a distributed 1MB rewrite, tens of milliseconds and
-        # a full GC pass on the loop. Only range mapping reads it, so the Text
-        # observer exists only while ranges are tracked; otherwise each merge
-        # below refreshes the snapshot itself.
+        # a full GC pass on the loop. Only range mapping and the recent states
+        # read it, so the Text observer starts at the first tracked range or
+        # capture ask (a refused one too) and stays until ``close``. From then
+        # on each merge also reads the state vector and hashes the whole text
+        # (``_current_key``), so a capture can name the state it saw. Until
+        # then each merge below refreshes the snapshot itself.
         self._subscription = None
         self._updates = self.doc.observe(self._transaction_changed)
 
@@ -130,14 +137,18 @@ class LiveDocument:
         return text_digest(self.text)
 
     def _changed(self, event) -> None:
+        # One pass over the text before the edit; ranges, reservations and the past states all follow these steps.
+        steps = utf16_delta(self._before, event.delta)
         ids = list(self.ranges)
-        spans, opened = follow_spans(list(self.ranges.values()), self._before, event.delta,
+        spans, opened = follow_steps(list(self.ranges.values()), steps,
                                      {index for index, identifier in enumerate(ids) if identifier in self.open_ends})
         self.ranges.update(zip(ids, spans))
         self.open_ends = {ids[index] for index in opened}
         held = list(self._reservations.values())
-        for reservation, span in zip(held, map_spans([item.span for item in held], self._before, event.delta)):
+        for reservation, span in zip(held, shift_spans([item.span for item in held], steps)):
             reservation.span = span
+        if self.states:
+            self.states.replaced(steps)
         self._before = self.text
         self.snapshot = (self._before, dict(self.ranges))
         self.text_changed()
@@ -147,6 +158,12 @@ class LiveDocument:
             self._before = self.text
             self.snapshot = (self._before, dict(self.ranges))
             self.text_changed()
+        if self.states:  # read after the transaction, when the state can be read
+            self.states.stamp(self._current_key())
+
+    def _current_key(self) -> StateKey:
+        text = self.text
+        return state_key(self.doc.get_state(), utf16_length(text), text_digest(text))
 
     def _transaction_changed(self, event) -> None:
         # Document state cannot be read inside the transaction; ``_apply``
@@ -190,9 +207,14 @@ class LiveDocument:
     def _observe(self, start: int, end: int) -> None:
         if not self.fits(start, end):
             raise ValueError("Comment range is outside the live document")
+        self._subscribe()
+
+    def _subscribe(self) -> None:
+        """Follow every edit from now on: tracked ranges move with it and the recent states start."""
         if self._subscription is None:
             self._before = self.text
             self._subscription = self._text.observe(self._changed)
+            self.states.start(self._current_key())
 
     def track_range(self, identifier: str, start: int, end: int) -> None:
         self._observe(start, end)
@@ -209,22 +231,24 @@ class LiveDocument:
         return held
 
     def reserve(self, identifier: str, start: int, end: int, user_id: str, holder: object, *,
-                vector: bytes, digest: str, length: int) -> bool:
-        """Track a captured selection under its comment's client id when the browser's state is the live one.
+                vector: bytes, digest: str, length: int, quote: str | None = None) -> bool:
+        """Track a captured selection under its comment's client id, made in the live state or a recent one.
 
-        A delete leaves the vector unchanged, so the digest and length join it.
-        False means the state differs and nothing was tracked.
+        The browser's state is its clocks, length and digest (``state_key``). A recent state needs the
+        selection's quote, and the selection mapped to now must still hold exactly that text.
+        False means the state is unknown or the selected text changed, and nothing was tracked.
         """
-        text = self.text
-        if (state_clocks(vector) != state_clocks(self.doc.get_state())
-                or (digest, length) != (text_digest(text), utf16_length(text))):
+        self._subscribe()
+        asked = state_key(vector, length, digest)
+        span = self.states.span_now(asked, self._current_key(), self.text, start, end, quote)
+        if span is None:
             return False
         self.reserved_by(identifier, user_id)
         if identifier in self.ranges:
             raise IdentityInUse("Comment identity is already in use")
-        self._observe(start, end)
+        self._observe(*span)
         self._reservations.pop(identifier, None)
-        self._reservations[identifier] = Reservation(user_id, holder, (start, end))
+        self._reservations[identifier] = Reservation(user_id, holder, span)
         mine = [key for key, held in self._reservations.items() if held.holder is holder]
         for key in mine[:max(0, len(mine) - RESERVATION_LIMIT)]:
             del self._reservations[key]
@@ -328,6 +352,7 @@ class LiveDocument:
         self.read_bases.clear()
         self.sections.clear()
         self._reservations.clear()
+        self.states.clear()
         self.acknowledge = lambda ids: None
         self.viewer_actor = lambda: None
         self.store.observe_refusal = lambda error: None

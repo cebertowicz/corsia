@@ -380,6 +380,19 @@ def test_denied_paths_are_read_back_from_the_os_denial_output() -> None:
     assert len(found) == 2
 
 
+def test_refusals_keep_the_failing_call_with_the_program() -> None:
+    """``cp -p`` names its call before the path; the path is read the same way."""
+    from tools.host_path_resolution import denied_paths_in, refusals_in
+
+    text = (
+        "cp: utimensat: /Users/x/repo/.worktrees/task/.: Operation not permitted\n"
+        "touch: .: Operation not permitted\n"
+    )
+
+    assert refusals_in(text) == (("cp: utimensat", "/Users/x/repo/.worktrees/task/."), ("touch", "."))
+    assert denied_paths_in(text) == (Path("/Users/x/repo/.worktrees/task/."),)
+
+
 def test_shell_output_guidance_identifies_state_and_other_hard_floor(
     tmp_path,
 ) -> None:
