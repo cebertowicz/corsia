@@ -103,12 +103,17 @@ _SETTLEMENT_OPERATIONS = frozenset(
 
 
 def _reorder(params: dict[str, Any], common: dict) -> dict:
-    """Move one node; its siblings keep their revisions (service.touch_node)."""
+    """Move one node; its siblings keep their revisions; a foreign move tells the owner."""
+    from plans import plan_top
     from plans.boundary import node_projection
 
+    before = plan_top.last_move_id(common["db"], params["node_id"])
     moved = mutations.reorder_node(
         params["node_id"], fields.integer(params, "order_key"),
         **fields.expected(params), **common,
+    )
+    plan_top.tell_owner_moved(
+        common["db"], params["node_id"], actor_id=common["actor_id"], before=before,
     )
     return {"node": node_projection(moved)}
 
@@ -132,11 +137,13 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
                 node.id, fields.text(params, "depends_on_node_id"),
                 causing_executor=acting, **common,
             )
-        line = (
-            triage_lines.add_line(db, service._plan_row(db, plan_id), node.id, actor_id=acting)
-            if operation == "add" else None
+        from plans import plan_top
+
+        placing = plan_top.placing_reply(
+            db, service._plan_row(db, plan_id), node.id, actor=actor, inserted=operation == "insert",
         )
-        return workflow_fields.added(db, node, line, workflow_steps, causing_executor=acting)
+        plan_top.tell_owner_added(db, node.id, actor_id=common["actor_id"])
+        return workflow_fields.added(db, node, placing, workflow_steps, causing_executor=acting)
     if operation == "edit":
         changed = fields.edit_fields(params)
         if "later" not in changed:

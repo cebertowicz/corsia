@@ -275,23 +275,11 @@ def mark_done_slot_held(holder_title: str, holder_id: str, node_id: str) -> str:
     )
 
 
-#: ``rank`` on an ``add`` that lands below ready top-level work (T1): where the
-#: new task sits, and what runs first. Guidance only; nothing is refused.
-TRIAGE_RANK = (
-    "{rank} of {total} open. Ready above it: {above}. Work runs in plan order; "
-    "reorder it to order_key={key} only if it outranks them."
-)
 #: ``jumped`` on a named start that passes ready top-level work (T2).
 TRIAGE_JUMPED = (
     "Started ahead of ready '{title}' ({node}), ranked {rank} of {total}. If this "
     "outranks it, reorder node_id={top} order_key={key} so the plan says so."
 )
-
-
-def triage_rank(rank: int, total: int, above: list[tuple[str, str]], key: int) -> str:
-    """Return the ``rank`` line; ``above`` holds up to two (title, id), topmost first."""
-    names = ", ".join(f"'{title}' ({node})" for title, node in above)
-    return TRIAGE_RANK.format(rank=rank, total=total, above=names, key=key)
 
 
 def triage_jumped(
