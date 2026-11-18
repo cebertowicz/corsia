@@ -42,9 +42,9 @@ def _run_phase(db, node) -> bool:
 def open_nodes(db, phase_id: str) -> list[str]:
     """Open work beneath a run's phase, deepest first.
 
-    The walk is the in-work walk of ``user_settle``; a nested run's phase and a
-    container whose children are in work have no work of their own: they read
-    as their leaves, the same rule the fold uses.
+    The walk is the in-work walk of ``user_settle``. A task step remains open
+    until it settles, even with children. A nested run's phase and other containers
+    whose children are in work read as their leaves.
     """
     return [str(row["id"]) for row in db.execute(
         "WITH RECURSIVE below(id,depth) AS ("
@@ -55,7 +55,7 @@ def open_nodes(db, phase_id: str) -> list[str]:
         " SELECT n.id FROM below JOIN plan_nodes n ON n.id=below.id"
         f" WHERE {node_states.open_sql('n')}"
         " AND NOT (n.kind='phase' AND n.workflow_step IS NOT NULL)"
-        f" AND NOT {node_states.is_container_sql('n')}"
+        f" AND NOT (n.workflow_step IS NULL AND {node_states.is_container_sql('n')})"
         " ORDER BY below.depth DESC,n.order_key", (phase_id,),
     )]
 

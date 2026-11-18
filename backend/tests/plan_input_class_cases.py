@@ -52,6 +52,24 @@ def _workflow_fields_before_migration(db, scene):
     )
 
 
+def _child_of_person_step(db, scene):
+    step = service._create_node(
+        db, scene.plan_id, kind="task", title="Person step", acceptance_criteria="Answered",
+        parent_id=None, order_key=None, description=None, workflow_ref=None,
+        workflow_version=None, workflow_step="person", difficulty="routine", size="S",
+        checkpoint_exception=False, assignee="user", spawn_kind=None,
+        watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
+        node_id=service._id(), workflow_by="person",
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "add", {
+            "kind": "task", "title": "Child", "acceptance_criteria": "Done",
+            "size": "S", "intent": "Do the work", "parent_id": step.id,
+        }, _mid(),
+    )
+
+
 def _negative_order_key(db, scene):
     """`add` and `insert` publish no `order_key`, so `_create_node`'s guard is
     unreachable from the boundary. The public service call is its only caller."""
@@ -777,11 +795,13 @@ _CASES = {
             "watchdog_budget_seconds": 0,
         }),
     ("node_creation.py", '"order key must be non-negative"'): _negative_order_key,
-    ("node_creation.py", '"task nodes are leaves and cannot contain children"'):
+    ("node_creation.py", '"task nodes are leaves and cannot contain children unless they are workflow steps"'):
         _operation("add", {
             "kind": "task", "title": "T", "acceptance_criteria": "DOD",
             "parent_id": NODE,
         }),
+    ("node_creation.py", '"The person does that step, so the agent\'s work goes in its own step or task."'):
+        _child_of_person_step,
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
     ("node_creation.py", '"task intent requires schema version 138"'): _intent_before_migration,
