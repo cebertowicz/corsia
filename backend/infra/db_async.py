@@ -14,6 +14,7 @@ from functools import partial
 
 from loguru import logger
 
+from infra import cpu_sampler
 from infra.db_connection import mark_thread_lane
 
 def _lane_workers(default: int) -> int:
@@ -70,7 +71,10 @@ def _run_timed_db_job(fn, scope: str) -> _TimedResult:
     """Run one database job while measuring only the worker execution window."""
     started_at = time.perf_counter()
     try:
-        value = _run_db_job(fn, scope)
+        if (sampler := cpu_sampler._sampler) is not None:
+            value = cpu_sampler.run_profiled_db_job(sampler, _run_db_job, fn, scope)
+        else:
+            value = _run_db_job(fn, scope)
     except BaseException as error:
         error._corsia_db_timing = (started_at, time.perf_counter())
         raise

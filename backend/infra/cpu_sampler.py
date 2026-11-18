@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from types import FrameType
 
@@ -102,6 +103,34 @@ def _ellipsize(value: str, limit: int) -> str:
     return f"{value[: limit - 3]}..."
 
 
+def _callable_name(fn: Callable) -> str:
+    while isinstance(fn, partial):
+        fn = fn.func
+    target = getattr(fn, "__func__", fn)
+    if not hasattr(target, "__qualname__"):
+        target = type(target)
+    return f"{target.__module__}.{target.__qualname__}"
+
+
+def run_profiled_db_job(sampler, worker, fn, scope):
+    """Measure a worker without allowing diagnostic failures to affect its result."""
+    try:
+        started = time.thread_time_ns()
+    except BaseException:
+        sampler.count_job_error()
+        return worker(fn, scope)
+    try:
+        return worker(fn, scope)
+    finally:
+        try:
+            elapsed = time.thread_time_ns() - started
+            thread_name = threading.current_thread().name
+            lane = next((name for name in ("db-read", "db-bulk", "db") if thread_name.startswith(name + "_")), "off-db")
+            sampler.record_job_cpu(lane, _callable_name(fn), elapsed)
+        except BaseException:
+            sampler.count_job_error()
+
+
 class CpuSampler:
     """Attribute process native-thread CPU deltas to Python stack snapshots."""
 
@@ -134,6 +163,38 @@ class CpuSampler:
         self._sampler_cpu_seconds = 0.0
         self._max_tick_lag_seconds = 0.0
         self._window_started_at = self._clock()
+        self._job_lock = threading.Lock()
+        self._job_cpu: dict[tuple[str, str], tuple[int, int, int]] = {}
+        self._job_errors = 0
+
+    def record_job_cpu(self, lane: str, name: str, elapsed_ns: int) -> None:
+        with self._job_lock:
+            count, total, maximum = self._job_cpu.get((lane, name), (0, 0, 0))
+            self._job_cpu[(lane, name)] = (count + 1, total + elapsed_ns, max(maximum, elapsed_ns))
+
+    def count_job_error(self) -> None:
+        try:
+            with self._job_lock:
+                self._job_errors += 1
+        except BaseException:
+            pass  # Diagnostics must not change a worker's result.
+
+    def _emit_jobs(self) -> None:
+        with self._job_lock:
+            jobs, self._job_cpu = self._job_cpu, {}
+            errors, self._job_errors = self._job_errors, 0
+        if not jobs and not errors:
+            return
+        entries = sorted(jobs.items(), key=lambda item: item[1][1], reverse=True)
+        prefix = f"cpu sampler jobs: errors={errors} top=["
+        parts: list[str] = []
+        for (lane, name), (count, total, maximum) in entries:
+            item = f"{lane}:{_ellipsize(name, 200)} count={count} cpu={total / 1e9:.6f}s max={maximum / 1e9:.6f}s"
+            candidate = prefix + "; ".join([*parts, item]) + "]"
+            if len(candidate) > MAX_SUMMARY_CHARS:
+                break
+            parts.append(item)
+        self._logger.warning("%s", prefix + "; ".join(parts) + "]")
 
     def start(self) -> None:
         """Start once, or reuse the active sampler thread."""
@@ -227,6 +288,7 @@ class CpuSampler:
         # fallback and the OTel capture handler accept WARNING and above, so an
         # INFO summary is dropped before it reaches any sink.
         self._logger.warning("%s", _ellipsize(message, MAX_SUMMARY_CHARS))
+        self._emit_jobs()
         # One record per stack: log readers cap each record's message, so stacks
         # packed into the summary line were cut after the first few.
         for rank, (signature, seconds) in enumerate(top_stack_items, start=1):
