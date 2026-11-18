@@ -17,7 +17,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode
+from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected
 from registry.durable_write_recovery import recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
@@ -370,9 +370,8 @@ def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha2
     check_expected_content(target, expected_sha256)
     if backup is not None:
         checked_copy_target(target, backup, expected_sha256)
-    check_expected_content(target, expected_sha256)
     if backup is not None:
-        replace_bound_file(stage, target)
+        replace_if_expected(stage, target, expected_sha256)
     elif not restore_claimed_file(stage, target):
         raise FileExistsError(f"Publication destination already exists: {target}")
 

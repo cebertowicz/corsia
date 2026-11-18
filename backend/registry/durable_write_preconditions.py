@@ -20,6 +20,17 @@ def check_expected_content(path: Path, expected_sha256: str | None) -> None:
         raise FileChangedOutside()
 
 
+def replace_if_expected(stage: Path, target: Path, expected_sha256: str | None) -> None:
+    """Check the target immediately before replacing it with the staged file.
+
+    Independent writers can still change the target between the check and rename.
+    """
+    from tools.filesystem_effects import replace_bound_file
+
+    check_expected_content(target, expected_sha256)
+    replace_bound_file(stage, target)
+
+
 def checked_file_mode(path: Path, expected_sha256: str | None) -> int:
     """Get target mode, preserving the missing-target refusal for conditional writes."""
     from tools.filesystem_effects import bound_file_mode

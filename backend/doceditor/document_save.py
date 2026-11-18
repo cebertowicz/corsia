@@ -222,22 +222,20 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
     Validation and registration stay with the document save owner. The stage
     name is deterministic so recovery can remove it after a killed process.
     With ``prior_sha256``, the file is compared with it immediately before the
-    rename, in this same synchronous call, and a changed file is never replaced.
+    rename, in this same synchronous call. An independent writer can still race
+    the check and rename.
     """
-    from tools.filesystem_effects import (
-        replace_bound_file, stage_bound_bytes, unlink_bound_file,
-    )
+    from tools.filesystem_effects import stage_bound_bytes, unlink_bound_file
 
     leaf = f".corsia-live-{path.name}.stage"
     stage = path.with_name(leaf)
     unlink_bound_file(stage, missing_ok=True)
     try:
-        from registry.durable_write_preconditions import check_expected_content, checked_file_mode
+        from registry.durable_write_preconditions import checked_file_mode, replace_if_expected
 
         mode = checked_file_mode(path, prior_sha256)
         stage_bound_bytes(path, text.encode("utf-8"), leaf=leaf, mode=mode)
-        check_expected_content(path, prior_sha256)
-        replace_bound_file(stage, path)
+        replace_if_expected(stage, path, prior_sha256)
     finally:
         unlink_bound_file(stage, missing_ok=True)
 

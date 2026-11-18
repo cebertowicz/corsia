@@ -59,6 +59,10 @@ async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=No
         result = await entry.lane.submit(Operation("accept", actor=actor,
             suggestions=tuple(json.dumps(row) for row in rows), single_suggestion=single))
         result.require_landed()
+    except FileNotFoundError as exc:
+        if exc.filename != str(live.path):
+            raise
+        raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
     except (LaneRefused, StoreRefused) as exc:
         raise CommentActionError("save_refused", str(exc)) from exc
     except DurableWritePolicyError as exc:
