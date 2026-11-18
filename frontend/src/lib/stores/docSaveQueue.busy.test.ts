@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { liveDocumentBindings } from './liveDocuments';
 import { LiveDocumentSession } from './liveDocumentSession';
-import { clearDraft, existingDraft, seedDraft, setDraftText } from './docSaveQueue';
+import { clearDraft, closeTabWithSaveGate, existingDraft, seedDraft, setDraftText } from './docSaveQueue';
 
 const calls = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock('$lib/api/docs', () => ({ writeContent: vi.fn() }));
@@ -41,8 +41,9 @@ it('retries a busy flush once without showing an error when it succeeds', async 
 
 it('shows busy after two automatic attempts fail and keeps retrying with backoff', async () => {
 	setup(); await vi.advanceTimersByTimeAsync(700); busy(); await vi.advanceTimersByTimeAsync(1000); busy();
-	await vi.advanceTimersByTimeAsync(2000); busy(); await vi.advanceTimersByTimeAsync(0);
+	await vi.advanceTimersByTimeAsync(0);
 	expect(session.failureLines).toContain('Not saved to the file: The document is busy. Try saving again.');
+	await vi.advanceTimersByTimeAsync(2000); busy(); await vi.advanceTimersByTimeAsync(0);
 	expect(calls.toast).toHaveBeenCalledTimes(1);
 	await vi.advanceTimersByTimeAsync(4000); expect(flushes()).toHaveLength(4); busy();
 	await vi.advanceTimersByTimeAsync(0); expect(existingDraft(target)?.status).toBe('error');
@@ -55,6 +56,18 @@ it('marks a successful Retry as written and clears the draft error', async () =>
 	await vi.advanceTimersByTimeAsync(2000); busy(); await vi.advanceTimersByTimeAsync(0);
 	const retry = session.retry(); await saved(); await retry; await vi.advanceTimersByTimeAsync(0);
 	expect(session.durability.saved).toBe(true); expect(existingDraft(target)).toMatchObject({ status: 'saved', error: '' });
+});
+
+it('shows the busy reason immediately when a close attempt fails, and keeps retrying', async () => {
+	setup(); const onClose = vi.fn(); const onBringIntoView = vi.fn();
+	const closing = closeTabWithSaveGate(target, { onClose, onBringIntoView });
+	busy(); expect(await closing).toEqual({ closed: false });
+	expect(onBringIntoView).toHaveBeenCalledOnce(); expect(onClose).not.toHaveBeenCalled();
+	expect(session.failureLines).toContain('Not saved to the file: The document is busy. Try saving again.');
+	expect(existingDraft(target)).toMatchObject({ status: 'error', error: 'The document is busy. Try saving again.' });
+	await vi.advanceTimersByTimeAsync(1000); expect(flushes()).toHaveLength(2); await saved();
+	expect(session.failureLines).toEqual([]); expect(existingDraft(target)?.status).toBe('saved');
+	expect(onClose).not.toHaveBeenCalled();
 });
 
 it('stops retrying after the tab draft is cleared', async () => {

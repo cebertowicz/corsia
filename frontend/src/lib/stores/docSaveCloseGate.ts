@@ -1,6 +1,6 @@
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { closeLiveDocument } from './liveDocuments';
-import { clearDraft, flushDraft } from './docSaveQueue';
+import { clearDraft, flushDraft, revealBusySave } from './docSaveQueue';
 
 export interface CloseGateCallbacks {
 	onClose: () => void;
@@ -14,6 +14,7 @@ export async function closeTabWithSaveGate(
 ): Promise<{ closed: boolean }> {
 	const ok = await flushDraft(target);
 	if (!ok) {
+		revealBusySave(target);
 		callbacks.onBringIntoView();
 		return { closed: false };
 	}

@@ -10,6 +10,7 @@ BUSY_CLOSE_DELAYS = (0.5, 1.0, 2.0, 4.0)
 
 
 async def flush_last_viewer(subscription, artifact_id: str) -> None:
+    # Holds owner.lock and comment_mutex during retries (7.5s of delays), delaying reopen or comments.
     for delay in (*BUSY_CLOSE_DELAYS, None):
         try:
             result = await subscription.entry.lane.submit(Operation("flush", actor=subscription.actor))

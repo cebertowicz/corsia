@@ -245,6 +245,10 @@ async function runSave(key: string): Promise<boolean> {
 	return resave ? runSave(key) : completed;
 }
 
+export function revealBusySave(target: TargetIdentity): void {
+	busyRetries.reveal(draftKey(target));
+}
+
 /**
  * Cancels any pending debounce and drains the save queue for this exact
  * target — including any edit coalesced in after the flush began — then
