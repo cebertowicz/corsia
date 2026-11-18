@@ -3,7 +3,7 @@ import { EditorState } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import type { Rig } from './typed-reveal-rig';
-import { emptyCellSelection } from './widget-cell-comment';
+import { textlessCellSelection } from './widget-cell-comment';
 import { openCellState } from './widget-cell-state';
 import { intersectsCell, tableCells, tableGrid, widgetCommentLabel } from './widget-cells';
 import { build, cellCaret, cellText, cleanup, clicked, table, typed } from './widget-cell-rig';
@@ -62,7 +62,7 @@ describe('the padded cells of a short row', () => {
 			const r = track(build(short(row)));
 			clicked(r, table(r)!.rows[1].cells[3]);
 			expect(opened(r)?.col, 'setup: a padded cell is open').toBe(3);
-			expect(emptyCellSelection(r.view)).toBeNull();
+			expect(textlessCellSelection(r.view)).toBeNull();
 		});
 	}
 
@@ -102,6 +102,6 @@ describe('the padded cells of a short row', () => {
 	it('leaves a real empty cell its whole-cell Comment offer', () => {
 		const r = track(build(short('| Login |  | first | me |')));
 		clicked(r, table(r)!.rows[1].cells[1]);
-		expect(emptyCellSelection(r.view), 'a cell the source delimits is offered whole').toEqual(expect.objectContaining({ inWidget: true }));
+		expect(textlessCellSelection(r.view), 'a cell the source delimits is offered whole').toEqual(expect.objectContaining({ inWidget: true }));
 	});
 });
