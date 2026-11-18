@@ -181,7 +181,9 @@ async def write_content(token: str, body: WriteBody):
         return await save_document_text(DocumentSave(**body.model_dump()), user["id"])
     except DocumentSaveError as exc:
         if exc.kind == "no_such_file":
-            raise HTTPException(404, "This file no longer exists, so the document wasn't saved. Restore the file and try again.") from exc
+            from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
+
+            raise HTTPException(404, MISSING_SAVE_MESSAGE) from exc
         raise document_save_http_exception(exc) from exc
 
 

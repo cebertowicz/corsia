@@ -23,7 +23,7 @@ def check_expected_content(path: Path, expected_sha256: str | None) -> None:
 def replace_if_expected(stage: Path, target: Path, expected_sha256: str | None) -> None:
     """Check the target immediately before replacing it with the staged file.
 
-    Independent writers can still change the target between the check and rename.
+    Any writer can still change the target between the check and rename.
     """
     from tools.filesystem_effects import replace_bound_file
 

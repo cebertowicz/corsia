@@ -20,7 +20,6 @@ from doceditor.live_text import utf16_length
 from infra.db_async import run_in_db
 from infra.state import send_to_client
 from ws import document_email, section_turn
-from ws.document_close_flush import CLOSE_LOCK_WAIT_SECONDS, flush_last_viewer
 from ws.document_failures import failure_state
 from ws.document_send import closed_socket_error, observe_send
 
@@ -310,15 +309,18 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
         else:
             await _operate(socket, user, data)
     except (HTTPException, ValueError, PermissionError, StoreRefused, OSError) as exc:
+        from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
+
         title = getattr(exc, "title", None)
-        code = getattr(exc, "code", None)
+        message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        if data["type"] == "doc_flush" and getattr(exc, "kind", None) == "no_such_file":
+            message = MISSING_SAVE_MESSAGE
         await send_to_client(socket, {"type": "doc_error", "artifact_id": data.get("artifact_id"),
                                     "request_id": data.get("request_id"),
                                     "kind": getattr(exc, "kind", "store_refused" if isinstance(exc, StoreRefused) else "refused"),
                                     "blocking": isinstance(exc, StoreRefused) or getattr(exc, "blocking", False),
                                     **({"title": title} if title else {}),
-                                    **({"code": code} if code else {}),
-                                    "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
+                                    "message": message})
     except Exception as error:
         if closed_socket_error(error):
             log.debug("Live-document frame not delivered to a closed socket: %s", error)
@@ -364,13 +366,12 @@ async def _leave(socket, artifact_id: str) -> None:
             await asyncio.shield(task)
         await subscription.entry.live.commit_received()
         if subscription.writable:
-            result = await subscription.entry.lane.submit(Operation(
-                "flush", actor=subscription.actor, history_lock_wait=CLOSE_LOCK_WAIT_SECONDS))
+            result = await subscription.entry.lane.submit(Operation("flush", actor=subscription.actor))
             result.require_landed()
     manager = get_documents()
     if manager is not None:
-        await flush_last_viewer(manager, subscription, artifact_id, flush,
-                                lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
+        await manager.evict(artifact_id, subscription.entry, before_close=flush,
+                            can_evict=lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
 
 
 async def disconnect(socket) -> None:

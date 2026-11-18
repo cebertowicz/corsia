@@ -111,8 +111,8 @@ def _guided_write(
 ) -> dict:
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
-    ``expected_sha256`` is checked under the history lock and passed to the file writer for its
-    publication check. ``history_required`` writes nothing unless the version is recorded. The owner
+    ``expected_sha256`` is checked by the history writer and passed to the file writer for its
+    publication check, including on the unrecorded fallback. ``history_required`` writes nothing unless the version is recorded. The owner
     report's diff runs after the save, never under the history lock."""
     payloads: list[dict] = []
     reports: list[Callable[[], None]] = []
@@ -120,7 +120,7 @@ def _guided_write(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
         atomic=history_required, write=lambda _path, _data: payloads.append(write(path, expected_sha256, reports)),
-        accepted_suggestions=accepted, require_history_lock=True,
+        accepted_suggestions=accepted,
     )
     if saved.outcome == "refused":
         assert saved.line is not None
@@ -223,8 +223,7 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
     Validation and registration stay with the document save owner. The stage
     name is deterministic so recovery can remove it after a killed process.
     With ``prior_sha256``, the file is compared with it immediately before the
-    rename, in this same synchronous call. An independent writer can still race
-    the check and rename.
+    rename, in this same synchronous call. A writer can still race the check and rename.
     """
     from tools.filesystem_effects import stage_bound_bytes, unlink_bound_file
 

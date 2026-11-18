@@ -171,8 +171,7 @@ class DocumentLane:
                 if ordinary and isinstance(job.operation, Operation):
                     job.future.set_result(result)
                 else:
-                    from doceditor.live_text_write import HistoryLockBusy
-                    if job.detached and isinstance(exc, (StoreRefused, OSError, sqlite3.Error)) and not isinstance(exc, HistoryLockBusy):
+                    if job.detached and isinstance(exc, (StoreRefused, OSError, sqlite3.Error)):
                         await self.retry.record_failure(exc)
                     elif isinstance(exc, StoreRefused):
                         self.retry.notify()
@@ -354,7 +353,7 @@ class DocumentLane:
         """Run a whole-text replace only while the live text still hashes to ``expected_sha256``, the
         text the person restored from; checked in this lane's turn, so no write lands in between. An
         outside edit seen before the final check counts as a change, and a rejected attempt rechecks.
-        An independent writer can still race the final check and rename. A stale attempt writes nothing;
+        Another writer can still race the final check and rename. A stale attempt writes nothing;
         the next save of the document records that edit."""
         return await self._submit(lambda: self._execute(operation, expected_sha256))
 

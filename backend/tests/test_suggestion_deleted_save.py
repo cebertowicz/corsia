@@ -43,7 +43,7 @@ async def test_deleted_document_refuses_decision_through_editor_route(
     response = _user_decide(integration_client, suggestion['id'], 'accept')
 
     assert response.status_code == 404, response.text
-    assert response.json()['detail'] == "This file no longer exists, so the suggestion wasn't applied. Restore the file and try again."
+    assert response.json()['detail'] == "This file no longer exists, so nothing was changed. You can close it."
     assert not path.exists()
     assert _row(suggestion['id'])['decision'] is None
     if timing == 'publication':

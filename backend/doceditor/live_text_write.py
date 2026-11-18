@@ -9,7 +9,6 @@ from pathlib import Path
 from doceditor import document_save
 from doceditor.document_save import DocumentSaveError, FileChangedOutside
 from doceditor.document_scope import UI_THREAD
-from doceditor.live_store import StoreRefused
 from infra import config
 from infra.guidance_git import save_with_history
 from infra.guidance_messages import saver_author
@@ -18,16 +17,11 @@ from infra.guidance_targets import history_target
 _log = logging.getLogger(__name__)
 
 
-class HistoryLockBusy(StoreRefused):
-    """A conditional file write can be retried after the history lock clears."""
-    code = "history_lock_busy"
-
-
 def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) -> None:
-    """Blocking. The live lane's write: a recorded document is written and saved as a version by the
-    operation's actor under its reason, under the history lock, before this returns; any other file as
-    before. A change detected before replacement raises ``FileChangedOutside``; an independent writer
-    can still race the check and rename. A restore raises unless its version is recorded.
+    """Blocking. The live lane's write records a version under the history lock when available;
+    otherwise it uses the existing unrecorded fallback. A change detected before replacement raises
+    ``FileChangedOutside``; any writer can still race the check and rename. A restore raises unless
+    its version is recorded.
 
     Text whose bytes equal the file's is not written: a flush with nothing new (the last viewer
     leaving) renames nothing and records no version. The lane still records and publishes it."""
@@ -45,18 +39,15 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         {path: text.encode("utf-8")}, workspace=Path(config.WORKSPACE), target=target,
         author=_live_author(operation.actor if operation else None), reason=operation.reason if operation else None,
         expected={path: prior_sha256}, atomic=required,
-        accepted_suggestions=operation.accepted if operation else (), require_history_lock=True,
-        lock_wait_seconds=operation.history_lock_wait if operation else None,
+        accepted_suggestions=operation.accepted if operation else (),
         write=lambda _path, data: document_save.write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
     )
-    if saved.reason == "deferred-guidance-lock":
-        raise HistoryLockBusy(saved.line or "The document is busy. Try saving again.")
     if saved.outcome == "stale":
         from registry.durable_write_preconditions import check_expected_content
 
         check_expected_content(path, prior_sha256)
         raise FileChangedOutside()
-    if saved.reason == "history-lock-failed" or saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
+    if saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
     if saved.line:
         _log.warning("live document %s saved without its version: %s", path, saved.line)

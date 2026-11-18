@@ -30,7 +30,7 @@ from infra.guidance_messages import (
     unforgeable,
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
-from infra.guidance_save_after import after_save, conditional_lock_refusal
+from infra.guidance_save_after import after_save
 from infra.guidance_save_types import KnownHead, SaveResult, _Commit
 from infra.guidance_targets import HistoryTarget
 from infra.history_ignore import ignored
@@ -124,7 +124,7 @@ def git_dir(repo: Path) -> Path:
     return known
 
 
-def _acquire(repo: Path, directory: Path | None = None, *, wait_seconds: float | None = None) -> tuple[int, float]:
+def _acquire(repo: Path, directory: Path | None = None) -> tuple[int, float]:
     try:
         handle = os.open((directory or git_dir(repo)) / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
     except OSError as exc:
@@ -135,7 +135,7 @@ def _acquire(repo: Path, directory: Path | None = None, *, wait_seconds: float |
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return handle, (time.monotonic() - started) * 1000
         except BlockingIOError:
-            if time.monotonic() - started >= (_LOCK_WAIT_SECONDS if wait_seconds is None else wait_seconds):
+            if time.monotonic() - started >= _LOCK_WAIT_SECONDS:
                 os.close(handle)
                 raise _LockBusy("the guidance lock stayed busy") from None
             time.sleep(0.02)
@@ -278,7 +278,6 @@ def save_with_history(
     lesson_gate: bool = True,
     lesson_observation_thread_id: str | None = None,
     accepted_suggestions: tuple[str, ...] = (),
-    require_history_lock: bool = False, lock_wait_seconds: float | None = None,
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one history commit; ``accepted_suggestions`` marks
     a version that applies those accepted suggestions, and nothing else can.
@@ -286,7 +285,7 @@ def save_with_history(
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     A document target is recorded the same way, with no lesson check, carry-in record or sweep of other
-    guidance; its line names only a save history could not record. Conditional writes can require the lock.
+    guidance; its line names only a save history could not record.
     """
     lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
@@ -309,7 +308,7 @@ def save_with_history(
     done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
     subject = f"{target.kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = unforgeable(message) if message else commit_message(subject, target.scope, reason, evidence, accepted_suggestions)
-    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing, require_history_lock, lock_wait_seconds)
+    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing)
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
         lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
@@ -319,7 +318,7 @@ def save_with_history(
 def _save(
     writes: dict[Path, bytes | None], workspace: Path, target: HistoryTarget, author: str, message: str, done: str,
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
-    write: Callable[[Path, bytes], object], timing: dict[str, float], require_history_lock: bool, lock_wait_seconds: float | None,
+    write: Callable[[Path, bytes], object], timing: dict[str, float],
 ) -> SaveResult:
     from infra.history_record import Version, put_back, record, write_checked
 
@@ -346,16 +345,11 @@ def _save(
         if ignored(repo, list(rels.values()), tray=target.registered):
             return unrecorded("history-off", "ignored", SAVE_HISTORY_OFF.format(why="the path is ignored by Git"))
         directory = git_dir(repo)
+        handle, timing["lock_wait_ms"] = _acquire(repo, directory)
+    except _LockBusy as exc:
+        return unrecorded("deferred", "deferred-guidance-lock", SAVE_FAILED.format(error=exc))
     except (GitFault, ValueError) as exc:
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
-    try:
-        handle, timing["lock_wait_ms"] = _acquire(repo, directory, wait_seconds=lock_wait_seconds)
-    except (_LockBusy, GitFault, ValueError) as exc:
-        if require_history_lock and expected and any(value is not None for value in expected.values()):
-            return conditional_lock_refusal(exc)
-        outcome = "deferred" if isinstance(exc, _LockBusy) else "failed"
-        why = "deferred-guidance-lock" if isinstance(exc, _LockBusy) else str(exc)
-        return unrecorded(outcome, why, SAVE_FAILED.format(error=exc))
     with _locked(handle) as db:
         if isinstance(prior := write_checked(writes, expected, write), SaveResult):
             return prior  # the edit that made it stale is recorded by the next save at its path

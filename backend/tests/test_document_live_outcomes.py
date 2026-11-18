@@ -84,14 +84,13 @@ async def test_native_event_returns_not_started_or_pending_values(tmp_path, monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refusal_kind", ["lane", "edit", "policy", "setup", "store", "busy"])
+@pytest.mark.parametrize("refusal_kind", ["lane", "edit", "policy", "setup", "store"])
 async def test_detached_refusal_settles_its_job_only_store_errors_spend_budget(tmp_path, monkeypatch, refusal_kind):
     from doceditor.live_lane import EditRefused
     from doceditor.document_save import DocumentSaveError
     from registry.shared_write_errors import SharedIdentitySetupRequired
     from doceditor.live_store import StoreRefused
-    from doceditor.live_text_write import HistoryLockBusy
-    failures = {"busy": HistoryLockBusy("busy"), "lane": LaneRefused("lane refused"), "edit": EditRefused("Error: unmatched"),
+    failures = {"lane": LaneRefused("lane refused"), "edit": EditRefused("Error: unmatched"),
                 "policy": DocumentSaveError("policy", "policy refused"),
                 "setup": SharedIdentitySetupRequired(), "store": StoreRefused("disk full")}
     entered, release = asyncio.Event(), asyncio.Event()

@@ -2,7 +2,8 @@
 
 from typing import Any
 
-MISSING_DOCUMENT_MESSAGE = "This file no longer exists."
+MISSING_DOCUMENT_MESSAGE = "This file no longer exists, so nothing was changed. You can close it."
+MISSING_SAVE_MESSAGE = "This file no longer exists, so your changes weren’t saved. They’re still here; copy them before you close."
 
 
 class DocumentSaveError(ValueError):

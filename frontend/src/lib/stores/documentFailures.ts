@@ -19,7 +19,7 @@ export function publicFailureMessage(kind: string | undefined, reason?: string):
 }
 
 export class LiveOperationError extends Error {
-	constructor(readonly kind: string | undefined, reason?: string, readonly code?: string) {
+	constructor(readonly kind: string | undefined, reason?: string) {
 		super(publicFailureMessage(kind, reason));
 	}
 }
