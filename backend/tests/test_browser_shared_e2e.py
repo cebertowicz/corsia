@@ -107,6 +107,12 @@ FRAME_TWINS = """<!doctype html><title>Frame twins</title><body style="margin:8p
 <div style="height:60px">top</div>
 <iframe src="/frame-link.html" style="width:300px;height:120px;border:0"></iframe>
 <iframe src="/frame-covered.html" style="width:300px;height:120px;border:0"></iframe>"""
+# Two embeds laid out alike, the second below the fold, as repeated video players or payment widgets are.
+FRAME_TWINS_OFF_SCREEN = """<!doctype html><title>Frame twins off screen</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>
+<div style="height:3000px">spacer</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -143,7 +149,8 @@ def fixture_server():
              "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode(),
              "/frame-twins.html": FRAME_TWINS.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
-    frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered"}
+    frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered",
+                   "/frame-twins-off-same.html": "same", "/frame-twins-off-cross.html": "cross"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -152,7 +159,8 @@ def fixture_server():
                 # localhost is another site than 127.0.0.1, so Chrome runs that frame in its own process.
                 frame = {"same": "/frame-link.html", "covered": "/frame-covered.html",
                          "cross": f"http://localhost:{self.server.server_port}/frame-link.html"}[frame_pages[self.path]]
-                body = FRAME_OUTER.replace("__FRAME__", frame).encode()
+                outer = FRAME_TWINS_OFF_SCREEN if self.path.startswith("/frame-twins-off-") else FRAME_OUTER
+                body = outer.replace("__FRAME__", frame).encode()
             if body is None:
                 self.send_error(404)
                 return
@@ -564,6 +572,30 @@ async def test_a_covered_link_in_one_of_two_frames_laid_out_alike_is_refused_as_
                 await owner.run(thread_id, ("click", ref), session="existing")
             clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
             assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-twins-off-same.html", "frame-twins-off-cross.html"])
+async def test_a_link_in_an_embed_below_the_fold_with_a_look_alike_in_view_is_refused_as_ambiguous(page):
+    """The ref names the lower embed's link; the look-alike in view is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-off-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-off", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            if page == "frame-twins-off-same.html":
+                clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+                assert await cdp_value(owner, thread_id, clicks) == [0, 0]
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

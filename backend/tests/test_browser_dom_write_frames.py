@@ -189,6 +189,43 @@ async def test_a_twin_frames_covered_match_still_makes_the_ref_ambiguous_and_not
     assert refused.value.reason == "ambiguous" and page.written == []
 
 
+def _twin_off_screen(content, *, holds):
+    """Two frames laid out alike, the second wholly outside the page's 800x600 view at ``content``."""
+    twin_owner = 51
+    return Target(
+        {TOP_HIT: TOP, FRAMED_HIT: LINK},
+        {LINK: {"border": PLACED}, TOP: {"border": [0, 0, 800, 0, 800, 60, 0, 60]}, OWNER: {"content": FRAME_CONTENT},
+         twin_owner: {"content": content}},
+        {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}, {"frame": {"id": "twin"}}]},
+        owners={"child": OWNER, "twin": twin_owner}, covers={TOP: "HEADER"}, holds=holds)
+
+
+BELOW_THE_FOLD = [8, 2000, 608, 2000, 608, 2300, 8, 2300]
+PAST_THE_RIGHT_EDGE = [1200, 68, 1800, 68, 1800, 368, 1200, 368]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [BELOW_THE_FOLD, PAST_THE_RIGHT_EDGE], ids=["below-the-fold", "past-the-right-edge"])
+async def test_a_look_alike_frame_off_screen_still_makes_the_ref_ambiguous_and_nothing_is_written(monkeypatch, content):
+    """The ref may name the off-screen embed's link: the on-screen twin's match is not assumed to be the one."""
+    page = _twin_off_screen(content, holds={"child", "twin"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_an_off_screen_frame_that_alone_holds_the_element_keeps_the_pages_own_refusal(monkeypatch):
+    """Nothing on screen holds the element and the off-screen frame can't be hit: refused as before frames were searched."""
+    page = _twin_off_screen(BELOW_THE_FOLD, holds={"twin"})
+    page.hits[FRAMED_HIT] = TOP
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <header>\)") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "covered" and page.written == []
+
+
 @pytest.mark.asyncio
 async def test_a_page_element_under_a_banner_with_a_look_alike_in_a_frame_is_ambiguous_not_written_in_the_frame(
         monkeypatch):
