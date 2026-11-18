@@ -27,6 +27,16 @@ def test_fresh_schema_has_no_journal_and_reverse_is_a_noop():
     db.close()
 
 
+def test_upgrade_without_pending_legacy_rows_has_no_journal():
+    from infra.migration_199_to_200_feedback_recipients import reverse_200_to_199
+
+    db = _db()
+    migrate_199_to_200(db)
+    assert db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_recipient_migration_journal'").fetchone() is None
+    reverse_200_to_199(db)
+    db.close()
+
+
 def _batch(db, batch_id, recipient, state='open', artifact='a'):
     db.execute("""INSERT INTO doc_feedback_batches
         (id,artifact_id,author_kind,author_id,recipient_id,delivery_policy,state,

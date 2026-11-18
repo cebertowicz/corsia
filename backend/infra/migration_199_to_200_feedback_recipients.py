@@ -68,7 +68,6 @@ def _merge_open(db, source, target):
 
 def migrate_199_to_200(db):
     started = time.monotonic()
-    db.execute(JOURNAL_SCHEMA_SQL)
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
     counts = dict(normalized=0, merged=0, reopen_conflicts=0, edit_conflicts=0, referenced=0)
@@ -78,6 +77,8 @@ def migrate_199_to_200(db):
            FROM doc_feedback_batches WHERE recipient_id LIKE 'project:%'
            AND state IN ('open','undelivered') ORDER BY id"""
     ).fetchall()
+    if rows:
+        db.execute(JOURNAL_SCHEMA_SQL)
     for batch_id, author_kind, author_id, artifact_id, policy, state in rows:
         target = None
         if state == 'open':
