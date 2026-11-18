@@ -1,5 +1,6 @@
 """Keys, dropdown choice, scrolling, hover and history on a saved sign-in: each verb is one fixed shape."""
 import asyncio
+import json
 
 import pytest
 
@@ -15,6 +16,8 @@ ADMITTED = [
     ["scroll", "down"], ["scroll", "up", "500"], ["scroll", "left", "40"], ["scroll", "right", "5000"],
     ["scrollintoview", "@e15"], ["scrollintoview", "#footer"],
     ["hover", "@e4"], ["hover", ".menu > li:first-child"],
+    # '=' inside an attribute bracket, quoted values included, is plain CSS
+    ["hover", 'a[title="x=y"]'], ["hover", "input[value='a]=b']"], ["hover", "a[href^=https][rel~=next]"],
     ["back"], ["forward"],
 ]
 REFUSED = [
@@ -37,6 +40,9 @@ REFUSED = [
     # the parser trims parts and allows space before '='; a quoted selector is text, '..' is XPath
     ["hover", " text=Pay"], ["hover", "text =Pay"], ["hover", "xpath =//a"], ["hover", "#pay "],
     ["select", '"Sign in"', "v"], ["hover", "'Pay'"], ["scrollintoview", ".."], ["hover", "../a"],
+    # any '=' outside an attribute bracket: engine names with a capture marker or other characters
+    ["hover", "*text=Pay"], ["hover", "*css=#a"], ["hover", "te+xt=Pay"], ["hover", "#a=b"],
+    ["hover", "[id=a"], ["hover", "a[title='x]"],
     # shape: several values, extra arguments, bad directions and amounts
     ["select", "@e5", "a", "b"], ["select", "@e5"], ["hover", "@e1", "@e2"], ["scrollintoview"],
     ["scroll"], ["scroll", "sideways"], ["scroll", "down", "lots"], ["scroll", "down", "0"],
@@ -178,28 +184,97 @@ NEW_DOCUMENT = {"frameId": "f", "loaderId": "L2"}
 SAME_DOCUMENT = {"frameId": "f"}
 
 
-@pytest.mark.parametrize(("url", "navigations", "sent"), [
-    ("https://bank.test/pay", [NEW_DOCUMENT], ["https://bank.test/pay"]),
-    # A #fragment address is a same-document navigation that keeps the restored page, so it loads without it.
-    ("https://bank.test/#/pay", [SAME_DOCUMENT, NEW_DOCUMENT], ["https://bank.test/#/pay", "https://bank.test/"]),
-])
-async def test_reopen_fresh_ends_on_a_new_document(monkeypatch, url, navigations, sent):
-    cdp = _ScriptedCdp(url, navigations)
+async def test_reopen_fresh_navigates_to_the_same_address_for_a_new_document(monkeypatch):
+    cdp = _ScriptedCdp("https://bank.test/pay", [NEW_DOCUMENT])
     monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
     await browser_history.reopen_fresh("ws://page")
-    assert cdp.sent == sent
+    assert cdp.sent == ["https://bank.test/pay"]
 
 
-@pytest.mark.parametrize(("url", "navigations"), [
-    ("https://bank.test/pay", [SAME_DOCUMENT]),
-    ("https://bank.test/pay", [{"frameId": "f", "loaderId": "L2", "errorText": "net::ERR_ABORTED"}]),
-    ("https://bank.test/#/pay", [SAME_DOCUMENT, SAME_DOCUMENT]),
-    ("https://bank.test/#/pay", [SAME_DOCUMENT, {"frameId": "f", "errorText": "net::ERR_ABORTED"}]),
-])
-async def test_reopen_fresh_raises_when_no_new_document_commits(monkeypatch, url, navigations):
-    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: _ScriptedCdp(url, navigations))
+@pytest.mark.parametrize("navigations", [
+    [SAME_DOCUMENT], [{"frameId": "f", "loaderId": "L2", "errorText": "net::ERR_ABORTED"}]])
+async def test_reopen_fresh_raises_when_no_new_document_commits(monkeypatch, navigations):
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: _ScriptedCdp("https://bank.test/pay", navigations))
     with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
         await browser_history.reopen_fresh("ws://page")
+
+
+class _Socket:
+    """The messages Chrome sends on a reload, in order; recv waits forever once they run out."""
+
+    def __init__(self, messages):
+        self.messages = list(messages)
+
+    async def recv(self):
+        if not self.messages:
+            await asyncio.Event().wait()
+        return json.dumps(self.messages.pop(0))
+
+
+class _ReloadCdp:
+    """A #fragment entry reloaded in place: scripted pauses on the page's requests, and loader ids read after."""
+
+    def __init__(self, messages, loaders):
+        self.socket, self.loaders = _Socket(messages), list(loaders)
+        self.calls, self.sent = [], []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def call(self, method, **params):
+        self.calls.append(method)
+        if method == "Page.getNavigationHistory":
+            return {"currentIndex": 0, "entries": [{"url": "https://bank.test/#/pay"}]}
+        if method == "Page.getFrameTree":
+            return {"frameTree": {"frame": {"id": "main", "loaderId": self.loaders.pop(0) if self.loaders else "L1"}}}
+        return {}
+
+    async def send(self, method, **params):
+        self.sent.append((method, params.get("requestId")))
+        return 7 if method == "Page.reload" else 100 + len(self.sent)
+
+
+def _paused(request_id, frame, method="GET"):
+    return {"method": "Fetch.requestPaused", "params": {"requestId": request_id, "frameId": frame, "request": {"method": method}}}
+
+
+async def test_a_fragment_entry_is_reloaded_in_place_and_its_get_goes_on(monkeypatch):
+    """No navigation (that would add an entry); the page's own GET and another frame's request go on."""
+    cdp = _ReloadCdp([_paused("child", "frame-2"), {"id": 7, "result": {}}, _paused("page", "main")], ["L1", "L2"])
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
+    await browser_history.reopen_fresh("ws://page")
+    assert "Page.navigate" not in cdp.calls and cdp.calls[-2:] == ["Fetch.disable", "Page.getFrameTree"]
+    assert cdp.sent == [("Page.reload", None), ("Fetch.continueRequest", "child"), ("Fetch.continueRequest", "page")]
+
+
+async def test_a_fragment_entry_a_form_posted_is_never_posted_again(monkeypatch):
+    """Chrome's reload repeats a form's POST without asking; it is stopped and Chrome's blocked page stands."""
+    cdp = _ReloadCdp([_paused("page", "main", "POST"), {"id": 7, "result": {}}], ["L1", "L2"])
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
+    await browser_history.reopen_fresh("ws://page")
+    assert cdp.sent == [("Page.reload", None), ("Fetch.failRequest", "page")] and "Fetch.disable" in cdp.calls
+
+
+@pytest.mark.parametrize(("messages", "loaders"), [
+    # The reload is refused.
+    ([{"id": 7, "error": {"code": -32000}}], ["L1"]),
+    # The page's request never comes.
+    ([{"id": 7, "result": {}}], ["L1"]),
+    # It goes on, but no new document commits.
+    ([{"id": 7, "result": {}}, _paused("page", "main")], ["L1"]),
+])
+async def test_a_fragment_entry_that_does_not_reload_raises_and_lets_requests_go(monkeypatch, messages, loaders):
+    cdp = _ReloadCdp(messages, loaders)
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_history, "RELOAD_SECONDS", 0.05)
+    monkeypatch.setattr(browser_history, "COMMIT_READS", 2)
+    monkeypatch.setattr(browser_history, "COMMIT_INTERVAL", 0)
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await browser_history.reopen_fresh("ws://page")
+    assert "Fetch.disable" in cdp.calls
 
 
 @pytest.mark.parametrize("owner_key", ["owner", None])

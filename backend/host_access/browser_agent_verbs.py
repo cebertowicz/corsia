@@ -36,21 +36,43 @@ PANE_INPUT_REFUSAL = (
     "selector to bring an element into view, or ask the person in chat.")
 
 _REF = re.compile(r"(?:@|ref=)?e\d+")
-# Other selector engines: a prefix such as text=, xpath= or js= (the parser allows space before '='), an XPath,
-# a quoted text selector, a chained locator, or a script URL.
-_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_:-]*\s*=")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def plain_target(selector: str) -> bool:
-    """A snapshot ref or a plain CSS selector; never an engine prefix, XPath, chain or script."""
+    """A snapshot ref or a plain CSS selector; never an engine prefix, XPath, chain or script.
+
+    Plain CSS has '=' only inside an attribute bracket, so any other '=' is refused: whatever characters the
+    selector parser allows in an engine name, an engine prefix (text=, xpath=, js=, *name=) needs one.
+    """
     if _REF.fullmatch(selector):
         return True
     lowered = selector.lower()
     # The selector parser trims each part, so a check on the untrimmed text could miss a prefix.
     return not (not selector or selector != selector.strip() or selector.startswith(("-", "/", "(", "..", '"', "'")) or
-                _ENGINE.match(selector) or ">>" in selector or _CONTROL.search(selector) or
+                _equals_outside_brackets(selector) or ">>" in selector or _CONTROL.search(selector) or
                 "javascript:" in lowered or "eval(" in lowered)
+
+
+def _equals_outside_brackets(selector: str) -> bool:
+    """Whether an '=' stands outside an attribute bracket; an unclosed bracket or quote counts as one."""
+    depth, quote, escaped = 0, "", False
+    for char in selector:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif quote:
+            quote = "" if char == quote else quote
+        elif depth and char in "\"'":
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]" and depth:
+            depth -= 1
+        elif char == "=" and not depth:
+            return True
+    return bool(depth or quote)
 
 
 def admitted(args: Sequence[str]) -> bool:

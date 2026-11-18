@@ -324,15 +324,25 @@ async def test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document
     owner = BrowserSessionOwner(namespace="corsia-verbs-back", instance_key=uuid4().hex)
     try:
         with fixture_server() as origin:
-            await owner.run(thread_id, ("open", f"{origin}/form.html#step"))
+            where = "location.pathname + location.hash"
+            await owner.run(thread_id, ("open", f"{origin}/choice.html"))
+            await owner.run(thread_id, ("open", f"{origin}/form.html#step"), session="existing")
             await owner.run(thread_id, ("fill", "#field", "typed"), session="existing")
             assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "typed"
             await owner.run(thread_id, ("open", f"{origin}/plain.html"), session="existing")
             # The session has held a page (the password guard applied to an earlier visit).
             browser_control._guarded_visits[thread_id] = {"earlier": browser_control.PasswordReadGuard("earlier", frozenset())}
             assert await owner.run(thread_id, ("back",), session="existing") == "Done."
-            assert await cdp_value(owner, thread_id, "location.pathname + location.hash") == "/form.html"
+            # The same entry, address and fragment kept, with a fresh document.
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
             assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "old"
+            # The reload added no entry and dropped no forward entry: back gets past it, and forward returns.
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/choice.html"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/plain.html"
     finally:
         browser_control._guarded_visits.pop(thread_id, None)
         await owner.shutdown()
