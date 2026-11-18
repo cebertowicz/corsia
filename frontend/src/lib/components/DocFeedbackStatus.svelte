@@ -80,4 +80,8 @@
 	});
 </script>
 
-{#if showControls}<DocFeedbackControls {feedback} {compact} {lane} {countSep} />{/if}
+{#if showControls}<DocFeedbackControls {feedback} {compact} {lane} {countSep} />{:else}<span class="sr-only" role="status" data-feedback-status>{feedback.undeliveredCount(lane) > 0 ? feedback.undeliveredSummary(lane) : feedback.sent > 0 ? feedback.sentText : ''}</span>{/if}
+
+<style>
+	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+</style>

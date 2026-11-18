@@ -174,7 +174,7 @@ journey('the empty and the resolved-empty drawer', FINE_AND_PHONE, async ({ page
 	await shot(page, 'rs-19-empty', info);
 });
 
-journey('with nothing resolved the drawer offers no Resolved entry and no filter', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('with nothing resolved the drawer shows an empty Resolved view and no filter', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Drawer resolved empty ${mode} ${theme}`);
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
@@ -182,8 +182,11 @@ journey('with nothing resolved the drawer offers no Resolved entry and no filter
 	await openComments(page);
 	const drawer = drawerOf(page);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
-	await expect(resolvedEntry(drawer)).toHaveCount(0);
+	await expect(resolvedEntry(drawer)).toBeVisible();
+	await expect(resolvedEntry(drawer)).toContainText('Resolved · 0');
 	await expect(drawer.locator('[data-drawer-filter]')).toHaveCount(0);
+	await openResolved(drawer);
+	await expect(drawer.getByText('No resolved comments.')).toBeVisible();
 	await settled(page);
 	await shot(page, 'rs-20-nothing-resolved', info);
 });

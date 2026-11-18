@@ -168,6 +168,7 @@ for (const { width, scheme, resolved } of CASES) {
 			expect.soft(fit.clipped, `${label}: Resolved is not clipped`).toBe(false);
 			expect.soft(fit.inside, `${label}: Resolved sits inside the drawer`).toBe(true);
 			expect.soft(fit.sideways, `${label}: the drawer does not scroll sideways`).toBeLessThanOrEqual(1);
+			if (width <= 768) await expectTouchTargets(panel, '[aria-label="Close comments"]', { min: 44 });
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), fullPage: false });
 			await closeComments(page);
 			// The Comments button counts open threads, and all three are resolved.
@@ -217,11 +218,12 @@ const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, 
 const FRAME_SIZES = [320, 360, 375, 393, 560, 700, 900];
 
 /** Details' delivery switch: its button is the track; its hit area is the track or the 44 px touch size, and a tap on each corner and the centre lands on it. */
-async function measureSwitch(page: Page) {
+async function measureSwitch(page: Page, width: number) {
 	const panel = await openDetails(page);
 	const reviewerMore = await panel.locator('.reviewer-group .more').textContent();
 	await closeDetails(page);
 	await openComments(page);
+	await settled(page, width);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const measured = await drawer.evaluate((root) => {
 		const toggle = root.querySelector<HTMLElement>('.delivery .tg')!;
@@ -232,7 +234,14 @@ async function measureSwitch(page: Page) {
 		const probes: Array<[number, number]> = [[area.left + 1, area.top + 1], [area.right - 1, area.top + 1], [area.left + 1, area.bottom - 1], [area.right - 1, area.bottom - 1], [area.left + area.width / 2, area.top + area.height / 2]];
 		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggle).map((el) => `${el?.tagName}.${el?.className}`);
 		const overlapOf = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
-		const hitOverlaps = [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => control !== toggle && !toggle.contains(control) && !control.contains(toggle) && control.getBoundingClientRect().width > 0 && overlapOf(area, control.getBoundingClientRect())).map((control) => control.getAttribute('aria-label') ?? control.className);
+		const hitOverlaps = [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => {
+			if (control === toggle || toggle.contains(control) || control.contains(toggle)) return false;
+			const box = control.getBoundingClientRect(), scroller = control.closest<HTMLElement>('.drawer-comments');
+			if (!scroller) return box.width > 0 && overlapOf(area, box);
+			const clip = scroller.getBoundingClientRect();
+			const visible = new DOMRect(Math.max(box.left, clip.left), Math.max(box.top, clip.top), Math.max(0, Math.min(box.right, clip.right) - Math.max(box.left, clip.left)), Math.max(0, Math.min(box.bottom, clip.bottom) - Math.max(box.top, clip.top)));
+			return visible.width > 0 && visible.height > 0 && overlapOf(area, visible);
+		}).map((control) => control.getAttribute('aria-label') ?? control.className);
 		const send = root.querySelector<HTMLElement>('.drawer-foot .btn');
 		const sendShort = send?.querySelector<HTMLElement>('.send-short');
 		const sendShown = sendShort && getComputedStyle(sendShort).display !== 'none' ? sendShort : send?.querySelector<HTMLElement>('.send-full') ?? send;
@@ -243,7 +252,6 @@ async function measureSwitch(page: Page) {
 			area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 },
 			tapMisses, hitOverlaps,
 			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right) },
-			touchMeant: window.innerWidth <= 768,
 			sendText: sendShown?.innerText.trim() ?? null, sendName: send?.getAttribute('aria-label') ?? null,
 			deliverLabel: root.querySelector<HTMLElement>('.delivery > span')?.textContent?.trim() ?? null,
 			sideways: root.scrollWidth - root.clientWidth,
@@ -256,7 +264,7 @@ async function measureSwitch(page: Page) {
 function expectSwitchWhole(measured: Awaited<ReturnType<typeof measureSwitch>>, label: string) {
 	const { button, area, tapMisses } = measured;
 	expect.soft(Math.abs(button.width - 30) <= 0.5 && Math.abs(button.height - 17) <= 0.5, `${label}: the switch button is its 30 x 17 track, measured ${button.width} x ${button.height}`).toBe(true);
-	expect.soft(measured.touchMeant ? area.width >= 43.5 && area.height >= 43.5 : Math.abs(area.width - 30) <= 0.5 && Math.abs(area.height - 17) <= 0.5, `${label}: the hit area is 44 x 44 in a window up to 768 px and the track elsewhere, measured ${area.width} x ${area.height}`).toBe(true);
+	expect.soft(area.width >= 43.5 && area.height >= 43.5, `${label}: the hit area is at least 44 x 44, measured ${area.width} x ${area.height}`).toBe(true);
 	expect.soft(measured.hitOverlaps, `${label}: the switch's hit area overlaps no other control in Details`).toEqual([]);
 	expect.soft(measured.hitOutside, `${label}: the switch's hit area stays inside Details`).toEqual({ left: 0, right: 0 });
 	expect.soft(tapMisses, `${label}: taps on the four corners and the centre of the switch's hit area land on the switch`).toEqual([]);
@@ -327,7 +335,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			const measured = await measureBar(page);
 			await expectCountsWhole(page, measured, label, { threads: 120, unread: 45, needs: 1 });
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), clip: { x: 0, y: 0, width: viewport, height: Math.max(240, Math.ceil(measured.bar.bottom + 40)) } });
-			const details = await measureSwitch(page);
+			const details = await measureSwitch(page, viewport);
 			expectSwitchWhole(details, label);
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-details-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), fullPage: false });
 			await closeComments(page);
@@ -365,17 +373,16 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 
 /**
  * The amber count beside Details, driven through each real thing it counts, never set by hand. It counts what needs the reader
- * behind Details and nowhere else on screen: Overdue; File changed where the bar does not show its reload mark (a canvas wide
- * enough to split); an ask whose card is hidden under the comment sheet (a touch screen: a phone, or one held sideways). So it
- * reads 1 at every width (Overdue), 2 where the canvas splits (File changed joins), at most 2 on a compact canvas (File changed is
- * the bar's own mark there), and 3 only on a touch screen held sideways whose canvas splits. File changed comes from a second
+ * behind Details and nowhere else on screen: Overdue and an ask whose card is hidden under the comment sheet (a touch screen:
+ * a phone, or one held sideways). File changed remains visible in the bar at every width and is not counted. The count reads 1
+ * for Overdue, rising to 2 when the sheet hides the ask. File changed comes from a second
  * writer: a document in a skill's evals folder is guidance and opens without live editing (an agent saving a file the reader has
  * open), so the save is a change the reader is told about rather than merged into their text.
  */
 const NEEDS_CASES = [
-	{ name: 'a split canvas on a desktop window', project: 'chromium-desktop', width: 1440, height: 900, split: true, sheet: false, max: 2 },
+	{ name: 'a split canvas on a desktop window', project: 'chromium-desktop', width: 1440, height: 900, split: true, sheet: false, max: 1 },
 	{ name: 'a phone (compact canvas)', project: 'chromium-mobile', width: 393, height: 852, split: false, sheet: true, max: 2 },
-	{ name: 'a phone held sideways (split canvas)', project: 'chromium-mobile', width: 915, height: 412, split: true, sheet: true, max: 3 },
+	{ name: 'a phone held sideways (split canvas)', project: 'chromium-mobile', width: 915, height: 412, split: true, sheet: true, max: 2 },
 ] as const;
 
 /**
@@ -447,27 +454,19 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		await expect(card).toBeVisible();
 		await expectNeeds(1, 'overdue, ask on its card');
 
-		// A second writer saves the file. Where the canvas splits, File changed is a row in Details and joins the count; on a compact
-		// canvas it is the bar's own reload mark and does not.
+		// A second writer saves the file. File changed is in the bar at every width and does not join the count.
 		const saved = await page.request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: doc.path, text: `${doc.text}\nA line another writer added.\n`, thread_id: threadId } });
 		expect(saved.ok(), await saved.text()).toBeTruthy();
 		const barReload = documentBarHost(page).locator('[data-file-changed]');
-		if (split) {
-			await expectNeeds(2, 'overdue, file changed');
-			await expect(barReload, 'File changed is not drawn in the bar where the canvas splits').toHaveCount(0);
-			const panel = await openDetails(page);
-			await expect(panel.locator('[data-file-changed]')).toHaveText('File changed · Reload');
-			await closeDetails(page);
-		} else {
-			await expect(barReload).toBeVisible();
-			await expectNeeds(1, 'overdue, file changed in the bar');
-		}
+		await expect(barReload).toBeVisible();
+		await expect(barReload).toHaveAccessibleName('File changed · Reload');
+		await expectNeeds(1, 'overdue, file changed in the bar');
 
 		// The comment sheet covers the ask's card on a touch screen, so the ask joins the count; elsewhere the card stays on screen.
 		await page.locator('[data-comments-entry]').click();
 		if (sheet) {
 			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
-			await expectNeeds(max, `overdue, ${split ? 'file changed, ' : 'file changed in the bar, '}ask under the comment sheet`);
+			await expectNeeds(max, 'overdue, file changed in the bar, ask under the comment sheet');
 		} else {
 			await expect(card, 'without a sheet the ask keeps its card').toBeVisible();
 			await expectNeeds(max, 'overdue, file changed, comments open beside the text');

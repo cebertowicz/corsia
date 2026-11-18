@@ -311,8 +311,8 @@ export const sentToast = (page: Page, text: string): Locator => page.locator('.t
  * found closed or open like `headerSend`; check it is visible only after opening Details.
  */
 export const headerSent = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot .sending-now .sent');
-/** The document header's spoken delivery status (what was sent, or what was not delivered), in Details' Comments section; read while closed too. */
-export const headerSentStatus = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot [role="status"]');
+/** The document's spoken delivery status remains mounted whether the drawer is open or closed. */
+export const headerSentStatus = (page: Page): Locator => page.locator('[data-feedback-status]');
 
 // ---- Fixtures ----------------------------------------------------------------------------------------------------
 

@@ -231,6 +231,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await headerSend(page).click();
 		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
+		await expect(page.locator('[data-comments-entry] [data-comments-sent]')).toHaveCount(0);
+		await expect(page.locator('[data-doc-comments-drawer] .drawer-foot .sending-now .sent')).toHaveCount(1);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expect(chatSend(page)).toHaveText('Send 2 comments');
 		expect(heldIn(first.artifactId, 'document-held'), 'the first document sent').toBe(0);

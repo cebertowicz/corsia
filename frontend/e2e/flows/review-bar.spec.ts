@@ -772,30 +772,21 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 }, orphanHeavyStart);
 
 /**
- * The opened card's asker keeps its distinguishing suffix whenever its prefix truncates, never cut into two lines, and its box stays off
- * the card's answers and the bar's Comments and Details.
+ * The opened card shows the whole asker on its own line, clear of its answers and the bar's Comments and Details.
  */
 async function expectNameClearOfControls(page: Page, title: string) {
 	const name = card(page).locator('.rb-dock-who');
 	await expect(name).toHaveText(title);
 	await expect(name).toBeVisible();
-	await expect(name.locator('.name'), 'the whole name is one hover away').toHaveAttribute('title', title);
 	const boxes = await card(page).evaluate((element) => {
 		const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, label: (node.getAttribute('aria-label') ?? node.textContent ?? '').slice(0, 40) }; };
-		const who = element.querySelector('.rb-dock-who')!, head = who.querySelector<HTMLElement>('.name-head')!, tail = who.querySelector('.name-tail');
-		const line = parseFloat(getComputedStyle(who).lineHeight) || parseFloat(getComputedStyle(who).fontSize) * 1.5;
+		const who = element.querySelector<HTMLElement>('.rb-dock-who')!;
 		// A touch control's 44px hit area is held to what is drawn, as the review answers' rows are.
 		const controls = [...element.querySelectorAll('.rb-actions .btn'), ...document.querySelectorAll('[data-comments-entry], [data-document-details]')]
 			.map(rect).filter((r) => r.right > r.left);
-		return { who: rect(who), tail: tail ? rect(tail) : null, cut: head.scrollWidth > head.clientWidth, line, controls };
+		return { who: rect(who), scrollWidth: who.scrollWidth, clientWidth: who.clientWidth, controls };
 	});
-	expect(boxes.who.height, `the name is one line: ${JSON.stringify(boxes.who)}`).toBeLessThanOrEqual(boxes.line * 1.5);
-	if (boxes.cut) expect(boxes.tail, 'a cut name keeps its suffix').not.toBeNull();
-	if (boxes.tail) {
-		const tail = boxes.tail, who = boxes.who;
-		const inside = tail.right > tail.left && tail.left >= who.left - 0.5 && tail.right <= who.right + 0.5 && tail.top >= who.top - 0.5 && tail.bottom <= who.bottom + 0.5;
-		expect(inside, `the distinguishing suffix stays visible within the requester box: ${JSON.stringify(boxes)}`).toBe(true);
-	}
+	expect(boxes.scrollWidth, 'the whole asker fits in the opened card').toBeLessThanOrEqual(boxes.clientWidth);
 	expect(boxes.controls.length).toBeGreaterThan(0);
 	for (const control of boxes.controls) {
 		const apart = boxes.who.right <= control.left || control.right <= boxes.who.left || boxes.who.bottom <= control.top || control.bottom <= boxes.who.top;

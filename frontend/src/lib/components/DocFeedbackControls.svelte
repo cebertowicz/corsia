@@ -6,7 +6,7 @@
 	import type { DocFeedback, HeldLane } from '$lib/docFeedback.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
 
-	let { feedback, compact = false, lane = null, countSep = ' ' }: {
+	let { feedback, compact = false, lane = null, countSep = ' ', announce = true }: {
 		feedback: DocFeedback;
 		/** A narrow bar: the Send control alone, its full wording read out rather than shown. */
 		compact?: boolean;
@@ -14,6 +14,8 @@
 		lane?: HeldLane | null;
 		/** What sits between Send and its count in the short label: ' · ' in the document's Details panel, matching "Resolved · N". */
 		countSep?: string;
+		/** The document header owns the live region while these controls are in its drawer. */
+		announce?: boolean;
 	} = $props();
 	const held = $derived(lane ? feedback.heldCount(lane) : 0);
 	const undelivered = $derived(feedback.undeliveredCount(lane));
@@ -56,7 +58,7 @@
 {/if}
 <!-- In a narrow bar the summary is read out, not laid out: Retry stands in Send's place and carries it as its name. -->
 <span bind:this={notSent} class="undelivered" class:idle={undelivered === 0} class:compact>
-	<span role="status" class:sr-only={compact}>{undelivered > 0 ? summary : feedback.sent > 0 ? feedback.sentText : ''}</span>
+	<span role={announce ? 'status' : undefined} class:sr-only={compact}>{undelivered > 0 ? summary : feedback.sent > 0 ? feedback.sentText : ''}</span>
 	{#if lane && undelivered > 0}
 		<Button size="sm" variant="secondary" onclick={() => void feedback.retry(lane)} loading={feedback.retryingLane === lane} disabled={feedback.retryingLane !== null}
 			ariaLabel={compact ? `Retry sending. ${summary}` : undefined} title={compact ? summary : undefined}>

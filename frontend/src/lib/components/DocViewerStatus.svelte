@@ -80,8 +80,20 @@
 	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: false, hiddenAsk: !!ask && !ask.onCard }));
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
+	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
+	let receiptBox = $state<HTMLElement>(), receiptMeasure = $state<HTMLElement>();
+	let receiptTextFits = $state(false);
+	$effect(() => {
+		const box = receiptBox, measure = receiptMeasure;
+		if (!box || !measure) return;
+		const update = () => { receiptTextFits = measure.getBoundingClientRect().width <= box.getBoundingClientRect().width; };
+		update();
+		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+		observer?.observe(box); observer?.observe(measure);
+		return () => observer?.disconnect();
+	});
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
-		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} new` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}`);
+		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} new` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
 	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
 	const statusText = $derived(freshnessPresentation
 		? freshnessPresentation.overdue
@@ -209,10 +221,16 @@
 	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
 		aria-busy={!ready || commentsLoading} aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
-		<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
-		<!-- Unread is text; the separate dot marks comments waiting for Send. -->
-		{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
-		{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
+		<span class="bar-comments-content" class:receipt-hidden={sent && !commentsOpen}>
+			<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
+			<!-- Unread is text; the separate dot marks comments waiting for Send. -->
+			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
+			{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
+		</span>
+		{#if sent && !commentsOpen}<span class="bar-sent-container" data-comments-sent aria-hidden="true" bind:this={receiptBox}>
+			<span class="bar-sent"><svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg><svg class="sent-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg>{#if receiptTextFits}<span>Sent</span>{/if}</span>
+			<span class="bar-sent-measure" bind:this={receiptMeasure}><svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg><svg class="sent-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg><span>Sent</span></span>
+		</span>{/if}
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
@@ -281,6 +299,15 @@
 		:global(.shell-header) .bar-new-word { display: none; }
 	}
 	.bar-tools :global(.presence-row) { flex: none; }
+	.bar-comments { position: relative; }
+	.bar-comments-content { display: inline-flex; align-items: center; gap: var(--space-1); }
+	.bar-comments-content.receipt-hidden { visibility: hidden; }
+	.bar-sent-container { position: absolute; inset: 0; overflow: hidden; }
+	.bar-sent, .bar-sent-measure { display: flex; align-items: center; color: var(--green-text); }
+	.bar-sent { position: absolute; inset: 0; justify-content: center; }
+	.bar-sent-measure { position: absolute; width: max-content; visibility: hidden; pointer-events: none; }
+	.bar-comments .bar-sent svg, .bar-comments .bar-sent-measure svg { flex: none; }
+	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
 	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }

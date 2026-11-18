@@ -868,7 +868,15 @@ for (const theme of ['light', 'dark'] as const) {
 			await holdTimers(page, false);
 			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
 			await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
+			await holdTimers(page, true);
+			const entry = page.locator('[data-comments-entry]');
+			await expect(entry.locator('[data-comments-sent] .bar-sent .sent-check')).toBeVisible();
+			await expect(entry.locator('.bar-sent > span')).toHaveCount(width === 393 ? 0 : 1);
+			const sentWidth = (await entry.boundingBox())!.width;
 			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
+			await holdTimers(page, false);
+			await expect(entry.locator('[data-comments-sent]')).toHaveCount(0);
+			expect((await entry.boundingBox())!.width, 'the receipt does not change the control width').toBe(sentWidth);
 
 			await holdTimers(page, true);
 			if (width === 1440) await page.evaluate(() => {
