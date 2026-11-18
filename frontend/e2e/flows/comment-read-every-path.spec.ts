@@ -511,12 +511,8 @@ for (const way of ['card', 'tag'] as const) {
 			await imageTag(page, 1).click();
 		}
 		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { timeout: 10_000 }).toBe(false);
-		const reply = await agentDocReply(request, id, seeded.sessionId, 'A later answer.');
-		if (reply === null) {
-			// The writer line holds an agent's reply while the person's page holds the thread: nothing arrives while it is open.
-			info.annotations.push({ type: 'arrival', description: 'the reply waited in the writer line while the thread was open' });
-			return;
-		}
+		// The reply must post while the thread is open; if it waited in the writer line, the read on close below would test nothing.
+		expect(await agentDocReply(request, id, seeded.sessionId, 'A later answer.'), 'the reply posts while the image thread is open').not.toBeNull();
 		await expect.poll(() => threadUnread(request, seeded.artifactId, id)).toBe(true);
 		await page.waitForTimeout(SEEN_FOR_MS);
 		expect(await threadUnread(request, seeded.artifactId, id), 'arriving while open reads nothing yet').toBe(true);
