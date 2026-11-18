@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, heldPlace, holdPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
 import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
@@ -45,7 +45,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const frameEl = document.createElement('div');
 	frameEl.className = 'doc';
 	root.appendChild(frameEl);
-	const screen = { top: 0, page: 0, header, height, offset: 0, width: 800 };
+	const screen = { top: 0, page: 0, header, height, offset: 0, width: 800, contentWidth: 800 };
 	/** Where the scroller's top edge is on screen, and how tall it is. */
 	const edge = () => screen.top - screen.page + screen.header;
 	const inner = () => screen.height - screen.top - screen.header;
@@ -81,6 +81,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 			set: (value: number) => { screen.offset = Math.round(Math.min(max(), Math.max(0, value))); scrolled = true; },
 		},
 	});
+	Object.defineProperty(view.contentDOM, 'clientWidth', { configurable: true, get: () => screen.contentWidth });
 	// Zero-sized boxes keep CodeMirror on its estimated heights; only the tops matter here.
 	const box = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
 	vi.spyOn(frameEl, 'getBoundingClientRect').mockImplementation(() => box(screen.top - screen.page));
@@ -98,7 +99,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const follow = (text: string) => { reading = text; painted.length = 0; };
 	const painted: number[] = [];
 	let laidOut = '';
-	const size = () => [screen.top, screen.header, screen.height, screen.width, view.contentHeight].join();
+	const size = () => [screen.top, screen.header, screen.height, screen.width, screen.contentWidth, view.contentHeight].join();
 	laidOut = size();
 	/** Runs one frame; `layout` changes the page (a header growing) after the frame's callbacks, as a CSS transition does. */
 	const frame = async (layout?: () => void) => {
@@ -143,6 +144,38 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 const off = (painted: number[], top: number, px = 1) => painted.filter((at) => Math.abs(at - top) > px);
 
 describe('keepPlaceWhenEditorMoves', () => {
+	it('holds the selected place when the text column narrows before a layout scroll', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		const selected = captureDocumentPlace(page.view);
+		holdPlace(page.view, selected, true);
+		page.screen.contentWidth = 700;
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).toBe(selected.from);
+		expect(page.scroller.scrollTop).toBe(selected.scrollTop);
+		page.stop();
+	});
+
+	it('consumes the selecting press but lets a later wheel take over', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		page.scroller.dispatchEvent(new Event('pointerdown'));
+		const selected = captureDocumentPlace(page.view);
+		holdPlace(page.view, selected, true);
+		page.screen.width = 700;
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).toBe(selected.from);
+		expect(page.scroller.scrollTop).toBe(selected.scrollTop);
+		await page.frame();
+		page.scroller.dispatchEvent(new Event('wheel'));
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).not.toBe(selected.from);
+		page.stop();
+	});
+
 	it('anchors after a clipped paragraph when that paragraph can rewrap above the first whole line', async () => {
 		const page = pane();
 		await page.readAt(1000);
