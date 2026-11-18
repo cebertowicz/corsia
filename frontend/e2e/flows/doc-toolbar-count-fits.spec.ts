@@ -280,6 +280,36 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 	test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	test.setTimeout(600_000);
+	const logUrl = (url: string) => { try { const parsed = new URL(url); return `${parsed.origin}${parsed.pathname}`; } catch { return '<unparseable>'; } };
+	page.on('framenavigated', (frame) => console.info('NAV_DIAG', Date.now(), 'framenavigated', logUrl(frame.url())));
+	page.on('requestfailed', (req) => console.info('NAV_DIAG', Date.now(), 'requestfailed', logUrl(req.url()), req.failure()?.errorText));
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Page.enable');
+	await cdp.send('Network.enable');
+	cdp.on('Page.frameRequestedNavigation', (event) => console.info('NAV_DIAG', Date.now(), 'requestedNavigation', event.reason, logUrl(event.url)));
+	cdp.on('Network.requestWillBeSent', (event) => {
+		if (event.type === 'Document') console.info('NAV_DIAG', Date.now(), 'documentRequest', logUrl(event.request.url), event.initiator.type,
+			event.initiator.stack?.callFrames.map((frame) => ({ functionName: frame.functionName, url: logUrl(frame.url), line: frame.lineNumber })));
+	});
+	page.on('console', (message) => { if (message.text().startsWith('NAV_DIAG_PAGE')) console.info(message.text()); });
+	await page.addInitScript(() => {
+		for (const name of ['pushState', 'replaceState'] as const) {
+			const original = history[name];
+			history[name] = function (...args) {
+				console.info('NAV_DIAG_PAGE', Date.now(), `history.${name}`, args[2] ? new URL(String(args[2]), location.href).pathname : '<unchanged>');
+				return original.apply(this, args);
+			};
+		}
+		for (const name of ['assign', 'replace', 'reload'] as const) {
+			try {
+				const original = location[name].bind(location);
+				Object.defineProperty(location, name, { configurable: true, value: (...args: string[]) => {
+					console.info('NAV_DIAG_PAGE', Date.now(), `location.${name}`, args[0] ? new URL(args[0], location.href).pathname : '<current>');
+					return original(...(args as [string]));
+				} });
+			} catch { console.info('NAV_DIAG_PAGE', Date.now(), `location.${name}`, 'not-wrappable'); }
+		}
+	});
 	await setMockCorsiaAgentModel(request);
 	await setDebugVersionOverlay(request, false);
 	const title = `toolbar-worst-${Date.now()}-a-document-title-long-enough-to-prove-the-bar-keeps-its-tools-together`;
@@ -316,7 +346,9 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 		const open = async (viewport: number, split: number | null) => {
 			await page.setViewportSize({ width: viewport, height: viewport < 700 ? 852 : 900 });
 			await installWorkspace(page, threadId, [doc], 0, split ? { splitWidth: split } : {});
+			console.info('NAV_DIAG', Date.now(), 'openThread start', JSON.stringify({ viewport, split }));
 			await openThread(page, threadId, title);
+			console.info('NAV_DIAG', Date.now(), 'openThread done', JSON.stringify({ viewport, split }));
 			await expect(page.locator('.cm-content')).toContainText('A commentable document.');
 			if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
 			await turnOffDocumentComments(page);
