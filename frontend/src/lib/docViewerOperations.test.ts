@@ -10,9 +10,15 @@ vi.mock('$lib/api/docs', async (importOriginal) => ({
 	fetchContent: vi.fn(),
 }));
 
+vi.mock('$lib/stores/docComments', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/stores/docComments')>(),
+	addReply: vi.fn(),
+}));
+
+import { addReply } from '$lib/stores/docComments';
 import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshness';
 import { emit } from '$lib/ws/events';
-import { createCommentRetryToast, markFreshnessVerified, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
+import { createCommentRetryToast, createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
 import { RequestRefused } from '$lib/api/docs';
 
@@ -27,6 +33,8 @@ function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshnes
 		...overrides,
 	};
 }
+
+const NOT_COMMENTABLE_SENTENCE = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
 
 describe('comment submission failure delivery', () => {
 	it('reports the failure and preserves its rejection for the draft-owning composer', async () => {
@@ -67,6 +75,52 @@ describe('comment submission failure delivery', () => {
 		try {
 			await expect(submitDocumentComment(async () => { throw error; }, undefined, () => 'surface')).rejects.toBe(error);
 			expect(report).toHaveBeenCalledWith(copy, 'error');
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it('shows the server\'s sentence for a not_commentable refusal as given, with no "try again", and keeps the rejection', async () => {
+		const error = new RequestRefused(`409 ${JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE, kind: 'not_commentable' })}`, 'not_commentable');
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await expect(submitDocumentComment(async () => { throw error; }, undefined, () => 'The document changed. Try again.')).rejects.toBe(error);
+			expect(report).toHaveBeenCalledWith(NOT_COMMENTABLE_SENTENCE, 'error');
+			expect(report.mock.calls[0][0]).not.toMatch(/try again/i);
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it('matches the refusal by its kind, never by its sentence or the 409 status alone', () => {
+		const body = JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE });
+		expect(isNotCommentable(new RequestRefused(`409 ${body}`, 'not_commentable'))).toBe(true);
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, 'not_commentable'))).toBe(NOT_COMMENTABLE_SENTENCE);
+		// Same sentence and status without the kind, another kind, a plain Error and a body with no sentence: none is this refusal.
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, null))).toBeUndefined();
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, 'diagram_changed'))).toBeUndefined();
+		expect(notCommentableMessage(new Error(`409 ${body}`))).toBeUndefined();
+		expect(notCommentableMessage(new RequestRefused('409 not json', 'not_commentable'))).toBeUndefined();
+	});
+
+	it('keeps a reply refused as not_commentable: the sentence shows, the rejection reaches the composer, and no other 409 is changed', async () => {
+		const refused = new RequestRefused(`409 ${JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE, kind: 'not_commentable' })}`, 'not_commentable');
+		const commentCreated = vi.fn();
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			vi.mocked(addReply).mockRejectedValueOnce(refused);
+			await expect(createThreadActions(() => 'artifact', commentCreated).reply('root', 'My reply')).rejects.toBe(refused);
+			expect(report).toHaveBeenCalledWith(NOT_COMMENTABLE_SENTENCE, 'error');
+			expect(commentCreated).not.toHaveBeenCalled();
+			// Another 409 has no named reason here, so the existing generic toast shows as on dev.
+			const other = new RequestRefused('409 {"detail":"changed"}', null);
+			vi.mocked(addReply).mockRejectedValueOnce(other);
+			await expect(createThreadActions(() => 'artifact', commentCreated).reply('root', 'My reply')).rejects.toBe(other);
+			expect(report).toHaveBeenLastCalledWith("Couldn't post the comment — try again", 'error');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
