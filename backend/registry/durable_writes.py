@@ -31,7 +31,6 @@ from registry.shared_write_errors import DurableWritePolicyError, SuccessorHolds
 from tools.filesystem_effects import (
     claim_bound_file,
     copy_bound_file,
-    replace_bound_file,
     restore_claimed_file,
     stage_bound_bytes,
     stage_bound_file,
@@ -41,9 +40,6 @@ from tools.filesystem_effects import (
 
 _INTENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 logger = logging.getLogger(__name__)
-
-
-# Shared target policy is implemented in registry.shared_documents.
 
 
 def _remove_if_present(path: Path | None) -> None:
@@ -57,7 +53,7 @@ def _remove_if_present(path: Path | None) -> None:
         return
 
 
-def _restore_target(target: Path, backup: Path | None) -> None:
+def _restore_target(target: Path, backup: Path | None, content_hash: str) -> None:
     if backup is None:
         _remove_if_present(target)
         return
@@ -66,7 +62,7 @@ def _restore_target(target: Path, backup: Path | None) -> None:
             f"{backup.name.removesuffix('.backup')}.stage"
         )
         copy_bound_file(backup, rollback_stage)
-        replace_bound_file(rollback_stage, target)
+        replace_if_expected(rollback_stage, target, content_hash)
 
 
 def _finish_undo(
@@ -86,9 +82,11 @@ def _finish_undo(
                 raise RuntimeError(
                     f"Durable write intent {intent_id} no longer owns its target."
                 )
-            _restore_target(target, None)
+            _restore_target(target, None, content_hash)
     elif backup.exists():
-        _restore_target(target, backup)
+        # Recovery may resume after the restore itself but before the intent advanced.
+        if not target.is_file() or _sha256_file(target) != _sha256_file(backup):
+            _restore_target(target, backup, content_hash)
     else:
         raise RuntimeError(
             f"Durable write intent {intent_id} lost its rollback backup."

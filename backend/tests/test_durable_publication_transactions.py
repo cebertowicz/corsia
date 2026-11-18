@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from core.workspace_layout import resolve_thread_working_root
+from doceditor.document_save_errors import FileChangedOutside
 from infra.database import SchemaVersionError, TransactionOwnershipError
 from infra.db_connection import LaneWriteError
 from infra.db_loop_guard import LoopThreadWriteError
@@ -83,6 +84,27 @@ def _run(scope, operation, source=None):
     )
 
 
+def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_scope, monkeypatch):
+    workspace, project, thread, db = durable_scope
+    target = project / "shared" / "planning" / "transaction.md"
+    kwargs = dict(thread_id=thread, project_id="project-alpha", workspace=workspace,
+                  description="Transaction proof", notify=False)
+    durable_writes.write_text(target, "original", **kwargs)
+
+    def fail_after_outside_edit(*args, **kwargs):
+        target.write_text("outside edit")
+        raise sqlite3.OperationalError("injected registration failure")
+
+    monkeypatch.setattr(durable_writes, "_register_applied", fail_after_outside_edit)
+    with pytest.raises(FileChangedOutside):
+        durable_writes.write_text(target, "candidate", **kwargs)
+    assert target.read_text() == "outside edit"
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
+    durable_writes.recover_write_intents(workspace=workspace)
+    assert target.read_text() == "outside edit"
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("operation", ["write", "promote", "recover"])
 def test_unknown_owner_is_preserved_before_any_work(durable_scope, monkeypatch, operation):
     _workspace, project, thread, db = durable_scope
@@ -130,7 +152,7 @@ def test_filesystem_work_is_outside_sqlite_writer(durable_scope, monkeypatch, op
         monkeypatch.setattr(Path, name, guarded(getattr(Path, name), name))
     for name in (
         "claim_bound_file", "stage_bound_file", "stage_bound_bytes", "copy_bound_file",
-        "replace_bound_file", "restore_claimed_file", "_sha256_file",
+        "replace_if_expected", "restore_claimed_file", "_sha256_file",
     ):
         monkeypatch.setattr(durable_writes, name, guarded(getattr(durable_writes, name), name))
 
@@ -278,7 +300,7 @@ def test_cleanup_commit_failure_keeps_committed_publication_recoverable(
     retained = target.read_bytes()
     def no_second_write(*args, **kwargs):
         pytest.fail("recovery must not replace an already committed target")
-    monkeypatch.setattr(durable_writes, "replace_bound_file", no_second_write)
+    monkeypatch.setattr(durable_writes, "replace_if_expected", no_second_write)
     durable_writes.recover_write_intents(workspace=workspace)
     assert target.read_bytes() == retained
     assert service.find_file_identity(str(target), db=db)["id"] == identity["id"]
