@@ -474,7 +474,7 @@ test('chat 1440 with the sidebar and panel open: an answer that arrived before i
 
 // ---------------------------------------------------------------- an image thread opened from the document
 for (const way of ['card', 'tag'] as const) {
-	test(`image in a document 1440: a thread opened by its ${way === 'card' ? 'card in the margin' : 'tag on the image'} is read, and a reply that arrives while it is open is read when the image closes`, async ({ page, request }, info) => {
+	test(`image in a document 1440: a thread opened by its ${way === 'card' ? 'card in the margin' : 'tag on the image'} is read, and an agent's reply waits in the writer line while it is open`, async ({ page, request }, info) => {
 		test.skip(!mocked() || !onProject(info.project.name, 1440));
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -491,6 +491,7 @@ for (const way of ['card', 'tag'] as const) {
 		asAgent(seeded, id);
 		expect(await threadUnread(request, seeded.artifactId, id), 'setup: the agent note is unread').toBe(true);
 		const stamps = watchStamps(page);
+		const held = watchHeld(page);
 		await openDocument(page, seeded, 1440);
 		await page.waitForTimeout(SEEN_FOR_MS);
 		expect(stamps(), 'opening the document reads nothing').toEqual([]);
@@ -511,15 +512,24 @@ for (const way of ['card', 'tag'] as const) {
 			await imageTag(page, 1).click();
 		}
 		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { timeout: 10_000 }).toBe(false);
-		// The reply must post while the thread is open; if it waited in the writer line, the read on close below would test nothing.
-		expect(await agentDocReply(request, id, seeded.sessionId, 'A later answer.'), 'the reply posts while the image thread is open').not.toBeNull();
-		await expect.poll(() => threadUnread(request, seeded.artifactId, id)).toBe(true);
-		await page.waitForTimeout(SEEN_FOR_MS);
-		expect(await threadUnread(request, seeded.artifactId, id), 'arriving while open reads nothing yet').toBe(true);
+		// The open thread holds the person's writer turn once the server has taken it (it answers with the thread's line),
+		// so an agent's reply waits in the line instead of arriving while the thread is open, as on the document margin.
+		await expect.poll(() => held().includes(id), { message: 'the server holds the thread for the person' }).toBe(true);
+		expect(await agentDocReply(request, id, seeded.sessionId, 'A later answer.'), 'the reply waits while the image thread is open').toBeNull();
 		for (let i = 0; i < 3 && await overlay(page).isVisible(); i += 1) { await page.keyboard.press('Escape'); await page.waitForTimeout(400); }
 		await expect(overlay(page)).toBeHidden();
-		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { timeout: 10_000 }).toBe(false);
+		await page.waitForTimeout(SEEN_FOR_MS);
+		expect(await threadUnread(request, seeded.artifactId, id), 'closing leaves the thread read').toBe(false);
 	});
+}
+
+/** The threads the server has told this page it holds the writer turn on (a `comment_line` frame). Install before the page opens. */
+function watchHeld(page: Page): () => string[] {
+	const ids: string[] = [];
+	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
+		try { const data = JSON.parse(String(frame.payload)); if (data.type === 'comment_line' && typeof data.comment_id === 'string') ids.push(data.comment_id); } catch { /* not a JSON frame */ }
+	}));
+	return () => ids;
 }
 
 // ---------------------------------------------------------------- documents with unread agent notes
