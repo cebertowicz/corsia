@@ -120,7 +120,7 @@ def _guided_write(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
         atomic=history_required, write=lambda _path, _data: payloads.append(write(path, expected_sha256, reports)),
-        accepted_suggestions=accepted,
+        accepted_suggestions=accepted, require_history_lock=True,
     )
     if saved.outcome == "refused":
         assert saved.line is not None

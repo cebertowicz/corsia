@@ -357,6 +357,57 @@ async def test_a_save_past_a_busy_history_lock_is_written_and_kept_by_the_next(h
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['busy', 'fault'])
+async def test_conditional_save_refuses_without_history_lock(history_scope, monkeypatch, failure):
+    from doceditor.document_save import DocumentSaveError
+    from infra import guidance_git
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    path = placed(workspace / 'notes' / 'conditional.md', 'Original.\n')
+    await save_document_text(DocumentSave(path=str(path), text='Original.\n', thread_id=thread_id), user_id)
+    real_acquire = guidance_git._acquire
+    failure_error = guidance_git._LockBusy('busy') if failure == 'busy' else guidance_git.GitFault('lock unavailable')
+    monkeypatch.setattr(guidance_git, '_acquire', lambda *_a, **_k: (_ for _ in ()).throw(failure_error))
+    with pytest.raises(DocumentSaveError) as error:
+        await save_document_text(DocumentSave(path=str(path), text='Unsaved.\n', thread_id=thread_id), user_id, expected_sha256=sha('Original.\n'))
+    assert error.value.kind == 'save_failed'
+    assert 'busy' in error.value.message
+    assert path.read_text() == 'Original.\n'
+    monkeypatch.setattr(guidance_git, '_acquire', real_acquire)
+    await save_document_text(DocumentSave(path=str(path), text='Unsaved.\n', thread_id=thread_id), user_id, expected_sha256=sha('Original.\n'))
+    assert path.read_text() == 'Unsaved.\n'
+
+
+@pytest.mark.asyncio
+async def test_live_conditional_write_refuses_when_history_lock_is_busy(history_scope, tmp_path, monkeypatch):
+    from doceditor.live_lane import Operation, WriteActor
+    from doceditor.live_store import StoreRefused
+    from infra import guidance_git
+    from tests.test_document_live_lane import insert
+
+    workspace, thread_id = history_scope
+    path = placed(workspace / 'notes' / 'live-conditional.md', 'Original.\n')
+    live, lane = await live_lane(path, tmp_path)
+    insert(live, 'typing', 'Unsaved ')
+    real_acquire = guidance_git._acquire
+    monkeypatch.setattr(guidance_git, '_acquire', lambda *_a, **_k: (_ for _ in ()).throw(guidance_git._LockBusy('busy')))
+    try:
+        with pytest.raises(StoreRefused, match='busy'):
+            await lane.submit(Operation('flush', actor=WriteActor(thread_id, None)))
+        assert path.read_text() == 'Original.\n'
+        assert live.text == 'Unsaved Original.\n'
+        monkeypatch.setattr(guidance_git, '_acquire', real_acquire)
+        await lane.retry.retry_blocked()
+        result = await lane.submit(Operation('flush', actor=WriteActor(thread_id, None)))
+        result.require_landed()
+        assert path.read_text() == live.text == 'Unsaved Original.\n'
+    finally:
+        await lane.close()
+        live.close()
+
+
+@pytest.mark.asyncio
 async def test_a_save_held_in_its_owner_report_never_holds_another_documents_save(history_scope, monkeypatch):
     from doceditor import document_save
 

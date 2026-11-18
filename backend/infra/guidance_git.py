@@ -278,6 +278,7 @@ def save_with_history(
     lesson_gate: bool = True,
     lesson_observation_thread_id: str | None = None,
     accepted_suggestions: tuple[str, ...] = (),
+    require_history_lock: bool = False,
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one history commit; ``accepted_suggestions`` marks
     a version that applies those accepted suggestions, and nothing else can.
@@ -285,7 +286,7 @@ def save_with_history(
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     A document target is recorded the same way, with no lesson check, carry-in record or sweep of other
-    guidance; its line names only a save history could not record.
+    guidance; its line names only a save history could not record. Conditional writes can require the lock.
     """
     lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
@@ -308,7 +309,7 @@ def save_with_history(
     done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
     subject = f"{target.kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = unforgeable(message) if message else commit_message(subject, target.scope, reason, evidence, accepted_suggestions)
-    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing)
+    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing, require_history_lock)
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
         lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
@@ -318,7 +319,7 @@ def save_with_history(
 def _save(
     writes: dict[Path, bytes | None], workspace: Path, target: HistoryTarget, author: str, message: str, done: str,
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
-    write: Callable[[Path, bytes], object], timing: dict[str, float],
+    write: Callable[[Path, bytes], object], timing: dict[str, float], require_history_lock: bool,
 ) -> SaveResult:
     from infra.history_record import Version, put_back, record, write_checked
 
@@ -345,11 +346,16 @@ def _save(
         if ignored(repo, list(rels.values()), tray=target.registered):
             return unrecorded("history-off", "ignored", SAVE_HISTORY_OFF.format(why="the path is ignored by Git"))
         directory = git_dir(repo)
-        handle, timing["lock_wait_ms"] = _acquire(repo, directory)
-    except _LockBusy as exc:
-        return unrecorded("deferred", "deferred-guidance-lock", SAVE_FAILED.format(error=exc))
     except (GitFault, ValueError) as exc:
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
+    try:
+        handle, timing["lock_wait_ms"] = _acquire(repo, directory)
+    except (_LockBusy, GitFault, ValueError) as exc:
+        if require_history_lock and expected and any(value is not None for value in expected.values()):
+            return SaveResult("deferred", "deferred-guidance-lock", line="The document is busy. Try saving again.")
+        outcome = "deferred" if isinstance(exc, _LockBusy) else "failed"
+        why = "deferred-guidance-lock" if isinstance(exc, _LockBusy) else str(exc)
+        return unrecorded(outcome, why, SAVE_FAILED.format(error=exc))
     with _locked(handle) as db:
         if isinstance(prior := write_checked(writes, expected, write), SaveResult):
             return prior  # the edit that made it stale is recorded by the next save at its path
