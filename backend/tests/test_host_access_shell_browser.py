@@ -1575,6 +1575,98 @@ async def test_shell_state_refusal_names_scoped_route(tmp_path, monkeypatch, lea
     assert "request a host-access lease" not in result
 
 
+@pytest.mark.parametrize(
+    ("reported", "matches"),
+    [
+        ("touch: .: Operation not permitted", True),
+        ("touch: {root}: Operation not permitted", True),
+        ("cp: utimensat: {root}/.: Operation not permitted", True),
+        ("touch: {container}/: Operation not permitted", True),
+        ("touch: {root}/child: Operation not permitted", False),
+        ("touch: {container}X: Operation not permitted", False),
+        ("touch: /unrelated: Operation not permitted", False),
+        ("rmdir: {root}: Operation not permitted", False),
+        ("rm: {root}: Operation not permitted", False),
+        ("mkdir: {container}/new: Operation not permitted", False),
+        ("ln: {container}/link: Operation not permitted", False),
+        # Another refusal in the same output keeps the general reply and its guidance.
+        ("touch: .: Operation not permitted\ntouch: /unrelated: Operation not permitted", False),
+        ("touch: .: Operation not permitted\n"
+         "PermissionError: [Errno 1] Operation not permitted: '/unrelated'", False),
+        ("touch: .: Operation not permitted\nError: Operation not permitted (os error 1)", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_shell_worktree_root_refusal(tmp_path, monkeypatch, reported, matches):
+    from core.turn_core import TurnIdentity
+    from host_access.processes import ForegroundProcessResult
+    from infra.project_repo_policy import RepoPolicy
+    from tests.shell_platform_helpers import use_mac_shell
+    from tools import host_access_gate, shell
+    from tools.repo_worktree_guidance import worktree_root_denial_guidance
+
+    repo = tmp_path / "repo"
+    root = repo / ".worktrees" / "task"
+    root.mkdir(parents=True)
+    policy = RepoPolicy("project", "repo", repo, "dev", True)
+    message = reported.format(root=root, container=root.parent)
+    assert bool(worktree_root_denial_guidance(message, root, [policy])) is matches
+
+    async def no_permit(**_kwargs):
+        return None
+
+    class Owner:
+        async def spawn(self, _argv, **_kwargs):
+            return ForegroundProcessResult(record=None, stdout=b"", stderr=message.encode(), returncode=1)
+
+    monkeypatch.setattr(host_access_gate, "consume_current_action_permit", no_permit)
+    monkeypatch.setattr(shell, "PROCESS_OWNER", Owner())
+    monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
+    monkeypatch.setattr(shell, "controlled_fast_forward_policy", lambda *_a, **_k: None)
+    monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    use_mac_shell(monkeypatch)
+    monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
+    monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
+    monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
+    monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
+    monkeypatch.setattr(shell, "safehouse_argv", lambda *_a, **_k: ["safehouse"])
+    monkeypatch.setattr(shell, "check_repo_write_path", lambda *_a: None)
+    monkeypatch.setattr(shell, "chained_base_git_denial_guidance", lambda *_a: None)
+    # shell.py reads sys.platform itself to pick the macOS denial reply.
+    monkeypatch.setattr(shell, "sys", SimpleNamespace(platform="darwin"))
+    result = await shell.BashTool(working_dir=str(root)).execute(
+        "touch .", _thread_id="thread-1", _host_access_turn_identity=TurnIdentity("turn-1", 1),
+    )
+    if matches:
+        assert "Host access is not needed." in result
+        assert "request_host_access" not in result
+    else:
+        assert "request_host_access" in result
+
+
+@pytest.mark.parametrize(
+    ("protect", "enforcement_error", "binding_valid", "matches"),
+    [
+        (True, None, True, True),
+        (False, None, True, False),
+        (True, "broken", True, False),
+        (False, "broken", True, False),
+        (True, None, False, False),
+    ],
+)
+def test_worktree_root_refusal_needs_enforced_protection(tmp_path, protect, enforcement_error,
+                                                         binding_valid, matches):
+    from infra.project_repo_policy import RepoPolicy
+    from tools.repo_worktree_guidance import worktree_root_denial_guidance
+
+    repo = tmp_path / "repo"
+    root = repo / ".worktrees" / "task"
+    root.mkdir(parents=True)
+    policy = RepoPolicy("project", "repo", repo, "dev", protect, enforcement_error, binding_valid)
+    guidance = worktree_root_denial_guidance("touch: .: Operation not permitted", root, [policy])
+    assert bool(guidance) is matches
+
+
 @pytest.mark.asyncio
 async def test_stale_thread_default_cwd_degrades_to_workspace_root(
     tmp_path,
