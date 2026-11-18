@@ -69,6 +69,21 @@ def test_repeated_deleted_quote_matches_uncached_result_and_reuses_mapping(monke
     assert first['orphaned'] and (first, first_updates) == (second, second_updates) == (control, control_updates)
 
 
+def test_deleted_line_does_not_search_for_an_edited_quote(monkeypatch):
+    source = 'header\ntarget\nend\n'
+    current = 'header\nend\n'
+    comment = row(source, 'target', source.index('target'))
+    calls = []
+    original = comment_anchoring.reanchor_edited
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(comment_anchoring, 'reanchor_edited', counted)
+    updates = snapshot_reanchor.resolve([comment], source, current)
+    assert comment['orphaned'] and updates == []
+    assert calls == []
+
+
 def test_cache_matches_uncached_bytes_across_deletion_repetition_and_restoration():
     source = 'head\ntarget\nother\ntail\n'
     original = row(source, 'target', 5)

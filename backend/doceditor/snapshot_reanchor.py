@@ -190,8 +190,6 @@ def resolve(threads: list[dict], old: str, new: str, *, new_index=None,
         mapped = snapshot_mapping_cache.map_spans(snapshot_id, old, new, spans, digest, _map_spans)
     ranges = dict(zip((c['id'] for c in eligible), mapped))
     candidates = [dict(c) for c in eligible]
-    updates = comment_anchoring.resolve_threads(candidates, new, ranges=ranges)
-    accepted = set()
     if line_context is None:
         line_pairs = snapshot_showing._line_pairs(old, new)
     else:
@@ -201,6 +199,18 @@ def resolve(threads: list[dict], old: str, new: str, *, new_index=None,
         lines, positions = line_context[0]
         line_pairs = snapshot_showing._line_pairs(old, new, new_lines=lines, new_positions=positions)
     line_counts = (Counter(old.splitlines()), Counter(new.splitlines()))
+    to_resolve = []
+    for candidate, old_span, mapped_span in zip(candidates, spans, mapped):
+        old_start = old_index.cp_at_u16(old_span[0])
+        kind = line_pairs.get(old_index.line_at(old_start), ('unclear', None))[0]
+        if mapped_span[0] == mapped_span[1] and kind == 'delete':
+            # A deleted source line cannot pass the showing rule at any place.
+            candidate.update(from_off=mapped_span[0], to_off=mapped_span[1],
+                             orphaned=not bool(candidate.get('decision')))
+        else:
+            to_resolve.append(candidate)
+    updates = comment_anchoring.resolve_threads(to_resolve, new, ranges=ranges)
+    accepted = set()
     for original, candidate, old_span in zip(eligible, candidates, spans):
         quote = comment_anchoring._anchored_quote(original)
         allowed, _, _ = snapshot_showing.evaluate(
