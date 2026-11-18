@@ -116,6 +116,9 @@ def _cp_at_u16(text: str, offset16: object) -> int | None:
         return None
 
 
+_CONTEXT_CHARS = 32
+
+
 def anchor_context(
     text: str, from16: int, to16: int, quote: str | None = None
 ) -> tuple[str, str] | None:
@@ -126,7 +129,7 @@ def anchor_context(
         return None
     if quote is not None and text[start:end] != quote:
         return None
-    return text[max(0, start - 32):start], text[end:end + 32]
+    return text[max(0, start - _CONTEXT_CHARS):start], text[end:end + _CONTEXT_CHARS]
 
 
 def reanchor_edited(
@@ -171,36 +174,52 @@ def reanchor_edited(
 
 _BLANK_LINES_AT_START = re.compile(r"\A(?:[ \t\r]*\n)+")
 _BLANK_LINES_AT_END = re.compile(r"(?:\n[ \t\r]*)+\Z")
-_MIN_IDENTIFYING_CHARS = 3
 
 
-def _identifies_a_line(fragment: str) -> bool:
-    """Whether a stored piece of the neighbouring line says which line it was.
+def _whole_line_below(suffix: str | None) -> str | None:
+    """The first non-blank line after the commented one, when the stored context holds it whole.
 
-    A list marker, a ``#``, an indent or a closing full stop is shared by many lines, so it is no evidence.
+    Whole means both of its line boundaries are inside the stored window: the one before it is the first line
+    break of the suffix, the one after it must be inside the window too, or the window ended at the end of the
+    document. A line cut by the window says nothing about which line it was, so it gives no evidence.
     """
-    return sum(ch.isalnum() for ch in fragment) >= _MIN_IDENTIFYING_CHARS
+    if not suffix or "\n" not in suffix:
+        return None
+    line, ends_here, _ = _BLANK_LINES_AT_START.sub("", suffix.split("\n", 1)[1]).partition("\n")
+    if line.strip(" \t\r") and (ends_here or len(suffix) < _CONTEXT_CHARS):
+        return line
+    return None
+
+
+def _whole_line_above(prefix: str | None) -> str | None:
+    """The last non-blank line before the commented one, when the stored context holds it whole (mirror of the above)."""
+    if not prefix or "\n" not in prefix:
+        return None
+    head = _BLANK_LINES_AT_END.sub("", prefix.rsplit("\n", 1)[0])
+    _, starts_here, line = head.rpartition("\n")
+    if line.strip(" \t\r") and (starts_here or len(prefix) < _CONTEXT_CHARS):
+        return line
+    return None
 
 
 def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suffix: str | None) -> bool:
     """Whether the quote at ``start``/``end`` sits on the line beside the commented one, not on the commented one.
 
     A comment whose line was deleted finds the same words on the line that moved into its place: that line
-    starts like the deleted one and so matches one stored side. The stored context says whose line it is.
-    The text after the commented line's first line break (blank lines skipped) is the start of the line below
-    it; if that starts this line, and does not start the next non-blank line after this one, this is the line
-    below, moved up. The text before the last line break is the end of the line above it; the same test,
-    mirrored, finds the line above.
+    starts like the deleted one and so matches one stored side. The stored context says whose line it is, but
+    only where it holds the neighbouring line whole. The first non-blank line after the commented one counts when
+    the stored context holds all of it (``_whole_line_below``); if it starts this line, and does not start the
+    next non-blank line after this one, this is the line below, moved up. The last non-blank line before the
+    commented one counts the same way (``_whole_line_above``), mirrored.
     It never refuses a line whose own text around the quote is unchanged: that is the commented line,
     whatever happened to its neighbours.
 
-    Limit: it needs a line break inside the stored context (up to 32 characters each side), so a comment
-    inside a long line has none and the caller's matching rule stands unchanged. So does a comment whose
-    context window is filled by its own line: what is left of the neighbouring line is then a marker or a
-    character or two (fewer than three letters or digits), which many lines share, so it counts for nothing.
-    When the neighbouring
-    line was edited in the same rewrite its stored start no longer matches and this cannot tell it apart
-    from the commented line itself edited.
+    Limit: a neighbouring line that the stored context (up to 32 characters each side) holds only in part gives no
+    evidence, however much of it is there, because no part of a line says whether it is the same line. Then
+    the caller's matching rule stands, as on dev. That covers a comment inside a long line (no line break in the
+    context) and a neighbour longer than the window leaves room for. When the neighbouring line was edited in
+    the same rewrite its stored text no longer matches and this cannot tell it apart from the commented line
+    itself edited.
     """
     line_start = text.rfind("\n", 0, start) + 1
     line_end = text.find("\n", end)
@@ -224,14 +243,12 @@ def _is_neighbour_line(text: str, start: int, end: int, prefix: str | None, suff
         if seg_start == 0 or text[seg_start:prev_end].strip(" \t\r"):
             break
         prev_end = seg_start - 1
-    if suffix and "\n" in suffix:
-        below = _BLANK_LINES_AT_START.sub("", suffix.split("\n", 1)[1])
-        if _identifies_a_line(below) and text.startswith(below, line_start) and not text.startswith(below, next_start):
-            return True
-    if prefix and "\n" in prefix:
-        above = _BLANK_LINES_AT_END.sub("", prefix.rsplit("\n", 1)[0])
-        if _identifies_a_line(above) and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
-            return True
+    below = _whole_line_below(suffix)
+    if below and text.startswith(below, line_start) and not text.startswith(below, next_start):
+        return True
+    above = _whole_line_above(prefix)
+    if above and text.endswith(above, 0, line_end) and not text.endswith(above, 0, prev_end):
+        return True
     return False
 
 

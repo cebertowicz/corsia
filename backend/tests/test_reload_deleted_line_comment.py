@@ -53,8 +53,9 @@ def test_the_line_above_does_not_take_the_comment_either():
 
 def test_a_blank_line_between_the_items_does_not_hide_the_next_one():
     # Paragraphs, headings and loose lists: the neighbour sits behind a blank line.
-    old = HEAD + "- deploy queue merge\n\n- deploy docs test\n" + TAIL
-    new = HEAD + "- deploy docs test\n" + TAIL
+    # The neighbour must fit the 32-character window whole, blank line included.
+    old = HEAD + "- deploy a\n\n- deploy b\n" + TAIL
+    new = HEAD + "- deploy b\n" + TAIL
     comment = _stored(old, "deploy")
     stored_place = (comment["from_off"], comment["to_off"])
     resolve_threads([comment], new)
@@ -75,8 +76,8 @@ def test_a_blank_line_between_the_items_does_not_hide_the_one_above():
 @pytest.mark.parametrize("gap", ["  \t\n", "\r\n"], ids=["spaces-and-tab", "crlf"])
 def test_a_whitespace_only_or_crlf_blank_line_does_not_hide_the_neighbour(gap):
     eol = "\r\n" if gap == "\r\n" else "\n"
-    old = HEAD + f"- deploy queue merge{eol}{gap}- deploy docs test{eol}" + TAIL
-    new = HEAD + f"- deploy docs test{eol}" + TAIL
+    old = HEAD + f"- deploy a{eol}{gap}- deploy b{eol}" + TAIL
+    new = HEAD + f"- deploy b{eol}" + TAIL
     below = _stored(old, "deploy")
     stored_place = (below["from_off"], below["to_off"])
     resolve_threads([below], new)
@@ -166,3 +167,37 @@ def test_a_short_end_of_the_line_above_is_not_evidence_that_the_commented_line_i
     resolve_threads([comment], new)
     assert comment["orphaned"] is False
     assert new[comment["from_off"]:comment["to_off"]] == "deploy"
+
+
+def test_a_start_shared_with_the_next_line_is_not_evidence_however_long_it_is():
+    # Many items start alike ("- Add "); the commented line shares that start, so it does not say whose line this is.
+    old = HEAD + "- Add deploy queue merge and rebuild.\n- Add docs\n" + TAIL
+    new = HEAD + "- Add deploy queue merge and rebuild all.\n" + TAIL
+    comment = _stored(old, "deploy")
+    assert comment["anchor_suffix"].endswith("\n- Add ")
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
+    assert new[comment["from_off"]:comment["to_off"]] == "deploy"
+
+
+def test_an_end_shared_with_the_line_above_is_not_evidence_however_long_it_is():
+    # The stored window keeps only the last characters of the line above ("lding."); the commented line ends the same way.
+    start = "- " + "w" * 22 + " "
+    old = HEAD + "Step: rebuilding.\n" + start + "deploy and rebuilding.\n" + TAIL
+    new = HEAD + "Step: other.\n" + "- " + "x" * 22 + " " + "deploy and rebuilding.\n" + TAIL
+    comment = _stored(old, "deploy")
+    assert comment["anchor_prefix"].rsplit("\n", 1)[0] == "lding."
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
+    assert new[comment["from_off"]:comment["to_off"]] == "deploy"
+
+
+def test_a_neighbour_too_long_for_the_window_is_not_judged():
+    # Limit: the stored context holds 32 characters, so a long next line is cut and gives no evidence. The
+    # caller's matching rule stands as on dev (the comment still moves); nothing is refused on a partial line.
+    old = HEAD + "- deploy queue merge\n- deploy docs test and more words\n" + TAIL
+    new = HEAD + "- deploy docs test and more words\n" + TAIL
+    comment = _stored(old, "deploy")
+    assert comment["anchor_suffix"].count("\n") == 1
+    resolve_threads([comment], new)
+    assert comment["orphaned"] is False
