@@ -18,6 +18,7 @@ from infra.config import WORKSPACE
 from plans import artifact_links, node_states, notifications, review_evidence, review_requests, service, user_ask
 from plans.feedback_items import artifact_name
 from registry import models as registry_models
+from registry.document_supervisor import owner_kind
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 from registry.shared_principals import document_scope
 
@@ -50,7 +51,7 @@ def _owner(db, artifact: dict | None):
     if not artifact or artifact.get('relationship_state') not in OWNER_REGISTRATION_STATES:
         return None
     owner = artifact.get('parent_thread_id')
-    if owner == 'ui':
+    if owner_kind(owner) == 'person':
         owner = _supervisor(db, artifact)
     return db.execute('SELECT id, user_id, title FROM threads WHERE id=?', (owner,)).fetchone() if owner else None
 

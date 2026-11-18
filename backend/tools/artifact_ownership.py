@@ -18,6 +18,21 @@ from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
 
 
+def _rehome_to_thread(db, integration, type_, external_id, new_owner_thread_id, actor_thread_id, authority, reason, causal_event_id, metadata):
+    from registry.ownership import rehome_artifact
+
+    return rehome_artifact(
+        integration=integration, type=type_, external_id=external_id,
+        new_owner_thread_id=new_owner_thread_id, actor_thread_id=actor_thread_id,
+        authority=authority, reason=reason, source_path="tool:artifact_rehome",
+        causal_event_id=causal_event_id, metadata=metadata,
+        removal_event={
+            "actor_kind": "agent", "causal_event_id": causal_event_id,
+            "new_owner_thread_id": new_owner_thread_id,
+        }, db=db,
+    )
+
+
 class ArtifactRehomeTool(Tool):
     """Explicitly transfer artifact ownership."""
 
@@ -27,7 +42,8 @@ class ArtifactRehomeTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Explicitly transfer artifact ownership through the audited registry path."
+        return ("Explicitly transfer artifact ownership through the audited registry path. Use this to give the person a document that is theirs to approve. "
+                "The file's Owner header is not updated: update it before handing the document to 'user', because afterward only the person can edit it.")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -35,7 +51,7 @@ class ArtifactRehomeTool(Tool):
             "integration": {"type": "string"},
             "type": {"type": "string"},
             "external_id": {"type": "string"},
-            "new_owner_thread_id": {"type": "string"},
+            "new_owner_thread_id": {"type": "string", "description": "The new owner's thread ID, or 'user' to give the document to the person."},
             "authority": AUTHORITY_PARAMETER,
             "reason": {"type": "string"},
             "metadata": {"type": ["object", "null"]},
@@ -50,7 +66,6 @@ class ArtifactRehomeTool(Tool):
         if isinstance(context, str):
             return context
         actor_thread_id, actor = context
-        from registry.ownership import rehome_artifact
         from registry.ownership_authority import (
             can_rehome,
             rehome_source_thread_id,
@@ -68,6 +83,10 @@ class ArtifactRehomeTool(Tool):
                     if owner is None and routing.get("identity") is None:
                         return "not_found", None
                     current_owner = owner["parent_thread_id"] if owner else None
+                    if new_owner_thread_id == "user":
+                        from tools.artifact_person_handover import handover_to_person
+
+                        return handover_to_person(db, routing, actor_thread_id, reason=reason, causal_event_id=causal_event_id, metadata=kwargs.get("metadata"))
                     source_thread_id = rehome_source_thread_id(routing, db)
                     source_thread_row = (
                         get_thread_for_user(source_thread_id, actor["user_id"], db=db)
@@ -93,23 +112,9 @@ class ArtifactRehomeTool(Tool):
                             "current_owner_thread_id": current_owner,
                             "requested_owner_thread_id": new_owner_thread_id,
                         }
-                    result = rehome_artifact(
-                        integration=integration,
-                        type=type_,
-                        external_id=external_id,
-                        new_owner_thread_id=new_owner_thread_id,
-                        actor_thread_id=actor_thread_id,
-                        authority=authority,
-                        reason=reason,
-                        source_path="tool:artifact_rehome",
-                        causal_event_id=causal_event_id,
-                        metadata=kwargs.get("metadata"),
-                        removal_event={
-                            "actor_kind": "agent",
-                            "causal_event_id": causal_event_id,
-                            "new_owner_thread_id": new_owner_thread_id,
-                        },
-                        db=db,
+                    result = _rehome_to_thread(
+                        db, integration, type_, external_id, new_owner_thread_id,
+                        actor_thread_id, authority, reason, causal_event_id, kwargs.get("metadata"),
                     )
                     return "ok", result
             except Exception as e:
@@ -120,6 +125,10 @@ class ArtifactRehomeTool(Tool):
             return "Error: Artifact or thread not found"
         if status == "forbidden":
             return f"Error: Re-home authority denied: {result}"
+        if status == "person_forbidden":
+            return "Error: Ask the document's owner or their worker to give it to the person; for an unowned project document, ask its conductor."
+        if status == "person_invalid_document":
+            return "Error: Only documents with a path can be given to the person."
         if status == "error":
             return f"Error rehoming artifact: {result}"
         event = result.get("removal_event")

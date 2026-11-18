@@ -36,6 +36,10 @@ def claim_and_deliver(
     if changed.rowcount == 0:
         return False, ()
     batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    # Unmergeable legacy collisions keep their recipient until claim; remove in #3003.
+    if str(batch["recipient_id"]).startswith("project:"):
+        db.execute("UPDATE doc_feedback_batches SET recipient_id='ui' WHERE id=?", (batch_id,))
+        batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
     delivered = feedback_delivery.deliver_claimed(db, batch)
     review_woken: tuple[str, ...] = ()
     if delivered.reason is not None:

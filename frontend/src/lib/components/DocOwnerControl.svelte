@@ -34,8 +34,8 @@
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
 	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
-	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
-	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
+	// Every person may take ownership, including when another person is recorded.
+	const ownerChoices = $derived([{ id: 'user', name: 'You', responsibility: '', paused: false }, ...(ownership.multi_person_refusal ? [] : agents)]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
 
@@ -59,7 +59,8 @@
 		if (!role || saving || inert) return;
 		picker = null;
 		restoreFocus();
-		if (choice.id === (role === 'owner' ? ownerId : supervisorId)) return;
+		if (choice.id === (role === 'owner' ? ownerId : supervisorId)
+			&& !(role === 'owner' && choice.id === 'user' && !ownership.owner.recorded_viewer)) return;
 		const settle = onChange; // what the row on screen does with the answer is fixed when the pick starts
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;
@@ -102,16 +103,13 @@
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>
-			{#if !ownership.can_change}<p class="note">{ownership.refusal}</p>
-			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
-			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
+			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder={role === 'owner' ? 'Search' : 'Search agents'} autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
 			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
+			{#if role === 'owner' && ownership.multi_person_refusal}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if ownership.scope === null}<p class="note">Couldn’t load the agents for this document. Reload the page to try again.</p>
 			{:else if !options.length}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
-			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
-			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if role === 'supervisor' && supervisorPaused}<p class="note">This agent is paused. Comments wait until it resumes.</p>
 			{:else if role === 'supervisor' && !supervisorShown}<p class="note">No one gets comments on this document.</p>{/if}
 			{#if role === 'owner' && merged}<button type="button" class="link" onclick={pickSupervisor}>Choose a different supervisor</button>{/if}

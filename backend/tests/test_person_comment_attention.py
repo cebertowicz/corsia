@@ -12,6 +12,31 @@ from plans import artifact_links, person_comment_task, public, service
 from plans.boundary import PlanActor
 
 
+@pytest.mark.parametrize(('owner', 'holder'), [('ui', 'conductor'), ('project:example', 'conductor'), ('agent-owner', 'agent-owner')])
+def test_person_comment_task_uses_conductor_for_person_owned_documents(isolated_db, monkeypatch, owner, holder):
+    from doceditor import comments, feedback_batches
+
+    db = get_db()
+    try:
+        seed_thread(db, 'conductor')
+        seed_thread(db, 'agent-owner')
+        seed_thread(db, 'author')
+        monkeypatch.setattr(person_comment_task, '_supervisor', lambda _db, _artifact: 'conductor')
+        artifact = seed_document(db, owner)
+        with write_transaction(db, scope='test_person_comment') as connection:
+            comment, created = comments.create_with_status(
+                artifact, body='Please review', author='Author', author_kind='agent',
+                author_thread_id='author', tagged_user_id='owner-token', db=connection,
+            )
+            feedback_batches.record_comment(connection, comment, created=created, delivery_policy=feedback_batches.IMMEDIATE)
+            task = person_comment_task.reconcile(connection, artifact)
+        row = db.execute('SELECT n.state, p.owner_id FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE n.id=?',
+                         (task,)).fetchone()
+        assert tuple(row) == ('pending', holder)
+    finally:
+        db.close()
+
+
 def test_one_task_per_document_closes_and_can_reopen(isolated_db):
     db = get_db()
     try:

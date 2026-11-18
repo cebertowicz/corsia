@@ -137,9 +137,9 @@ def test_roots_only_never_walks_or_reads_the_artifact_index(
 
     calls = {"walk": 0, "artifact_index": 0, "shared_projector": 0}
     for name in calls:
-        def counted(*args, name=name, real=getattr(files_api, name)):
+        def counted(*args, name=name, real=getattr(files_api, name), **kwargs):
             calls[name] += 1
-            return real(*args)
+            return real(*args, **kwargs)
         monkeypatch.setattr(files_api, name, counted)
 
     pid = two_repo_project["project_id"]

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app_shutdown_idle_timers import fold_idle_checkpoint_shutdown, remaining_idle_timers
 from app_shutdown_join import join_cleanup_owner, count_shutdown_owner
+from app_startup_background import run_startup_background as _run_startup_background
 from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tasks
 from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
@@ -139,8 +140,10 @@ async def lifespan(app: FastAPI):
 
         await run_in_db(record_current_install_week)
         startup_tasks[4] = asyncio.create_task(
-            restart_startup.run_startup_drive(
-                startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
+            _run_startup_background(
+                restart_startup.run_startup_drive(
+                    startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
+                ),
             ),
         )
         startup_progress.finish()

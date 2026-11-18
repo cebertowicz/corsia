@@ -129,6 +129,39 @@ def test_a_batch_that_carried_an_edit_is_never_settled_by_its_comments(isolated_
         db.close()
 
 
+def test_repaired_undelivered_fold_retry_keeps_edit_from_settling(isolated_db):
+    from infra.migration_200_to_201_feedback_recipients import migrate_200_to_201
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner", title="Documents")
+        seed_thread(db, "author", title="Reviewer")
+        artifact = seed_document(db, "owner", name="Design.md")
+        comment, _ = add_comment(db, artifact)
+        feedback_batch_edits.record_edit(
+            db, artifact_id=artifact, recipient_id="owner", author_kind="agent", author_id="author",
+            actor_display="Reviewer", path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
+        )
+        batch = batches(db, state="open")[0]["id"]
+        db.execute("UPDATE doc_feedback_batches SET state='undelivered', item_count=1 WHERE id=?", (batch,))
+        db.execute("INSERT INTO comment_identity_moves VALUES ('doc_feedback_batch_folds','source','{}',?,'1')", (batch,))
+        db.commit()
+
+        migrate_200_to_201(db)
+        assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
+        db.commit()
+        assert feedback_batches.retry_batch(db, batch)[0]
+        delivered = db.execute("SELECT state,item_count,delivered_node_id FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+        assert delivered["state"] == "delivered"
+        assert delivered["item_count"] == 2
+        assert delivered["delivered_node_id"]
+        assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items WHERE batch_id=?", (batch,)).fetchone()[0] == 0
+        comments.update(comment["id"], {"resolved": True}, db=db)
+        assert _state(db, delivered["delivered_node_id"]) != "accepted"
+    finally:
+        db.close()
+
+
 def test_a_task_the_owner_already_finished_is_left_alone(isolated_db):
     db = get_db()
     try:
