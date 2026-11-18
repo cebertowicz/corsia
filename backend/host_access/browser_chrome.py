@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 import psutil
 
-from host_access import browser_launch, browser_ports
+from host_access import browser_launch, browser_own_address, browser_ports
 
 LISTENER_UNVERIFIED = "managed browser listener ownership could not be verified"
 ENDPOINT_MISMATCH = "managed browser endpoint did not match its reserved listener"
@@ -38,7 +38,7 @@ def chrome_argv(executable: str, port: int, profile: Path, *, headless: bool, ua
     # Chrome deletes session cookies at startup unless it is restoring the last session, so without it
     # a sign-in that set only session cookies is gone after any close of the saved profile.
     flags = [*CHROME_FLAGS, "--restore-last-session", f"--remote-debugging-port={port}",
-             "--remote-debugging-address=127.0.0.1",
+             "--remote-debugging-address=127.0.0.1", f"--host-resolver-rules={browser_own_address.resolver_rules()}",
              f"--user-data-dir={profile}", *browser_launch.managed_launch_args(ua, headless=headless).splitlines()]
     if headless:
         flags.append("--headless=new")
@@ -88,7 +88,7 @@ class ChromeProcess:
             assert target is not None
             target.mkdir(mode=0o700, parents=True, exist_ok=True)
             cdp_port, stream_port = cdp.getsockname()[1], stream.getsockname()[1]
-            argv = chrome_argv(executable, cdp_port, target, headless=headless, ua=ua)
+            argv = await asyncio.to_thread(chrome_argv, executable, cdp_port, target, headless=headless, ua=ua)
             cdp.close()
             # Shield the spawn so cancellation cannot lose a newly created child handle.
             spawning = asyncio.create_task(asyncio.create_subprocess_exec(
