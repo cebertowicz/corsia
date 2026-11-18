@@ -20,6 +20,7 @@ from doceditor.live_text import utf16_length
 from infra.db_async import run_in_db
 from infra.state import send_to_client
 from ws import document_email, section_turn
+from ws.document_close_flush import flush_last_viewer
 from ws.document_failures import failure_state
 from ws.document_send import closed_socket_error, observe_send
 
@@ -310,11 +311,13 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
             await _operate(socket, user, data)
     except (HTTPException, ValueError, PermissionError, StoreRefused, OSError) as exc:
         title = getattr(exc, "title", None)
+        code = getattr(exc, "code", None)
         await send_to_client(socket, {"type": "doc_error", "artifact_id": data.get("artifact_id"),
                                     "request_id": data.get("request_id"),
                                     "kind": getattr(exc, "kind", "store_refused" if isinstance(exc, StoreRefused) else "refused"),
                                     "blocking": isinstance(exc, StoreRefused) or getattr(exc, "blocking", False),
                                     **({"title": title} if title else {}),
+                                    **({"code": code} if code else {}),
                                     "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
     except Exception as error:
         if closed_socket_error(error):
@@ -361,8 +364,7 @@ async def _leave(socket, artifact_id: str) -> None:
             await asyncio.shield(task)
         await subscription.entry.live.commit_received()
         if subscription.writable:
-            result = await subscription.entry.lane.submit(Operation("flush", actor=subscription.actor))
-            result.require_landed()
+            await flush_last_viewer(subscription, artifact_id)
     manager = get_documents()
     if manager is not None:
         await manager.evict(artifact_id, subscription.entry, before_close=flush,

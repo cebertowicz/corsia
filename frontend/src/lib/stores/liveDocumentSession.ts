@@ -212,17 +212,21 @@ export class LiveDocumentSession {
 		}
 	}
 
+	showBusy(reason: string): void {
+		this.fileError = reason; this.operationErrorKind = 'store_refused'; this.changed();
+	}
+
 	private refused(frame: DocumentFrame): void {
 		const reason = publicFailureMessage(frame.kind, frame.message);
 		const request = this.requests.get(frame.request_id ?? '');
 		if (request) {
 			// Stamped refusals belong only to the versioned owner observation.
-			if (frame.failure_generation === undefined && frame.setup_revision === undefined) {
+			if (frame.code !== 'history_lock_busy' && frame.failure_generation === undefined && frame.setup_revision === undefined) {
 				this.fileError = reason;
 				this.operationErrorKind = frame.kind;
 			}
 			this.requests.delete(frame.request_id!);
-			request.reject(new LiveOperationError(frame.kind, reason));
+			request.reject(new LiveOperationError(frame.kind, reason, frame.code));
 		} else if ((frame.kind === 'store_refused' && frame.failure_generation === undefined) || this.updates.has(frame.request_id ?? '')) this.storeError = reason;
 	}
 
@@ -270,7 +274,11 @@ export class LiveDocumentSession {
 		const generation = this.durability.snapshot().localGeneration;
 		return this.request('doc_flush', {}, () => this.durability.written(generation));
 	}
-	retry(): Promise<DocumentFrame> { this.retryStore(); return this.request('doc_flush', { retry: true }); }
+	retry(): Promise<DocumentFrame> {
+		this.retryStore();
+		const generation = this.durability.snapshot().localGeneration;
+		return this.request('doc_flush', { retry: true }, () => this.durability.written(generation));
+	}
 	replace(text: string): Promise<DocumentFrame> { return this.request('doc_replace', { text }); }
 	choose(choice: 'corsia' | 'file'): Promise<DocumentFrame> { return this.request('doc_choice', { choice }); }
 

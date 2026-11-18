@@ -1,10 +1,12 @@
 import { writable, get } from 'svelte/store';
 import { writeContent } from '$lib/api/docs';
-import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
+import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
 import { saveErrorMessage } from './docSaveError';
+import { LiveOperationError } from './documentFailures';
+import { createBusyRetries } from './docSaveBusyRetry';
 import { createDocSaveActivityProjection } from './docSaveActivity';
 export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -45,6 +47,11 @@ const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
 const confirmationsOwed = new Map<string, true>();
+const busyRetries = createBusyRetries({
+	run: key => { void runSave(key); },
+	show: (_key, live, error) => { live.showBusy(error.message); toasts.show(saveErrorMessage(error), 'error'); },
+	failed: (key, error, visible) => patchDraft(key, visible ? { status: 'error', error: error.message } : { status: 'dirty' }),
+});
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;
 const publishActivity = activity.publish;
@@ -118,15 +125,16 @@ export function setDraftText(target: TargetIdentity, text: string): void {
 	const matchesSaved = text === cur.savedText;
 	patchDraft(key, {
 		editText: text,
-		status: matchesSaved ? 'idle' : 'dirty',
-		error: matchesSaved ? '' : cur.error,
+		status: busyRetries.has(key) && cur.status === 'error' ? 'error' : matchesSaved ? 'idle' : 'dirty',
+		error: busyRetries.has(key) ? cur.error : matchesSaved ? '' : cur.error,
 	});
 	// A live document re-saves only for its own unacknowledged transactions, read when the flush returns.
 	if (inflight.has(key) && !get(liveDocumentBindings)[key]) needsResave.set(key, true);
 	publishActivity(key);
 	const existingTimer = timers.get(key);
 	if (existingTimer) clearTimeout(existingTimer);
-	timers.set(key, setTimeout(() => { timers.delete(key); void runSave(key); }, SAVE_DEBOUNCE_MS));
+	timers.delete(key);
+	if (!busyRetries.has(key)) timers.set(key, setTimeout(() => { timers.delete(key); void runSave(key); }, SAVE_DEBOUNCE_MS));
 }
 
 function waitForLiveReconnect(key: string, live: LiveDocumentSession): void {
@@ -170,7 +178,10 @@ async function runSave(key: string): Promise<boolean> {
 	// save, and any remaining difference is remote edits the server already owns, so the draft rebaselines
 	// on them. An unacked transaction still flushes, so the resave loop below keeps going until clean.
 	if (live && live.durability.saved) {
-		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
+		const wasBusy = busyRetries.has(key);
+		busyRetries.clear(key);
+		if (wasBusy) patchDraft(key, { savedText: draft.editText, status: 'saved', error: '' });
+		else if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
 		return true;
 	}
 	const textAtStart = draft.editText;
@@ -180,6 +191,7 @@ async function runSave(key: string): Promise<boolean> {
 			const result = live ? await live.flush() : await writeContent(draft.target.path, textAtStart, {
 				projectId: draft.target.projectId, threadId: draft.target.threadId,
 			});
+			busyRetries.clear(key);
 			// A live flush is settled by this tab's own transactions, never by the file's digest: the remaining
 			// difference is remote edits the server owns. Local work that is unacked, or was typed after this
 			// flush began and so is not in the file yet, re-saves.
@@ -205,6 +217,11 @@ async function runSave(key: string): Promise<boolean> {
 			}
 			if (!live && draft.target.artifactId) void flushPositions(draft.target.artifactId, textAtStart);
 		} catch (e) {
+			if (live && e instanceof LiveOperationError && e.kind === 'store_refused' && e.code === 'history_lock_busy') {
+				busyRetries.schedule(key, live, e);
+				return false;
+			}
+			busyRetries.clear(key);
 			if (live && live.connection !== 'connected' && live.writable) {
 				if (getDraft(key)) patchDraft(key, { status: 'dirty', error: '' });
 				waitForLiveReconnect(key, live);
@@ -257,6 +274,7 @@ export function clearDraft(target: TargetIdentity): void {
 	const timer = timers.get(key);
 	if (timer) clearTimeout(timer);
 	timers.delete(key);
+	busyRetries.clear(key);
 	needsResave.delete(key);
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
@@ -270,30 +288,4 @@ export function clearDraft(target: TargetIdentity): void {
 	});
 }
 
-export interface CloseGateCallbacks {
-	onClose: () => void;
-	onBringIntoView: () => void;
-}
-
-/**
- * Flushes a target's pending save and only proceeds with `onClose` if the
- * flush succeeds; on failure, calls `onBringIntoView` instead so the failed
- * edit and its error stay visible and recoverable rather than disappearing
- * with the closed tab. Pure orchestration — no DOM/component dependency —
- * so it works the same whether the target's tab is currently active or not.
- */
-export async function closeTabWithSaveGate(
-	target: TargetIdentity,
-	callbacks: CloseGateCallbacks,
-): Promise<{ closed: boolean }> {
-	const ok = await flushDraft(target);
-	if (!ok) {
-		callbacks.onBringIntoView();
-		return { closed: false };
-	}
-	clearDraft(target);
-	// 4.1: the close sync and doc_close go now; closing never waits on their ack.
-	closeLiveDocument(target.instanceId);
-	callbacks.onClose();
-	return { closed: true };
-}
+export { closeTabWithSaveGate, type CloseGateCallbacks } from './docSaveCloseGate';

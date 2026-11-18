@@ -9,12 +9,18 @@ from pathlib import Path
 from doceditor import document_save
 from doceditor.document_save import DocumentSaveError, FileChangedOutside
 from doceditor.document_scope import UI_THREAD
+from doceditor.live_store import StoreRefused
 from infra import config
 from infra.guidance_git import save_with_history
 from infra.guidance_messages import saver_author
 from infra.guidance_targets import history_target
 
 _log = logging.getLogger(__name__)
+
+
+class HistoryLockBusy(StoreRefused):
+    """A conditional file write can be retried after the history lock clears."""
+    code = "history_lock_busy"
 
 
 def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) -> None:
@@ -43,9 +49,7 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         write=lambda _path, data: document_save.write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
     )
     if saved.reason == "deferred-guidance-lock":
-        from doceditor.live_store import StoreRefused
-
-        raise StoreRefused(saved.line or "The document is busy. Try saving again.")
+        raise HistoryLockBusy(saved.line or "The document is busy. Try saving again.")
     if saved.outcome == "stale":
         from registry.durable_write_preconditions import check_expected_content
 
