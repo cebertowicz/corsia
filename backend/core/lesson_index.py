@@ -50,6 +50,8 @@ PER_TASK = "trial lesson is delivered per task"
 HELD_PREFIX = "trial lesson not offered: "
 #: Follows a trial's name on its index line; an ordinary skill has none.
 TRIAL_MARK = " (trial, unproven)"
+#: Follows a workflow skill's name, on its full line and its names-only entry.
+WORKFLOW_MARK = " (workflow)"
 #: Maximum description length for non-System index lines.
 NON_SYSTEM_DESCRIPTION_LIMIT = 500
 
@@ -71,8 +73,14 @@ def index_line(row: SkillRow) -> str:
         description = description[:NON_SYSTEM_DESCRIPTION_LIMIT]
     trial = lesson_block(row.metadata) is not None
     if not trial and skill_root(row.name, row.path) is not None:
-        return f"- {row.name}: {description}"
-    return line_for(row.name, description, row.path, trial=trial)
+        return f"- {row.name}{WORKFLOW_MARK if is_workflow(row) else ''}: {description}"
+    return line_for(row.name, description, row.path, trial=trial, workflow=is_workflow(row))
+
+
+def is_workflow(row: SkillRow) -> bool:
+    """Whether ``row`` is a workflow skill: its CORSIA data carries a step list."""
+    workflow = row.corsia.get("workflow") if isinstance(row.corsia, dict) else None
+    return isinstance(workflow, dict) and isinstance(workflow.get("steps"), list)
 
 
 def skill_root(name: str, path: object) -> str | None:
@@ -89,14 +97,18 @@ def root_header(root: str) -> str:
     return f"Skills in {root} (read {root}<name>/SKILL.md):"
 
 
-def name_entry(name: str, path: object) -> str:
+def name_entry(name: str, path: object, *, workflow: bool = False) -> str:
     """The compact findable entry for a names-only overflow skill."""
-    return name if skill_root(name, path) is not None else f"{name} ({path})"
+    marked = f"{name}{WORKFLOW_MARK if workflow else ''}"
+    return marked if skill_root(name, path) is not None else f"{marked} ({path})"
 
 
-def line_for(name: str, description: str, path: object, *, trial: bool = False) -> str:
+def line_for(
+    name: str, description: str, path: object, *, trial: bool = False, workflow: bool = False,
+) -> str:
     """The index line a skill with these fields would contribute."""
-    return f"- {name}{TRIAL_MARK if trial else ''}: {description} ({path})"
+    mark = TRIAL_MARK if trial else WORKFLOW_MARK if workflow else ""
+    return f"- {name}{mark}: {description} ({path})"
 
 
 def line_tokens(line: str, model: str | None = None) -> int:

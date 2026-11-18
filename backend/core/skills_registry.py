@@ -10,7 +10,7 @@ from itertools import groupby
 from pathlib import Path
 
 from core.effective_context import ContextSourceEntry
-from core.lesson_index import index_line, name_entry, partition, root_header, skill_root
+from core.lesson_index import index_line, is_workflow, name_entry, partition, root_header, skill_root
 from core.lesson_trials import lesson_block
 from core.role_context_sources import RoleContextResolution, RoleName
 from core.skill_registry_types import SkillResolution, SkillRow, SkillScope
@@ -54,7 +54,7 @@ def _skills_index_content(
     if name_only_rows:
         runs = []
         for root, run in groupby(name_only_rows, key=lambda row: skill_root(row.name, row.path)):
-            names = ", ".join(name_entry(row.name, row.path) for row in run)
+            names = ", ".join(name_entry(row.name, row.path, workflow=is_workflow(row)) for row in run)
             runs.append(names if root is None else f"{root_header(root)} {names}")
         lines.append(
             "Also installed, listed by name only (read its SKILL.md when the request matches the name): "
@@ -160,6 +160,8 @@ def _listed_skills(
             "listed": form,
             "lesson_id": trial_ids.get((row.scope, row.scope_id, row.name)),
         }
+        if is_workflow(row):
+            item["workflow"] = True
         if origin := skill_origin(row):
             item["origin"] = origin
         listed.append(item)
@@ -175,20 +177,19 @@ def _scope_order(rows: list[SkillRow], precedence: tuple[tuple[str, str], ...]) 
 def _ordered_index_rows(
     rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
 ) -> tuple[list[SkillRow], list[SkillRow]]:
-    """Order rows for the stable full index and names-only overflow."""
+    """Order rows for the stable full index and names-only overflow.
+
+    Trials are always full. Of the rest, workflows take the full slots first,
+    so a workflow never loses its description to where its name sorts; every
+    list keeps scope-then-name order, so each root's header is stated once.
+    """
     system_rows = sorted((row for row in rows if row.scope == "system"), key=lambda row: row.name)
     other_rows = _scope_order([row for row in rows if row.scope != "system"], precedence)
-    full_rows = list(system_rows)
-    name_only_rows = []
-    ordinary_count = 0
-    for row in other_rows:
-        if lesson_block(row.metadata) is not None:
-            full_rows.append(row)
-        elif ordinary_count < _NON_SYSTEM_FULL_SKILL_LIMIT:
-            full_rows.append(row)
-            ordinary_count += 1
-        else:
-            name_only_rows.append(row)
+    ordinary = [row for row in other_rows if lesson_block(row.metadata) is None]
+    by_priority = sorted(ordinary, key=lambda row: not is_workflow(row))
+    name_only = {id(row) for row in by_priority[_NON_SYSTEM_FULL_SKILL_LIMIT:]}
+    full_rows = system_rows + [row for row in other_rows if id(row) not in name_only]
+    name_only_rows = [row for row in other_rows if id(row) in name_only]
     return full_rows, name_only_rows
 
 
