@@ -3,13 +3,10 @@ import { scroller } from '$lib/actions/keepInView';
 /**
  * A thread opened on its own (a popover, the sheet's thread) opens at its newest reply: what scrolls it starts at the
  * card's end, so the reply field shows under the newest reply when both fit, and never past the newest reply's first line.
- * Runs once per card, two frames on, since a popover takes its place and height in the frame after it opens; `again`
- * when its sheet or popover opens again over the same card, as a reopen during the close does.
+ * Runs two frames on, since a popover takes its place and height in the frame after it opens. The card calls it once per
+ * open of its sheet or popover.
  */
-const opened = new WeakSet<HTMLElement>();
-export function openAtNewestReply(card: HTMLElement, reply: HTMLElement, again = false) {
-	if (opened.has(card) && !again) return;
-	opened.add(card);
+export function openAtNewestReply(card: HTMLElement, reply: HTMLElement) {
 	requestAnimationFrame(() => requestAnimationFrame(() => {
 		const port = scroller(card);
 		if (!port || !reply.isConnected) return;

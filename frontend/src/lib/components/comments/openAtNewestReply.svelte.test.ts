@@ -15,6 +15,12 @@ vi.mock('$lib/actions/keepInView', async (importOriginal) => ({
 		return port;
 	},
 }));
+// Every time a card asks to open at its newest reply, scrolled or not.
+const opens = vi.hoisted(() => [] as HTMLElement[]);
+vi.mock('./openAtNewestReply', async (importOriginal) => {
+	const real = await importOriginal<typeof import('./openAtNewestReply')>();
+	return { openAtNewestReply: (...args: Parameters<typeof real.openAtNewestReply>) => { opens.push(args[0]); return real.openAtNewestReply(...args); } };
+});
 
 const reply = (n: number) => ({ id: `r${n}`, author: 'agent-1', authorKind: 'agent' as const, text: `Reply ${n}`, at: 'later' });
 function thread(id: string, replies: number[], extra: Partial<CommentThreadData> = {}): CommentThreadData {
@@ -44,6 +50,7 @@ const cards = () => [...document.querySelectorAll<HTMLElement>('.ct')];
 
 beforeEach(() => {
 	scrolled.length = 0;
+	opens.length = 0;
 	frames = [];
 	vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => frames.push(frame));
 	vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -112,6 +119,38 @@ describe('a thread opened on its own opens at its newest reply once per open', (
 		await settle(400);
 		expect(cards()[0].textContent).toContain('note, edited');
 		expect(scrolled).toHaveLength(1);
+	});
+
+	// Resolving, re-opening or deciding swaps the card for another inside the same open: none of these is an open. An
+	// unread reply keeps a resolved row expanded, so it still has a newest reply to open at when its surface reopens.
+	const changes: [string, Partial<CommentThreadData>, Partial<CommentThreadData>[]][] = [
+		['resolving it, then re-opening it', {}, [{ resolved: true }, { resolved: false }]],
+		['accepting its suggestion, which resolves it', { replacement: 'new text', newReplyIds: ['r2'] }, [{ decision: 'accepted', resolved: true }]],
+		['rejecting its suggestion, with the conversation left open', { replacement: 'new text' }, [{ decision: 'rejected' }]],
+	];
+	describe.each([['sheet', 'drawer'], ['popover', 'popover']] as const)('in a %s', (_label, surface) => {
+		it.each(changes)('does not open at the newest reply again for %s, but does when it closes and reopens', async (_change, start, steps) => {
+			const props = $state({ surface, open: true, comments: [thread('c1', [1, 2], start)] });
+			component = mount(SurfaceThreadHarness, { target: host, props });
+			await settle(400);
+			expect(opens).toHaveLength(1);
+			expect(scrolled).toHaveLength(1);
+
+			for (const step of steps) {
+				const before = cards()[0];
+				props.comments = [thread('c1', [1, 2], { ...start, ...step })];
+				await settle(400);
+				if (step.resolved !== undefined) expect(cards()[0]).not.toBe(before);
+			}
+			expect(opens).toHaveLength(1);
+			expect(scrolled).toHaveLength(1);
+
+			props.open = false;
+			await settle(40);
+			props.open = true;
+			await settle(400);
+			expect(opens).toEqual([expect.anything(), cards()[0]]);
+		});
 	});
 
 	it('scrolls each resolved card in a sheet once per open of the sheet, and not for a new reply', async () => {
