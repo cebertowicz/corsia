@@ -75,7 +75,7 @@ def _repair_fold_counts(db):
            JOIN comment_identity_moves m ON m.moved_to=b.id WHERE m.table_name=?""", (FOLDS,)
     ).fetchall()
     for batch_id, state in targets:
-        if state == 'open':
+        if state in ('open', 'undelivered'):
             _recount(db, batch_id)
     return sum(state == 'delivered' for _, state in targets)
 

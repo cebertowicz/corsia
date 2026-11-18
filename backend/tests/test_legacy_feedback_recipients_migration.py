@@ -152,7 +152,7 @@ def test_different_edit_snapshots_leave_source_open(caplog):
     db.close()
 
 
-def test_schema_200_fold_repair_only_open_targets_and_survives_reverse(caplog):
+def test_schema_200_fold_repair_open_target_and_survives_reverse(caplog):
     import logging
     from infra.migration_200_to_201_feedback_recipients import reverse_201_to_200
 
@@ -174,6 +174,26 @@ def test_schema_200_fold_repair_only_open_targets_and_survives_reverse(caplog):
     assert 'delivered_fold_targets=1' in caplog.text
     reverse_201_to_200(db)
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='target'").fetchone() == (2,)
+    db.close()
+
+
+def test_undelivered_fold_count_survives_recipient_reversal():
+    from infra.migration_200_to_201_feedback_recipients import reverse_201_to_200
+
+    db = _db()
+    db.execute('CREATE TABLE comment_identity_moves(table_name TEXT, row_id TEXT, original TEXT, moved_to TEXT, moved_at TEXT)')
+    _batch(db, 'retry', 'project:p', 'undelivered')
+    _batch(db, 'delivered', 'ui', 'delivered', 'b')
+    db.executemany("INSERT INTO comment_identity_moves VALUES ('doc_feedback_batch_folds',?,'{}',?,'1')",
+                   [('s1', 'retry'), ('s2', 'delivered')])
+    db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('retry','c1'),('delivered','c2')")
+    db.executemany("INSERT INTO doc_feedback_edit_items VALUES (?,'Person','diff','a','old','b','new',1,'1','2')",
+                   [('retry',), ('delivered',)])
+    migrate_200_to_201(db)
+    assert db.execute("SELECT id,item_count FROM doc_feedback_batches ORDER BY id").fetchall() == [
+        ('delivered', 1), ('retry', 2)]
+    reverse_201_to_200(db)
+    assert db.execute("SELECT recipient_id,item_count FROM doc_feedback_batches WHERE id='retry'").fetchone() == ('project:p', 2)
     db.close()
 
 
