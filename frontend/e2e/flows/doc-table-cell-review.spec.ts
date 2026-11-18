@@ -311,6 +311,7 @@ for (const layout of LAYOUTS) {
 
 			// A table wider than the pane: its last cell opens in place.
 			const wide = page.locator('.cm-md-table table').nth(1);
+			console.log('TABLE_PARSE_PROBE', JSON.stringify(await page.evaluate(() => (window as any).__tableParseProbe)));
 			await wide.scrollIntoViewIfNeeded();
 			const last = wide.locator('tr').nth(1).locator('td').nth(8);
 			await last.scrollIntoViewIfNeeded();

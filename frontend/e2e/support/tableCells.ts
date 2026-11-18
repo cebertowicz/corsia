@@ -174,9 +174,20 @@ export async function longPressOn(root: Locator, words: string) {
 		return null;
 	}, words);
 	expect(point, `"${words}" is drawn`).not.toBeNull();
+	await page.evaluate(() => {
+		(window as any).__touchProbe = [];
+		for (const type of ['touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'contextmenu', 'selectionchange']) {
+			document.addEventListener(type, (event) => {
+				const row = { type, at: performance.now(), target: (event.target as Element)?.className, prevented: false, selection: String(getSelection()) };
+				(window as any).__touchProbe.push(row);
+				queueMicrotask(() => { row.prevented = event.defaultPrevented; });
+			}, true);
+		}
+	});
 	const session = await page.context().newCDPSession(page);
 	await session.send('Input.synthesizeTapGesture', { x: point!.x, y: point!.y, duration: 1000, gestureSourceType: 'touch' });
 	await session.detach();
+	console.log('TOUCH_PROBE', JSON.stringify({ point, events: await page.evaluate(() => (window as any).__touchProbe), selection: await page.evaluate(() => String(getSelection())) }));
 }
 
 /**

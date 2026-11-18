@@ -154,6 +154,7 @@ export function repaintTableCell(el: HTMLElement, state: EditorState, cell: Open
 function buildTableDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
+	if (doc.toString().startsWith('# Long and wide')) (window as any).__tableParseProbe = { treeLength: syntaxTree(state).length, docLength: doc.length, wideAt: doc.toString().indexOf('| Column 1 |') };
 	const images = state.facet(imageContext)();
 	syntaxTree(state).iterate({
 		enter: (node) => {
