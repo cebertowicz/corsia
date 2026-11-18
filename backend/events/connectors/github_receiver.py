@@ -36,4 +36,5 @@ GITHUB_RECEIVER = ReceiverDecl(
     signature_prefix="sha256=",
     delivery_id_header="x-github-delivery",
     max_body_bytes=GITHUB_BODY_LIMIT,
+    sender_headers=("x-github-event", "x-github-hook-id", "x-github-hook-installation-target-type"),
 )
