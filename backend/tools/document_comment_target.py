@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from doceditor.comment_action_errors import CommentActionError
+from doceditor.comment_action_errors import CommentActionError, not_active_message
 from doceditor.comment_actions import validate_create
 from doceditor.comments import get_comment, validate_client_id
 from infra.auth import may_access_artifact
@@ -34,7 +34,7 @@ def resolve_doc_target(
     if artifact_id:
         art = registry_models.get_artifact(artifact_id, db=db)
         if art is None or art["state"] != "active":
-            raise ValueError(f"artifact_id does not resolve to an active artifact: {artifact_id}")
+            raise ValueError(not_active_message(artifact_id))
         if not may_access_artifact(art["parent_thread_id"], user_id, db=db):
             raise PermissionError("Artifact not found")
         return art["id"], art["path"], None

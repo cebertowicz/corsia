@@ -92,8 +92,8 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
 
     A comment whose live range still holds text keeps its place when the text
     inside the range changes: the anchor is the range's two ends, and the text
-    between them becomes its new quote. Only a collapsed range, with all of its
-    text gone, orphans. A suggestion's quote is the text it replaces, so it is
+    between them becomes its new quote. A collapsed range is resolved again from
+    its stored context; if that fails, it remains orphaned. A suggestion's quote is the text it replaces, so it is
     never rewritten: an open suggestion edited inside keeps its place the same way,
     flagged ``text_changed``, and its Accept is refused as stale (the quote no
     longer matches).
@@ -105,12 +105,16 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         quote = _anchored_quote(comment)
         undecided = not comment.get("decision")
         resolved = (ranges or {}).get(comment["id"])
+        collapsed = resolved if resolved is not None and resolved[0] == resolved[1] else None
+        if collapsed is not None:
+            resolved = None
         tracked = resolved is not None
         suggestion = comment.get("replacement") is not None
         if resolved is not None and undecided and not suggestion:
             quote = _text_in_range(text, resolved[0], resolved[1]) or quote
         if resolved is None:
-            resolved, quote = _resolve_place(comment, text, quote, requote=undecided and not suggestion)
+            hint = {**comment, "from_off": collapsed[0], "to_off": collapsed[1]} if collapsed is not None else comment
+            resolved, quote = _resolve_place(hint, text, quote, requote=undecided and not suggestion)
         edited = None
         if undecided and suggestion and (tracked or not _held(comment, text, resolved)):
             edited = _edited_place(comment, text, resolved if tracked else None)
@@ -127,16 +131,17 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
             continue
         if resolved is None:
             comment["orphaned"] = undecided
+            if collapsed is not None:
+                if (comment.get("from_off"), comment.get("to_off")) != collapsed:
+                    updates.append({"id": comment["id"], "from_off": collapsed[0], "to_off": collapsed[1]})
+                comment["from_off"], comment["to_off"] = collapsed
             continue
         from_off, to_off = resolved
         context = anchor_context(text, from_off, to_off, quote)
         if context is None:
             comment["orphaned"] = undecided
-            # A tracked range is where the thread is, whatever the text inside it now
-            # says: a deleted highlight's collapse point, or a decided suggestion's edited
-            # text. Report it and persist it, so a reload finds the same place instead of
-            # the stale offsets. Reload can deliberately omit the range hint and resolve
-            # restored text anew.
+            # Preserve the tracked position when its text cannot validate the quote,
+            # including a decided suggestion whose text has been edited.
             if comment["id"] in (ranges or {}):
                 if (comment.get("from_off"), comment.get("to_off")) != resolved:
                     updates.append({"id": comment["id"], "from_off": from_off, "to_off": to_off})

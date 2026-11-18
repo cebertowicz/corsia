@@ -172,8 +172,10 @@ def get_servers(provider: str | None = None, status: str | None = None) -> list[
     return [dict(r) for r in rows]
 
 
-def update_server_status(server_id: str, *, db=None, **kwargs: Any) -> None:
+def update_server_status(server_id: str, *, db=None, generation: int | None = None, **kwargs: Any) -> None:
     with write_transaction(db, scope="update_server_status") as connection:
+        if generation is not None and observation_generation(server_id) != generation:
+            return
         sets = ["updated_at = ?"]
         vals: list = [_now_iso()]
         for key in (
@@ -298,6 +300,7 @@ async def _sweep_managed(client: httpx.AsyncClient, server: dict) -> None:
         host, latency_ms, latest_data = result
         await run_in_db(
             upsert_endpoint, sid, host, ok=True, latency_ms=latency_ms,
+            generation=generation,
         )
         any_ok = True
         if fastest_latency is None or latency_ms < fastest_latency:
@@ -316,15 +319,18 @@ async def _sweep_managed(client: httpx.AsyncClient, server: dict) -> None:
             machine_id=latest_data.get("machine_id"),
         )
     else:
-        await record_unreachable(server)
+        await record_unreachable(server, generation=generation)
 
 
-def _record_server_offline(server: dict, provider: str) -> None:
-    """Commit the offline server and its model availability as one DB-only result."""
+def _record_server_offline(server: dict, provider: str, generation: int | None = None) -> bool:
+    """Commit offline state only if the server has not since been replaced."""
     with write_transaction(None, scope="record_server_offline") as db:
+        if generation is not None and observation_generation(server["id"]) != generation:
+            return False
         update_server_status(server["id"], status="offline", db=db)
         if server.get("status") != "offline":
             _mark_server_models_unavailable(server["id"], provider, db=db)
+        return True
 
 
 def _mark_server_models_unavailable(server_id: str, provider: str, *, db=None) -> None:
