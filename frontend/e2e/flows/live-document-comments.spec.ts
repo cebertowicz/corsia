@@ -59,8 +59,8 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-line').filter({ hasText: quote })).toHaveCount(2);
 			await expect(reader.locator('.cm-content')).toContainText(`reply anchor ${stamp}`);
 			await expect(reader.locator('.cm-content')).toContainText(`remote edit ${stamp}`);
-			// The comments say nothing about placement. Lost threads whose quote is back in the text are placed again on the
-			// next comments load, never on an edit, so the reader's reload below is the load that places them.
+			// Reload restores a quote only when both stored context sides identify it. The first quote retains both;
+			// the second lost its earlier prefix during deletion, so it remains reachable as an orphan rather than guessing.
 			await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
 			await reader.reload();
@@ -68,9 +68,15 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await reader.getByText(document.title, { exact: true }).first().click();
 			await expect(reader.locator('.cm-content')).toContainText(quote);
 			await openComments(reader, /^3 comments\b/);
-			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
-			await expect(reader.getByText(`First ${stamp}`, { exact: true })).toBeVisible();
-			await expect(reader.getByText(`Second ${stamp}`, { exact: true })).toBeVisible();
+			const restoredLines = reader.locator('.cm-line').filter({ hasText: quote });
+			await expect(restoredLines.nth(0).locator('.cm-comment-anchor')).toHaveText(quote);
+			await expect(restoredLines.nth(1).locator('.cm-comment-anchor')).toHaveCount(0);
+			const first = reader.locator('[data-comment-id]').filter({ hasText: `First ${stamp}` });
+			const second = reader.locator('[data-comment-id]').filter({ hasText: `Second ${stamp}` });
+			await expect(first).toBeVisible();
+			await expect(first.locator('.ct-orphan')).toHaveCount(0);
+			await expect(second).toBeVisible();
+			await expect(second.locator('.ct-orphan')).toBeVisible();
 		} finally {
 			await writerContext.close();
 			await readerContext.close();
