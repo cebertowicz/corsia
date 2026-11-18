@@ -275,10 +275,11 @@ test.describe('a touch screen wide enough for the margin column', () => {
 		if (!(await field.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false))) await card.tap();
 		await expect(field).toBeVisible();
 		// The field sits in the lower part of the screen, where an on-screen keyboard comes up, with the reader well above the live edge.
+		// It sits above the band the grown composer covers (top 770 at 1000 tall), so the composer growing gives the column nothing to reveal.
 		await field.evaluate((el) => {
 			const scroller = el.closest<HTMLElement>('.messages')!;
 			const box = el.getBoundingClientRect();
-			scroller.scrollTop += box.top + box.height / 2 - 780;
+			scroller.scrollTop += box.top + box.height / 2 - 650;
 		});
 		const still = () => expect.poll(() => field.evaluate((el) => new Promise<string>((resolve) => {
 			const scroller = el.closest<HTMLElement>('.messages')!;
