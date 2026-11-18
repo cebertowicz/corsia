@@ -5,7 +5,7 @@ from collections import Counter
 import json
 import logging
 
-from doceditor import comment_anchoring, comment_snapshots, live_text, snapshot_showing
+from doceditor import comment_anchoring, comment_snapshots, live_diff, live_text, snapshot_showing
 
 
 log = logging.getLogger(__name__)
@@ -123,6 +123,21 @@ def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None)
     return legacy_updates, versioned_updates, invalid
 
 
+def _map_spans(old: str, new: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Follow the same UTF-8 edit delta as a single CRDT text transaction."""
+    delta = []
+    position = 0
+    for start, end, inserted in live_diff.text_changes(old, new):
+        if start > position:
+            delta.append({'retain': start - position})
+        if end > start:
+            delta.append({'delete': end - start})
+        if inserted:
+            delta.append({'insert': inserted})
+        position = end
+    return live_text.follow_spans(spans, old, delta)[0] if delta else spans
+
+
 def resolve(threads: list[dict], old: str, new: str, *, new_index=None) -> list[dict]:
     """Map and judge candidates; rejected anchors retain their persisted evidence.
 
@@ -157,22 +172,15 @@ def resolve(threads: list[dict], old: str, new: str, *, new_index=None) -> list[
         eligible.append(comment)
     if not eligible:
         return []
-    doc = live_text.create(old)
-    text = doc['text']
     spans = [(c['from_off'], c['to_off']) for c in eligible]
-    state = {'spans': spans, 'before': old, 'open': set()}
-
-    def changed(event):
-        state['spans'], state['open'] = live_text.follow_spans(
-            state['spans'], state['before'], event.delta, state['open'])
-        state['before'] = str(text)
-
-    observer = text.observe(changed)
-    try:
+    if old == new:
+        # Keep the established fallback for unchanged text outside the shortcut.
+        doc = live_text.create(old)
         live_text.apply_text(doc, new)
-    finally:
-        text.unobserve(observer)
-    ranges = dict(zip((c['id'] for c in eligible), state['spans']))
+        mapped = spans
+    else:
+        mapped = _map_spans(old, new, spans)
+    ranges = dict(zip((c['id'] for c in eligible), mapped))
     candidates = [dict(c) for c in eligible]
     updates = comment_anchoring.resolve_threads(candidates, new, ranges=ranges)
     accepted = set()

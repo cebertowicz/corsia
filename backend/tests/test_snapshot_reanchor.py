@@ -12,6 +12,29 @@ def row(text, quote, start):
             'anchor_prefix': prefix, 'anchor_suffix': suffix}
 
 
+def test_direct_span_mapping_matches_crdt_for_edits_and_utf16_boundaries():
+    cases = [
+        ('hello world', 'hello brave world', [(0, 5), (6, 11), (5, 5)]),
+        ('a😀 target\nlast', 'a😀 changed\nlast!', [(1, 3), (4, 10), (0, 13)]),
+        ('one\ntwo\nthree\n', 'one\nthree\n', [(4, 7), (8, 13)]),
+        ('abc', 'aXYZc', [(1, 2), (0, 3), (2, 2)]),
+    ]
+    for old, new, spans in cases:
+        doc = snapshot_reanchor.live_text.create(old)
+        text = doc['text']
+        state = {'spans': spans, 'before': old, 'open': set()}
+        def changed(event):
+            state['spans'], state['open'] = snapshot_reanchor.live_text.follow_spans(
+                state['spans'], state['before'], event.delta, state['open'])
+            state['before'] = str(text)
+        observer = text.observe(changed)
+        try:
+            snapshot_reanchor.live_text.apply_text(doc, new)
+        finally:
+            text.unobserve(observer)
+        assert snapshot_reanchor._map_spans(old, new, spans) == state['spans']
+
+
 def test_versioned_rows_resolve_from_their_own_source_and_legacy_uses_existing_rules():
     db = sqlite3.connect(':memory:')
     db.execute('CREATE TABLE doc_comment_snapshots (id INTEGER PRIMARY KEY, digest BLOB NOT NULL, text BLOB NOT NULL)')
