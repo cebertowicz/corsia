@@ -1,17 +1,14 @@
 """Whether a shell command runs a CORSIA control-plane operation.
 
-A command is judged by its separate words, anywhere in a simple command:
-``timeout 5 corsia restart`` and ``find . -exec corsia restart \;`` are
-refused, while quoted text such as ``echo "corsia restart finished"`` is
-one word and only prints. A string that a carrier runs as a command again
-(a shell's ``-c``, ``su -c``, ``eval``, ``ssh``, ``watch``, ``trap``,
-``alias``, ``env -S``, ``$(...)``, backquotes) is judged the same way. The
-raw-text pattern, which fails closed, judges a command that does not
-tokenize, one holding a runner whose command text is not modelled (an
-interpreter, awk, tmux, xargs, a shell reading stdin), a carried string
-whose text is computed when it runs (``$(...)``, a backquote, ``$NAME``),
-a word holding ``=!`` (a git alias runs its shell command), and each
-``NAME=value`` word's value.
+The operation's words anywhere in a simple command are refused:
+``timeout 5 corsia restart`` and ``find . -exec corsia restart \;``.
+Otherwise the raw-text pattern, which fails closed, judges the whole
+command. Its match is cleared only when the text can do nothing but be
+printed or searched: every simple command is a text program (``echo``,
+``printf``, ``grep``, ``rg`` without ``--pre``, ``git commit``) and no
+output goes to a file, so ``echo "corsia restart finished"`` runs while
+the same text handed to any other program (a shell, ``source``, a
+variable in program position, a git alias) is refused.
 """
 
 from __future__ import annotations
@@ -39,24 +36,10 @@ _SERVICE_VERB_RE = re.compile(
     r"\b(?:bootout|kickstart|kill|restart|stop|unload)\b", re.IGNORECASE
 )
 _SERVICE_MANAGERS = frozenset({"launchctl", "systemctl"})
-# Run their ``-c``/``--command`` string; without one they read commands
-# from stdin or a script the command text does not show.
-_SHELLS = frozenset(
-    {"bash", "csh", "dash", "fish", "ksh", "sh", "su", "tcsh", "zsh"}
-)
-# Join their arguments into one command line that a shell parses again.
-_JOINERS = frozenset({"eval", "ssh", "trap", "watch"})
-# Run command text in a form not modelled here (code strings, stdin, a
-# terminal); like a shell with no ``-c``, the raw-text pattern judges them.
-_RUNNERS_RE = re.compile(
-    r"python\d*(?:\.\d+)?|perl|ruby|node|deno|bun|php|lua|osascript|tmux"
-    r"|screen|script|flock|runuser|parallel|at|batch|expect|xargs|[gmn]?awk"
-)
-# Text that a carried string expands only when it runs: its command is
-# unknowable here.
-_EXPANSION_RE = re.compile(r"`|\$[\w{(@*#?!$-]")
-# A ``NAME=value`` word, bare or after export, local, declare and the like.
-_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+# Programs that only print or search their text and run none of it. The
+# word must be exactly this: a path, a variable or a substitution in
+# program position is not known to be one of them.
+_TEXT_PROGRAMS = frozenset({"echo", "printf", "grep", "rg"})
 _REDIRECTIONS = frozenset(
     {"<", "<<", "<<<", ">", ">>", ">|", "<>", "<&", ">&", "&>", "&>>"}
 )
@@ -76,17 +59,24 @@ def runs_control_plane_operation(command: str, depth: int = 0) -> bool:
         words = shell_words(command)
     except ValueError:
         return CONTROL_PLANE_TEXT_RE.search(command) is not None
+    known = plain_word_indices(command, words)
     # Unknown quoting counts every word as written plainly: fails closed.
-    plain = plain_word_indices(command, words) or frozenset(range(len(words)))
+    plain = known or frozenset(range(len(words)))
     for word in words:
         # Command substitution runs even inside double quotes, where the
         # whole substitution is one word.
         for opener in _SUBSTITUTION_RE.finditer(word):
             if runs_control_plane_operation(word[opener.end():], depth + 1):
                 return True
-    return any(
-        _runs(segment, depth, command)
-        for segment in _segments(words, plain)
+    segments = _segments(words, plain)
+    if any(_runs(segment) for segment in segments):
+        return True
+    if CONTROL_PLANE_TEXT_RE.search(command) is None:
+        return False
+    return not (
+        known
+        and all(_only_text(segment) for segment in segments)
+        and not _writes_file(words)
     )
 
 
@@ -152,7 +142,7 @@ def _segments(
     return [segment for segment in done if segment]
 
 
-def _runs(words: Sequence[str], depth: int, command: str) -> bool:
+def _runs(words: Sequence[str]) -> bool:
     """Whether any word of a simple command starts a control-plane operation.
 
     Position does not matter: a wrapper (``timeout``, ``find -exec``,
@@ -161,71 +151,40 @@ def _runs(words: Sequence[str], depth: int, command: str) -> bool:
     for index, word in enumerate(words):
         name = Path(word).name.casefold()
         args = list(words[index + 1:])
-        assignment = _ASSIGNMENT_RE.match(word)
-        if assignment and CONTROL_PLANE_TEXT_RE.search(word[assignment.end():]):
-            return True
-        if (
-            _RUNNERS_RE.fullmatch(name) or "=!" in word
-        ) and CONTROL_PLANE_TEXT_RE.search(command):
-            return True
         if name == "corsia" and _CORSIA_VERB_RE.match(" ".join(args)):
             return True
         if name in _SERVICE_MANAGERS and any(
             _SERVICE_VERB_RE.search(arg) for arg in args
         ) and any("corsia" in arg.casefold() for arg in args):
             return True
-        if name in _SHELLS and _shell_runs(args, depth, command):
-            return True
-        if name in _JOINERS and _carried(" ".join(args), depth, command):
-            return True
-        if name == "alias" and any(
-            _carried(arg.partition("=")[2], depth, command)
-            for arg in args
-            if "=" in arg
-        ):
-            return True
-        if name == "env" and _env_split_runs(args, depth, command):
-            return True
     return False
 
 
-def _carried(text: str, depth: int, command: str) -> bool:
-    """Whether a string a carrier runs as a command again runs an operation;
-    if the string expands when it runs, the raw-text pattern judges the
-    whole command."""
-    if _EXPANSION_RE.search(text):
-        return CONTROL_PLANE_TEXT_RE.search(command) is not None
-    return runs_control_plane_operation(text, depth + 1)
+def _only_text(words: Sequence[str]) -> bool:
+    """Whether a simple command only prints or searches its words.
+
+    ``rg --pre`` runs a program on each file; ``git`` is a text program
+    only as ``git commit`` with nothing between, so no ``-c`` setting or
+    alias reaches it.
+    """
+    program = words[0]
+    if program == "git":
+        return len(words) > 1 and words[1] == "commit"
+    if program == "rg":
+        return not any(word.startswith("--pre") for word in words)
+    return program in _TEXT_PROGRAMS
 
 
-def _shell_runs(args: Sequence[str], depth: int, command: str) -> bool:
-    """Check each operand of ``sh -c`` (or ``--command``); a shell reading
-    stdin or a script gets its text from elsewhere in the command, so the
-    raw-text pattern judges the whole command."""
-    long_values = [
-        arg.partition("=")[2] for arg in args if arg.startswith("--command=")
-    ]
-    options = [arg for arg in args if arg[:1] in "-+" and not arg.startswith("--")]
-    if not long_values and "--command" not in args and not any(
-        "c" in option[1:] for option in options
-    ):
-        return CONTROL_PLANE_TEXT_RE.search(command) is not None
-    return any(
-        _carried(arg, depth, command)
-        for arg in [*long_values, *(arg for arg in args if arg[:1] not in "-+")]
-    )
-
-
-def _env_split_runs(args: Sequence[str], depth: int, command: str) -> bool:
-    """Check the string ``env -S`` splits into a command."""
-    for index, arg in enumerate(args):
-        value = None
-        if arg in {"-S", "--split-string"} and index + 1 < len(args):
-            value = args[index + 1]
-        elif arg.startswith("--split-string="):
-            value = arg.partition("=")[2]
-        elif arg.startswith("-S") and arg != "-S":
-            value = arg[2:]
-        if value and _carried(value, depth, command):
+def _writes_file(words: Sequence[str]) -> bool:
+    """Whether output is redirected anywhere but ``/dev/null`` or another
+    descriptor: text written to a file (a script, a startup file) can be
+    run later."""
+    for index, word in enumerate(words):
+        if word not in _REDIRECTIONS or ">" not in word:
+            continue
+        target = words[index + 1] if index + 1 < len(words) else ""
+        duplicate = word == ">&" and (target.isdigit() or target == "-")
+        if target != "/dev/null" and not duplicate:
             return True
     return False
+

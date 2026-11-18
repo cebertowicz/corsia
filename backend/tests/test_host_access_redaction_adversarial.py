@@ -371,6 +371,7 @@ _PW = "hunter" + "22"
         "gh api repos/o/r --jq '{" + _TOK.lower() + ": $t}'",
         "gh api repos/o/r --jq '.[] | {" + _TOK.lower() + ": (.a + .b)}'",
         "jq '{\"" + _TOK.lower() + "\": .x}' f.json",
+        "jq '{" + _TOK.lower() + ": (.a // .b), n: \"x\"}' f.json",
     ],
 )
 def test_url_and_expression_text_inside_a_word_is_not_a_credential(
@@ -399,6 +400,11 @@ def test_url_and_expression_text_inside_a_word_is_not_a_credential(
         "gh api x --jq '{" + _TOK.lower() + ": \"" + _PW + "\"}'",
         "gh api x --jq '{" + _TOK.lower() + ": " + _PW + "}'",
         "echo 'https://u:" + _PW + "@[bad'",
+        # The whole value is judged, not its first character.
+        "gh api x --jq '{" + _TOK.lower() + ": (\"" + _PW + "\")}'",  # gitleaks:allow
+        "gh api x --jq '{" + _TOK.lower() + ": [\"" + _PW + "\"]}'",  # gitleaks:allow
+        "gh api x --jq '{" + _TOK.lower() + ": (.v // \"" + _PW + "\")}'",  # gitleaks:allow
+        "gh api x --jq '{" + _TOK.lower() + ": .v | \"" + _PW + "\"}'",  # gitleaks:allow
     ],
 )
 def test_url_and_key_literals_inside_a_word_are_still_refused(

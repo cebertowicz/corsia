@@ -12,18 +12,20 @@ from typing import Callable
 
 _URL_START_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 _EMBEDDED_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"`<>]*")
-# A key, quoted or bare, then the first character of what follows it, past
-# any ``:`` or ``=``. A bare name right after ``.`` or ``$`` is a jq path
-# or a variable, not a key.
+# A key, quoted or bare, past any ``:`` or ``=``. A bare name right after
+# ``.`` or ``$`` is a jq path or a variable, not a key.
 _KEY_VALUE_RE = re.compile(
     r"(?P<key>\"[^\"\n]*\"|'[^'\n]*'|(?<![\w.$-])[A-Za-z_][\w-]*(?![\w-]))"
-    # The value is only looked at, so it can still start the next key.
-    r"\s*[:=]?\s*(?=(?P<value>\S))"
+    r"\s*[:=]?\s*"
 )
-# A value that starts with one of these is a jq path (``.x``), a variable
-# (``$x``) or an expression, or there is no value; anything else (a quoted
-# string, a bare word) is a literal.
-_NOT_LITERAL_STARTS = frozenset(".$([{@,;|)]}")
+# What a value may hold and still be an expression: jq paths, variables,
+# numbers, arithmetic, pipes and grouping, and a value the redactor already
+# replaced with its marker (a descriptor checked again). Anything else (a
+# quote, a bare word, ``@format``) is literal text.
+_EXPRESSION_PIECE_RE = re.compile(
+    r"\s+|(?P<ref>\.(?:[A-Za-z_]\w*)?|\$[A-Za-z_]\w*|\[REDACTED\])"
+    r"|\d+(?:\.\d+)?|//|[-+*/%|()\[\]]"
+)
 
 Redaction = tuple[str, int, int]
 
@@ -74,11 +76,41 @@ def has_literal_key_value(
 
     A literal is a quoted string or a bare word. A jq path, a variable or
     an expression after the key (``{token: .x}``) is not a credential.
+    The whole value, up to the next ``,``, ``}`` or ``;`` outside brackets,
+    is judged: a quoted string or a bare word anywhere in it is a literal.
     """
     for match in _KEY_VALUE_RE.finditer(text):
         key = match.group("key").strip("\"'")
-        if not is_sensitive_key(key):
-            continue
-        if match.group("value") not in _NOT_LITERAL_STARTS:
+        if is_sensitive_key(key) and not _is_expression(
+            _value_span(text, match.end())
+        ):
             return True
     return False
+
+
+def _value_span(text: str, start: int) -> str:
+    """The value from ``start`` to its end: ``,``, ``}`` or ``;`` at
+    bracket depth zero, or a closer with no opener in the value."""
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char in "([":
+            depth += 1
+        elif char in ")]" and depth:
+            depth -= 1
+        elif char in ")],};":
+            return text[start:index]
+    return text[start:]
+
+
+def _is_expression(value: str) -> bool:
+    """Whether ``value`` is empty or only paths, variables and arithmetic
+    that names at least one of them."""
+    position = refs = 0
+    while position < len(value):
+        piece = _EXPRESSION_PIECE_RE.match(value, position)
+        if piece is None:
+            return False
+        refs += piece.group("ref") is not None
+        position = piece.end()
+    return refs > 0 or not value.strip()
