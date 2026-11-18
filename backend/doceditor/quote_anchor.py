@@ -185,6 +185,14 @@ def reanchor(
     nothing tells its original quote apart from another occurrence, so any
     move could attach it to different text. Ties at the same score and distance
     deliberately become orphaned for the same reason.
+
+    One case tightens that, so a reload agrees with the live document: a stored span that is collapsed
+    (the comment's text is gone) comes back only where every stored side matches, as when deleted text
+    is restored. Without that, the line that moved up into a deleted line's place matches one side and
+    takes the comment.
+
+    Limit: a comment saved at its original span (the file changed on disk with no live session open) has
+    no collapsed span, so one matching side is still enough for it, as before.
     """
     if not quote:
         return None
@@ -197,14 +205,20 @@ def reanchor(
 
     eligible: list[tuple[int, int, int, int]] = []
     for start, candidate_from, candidate_to in candidates:
-        score = 0
+        score = sides = 0
         if prefix:
+            sides += 1
             score += int(text[max(0, start - len(prefix)):start] == prefix)
         end = start + len(quote)
         if suffix:
+            sides += 1
             score += int(text[end:end + len(suffix)] == suffix)
         exact = candidate_from == from16 and candidate_to == to16
-        if score > 0 or exact:
+        if from16 is not None and from16 == to16:
+            counts = sides > 0 and score == sides
+        else:
+            counts = score > 0 or exact
+        if counts:
             eligible.append((score, start, candidate_from, candidate_to))
     if not eligible:
         return None
