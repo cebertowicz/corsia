@@ -46,6 +46,7 @@ export interface DocComment {
 	acked?: boolean;
 	/** Everyone who has acknowledged the thread, in order. */
 	acknowledgedBy?: Acknowledger[];
+	replyGoesTo?: { id: string; name: string }[];
 	review?: boolean;
 	replacement?: string | null;
 	insertAfter?: boolean;
@@ -102,6 +103,7 @@ export function fromServer(r: ServerComment): DocComment {
 		textChanged: !!r.text_changed,
 		acked: (r.acknowledged_by ?? []).some((ack) => ack.kind === 'user'),
 		acknowledgedBy: r.acknowledged_by ?? [],
+		replyGoesTo: r.reply_goes_to,
 		review: !!r.review,
 		replacement: r.replacement,
 		insertAfter: !!r.insert_after,
