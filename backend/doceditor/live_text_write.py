@@ -20,8 +20,8 @@ _log = logging.getLogger(__name__)
 def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) -> None:
     """Blocking. The live lane's write: a recorded document is written and saved as a version by the
     operation's actor under its reason, under the history lock, before this returns; any other file as
-    before. A changed file is never replaced (``FileChangedOutside``). An operation that requires history
-    (a restore) raises, with the file left as it was, unless its version is recorded.
+    before. A change detected before replacement raises ``FileChangedOutside``; an independent writer
+    can still race the check and rename. A restore raises unless its version is recorded.
 
     Text whose bytes equal the file's is not written: a flush with nothing new (the last viewer
     leaving) renames nothing and records no version. The lane still records and publishes it."""
