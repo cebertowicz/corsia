@@ -1,0 +1,42 @@
+handler:
+  kind: instruction
+workflow:
+  steps:
+    - id: ground
+      title: Understand the ask and what is known
+      required: true
+      check: "the run's intent holds Goal, Done when in the person's terms, Reaches, 1 to 3 Could be wrong if lines, Kind of work and First job; each Assumed line is marked checked, wrong, asked or stated"
+      difficulty: {default: standard, hard_if: "the work is in a field whose rules the agent does not hold"}
+      instruction: "## Ground"
+    - id: premortem
+      title: Think through how it could fail
+      required: false          # close with reason when nothing is sent outside, hard to undo, large or built on
+      after: [ground]
+      difficulty: {default: standard}
+      instruction: "## Pre-mortem"
+    - id: work
+      title: Do the work
+      required: true
+      check: "the result exists where the person will use it; anything to go outside is a draft; nothing has been sent, published, paid, filed or deleted"
+      after: [ground, premortem]
+      difficulty: {default: standard}
+      instruction: "## Work"
+    - id: review
+      title: Fresh check before you see it
+      required: true
+      workflow: review-work
+      check: "review-work completed: a fresh reviewer returned PASS or a list; each failure is fixed or its rejection noted, and anything open goes into the hand-over"
+      after: [work]
+      difficulty: {default: standard}
+      instruction: "## Review"
+      quality:
+        - {name: pass-then-corrected, good: "no correction from the person against this run within 7 days of a PASS", observed: signal, when: "lagging:7"}
+    - id: handover
+      title: Hand over the result
+      required: true
+      check: "result checked against Done when where the person will use it; the hand-over opens with the result, then open Assumed lines, open or rejected review findings, and decisions made for them; anything that went outside had the person's yes for that action, is recorded, and has proof it landed or is said to be not done"
+      after: [review]
+      difficulty: {default: routine}
+      instruction: "## Hand over"
+      quality:
+        - {name: accepted-first-try, good: "the person used or approved the result without sending it back; no reply is not acceptance", observed: signal, when: completion}
