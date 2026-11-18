@@ -8,6 +8,8 @@ which leaves the browser holding the draft.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -329,5 +331,34 @@ def test_the_list_on_the_old_id_reads_as_before_when_no_live_document_can_be_rea
         successor = _promote(db, artifact)
         models.retire(successor, tombstone=True, cause="file_gone", db=db)
         assert _listed(client, artifact) == []
+    finally:
+        db.close()
+
+
+def test_an_agent_tool_comment_that_meets_a_promote_after_its_check_says_why_it_was_refused(isolated_db, monkeypatch):
+    """doc_comment_create checks the target, then writes; a promote between the two gives the preflight's sentence, not a bare id."""
+    import tools.documents as documents
+
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        promoted = {}
+        check = documents._resolve_comment_target
+
+        def check_then_promote(check_db, *args):
+            target = check(check_db, *args)  # the target is active here
+            other = get_db()
+            try:
+                promoted["successor"] = _promote(other, artifact)
+            finally:
+                other.close()
+            return target
+
+        monkeypatch.setattr(documents, "_resolve_comment_target", check_then_promote)
+        result = asyncio.run(documents.DocCommentCreateTool(workspace="/workspace").execute(
+            body="from the agent", parent_id=root["id"], _thread_id="owner"))
+        assert result == f"Error: artifact_id does not resolve to an active artifact: {artifact}", result
+        # The promote carried the one existing comment to the successor; the refused reply landed nowhere.
+        assert _rows(db, artifact) == [] and "from the agent" not in _rows(db, promoted["successor"])
     finally:
         db.close()
