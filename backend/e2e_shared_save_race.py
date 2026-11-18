@@ -31,12 +31,12 @@ _lock = Lock()
 router = APIRouter(prefix="/api/test/shared-save-race")
 
 
-def _target(value: str) -> Path:
+def _target(value: str, *, require_file: bool = True) -> Path:
     if any(os.environ.get(name) != "1" for name in ("CORSIA_TEST_MODE", "CORSIA_E2E_MOCK")) or not os.environ.get("CORSIA_WORKSPACE") or not os.environ.get("CORSIA_STATE_DIR"):
         raise HTTPException(403, "This control requires isolated mock E2E roots")
     path = Path(value).resolve()
     shared = (Path(config.WORKSPACE) / "shared").resolve()
-    if not path.is_relative_to(shared) or not path.is_file():
+    if not path.is_relative_to(shared) or (require_file and not path.is_file()):
         raise HTTPException(400, "An existing file in the test workspace's shared directory is required")
     return path
 
@@ -61,7 +61,7 @@ def status(path: str) -> dict:
 
 @router.post("/release")
 def release(body: Arm) -> dict:
-    target = _target(body.path)
+    target = _target(body.path, require_file=False)
     with _lock:
         gate = _gates.pop(target, None)
     if gate is None:
