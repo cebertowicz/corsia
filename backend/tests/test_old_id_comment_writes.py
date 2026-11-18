@@ -179,9 +179,54 @@ def test_a_promote_between_the_check_and_the_write_refuses_instead_of_writing_to
         monkeypatch.setattr(access, "_accessible_live_id", lambda artifact_id, user_id, db: artifact_id)
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert response.status_code == 404, response.text
+        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE), response.text
         assert _rows(db, artifact) == [] and _rows(db, successor) == before
     finally:
+        db.close()
+
+
+def test_an_agent_comment_that_meets_a_promote_after_its_check_is_refused_like_a_retired_artifact_id(
+    client, isolated_db, monkeypatch,
+):
+    """The CLI route's preflight refuses a retired artifact_id with 422; a promote that lands after it gets the same answer."""
+    import api.delegation_docs as delegation
+
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        successor = _promote(db, artifact)
+        monkeypatch.setattr(delegation, "_resolve_reply_target", lambda body, user_id, db: artifact)
+        before = _rows(db, successor)
+        response = client.post(
+            "/api/delegation/docs/comments", params=TOKEN,
+            json={"body": "from the cli", "parent_id": root["id"], "as_session_id": "owner"},
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == f"artifact_id does not resolve to an active artifact: {artifact}"
+        assert _rows(db, artifact) == [] and _rows(db, successor) == before
+    finally:
+        db.close()
+
+
+def test_a_loop_in_the_successor_chain_resolves_to_no_live_identity_and_says_so(isolated_db):
+    """A -> B -> A, however it got there: the walk's visited set ends it, it answers None and the log names the loop."""
+    from loguru import logger
+
+    db = get_db()
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        seed_thread(db, "owner")
+        first, second = seed_document(db, "owner"), seed_document(db, "owner")
+        for source, successor in ((first, second), (second, first)):
+            db.execute("UPDATE artifact_identities SET state='tombstone',"
+                       " metadata=json_set(COALESCE(NULLIF(metadata,''),'{}'),'$.successor_id',?) WHERE id=?",
+                       (successor, source))
+        db.commit()
+        assert models.live_identity(first, db=db) is None
+        assert any("successor loop" in message and first in message for message in messages), messages
+    finally:
+        logger.remove(sink)
         db.close()
 
 

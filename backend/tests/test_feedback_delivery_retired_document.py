@@ -13,7 +13,10 @@ import pytest
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import feedback_batches, feedback_delivery
 from infra.database import get_db
+from plans import public
 from registry import models
+from test_doc_review_requests import review_env, stored  # noqa: F401 - review_env is a fixture
+from test_doc_review_node_compatibility import request as escalated_request
 
 FAR_FUTURE = "9999-12-31T00:00:00+00:00"
 UNREACHABLE_TEXT = "was not delivered: the document was deleted or can no longer be reached."
@@ -81,6 +84,24 @@ def test_a_chain_that_ends_in_a_deleted_document_settles_the_same_way(db, notes)
     models.retire(middle, tombstone=True, cause="file_gone", db=db)
     feedback_batches.close_due(FAR_FUTURE, db=db)
     assert [b["state"] for b in batches(db)] == ["undelivered"] and len(notes) == 1
+
+
+def test_a_re_keyed_batch_answers_the_review_request_that_sits_on_the_live_identity(review_env):
+    db, source = review_env
+    live = seed_document(db, "owner", name="Promoted.md")
+    result = escalated_request(db, source)
+    add_comment(db, source, author_id="reviewer")
+    # The state the move leaves: the promote carried the request and the comment to the live identity, but the
+    # batch (which collided there) stayed on the retired one.
+    _retire(db, source, live, "promoted")
+    db.execute("UPDATE doc_review_requests SET artifact_id=? WHERE id=?", (live, result["id"]))
+    db.execute("UPDATE doc_comments SET artifact_id=? WHERE artifact_id=?", (live, source))
+    db.commit()
+    feedback_batches.close_due(FAR_FUTURE, db=db)
+    (batch,) = batches(db)
+    assert (batch["artifact_id"], batch["state"]) == (live, "delivered")
+    assert stored(db, result["id"])["state"] == "submitted"
+    assert public.get_node(result["node_id"], db=db).state == "accepted"
 
 
 def test_a_persons_batch_on_a_document_with_no_live_identity_settles_silently(db, notes):

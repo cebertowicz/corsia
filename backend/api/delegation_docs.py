@@ -16,7 +16,7 @@ from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError
 from doceditor.comment_actions import SUGGESTION_REASON_MAX_CHARS, CommentActionError, validate_create
 from doceditor.comment_action_errors import decision_only_error
-from doceditor.comments import CrossArtifactIdError, validate_client_id
+from doceditor.comments import CommentTargetMoved, CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import authenticate, may_access_artifact
 from infra.database import get_db, write_transaction
@@ -162,6 +162,9 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
     )
     try:
         created = await agent_comment_writes.reply(request, body.client_id)
+    except CommentTargetMoved as exc:
+        # The same answer the preflight gives a retired artifact_id; a promote landed after it.
+        raise HTTPException(422, f"artifact_id does not resolve to an active artifact: {exc}") from exc
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:

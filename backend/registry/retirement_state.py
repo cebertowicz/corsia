@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from loguru import logger
+
 
 def identity_state(artifact_id: str, *, db) -> str | None:
     """The identity's own lifecycle state, whoever owns it; ``None`` only when no such identity exists."""
@@ -47,43 +49,7 @@ def live_identity(artifact_id: str, *, db) -> str | None:
         if successor is None:
             return current if current == artifact_id or identity_state(current, db=db) == "active" else None
         if successor in seen:
+            logger.warning("successor loop in the identity chain from {}: {} was already visited", artifact_id, successor)
             return None
         seen.add(successor)
         current = successor
-
-
-def retired_identity_counts(db) -> tuple[int, int]:
-    """What the one-time move left behind, read-only: (retired identities with a successor that still
-    hold comments, open feedback batches that sit on a retired identity).
-
-    A diagnostic only; it gates nothing. After ``migration_199_to_200`` the first counts the identities
-    that held a reply whose parent is outside the document's lineage, or whose chain ends nowhere.
-    The second is feedback that cannot close (its artifact is not active) and so never reaches its agent.
-    """
-    comments = db.execute(
-        "SELECT COUNT(*) FROM artifact_identities i"
-        " WHERE json_valid(i.metadata) AND json_extract(i.metadata, '$.successor_id') IS NOT NULL"
-        " AND EXISTS (SELECT 1 FROM doc_comments c WHERE c.artifact_id = i.id)"
-    ).fetchone()[0]
-    batches = db.execute(
-        "SELECT COUNT(*) FROM doc_feedback_batches b JOIN artifact_identities i ON i.id = b.artifact_id"
-        " WHERE b.state IN ('open', 'undelivered') AND i.state != 'active'"
-    ).fetchone()[0]
-    return comments, batches
-
-
-def log_retired_identity_counts(logger) -> None:
-    """Write the :func:`retired_identity_counts` line at startup; a failure to count never stops startup."""
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        comments, batches = retired_identity_counts(db)
-        logger.info(
-            "document identities: retired_identities_with_comments={} held_feedback_batches_on_retired_identities={}",
-            comments, batches,
-        )
-    except Exception as exc:  # noqa: BLE001 - a count must never block startup
-        logger.warning("retired identity count failed: {}", exc)
-    finally:
-        db.close()

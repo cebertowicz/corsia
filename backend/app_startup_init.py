@@ -20,7 +20,6 @@ def initialize_startup(logger) -> None:
     from plans.public import sweep_owed_status
     from registry.durable_writes import recover_write_intents
     from registry.relocate import recover_interrupted_relocations
-    from registry.retirement_state import log_retired_identity_counts
 
     note_ignored_environment()
     prepare_startup_prerequisites()
@@ -38,7 +37,6 @@ def initialize_startup(logger) -> None:
     convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
-    log_retired_identity_counts(logger)
     recover_write_intents()
     recover_interrupted_relocations()
     recover_interrupted_held_replies()

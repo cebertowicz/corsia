@@ -25,7 +25,7 @@ from infra.migration_199_to_200_comments_off_retired_identities import (
     move_comments_to_live_identities,
     reverse_moves,
 )
-from registry.retirement_state import live_identity, retired_identity_counts
+from registry.retirement_state import live_identity
 
 TOKEN = {"token": OWNER_TOKEN}
 FAR_FUTURE = "9999-12-31T00:00:00+00:00"
@@ -271,7 +271,6 @@ def test_a_folded_batch_is_delivered_with_the_live_one_and_nothing_stays_strande
     feedback_batches.close_due(FAR_FUTURE, db=db)
     (batch,) = batches(db)
     assert (batch["artifact_id"], batch["state"], batch["item_count"]) == (live, "delivered", 2)
-    assert retired_identity_counts(db) == (0, 0)
 
 
 def _feedback_state(db):
@@ -354,7 +353,6 @@ def test_batches_with_an_edit_snapshot_on_both_are_not_folded_and_deliver_on_the
     assert report.left_behind == {"open_feedback_batch_edit_items_on_both": 1} and report.folded == 0
     feedback_batches.close_due(FAR_FUTURE, db=db)
     assert sorted((b["artifact_id"], b["state"]) for b in batches(db)) == [(live, "delivered"), (live, "delivered")]
-    assert retired_identity_counts(db) == (0, 0)
 
 
 def test_a_batch_whose_comment_is_in_the_live_batch_with_another_reopen_event_is_not_folded(db):
@@ -438,24 +436,6 @@ def test_a_pane_left_open_on_the_old_id_sees_every_comment_and_its_reply_lands_w
     assert "from the open pane" in [reply["body"] for reply in listed[0]["replies"]] + [
         reply["body"] for thread in listed for reply in thread["replies"]
     ]
-
-
-def test_the_startup_counts_fall_to_zero_after_a_clean_move_and_show_what_stayed(db):
-    source, live = _chain(db, 1)
-    _comment_on(db, source)
-    assert retired_identity_counts(db) == (1, 1)
-    move_comments_to_live_identities(db)
-    assert retired_identity_counts(db) == (0, 0)
-    stranger = seed_document(db, "owner")
-    foreign_root = _comment_on(db, stranger)
-    other = seed_document(db, "owner")
-    _retire(db, other, live)
-    stray = _comment_on(db, other)
-    db.execute("UPDATE doc_comments SET parent_id=? WHERE id=?", (foreign_root["id"], stray["id"]))
-    db.commit()
-    move_comments_to_live_identities(db)
-    # the stray reply stays, and its open batch is folded into the live one: only the comment is left
-    assert retired_identity_counts(db) == (1, 0)
 
 
 def _ledger_database(path: Path) -> None:
