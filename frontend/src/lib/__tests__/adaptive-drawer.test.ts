@@ -467,6 +467,63 @@ describe("AdaptiveDrawer", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("drags a headless sheet from its content's marked head row too, but leaves a control in that row a control", async () => {
+    const close = vi.fn();
+    const control = vi.fn();
+    const onDetent = vi.fn();
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: close, head: control, detent: "half", onDetent },
+    });
+    await settle();
+    const panel = host.querySelector(".drawer-panel") as HTMLElement;
+    const title = host.querySelector(".own-head h2") as HTMLElement;
+    const button = host.querySelector("[data-head-control]") as HTMLButtonElement;
+
+    // A quick tap on the control is its click, never a tap that grows the half sheet.
+    button.dispatchEvent(pointer("pointerdown", 100));
+    button.dispatchEvent(pointer("pointerup", 100));
+    button.click();
+    expect(control).toHaveBeenCalledOnce();
+    expect(onDetent).not.toHaveBeenCalled();
+    expect(panel.classList.contains("dragging")).toBe(false);
+
+    // A drag from the row's title follows the finger down and snaps back short of the dismiss distance.
+    title.dispatchEvent(pointer("pointerdown", 100));
+    title.dispatchEvent(pointer("pointermove", 135));
+    await settle();
+    expect(panel.style.getPropertyValue("--drawer-drag-y")).toBe("35px");
+    title.dispatchEvent(pointer("pointerup", 135));
+    await settle();
+    expect(panel.style.getPropertyValue("--drawer-drag-y")).toBe("0px");
+    expect(close).not.toHaveBeenCalled();
+
+    // Pulled up 60 px from the title, the half sheet grows to full; a long drag down from it closes.
+    title.dispatchEvent(pointer("pointerdown", 300, 8));
+    title.dispatchEvent(pointer("pointermove", 240, 8));
+    await settle();
+    expect(panel.style.getPropertyValue("--drawer-pull")).toBe("60px");
+    title.dispatchEvent(pointer("pointerup", 240, 8));
+    expect(onDetent).toHaveBeenCalledWith("full");
+    title.dispatchEvent(pointer("pointerdown", 100, 9));
+    title.dispatchEvent(pointer("pointermove", 280, 9));
+    title.dispatchEvent(pointer("pointerup", 280, 9));
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("does not drag from a press elsewhere in the content", async () => {
+    const close = vi.fn();
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: close, head: vi.fn(), tall: true } });
+    await settle();
+    const body = host.querySelector(".tall-content") as HTMLElement;
+    body.dispatchEvent(pointer("pointerdown", 100));
+    body.dispatchEvent(pointer("pointermove", 280));
+    body.dispatchEvent(pointer("pointerup", 280));
+    await settle();
+    expect(close).not.toHaveBeenCalled();
+    expect((host.querySelector(".drawer-panel") as HTMLElement).style.getPropertyValue("--drawer-drag-y")).toBe("0px");
+  });
+
   it("reopens at rest after a drag dismissal when the caller keeps it mounted", async () => {
     component = mount(AdaptiveDrawerHarness, {
       target: host,
