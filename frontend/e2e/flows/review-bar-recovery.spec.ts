@@ -1,5 +1,6 @@
 import { test, expect } from '../support/test';
-import { comment, open, seed } from '../support/reviewFixtures';
+import { open, seed } from '../support/reviewFixtures';
+import { beginComment, submitButton } from '../support/liveCommentProof';
 import { raiseAsk } from '../support/reviewAsk';
 
 const ask = (page: import('@playwright/test').Page, text: string) => page.getByRole('region', { name: 'Review request' }).filter({ hasText: text });
@@ -37,15 +38,32 @@ test.describe('review bar recovery', () => {
 	test('recovers a failed read when the window regains focus', async ({ page, request }) => {
 		const doc = await seed(request, 'Retry review');
 		raiseAsk(doc.threadId, doc.artifactId, 'Retry recovery ask');
-		let failed = false;
+		let failures = 0, allowRead = false;
+		const reads: { at: number; phase: string; status: number | string }[] = [];
 		await page.route(reviewUrl(doc.artifactId), async (route) => {
-			if (!failed) { failed = true; await route.abort('failed'); }
-			else await route.continue();
+			const at = Date.now(), phase = allowRead ? 'after-focus' : 'before-focus';
+			if (!allowRead) {
+				await route.abort('failed'); failures += 1;
+				reads.push({ at, phase, status: 'aborted' });
+				console.log('review read', JSON.stringify(reads.at(-1)));
+			} else {
+				const response = await route.fetch();
+				reads.push({ at, phase, status: response.status() });
+				console.log('review read', JSON.stringify(reads.at(-1)));
+				await route.fulfill({ response });
+			}
 		});
 		await open(page, doc, 'default', 'light');
-		await expect.poll(() => failed).toBe(true);
-		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-		await expect(ask(page, 'Retry recovery ask')).toBeVisible({ timeout: 15_000 });
+		await expect.poll(() => failures).toBeGreaterThan(0);
+		await expect(ask(page, 'Retry recovery ask')).toHaveCount(0);
+		// No artifact, plan or comment event is seeded after this point.
+		allowRead = true;
+		const focusedAt = await page.evaluate(() => { const at = Date.now(); window.dispatchEvent(new Event('focus')); return at; });
+		console.log('focus', focusedAt);
+		await expect(ask(page, 'Retry recovery ask')).toBeVisible({ timeout: 3_000 });
+		const success = reads.find((read) => typeof read.status === 'number' && read.status >= 200 && read.status < 300);
+		expect(success?.phase).toBe('after-focus');
+		expect(success?.at).toBeGreaterThanOrEqual(focusedAt);
 	});
 
 	test('foregrounding reads again while an earlier read is outstanding', async ({ page, request }) => {
@@ -77,28 +95,39 @@ test.describe('review bar recovery', () => {
 		} finally { release(); }
 	});
 
+	// Preserve the existing load-sequence guard in reviewBarState.svelte.ts:22,47–53.
 	test('an older response cannot erase a newer real ask', async ({ page, request }) => {
 		const doc = await seed(request, 'Stale review');
 		let release!: () => void, entered!: () => void, finished!: () => void;
 		const held = new Promise<void>((resolve) => { release = resolve; });
 		const intercepted = new Promise<void>((resolve) => { entered = resolve; });
 		const completed = new Promise<void>((resolve) => { finished = resolve; });
-		let first = true;
+		let first = true, freshDelivered = false, staleDeliveredAfterFresh = false;
 		await page.route(reviewUrl(doc.artifactId), async (route) => {
 			if (first) {
 				first = false;
 				const response = await route.fetch();
-				entered(); await held; await route.fulfill({ response }); finished();
-			} else await route.continue();
+				entered(); await held; await route.fulfill({ response });
+				staleDeliveredAfterFresh = freshDelivered;
+				finished();
+			} else {
+				const response = await route.fetch();
+				await route.fulfill({ response });
+				freshDelivered = true;
+			}
 		});
 		try {
 			await open(page, doc, 'default', 'light');
 			await intercepted;
 			raiseAsk(doc.threadId, doc.artifactId, 'Newer recovery ask');
-			// The fixture writes directly; a real comment emits the live refresh event.
-			await comment(request, doc, 'Refresh the review read.', 1);
+			// A comment created through the editor emits the live refresh event.
+			await beginComment(page, 'Step 1: the rollout proceeds to the next ring.', 'Refresh the review read.');
+			await submitButton(page).click();
+			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			await expect(ask(page, 'Newer recovery ask')).toBeVisible({ timeout: 15_000 });
+			expect(freshDelivered).toBe(true);
 			release(); await completed;
+			expect(staleDeliveredAfterFresh).toBe(true);
 			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 			await expect(ask(page, 'Newer recovery ask')).toBeVisible();
 		} finally { release(); }
