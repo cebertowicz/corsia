@@ -148,8 +148,9 @@
 
 	const { engage, openFromFocus, focusQuietly, close } = createThreadEngagement(() => comment, () => chatSurface, stamp);
 	// Closing a thread the person opened reads what arrived while it was open: its card resting again (a margin card let go,
-	// a chat thread no longer opened), or the thread leaving the page (its popover, sheet or drawer closed, another document or chat).
-	$effect(() => { if (chatSurface ? !opened : preview) untrack(close); });
+	// a chat thread no longer opened, a document card no longer the focused one: another thread picked in its list or margin, or
+	// none), or the thread leaving the page (its popover, sheet or drawer closed, another document or chat).
+	$effect(() => { if (chatSurface ? !opened : preview || !focused) untrack(close); });
 	$effect(() => () => untrack(close));
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });

@@ -224,6 +224,26 @@ describe('document thread stamps', () => {
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
 	});
 
+	it('lets a pressed list card go when another thread is picked: a reply that reaches it afterwards stays unread when the list closes', () => {
+		const card = $state({ focused: true });
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		// A row of a drawer, sheet or image list: never a resting preview, so only the pick says whether it is open.
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, drawerCard: true, scrollOnFocus: false, get focused() { return card.focused; } } });
+		flushSync();
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		// A reply that arrives while it is still the picked row is read as the pick moves on.
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		card.focused = false; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		// Another thread holds the pick now; a reply that reaches this row afterwards waits for its own engagement.
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z'), reply('r3', '2026-10-16T18:02:00Z')], newReplyIds: ['r3'] });
+		unmount(component); component = null; flushSync();
+		expect(onViewed).toHaveBeenCalledTimes(2);
+	});
+
 	it('keeps the New marks a picked document card opened with after the viewed stamp clears them, until the card rests again', () => {
 		const card = $state({ resting: true });
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };
