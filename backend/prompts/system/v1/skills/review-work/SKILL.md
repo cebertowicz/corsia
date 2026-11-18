@@ -25,7 +25,7 @@ If a deadline means the result must go before a review can return, tell the pers
 
 ## Check
 
-Try to show the result is wrong. First list your own ways it could fail from the person's words and the result, before reading the author's lines. Then check both lists. Re-check at least one fact the result rests on at its source. Check the result the way the person will meet it: the thing itself, such as the letter as it will be sent, the whole list, or the page on the device they use. Say PASS or list each failure, worst first, with where and why. Report a doubt you could not check as unchecked. Change nothing.
+Try to show the result is wrong. First list your own ways it could fail from the person's words and the result, before reading the author's lines. Then check both lists. Re-check at least one fact the result rests on at its source. Check the result the way the person will meet it: the thing itself, such as the letter as it will be sent, the whole list, or the page on the device they use. Say PASS or list each failure, worst first, with where and why. Report a doubt you could not check as unchecked. Change nothing, and start no workflow run of your own.
 
 ## Weigh
 

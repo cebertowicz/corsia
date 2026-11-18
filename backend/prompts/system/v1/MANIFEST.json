@@ -304,10 +304,10 @@
       "sha256": "418200bccb46229f934cfe6e72eed1a0e4696fb12f871b336e259c5b10e90f12"
     },
     {
-      "bytes": 7862,
+      "bytes": 8031,
       "kind": "skill",
       "path": "skills/general-work/SKILL.md",
-      "sha256": "79db23531a82972b018b407bf9dc91c7cb4ef2162006c9b1e296ac3a8bde84c5"
+      "sha256": "e2723f8f14a77e41f153cd1b1d94227502c182e62a9594955c146e0dc7821f78"
     },
     {
       "bytes": 2293,
@@ -424,10 +424,10 @@
       "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
     },
     {
-      "bytes": 2056,
+      "bytes": 2095,
       "kind": "skill",
       "path": "skills/review-work/SKILL.md",
-      "sha256": "687a54e97ac01683c8cb21a4cf5147c863cad49f32e0878571e678f1286112d6"
+      "sha256": "21c7df2ca7aa84aa76a98734e65aad97b8c14393172373e6097d36c0d71f6283"
     },
     {
       "bytes": 1295,
@@ -442,10 +442,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7497,
+      "bytes": 7478,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "444d4127c3f3bb0fc1acc6bacf4002e5280ec206822f658f0ad4d4c033592673"
+      "sha256": "ff1cb3f3b34fec847afd8efbb2356b04f3ecc1b98d87c22232b0fb1b473e6870"
     },
     {
       "bytes": 11071,

@@ -8,7 +8,7 @@ metadata:
 
 # General work
 
-**Applying these steps:** when you take on work this skill's description covers, start one run (skill `task-discipline`, Declared workflows). Before you start it, check that no workflow made for this kind of work fits: one that fits comes first.
+**Applying these steps:** when you take on work this skill's description covers, start one run (skill `task-discipline`, Declared workflows). Before you start it, check that no workflow made for this kind of work fits: one that fits comes first. Only the agent answerable for the whole result starts a run; a worker doing part of a run, or a reviewer checking one, works inside that run and starts none of its own.
 
 This is the floor under work that has no workflow of its own. It carries the steps every kind of work needs; it does not know the rules of any field. Its four required steps are Ground, Work, Review and Hand over. Pre-mortem is optional.
 

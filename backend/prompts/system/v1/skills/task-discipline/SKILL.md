@@ -26,7 +26,7 @@ Check each factual premise you need to proceed before building on it. Probe the 
 
 ## Verification methods
 
-Check the result against the aligned acceptance evidence on the real artifact or surface: recalculate, render, run, re-read against sources, or test with a reader. Bind fresh evidence to each acceptance item. Use an independent checker when a wrong result is costly, and give it the intent and the primary artifact. For behavior changes, record the success signal, failure signal, and when it will be measured.
+Check the result against the aligned acceptance evidence on the real artifact or surface: recalculate, render, run, re-read against sources, or test with a reader. Bind fresh evidence to each acceptance item. When a wrong result is costly, have a fresh agent check it as skill `review-work` says. For behavior changes, record the success signal, failure signal, and when it will be measured.
 
 ### Persistent-owner readiness
 
