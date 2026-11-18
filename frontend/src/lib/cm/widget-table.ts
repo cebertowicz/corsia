@@ -1,4 +1,4 @@
-import { Decoration, type DecorationSet, type EditorView } from '@codemirror/view';
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { EditorState, Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { renderMarkdown } from '$lib/markdown';
@@ -154,7 +154,16 @@ export function repaintTableCell(el: HTMLElement, state: EditorState, cell: Open
 function buildTableDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
-	if (doc.toString().startsWith('# Long and wide')) (window as any).__tableParseProbe = { treeLength: syntaxTree(state).length, docLength: doc.length, wideAt: doc.toString().indexOf('| Column 1 |') };
+	if (doc.toString().startsWith('# Long and wide')) (window as any).__tableDebug = () => {
+		const view = EditorView.findFromDOM(document.querySelector('.cm-md-table')!);
+		if (!view) return null;
+		const tree = syntaxTree(view.state), tables: Array<{ from: number; to: number }> = [];
+		tree.iterate({ enter: (node) => { if (node.name === 'Table') { tables.push({ from: node.from, to: node.to }); return false; } } });
+		const wideAt = view.state.doc.toString().indexOf('| Column 1 |');
+		const result = { treeLength: tree.length, docLength: view.state.doc.length, wideAt, tables, viewport: view.viewport };
+		view.dispatch({ effects: EditorView.scrollIntoView(wideAt, { y: 'center' }) });
+		return result;
+	};
 	const images = state.facet(imageContext)();
 	syntaxTree(state).iterate({
 		enter: (node) => {
