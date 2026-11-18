@@ -195,6 +195,29 @@ async def test_harness_bridge_sees_through_the_tool_call_wrapper(db, tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_harness_bridge_attaches_the_notice_to_an_update_that_links_a_document(
+    db, tmp_path, monkeypatch,
+):
+    """The bridge hands the notice ``post_update``'s own receipt, which names the saved update."""
+    from infra.queries import insert_message
+    from tests.project_ref_helpers import select_workspace
+    from tools.post_update_text import result_text
+
+    monkeypatch.setattr("core.plan_notice.plan_notice", lambda **_kwargs: None)
+    select_workspace(monkeypatch, tmp_path)
+    (tmp_path.resolve() / "report.md").write_text(" ".join(["word"] * 100), encoding="utf-8")
+    text = "The report is ready: report.md."
+    message_id = insert_message("owner", "assistant", text, {"for_user": True, "turn_id": "turn-1"}, db=db)
+    db.commit()
+    receipt = result_text(message_id, [], [], "owner")
+
+    result = await _bridge_result("post_update", {"text": text}, receipt)
+
+    assert result.startswith(receipt)
+    assert "Your update links 'report.md' for the person to read: 100 words" in result
+
+
+@pytest.mark.asyncio
 async def test_harness_bridge_adds_nothing_to_other_results(db, tmp_path, monkeypatch):
     monkeypatch.setattr("core.plan_notice.plan_notice", lambda **_kwargs: None)
 
