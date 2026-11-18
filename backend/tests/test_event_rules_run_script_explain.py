@@ -86,7 +86,8 @@ def test_only_an_unanswered_verification_is_pending():
 def test_a_failed_run_without_a_github_login_says_why(runs, state):
     view, why = _ACCOUNTS[state]
     _rule(_script(runs, "locked.sh"))
-    runs["outputs"]["locked.sh"] = ScriptRun(1, b"", b"", False, github_lock_reason(view))
+    # Unapproved: an approved run with no agents' account reads as the host login and is not locked.
+    runs["outputs"]["locked.sh"] = ScriptRun(1, b"", b"", False, github_lock_reason(view, approved=False))
     event_id = _emit()
     _sweep()
 
@@ -109,7 +110,7 @@ def test_a_long_failure_and_its_login_note_fit_the_reason_limit(runs):
 
     view, why = _ACCOUNTS["absent"]
     rule = _rule(_script(runs, "long.sh"))
-    runs["outputs"]["long.sh"] = ScriptRun(1, b"", b"x" * 2000, False, github_lock_reason(view))
+    runs["outputs"]["long.sh"] = ScriptRun(1, b"", b"x" * 2000, False, github_lock_reason(view, approved=False))
     _emit()
     _sweep()
 

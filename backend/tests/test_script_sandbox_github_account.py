@@ -172,6 +172,22 @@ def test_authenticated_run_keeps_ready_account_locked(run):
     assert not any(name in seen["env"] for name in _TOKENS)
 
 
+def test_authenticated_run_with_no_agents_account_gets_the_forwarder(run):
+    seen = run("absent", authenticated=True)
+    assert seen["result"].github_locked is None
+    assert seen["env"]["GH_CONFIG_DIR"].endswith("placeholder")  # the run's forwarder configuration
+    assert _git(seen["env"]) == _LOCKED_GIT
+    for home in (seen["person_gh"], seen["home_gh"]):
+        assert _deny(home) in seen["profile"]
+    assert not any(name in seen["env"] for name in _TOKENS)
+
+
+def test_authenticated_run_on_a_broken_account_stays_locked_and_says_so(run, caplog):
+    seen = run("suspended", authenticated=True)
+    assert seen["result"].github_locked.startswith("scripts get no GitHub login: GitHub rejected")
+    assert any("approved script ran with no GitHub login" in record.getMessage() for record in caplog.records)
+
+
 def test_only_an_authenticated_run_is_kept_off_python_bytecode_in_its_folder(run, tmp_path):
     authenticated = run("ready", authenticated=True)
     assert f"export PYTHONPYCACHEPREFIX={tmp_path / 'pycache'};" in authenticated["command"]

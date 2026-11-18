@@ -100,7 +100,7 @@ def _read(request: ReadRequest, context: str) -> dict[str, Any]:
     broker = default_broker()
     until = broker.read_budget.blocked_until(low_priority=True)
     if until is not None:
-        log.info("script github read deferred by the read budget %s", context)
+        log.warning("script github read deferred by the read budget %s", context)
         resumes = datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         return {"code": 1, "stdout": "",
                 "stderr": f"GitHub reads are paused by the shared rate-limit budget until {resumes}\n"}
