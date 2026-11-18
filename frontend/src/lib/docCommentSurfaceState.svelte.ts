@@ -33,9 +33,8 @@ export function focusDocumentEditor(root: HTMLElement | undefined, touch = false
 }
 
 /**
- * Closes the table cell open in the document's editor, and takes the focus out of it, so no caret or keyboard is left under
- * a modal sheet drawn over it. Answers how to give the caret back, as `focusDocumentEditor` does for prose: the cell at the
- * document's caret, which is still where the tap left it, opens again with the focus. Null when no cell was open.
+ * Closes the table cell under a modal sheet and returns its focus handler. A keyboard or mouse close reopens the cell
+ * at the document's caret; a touch close focuses the document host. Null when no cell was open.
  */
 export function closeDocumentCell(root: HTMLElement | undefined): ((touch?: boolean) => void) | null {
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
@@ -54,8 +53,8 @@ export function closeDocumentCell(root: HTMLElement | undefined): ((touch?: bool
 }
 
 /**
- * On a phone the card a tap in a table cell opened is a modal sheet: the cell under it closes, leaving no caret beneath it,
- * and closing the sheet (a key typed, Escape, Close) opens it again at the tapped place, as prose gets its caret back.
+ * A modal sheet closes the cell beneath it, leaving no caret there. Its return handler uses the closing input to decide
+ * whether to reopen the cell or focus the document host.
  */
 export function closeCellUnderSheet(commentUI: Pick<ReturnType<typeof createCommentSurfaceState>, 'sheetUp' | 'state' | 'returnFocusTo'>, root: () => HTMLElement | undefined) {
 	$effect(() => { const reopen = commentUI.sheetUp && commentUI.state?.kind === 'thread' && commentUI.state.fromText && closeDocumentCell(root()); if (reopen) commentUI.returnFocusTo(reopen); });
