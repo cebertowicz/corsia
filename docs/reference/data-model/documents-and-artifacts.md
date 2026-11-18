@@ -377,3 +377,16 @@ Source: `backend/infra/schema.py`.
 | `updated_at` | TEXT | No | Yes | — | — |
 
 Indexes: `sqlite_autoindex_durable_write_intents_1` (id, unique), `sqlite_autoindex_durable_write_intents_2` (target_path, unique).
+
+### `feedback_recipient_migration_journal`
+
+Source: `backend/infra/doc_feedback_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `seq` | INTEGER | Yes | No | — | — |
+| `batch_ids` | TEXT | No | Yes | — | — |
+| `before_rows` | TEXT | No | Yes | — | — |
+| `after_rows` | TEXT | No | Yes | — | — |
+
+Indexes: None.

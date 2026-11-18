@@ -183,8 +183,6 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
         "supervisor": supervisor,
         "can_act": status == "ready",
         "multi_person": multi_person,
-        "can_change": True,
-        "refusal": None,
         "multi_person_refusal": change_refusal(owner, "agent", multi_person),
         # None when the scope couldn't be resolved, so the picker says it couldn't load rather than "no agents".
         "scope": None if scope is None else "project" if scope[0] is not None else "workspace",

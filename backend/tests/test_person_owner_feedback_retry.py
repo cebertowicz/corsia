@@ -7,6 +7,41 @@ from infra.database import get_db
 from registry.identity_metadata import merge_identity_metadata
 
 
+def test_collision_preserves_send_count_until_due_then_reverse_refuses(isolated_db, monkeypatch):
+    import pytest
+    from doceditor import feedback_state
+    from infra.migration_199_to_200_feedback_recipients import migrate_199_to_200, reverse_200_to_199
+
+    db = get_db()
+    try:
+        artifact = seed_document(db, 'project:example')
+        monkeypatch.setattr(feedback_comments, 'comment_recipients', lambda *_a, **_kw: ('project:example',))
+        comment, feedback = add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER,
+                                        delivery_policy='document-held')
+        source = feedback['batch_ids'][0]
+        db.execute("""INSERT INTO doc_feedback_batches
+            (id,artifact_id,author_kind,author_id,recipient_id,delivery_policy,state,opened_at,last_item_at,
+             closes_at,item_count,created_at,updated_at)
+            SELECT 'collision',artifact_id,author_kind,author_id,'ui',delivery_policy,state,opened_at,last_item_at,
+                   closes_at,item_count,created_at,updated_at FROM doc_feedback_batches WHERE id=?""", (source,))
+        db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('collision',?)", (comment['id'],))
+        db.execute("UPDATE doc_feedback_batch_items SET event='reopened',event_at='1',event_by='ui' WHERE batch_id=?", (source,))
+        db.commit()
+        add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER, delivery_policy='document-held')
+        before = feedback_state.open_counts_for_document(db, artifact)
+        assert before['document_held_count'] == 2
+        migrate_199_to_200(db)
+        assert feedback_state.open_counts_for_document(db, artifact) == before
+        assert tuple(db.execute('SELECT state,recipient_id FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('open', 'project:example')
+        db.commit()
+        feedback_batches.close_due('9999-01-01T00:00:00+00:00', db=db)
+        assert tuple(db.execute('SELECT state,recipient_id,delivery_outcome FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('delivered', 'ui', 'ui')
+        with pytest.raises(RuntimeError, match='changed after migration'):
+            reverse_200_to_199(db)
+    finally:
+        db.close()
+
+
 def test_dev_era_project_owner_creates_conductor_and_sentinel_batches(isolated_db, monkeypatch):
     from registry import document_supervisor as legacy
     from registry.shared_principals import artifact_owner
@@ -76,9 +111,9 @@ def test_old_project_batches_retry_without_duplicate_supervisor_delivery(isolate
         before = len(feedback_nodes(db, "supervisor"))
         for batch in old_batches:
             assert feedback_batches.retry_batch(db, batch)[0]
-        rows = db.execute("SELECT state, undelivered_reason FROM doc_feedback_batches WHERE recipient_id='project:example'").fetchall()
-        assert len(rows) == 17
-        assert all(row[0] == "delivered" and row[1] is None for row in rows)
+        rows = [db.execute("SELECT state, undelivered_reason, recipient_id FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+                for batch in old_batches]
+        assert all(tuple(row) == ("delivered", None, "ui") for row in rows)
         assert len(feedback_nodes(db, "supervisor")) == before
     finally:
         db.close()

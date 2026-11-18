@@ -149,9 +149,7 @@ def test_its_open_tab_finds_it_and_the_page_shows_no_owner(integration_client, r
     assert page["text"] == _BODY
     assert page["artifact"]["id"] == artifact["id"]
     ownership = page["ownership"]
-    assert (ownership["owner"]["kind"], ownership["can_change"], ownership["refusal"]) == (
-        "none", True, None,
-    )
+    assert ownership["owner"]["kind"] == "none"
 
 
 def test_the_person_can_take_the_released_document(integration_client, released):

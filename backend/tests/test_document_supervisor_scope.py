@@ -265,7 +265,7 @@ def test_a_person_can_take_a_released_document(owned_document):
     finally:
         db.close()
     view = _view(artifact_id)
-    assert (view["can_change"], view["refusal"], view["owner"]["label"]) == (True, None, "No owner")
+    assert view["owner"]["label"] == "No owner"
     assert [choice["id"] for choice in view["choices"]] == ["agent-1"]
     taken = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
     assert taken.status_code == 200, taken.text
@@ -428,6 +428,6 @@ def test_a_pick_on_a_shared_document_keeps_routing_when_the_install_becomes_mult
 
     seed_account(OTHER_USER, OTHER_TOKEN)
     view = _view(artifact_id)
-    assert (view["supervisor"]["id"], view["can_change"], view["owner"]["label"]) == ("agent-2", True, "You")
+    assert (view["supervisor"]["id"], view["owner"]["label"]) == ("agent-2", "You")
     assert {choice["id"] for choice in view["choices"]} == {"agent-1", "agent-2"}
     assert _comment_recipients(artifact_id) == ("agent-2",)

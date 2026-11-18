@@ -1,6 +1,14 @@
 """Schema fragment for durable document-feedback batching."""
 
-DOC_FEEDBACK_SCHEMA_SQL = """
+JOURNAL_SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS feedback_recipient_migration_journal (
+    seq INTEGER PRIMARY KEY,
+    batch_ids TEXT NOT NULL,
+    before_rows TEXT NOT NULL,
+    after_rows TEXT NOT NULL
+);"""
+
+DOC_FEEDBACK_SCHEMA_SQL = f"""
+    {JOURNAL_SCHEMA_SQL}
     CREATE TABLE IF NOT EXISTS doc_feedback_batches (
         id TEXT PRIMARY KEY,
         artifact_id TEXT NOT NULL REFERENCES artifact_identities(id),

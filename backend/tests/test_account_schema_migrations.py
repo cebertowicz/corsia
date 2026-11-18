@@ -859,6 +859,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 198 -> 199 adds dead_letter_events.code_named.
         from infra.migration_198_to_199_restart_dead_letter_codes import migrate_198_to_199
         migrate_198_to_199(db)
+        # 199 -> 200 adds the feedback recipient recovery journal.
+        from infra.migration_199_to_200_feedback_recipients import migrate_199_to_200
+        migrate_199_to_200(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)

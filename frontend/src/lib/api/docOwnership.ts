@@ -5,10 +5,6 @@ export interface DocOwnership {
 	supervisor: { id: string; name: string; source: string; status: string } | null;
 	can_act: boolean;
 	multi_person: boolean;
-	/** Whether ownership changes are available. */
-	can_change: boolean;
-	/** The sentences the server refuses with, shown before a pick so the screen and the refusal read alike. */
-	refusal: string | null;
 	multi_person_refusal: string | null;
 	/** Where the picker's agents come from; null when the server couldn't resolve the document's scope. */
 	scope: 'project' | 'workspace' | null;
