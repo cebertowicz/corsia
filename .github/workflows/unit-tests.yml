@@ -190,6 +190,38 @@ jobs:
           done
           exit "$status"
 
+      - name: Run Linux inherited-descriptor envelope proof
+        run: |
+          set -uo pipefail
+          root="$(mktemp -d "$RUNNER_TEMP/corsia-linux-fd-XXXXXX")" || exit 1
+          export CORSIA_WORKSPACE="$root/workspace" CORSIA_STATE_DIR="$root/state"
+          export CORSIA_TEST_MODE=1 CORSIA_ANALYTICS_DISABLE=1 PYTHONPATH=backend
+          export CORSIA_REQUIRE_LINUX_FD_PROBE=1
+          mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR" || exit 1
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as metadata
+          import json
+          import platform
+          import sys
+
+          print('Platform:', platform.system(), platform.release(), platform.machine())
+          print('Python:', sys.version.split()[0])
+          for name in ('pytest', 'httpx', 'openai', 'litellm'):
+              dist = metadata.distribution(name)
+              print(name, dist.version)
+              if name == 'litellm':
+                  direct = json.loads(dist.read_text('direct_url.json') or '{}')
+                  print('LiteLLM commit:', direct.get('vcs_info', {}).get('commit_id', 'unavailable'))
+          PY
+          diagnostic_status=$?
+          .venv/bin/python -m pytest -c backend/pytest.ini -q -rs \
+            --basetemp="$root/pytest" --junitxml="$RUNNER_TEMP/linux-fd-junit.xml" \
+            backend/tests/test_inherited_fd_envelope.py 2>&1 | tee "$RUNNER_TEMP/linux-fd.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          .venv/bin/python scripts/check_linux_fd_receipt.py "$RUNNER_TEMP/linux-fd-junit.xml"
+          receipt_status=$?
+          if (( diagnostic_status != 0 || pipeline_status[0] != 0 || pipeline_status[1] != 0 || receipt_status != 0 )); then exit 1; fi
+
       - name: Summarize backend test shards
         if: always()
         continue-on-error: true
@@ -300,6 +332,8 @@ jobs:
           path: |
             ${{ runner.temp }}/backend-junit-*.xml
             ${{ runner.temp }}/backend-*.log
+            ${{ runner.temp }}/linux-fd-junit.xml
+            ${{ runner.temp }}/linux-fd.log
           if-no-files-found: warn
 
   backend-macos:
