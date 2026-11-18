@@ -216,6 +216,46 @@ async def test_a_look_alike_frame_off_screen_still_makes_the_ref_ambiguous_and_n
 
 
 @pytest.mark.asyncio
+async def test_a_frame_below_the_fold_that_keeps_moving_does_not_stop_a_write_to_the_frame_in_view(monkeypatch):
+    """A carousel or ad below the fold moves on every read; only the frame in view must hold still."""
+    page = _twin_off_screen(BELOW_THE_FOLD, holds={"child"})
+    moves = iter(range(0, 10_000, 7))
+
+    def moving_twin():
+        y = 2000 + next(moves)
+        return {"content": [8, y, 608, y, 608, y + 300, 8, y + 300]}
+
+    boxes = page.boxes
+    page.boxes = type("Boxes", (dict,), {"get": lambda self, key: moving_twin() if key == 51 else boxes.get(key)})()
+    _connect(monkeypatch, **{PAGE_URL: page})
+    assert await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.written == ["field"]
+
+
+class _GoneFrame:
+    """A cross-site frame's target that went away between being listed and being opened."""
+
+    async def __aenter__(self):
+        raise OSError("connection refused")
+
+    async def __aexit__(self, *_args):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_a_cross_site_frame_off_screen_that_cannot_be_opened_counts_as_holding_it_so_nothing_is_written(
+        monkeypatch):
+    """A doubt refuses: the frame that went away may have held the element the agent named."""
+    page = _twin_off_screen(BELOW_THE_FOLD, holds={"child"})
+    page.frame_tree = {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}]}
+    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"twin": FRAME_URL})
+    _connect(monkeypatch, **{PAGE_URL: page, FRAME_URL: _GoneFrame()})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
 async def test_an_off_screen_frame_that_alone_holds_the_element_keeps_the_pages_own_refusal(monkeypatch):
     """Nothing on screen holds the element and the off-screen frame can't be hit: refused as before frames were searched."""
     page = _twin_off_screen(BELOW_THE_FOLD, holds={"twin"})

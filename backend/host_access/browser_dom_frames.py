@@ -5,6 +5,8 @@ import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
+from websockets.exceptions import WebSocketException
+
 from host_access import browser_cdp, browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, protocol_int
 from host_access.browser_dom_hit import (
@@ -35,7 +37,11 @@ class FrameTargets:
 
     async def open(self, endpoint: str) -> CdpClient:
         if endpoint not in self._open:
-            self._open[endpoint] = await self._stack.enter_async_context(CdpClient(endpoint))
+            try:
+                self._open[endpoint] = await self._stack.enter_async_context(CdpClient(endpoint))
+            except (OSError, TimeoutError, WebSocketException) as exc:
+                # A frame can go away between being listed and being opened (an ad frame swapped out).
+                raise BrowserSessionError("This page couldn't be checked") from exc
         return self._open[endpoint]
 
 
@@ -86,12 +92,12 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
         for frame, placed in placed_in:
             on_screen = in_viewport(view, placed)
             located, cover = await _hit_in_frame(page, frame, box, placed, targets) if on_screen else (None, None)
-            if located is not None or await _holds(*(await _document(page, frame, targets)), box):
+            if located is not None or await _frame_holds(page, frame, box, targets):
                 held.append((located, cover, on_screen))
         page_holds = in_viewport(view, box) and await _holds(page, None, box)
         # A frame may have moved while it was hit, so the answer holds only if its place and the box did not.
-        if await read_box(run, selector) == box and [frame.viewport for frame, _ in placed_in] == [
-                await _owner_viewport(page, frame.owner) for frame, _ in placed_in]:
+        if await read_box(run, selector) == box and [_place(view, frame.viewport, box) for frame, _ in placed_in] == [
+                _place(view, await _owner_viewport(page, frame.owner), box) for frame, _ in placed_in]:
             if len(held) + page_holds > 1:
                 # Two places laid out alike both hold an element that matches the box, and which one the agent
                 # named can't be told, whichever of them is covered: refused, as before frames were searched.
@@ -105,6 +111,26 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
             return (None, "covered", cover) if on_screen else (None, None, None)
         await asyncio.sleep(browser_dom_hit.SETTLE_INTERVAL)
     return None, None, None
+
+
+def _place(view: dict, viewport: Rect | None, box: dict) -> object:
+    """What of a frame's place must hold still: all of it on screen; off screen, only its size and staying off.
+
+    An off-screen frame is never hit, so where it sits doesn't change whether it holds the element; a carousel
+    or ad below the fold that keeps moving must not refuse a write to the frame in view.
+    """
+    if viewport is None:
+        return None
+    on_screen = in_viewport(view, {**box, "x": box["x"] + viewport["x"], "y": box["y"] + viewport["y"]})
+    return viewport if on_screen else (viewport["width"], viewport["height"])
+
+
+async def _frame_holds(page: CdpClient, frame: ChildFrame, box: dict, targets: FrameTargets) -> bool:
+    """Whether a frame's document holds an element with the box at its place; a frame that can't be opened might."""
+    try:
+        return await _holds(*(await _document(page, frame, targets)), box)
+    except (BrowserSessionError, OSError, TimeoutError, WebSocketException):
+        return True
 
 
 async def _document(page: CdpClient, frame: ChildFrame, targets: FrameTargets) -> tuple[CdpClient, str | None]:
