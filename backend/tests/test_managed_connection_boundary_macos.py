@@ -112,7 +112,9 @@ async def _launch(boundary, script, arguments, background):
 
     program = boundary.workspace / "probe.py"
     program.write_text(script)
-    command = shlex.join([sys.executable, str(program), *map(str, arguments)])
+    # The pytest venv lives under HOME on hosted runners, which the generated
+    # profile denies. These probes use only the macOS system Python's stdlib.
+    command = shlex.join(["/usr/bin/python3", str(program), *map(str, arguments)])
     profile = boundary.root / "profile.sb"
     profile.write_text(shell_guard.execution_envelope_profile(
         command, boundary.workspace, profile, leased=False, policies=[], thread_id=THREAD,
