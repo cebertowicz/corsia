@@ -62,7 +62,7 @@
 		focusedId: string | null;
 		focusedIds?: string[] | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
-		draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
+		draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string } | null;
 		draftReason?: string;
 		onDraftBody?: (text: string) => void;
 		onCancelDraft?: () => void;
@@ -323,7 +323,7 @@
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
 {/snippet}
 {#snippet content()}
-	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} selection={draftSelection} onSelection={(selection) => draftSelection = selection} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} error={sheet.draft.error ?? ''} onBody={onDraftBody} selection={draftSelection} onSelection={(selection) => draftSelection = selection} onSubmit={onSubmit} onCancel={sheet.cancelDraft} onEscape={sheet.close} />
 	{:else}
 		{#if stackedTitle && cardMode() !== 'sheet'}<h2 class="stacked-title">{stackedTitle}</h2>{/if}
 		<!-- One thread in the popover or the sheet draws flat: the container is its card. A row in the list shows its newest reply and opens whole in the thread view. -->

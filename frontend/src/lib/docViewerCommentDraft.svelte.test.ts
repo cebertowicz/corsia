@@ -43,7 +43,7 @@ function setup(inWidget: boolean, label?: string) {
 	let controller!: ReturnType<typeof createViewerCommentDraft>;
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
-			scope: () => scope, draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
+			scope: () => scope, keepKey: () => `doc|${scope}`, draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
 			isOpen: () => open, ensureArtifactId: async () => 'a', onFailure: () => {}, onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});

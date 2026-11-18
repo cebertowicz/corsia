@@ -45,7 +45,8 @@ describe('comment submission failure delivery', () => {
 		try {
 			await expect(submitDocumentComment(async () => { throw error; }, rememberFailureToast)).rejects.toBe(error);
 			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
-			expect(rememberFailureToast).toHaveBeenCalledWith('toast');
+			// The composer gets the toast to dismiss on a later success, and the reason to show beside its text.
+			expect(rememberFailureToast).toHaveBeenCalledWith('toast', "Couldn't post the comment — try again");
 		} finally {
 			report.mockRestore();
 			log.mockRestore();

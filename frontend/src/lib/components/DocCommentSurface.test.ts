@@ -131,7 +131,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('gives the column back to the picked card when a highlight is picked while the resolved list holds the place of a column at rest', () => {
 		const open = resolvedDrawerProps();
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		const focused = fromStore(focusedDocComment);
 		surface.state = { kind: 'list' };
 		try {

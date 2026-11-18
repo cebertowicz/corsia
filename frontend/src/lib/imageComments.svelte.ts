@@ -8,6 +8,7 @@ import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
+import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
 import { toasts } from '$lib/stores/toast';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
@@ -27,6 +28,8 @@ export function regionLabel(region: ImageRegion): string {
  */
 export function createImageComments(context: {
 	artifactId: () => string | null;
+	/** The image a new comment's text is kept for (`imageDraftKey`); the image artifact by default. */
+	draftKey?: () => string;
 	threadId?: () => string | null;
 	readOnly: () => boolean;
 	diagramSource?: () => string | undefined;
@@ -44,16 +47,18 @@ export function createImageComments(context: {
 	 */
 	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>; failure?: (error: unknown) => string } | null;
 }) {
-	// Its own draft scope, so closing a card here never aborts a document's comment capture elsewhere.
-	const ui = createCommentSurfaceState(context.restoreFocus, () => `image-comments:${context.artifactId() ?? ''}`);
+	const ui = createCommentSurfaceState(context.restoreFocus);
+	const key = () => context.draftKey?.() ?? imageDraftKey(context.artifactId());
 	const focused = fromStore(focusedDocComment);
 	const retryToast = createCommentRetryToast(toasts);
 	const threads = createThreadActions(context.artifactId, () => context.onCreated?.(), () => context.threadId?.() ?? null);
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
 	let draftBody = $state('');
+	/** Why the last press of Comment did not post; the composer shows it until the next press. */
+	let draftError = $state<string | undefined>(undefined);
 	let replacingDraft = $state(false);
-	const mentionSelection = createMentionSelection();
+	let mentionSelection = createMentionSelection();
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -66,14 +71,21 @@ export function createImageComments(context: {
 		ui.anchor = anchor;
 		ui.state = { kind: 'thread', id };
 	}
+	/** Every way out but Cancel: the text and its tags stay kept for the next box drawn on this image. */
 	function close() {
 		listCandidates = null;
 		listCandidateOrder = null;
 		ui.close();
 		draftRegion = null;
-		draftBody = '';
 		replacingDraft = false;
-		mentionSelection.clear();
+	}
+	/** The composer's Cancel, the one way to drop typed text. */
+	function cancel() {
+		keptCommentDrafts.forget(key());
+		close();
+		draftBody = '';
+		draftError = undefined;
+		mentionSelection = createMentionSelection();
 	}
 	/** The Comment button: box mode on, or off again without placing anything. */
 	function toggleBoxMode() {
@@ -106,8 +118,11 @@ export function createImageComments(context: {
 			return;
 		}
 		draftRegion = region;
-		// A draft kept after the diagram changed keeps its text and its tags.
-		if (!replacingDraft) { draftBody = ''; mentionSelection.clear(); }
+		// The composer starts from what the last one on this image held: its text, its tags and why it did not post.
+		const kept = keptCommentDrafts.get(key());
+		draftBody = kept?.body ?? '';
+		draftError = kept?.error;
+		mentionSelection = kept?.mentionSelection ?? createMentionSelection(draftBody);
 		replacingDraft = false;
 		ui.openDraft(anchor);
 	}
@@ -115,27 +130,37 @@ export function createImageComments(context: {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
-		const post = context.post?.();
-		let id: string;
+		const post = context.post?.(), tags = mentionSelection;
+		keptCommentDrafts.clearError(key());
+		draftError = undefined;
+		let id: string, failure = '';
 		try {
 			id = await submitDocumentComment(
-				() => (post ? post.create(region, text, taggedAgentIds, mentions) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions)), retryToast.remember,
+				() => (post ? post.create(region, text, taggedAgentIds, mentions) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions)),
+				(toastId, message) => { retryToast.remember(toastId); failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
 			);
 		} catch (error) {
 			if (await refreshAfterStale(error)) {
+				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next.
 				draftBody = text;
+				keptCommentDrafts.keep(key(), text, tags);
 				draftRegion = null;
 				replacingDraft = true;
 				ui.close();
 				boxMode = true;
+			} else if (failure) {
+				keptCommentDrafts.fail(key(), text, tags, failure);
+				if (mentionSelection === tags) draftError = failure;
 			}
 			throw error;
 		}
 		retryToast.dismissAfterSuccess();
+		keptCommentDrafts.forget(key());
 		draftRegion = null;
 		draftBody = '';
-		mentionSelection.clear();
+		draftError = undefined;
+		mentionSelection = createMentionSelection();
 		context.onCreated?.();
 		if (anchor) show(id, anchor);
 	}
@@ -221,10 +246,10 @@ export function createImageComments(context: {
 		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
 		/** The composer has text, so the review bar must not answer over it. */
 		get hasDraftText() { return (!!draftRegion || replacingDraft) && draftBody.trim() !== ''; },
-		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody, mentionSelection } : null; },
-		setDraftBody(text: string) { draftBody = text; },
+		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody, mentionSelection, error: draftError } : null; },
+		setDraftBody(text: string) { draftBody = text; keptCommentDrafts.keep(key(), text, mentionSelection); },
 		threads,
-		close, openList, toggleBoxMode, draw, submit, pick, pickCandidates, select, showFromList, movePin, onKeydownCapture,
+		close, cancel, openList, toggleBoxMode, draw, submit, pick, pickCandidates, select, showFromList, movePin, onKeydownCapture,
 	};
 }
 export type ImageComments = ReturnType<typeof createImageComments>;

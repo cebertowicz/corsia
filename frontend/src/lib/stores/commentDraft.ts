@@ -17,6 +17,8 @@ export interface CommentDraft {
 	holdUntilDrawn?: boolean;
 	body?: string;
 	mentionSelection?: ReturnType<typeof createMentionSelection>;
+	/** Why the last press of Comment did not post; the composer shows it until the next press. */
+	error?: string;
 	scope?: string;
 	selection?: CommentSelection;
 	identity?: object;
@@ -33,8 +35,13 @@ export function cancelCommentCapture(scope?: string): void {
 	const draft = get(commentDraft);
 	if (scope === undefined || draft?.scope === undefined || draft.scope === scope) draft?.request?.abort();
 }
+/** Cancel: the one way a draft and a post it started are dropped. */
 export function discardCommentDraft(scope?: string): void {
 	cancelCommentCapture(scope);
+	dropCommentDraft(scope);
+}
+/** The viewer that showed this draft is gone or shows another file: it lets go of the draft, and a post already pressed goes on. Its text stays kept (`keptCommentDrafts`). */
+export function dropCommentDraft(scope?: string): void {
 	commentDraft.update(draft => scope === undefined || draft?.scope === undefined || draft.scope === scope ? null : draft);
 }
 export function setCommentBody(body: string, scope?: string): void {

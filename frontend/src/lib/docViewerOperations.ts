@@ -3,7 +3,7 @@ import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
+import { commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 import { shouldReloadPresenceEdit } from '$lib/docPresence';
@@ -33,8 +33,8 @@ function tagRefusal(error: unknown): string | undefined {
 	return error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined;
 }
 
-// The viewer retains retry state; the composer needs the rejection to keep its draft.
-export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string) => void, failureMessage?: (error: unknown) => string | undefined): Promise<T> {
+// The viewer retains retry state; the composer needs the rejection to keep its draft, and `message` to say why in it.
+export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string, message: string) => void, failureMessage?: (error: unknown) => string | undefined): Promise<T> {
 	try {
 		return await action();
 	} catch (error) {
@@ -42,8 +42,9 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 		console.error('comment failed', error);
 		// A refusal with a named reason has the same cause on every surface, so its message comes before the surface's own.
 		// The not-commentable sentence is the server's, shown as given: it is never the surface's "try again".
-		const toastId = toasts.show(notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again", 'error');
-		onFailure?.(toastId);
+		const message = notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again";
+		const toastId = toasts.show(message, 'error');
+		onFailure?.(toastId, message);
 		throw error;
 	}
 }
@@ -111,7 +112,7 @@ export function teardownDocumentViewer(
 	flush();
 	if (target) release(target.instanceId);
 	focusedDocComment.set(null);
-	discardCommentDraft(commentDraftScope(target));
+	dropCommentDraft(commentDraftScope(target));
 }
 
 export function subscribeToDocumentCommentChanges(

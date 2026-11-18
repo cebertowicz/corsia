@@ -13,6 +13,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
+	import { imageDraftKey } from '$lib/stores/keptCommentDrafts';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
@@ -89,6 +90,8 @@
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
+		// An image inside a document keeps its own draft, apart from the document's and its other images'.
+		draftKey: () => imageDraftKey(artifactId, inDocument ? src : ''),
 		threadId: () => target?.threadId ?? null,
 		readOnly: () => !canComment,
 		diagramSource: () => diagramSource,
@@ -290,7 +293,7 @@
 			focusedIds={image.listCandidates}
 			draft={image.draft}
 			onDraftBody={image.setDraftBody}
-			onCancelDraft={image.close}
+			onCancelDraft={image.cancel}
 			onClose={image.close}
 			restoreFocus={image.ui.restoreFocus}
 			onFocus={focusFromCard}

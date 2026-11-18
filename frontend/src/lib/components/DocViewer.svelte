@@ -10,7 +10,8 @@
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
-	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
+	import { commentDraft, commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
+	import { documentDraftKey } from '$lib/stores/keptCommentDrafts';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createPressReveal } from '$lib/docPressReveal.svelte';
@@ -122,7 +123,7 @@
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
-	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, columnFits);
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), columnFits);
 	const reviewBarState = createReviewBarState();
 	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
@@ -158,7 +159,7 @@
 	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
-		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,
+		scope: () => targetKey, keepKey: () => documentDraftKey(target), draft: () => $commentDraft, session: () => liveSession,
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
 		ensureArtifactId: ensureEditorArtifactId, onFailure: commentRetryToast.remember,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
@@ -222,11 +223,13 @@
 			const seq = ++loadSeq;
 			const signal = loadSignal(onSignal, d);
 
+			const previous = prevTarget;
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
 			draftController.select(null);
 			commentUI.closeAll();
-			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
+			// Another file lets go of the last one's draft (its text stays kept); a reload of this one keeps its own.
+			focusedDocComment.set(null); if (previous && commentDraftScope(previous) !== key) dropCommentDraft(commentDraftScope(previous));
 			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
 			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
@@ -358,7 +361,7 @@
 		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}
-		onDraftBody={(body) => setCommentBody(body, targetKey)}
+		onDraftBody={draftController.setBody}
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
 		onThreadMissing={commentUI.focusRemainingThread}

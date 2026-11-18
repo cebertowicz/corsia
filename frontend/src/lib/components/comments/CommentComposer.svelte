@@ -56,7 +56,8 @@
 	}
 	function onKey(event: KeyboardEvent) {
 		if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
-		if (event.key === 'Escape') { selectedTags.clear(); (onEscape ?? onCancel)(); }
+		// Escape that closes keeps the text and its tags, as a click outside does; only Cancel drops them.
+		if (event.key === 'Escape') { if (!onEscape) selectedTags.clear(); (onEscape ?? onCancel)(); }
 	}
 </script>
 

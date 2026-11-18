@@ -29,6 +29,7 @@ import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
 const row = (id: string, number: number, x: number) => ({
@@ -69,6 +70,8 @@ beforeEach(() => {
 		return this.hasAttribute('data-image-regions') ? new DOMRect(24, 50, 500, 250) : measured.call(this);
 	});
 	docComments.set({});
+	// Text a test left in a comment box stays with its image for the page's life; each test is a fresh page.
+	keptCommentDrafts.reset();
 	mocks.fetchComments.mockReset().mockResolvedValue({
 		comments: [row('first', 1, 0.1), row('second', 3, 0.6)],
 		feedback: { owner_label: null, undelivered_batches: [] },
@@ -252,6 +255,31 @@ describe('ImageCommentLightbox', () => {
 		expect(escape.defaultPrevented).toBe(true);
 		expect(document.body.querySelector('textarea')).toBeNull();
 		expect(props.draftOpen).toBe(false);
+	});
+
+	// Path 15: of every way out of a new comment's box, only the Cancel the person presses drops what they typed.
+	it('path 15: pressing Cancel drops the typed text, so the next box on the image starts empty', async () => {
+		const props = $state({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', draftOpen: false });
+		await render(props);
+		const openBox = async () => {
+			commentButton()!.click();
+			await settle();
+			host.querySelector<HTMLElement>('[data-image-regions] .surface')!
+				.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+			await settle();
+			return document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		};
+		const textarea = await openBox();
+		textarea.value = 'Drop this one';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		expect(props.draftOpen).toBe(true);
+
+		document.body.querySelector<HTMLButtonElement>('.actions button.cancel')!.click();
+		await settle();
+		expect(document.body.querySelector('textarea')).toBeNull();
+		expect(props.draftOpen).toBe(false);
+		expect((await openBox()).value).toBe('');
 	});
 
 	describe('the drawer and the image, linked', () => {

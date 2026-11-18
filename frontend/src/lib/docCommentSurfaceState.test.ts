@@ -51,7 +51,7 @@ describe('comment surface state', () => {
 	});
 
 	it('opens only the picked thread in place of the list when the canvas has no room for the column', () => {
-		const surface = createCommentSurfaceState(() => {}, undefined, () => false);
+		const surface = createCommentSurfaceState(() => {}, () => false);
 		surface.openList(document.createElement('button'));
 		expect(surface.focusComment('c1', new DOMRect())).toBe(true);
 		expect(surface.state).toEqual({ kind: 'thread', id: 'c1', fromText: true });
@@ -62,11 +62,11 @@ describe('comment surface state', () => {
 		let caret = 0;
 		const button = document.createElement('button');
 		document.body.append(button);
-		const wide = createCommentSurfaceState(() => { caret += 1; }, undefined, () => true);
+		const wide = createCommentSurfaceState(() => { caret += 1; }, () => true);
 		wide.openList(button);
 		wide.restoreFocus();
 		expect(caret).toBe(1);
-		const narrow = createCommentSurfaceState(() => { caret += 1; }, undefined, () => false);
+		const narrow = createCommentSurfaceState(() => { caret += 1; }, () => false);
 		narrow.openList(button);
 		narrow.restoreFocus();
 		expect(document.activeElement).toBe(button);
@@ -97,7 +97,7 @@ describe('comment surface state', () => {
 	});
 
 	it('keeps the margin column under a new comment and goes back to it when the draft closes', () => {
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		surface.openOnLoad();
 		surface.openDraft(new DOMRect());
 		expect(surface.state).toEqual({ kind: 'draft' });
@@ -113,7 +113,7 @@ describe('comment surface state', () => {
 	});
 
 	it('closes a draft with nothing behind it, or everything when another document opens', () => {
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		surface.openDraft(new DOMRect());
 		expect(surface.draftOverColumn).toBe(false);
 		surface.close();
@@ -123,7 +123,7 @@ describe('comment surface state', () => {
 		surface.closeAll();
 		expect(surface.state).toBeNull();
 		// Without room for the column, a draft from the list is the popover's alone.
-		const narrow = createCommentSurfaceState(() => {}, undefined, () => false);
+		const narrow = createCommentSurfaceState(() => {}, () => false);
 		narrow.openList(document.createElement('button'));
 		narrow.openDraft(new DOMRect());
 		expect(narrow.draftOverColumn).toBe(false);
@@ -188,7 +188,7 @@ describe('comment surface state', () => {
 	});
 
 	it('counts what the reader opens, and not a pick let go or a resolved thread moving to the next in its stack', () => {
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		const button = document.createElement('button');
 		surface.focusMarker(['c1', 'c2'], button);
 		expect(surface.opened).toBe(1);
@@ -219,7 +219,7 @@ describe('comment surface state', () => {
 
 	describe('quiet: the column shown on load is the reader\'s once they engage with it', () => {
 		const shownOnLoad = () => {
-			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			const surface = createCommentSurfaceState(() => {}, () => true);
 			surface.openOnLoad();
 			expect(surface.quiet).toBe(true);
 			return surface;
@@ -241,7 +241,7 @@ describe('comment surface state', () => {
 
 	describe('release: a picked margin card lets go', () => {
 		it('returns a card picked from rest to the column and clears the highlight, without pulling focus', () => {
-			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			const surface = createCommentSurfaceState(() => {}, () => true);
 			surface.focusComment('c1', new DOMRect(), false, true);
 			expect(surface.state).toEqual({ kind: 'thread', id: 'c1', fromText: true });
 			expect(surface.release()).toBe(true);
@@ -251,7 +251,7 @@ describe('comment surface state', () => {
 		});
 
 		it('clears the pick when the column is already showing (a pick leaves the list state with only the focus set)', () => {
-			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			const surface = createCommentSurfaceState(() => {}, () => true);
 			surface.openList(document.createElement('button'));
 			surface.focusComment('c1', new DOMRect());
 			expect(get(focusedDocComment)).toBe('c1');
@@ -262,7 +262,7 @@ describe('comment surface state', () => {
 
 		it('closes the column to the editor after a pick that a caret in plain text released', () => {
 			const editor = vi.fn();
-			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			const surface = createCommentSurfaceState(editor, () => true);
 			surface.focusComment('c1', new DOMRect(), false, true);
 			expect(surface.release()).toBe(true);
 			surface.close();
@@ -274,7 +274,7 @@ describe('comment surface state', () => {
 		// The column sits beside the text, so closing it hands focus back to the caret, not to the button that opened it.
 		it('closes the column to the caret after a draft over it was cancelled', () => {
 			const editor = vi.fn(), button = document.body.appendChild(document.createElement('button'));
-			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			const surface = createCommentSurfaceState(editor, () => true);
 			surface.openList(button);
 			surface.openDraft(new DOMRect());
 			surface.close();
@@ -287,7 +287,7 @@ describe('comment surface state', () => {
 		});
 
 		it('does nothing when nothing is picked, or without the margin column', () => {
-			const margin = createCommentSurfaceState(() => {}, undefined, () => true);
+			const margin = createCommentSurfaceState(() => {}, () => true);
 			margin.openList(document.createElement('button'));
 			expect(margin.release()).toBe(false);
 			const popover = createCommentSurfaceState(() => {});
