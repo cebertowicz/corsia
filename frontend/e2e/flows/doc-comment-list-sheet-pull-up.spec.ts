@@ -91,6 +91,25 @@ async function openList(page: Page) {
 	expect((await sheetNow(page)).half, 'the list opens full').toBe(false);
 }
 
+/** At half, the head, Accept all and the card just read are each where the reader can see them, in that order, none over another. */
+async function expectHalfLaidOut(page: Page, id: string, why: string) {
+	const rects = await sheet(page).evaluate((panel, id) => {
+		const box = (el: Element | null) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+		return {
+			panel: box(panel)!, head: box(panel.querySelector('.drawer-heading')), acceptAll: box(panel.querySelector('.list-accept-all')),
+			read: box(panel.querySelector(`[data-comment-id="${id}"]`)), sticky: [...panel.querySelectorAll('.ct-suggestion-pin')].filter((el) => getComputedStyle(el).position === 'sticky').map(box),
+		};
+	}, id);
+	expect(rects.head, `${why}: the head shows`).not.toBeNull();
+	expect(rects.head!.top, `${why}: the head is inside the sheet`).toBeGreaterThanOrEqual(rects.panel.top);
+	expect(rects.acceptAll, `${why}: Accept all shows`).not.toBeNull();
+	expect(rects.acceptAll!.top, `${why}: Accept all sits under the head`).toBeGreaterThanOrEqual(rects.head!.bottom - 1);
+	expect(rects.read, `${why}: the card just read is in the list`).not.toBeNull();
+	expect(rects.read!.top, `${why}: the card just read sits under Accept all, not behind it`).toBeGreaterThanOrEqual(rects.acceptAll!.bottom - 1);
+	expect(rects.read!.top, `${why}: and starts inside the sheet`).toBeLessThan(rects.panel.bottom - 24);
+	expect(rects.sticky, `${why}: no card in the list pins its Accept and Reject row`).toEqual([]);
+}
+
 /** At half, the sheet rests at about 46% of its column. */
 async function expectHalf(page: Page, why: string) {
 	await expect(sheet(page), why).toHaveClass(/\bhalf\b/);
@@ -167,6 +186,7 @@ test.describe(`${TAG} list sheet`, () => {
 		await openList(page);
 		await card(page, ids[2]).locator('[data-discussion-original]').tap();
 		const rest = await expectHalf(page, 'a card tap');
+		await expectHalfLaidOut(page, ids[2], 'after a card tap');
 		const raised = await pullUpFromHead(page, rest);
 		await sheet(page).locator('.drawer-comments').evaluate((list) => { list.scrollTop += 240; list.dispatchEvent(new Event('scroll')); });
 		await sheetSettled(page);
@@ -180,6 +200,7 @@ test.describe(`${TAG} list sheet`, () => {
 		await openList(page);
 		await card(page, ids[3]).locator('[data-comment-jump]').tap();
 		const rest = await expectHalf(page, 'Go to text');
+		await expectHalfLaidOut(page, ids[3], 'after Go to text');
 		await pullUpFromHead(page, rest);
 
 		await card(page, ids[1]).locator('[data-comment-jump]').tap();

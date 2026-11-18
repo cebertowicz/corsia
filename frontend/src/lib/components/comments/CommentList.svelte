@@ -13,7 +13,7 @@
 	const showsOwnQuote = (comment: Comment) => !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, docPath = null, documentOrder = false, focusedId = null, focusedIds = null, candidateOrder = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, diagramOf, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, actionsAbove = false, replyDrafts = $bindable({}), replySelections = $bindable({}), replyTags = new Map(), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false, flat = false, underTextChanged = false, restCards = false, replyView = 'recent', onOpenThread }: {
+	let { comments, docPath = null, documentOrder = false, focusedId = null, focusedIds = null, candidateOrder = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, diagramOf, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, unfocused = 'input', actionsAbove = false, replyDrafts = $bindable({}), replySelections = $bindable({}), replyTags = new Map(), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false, flat = false, underTextChanged = false, restCards = false, replyView = 'recent', onOpenThread }: {
 		comments: Comment[];
 		docPath?: string | null;
 		documentOrder?: boolean;
@@ -49,6 +49,7 @@
 		showReply?: boolean;
 		/** A sheet owns the card scroller, so a shortened visual viewport keeps its reply field visible. */
 		keepReplyVisible?: boolean;
+		unfocused?: 'input' | 'card-top';
 		/** The sheet's header row carries the one thread's Agree and Resolve. */
 		actionsAbove?: boolean;
 		/** Replies being typed, by comment id; the caller owns them so they outlive this list (a filter switch rebuilds it). */
@@ -149,7 +150,7 @@
 						</button>
 					{/if}
 				{/snippet}
-				<CommentThread {actionsAbove} selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} {header} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} {replyView} {onOpenThread} drawerCard {flat} autoFocusSelection={!focusedIds} hideReply={restCards && focusedId !== comment.id} inMargin={restCards} hideOrphan={documentOrder && !underTextChanged} />
+				<CommentThread {actionsAbove} selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} {header} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {unfocused} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} {replyView} {onOpenThread} drawerCard {flat} autoFocusSelection={!focusedIds} hideReply={restCards && focusedId !== comment.id} inMargin={restCards} hideOrphan={documentOrder && !underTextChanged} />
 			</div>
 			{/each}
 		{/each}
