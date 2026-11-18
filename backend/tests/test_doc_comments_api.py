@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 
 import pytest
@@ -318,7 +319,70 @@ def test_list_reanchors_external_file_changes_and_orphans(integration_client, ar
     ).json()["comments"]
     row = next(comment for comment in orphaned if comment["id"] == created["id"])
     assert row["orphaned"] is True
+    assert row["anchor_text"] == quote
     assert (row["from_off"], row["to_off"]) == (shifted, shifted + len(quote))
+
+
+@pytest.mark.parametrize("new_text", ["# Spec\n\n", "# Spec\n\nA separate section.\n"])
+def test_external_deletion_keeps_comment_gone_with_quote_and_body(integration_client, artifact_id, doc_file, new_text):
+    quote = "router decides"
+    original = doc_file.read_text()
+    start = original.index(quote)
+    created = integration_client.post(
+        f"/api/artifacts/{artifact_id}/comments", params={"token": _TOKEN},
+        json={"delivery_policy": "immediate", "body": "Keep this.", "anchor_text": quote,
+              "from_off": start, "to_off": start + len(quote)},
+    ).json()["comment"]
+    doc_file.write_text(new_text)
+    rows = integration_client.get(
+        f"/api/artifacts/{artifact_id}/comments", params={"token": _TOKEN},
+    ).json()["comments"]
+    row = next(comment for comment in rows if comment["id"] == created["id"])
+    assert row["orphaned"] is True
+    assert (row["anchor_text"], row["body"]) == (quote, "Keep this.")
+
+
+def test_large_closed_document_reanchors_on_list(integration_client, artifact_id, doc_file):
+    quote = 'target marker'
+    content = ''.join(f'line {i:05d} ' + 'x' * 29 + '\n' for i in range(5000)) + quote + '\n'
+    doc_file.write_text(content)
+    start = content.index(quote)
+    response = integration_client.post(
+        f'/api/artifacts/{artifact_id}/comments', params={'token': _TOKEN},
+        json={'delivery_policy': 'immediate', 'body': 'Keep this.', 'anchor_text': quote,
+              'from_off': start, 'to_off': start + len(quote)},
+    )
+    assert response.status_code == 200
+    doc_file.write_text('new heading\n' + content)
+    started = time.perf_counter()
+    listed = integration_client.get(f'/api/artifacts/{artifact_id}/comments', params={'token': _TOKEN})
+    elapsed = time.perf_counter() - started
+    assert listed.status_code == 200
+    comment = listed.json()['comments'][0]
+    assert not comment['orphaned']
+    assert comment['from_off'] == start + len('new heading\n')
+    assert comment['anchor_text'] == quote
+    print(f'closed-list bytes={len(content.encode())} elapsed={elapsed:.3f}s')
+
+
+def test_external_edit_that_dev_cannot_place_keeps_suggestion_quote(integration_client, artifact_id, doc_file):
+    quote = "router decides"
+    original = doc_file.read_text()
+    start = original.index(quote)
+    response = integration_client.post(
+        f"/api/artifacts/{artifact_id}/comments", params={"token": _TOKEN},
+        json={"delivery_policy": "immediate", "body": "Consider this.", "anchor_text": quote,
+              "replacement": "router selects", "from_off": start, "to_off": start + len(quote)},
+    )
+    assert response.status_code == 200, response.text
+    created = response.json()["comment"]
+    doc_file.write_text(original.replace(quote, "route chooses"))
+    rows = integration_client.get(
+        f"/api/artifacts/{artifact_id}/comments", params={"token": _TOKEN},
+    ).json()["comments"]
+    row = next(comment for comment in rows if comment["id"] == created["id"])
+    assert row["orphaned"] is True
+    assert row["anchor_text"] == quote
 
 
 def test_comment_create_can_join_outer_transaction(artifact_id):

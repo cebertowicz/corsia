@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 import logging
 
-from doceditor import comments, comment_anchoring
+from doceditor import comments, comment_anchoring, comment_snapshots
 from doceditor.feedback_edit_discard import discard_new_edit_item
 from doceditor.live_publication_record import OwedPublication, Publication
 from doceditor.live_store import LiveStore, StoreRefused
@@ -82,6 +82,7 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
             )
             if positions:
                 comments.update_positions(artifact["id"], positions, db=db)
+            comment_snapshots.pair_published_positions(db, artifact["id"], text)
             if shared:
                 record_post_write_events(shared, artifact, before=before, after=after,
                                          actor_thread_id=publication.actor, db=db, prepared=payload)
