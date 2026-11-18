@@ -288,6 +288,37 @@ test('@flow:doc-margin-cards below the margin width a thread opens as a popover 
 	expect(doc.ids.length).toBe(ITEMS.length);
 });
 
+test('@flow:doc-margin-cards a keyboard closes a phone sheet and types at the selected text', async ({ page, request }, info) => {
+	test.skip(!info.project.name.includes('mobile'), 'A touch context with a hardware keyboard.');
+	test.setTimeout(120_000);
+	await page.setViewportSize({ width: 393, height: 852 });
+	await open(page, request, { wide: false });
+	const target = 'Paragraph 1 of the plan';
+	await page.locator('.cm-comment-anchor', { hasText: target }).first().tap();
+	await expect(page.locator('[data-adaptive-drawer] .drawer-panel')).toBeVisible();
+	const before = await editorText(page);
+	await page.keyboard.press('Escape');
+	await expect(page.locator('.cm-content').first()).toBeFocused();
+	await expectTypingAtSelection(page, before, target);
+});
+
+test('@flow:doc-margin-cards tapping Close leaves the phone editor unfocused and the reading place still', async ({ page, request }, info) => {
+	test.skip(!info.project.name.includes('mobile'), 'A touch close.');
+	test.setTimeout(120_000);
+	await page.setViewportSize({ width: 393, height: 852 });
+	await open(page, request, { wide: false });
+	await page.locator('.cm-comment-anchor', { hasText: 'Paragraph 1 of the plan' }).first().tap();
+	const sheet = page.locator('[data-adaptive-drawer] .drawer-panel');
+	await expect(sheet).toBeVisible();
+	const scroller = page.locator('.doc .cm-scroller');
+	const before = await scroller.evaluate((node) => node.scrollTop);
+	await sheet.getByRole('button', { name: 'Close', exact: true }).tap();
+	await expect(sheet).toBeHidden();
+	await expect(page.locator('.doc .md-editor')).toBeFocused();
+	await expect(page.locator('.doc .cm-content').first()).not.toBeFocused();
+	expect(Math.abs(await scroller.evaluate((node) => node.scrollTop) - before)).toBeLessThanOrEqual(3);
+});
+
 test('@flow:doc-margin-cards the column comes back when version history closes, however it is closed', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
 	test.setTimeout(150_000);

@@ -29,6 +29,21 @@ describe('the cell under a modal comment sheet', () => {
 		expect(r.view.state.doc.toString(), 'the document is as it was').toBe(before);
 	});
 
+	it('leaves the committed cell closed and focuses the document host after a tap', () => {
+		const r = build(THREEROW);
+		const root = r.view.dom.parentElement!;
+		const host = document.createElement('div');
+		host.className = 'md-editor'; host.tabIndex = -1;
+		root.insertBefore(host, r.view.dom); host.append(r.view.dom);
+		clicked(r, cellEl(r, 2, 1));
+		const before = r.view.state.doc.toString();
+		const reopen = closeDocumentCell(root);
+		reopen!(true);
+		expect(mountedEditor(r)).toBeNull();
+		expect(document.activeElement).toBe(host);
+		expect(r.view.state.doc.toString()).toBe(before);
+	});
+
 	it('answers nothing to restore when no cell was open', () => {
 		const r = build(THREEROW);
 		expect(closeDocumentCell(r.view.dom.parentElement!)).toBeNull();

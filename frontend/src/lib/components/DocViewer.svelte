@@ -122,7 +122,7 @@
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
-	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, columnFits);
+	const commentUI = createCommentSurfaceState((touch) => focusDocumentEditor(docRoot, touch), () => targetKey, columnFits);
 	const reviewBarState = createReviewBarState();
 	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
@@ -164,10 +164,12 @@
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
+	let postTouch = false;
 	async function submitComment(text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) {
+		const touch = postTouch;
 		const id = await draftController.submit(text, taggedAgentIds, target?.threadId ?? null, mentions);
 		if (!id) return;
-		scroll.toComment(id, true, 'comment-save');
+		scroll.toComment(id, true, 'comment-save', touch);
 		focusedDocComment.set(id);
 		commentUI.state = { kind: 'thread', id };
 		commentDraft.set(null);
@@ -362,11 +364,12 @@
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
 		onThreadMissing={commentUI.focusRemainingThread}
-		restoreFocus={commentUI.restoreFocus}
+		restoreFocus={(touch) => touch ? focusDocumentEditor(docRoot, true) : commentUI.restoreFocus()}
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onSubmit={submitComment}
+		onSubmitInput={(touch) => postTouch = touch}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
 		onResolve={threadActions.resolve}

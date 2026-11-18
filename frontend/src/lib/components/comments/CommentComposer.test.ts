@@ -95,6 +95,32 @@ describe('CommentComposer', () => {
 		await vi.waitFor(() => expect(textarea.value).toBe(''));
 	});
 
+	it('reports the input that submits the comment', async () => {
+		const input = vi.fn();
+		const textarea = render(async () => {}, { body: 'A comment', onSubmitInput: input });
+		const button = host.querySelector<HTMLButtonElement>('.submit')!;
+		button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+		button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+		expect(input).toHaveBeenLastCalledWith(true);
+		await vi.waitFor(() => expect(textarea.value).toBe(''));
+		textarea.value = 'Another comment';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', metaKey: true }));
+		expect(input).toHaveBeenLastCalledWith(false);
+	});
+
+	it('reports the input that cancels the draft', () => {
+		const cancel = vi.fn();
+		const textarea = render(async () => {}, { onCancel: cancel });
+		const button = host.querySelector<HTMLButtonElement>('.cancel')!;
+		button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+		button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+		expect(cancel).toHaveBeenLastCalledWith(true);
+		textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }));
+		expect(cancel).toHaveBeenLastCalledWith();
+	});
+
 	it('offers no Retry, by button or keyboard, for a failure no press can get past', () => {
 		const onSubmit = vi.fn(async () => {});
 		const textarea = render(onSubmit, { body: 'Kept to copy', error: 'This chat is deleted.', retryable: false });

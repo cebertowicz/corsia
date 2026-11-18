@@ -11,12 +11,13 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
+	import { isTouchClose, returnFocus } from '$lib/focusReturn';
 	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', ariaLabel, sideKey, keepOpenOnPointer, covered = false, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
 		onClosed?: () => void;
-		restoreFocus?: () => void;
+		restoreFocus?: (touch?: boolean) => void;
 		placement?: 'right' | 'bottom' | 'bottom-end' | 'pointer';
 		/** Make the content a column bounded by the popover, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
@@ -239,9 +240,13 @@
 		if (open) void tick().then(() => position());
 	});
 	function onScrollInput(event: Event) { if (!(event.target instanceof Node && surface?.contains(event.target))) lastScrollInput = performance.now(); }
-	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus({ preventScroll: true }); }
-	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
-	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
+	function dismiss(event?: Event) {
+		onClose();
+		if (restoreFocus) restoreFocus(isTouchClose(event as PointerEvent | undefined));
+		else if (opener) returnFocus(opener);
+	}
+	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(event); }
+	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(event); } }
 </script>
 
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} onwheelcapture={onScrollInput} ontouchmovecapture={onScrollInput} />

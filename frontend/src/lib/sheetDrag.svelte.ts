@@ -1,6 +1,19 @@
 import { releaseSheetDrag } from '$lib/sheetMotion';
 import { holdSheet } from '$lib/sheetClearance';
 
+/** Dismiss only a press that began on the scrim, never the tap that opened the sheet. */
+export function createBackdropDismiss(enabled: () => boolean, close: (event: MouseEvent) => void) {
+	let pressed = false;
+	return {
+		down(event: PointerEvent) { pressed = event.target === event.currentTarget; },
+		click(event: MouseEvent) {
+			const wasPressed = pressed;
+			pressed = false;
+			if (enabled() && wasPressed && event.target === event.currentTarget) close(event);
+		},
+	};
+}
+
 /** How long a let-go sheet takes to settle: its transform and max-height transitions run 220 ms (AdaptiveDrawer), plus a frame or two. */
 const SETTLE_MS = 300;
 /** What a drag starts from: the grabber, or a head row the sheet's content marks as a handle too. */
@@ -19,7 +32,7 @@ export function createSheetDrag(props: {
 	/** The sheet's panel: held while dragged, and its height when the drag ends sets the dismiss distance. */
 	panel: () => HTMLElement | null;
 	onExpand: () => void;
-	onDismiss: () => void;
+	onDismiss: (event: PointerEvent) => void;
 }) {
 	let dragY = $state(0);
 	let pullY = $state(0);
@@ -83,7 +96,7 @@ export function createSheetDrag(props: {
 		pullY = 0;
 		letGo();
 		if (release === 'expand') props.onExpand();
-		else if (release === 'dismiss') props.onDismiss();
+		else if (release === 'dismiss') props.onDismiss(event);
 		else dragY = 0;
 	}
 

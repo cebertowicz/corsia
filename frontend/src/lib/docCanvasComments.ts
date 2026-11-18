@@ -3,7 +3,7 @@ import { anchoredQuote } from '$lib/stores/docCommentProjection';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
-export type CanvasScrollTarget = { from: number; to: number; focus?: boolean; origin: ScrollOrigin; commentId?: string };
+export type CanvasScrollTarget = { from: number; to: number; focus?: boolean; origin: ScrollOrigin; commentId?: string; touchClose?: boolean };
 
 /**
  * Where a comment sits in the text on screen. An orphaned card has no place to mark, jump to or sort by.

@@ -3,6 +3,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
+	import { createCloseInput } from '$lib/focusReturn';
 	import { portal } from '$lib/actions/portal';
 	import { settleHeight } from '$lib/actions/settleHeight';
 	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
@@ -10,7 +11,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import CloseButton from './CloseButton.svelte';
 	import { sheetFly } from '$lib/sheetMotion';
-	import { createSheetDrag } from '$lib/sheetDrag.svelte';
+	import { createBackdropDismiss, createSheetDrag } from '$lib/sheetDrag.svelte';
 	import { liftSheetCap, sheetCapped } from '$lib/sheetClearance';
 	import { coverUnderNav } from '$lib/stores/phoneNav.svelte';
 
@@ -20,7 +21,7 @@
 		headingMeta = null,
 		contextLabel = null,
 		leading, actions, compact = false,
-		doneLabel = 'Done', doneIcon = false, onClose,
+		doneLabel = 'Done', doneIcon = false, onClose, restoreFocus,
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
@@ -57,7 +58,8 @@
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
 		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */ doneIcon?: boolean;
-		onClose: () => void;
+		onClose: (event?: Event, touch?: boolean) => void;
+		restoreFocus?: (previous: HTMLElement) => void;
 		children: Snippet;
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
@@ -99,11 +101,13 @@
 		return trackColumnBox(within, (next) => { box = next; });
 	});
 	// A half sheet, or one held below its height to leave its text room above it, grows when pulled up: the one drag path for both.
+	const closeInput = createCloseInput();
+	function close(event?: Event) { onClose(event, closeInput.close(event)); }
 	const drag = createSheetDrag({
 		expandable: () => detent === 'half' || sheetCapped(panel),
 		panel: () => panel,
 		onExpand: () => { if (detent === 'half') onDetent?.('full'); else if (panel) liftSheetCap(panel); },
-		onDismiss: () => onClose(),
+		onDismiss: (event) => close(event),
 	});
 	const underNav = coverUnderNav(() => open, () => panel);
 
@@ -115,17 +119,7 @@
 	// The sheet's outro ends in onClosed, so under reduced motion it holds still for the crossfade instead of ending at once.
 	const flyParams = $derived(sheetFly($prefersReducedMotion, tightMs));
 
-	// A click dismisses only a press that began on the scrim. The click that follows the tap which opened this sheet
-	// lands on the new scrim with no press of its own on it, so it is not a tap outside.
-	let pressedScrim = false;
-	function onBackdropDown(event: PointerEvent): void {
-		pressedScrim = event.target === event.currentTarget;
-	}
-	function onBackdrop(event: MouseEvent): void {
-		const pressed = pressedScrim;
-		pressedScrim = false;
-		if (modal && detent !== 'half' && pressed && event.target === event.currentTarget) onClose();
-	}
+	const backdrop = createBackdropDismiss(() => modal && detent !== 'half', close);
 
 	$effect(() => {
 		if (!open || !panel) return;
@@ -170,8 +164,10 @@
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	data-keeps-text={keepsText || undefined}
-	onpointerdown={onBackdropDown}
-	onclick={onBackdrop}
+	onpointerdowncapture={(event) => closeInput.pointerDown(event)}
+		 onkeydowncapture={() => closeInput.clear()}
+		onpointerdown={backdrop.down}
+		onclick={backdrop.click}
 		in:fade|global={fadeParams}
 		out:fade={fadeParams}
 		use:portal
@@ -189,7 +185,7 @@
 			aria-modal={modal && detent !== 'half' ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
-			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
+			use:focusTrap={{ onEscape: close, autoFocus: false, restoreFocus }}
 			use:settleHeight={{ enabled: open && !drag.dragging, reduced: $prefersReducedMotion }}
 			onpointerdown={drag.press}
 			onpointermove={drag.move}
@@ -204,7 +200,7 @@
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}{#if actions}<span class="drawer-actions">{@render actions()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
-					{#if doneIcon}<span class="drawer-done-icon"><CloseButton label={doneLabel} onclick={onClose} /></span>{:else}<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>{/if}
+					{#if doneIcon}<span class="drawer-done-icon"><CloseButton label={doneLabel} onclick={close} /></span>{:else}<button class="drawer-done" type="button" onclick={close}>{doneLabel}</button>{/if}
 				</div>{/if}
 			</div>
 			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>

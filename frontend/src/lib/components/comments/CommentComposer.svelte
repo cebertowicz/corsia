@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { keepTyped } from '$lib/actions/keepTyped';
+	import { createCloseInput } from '$lib/focusReturn';
 	import { untrack } from 'svelte';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
@@ -9,7 +10,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onSubmitInput, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -28,7 +29,8 @@
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
-		onCancel: () => void;
+		onSubmitInput?: (touch: boolean) => void;
+		onCancel: (touch?: boolean) => void;
 		/** Escape, when it should close without discarding the text (as a click outside does); Cancel by default. */
 		onEscape?: () => void;
 		/** The caret the field takes when it mounts (the same draft drawn in another form), and each place it moves to. */
@@ -44,9 +46,11 @@
 		text;
 		untrack(() => onBody?.(text));
 	});
-	async function submit() {
+	const closeInput = createCloseInput();
+	async function submit(event?: Event) {
 		const value = text.trim();
 		if (!value || posting || pending || disabledReason || (error && !retryable)) return;
+		onSubmitInput?.(closeInput.close(event));
 		posting = true;
 		const offset = text.length - text.trimStart().length;
 		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
@@ -55,7 +59,8 @@
 		finally { posting = false; }
 	}
 	function onKey(event: KeyboardEvent) {
-		if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
+		closeInput.clear();
+		if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit(event);
 		if (event.key === 'Escape') { selectedTags.clear(); (onEscape ?? onCancel)(); }
 	}
 </script>
@@ -69,8 +74,8 @@
 		</Field>
 	</div>
 	<div class="actions">
-		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
-		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
+		<button class="cancel" onpointerdown={(event) => closeInput.pointerDown(event)} onkeydown={() => closeInput.clear()} onclick={(event) => { selectedTags.clear(); onCancel(closeInput.close(event)); }}>Cancel</button>
+		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onpointerdown={(event) => closeInput.pointerDown(event)} onkeydown={() => closeInput.clear()} onclick={(event) => void submit(event)}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
 	{#if error}<p class="selection-reason" role="alert">{error}</p>{/if}

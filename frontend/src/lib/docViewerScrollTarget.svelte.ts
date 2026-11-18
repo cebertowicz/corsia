@@ -30,6 +30,10 @@ export function createCommentScrollTarget(source: {
 		/** Focus this comment without scrolling to it. */
 		stay(id: string) { stayOn = id; target = null; },
 		/** Scrolls to a comment's text as it is now placed; a comment with no text to jump to clears the target. */
-		toComment(id: string, focus: boolean, origin: ScrollOrigin) { stayOn = null; target = canvasCommentScrollTarget(source.comments(), source.text(), id, focus, origin); },
+		toComment(id: string, focus: boolean, origin: ScrollOrigin, touchClose?: boolean) {
+			stayOn = null;
+			const next = canvasCommentScrollTarget(source.comments(), source.text(), id, focus, origin);
+			target = next && (touchClose === undefined ? next : { ...next, touchClose });
+		},
 	};
 }
