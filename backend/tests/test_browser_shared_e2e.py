@@ -113,6 +113,11 @@ FRAME_TWINS_OFF_SCREEN = """<!doctype html><title>Frame twins off screen</title>
 <iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>
 <div style="height:3000px">spacer</div>
 <iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+# Two embeds laid out alike, both in view, the second only 20px tall: its link sits below its own fold.
+FRAME_TWINS_SCROLLED = """<!doctype html><title>Frame twins scrolled</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="/frame-link.html" style="width:300px;height:20px;border:0;display:block"></iframe>"""
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -147,7 +152,7 @@ def fixture_server():
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
              "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode(),
-             "/frame-twins.html": FRAME_TWINS.encode(),
+             "/frame-twins.html": FRAME_TWINS.encode(), "/frame-twins-scrolled.html": FRAME_TWINS_SCROLLED.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
     frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered",
                    "/frame-twins-off-same.html": "same", "/frame-twins-off-cross.html": "cross"}
@@ -596,6 +601,33 @@ async def test_a_link_in_an_embed_below_the_fold_with_a_look_alike_in_view_is_re
             if page == "frame-twins-off-same.html":
                 clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
                 assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_link_below_its_own_frames_fold_is_never_written_in_a_look_alike_frame():
+    """The ref names the short frame's link, out of that frame's own view; the taller twin's link is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-scrolled-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-scrolled", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins-scrolled.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            refused = None
+            try:
+                await owner.run(thread_id, ("click", ref), session="existing")
+            except browser_dom_write.DomWriteRefused as exc:
+                refused = exc
+            clicks = await cdp_value(owner, thread_id, "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)")
+            # Refused as ambiguous, or written in the short frame if measuring the box scrolled it into its view.
+            assert (refused is not None and refused.reason == "ambiguous" and clicks == [0, 0]) or (
+                refused is None and clicks == [0, 1]), (refused, clicks)
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

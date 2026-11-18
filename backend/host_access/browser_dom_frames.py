@@ -14,16 +14,12 @@ from host_access.browser_dom_hit import (
 )
 from host_access.browser_session_state import BrowserSessionError
 
-# Whether a document holds an element with the target's box at its place, whatever covers it: every element at
-# the point, through open shadow roots, not only the topmost one a hit test returns.
-_HOLDS = """function(x, y, box) {
+# Whether a document holds an element with the target's box, whatever covers it and wherever it sits: every
+# element, through open shadow roots, so one scrolled out of the document's own view is counted too.
+_HOLDS = """function(box) {
   const near = (rect) => ['x', 'y', 'width', 'height'].every((key) => Math.abs(rect[key] - box[key]) <= 1);
-  const seen = new Set();
-  const holds = (root) => root.elementsFromPoint(x, y).some((element) => {
-    if (seen.has(element)) return false;
-    seen.add(element);
-    return near(element.getBoundingClientRect()) || (element.shadowRoot !== null && holds(element.shadowRoot));
-  });
+  const holds = (root) => Array.from(root.querySelectorAll('*')).some((element) =>
+    near(element.getBoundingClientRect()) || (element.shadowRoot !== null && holds(element.shadowRoot)));
   return holds(document);
 }"""
 
@@ -63,17 +59,17 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
     """Find a target inside a child frame: the node, else why not, and the tag of what covers it.
 
     A ref gives only a box, so which document it names is decided first, apart from what covers it: the page
-    and each frame that hold an element with that box at its place, on screen or not, since a look-alike embed
-    below the fold names it as well as one in view. Why not is "ambiguous" when more than one does, "covered"
-    when the one that does is a frame on screen whose hit test reached something else, and None when no frame
-    holds it or the one that does is off screen and can't be hit, so the page's own answer stands. A document
-    that cannot be read counts as holding it, so a doubt refuses. A covered element inside a closed shadow root
-    is not seen.
+    and each frame that hold an element with that box, shown or not, since a look-alike embed below the fold,
+    or scrolled out of its own frame's view, names it as well as one in view. Why not is "ambiguous" when more
+    than one does, "covered" when the one that does is a shown frame whose hit test reached something else, and
+    None when no frame holds it or the one that does doesn't show it and can't be hit, so the page's own answer
+    stands. A document that cannot be read counts as holding it, so a doubt refuses. A covered element inside a
+    closed shadow root is not seen.
 
     agent-browser measures an element inside a frame from that frame's own corner, so each frame's content-box
-    origin moves the box onto the page. A frame counts only when the moved centre is inside the frame's own
-    viewport, is hit only when it is also inside the page's, and the page must hold still between the box and
-    the hit test, as on the page.
+    origin moves the box onto the page. A frame shows the box, and is hit, only when the moved centre is inside
+    both the frame's own viewport and the page's, and the page must hold still between the box and the hit
+    test, as on the page.
 
     The search stops one level down: a frame nested inside a cross-site frame has its owner in that frame's
     process, not in this page, so it is never listed here and its elements are still refused.
@@ -84,45 +80,51 @@ async def locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, sele
         if box is None or is_empty(box):
             return None, None, None
         view = await page_viewport(page)
-        placed_in = [(frame, _on_page(box, frame)) for frame in await _child_frames(page, endpoint)]
-        placed_in = [(frame, placed) for frame, placed in placed_in if _inside(frame.viewport, placed)]
-        if not placed_in:
+        frames = await _child_frames(page, endpoint)
+        if not frames:
             return None, None, None
         held = []
-        for frame, placed in placed_in:
-            on_screen = in_viewport(view, placed)
-            located, cover = await _hit_in_frame(page, frame, box, placed, targets) if on_screen else (None, None)
+        for frame in frames:
+            placed = _on_page(box, frame)
+            shown = _shows(view, frame.viewport, box)
+            located, cover = await _hit_in_frame(page, frame, box, placed, targets) if shown else (None, None)
             if located is not None or await _frame_holds(page, frame, box, targets):
-                held.append((located, cover, on_screen))
+                held.append((located, cover, shown))
         page_holds = in_viewport(view, box) and await _holds(page, None, box)
         # A frame may have moved while it was hit, so the answer holds only if its place and the box did not.
-        if await read_box(run, selector) == box and [_place(view, frame.viewport, box) for frame, _ in placed_in] == [
-                _place(view, await _owner_viewport(page, frame.owner), box) for frame, _ in placed_in]:
+        if await read_box(run, selector) == box and [_place(view, frame.viewport, box) for frame in frames] == [
+                _place(view, await _owner_viewport(page, frame.owner), box) for frame in frames]:
             if len(held) + page_holds > 1:
                 # Two places laid out alike both hold an element that matches the box, and which one the agent
                 # named can't be told, whichever of them is covered: refused, as before frames were searched.
                 return None, "ambiguous", None
             if not held:
                 return None, None, None
-            located, cover, on_screen = held[0]
+            located, cover, shown = held[0]
             if located is not None:
                 return located, None, None
-            # A frame off screen can't be hit: refused for the page's own reason, as before frames were searched.
-            return (None, "covered", cover) if on_screen else (None, None, None)
+            # A frame that doesn't show the box can't be hit: refused for the page's own reason, as before frames
+            # were searched.
+            return (None, "covered", cover) if shown else (None, None, None)
         await asyncio.sleep(browser_dom_hit.SETTLE_INTERVAL)
     return None, None, None
 
 
-def _place(view: dict, viewport: Rect | None, box: dict) -> object:
-    """What of a frame's place must hold still: all of it on screen; off screen, only its size and staying off.
+def _shows(view: dict, viewport: Rect, box: dict) -> bool:
+    """Whether a frame shows a box measured from its corner: inside its own viewport and the page's."""
+    placed = {**box, "x": box["x"] + viewport["x"], "y": box["y"] + viewport["y"]}
+    return _inside(viewport, placed) and in_viewport(view, placed)
 
-    An off-screen frame is never hit, so where it sits doesn't change whether it holds the element; a carousel
-    or ad below the fold that keeps moving must not refuse a write to the frame in view.
+
+def _place(view: dict, viewport: Rect | None, box: dict) -> object:
+    """What of a frame's place must hold still: all of it when it shows the box; otherwise only its size.
+
+    A frame that doesn't show the box is never hit, so where it sits doesn't change whether it holds the
+    element; a carousel or ad below the fold that keeps moving must not refuse a write to the frame in view.
     """
     if viewport is None:
         return None
-    on_screen = in_viewport(view, {**box, "x": box["x"] + viewport["x"], "y": box["y"] + viewport["y"]})
-    return viewport if on_screen else (viewport["width"], viewport["height"])
+    return viewport if _shows(view, viewport, box) else (viewport["width"], viewport["height"])
 
 
 async def _frame_holds(page: CdpClient, frame: ChildFrame, box: dict, targets: FrameTargets) -> bool:
@@ -143,8 +145,7 @@ async def _holds(cdp: CdpClient, frame_id: str | None, box: dict) -> bool:
     try:
         result = await cdp.call(
             "Runtime.callFunctionOn", executionContextId=await isolated_context(cdp, frame_id), functionDeclaration=_HOLDS,
-            arguments=[{"value": box["x"] + box["width"] / 2}, {"value": box["y"] + box["height"] / 2},
-                       {"value": {key: box[key] for key in ("x", "y", "width", "height")}}],
+            arguments=[{"value": {key: box[key] for key in ("x", "y", "width", "height")}}],
             returnByValue=True, silent=True)
     except BrowserSessionError:
         return True

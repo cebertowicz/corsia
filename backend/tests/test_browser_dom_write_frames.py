@@ -63,7 +63,7 @@ class Target:
         if method == "Page.createIsolatedWorld":
             self.worlds.append(params["frameId"])
             return {"executionContextId": len(self.worlds)}
-        if method == "Runtime.callFunctionOn" and "elementsFromPoint" in params["functionDeclaration"]:
+        if method == "Runtime.callFunctionOn" and "querySelectorAll" in params["functionDeclaration"]:
             frame = self.worlds[params["executionContextId"] - 1]
             return {"result": {"type": "boolean", "value": frame in self.holds}}
         if method == "DOM.resolveNode":
@@ -202,6 +202,26 @@ def _twin_off_screen(content, *, holds):
 
 BELOW_THE_FOLD = [8, 2000, 608, 2000, 608, 2300, 8, 2300]
 PAST_THE_RIGHT_EDGE = [1200, 68, 1800, 68, 1800, 368, 1200, 368]
+# On screen but 30px tall, so the box (centre 44px down) sits below the frame's own fold, in content it scrolls.
+SHORT_FRAME = [8, 400, 608, 400, 608, 430, 8, 430]
+
+
+@pytest.mark.asyncio
+async def test_a_look_alike_frame_holding_the_element_below_its_own_fold_still_makes_the_ref_ambiguous(monkeypatch):
+    """The ref may name the short frame's link, scrolled out of that frame's view: the other frame's is not assumed."""
+    page = _twin_off_screen(SHORT_FRAME, holds={"child", "twin"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "ambiguous" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_short_frame_that_holds_no_such_element_does_not_stop_a_write_to_the_frame_that_shows_it(monkeypatch):
+    page = _twin_off_screen(SHORT_FRAME, holds={"child"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    assert await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.written == ["field"]
 
 
 @pytest.mark.asyncio
