@@ -6,8 +6,7 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 const TEXT = 'A sentence to select and comment on.';
 test.use({ hasTouch: true });
 test('@flow:doc-draft-outside-dev draft remains available after outside tap', async ({ page, request }, info) => {
-	test.skip(info.project.name !== 'chromium-desktop');
-	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.setViewportSize(info.project.name === 'chromium-mobile' ? { width: 393, height: 852 } : { width: 1440, height: 900 });
 	const title = `draft-outside-${Date.now()}`, threadId = await createSession(request, title), params = { token: TEST_TOKEN };
 	const roots = (await (await request.get('/api/files/tree', { params })).json()).roots as Array<{ kind: string; path: string }>;
 	const docPath = path.join(roots.find(root => root.kind === 'workspace')!.path, `${title}.md`);
