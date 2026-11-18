@@ -18,11 +18,18 @@ for (const host of ['comment', 'reply'] as const) {
 				? route.fulfill({ status: 503, json: {} })
 				: route.fulfill({ json: { reviews: [], reviewers: agents, taggable_agents: agents } }));
 			await open(page, doc, info.project.name.includes('mobile') ? 'phone' : 'closed', 'light');
+			const thread = page.locator('.ct:not([inert] *)').filter({ hasText: 'Existing thread' }).first();
 			if (host === 'comment') await beginComment(page, 'Step 1: the rollout proceeds to the next ring.');
-			else await openComments(page, /^1 comment\b/);
+			else {
+				await openComments(page, /^1 comment\b/);
+				// In the margin beside the text a card at rest shows no reply field until it is picked, so the reply is reached as a
+				// person reaches it: by picking the card. A sheet or popover shows the field already.
+				await expect(thread).toBeVisible();
+				if (await page.locator('[data-margin-card]').filter({ hasText: 'Existing thread' }).count()) await thread.getByText('Existing thread', { exact: true }).click();
+			}
 			const input = host === 'comment'
 				? page.locator('textarea[placeholder="Comment, or @ to tag an agent"]:not([inert] *)')
-				: page.locator('.ct:not([inert] *)').filter({ hasText: 'Existing thread' }).first().locator('textarea');
+				: thread.locator('textarea');
 			await input.fill('Hello @Al');
 			await expect(page.getByText("Couldn’t load agents.")).toBeVisible();
 			const caret = await input.evaluate((element: HTMLTextAreaElement) => element.selectionStart);

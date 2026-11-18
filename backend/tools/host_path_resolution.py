@@ -83,21 +83,31 @@ def contains(root: Path, path: Path) -> bool:
 _DENIAL_SUFFIX = ": Operation not permitted"
 
 
-def denied_paths_in(text: str) -> tuple[Path, ...]:
-    """Return the absolute paths the OS itself named as refused in ``text``."""
-    found: list[Path] = []
+def refusals_in(text: str) -> tuple[tuple[str, str], ...]:
+    """Return ``(program, path as written)`` for each macOS refusal line in ``text``.
+
+    ``cp -p`` names the failing call before the path (``cp: utimensat: <path>``);
+    that call stays with the program, so the path is the same either way.
+    """
+    found: list[tuple[str, str]] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line.endswith(_DENIAL_SUFFIX):
             continue
         head = line[: -len(_DENIAL_SUFFIX)]
-        _, separator, candidate = head.partition(": ")
+        program, separator, candidate = head.partition(": ")
         if not separator:
-            candidate = head
-        candidate = candidate.strip().rstrip("/")
-        if candidate.startswith("/"):
-            found.append(Path(candidate))
-    return tuple(dict.fromkeys(found))
+            program, candidate = "", head
+        call, separator, rest = candidate.partition(": ")
+        if separator and rest and call.isidentifier():
+            program, candidate = f"{program}: {call}", rest
+        found.append((program, candidate.strip().rstrip("/")))
+    return tuple(found)
+
+
+def denied_paths_in(text: str) -> tuple[Path, ...]:
+    """Return the absolute paths the OS itself named as refused in ``text``."""
+    return tuple(dict.fromkeys(Path(path) for _, path in refusals_in(text) if path.startswith("/")))
 
 
 # A bwrap mask refuses with ``Permission denied``, naming the path as the program was given it:

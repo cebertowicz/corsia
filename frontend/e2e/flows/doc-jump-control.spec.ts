@@ -433,12 +433,20 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.locator('.doc .cm-content').click();
 			await page.keyboard.press('ControlOrMeta+End');
 			await page.keyboard.press('ArrowLeft');
-			const caretBox = await page.locator('.doc .cm-content').evaluate((editor) => {
+			const caret = () => page.locator('.doc .cm-content').evaluate((editor) => {
 				const selection = window.getSelection();
 				if (!selection?.isCollapsed || !selection.anchorNode || !editor.contains(selection.anchorNode)) throw new Error('Editor caret is not focused');
 				const rect = selection.getRangeAt(0).getBoundingClientRect();
 				return { x: rect.x, y: rect.y, height: rect.height };
 			});
+			// CodeMirror scrolls the caret into view in its next measure frame, which a slow runner can reach after the key press returns.
+			await expect.poll(async () => {
+				const box = await caret();
+				const editor = (await page.locator('.doc-main').boundingBox())!;
+				const band = (await controlBox(page).boundingBox())!;
+				return box.y + box.height <= Math.min(editor.y + editor.height + 0.5, band.y);
+			}, { message: 'the caret is scrolled into view above the bottom band' }).toBe(true);
+			const caretBox = await caret();
 			expect(caretBox.height, 'caret has visible geometry').toBeGreaterThan(0);
 			const editorAfter = (await page.locator('.doc-main').boundingBox())!;
 			const bandAfter = (await controlBox(page).boundingBox())!;
