@@ -516,12 +516,15 @@ for (const way of ['card', 'tag'] as const) {
 		// so an agent's reply waits in the line instead of arriving while the thread is open, as on the document margin.
 		await expect.poll(() => held().includes(id), { message: 'the server holds the thread for the person' }).toBe(true);
 		expect(await agentDocReply(request, id, seeded.sessionId, 'A later answer.'), 'the reply waits while the image thread is open').toBeNull();
-		// The person answers in the thread. Sending lets the turn go, so the waiting reply posts while the image is still open,
-		// and it counts as unread: an agent's reply is the person's to read once they have replied in its thread.
+		// The person answers in the thread. Sending lets the turn go and the server wakes the waiting agent, whose next call
+		// posts its reply while the image is still open (a saved write is never posted for it). The reply counts as unread:
+		// an agent's reply is the person's to read once they have replied in its thread.
 		// The open image thread is the viewer's popover card, not part of the overlay element; the document margin keeps its own card.
 		const open = page.getByRole('dialog').locator('.ct').filter({ hasText: 'An agent note on the image.' });
 		await open.getByPlaceholder('Reply…').fill('Which part?');
 		await open.getByRole('button', { name: 'Send reply', exact: true }).click();
+		await expect(open).toContainText('Which part?');
+		await expect.poll(() => agentDocReply(request, id, seeded.sessionId, 'A later answer.'), { message: 'the woken agent posts once sending lets the turn go' }).not.toBeNull();
 		await expect(open).toContainText('A later answer.', { timeout: 15_000 });
 		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { message: 'the reply arrives unread while the image is open' }).toBe(true);
 		await page.waitForTimeout(SEEN_FOR_MS);
