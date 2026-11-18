@@ -356,8 +356,8 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
     original = script_sandbox.github_proxy
 
     @asynccontextmanager
-    async def proxy(path, credential):
-        async with original(path, credential, transport=httpx.MockTransport(upstream)):
+    async def proxy(path, credential, **kwargs):
+        async with original(path, credential, transport=httpx.MockTransport(upstream), **kwargs):
             yield
 
     monkeypatch.setattr(script_sandbox, "github_proxy", proxy)

@@ -10,6 +10,8 @@ for the agents' account to be. A failed check never sets it.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -72,3 +74,21 @@ def _probe() -> None:
 def reset_for_tests() -> None:
     global _last_probe
     _last_probe = float("-inf")
+
+
+def person_forwarder_credential() -> str:
+    """Read the host ``gh`` login's credential for the script forwarder only, when there is no
+    agents' account: agent shells then use that login too (``github_agent.shell_env``). Never returned to a script."""
+    from connections.github_read_request import GH_HOST
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token", "--hostname", GH_HOST], capture_output=True, text=True,
+            timeout=15, check=False, env={**os.environ, "GH_HOST": GH_HOST, "GH_PROMPT_DISABLED": "1"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError("the person's GitHub credential is unavailable") from exc
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    if not value:
+        raise ValueError("the person's GitHub credential is unavailable")
+    return value
