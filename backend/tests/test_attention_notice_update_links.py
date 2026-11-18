@@ -254,3 +254,41 @@ def test_a_project_update_counts_the_documents_chat_shows_as_cards(db, events, w
     assert "Your update links 2 documents for the person to read: 3,000 words" in notice
     assert "The longest is 'brief.md': 2,000 words" in notice
     assert events[-1]["properties"]["linked_documents"] == len(shown)
+
+
+def test_a_document_named_only_in_a_placed_comment_answer_is_not_counted(db, events, workspace):  # noqa: F811
+    """Cards follow the chat text saved for an update that answers comments; so does the notice.
+
+    The answer section moves to its comment thread, so chat draws no card for
+    a file named only there. Both sides read the text
+    ``infra.chat_comment_answers.VISIBLE_CONTENT`` names.
+    """
+    import json
+
+    from api import thread_cards
+
+    _document(db, workspace / "plan.md", _words(1000))
+    _document(db, workspace / "brief.md", _words(2000))
+    seq = db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE thread_id='owner'").fetchone()[0]
+    db.execute(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq,input_order) "
+        "VALUES ('question','owner','user','text',?,'2026-01-01',?,1)",
+        (json.dumps({"reply_context": {"comments": [{"cid": "c1.1"}]}}), seq),
+    )
+    db.execute("UPDATE threads SET next_message_seq=? WHERE id='owner'", (seq + 1,))
+    db.commit()
+    arguments, result = _post(db, "The plan is in plan.md.\n\n[c1.1] The detail is in brief.md.")
+
+    notice = mod.attention_notice(
+        thread_id="owner", tool_name="post_update", arguments=arguments, result=result,
+    )
+    row = dict(db.execute("SELECT * FROM messages WHERE thread_id='owner' AND role='assistant'").fetchone())
+    assert db.execute(
+        "SELECT content FROM chat_visible_content WHERE message_id=?", (row["id"],),
+    ).fetchone()[0] == "The plan is in plan.md."
+    thread_cards.attach_cards(db, "owner", "user", {"project_id": None}, [row])
+
+    shown = sorted(card["name"] for card in row["cards"] if card["type"] == "document")
+    assert shown == ["plan.md"]
+    assert "Your update links 'plan.md' for the person to read: 1,000 words" in notice
+    assert events[-1]["properties"]["linked_documents"] == len(shown)

@@ -163,17 +163,20 @@ def _linked_documents(db, thread_id: str, message_id: str) -> list[Path]:
     """The documents chat shows the person as cards under this agent's saved update."""
     from doceditor.document_scope import scope_roots
     from infra import config
+    from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
     from registry.path_cards import reference_cards
 
+    # Cards follow the text chat draws under the update: an answer section that
+    # was placed in its comment thread is not part of it.
     row = db.execute(
-        "SELECT m.content AS content, t.user_id AS user_id, t.project_id AS project_id"
-        " FROM messages AS m JOIN threads AS t ON t.id = m.thread_id"
+        f"SELECT {VISIBLE_CONTENT} AS content, t.user_id AS user_id, t.project_id AS project_id"
+        f" FROM messages AS m JOIN threads AS t ON t.id = m.thread_id {VISIBLE_CONTENT_JOIN}"
         " WHERE m.id=? AND m.thread_id=?",
         (message_id, thread_id),
     ).fetchone()
     if row is None or not isinstance(row["content"], str):
         return []
-    # The roots and the second origin are the ones ``api.thread_cards.attach_cards``
+    # The text, the roots and the second origin are the ones ``api.thread_cards.attach_cards``
     # gives the same reader; ``test_attention_notice_update_links`` holds the two together.
     origin, bases = scope_roots(row["project_id"], db)
     cards = reference_cards(
