@@ -16,7 +16,8 @@
 	const filterName = $derived(FILTERS.find(([key]) => key === filter)?.[1] ?? 'Open');
 </script>
 
-<div class="drawer-heading"><h2>{title}{#if count}{' '}<span>{count}</span>{/if}</h2><div class="drawer-tools">{#if filtered}<div class="filter-menu">
+<!-- In the phone sheet the whole row is a handle as well as the grabber (AdaptiveDrawer); its buttons stay buttons. -->
+<div class="drawer-heading" data-drawer-handle><h2>{title}{#if count}{' '}<span>{count}</span>{/if}</h2><div class="drawer-tools">{#if filtered}<div class="filter-menu">
 	<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
 	{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 </div>{/if}<IconButton ariaLabel={closeLabel} variant="ghost" size="sm" onclick={onClose}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>

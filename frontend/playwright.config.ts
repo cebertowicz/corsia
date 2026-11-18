@@ -44,7 +44,7 @@ const backendCommand = [
 ].filter(Boolean).join(' ');
 
 // The desktop app is a WKWebView, so the document scroll and table-cell
-// selection specs can also run in WebKit, and the reading-place spec at phone width too. Opt-in (CORSIA_E2E_WEBKIT=1,
+// selection specs can also run in WebKit, and the reading-place and comment-sheet specs at phone width too. Opt-in (CORSIA_E2E_WEBKIT=1,
 // then `--project webkit-desktop` or `webkit-mobile`) because the default CI browser install does not include WebKit.
 const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 	? [{
@@ -53,7 +53,7 @@ const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
 	}, {
 		name: 'webkit-mobile',
-		testMatch: /(doc-remote-edit-anchor|doc-phone-tap-comment)\.spec\.ts$/,
+		testMatch: /(doc-remote-edit-anchor|doc-phone-tap-comment|doc-comment-sheet-pull-up|doc-comment-list-sheet-pull-up)\.spec\.ts$/,
 		use: { ...devices['iPhone 15'] },
 	}]
 	: [];

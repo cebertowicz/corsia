@@ -51,6 +51,6 @@ function holdSubject(area: HTMLElement | null, now: string): boolean {
 	const edge = (view.dom.closest<HTMLElement>('.doc') ?? view.scrollDOM).getBoundingClientRect().top;
 	const top = Math.min(Math.max(placeTop(view, pos), box.top - edge), box.bottom - edge - view.defaultLineHeight);
 	// A picked row is held even at the very top of the document, where the keeper would otherwise hold the start.
-	holdPlace(view, { from: pos, top, scrollTop: Math.max(1, view.scrollDOM.scrollTop) });
+	holdPlace(view, { from: pos, top, scrollTop: Math.max(1, view.scrollDOM.scrollTop) }, true);
 	return true;
 }

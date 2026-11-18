@@ -315,6 +315,31 @@ def test_reset_removes_completion_gates():
 
 
 @pytest.mark.asyncio
+async def test_delivery_delay_slows_the_start_after_admission_until_reset(monkeypatch):
+    import e2e_mock
+    import infra.thread_execution as thread_execution
+
+    calls = []
+
+    async def prepared(batch, **kwargs):
+        calls.append(batch)
+        return "prepared"
+
+    monkeypatch.setattr(thread_execution, "_prepare_batch", prepared)
+    monkeypatch.setattr(e2e_mock, "_prepare_batch_original", None)
+    monkeypatch.setattr(e2e_mock, "_delivery_delay", 0.0)
+
+    e2e_mock._set_delivery_delay(0.3)
+    pending = asyncio.ensure_future(thread_execution._prepare_batch("batch"))
+    await asyncio.sleep(0.05)
+    assert calls == [] and not pending.done()
+    assert await pending == "prepared" and calls == ["batch"]
+
+    e2e_mock._reset_mock_state()
+    assert await asyncio.wait_for(thread_execution._prepare_batch("again"), 0.1) == "prepared"
+
+
+@pytest.mark.asyncio
 async def test_reset_releases_old_gate_waiter_and_keeps_new_gate_closed():
     from e2e_mock import (
         _next_reply,
