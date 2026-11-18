@@ -268,7 +268,9 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		const notes = (await page.locator('.cm-md-table th', { hasText: 'Notes' }).boundingBox())!;
 		const widget = (await table.boundingBox())!;
 		expect(notes.y - widget.y, 'setup: the table has padding above its header').toBeGreaterThan(4);
-		const point = { x: notes.x + notes.width / 2, y: widget.y + 2 };
+		const header = (await page.locator('.document-header').boundingBox())!;
+		const point = { x: notes.x + notes.width / 2, y: Math.max(widget.y + 2, header.y + header.height + 1) };
+		expect(point.y, 'setup: the clear point is still above the table header').toBeLessThan(notes.y);
 		expect(await table.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), point), 'setup: the padding is unobstructed').toBe(true);
 		await page.touchscreen.tap(point.x, point.y);
 		await settled(page);

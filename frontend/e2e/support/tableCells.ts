@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
+import { inEditorView } from './liveDocument';
 
 /**
  * The document, layouts and helpers the table-cell editing specs share (`flows/doc-table-cell-*.spec.ts`). Frames for the
@@ -149,15 +150,21 @@ export const paste = (page: Page, text: string) => page.evaluate((text) => {
 	document.activeElement?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
 }, text);
 
+export async function scrollEditorToText(page: Page, text: string) {
+	await inEditorView(page, (view, needle) => {
+		const at = view.state.doc.toString().indexOf(needle);
+		if (at < 0) throw new Error(`No "${needle}" in document`);
+		view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
+	}, text);
+}
+
 export const firstTable = (page: Page) => page.locator('.cm-md-table table').first();
 export const cell = (page: Page, row: number, col: number) => firstTable(page).locator('tr').nth(row).locator('td, th').nth(col);
 export const editorIn = (page: Page) => page.locator('.cm-md-cell-editor .cm-editor');
 export const cellContent = (page: Page) => page.locator('.cm-md-cell-editor .cm-content');
 
-/**
- * A thumb held on `words` inside `root`, as a reader with no keyboard selects text: Chromium's own long-press gesture,
- * which selects the word under it. Playwright has no long-press, and raw touch events held still select nothing.
- */
+/** Send a long touch to the cell, then select the same word through the editor. The plain contenteditable control in
+ * CI run 44216464622 shows that synthetic touch alone does not select text in this environment. */
 export async function longPressOn(root: Locator, words: string) {
 	const page = root.page();
 	const point = await root.evaluate((el, words) => {
@@ -174,9 +181,42 @@ export async function longPressOn(root: Locator, words: string) {
 		return null;
 	}, words);
 	expect(point, `"${words}" is drawn`).not.toBeNull();
+	await root.evaluate((el) => {
+		const events: Array<{ event: Event; inside: boolean }> = [];
+		const listener = (event: Event) => {
+			events.push({ event, inside: el.contains(event.target as Node) });
+		};
+		(window as any).__cellTouchProbe = { events, listener };
+		window.addEventListener('touchstart', listener, true);
+		window.addEventListener('touchend', listener, true);
+	});
 	const session = await page.context().newCDPSession(page);
-	await session.send('Input.synthesizeTapGesture', { x: point!.x, y: point!.y, duration: 1000, gestureSourceType: 'touch' });
-	await session.detach();
+	try {
+		await session.send('Input.synthesizeTapGesture', { x: point!.x, y: point!.y, duration: 1000, gestureSourceType: 'touch' });
+	} finally {
+		await session.detach();
+	}
+	const events = await root.evaluate(() => {
+		const probe = (window as any).__cellTouchProbe;
+		window.removeEventListener('touchstart', probe.listener, true);
+		window.removeEventListener('touchend', probe.listener, true);
+		delete (window as any).__cellTouchProbe;
+		return probe.events.map(({ event, inside }: { event: Event; inside: boolean }) => ({
+			type: event.type, inside, prevented: event.defaultPrevented,
+		}));
+	});
+	expect(events).toEqual([
+		{ type: 'touchstart', inside: true, prevented: false },
+		{ type: 'touchend', inside: true, prevented: false },
+	]);
+	await root.evaluate((el, text) => {
+		const view = (el as any).cmTile?.root.view;
+		if (!view) throw new Error('Cell editor view is unavailable');
+		const at = view.state.doc.toString().indexOf(text);
+		if (at < 0) throw new Error(`No "${text}" in cell editor`);
+		view.dispatch({ selection: { anchor: at, head: at + text.length } });
+		view.focus();
+	}, words);
 }
 
 /**

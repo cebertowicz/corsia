@@ -83,12 +83,12 @@ for (const layout of LAYOUTS) {
 			const keys = await keysOf(page);
 
 			// A word selected inside the open cell, as in prose: the selection reaches the document, so the comment offer appears.
-			// On a phone the reader has no keyboard: a long press on the word selects it.
+			// On a phone, check the long touch and select that word in the cell editor.
 			if (layout.project === 'chromium-mobile') {
 				await cell(page, 3, 1).tap({ position: { x: 6, y: 6 } });
 				await editorInCell(page, cell(page, 3, 1));
 				await longPressOn(cellContent(page), 'long');
-				await expect.poll(() => page.evaluate(() => document.getSelection()?.toString()), { message: 'the long press selected the word' }).toBe('long');
+				await expect.poll(() => page.evaluate(() => document.getSelection()?.toString()), { message: 'the cell editor selected the word' }).toBe('long');
 			} else {
 				await cell(page, 3, 1).click({ position: { x: 6, y: 6 } });
 				await editorInCell(page, cell(page, 3, 1));
