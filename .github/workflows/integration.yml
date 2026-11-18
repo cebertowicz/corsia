@@ -149,15 +149,41 @@ jobs:
           done
           exit 1
 
+      - name: Run managed connection boundary probes
+        id: managed-boundary
+        continue-on-error: true
+        run: |
+          cd backend
+          ../.venv/bin/python -m pytest tests/test_managed_connection_boundary_macos.py \
+            -m "integration" --tb=short -q -rs
+
+      - name: Run managed connection private-root probes
+        id: managed-private-root
+        continue-on-error: true
+        run: |
+          cd backend
+          ../.venv/bin/python -m pytest tests/test_managed_connection_private_root_macos.py \
+            -m "integration" --tb=short -q -rs
+
       - name: Run integration tests
         run: |
           set -e
           cd backend
           ../.venv/bin/python -m pytest -m "integration" \
+            --ignore=tests/test_managed_connection_boundary_macos.py \
+            --ignore=tests/test_managed_connection_private_root_macos.py \
             --ignore=tests/test_host_access_reviewer_live_inference.py \
             --tb=short -q -rs \
             --durations=25 \
             -x
+
+      - name: Report managed connection boundary probe failure
+        if: ${{ always() && steps.managed-boundary.outcome == 'failure' }}
+        run: exit 1
+
+      - name: Report managed connection private-root probe failure
+        if: ${{ always() && steps.managed-private-root.outcome == 'failure' }}
+        run: exit 1
 
   live-reviewer:
     needs: relevance
@@ -253,5 +279,6 @@ jobs:
           export CORSIA_WORKSPACE CORSIA_STATE_DIR
           export CORSIA_TEST_MODE=1
           cd backend
-          ../.venv/bin/python -m pytest tests/test_host_access_reviewer_live_inference.py \
+          ../.venv/bin/python -m pytest tests/test_managed_connection_boundary_macos.py \
+            tests/test_host_access_reviewer_live_inference.py \
             --tb=short -q
