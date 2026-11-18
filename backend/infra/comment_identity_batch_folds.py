@@ -54,7 +54,8 @@ def _recount(conn: sqlite3.Connection, batch_id: str) -> None:
 
 def _record(conn: sqlite3.Connection, table: str, row_id: str, original: dict, moved_to: str, now: str) -> None:
     conn.execute(
-        f"INSERT OR IGNORE INTO {LEDGER}(table_name, row_id, original, moved_to, moved_at) VALUES (?,?,?,?,?)",
+        "INSERT OR IGNORE INTO comment_identity_moves(table_name, row_id, original, moved_to, moved_at)"
+        " VALUES (?,?,?,?,?)",
         (table, row_id, json.dumps(original), moved_to, now),
     )
 
@@ -142,11 +143,11 @@ def reverse_folds(conn: sqlite3.Connection, counts: dict[str, int]) -> None:
             if item["joined"]:
                 conn.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
                              (target_id, item["comment_id"]))
-            conn.execute(f"DELETE FROM {LEDGER} WHERE table_name=? AND row_id=?", (FOLDED_ITEMS, entry_id))
+            conn.execute("DELETE FROM comment_identity_moves WHERE table_name=? AND row_id=?", (FOLDED_ITEMS, entry_id))
         if conn.execute(f"SELECT 1 FROM {LEDGER} WHERE table_name=? AND row_id=?", (MOVED_EDIT, batch_id)).fetchone():
             conn.execute("UPDATE doc_feedback_edit_items SET batch_id=? WHERE batch_id=?", (batch_id, target_id))
-            conn.execute(f"DELETE FROM {LEDGER} WHERE table_name=? AND row_id=?", (MOVED_EDIT, batch_id))
+            conn.execute("DELETE FROM comment_identity_moves WHERE table_name=? AND row_id=?", (MOVED_EDIT, batch_id))
         _recount(conn, batch_id)
         _recount(conn, target_id)
-        conn.execute(f"DELETE FROM {LEDGER} WHERE table_name=? AND row_id=?", (FOLDS, batch_id))
+        conn.execute("DELETE FROM comment_identity_moves WHERE table_name=? AND row_id=?", (FOLDS, batch_id))
         counts["reversed"] += 1
