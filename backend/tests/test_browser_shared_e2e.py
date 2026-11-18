@@ -115,12 +115,29 @@ document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title 
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
 
+# A form submitted on Enter, whose choice and typed text land in the title (a saved sign-in cannot read page text).
+CHOICE_FORM = """<!doctype html><title>Choice form</title>
+<form><select id=choice><option value=a>Ay</option><option value=b>Bee</option></select><input id=q value=x>
+<div id=hover>Over</div><div style="height:3000px"></div></form>
+<script>
+document.querySelector('form').addEventListener('submit', event => {
+  event.preventDefault(); document.title = 'sent:' + document.querySelector('#choice').value + ':' + document.querySelector('#q').value;
+});
+document.querySelector('#hover').addEventListener('mouseover', () => { window.hovered = true; });
+</script>"""
+
+# A dropdown and a button under a white overlay, and an option label that must not reach an agent.
+COVERED = """<!doctype html><title>Covered fixture</title>
+<div style="position:relative"><select id=cs><option value=x>Secret option label</option></select>
+<button id=cb>Secret button text</button><div style="position:absolute;inset:0;background:white"></div></div>"""
+
 
 @contextmanager
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/choice.html": CHOICE_FORM.encode(), "/covered.html": COVERED.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
 
     class Handler(BaseHTTPRequestHandler):
@@ -254,6 +271,111 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
         browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
         import shutil
         shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path, monkeypatch):
+    """F1: on a session with a saved sign-in, select, scroll, hover and press act in the page; a key off the list is refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        # Linux refuses a saved profile at admission, so the job's browser would run without one. The record
+        # still carries it, and that is what puts a session behind the saved-sign-in command rules.
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verbs-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"))).startswith("Error:")
+            record = owner._sessions[thread_id].record
+            assert record.profile or record.copy_of
+            with pytest.raises(BrowserSessionError):
+                await owner.run(thread_id, ("eval", "1"), session="existing")
+            assert await owner.run(thread_id, ("select", "#choice", "b"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("hover", "#hover"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("scroll", "down", "300"), session="existing") == "Done."
+            assert "clicked" in await owner.run(thread_id, ("click", "#q"), session="existing")
+            with pytest.raises(BrowserSessionError, match="Enter, Tab, Shift\\+Tab"):
+                await owner.run(thread_id, ("press", "Control+a"), session="existing")
+            assert await owner.run(thread_id, ("press", "Enter"), session="existing") == "Done."
+            assert "sent:b:x" in await owner.run(thread_id, ("get", "title"), session="existing")
+    finally:
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document(tmp_path, monkeypatch):
+    """F1: going back to an address with a #fragment can't restore what was typed, once the session held a page."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verbs-back-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-back", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            where = "location.pathname + location.hash"
+            await owner.run(thread_id, ("open", f"{origin}/choice.html"))
+            await owner.run(thread_id, ("open", f"{origin}/form.html#step"), session="existing")
+            await owner.run(thread_id, ("fill", "#field", "typed"), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "typed"
+            await owner.run(thread_id, ("open", f"{origin}/plain.html"), session="existing")
+            # The session has held a page (the password guard applied to an earlier visit).
+            browser_control._guarded_visits[thread_id] = {"earlier": browser_control.PasswordReadGuard("earlier", frozenset())}
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            # The same entry, address and fragment kept, with a fresh document.
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "old"
+            # The reload added no entry and dropped no forward entry: back gets past it, and forward returns.
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/choice.html"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/plain.html"
+    finally:
+        browser_control._guarded_visits.pop(thread_id, None)
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_sign_in_shows_an_agent_no_page_text_in_a_target_verbs_error(tmp_path, monkeypatch):
+    """F1: agent-browser names the element covering a target; the agent gets a fixed text for it."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_agent_verbs as verbs, browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verb-errors-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verb-errors", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            await owner.run(thread_id, ("open", f"{origin}/covered.html"))
+            for verb in ("hover", "select", "scrollintoview"):
+                tail = ("Secret option label",) if verb == "select" else ()
+                assert await owner.run(thread_id, (verb, "#nope", *tail), session="existing") == verbs.NOT_FOUND
+            for target in ("#cs", "#cb"):
+                assert await owner.run(thread_id, ("hover", target), session="existing") == verbs.COVERED
+            for verb, target in (("select", "#cs"), ("scrollintoview", "#cb")):
+                tail = ("Secret option label",) if verb == "select" else ()
+                result = await owner.run(thread_id, (verb, target, *tail), session="existing")
+                assert result == verbs.ACKNOWLEDGED and "Secret" not in result
+    finally:
+        await owner.shutdown()
 
 
 async def cdp_value(owner: BrowserSessionOwner, thread_id: str, expression: str):

@@ -176,17 +176,14 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "memory", status="suspect", summary="List knowledge base entries",
         activity="Listing knowledge",
     ),
-    "browser_open": _Entry(
-        "browser", summary="Open a URL in the browser", activity="Opening",
-    ),
+    "browser_open": _Entry("browser", summary="Open a URL in the browser", activity="Opening"),
     "browser_snapshot": _Entry(
         "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
-    "browser_click": _Entry(
-        "browser", summary="Click a page element", activity="Clicking",
-    ),
+    "browser_click": _Entry("browser", summary="Click a page element", activity="Clicking"),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
+    "browser_input": _Entry("browser", summary="Press a key, choose a dropdown option, scroll, hover, go back or forward", activity="Using the page"),
     "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",

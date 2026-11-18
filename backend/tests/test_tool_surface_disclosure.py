@@ -116,7 +116,7 @@ def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
 
     assert sorted(packed + CORE) == sorted(registry.tool_names)
     assert len(packed) == len(set(packed))
-    assert all(0 < len(names) <= 10 for names in members.values())
+    assert all(0 < len(names) <= 11 for names in members.values())
     assert list(members) == list(TOOL_PACKS)
     for name in packed:
         assert TOOL_CATALOG[name].summary
