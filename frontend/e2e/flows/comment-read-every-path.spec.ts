@@ -474,7 +474,7 @@ test('chat 1440 with the sidebar and panel open: an answer that arrived before i
 
 // ---------------------------------------------------------------- an image thread opened from the document
 for (const way of ['card', 'tag'] as const) {
-	test(`image in a document 1440: a thread opened by its ${way === 'card' ? 'card in the margin' : 'tag on the image'} is read, and an agent's reply waits in the writer line while it is open`, async ({ page, request }, info) => {
+	test(`image in a document 1440: a thread opened by its ${way === 'card' ? 'card in the margin' : 'tag on the image'} is read, an agent's reply waits in the writer line while the person holds it, and a reply that arrives while it is open is read when the image closes`, async ({ page, request }, info) => {
 		test.skip(!mocked() || !onProject(info.project.name, 1440));
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -516,10 +516,18 @@ for (const way of ['card', 'tag'] as const) {
 		// so an agent's reply waits in the line instead of arriving while the thread is open, as on the document margin.
 		await expect.poll(() => held().includes(id), { message: 'the server holds the thread for the person' }).toBe(true);
 		expect(await agentDocReply(request, id, seeded.sessionId, 'A later answer.'), 'the reply waits while the image thread is open').toBeNull();
+		// The person answers in the thread. Sending lets the turn go, so the waiting reply posts while the image is still open,
+		// and it counts as unread: an agent's reply is the person's to read once they have replied in its thread.
+		const reply = overlay(page).getByPlaceholder('Reply…').first();
+		await reply.fill('Which part?');
+		await overlay(page).getByRole('button', { name: 'Send reply', exact: true }).first().click();
+		await expect(overlay(page)).toContainText('A later answer.', { timeout: 15_000 });
+		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { message: 'the reply arrives unread while the image is open' }).toBe(true);
+		await page.waitForTimeout(SEEN_FOR_MS);
+		expect(await threadUnread(request, seeded.artifactId, id), 'arriving while open reads nothing yet').toBe(true);
 		for (let i = 0; i < 3 && await overlay(page).isVisible(); i += 1) { await page.keyboard.press('Escape'); await page.waitForTimeout(400); }
 		await expect(overlay(page)).toBeHidden();
-		await page.waitForTimeout(SEEN_FOR_MS);
-		expect(await threadUnread(request, seeded.artifactId, id), 'closing leaves the thread read').toBe(false);
+		await expect.poll(() => threadUnread(request, seeded.artifactId, id), { timeout: 10_000, message: 'closing reads the reply that arrived while open' }).toBe(false);
 	});
 }
 
