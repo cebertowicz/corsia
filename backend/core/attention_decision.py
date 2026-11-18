@@ -27,7 +27,7 @@ def measure_decision(thread_id: str, arguments: dict, result: Any, get_db: Calla
             return None
         actor = PlanActor(thread_id, str(actor_row["user_id"]), actor_row["project_id"])
         _, decision, _, _ = resolve_decision(db, decision_id, actor)
-        pieces = [decision[key] for key in ("context", "tradeoff", "rationale")]
+        pieces = [decision[key] for key in ("title", "context", "tradeoff", "rationale")]
         for option in decision["options"]:
             pieces.extend((option["label"], option["detail"]))
         if not all(isinstance(piece, str) for piece in pieces):

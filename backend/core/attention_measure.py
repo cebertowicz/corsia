@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+
 #: Average adult silent reading rate for English non-fiction (Brysbaert 2019,
 #: "How many words do we read per minute?", Journal of Memory and Language).
 #: Reading to judge is slower, so the time stated is a floor.
@@ -30,6 +32,7 @@ _WORD = re.compile(r"[^\W_]+")
 #: ``_WORD`` match however long, so they are counted as characters instead.
 _UNSPACED = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 _IMAGE = re.compile(r"!\[|<img\b", re.IGNORECASE)
+_MARKDOWN = MarkdownIt()
 _BREAKS = (" ", "\n", "\t", "\r")
 
 #: Bytes read at a time.
@@ -57,11 +60,26 @@ class Measure:
 
 def measure_text(text: str) -> Measure:
     """Count the visible text of an update or decision."""
+    visible = _visible_text(text)
     return Measure(
-        words=len(_WORD.findall(_UNSPACED.sub(" ", text))),
-        unspaced=len(_UNSPACED.findall(text)),
+        words=len(_WORD.findall(_UNSPACED.sub(" ", visible))),
+        unspaced=len(_UNSPACED.findall(visible)),
         images=len(_IMAGE.findall(text)),
     )
+
+
+def _visible_text(text: str) -> str:
+    """Read Markdown's text tokens, leaving link destinations in their attributes."""
+    parts: list[str] = []
+    for block in _MARKDOWN.parse(text):
+        if block.children is not None:
+            parts.extend(
+                token.content for token in block.children
+                if token.type in {"text", "code_inline", "html_inline", "image"}
+            )
+        elif block.type in {"fence", "code_block", "html_block"}:
+            parts.append(block.content)
+    return " ".join(parts)
 
 
 def measure_file(path: Path) -> Measure | None:

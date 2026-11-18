@@ -1,8 +1,12 @@
 """Notice the text saved in updates and projected by plan decisions."""
 
 import json
+import sqlite3
+
+import pytest
 
 import core.attention_notice as notice
+from doceditor.document_scope import ProjectNotFound
 from plans import public
 from tests.test_attention_notice import _Open
 from tests.test_attention_notice_update_links import _post, workspace  # noqa: F401
@@ -30,11 +34,16 @@ def test_saved_update_and_replacement_use_saved_text(db, workspace, monkeypatch)
     assert events[0]["properties"]["handover"] == "update"
     assert events[0]["properties"]["update_words"] == 3
     assert events[0]["properties"]["waiting_documents"] is None
+    assert notice.attention_notice(
+        thread_id="owner", tool_name="post_update", arguments=args, result="Error: refused",
+    ) is None
+    assert len(events) == 1
 
 
-def test_notice_failure_does_not_change_a_saved_call(monkeypatch, caplog):
+@pytest.mark.parametrize("error", [sqlite3.OperationalError, ProjectNotFound])
+def test_notice_failure_does_not_change_a_saved_call(monkeypatch, caplog, error):
     def fail_open():
-        raise RuntimeError("database unavailable")
+        raise error("read unavailable")
 
     monkeypatch.setattr(notice, "get_db", fail_open)
     with caplog.at_level("WARNING", logger=notice.__name__):
@@ -46,6 +55,19 @@ def test_notice_failure_does_not_change_a_saved_call(monkeypatch, caplog):
     assert "could not project post_update" in caplog.text
 
 
+@pytest.mark.parametrize("error", [RuntimeError, KeyError])
+def test_programming_error_is_not_hidden(monkeypatch, error):
+    def fail_open():
+        raise error("programming error")
+
+    monkeypatch.setattr(notice, "get_db", fail_open)
+    with pytest.raises(error, match="programming error"):
+        notice.attention_notice(
+            thread_id="owner", tool_name="post_update", arguments={},
+            result="Update saved as message id-1.",
+        )
+
+
 def test_decision_draft_and_update_are_read_from_public_projection(db, monkeypatch):
     events = []
     monkeypatch.setattr(notice, "get_db", lambda: _Open(db))
@@ -55,18 +77,19 @@ def test_decision_draft_and_update_are_read_from_public_projection(db, monkeypat
     receipt = json.dumps({"decision": decision})
     draft = notice.attention_notice(thread_id="worker", tool_name="plan_decision", arguments={"operation": "draft"}, result=receipt)
     assert draft == (
-        "[CORSIA attention notice] Your decision: 39 words, at least 1 minute to read.\n"
+        f"[CORSIA attention notice] Your decision: {39 + len(decision['title'].split())} words, at least 1 minute to read.\n"
         + CHECK
     )
     assert events[-1]["properties"]["handover"] == "decision"
     assert events[-1]["properties"]["waiting_documents"] is None
-    previous_words = events[-1]["properties"]["words"]
+    assert events[-1]["properties"]["words"] is None
+    previous_words = events[-1]["properties"]["decision_words"]
     changed = public.update_decision(
         decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
         actor=_thread_actor(), provenance="test", db=db, context="A much shorter context.",
     ).result["decision"]
     updated = notice.attention_notice(thread_id="worker", tool_name="plan_decision", arguments={"operation": "update"}, result=json.dumps({"decision": changed}))
     assert updated and updated.endswith(CHECK)
-    assert events[-1]["properties"]["words"] < previous_words
+    assert events[-1]["properties"]["decision_words"] < previous_words
     assert notice.attention_notice(thread_id="worker", tool_name="plan_decision", arguments={"operation": "update"}, result="Error: refused") is None
     assert len(events) == 2

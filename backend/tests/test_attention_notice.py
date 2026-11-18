@@ -330,7 +330,7 @@ def test_a_failed_read_leaves_the_result_alone_and_is_logged(db, events, tmp_pat
 
     with caplog.at_level("WARNING", logger=mod.__name__):
         assert _notice(arguments) is None
-    assert "could not read what plan_update handed over" in caplog.text
+    assert "could not project plan_update" in caplog.text
     assert events == []
 
 

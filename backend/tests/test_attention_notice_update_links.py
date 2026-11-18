@@ -212,7 +212,7 @@ def test_a_failed_read_leaves_the_receipt_alone_and_is_logged(db, events, worksp
         assert mod.attention_notice(
             thread_id="owner", tool_name="post_update", arguments=arguments, result=result,
         ) is None
-    assert "could not read what post_update linked" in caplog.text
+    assert "could not project post_update" in caplog.text
     assert events == []
 
 
