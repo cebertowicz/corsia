@@ -54,7 +54,7 @@ for (const width of [1440, 393]) {
 				test.skip(testInfo.project.name !== 'chromium-desktop');
 				test.setTimeout(180_000);
 				await delayedCaretReveal(page);
-				const agentContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+				const agentContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false });
 				try {
 					const agent = await openAgentBeside(request, await agentContext.newPage(), `Reading place ${Date.now()}`, promoted);
 					const tree = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
