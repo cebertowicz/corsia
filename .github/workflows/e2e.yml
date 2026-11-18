@@ -22,6 +22,11 @@ on:
         type: string
         required: false
         default: ''
+      probe_mode:
+        description: 'Disposable phone probe: dry or measure; empty runs normal gates.'
+        type: string
+        required: false
+        default: ''
 
 # Each hosted job has its own VM, so superseded runs on this ref can cancel
 # without affecting another ref's E2E owner.
@@ -31,6 +36,7 @@ concurrency:
 
 jobs:
   e2e:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.probe_mode == '' }}
     name: Playwright UI-E2E (mock) ${{ matrix.shard }}/3
     runs-on: ubuntu-24.04
     # Inside a job the suite is serial (workers: 1, fullyParallel: false, because the mock backend is shared), so it is split
@@ -170,7 +176,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: |
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && inputs.probe_mode == '')
       || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
@@ -207,3 +213,83 @@ jobs:
             exit 1
           fi
           bash scripts/verify-mock-fidelity
+
+  phone-probe:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.probe_mode == 'dry' || inputs.probe_mode == 'measure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+    env:
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
+      CORSIA_E2E_MOCK: '1'
+      CORSIA_E2E_MODEL: 'mock/test-model'
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_E2E_WEBKIT: '1'
+      CORSIA_PROBE_PHONE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record delivered configuration
+        env:
+          PROBE_REF: ${{ github.ref }}
+          PROBE_SHA: ${{ github.sha }}
+          PROBE_MODE: ${{ inputs.probe_mode }}
+          PROBE_ENGINE: ${{ matrix.engine }}
+        run: |
+          mkdir -p probe-output
+          git rev-parse HEAD > probe-output/checkout-sha.txt
+          printf 'ref=%s\nevent_sha=%s\nmode=%s\nengine=%s\nproject=probe-%s-phone\nviewport=393x852\n' "$PROBE_REF" "$PROBE_SHA" "$PROBE_MODE" "$PROBE_ENGINE" "$PROBE_ENGINE" | tee probe-output/config.txt
+      - name: Assign isolated E2E ports
+        if: ${{ inputs.probe_mode == 'measure' }}
+        run: scripts/assign-e2e-runner-ports
+      - name: Prepare isolated workspace
+        if: ${{ inputs.probe_mode == 'measure' }}
+        run: |
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+      - uses: actions/setup-python@v5
+        if: ${{ inputs.probe_mode == 'measure' }}
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.probe_mode == 'measure' }}
+        with:
+          node-version: '24'
+      - name: Install backend deps
+        if: ${{ inputs.probe_mode == 'measure' }}
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r backend/requirements.txt
+      - name: Install frontend deps
+        if: ${{ inputs.probe_mode == 'measure' }}
+        working-directory: frontend
+        run: npm ci
+      - name: Install browsers
+        if: ${{ inputs.probe_mode == 'measure' }}
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium webkit
+      - name: Measure
+        if: ${{ inputs.probe_mode == 'measure' }}
+        env:
+          PROBE_ENGINE: ${{ matrix.engine }}
+        run: |
+          set -uo pipefail
+          bash scripts/e2e-local --grep '@probe:phone-reading' --project "probe-${PROBE_ENGINE}-phone" 2>&1 | tee "probe-output/${PROBE_ENGINE}.log"
+          probe_rc="${PIPESTATUS[0]}"
+          exit "$probe_rc"
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-probe-${{ matrix.engine }}-${{ github.run_attempt }}
+          path: |
+            probe-output/
+            frontend/test-results/probe-*.jsonl
+            frontend/test-results/**/trace.zip
+            frontend/test-results/**/error-context.md
+            frontend/test-results/**/*.png
+          if-no-files-found: warn
+          retention-days: 14

@@ -33,6 +33,7 @@
 	import { jumpToComment, type JumpTarget } from '$lib/cm/comment-jump';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import { captureDocumentPlace, dispatchKeepingPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
+	import { createPhoneProbe } from '$lib/probePhoneReadingArms';
 
 	let {
 		value = $bindable(''),
@@ -206,6 +207,7 @@
 		binding = activeText ? liveDocumentBinding(activeText) : undefined;
 		// The save key is the document's in prose and in an open table cell alike; a cell's edit is in the document as it is typed.
 		const saveKey = keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { onSave?.(); return true; } }]);
+		const probe = createPhoneProbe();
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
@@ -232,6 +234,9 @@
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,
+				// PROBE ONLY: spread before roComp on purpose — EditorState.readOnly keeps the FIRST provider, so an arm placed
+				// after roComp's readOnly.of(false) would be ignored and read as a setting that never applied.
+				...probe.extensions,
 				EditorView.contentAttributes.of({ spellcheck: 'true' }),
 				roComp.of(EditorState.readOnly.of(readOnly)),
 				EditorView.domEventHandlers({
@@ -265,6 +270,7 @@
 			]
 		});
 		view = v;
+		probe.publish(v); // PROBE ONLY: the probe's only way to read this view's own facets.
 		const stopKeepingPlace = keepPlaceWhenEditorMoves(v);
 		onLayout?.();
 		return () => { stopKeepingPlace(); v.destroy(); binding?.destroy(); };

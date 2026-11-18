@@ -58,6 +58,22 @@ const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 	}]
 	: [];
 
+// PROBE ONLY (probe/phone-reading-selection-ci): the same document probe at 393x852 on Linux Chromium (mobile emulation +
+// touch) and Linux WebKit. Gated on CORSIA_PROBE_PHONE so no ordinary CI run ever sees these projects. The viewport is set
+// explicitly rather than trusted from the device table, and the probe itself measures whether (pointer: coarse) actually
+// matches, because the whole reading of arm A depends on it.
+const probeProjects = process.env.CORSIA_PROBE_PHONE === '1'
+	? [{
+		name: 'probe-chromium-phone',
+		// browserName is stated outright rather than left to the device preset's defaultBrowserType, which the spread would
+		// otherwise have to override correctly for the engine choice to mean anything.
+		use: { ...devices['iPhone 15'], browserName: 'chromium' as const, viewport: { width: 393, height: 852 } },
+	}, {
+		name: 'probe-webkit-phone',
+		use: { ...devices['iPhone 15'], browserName: 'webkit' as const, viewport: { width: 393, height: 852 } },
+	}]
+	: [];
+
 export default defineConfig({
 	testDir: './e2e',
 	// Stress video/measurement runs are on-demand, never part of the default CI flow.
@@ -104,6 +120,7 @@ export default defineConfig({
 			},
 		},
 		...webkitProjects,
+		...probeProjects,
 	],
 	webServer: [
 		{
