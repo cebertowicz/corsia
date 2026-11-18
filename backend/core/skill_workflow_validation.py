@@ -29,6 +29,16 @@ _WORKFLOW_STEP_KEYS = frozenset(
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
 
 
+def declares_workflow(corsia: object) -> bool:
+    """Whether a skill's CORSIA data declares a workflow: a step list, or a worker's result or
+    worker with no steps. The one rule the skills index, measure_sync, script schedules and
+    the script runner share."""
+    workflow = corsia.get("workflow") if isinstance(corsia, dict) else None
+    return isinstance(workflow, dict) and (
+        isinstance(workflow.get("steps"), list) or "result" in workflow or "worker" in workflow
+    )
+
+
 def text_value(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()

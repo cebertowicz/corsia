@@ -40,6 +40,7 @@ from core.lesson_files import raw_sha256, read_trial
 from core.lesson_trials import lesson_block, offer_refusal
 from core.skill_registry_types import SkillRow
 from core.skill_scanning import omitted_row
+from core.skill_workflow_validation import declares_workflow
 
 OVERRIDDEN = "overridden by a more specific skill"
 UNCHECKED = "its review could not be checked"
@@ -78,9 +79,8 @@ def index_line(row: SkillRow) -> str:
 
 
 def is_workflow(row: SkillRow) -> bool:
-    """Whether ``row`` is a workflow skill: its CORSIA data carries a step list."""
-    workflow = row.corsia.get("workflow") if isinstance(row.corsia, dict) else None
-    return isinstance(workflow, dict) and isinstance(workflow.get("steps"), list)
+    """Whether ``row`` is a workflow skill, by the shared rule in :func:`declares_workflow`."""
+    return declares_workflow(row.corsia)
 
 
 def skill_root(name: str, path: object) -> str | None:

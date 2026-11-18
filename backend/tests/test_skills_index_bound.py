@@ -254,6 +254,14 @@ def test_a_workflow_keeps_its_description_whatever_its_name_sorts_to(monkeypatch
     assert lines.count(header) == 1
 
 
+def test_a_worker_workflow_with_no_steps_is_marked_a_workflow(monkeypatch):
+    worker = {"workflow": {"result": {"type": "object"}}}
+    workflow = _row("zz-worker-run", "workspace", "workspace", "Run the worker.", corsia=worker)
+    lines = (_index(monkeypatch, [workflow]).prompt_content or "").splitlines()
+
+    assert "- zz-worker-run (workflow): Run the worker." in lines
+
+
 def test_workflows_past_the_limit_are_marked_in_the_names_only_list(monkeypatch):
     workflows = [
         _row(f"flow-{number:02}", "workspace", "workspace", corsia=_WORKFLOW) for number in range(41)
