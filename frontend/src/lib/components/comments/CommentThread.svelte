@@ -147,7 +147,17 @@
 	const { openThread, openFromFocus, focusQuietly } = createThreadOpen(() => comment, () => chatSurface, stamp);
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	$effect(() => { if (flat && !inMargin && !inList && newestReply && el) openAtNewestReply(el, newestReply); });
+	/** A thread opened on its own, in a sheet or popover: not a margin card, nor one row of a list. */
+	const onItsOwn = $derived(flat && !inMargin && !inList);
+	// Once per open of its sheet or popover, not once per card: resolving, re-opening or deciding swaps the card inside the
+	// same open, and none of these opens it.
+	let atNewestDone = false;
+	const atNewest = () => { if (onItsOwn && newestReply && el) { atNewestDone = true; openAtNewestReply(el, newestReply); } };
+	$effect(() => { if (!atNewestDone) atNewest(); });
+	/** Zero-length, on one mark outside the card's branches: only its sheet or popover closing over it and opening again plays it, a reopen during the close included. */
+	const withSurface = (_mark: Element) => ({});
+	let closedOver = false;
+	const reopened = () => { if (closedOver) atNewest(); closedOver = false; };
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
 	// Opening reads what is unread at that moment: a chat thread its caller opened, or a thread the person picked (a click
@@ -288,6 +298,7 @@
 		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />{/if}
 	</div>
 {/if}
+{#if onItsOwn}<span hidden data-surface-mark transition:withSurface|global onoutrostart={() => (closedOver = true)} onintrostart={reopened}></span>{/if}
 
 <style>
 	.ct {
