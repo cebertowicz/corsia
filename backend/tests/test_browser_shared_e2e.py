@@ -663,10 +663,16 @@ async def test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
-            # The snapshot lists the page's embed first and the nested one last.
-            ref = await frame_link_ref(owner, thread_id, links=2)
-            with pytest.raises(browser_dom_write.DomWriteRefused):
-                await owner.run(thread_id, ("click", ref), session="existing")
+            try:
+                # The snapshot lists the page's embed first and the nested one last.
+                ref = await frame_link_ref(owner, thread_id, links=2)
+            except AssertionError:
+                # agent-browser 0.31.2 lists no link in any frame on such a page, so no ref can name the nested one.
+                snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+                assert not re.findall(r'link \\?"Go\\?"', snapshot), snapshot
+            else:
+                with pytest.raises(browser_dom_write.DomWriteRefused):
+                    await owner.run(thread_id, ("click", ref), session="existing")
             assert await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks") == 0
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
