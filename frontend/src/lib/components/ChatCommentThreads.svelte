@@ -54,8 +54,11 @@
 			body: JSON.stringify({ assistant_message_id: answer.assistant_message_id }),
 		});
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
-		messages.update(current => current.map(row => row.id !== messageId ? row : {
-			...row, chat_comments: (row.chat_comments ?? []).map(item => item.cid !== comment.cid || item.user_message_id !== comment.user_message_id
+		// The row is found by the comment, not by `messageId`: a thread read as its popover or sheet closes stamps after the
+		// opener has let go of the message it showed.
+		const owns = (item: ChatComment) => item.cid === comment.cid && item.user_message_id === comment.user_message_id;
+		messages.update(current => current.map(row => !(row.chat_comments ?? []).some(owns) ? row : {
+			...row, chat_comments: (row.chat_comments ?? []).map(item => !owns(item)
 				? item : { ...item, answers: item.answers.map(entry => entry.author_kind === 'agent' && entry.user_message_id === answer.user_message_id && entry.cid === answer.cid && entry.created_at <= answer.created_at ? { ...entry, unread: false } : entry) }),
 		}));
 		await refreshChatReplyAttention(threadId);

@@ -294,6 +294,8 @@
 			const root = messageRoot();
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
+			// A press on the transcript away from any highlight or card lets the picked card go, as Escape does: a click outside closes it.
+			if (!hit && marginComments && selectedCommentId && !open && (document.getSelection()?.isCollapsed ?? true) && target && root?.contains(target) && !target.closest('.chat-margin')) { selectedCommentId = null; returnFocus = null; return; }
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
