@@ -119,6 +119,17 @@ async function reviewSurface(page: Page) {
 	};
 }
 
+function expectReviewPopoverPlacement(geometry: { panel: DOMRect; leaf: DOMRect; trigger: DOMRect }) {
+	const { panel, leaf, trigger } = geometry, gutter = 8;
+	expect(panel.left).toBeGreaterThanOrEqual(leaf.left + gutter - 0.5);
+	expect(panel.right).toBeLessThanOrEqual(leaf.right - gutter + 0.5);
+	expect(panel.top).toBeGreaterThanOrEqual(leaf.top + gutter - 0.5);
+	expect(panel.bottom).toBeLessThanOrEqual(leaf.bottom - gutter + 0.5);
+	if (trigger.left + panel.width <= leaf.right - gutter) expect(Math.abs(panel.left - trigger.left)).toBeLessThanOrEqual(2);
+	else if (trigger.right - panel.width >= leaf.left + gutter) expect(Math.abs(panel.right - trigger.right)).toBeLessThanOrEqual(2);
+	else { expect(panel.left).toBeLessThanOrEqual(trigger.left); expect(panel.right).toBeGreaterThanOrEqual(trigger.right); }
+}
+
 // Layout fixtures affect only the disposable CI mock database. Review creation,
 // cancellation and settlement below always cross the real API/service boundary.
 function setFeedbackFixture(artifactId: string, state: SendState) {
@@ -202,14 +213,27 @@ test('review surface switches at the document width boundary', async ({ page, re
 	await openDocument(page, doc, 820);
 	await settled(page);
 	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(600);
+	await saveEvidenceScreenshot(page, info, 'review-boundary-600-trigger', { fullPage: false });
 	await reviewTrigger(page).click();
-	await expect(page.locator('[data-adaptive-drawer]:has([data-review-surface])')).toBeVisible();
+	const drawer = page.locator('[data-adaptive-drawer]:has([data-review-surface])');
+	await expect(drawer).toBeVisible();
+	await settled(page);
+	const narrowBounds = await drawer.evaluate(panel => ({ panel: panel.getBoundingClientRect().toJSON(), leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(), trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON() }));
+	console.info('Review boundary 600:', JSON.stringify(narrowBounds));
+	await saveEvidenceScreenshot(page, info, 'review-boundary-600', { fullPage: false });
+	expect(narrowBounds.panel.right).toBeLessThanOrEqual(narrowBounds.leaf.right);
 	await page.getByRole('button', { name: 'Close', exact: true }).click();
 	await page.setViewportSize({ width: 1233, height: 900 });
 	await settled(page);
 	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(601);
 	await reviewTrigger(page).click();
-	await expect(page.locator('.popover:has([data-review-surface])')).toBeVisible();
+	const popover = page.locator('.popover:has([data-review-surface])');
+	await expect(popover).toBeVisible();
+	await settled(page);
+	const wideBounds = await popover.evaluate(panel => ({ panel: panel.getBoundingClientRect().toJSON(), leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(), trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON() }));
+	console.info('Review boundary 601:', JSON.stringify(wideBounds));
+	await saveEvidenceScreenshot(page, info, 'review-boundary-601', { fullPage: false });
+	expectReviewPopoverPlacement(wideBounds);
 });
 
 const composedFixtures = [
@@ -257,12 +281,30 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 			expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
 		}
 		await closeComments(page);
+		// Keep the overlaid Workspace case at 1280; close it at 1440 to exercise the wide document popover.
+		if (viewport === 'desktop-1440' && !(await page.locator('.pane').evaluate(element => element.classList.contains('collapsed')))) {
+			await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+			await settled(page);
+		}
 		await openDetails(page);
 		const trigger = reviewTrigger(page);
 		await trigger.click();
 		const surface = await reviewSurface(page);
 		expect(surface.narrow, `${viewport} document content width ${surface.contentWidth}`).toBe(expectedNarrow);
 		await expect(surface.panel).toBeVisible();
+		if (viewport === 'desktop-1280' || viewport === 'desktop-1440') {
+			await settled(page);
+			const geometry = await surface.panel.evaluate(panel => ({
+				panel: panel.getBoundingClientRect().toJSON(),
+				document: document.querySelector('.doc')!.getBoundingClientRect().toJSON(),
+				leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(),
+				workspace: document.querySelector('.pane')!.getBoundingClientRect().toJSON(),
+				trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON(),
+			}));
+			await info.attach('review-geometry', { body: JSON.stringify(geometry), contentType: 'application/json' });
+			console.info('Review geometry:', JSON.stringify({ viewport, theme, ...geometry }));
+			expectReviewPopoverPlacement(geometry);
+		}
 		const search = page.getByRole('combobox', { name: 'Add reviewers' });
 		await expect(search).toBeFocused();
 		// With all ten reviewers listed, each row leads with the agent's name and the footer stays inside the panel.
