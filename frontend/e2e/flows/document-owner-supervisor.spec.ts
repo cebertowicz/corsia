@@ -3,7 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/heldComments';
-import { detailsPanel, openDetails } from '../support/documentBar';
+import { detailsPanel, openDetails, togglePanel } from '../support/documentBar';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
@@ -290,7 +290,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 		], seeded.artifact);
 		await seeded.open(page);
 		const browse = page.getByRole('button', { name: 'Browse documents…' });
-		if (!(await browse.isVisible())) await page.getByRole('button', { name: 'Toggle panel' }).click();
+		if (!(await browse.isVisible())) await togglePanel(page);
 		await browse.evaluate((button: HTMLElement) => button.click());
 		await page.getByPlaceholder('Search docs…').fill('Project planning');
 		// This test's own rows: earlier tests on the same server seed documents with the same names.

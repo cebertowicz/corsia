@@ -523,8 +523,15 @@ test.describe('375px review sheet', () => {
 		await openComments(page, /^\d+ comments?\b/);
 		// So is every suggestion's Accept in the sheet.
 		const sheet = page.locator('[data-doc-comments-drawer]');
-		await expect(sheet.locator('.ct-suggestion-accept').first()).toBeVisible();
+		await settled(page);
+		const accepts = sheet.locator('.ct-suggestion-accept');
+		await expect(accepts).toHaveCount(2);
+		await expect(accepts.first()).toBeVisible();
 		await expectTouchTargets(sheet, '.ct-suggestion-accept', { min: 44, gap: 8 });
+		const secondAccept = accepts.nth(1);
+		await secondAccept.scrollIntoViewIfNeeded();
+		await expect(secondAccept).toBeInViewport({ ratio: 1 });
+		expect(await hitAtCentre(secondAccept)).toBe(true);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
 		await expect(page.locator('[data-doc-comments-drawer] [data-ask-card], [data-doc-comments-drawer] .review-bar')).toHaveCount(0);
 		await closeComments(page.locator('[data-doc-comments-drawer]'));

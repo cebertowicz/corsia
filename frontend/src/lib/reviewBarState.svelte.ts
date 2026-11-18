@@ -29,7 +29,6 @@ export function createReviewBarState() {
 	/** The layout a send came from: the sending bar keeps it, so nothing remounts under the user's hands. */
 	let sendingFrom = $state<'ask' | 'noting'>('ask');
 	let note = $state('');
-	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
 	let accepting = $state(false);
 	let failure = $state('');
 	/** The server refused a verdict without a note: the note stays required for this ask whatever the local count says. */
@@ -43,7 +42,7 @@ export function createReviewBarState() {
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
-		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null; noteDemanded = false;
+		read = null; phase = 'ask'; note = ''; failure = ''; receipt = null; noteDemanded = false;
 		return true;
 	}
 	async function load() {
@@ -65,7 +64,7 @@ export function createReviewBarState() {
 
 	/** Send the verdict; `from` is where a failed send returns to, with the note kept. */
 	async function answer(
-		verdict: ReviewVerdict,
+		verdict: 'approved' | 'changes_requested',
 		onSendStarted?: () => void,
 		onSendConfirmed?: (answer: ReviewAnswer) => void,
 	): Promise<ReviewAnswerOutcome> {
@@ -93,8 +92,6 @@ export function createReviewBarState() {
 				phase = 'stale';
 				await load();
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
-				// The note opens for the verdict that was refused, so sending it records that verdict.
-				if (verdict !== 'approved') noteFor = verdict;
 				noteDemanded = true; phase = 'noting'; failure = NOTE_NEEDED;
 			} else {
 				phase = from; failure = SEND_FAILED;
@@ -105,7 +102,6 @@ export function createReviewBarState() {
 	return {
 		get read() { return read; }, get phase() { return phase; }, get sendingFrom() { return sendingFrom; }, get receipt() { return receipt; },
 		get note() { return note; }, set note(value: string) { note = value; },
-		get noteFor() { return noteFor; }, set noteFor(value: typeof noteFor) { noteFor = value; },
 		get accepting() { return accepting; }, set accepting(value: boolean) { accepting = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
 		get visible() { return visible(); },

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
+import { expectQuietSave, observeSaveCue, proveSaveCue, routeDocumentSaves } from '../support/docSaveCue';
 import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown, openComments as openCommentsPill } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
@@ -38,8 +38,9 @@ async function seedCommentedDocument({ page, request }: { page: Page; request: A
 	return { title, commentUrl, commentId, artifactId, threadId };
 }
 
-test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request }, testInfo) => {
+test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request, context }, testInfo) => {
 	test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Uses the existing desktop Comments pane.');
+	const link = await routeDocumentSaves(context);
 	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
@@ -77,6 +78,12 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
 
 	const editor = page.locator('.cm-content');
+	// Prove the selector in a slow save, then reset samples before the quiet episode.
+	await proveSaveCue(page, link, async () => {
+		await editor.click();
+		await page.keyboard.press('ControlOrMeta+End');
+		await page.keyboard.type(' ');
+	});
 	await editor.click();
 	await page.keyboard.press('ControlOrMeta+A');
 	await page.keyboard.press('ArrowLeft');

@@ -78,7 +78,7 @@
 	}
 </script>
 
-<div class="strip">
+<div class="strip" data-document-bar-row>
 	<div
 		class="tabs"
 		class:start-hidden={startHidden}

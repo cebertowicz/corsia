@@ -702,14 +702,17 @@ async function expectDetailsControlsFit(page: Page, width: number) {
 async function expectOneLine(send: Locator, width: number) {
 	await expect(send).toBeInViewport({ ratio: 0.9 });
 	const fit = await send.evaluate((button) => {
-		const range = document.createRange();
-		range.selectNodeContents(button);
 		const box = button.getBoundingClientRect();
-		const text = range.getBoundingClientRect();
+		const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+		const textRects: DOMRect[] = [];
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+			const range = document.createRange(); range.selectNodeContents(node);
+			textRects.push(...[...range.getClientRects()].filter((rect) => rect.width > 0));
+		}
 		return {
-			// The words on screen: the short "Send 99+" in a tight row ("Send · 99+" in Details), the full label otherwise (the hidden one is display:none, so it is not in innerText).
+			// Measure the visible label's text boxes; hidden alternate labels do not draw a box.
 			visibleLabel: (button as HTMLElement).innerText.trim(),
-			clipped: Math.max(text.right - box.right, box.left - text.left, 0),
+			clipped: Math.max(0, ...textRects.map((text) => Math.max(text.right - box.right, box.left - text.left))),
 			right: box.right,
 			left: box.left,
 			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),

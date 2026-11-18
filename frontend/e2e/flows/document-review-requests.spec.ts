@@ -105,11 +105,15 @@ async function reviewSurface(page: Page) {
 		const style = getComputedStyle(element);
 		return element.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
 	});
-	const narrow = contentWidth <= 600;
+	// ReviewSurface renders the component's current narrow state as a drawer or popover.
+	const drawer = page.locator('[data-adaptive-drawer]:has([data-review-surface])');
+	const popover = page.locator('.popover:has([data-review-surface])');
+	await expect.poll(async () => (await drawer.isVisible()) || (await popover.isVisible())).toBe(true);
+	const narrow = await drawer.isVisible();
 	return {
 		contentWidth,
 		narrow,
-		panel: page.locator(narrow ? '[data-adaptive-drawer]' : '.popover'),
+		panel: narrow ? drawer : popover,
 		close: closeReviewControls(page, narrow),
 	};
 }
@@ -189,9 +193,27 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 	}
 }
 
+test('review surface switches at the document width boundary', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop');
+	await page.setViewportSize({ width: 1232, height: 900 });
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	const doc = await seedDocument(request, `review-boundary-${Date.now()}`);
+	await openDocument(page, doc, 820);
+	await settled(page);
+	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(600);
+	await reviewTrigger(page).click();
+	await expect(page.locator('[data-adaptive-drawer]:has([data-review-surface])')).toBeVisible();
+	await page.getByRole('button', { name: 'Close', exact: true }).click();
+	await page.setViewportSize({ width: 1233, height: 900 });
+	await settled(page);
+	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(601);
+	await reviewTrigger(page).click();
+	await expect(page.locator('.popover:has([data-review-surface])')).toBeVisible();
+});
+
 const composedFixtures = [
-	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: true },
-	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: true },
+	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: false },
+	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: false },
 	{ viewport: 'phone-393', width: 393, height: 852, splitWidth: 500, expectedNarrow: true },
 	{ viewport: 'wide-desktop-1920', width: 1920, height: 1000, splitWidth: 820, expectedNarrow: false },
 ] as const;

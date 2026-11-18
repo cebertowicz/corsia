@@ -47,19 +47,6 @@ describe('review-bar submission outcomes', () => {
 		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: feedback_counts } });
 	});
 
-	it('opens the note for the verdict the server refused, not one left from earlier', async () => {
-		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
-		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
-		const state = createReviewBarState();
-		state.setTarget('doc-1');
-		await state.load();
-		state.noteFor = 'changes_requested';
-
-		expect(await state.answer('approved_with_changes')).toBe('failed');
-		expect(state.phase).toBe('noting');
-		expect(state.noteFor).toBe('approved_with_changes');
-	});
-
 	it('keeps the note required after the server refuses one, until the document changes', async () => {
 		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
 		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
@@ -80,13 +67,6 @@ describe('review-bar submission outcomes', () => {
 		expect(state.noteRequired).toBe(false);
 	});
 
-	it('starts each document with the default note verdict', () => {
-		const state = createReviewBarState();
-		state.setTarget('doc-1');
-		state.noteFor = 'approved_with_changes';
-		state.setTarget('doc-2');
-		expect(state.noteFor).toBe('changes_requested');
-	});
 });
 
 describe('documentAskOf', () => {

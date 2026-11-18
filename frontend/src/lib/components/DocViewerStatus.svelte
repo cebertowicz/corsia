@@ -205,8 +205,9 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
-	<!-- The transient save cue, in text, before Comments as on dev. Where File changed's reload mark is in the bar it yields to it, so the name keeps its room. -->
-	{#if saveStatus !== 'idle'}<span class="save-ghost bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
+	{#if presence}{@render presence()}{/if}
+	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
+	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
 		aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
 		<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
@@ -262,7 +263,6 @@
 			{#if historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
 		</div>{/if}
 		{#if paneHere}<div class="p-section"><button type="button" class="p-row" onclick={() => closeThen(() => paneOpen.set(true))}>Show panel</button></div>{/if}
-		{#if presence}<div class="p-section p-presence"><span class="p-label-row">Recent activity</span>{@render presence()}</div>{/if}
 	</div>
 	<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead} connectionStatusId={connectionDescriptionId} />
 	<span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
@@ -288,8 +288,7 @@
 	.bar-details { padding: 0 var(--space-2); }
 	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }
-	/* The save cue is text, not the old pill: no fill, border or padding. */
-	.bar-tools .bar-save { min-height: 0; padding: 0; border: 0; background: none; color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; }
+	.bar-tools .bar-save { flex: none; display: inline-flex; align-items: center; box-sizing: border-box; border-radius: var(--radius-pill); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; animation: fadein var(--dur-tight) ease-out; }
 	.bar-tools .bar-save:not(.saving) { color: var(--green); }
 	.bar-tools .bar-save.yields { display: none; }
 	.bar-needs { color: var(--amber-text); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
@@ -341,8 +340,6 @@
 	.p-who strong { display: grid; min-width: 0; }
 	.p-ask strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	.p-full { overflow-wrap: break-word; }
-	/* Recent activity only when there is any. */
-	.p-presence:not(:has(:global(.presence-row))) { display: none; }
 	@media (max-width: 768px) {
 		.p-row { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		.doc-panel :global(button:not(.tg)), .p-review :global(.review-request) { min-height: var(--touch-target); min-width: var(--touch-target); }

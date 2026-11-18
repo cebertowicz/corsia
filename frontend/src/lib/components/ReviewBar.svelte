@@ -107,7 +107,7 @@
 		return true;
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
-	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
+	async function settle(verdict: 'approved' | 'changes_requested') {
 		const targetId = artifactId;
 		if (!targetId) return;
 		const targetHoldIds = [...holdIds];
@@ -143,7 +143,6 @@
 	}
 	async function requestChanges() {
 		if (blocked()) return;
-		bar.noteFor = 'changes_requested';
 		bar.openNote();
 		await tick();
 		noteInput?.focus();
@@ -155,7 +154,7 @@
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle(bar.noteFor);
+		void settle('changes_requested');
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }

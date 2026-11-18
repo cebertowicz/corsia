@@ -142,7 +142,7 @@
 	{/if}
 {/snippet}
 
-<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} data-document-bar-row data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
