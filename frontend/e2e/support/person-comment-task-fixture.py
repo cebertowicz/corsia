@@ -82,14 +82,15 @@ try:
                 feedback_batches.record_comment(connection, row, created=created,
                                                delivery_policy=feedback_batches.IMMEDIATE)
             person_comment_task.reconcile(connection, artifact_id)
-    elif mode == 'highlights':
+    elif mode in ('highlights', 'highlight'):
         # Three agent comments tagging the person, each on its own highlight of the document text the spec saves:
         # a one-word one, a longer one, and one left unread so the count stays on screen after both taps.
+        # 'highlight' seeds only the first, so one read clears every count of it.
         text = 'Launch plan details for review. The rollout waits on sign-off.'
         user_id = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0]
+        seeded = (('details', 'Which details?'), ('The rollout waits on sign-off', 'Who signs off?'), ('Launch', 'Launch when?'))
         with write_transaction(db, scope='seed_highlights') as connection:
-            for quote, body in (('details', 'Which details?'), ('The rollout waits on sign-off', 'Who signs off?'),
-                                ('Launch', 'Launch when?')):
+            for quote, body in seeded[:1] if mode == 'highlight' else seeded:
                 start = text.index(quote)
                 row, created = comments.create_with_status(
                     artifact_id, body=body, author='Reviewer', author_kind='agent', author_thread_id=thread_id,
