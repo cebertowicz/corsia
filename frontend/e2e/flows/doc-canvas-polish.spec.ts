@@ -111,7 +111,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	// labels vary by viewport, so they are not asserted here.
 	await reader.close();
 	// The document bar shows three readers, evenly spaced.
-	const presence = page.getByRole('group', { name: '3 participants', exact: true });
+	const presence = page.locator('[data-document-bar-row] .bar-tools').getByRole('group', { name: '3 participants', exact: true });
 	await expect(presence).toBeVisible();
 	const avatars = await presence.locator('.avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
 	await testInfo.attach('presence-avatar-lefts', { body: JSON.stringify(avatars), contentType: 'application/json' });

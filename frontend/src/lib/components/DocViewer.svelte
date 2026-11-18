@@ -45,7 +45,8 @@
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
-	import DocViewerPresence from './DocViewerPresence.svelte';
+	import DocPresenceStatus, { type PresenceView } from './DocPresenceStatus.svelte';
+	import DocPresenceAvatars from './DocPresenceAvatars.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
@@ -104,7 +105,7 @@
 
 	const commentRetryToast = createCommentRetryToast(toasts);
 	let presenceRanges = $state<PresenceRange[]>([]);
-	let presenceTarget = $state<HTMLElement>();
+	let presenceView = $state<PresenceView | null>(null);
 	let activity = $state<DocCanvasActivity>();
 	const imageKey = createDocImageCacheKey(() => target?.threadId, () => loadedArtifactId);
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
@@ -272,10 +273,10 @@
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
 <div class="doc" class:margin-room={commentSurface?.marginShown()} use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	{#if target && loadedArtifactId}
-		<DocViewerPresence {target} artifactId={loadedArtifactId} {docState} root={docRoot} barTarget={presenceTarget}
+		<DocPresenceStatus {target} artifactId={loadedArtifactId} root={docRoot}
 			textCurrent={liveConnection === null || liveConnection === 'connected' || liveConnection === 'refused'}
 			projectComment={(comment) => commentsInDocumentOrder([comment], editText, $suggestionRefusals[loadedArtifactId!], suggestionBusyId)[0]}
-			bind:ranges={presenceRanges} {onPrepareCleanReload}
+			bind:ranges={presenceRanges} bind:presenceView {onPrepareCleanReload}
 			onArrival={(frame) => void activity?.arrive(frame)}
 			onFeedback={(id, feedback) => feedbackStatus?.sync(id, feedback)} />
 	{/if}
@@ -312,7 +313,7 @@
 		onRead={() => reloadNonce += 1}
 	>
 		{#snippet reviewBar()}{@render reviewControls()}{/snippet}
-		{#snippet presence()}<span bind:this={presenceTarget}></span>{/snippet}
+		{#snippet presence()}<DocPresenceAvatars view={presenceView} artifactId={loadedArtifactId} instanceId={target?.instanceId} ready={docState === 'ready'} />{/snippet}
 	</DocViewerStatus>
 	{#if target}<DocBottomBand artifactId={loadedArtifactId} threads={unreadThreads} root={docRoot} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetUp} onJump={(thread) => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.goTo(thread.id); }} onControlGone={() => focusDocumentEditor(docRoot)} />{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />

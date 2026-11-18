@@ -64,7 +64,7 @@ afterEach(async () => {
 });
 
 it('keeps document presence alive when the bar moves and an image covers the document', async () => {
-	const props = $state({ target: notes, offScreen: false });
+	const props = $state<{ target: DocViewerTarget; offScreen: boolean }>({ target: notes, offScreen: false });
 	viewer = mount(DocViewer, { target: host, props });
 	bar = mount(DocumentBarTestHost, { target: barHost });
 	flushSync();
@@ -77,19 +77,34 @@ it('keeps document presence alive when the bar moves and an image covers the doc
 	recordDocActivity({ type: 'doc_activity', artifact_id: 'notes', thread_id: 'agent', agent: 'Agent', kind: 'read', span: { from: 1, to: 2 }, comment_id: null, revision: null, at: new Date().toISOString() });
 	await vi.waitFor(() => expect(host.querySelector('.cm-presence-cursor')).not.toBeNull());
 	await vi.waitFor(() => expect(barHost.querySelector('[aria-label="1 participants"]')).not.toBeNull());
-	const avatar = barHost.querySelector('[aria-label="1 participants"]');
 	holdCommentArrival('notes', 'held-comment');
 	await unmount(bar); bar = undefined;
 	bar = mount(DocumentBarTestHost, { target: barHost }); flushSync();
 	expect(presence.detach).not.toHaveBeenCalled();
 	expect(host.querySelector('.cm-presence-cursor')).not.toBeNull();
-	expect(barHost.querySelector('[aria-label="1 participants"]')).toBe(avatar);
+	expect(barHost.querySelectorAll('[aria-label="1 participants"]')).toHaveLength(1);
 	expect(heldIds('notes')).toContain('held-comment');
 	props.offScreen = true; flushSync();
 	expect(presence.detach).not.toHaveBeenCalled();
 	expect(host.querySelector('.cm-presence-cursor')).not.toBeNull();
 	expect(heldIds('notes')).toContain('held-comment');
 	props.offScreen = false; flushSync();
-	expect(barHost.querySelector('[aria-label="1 participants"]')).toBe(avatar);
+	expect(barHost.querySelectorAll('[aria-label="1 participants"]')).toHaveLength(1);
 	expect(presence.attached).toBe(1);
+
+	// Leave the bar mounted while the viewer changes to a document without an artifact.
+	api.fetchContent.mockReturnValue(new Promise(() => {}));
+	props.target = { ...notes, instanceId: 'tab-draft', path: '/documents/draft.md', name: 'draft.md', artifactId: null };
+	flushSync();
+	expect.soft(barHost.querySelectorAll('[aria-label="1 participants"]').length, 'switch to unregistered document').toBe(0);
+	props.target = { ...notes, instanceId: 'tab-other', path: '/documents/other.md', name: 'other.md', artifactId: 'other' };
+	flushSync();
+	expect.soft(barHost.querySelectorAll('[aria-label="1 participants"]').length, 'switch to another registered document while loading').toBe(0);
+	await unmount(viewer); viewer = undefined;
+	expect.soft(barHost.querySelectorAll('[aria-label="1 participants"]').length, 'unmount viewer with bar alive').toBe(0);
+
+	api.fetchContent.mockResolvedValue({ text: 'notes text', writable: true, artifact: { id: 'notes' }, freshness: null });
+	props.target = notes;
+	viewer = mount(DocViewer, { target: host, props }); flushSync();
+	await vi.waitFor(() => expect(barHost.querySelectorAll('[aria-label="1 participants"]').length, 'remount has exactly one current stack').toBe(1));
 });
