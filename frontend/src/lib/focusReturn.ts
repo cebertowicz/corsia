@@ -14,8 +14,8 @@ export function createCloseInput() {
 			const preceding = pointer;
 			pointer = null;
 			if (!event) return false;
-			if (event instanceof PointerEvent && event.pointerType) return isTouchClose(event);
-			return event instanceof MouseEvent && event.type === 'click' && event.detail > 0 && preceding?.target === event.target && preceding.touch;
+			if (event instanceof MouseEvent && event.type === 'click' && event.detail > 0 && preceding?.target === event.target) return preceding.touch;
+			return event instanceof PointerEvent && !!event.pointerType && isTouchClose(event);
 		},
 		clear() { pointer = null; },
 	};

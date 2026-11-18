@@ -35,6 +35,21 @@ describe('returning focus', () => {
 		expect(isTouchClose({ type: 'click', detail: 0 })).toBe(false);
 	});
 
+	it('uses the matching pointerdown when WebKit labels a touch click as mouse', () => {
+		const input = createCloseInput(), button = document.createElement('button');
+		const event = (type: string, pointerType: string, detail = 0) => {
+			const value = new PointerEvent(type, { pointerType, detail });
+			Object.defineProperty(value, 'target', { value: button });
+			return value;
+		};
+		input.pointerDown(event('pointerdown', 'touch'));
+		event('pointerup', 'touch');
+		expect(input.close(event('click', 'mouse', 1))).toBe(true);
+		input.pointerDown(event('pointerdown', 'mouse'));
+		expect(input.close(event('click', 'mouse', 1))).toBe(false);
+		expect(input.close(event('click', 'touch', 1))).toBe(true);
+	});
+
 	it('consumes only the pointer for this surface and activation', () => {
 		const first = createCloseInput(), second = createCloseInput();
 		const button = document.createElement('button');
