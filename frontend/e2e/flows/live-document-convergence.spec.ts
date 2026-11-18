@@ -32,10 +32,11 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			const second = await secondContext.newPage();
 			const firstFrames = await openLiveDocument(first, document);
 			const secondFrames = await openLiveDocument(second, document);
-			await Promise.all([firstContext.setOffline(true), secondContext.setOffline(true)]);
+			// Close the sockets while the network is still up, so each close frame reaches the server; then go offline.
 			await Promise.all([firstLink.cut(), secondLink.cut()]);
 			await expectLiveSocketsClosed(firstFrames);
 			await expectLiveSocketsClosed(secondFrames);
+			await Promise.all([firstContext.setOffline(true), secondContext.setOffline(true)]);
 			await expect(first.getByRole('status').filter({ hasText: 'Disconnected' })).toBeVisible();
 			await expect(second.getByRole('status').filter({ hasText: 'Disconnected' })).toBeVisible();
 

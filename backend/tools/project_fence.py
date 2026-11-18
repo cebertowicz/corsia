@@ -131,15 +131,12 @@ def _folder_roots(workspace: Path, db, fences: _Fences, rows, cloud_off) -> list
     Fails closed: while a Local only project's folder does not resolve, any folder no
     project claims may be it, so each is fenced as Local only.
     """
-    from core.project_context import resolve_project_row_paths
+    from core.project_context import project_row_folder
 
     by_root = {}
     lost_local_only = False
     for row in rows:
-        try:
-            _name, root = resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])
-        except (ValueError, OSError):
-            root = None
+        root = project_row_folder(workspace, row)
         if root is not None:
             by_root[canonical(root)] = row
         elif row["id"] in cloud_off:

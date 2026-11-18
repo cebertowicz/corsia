@@ -16,6 +16,19 @@ const TAG_REFUSALS: Record<string, string> = {
 	tag_unavailable: 'An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.',
 };
 
+/** The server's reason a comment write is refused because its document no longer takes comments, as the 409's `kind`. */
+export const NOT_COMMENTABLE_KIND = 'not_commentable';
+
+export const isNotCommentable = (error: unknown): boolean => error instanceof RequestRefused && error.kind === NOT_COMMENTABLE_KIND;
+
+/** That refusal's own sentence, as the server gave it (the 409 body's `detail`); it says the draft is kept, so no "try again" goes with it. */
+export function notCommentableMessage(error: unknown): string | undefined {
+	if (!isNotCommentable(error)) return undefined;
+	let detail: unknown;
+	try { detail = JSON.parse((error as Error).message.replace(/^\d{3}\s*/, ''))?.detail; } catch { /* A body that is not JSON has no sentence to show. */ }
+	return typeof detail === 'string' && detail ? detail : undefined;
+}
+
 function tagRefusal(error: unknown): string | undefined {
 	return error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined;
 }
@@ -27,8 +40,9 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 	} catch (error) {
 		if (error instanceof DOMException && error.name === 'AbortError') throw error;
 		console.error('comment failed', error);
-		// A tag refusal has the same cause on every surface, so its message comes before the surface's own.
-		const toastId = toasts.show(tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again", 'error');
+		// A refusal with a named reason has the same cause on every surface, so its message comes before the surface's own.
+		// The not-commentable sentence is the server's, shown as given: it is never the surface's "try again".
+		const toastId = toasts.show(notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again", 'error');
 		onFailure?.(toastId);
 		throw error;
 	}

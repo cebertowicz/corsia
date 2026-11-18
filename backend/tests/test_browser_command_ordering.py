@@ -41,13 +41,14 @@ async def test_pane_navigation_cannot_overtake_guarded_command(monkeypatch):
         calls.append("guard")
         guard_checked.set()
         await release_guard.wait()
+        return browser_control.PageAccess(None, False)
 
     async def finished(*_args):
         pass
 
     monkeypatch.setattr(browser_cli, "check_local_mode", lambda _args: {})
     monkeypatch.setattr(browser_cdp, "page_endpoint", endpoint)
-    monkeypatch.setattr(browser_control, "require_page_access", guard)
+    monkeypatch.setattr(browser_control, "check_page_access", guard)
     monkeypatch.setattr(browser_pane_state, "has_pane", lambda _thread: False)
     monkeypatch.setattr(browser_pane_state, "agent_acted", lambda _thread: None)
     monkeypatch.setattr(browser_pane_state, "page_command_starting", lambda *_args: None)

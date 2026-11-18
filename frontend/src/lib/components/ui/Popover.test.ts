@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
-import Popover from './Popover.svelte';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
+import Popover, { ANCHOR_MOVED } from './Popover.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -126,6 +126,49 @@ describe('Popover', () => {
 		const { onClose } = render();
 		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+	describe('a press on the card\'s own text', () => {
+		/** What a browser does with a press: focus moves to the nearest focusable element holding the target, else off any element. */
+		function press(target: Element) {
+			target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			const focusable = target.closest<HTMLElement>('button, input, textarea, select, a[href], [tabindex]');
+			if (focusable) focusable.focus(); else (document.activeElement as HTMLElement | null)?.blur();
+		}
+		const card = createRawSnippet(() => ({ render: () => '<div><p class="card-text">Agreed, ship it.</p><textarea aria-label="Reply"></textarea></div>' }));
+		let closeDocument: Mock<() => void>;
+		const documentEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) closeDocument(); };
+		beforeEach(() => { closeDocument = vi.fn(); window.addEventListener('keydown', documentEscape); });
+		afterEach(() => window.removeEventListener('keydown', documentEscape));
+		const open = async () => {
+			host = document.createElement('div'); document.body.appendChild(host);
+			const onClose = vi.fn();
+			component = mount(Popover, { target: host, props: { anchor: anchor(), open: true, onClose, takeFocus: false, children: card } });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe(''));
+			return { surface, onClose };
+		};
+		it('puts the focus on the card, so Escape closes the card and not the page beneath it', async () => {
+			const { surface, onClose } = await open();
+			press(surface.querySelector('.card-text')!);
+			expect(document.activeElement).toBe(surface);
+			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).toHaveBeenCalledOnce();
+			expect(closeDocument).not.toHaveBeenCalled();
+		});
+		it('moves the focus from a reply field to the card, as a press on text blurs a field, and Escape still closes only the card', async () => {
+			const { surface, onClose } = await open();
+			surface.querySelector<HTMLTextAreaElement>('textarea')!.focus();
+			press(surface.querySelector('.card-text')!);
+			expect(document.activeElement).toBe(surface);
+			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).toHaveBeenCalledOnce();
+			expect(closeDocument).not.toHaveBeenCalled();
+		});
+		it('shows no focus ring on the card itself', () => {
+			const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Popover.svelte'), 'utf8');
+			expect(source).toMatch(/\.popover:focus \{ outline: none; \}/);
+		});
 	});
 	it('repositions on resize and closes when the anchor leaves the viewport', async () => {
 		const { onClose } = render({ anchor: anchor(-50, -50) });
@@ -342,6 +385,37 @@ describe('Popover', () => {
 		await vi.waitFor(() => expect(surface().style.top).toBe('100px'));
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));
+	});
+	it('keeps the card scrolled where it was when it re-measures, so a caret scrolled into view stays in view', async () => {
+		render();
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface.style.top).not.toBe('12px'));
+		// A browser clamps the scroll of a card measured at full height to 0; jsdom has no layout, so do it here.
+		let scrollTop = 0;
+		Object.defineProperty(surface, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } });
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { if (this === surface && this.style.maxHeight === '') scrollTop = 0; return this.getBoundingClientRect().height; });
+		scrollTop = 120;
+		window.dispatchEvent(new Event(ANCHOR_MOVED));
+		expect(scrollTop).toBe(120);
+	});
+	it('watches content swapped in while it stays open, and re-places the card when that content grows', async () => {
+		const watching: Element[] = []; let resized: () => void = () => {};
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback; } observe(el: Element) { watching.push(el); } unobserve(el: Element) { watching.splice(watching.indexOf(el), 1); } disconnect() {} });
+		const onPlace = vi.fn();
+		render({ onPlace });
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		const draft = document.createElement('div'); surface.append(draft);
+		await vi.waitFor(() => expect(watching).toContain(draft));
+		// The draft is replaced by the thread inside the same open card.
+		const thread = document.createElement('div'); draft.replaceWith(thread);
+		await vi.waitFor(() => expect(watching).toContain(thread));
+		expect(watching).not.toContain(draft);
+		await vi.waitFor(() => expect(onPlace).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 50)); // let the swap's own placement finish
+		const settled = onPlace.mock.calls.length;
+		resized();
+		await vi.waitFor(() => expect(onPlace.mock.calls.length).toBeGreaterThan(settled));
+		vi.unstubAllGlobals();
 	});
 	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
 		const { fromStore, writable } = await import('svelte/store');

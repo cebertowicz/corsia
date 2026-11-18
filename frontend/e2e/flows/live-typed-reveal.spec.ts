@@ -3,7 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { setDeliveryPreference } from '../support/heldComments';
-import { openLiveDocument, type LiveDocument } from '../support/liveDocument';
+import { editorPlace, inEditorView, openLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, designateConductor } from '../support/sharedLiveDocument';
 import { layouts } from '../support/liveConcurrency';
 import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses, waitForThreadReply } from '../support/mock';
@@ -74,9 +74,69 @@ async function shownCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
 }
 
-/** The writing agent creates the document it then edits, so it owns it; the viewer opens it afterwards. */
-async function seed(request: APIRequestContext, owner: Agent, stamp: string): Promise<LiveDocument> {
-	return agentCreatesSharedDocument(request, owner, `typed-${stamp}`, `# Typed ${stamp}\n\nlead line ${stamp}\n\n${MARKER_A}\n\n${MARKER_B}\n\nclosing line ${stamp}\n`);
+/**
+ * Scrolls the editor so `text` in its document sits mid-view, then waits two frames for CodeMirror to draw there.
+ * The scroll is a view effect only (no change, no selection), so it never reveals typed text.
+ */
+async function scrollToText(page: Page, text: string): Promise<void> {
+	await inEditorView(page, (view, text) => new Promise<void>((resolve) => {
+		const at = (view.state.doc.toString() as string).indexOf(text);
+		if (at >= 0) view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
+		requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+	}), text);
+}
+
+/**
+ * Scrolls the editor to `agent`'s presence caret where the editor draws it (its select, else the front of its hidden
+ * text, else its caret: typed-reveal-state laneDecorations), then waits two frames. A view effect only, as above.
+ */
+async function scrollToCaret(page: Page, agent: Agent): Promise<void> {
+	await inEditorView(page, async (view, { id, url }) => {
+		const { typedReveals } = await import(/* @vite-ignore */ url);
+		const lanes = view.state.field(typedReveals, false) as Array<{ threadId: string; select: { from: number } | null; segments: Array<{ from: number }>; caret: number | null }> | undefined;
+		if (!lanes) throw new Error('typedReveals is not in the editor state');
+		const lane = lanes.find((candidate) => candidate.threadId === id);
+		const at = lane ? lane.select?.from ?? lane.segments[0]?.from ?? lane.caret : null;
+		if (at !== null && at !== undefined) view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
+		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+	}, { id: agent.id, url: '/src/lib/cm/typed-reveal-state.ts' });
+}
+
+/** The agent's presence caret read at its own place: whether it shows typing, and its label. */
+async function caretAtItsPlace(page: Page, agent: Agent): Promise<{ typing: boolean; label: string | null }> {
+	await scrollToCaret(page, agent);
+	return caret(page, agent).evaluateAll((cursors) => cursors.length ? {
+		typing: cursors[0].classList.contains('cm-presence-cursor-typing'),
+		label: cursors[0].querySelector('.cm-presence-cursor-label')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+	} : { typing: false, label: null });
+}
+
+/** Scrolls the editor to `text` in its document, then counts it where a reader would see it: CodeMirror draws only the lines near the view. */
+async function shownAtItsPlace(page: Page, text: string): Promise<number> {
+	await scrollToText(page, text);
+	return shownCount(page, text);
+}
+
+/** A drawn count of 0 is the reveal hiding text only if the text is in the viewer's document and inside the drawn range. */
+async function expectHeldBack(page: Page, text: string): Promise<void> {
+	expect(await editorPlace(page, text), `${text} is in the document and drawn range, so its 0 is the reveal, not out of view`).toEqual({ count: 1, inDrawnRange: true });
+}
+
+/**
+ * Held back at its own place: scrolls to `text` first, so the read holds wherever other writes have pushed it, then
+ * requires a drawn count of 0 with the text in the document and drawn range.
+ */
+async function expectHeldBackAtItsPlace(page: Page, text: string, message: string): Promise<void> {
+	expect(await shownAtItsPlace(page, text), message).toBe(0);
+	await expectHeldBack(page, text);
+}
+
+/**
+ * The writing agent creates the document it then edits, so it owns it; the viewer opens it afterwards. `markers` sets
+ * their order in the document.
+ */
+async function seed(request: APIRequestContext, owner: Agent, stamp: string, markers: readonly [string, string] = [MARKER_A, MARKER_B]): Promise<LiveDocument> {
+	return agentCreatesSharedDocument(request, owner, `typed-${stamp}`, `# Typed ${stamp}\n\nlead line ${stamp}\n\n${markers[0]}\n\n${markers[1]}\n\nclosing line ${stamp}\n`);
 }
 
 for (const [width, height, project] of layouts) {
@@ -181,6 +241,7 @@ for (const [width, height, project] of layouts) {
 			await expect(caret(viewer, agent).locator('.cm-presence-cursor-label')).toHaveText(agent.title);
 			await expect(caret(viewer, agent)).toHaveClass(/cm-presence-cursor-typing/);
 			expect(await shownCount(viewer, last), 'the end of the write is not shown yet').toBe(0);
+			await expectHeldBack(viewer, last);
 
 			await expect.poll(() => shownCount(viewer, last), { timeout: PACE_CAP_MS + 3_000 }).toBe(1);
 			// Idle: the steady caret goes back to blinking.
@@ -207,6 +268,7 @@ for (const [width, height, project] of layouts) {
 			await agentWrites(request, agent, live, MARKER_A, text);
 			await expect(caret(viewer, agent)).toHaveClass(/cm-presence-cursor-typing/);
 			expect(await shownCount(viewer, last)).toBe(0);
+			await expectHeldBack(viewer, last);
 
 			const line = viewer.locator('.cm-line').filter({ has: caret(viewer, agent) });
 			const box = await line.boundingBox();
@@ -250,25 +312,27 @@ for (const [width, height, project] of layouts) {
 			const viewer = await context.newPage();
 			const first = await openAgent(request, viewer, `Lane One ${stamp}`);
 			const second = await openAgent(request, viewer, `Lane Two ${stamp}`);
-			const live = await seed(request, first, stamp);
+			// B's marker sits above A's: B's insert then stays in view when it arrives (an insert out of view shows at once),
+			// however far A's reveal has got. B's reveal pushes A down instead, so every read about A is taken at A's place.
+			const live = await seed(request, first, stamp, [MARKER_B, MARKER_A]);
 			// Only the owner or the conductor edits a shared document directly; the second writer is the conductor.
 			await designateConductor(request, second.id);
 			designated = true;
 			await openLiveDocument(viewer, live);
-			const textA = prose(`a${stamp}`, 500);
-			const textB = prose(`b${stamp}`, 500);
+			const textA = prose(`${stamp}a`, 500);
+			const textB = prose(`${stamp}b`, 500);
 			const lastA = textA.split(' ').at(-1)!;
 			const lastB = textB.split(' ').at(-1)!;
 			await agentWrites(request, first, live, MARKER_A, textA);
 			await agentWrites(request, second, live, MARKER_B, textB, [first.id]);
 
-			await expect(caret(viewer, first)).toHaveClass(/cm-presence-cursor-typing/);
-			await expect(caret(viewer, second)).toHaveClass(/cm-presence-cursor-typing/);
-			await expect(caret(viewer, first).locator('.cm-presence-cursor-label')).toHaveText(first.title);
-			await expect(caret(viewer, second).locator('.cm-presence-cursor-label')).toHaveText(second.title);
-			expect(await shownCount(viewer, lastA) + await shownCount(viewer, lastB), 'neither write is complete yet').toBe(0);
+			await expect.poll(() => caretAtItsPlace(viewer, first), { message: 'the first writer types, under its own label' }).toEqual({ typing: true, label: first.title });
+			await expect.poll(() => caretAtItsPlace(viewer, second), { message: 'the second writer types, under its own label' }).toEqual({ typing: true, label: second.title });
+			// Both reveals run on while these reads happen, and B's shown words push A down; each end is read at its own place.
+			await expectHeldBackAtItsPlace(viewer, lastA, 'neither write is complete yet: the first writer\'s end is not shown');
+			await expectHeldBackAtItsPlace(viewer, lastB, 'neither write is complete yet: the second writer\'s end is not shown');
 
-			await expect.poll(async () => [await shownCount(viewer, lastA), await shownCount(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
+			await expect.poll(async () => [await shownAtItsPlace(viewer, lastA), await shownAtItsPlace(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
 			// The second writer's edit selects review work for the owner; settle it before another case seeds replies.
 			await waitForThreadReply(request, first.id, 'Reviewed the other agent’s edit.');
 			expect(await readUnmatchedThreads(request)).toEqual([]);
@@ -323,6 +387,8 @@ for (const [width, height, project] of layouts) {
 				});
 				observer.observe(probe);
 			}));
+			// The samples cover the write in progress only if it is already in the document; a 0 below is then the reveal.
+			if (await shownCount(viewer, last) === 0) await expectHeldBack(viewer, last);
 			// The caret sweeps every line end while it types; sample until the write is complete.
 			for (let sample = 0; sample < 40 && await shownCount(viewer, last) === 0; sample += 1) {
 				const seen = await overflow();

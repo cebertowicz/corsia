@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, demoteAgentLocally, type Thread } from '$lib/stores/threads';
@@ -148,7 +149,7 @@
 
 	{#if editing}
 		<div class="agent-form">
-			<textarea
+			<textarea use:keepTyped
 				bind:value={description}
 				rows="3"
 				placeholder="Responsibility"

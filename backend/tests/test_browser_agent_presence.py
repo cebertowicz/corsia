@@ -30,12 +30,13 @@ def _owner(monkeypatch, password_page):
     async def page_access(_thread_id, _probe, _args, **_kwargs):
         if password_page["shown"]:
             raise BrowserSessionError(browser_control.PASSWORD_PAGE)
+        return browser_control.PageAccess(None, False)
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
-    monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    monkeypatch.setattr(browser_control, "check_page_access", page_access)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/devtools/page/1"))
     return owner
 
@@ -84,7 +85,7 @@ async def test_ref_click_is_refused_before_input_when_person_has_control(monkeyp
         input_calls.append(args)
         return "ok"
 
-    monkeypatch.setattr(browser_control, "require_page_access", refuse_person_step)
+    monkeypatch.setattr(browser_control, "check_page_access", refuse_person_step)
     monkeypatch.setattr(owner, "_run_admitted", native_input)
     monkeypatch.setattr(browser_dom_write, "shared_action", shared_input)
     with pytest.raises(BrowserSessionError, match=browser_control.PERSON_STEP):
@@ -413,3 +414,66 @@ async def test_an_all_zero_box_is_refused_without_a_hit_test(monkeypatch, select
         await browser_dom_write.shared_action(run, "ws://page.test", ("click", selector))
     assert refused.value.reason == reason and text in str(refused.value)
     assert cdp.hit_tests == [] and commands == [("get", "box", selector)]
+
+
+class CoveringCdp(FakeCdp):
+    """A page whose element at the hit point is a dialog."""
+
+    async def call(self, method, **params):
+        if method == "DOM.describeNode":
+            self.calls.append(method)
+            return {"node": {"backendNodeId": 9, "nodeName": "DIALOG"}}
+        return await super().call(method, **params)
+
+
+def _recording_run(commands):
+    async def run(args, timeout):
+        commands.append(tuple(args))
+        return await _run(args, timeout)
+    return run
+
+
+@pytest.mark.asyncio
+async def test_a_target_in_view_under_a_banner_is_scrolled_clear_once_and_written(monkeypatch):
+    """A sticky header covers a target that is in view; a person scrolls it clear before clicking."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    hits = iter([None, 7])
+
+    async def covered_then_clear(_cdp, _selector, _box):
+        return next(hits)
+
+    monkeypatch.setattr(browser_dom_write, "_hit", covered_then_clear)
+    commands = []
+    assert await browser_dom_write.shared_action(_recording_run(commands), "ws://page.test", ("click", "@e2")) == "ok"
+    assert commands.count(("scrollintoview", "@e2")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_target_still_covered_after_scrolling_is_refused_naming_only_the_covers_tag(monkeypatch):
+    cdp = CoveringCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+
+    async def covered(_cdp, _selector, _box):
+        return None
+
+    monkeypatch.setattr(browser_dom_write, "_hit", covered)
+    commands = []
+    with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <dialog>\)") as refused:
+        await browser_dom_write.shared_action(_recording_run(commands), "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "covered"
+    assert commands.count(("scrollintoview", "@e2")) == 1 and "Runtime.callFunctionOn" not in cdp.calls
+
+
+@pytest.mark.asyncio
+async def test_a_covered_read_target_does_not_scroll_the_persons_page(monkeypatch):
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+
+    async def covered(_cdp, _selector, _box):
+        return None
+
+    monkeypatch.setattr(browser_dom_write, "_hit", covered)
+    commands = []
+    assert await browser_dom_write.target_node(_recording_run(commands), "ws://page.test", "@e2") is None
+    assert ("scrollintoview", "@e2") not in commands

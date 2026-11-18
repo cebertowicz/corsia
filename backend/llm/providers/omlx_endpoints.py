@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from llm.network_urls import http_origin
+
 _TIMEOUT = 10.0
 
 
@@ -48,7 +50,7 @@ def _api_base(cfg: dict) -> str | None:
     host, port = _resolve_endpoint(cfg)
     if not host or not port:
         return None
-    return f"http://{host}:{port}/v1"
+    return f"{http_origin(host, port)}/v1"
 
 
 def _admin_base(cfg: dict) -> str | None:
@@ -56,12 +58,12 @@ def _admin_base(cfg: dict) -> str | None:
     host, port = _resolve_endpoint(cfg)
     if not host or not port:
         return None
-    return f"http://{host}:{port}/admin/api"
+    return f"{http_origin(host, port)}/admin/api"
 
 
 def health_url(host: str, port: int) -> str:
     """The oMLX health surface for one host -- the only place it is built."""
-    return f"http://{host}:{port}/health"
+    return f"{http_origin(host, port)}/health"
 
 
 def _health_url(cfg: dict) -> str | None:

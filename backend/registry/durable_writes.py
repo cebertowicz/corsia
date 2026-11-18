@@ -17,7 +17,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_recovery import recovery_shared_target
+from registry.durable_write_recovery import recover_intents, recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
 from registry.promote_recovery_notice import INTERRUPTED, announce_undone_promote, recovery_path
@@ -707,10 +707,6 @@ def recover_write_intents(*, workspace: Path | None = None) -> None:
         raise TransactionOwnershipError("durable recovery requires a clean connection")
     try:
         workspace_root = (workspace or config.WORKSPACE).resolve(strict=False)
-        rows = db.execute(
-            "SELECT * FROM durable_write_intents ORDER BY created_at,id"
-        ).fetchall()
-        for raw in rows:
-            _recover_one_intent(dict(raw), workspace=workspace_root, db=db)
+        recover_intents(db, workspace_root, _recover_one_intent)
     finally:
         db.close()

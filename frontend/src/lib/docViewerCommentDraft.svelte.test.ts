@@ -6,6 +6,8 @@ import { captureComment, SELECTION_RECONNECTED } from '$lib/stores/commentSelect
 import { addComment } from '$lib/stores/docComments';
 import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
+import { RequestRefused } from '$lib/api/docs';
+import { toasts } from '$lib/stores/toast';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
@@ -159,6 +161,36 @@ describe('the pending mark before and while the composer is open', () => {
 		expect(current.controller.pendingComment).toBe(owned);
 		current.controller.select(selection(6, 10, false)); flushSync();
 		expect(current.controller.pendingComment).toBe(owned);
+	});
+});
+
+describe('a comment refused because the document no longer takes comments', () => {
+	const SENTENCE = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
+	const refused = () => new RequestRefused(`409 ${JSON.stringify({ detail: SENTENCE, kind: 'not_commentable' })}`, 'not_commentable');
+	const begin = (live: boolean) => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		// The prose composer has a quote and offsets but no live selection.
+		commentDraft.update(draft => draft && { ...draft, body: 'Unfinished', ...(live ? {} : { selection: undefined }) }); flushSync();
+		vi.mocked(captureComment).mockClear(); vi.mocked(addComment).mockClear();
+	};
+	const show = vi.spyOn(toasts, 'show');
+	afterEach(() => { show.mockReset(); });
+
+	it.each([['selection', true], ['prose', false]])('shows the server sentence once, keeps the %s draft and does not post again', async (_name, live) => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		show.mockImplementation(() => 'toast');
+		begin(live);
+		vi.mocked(addComment).mockRejectedValue(refused());
+		await expect(current!.controller.submit('Unfinished')).rejects.toBeInstanceOf(RequestRefused);
+		vi.mocked(addComment).mockResolvedValue('posted');
+		expect(addComment).toHaveBeenCalledTimes(1);
+		expect(captureComment).toHaveBeenCalledTimes(live ? 1 : 0);
+		expect(show).toHaveBeenCalledTimes(1);
+		expect(show).toHaveBeenCalledWith(SENTENCE, 'error');
+		expect(current!.controller.draft?.body).toBe('Unfinished');
+		log.mockRestore();
 	});
 });
 

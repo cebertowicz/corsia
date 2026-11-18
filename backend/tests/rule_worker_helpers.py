@@ -133,7 +133,7 @@ def world(signed_in_defaults, tmp_path, monkeypatch, _cc_runtime_cleanup):
 
     monkeypatch.setattr(script_runner, "_drive_owner", drive_owner)
     monkeypatch.setattr(worker_runner, "_state",
-                        {"lock": None, "task": None, "again": False, "open": False, "waited": 0})
+                        {"lock": None, "task": None, "again": False, "open": False})
     monkeypatch.setattr(worker_start_wait, "_waiting", {})
     yield {"root": root, "folder": folder, "project": project, "reply": reply, "driven": driven,
            "staging": folder / "staging" / "req"}

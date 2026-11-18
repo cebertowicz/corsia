@@ -34,13 +34,13 @@ export async function seed(request: APIRequestContext, baseTitle: string, option
 export type Doc = Awaited<ReturnType<typeof seed>>;
 
 /** A registered image the owning thread asks about; the same fixture shape as a document, with no text. */
-export async function seedImage(request: APIRequestContext, baseTitle: string): Promise<Doc> {
-	const title = uniqueTitle(baseTitle);
+export async function seedImage(request: APIRequestContext, baseTitle: string, exact?: { title: string; file: string }): Promise<Doc> {
+	const title = exact?.title ?? uniqueTitle(baseTitle);
 	const threadId = await createSession(request, title);
 	seededThreadIds.push(threadId);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
-	const name = `${title} ${Date.now()}.png`, docPath = path.join(workspace, name);
+	const name = exact?.file ?? `${title} ${Date.now()}.png`, docPath = path.join(workspace, name);
 	fs.writeFileSync(docPath, syntheticPng(640, 400));
 	const registered = await request.post('/api/files/register', { params: { token: TEST_TOKEN }, data: { path: docPath, thread_id: threadId } });
 	expect(registered.ok(), await registered.text()).toBeTruthy();

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { expect, type APIRequestContext, type BrowserContext, type Page, type WebSocket, type WebSocketRoute } from '@playwright/test';
+import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page, type WebSocket, type WebSocketRoute } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 
 export interface LiveDocument {
@@ -136,6 +136,53 @@ export async function renderedCount(page: Page, text: string): Promise<number> {
 	return ((await page.locator('.cm-content').textContent()) ?? '').split(text).length - 1;
 }
 
+/** How often `text` is in the editor's document. `renderedCount` sees only the lines CodeMirror draws, so a 0 there can be text out of view. */
+export async function documentCount(page: Page, text: string): Promise<number> {
+	return (await editorPlace(page, text)).count;
+}
+
+/** Run on the CodeMirror view for a content element, keeping its private lookup in one place. */
+export async function inContentEditorView<R, A>(content: Locator, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
+	const view = await content.evaluateHandle((el): any => {
+		const view = (el as HTMLElement & { cmTile?: { root: { view: any } } }).cmTile?.root.view;
+		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
+		return view;
+	});
+	try {
+		return (await view.evaluate(fn as (view: any, arg: unknown) => R | Promise<R>, arg)) as R;
+	} finally {
+		await view.dispose();
+	}
+}
+
+/** Run on the document editor's view, excluding nested table cell editors. */
+export async function inEditorView<R, A>(page: Page, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
+	return inContentEditorView(page.locator('.cm-content:not(.cm-md-cell-editor .cm-content)').first(), fn, arg);
+}
+
+/** The whole document from the editor's state; `.cm-content` holds only the lines CodeMirror has drawn, so its text can lack lines out of view. */
+export async function editorText(page: Page): Promise<string> {
+	return inEditorView(page, (view) => view.state.doc.toString() as string, null);
+}
+
+/**
+ * How often `text` is in the editor's document, and whether every copy lies inside the range CodeMirror draws.
+ * When both hold, a drawn count of 0 means the editor hides the text (a typed reveal), not that it is out of view.
+ */
+export async function editorPlace(page: Page, text: string): Promise<{ count: number; inDrawnRange: boolean }> {
+	return inEditorView(page, (view, text) => {
+		const doc = view.state.doc.toString() as string;
+		const { from, to } = view.viewport as { from: number; to: number };
+		let count = 0;
+		let inDrawnRange = true;
+		for (let at = doc.indexOf(text); at >= 0; at = doc.indexOf(text, at + text.length)) {
+			count += 1;
+			if (at < from || at + text.length > to) inDrawnRange = false;
+		}
+		return { count, inDrawnRange };
+	}, text);
+}
+
 async function lineEnd(line: ReturnType<Page['locator']>): Promise<{ x: number; y: number }> {
 	await line.scrollIntoViewIfNeeded();
 	const box = await line.boundingBox();
@@ -152,6 +199,7 @@ async function lineEnd(line: ReturnType<Page['locator']>): Promise<{ x: number; 
 export async function deleteRenderedLine(page: Page, text: string): Promise<void> {
 	const before = await renderedCount(page, text);
 	expect(before).toBeGreaterThan(0);
+	const inDocument = await documentCount(page, text);
 	const line = page.locator('.cm-line').filter({ hasText: text }).first();
 	const previous = line.locator('xpath=preceding-sibling::div[contains(concat(" ", normalize-space(@class), " "), " cm-line ")][1]');
 	const start = await lineEnd(previous);
@@ -163,6 +211,7 @@ export async function deleteRenderedLine(page: Page, text: string): Promise<void
 	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toContain(text);
 	await page.keyboard.press('Backspace');
 	await expect.poll(() => renderedCount(page, text)).toBe(before - 1);
+	await expect.poll(() => documentCount(page, text), { message: 'the line is gone from the document, not only from view' }).toBe(inDocument - 1);
 	await expect(page.locator('.cm-content')).toBeFocused();
 }
 
