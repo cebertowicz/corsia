@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { expect, type APIRequestContext, type BrowserContext, type Page, type WebSocket, type WebSocketRoute } from '@playwright/test';
+import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page, type WebSocket, type WebSocketRoute } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 
 export interface LiveDocument {
@@ -141,14 +141,10 @@ export async function documentCount(page: Page, text: string): Promise<number> {
 	return (await editorPlace(page, text)).count;
 }
 
-/**
- * Runs `fn` in the page on the document editor's CodeMirror view (not a table cell's editor). The view is read through
- * CodeMirror's private `cmTile.root.view`; read it here rather than with another copy of that lookup.
- */
-export async function inEditorView<R, A>(page: Page, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
-	const view = await page.evaluateHandle((): any => {
-		const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
-		const view = content?.cmTile?.root.view;
+/** Run on the CodeMirror view for a content element, keeping its private lookup in one place. */
+export async function inContentEditorView<R, A>(content: Locator, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
+	const view = await content.evaluateHandle((el): any => {
+		const view = (el as HTMLElement & { cmTile?: { root: { view: any } } }).cmTile?.root.view;
 		if (!view) throw new Error('CodeMirror view is unreadable through cmTile.root.view');
 		return view;
 	});
@@ -157,6 +153,11 @@ export async function inEditorView<R, A>(page: Page, fn: (view: any, arg: A) => 
 	} finally {
 		await view.dispose();
 	}
+}
+
+/** Run on the document editor's view, excluding nested table cell editors. */
+export async function inEditorView<R, A>(page: Page, fn: (view: any, arg: A) => R | Promise<R>, arg: A): Promise<R> {
+	return inContentEditorView(page.locator('.cm-content:not(.cm-md-cell-editor .cm-content)').first(), fn, arg);
 }
 
 /** The whole document from the editor's state; `.cm-content` holds only the lines CodeMirror has drawn, so its text can lack lines out of view. */

@@ -207,6 +207,27 @@ def test_a_person_step_states_its_instructions_document(db, events, tmp_path):  
     assert events[-1]["properties"]["handover"] == "step"
 
 
+def test_a_person_steps_document_counts_as_waiting_on_them(db, events, tmp_path):  # noqa: F811
+    plan = owner_plan(db)
+    _ask(db, plan.id, "Proposal", _document(db, tmp_path / "proposal.md", _words(1000)))
+    document = _document(db, tmp_path / "setup.md", _words(2000))
+    params = {
+        "kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.",
+        "size": "unknown", "assignee": "user",
+        "description": "Run this setup. Already tried: I used the supported agent route.",
+        "instructions_artifact_id": document,
+    }
+    plan_update(db, plan.id, "add", params)
+
+    notice = _notice({"plan_id": plan.id, "operation": "add", "params": params})
+
+    assert (
+        "You now have 2 documents waiting on them: 3,000 words and at least 13 minutes in all."
+        in notice
+    )
+    assert events[-1]["properties"]["waiting_documents"] == 2
+
+
 def test_a_person_step_that_was_not_created_carries_no_notice(db, events, tmp_path):  # noqa: F811
     plan = owner_plan(db)
     document = _document(db, tmp_path / "setup.md", _words(700))
@@ -215,7 +236,7 @@ def test_a_person_step_that_was_not_created_carries_no_notice(db, events, tmp_pa
     assert _notice({"plan_id": plan.id, "operation": "add", "params": params}) is None
 
 
-@pytest.mark.parametrize("outcome", ["requested", "link", "already_open"])
+@pytest.mark.parametrize("outcome", ["requested", "already_open"])
 def test_opening_a_document_for_the_person_states_it(db, events, tmp_path, outcome):  # noqa: F811
     document = _document(db, tmp_path / "report.md", _words(476))
 
@@ -224,9 +245,11 @@ def test_opening_a_document_for_the_person_states_it(db, events, tmp_path, outco
         result=json.dumps({"outcome": outcome, "reason": None}),
     )
 
-    assert notice.startswith(
+    # It is already open in front of them, so the close does not say "before they open it".
+    assert notice == (
         "[CORSIA attention notice] You put 'report.md' in front of the person: "
-        "476 words, at least 2 minutes to read."
+        "476 words, at least 2 minutes to read. If they could act on less, cut the file "
+        "now: put first what they must decide or do, and keep only what they need for it."
     )
     assert events[-1]["properties"]["handover"] == "open"
 
@@ -245,6 +268,8 @@ def test_opening_by_path_resolves_against_the_tools_workspace(db, events, tmp_pa
 
 @pytest.mark.parametrize("result", [
     json.dumps({"outcome": "refused", "reason": "not yours"}),
+    # The tool could not show it and returned a link for the agent to post instead.
+    json.dumps({"outcome": "link", "reason": "user_view_unknown"}),
     "Error: pass exactly one of path or artifact_id",
     None,
 ])
