@@ -431,7 +431,7 @@ async def test_a_media_result_carries_the_notice_after_its_placeholder(
     monkeypatch.setattr(
         bridge, "_persist_delivery_off_loop",
         AsyncMock(return_value=SimpleNamespace(
-            invocation_id="inv-1", assistant_step_id="step-1",
+            invocation_id="inv-1", assistant_step_id="step-1", content='{"kind":"image"}',
         )),
     )
     monkeypatch.setattr(
