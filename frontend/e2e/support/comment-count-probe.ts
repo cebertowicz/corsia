@@ -58,12 +58,22 @@ export async function countFit(scope: Locator) {
 		const leadBox = box(lead);
 		const sepBox = box(sep);
 		const wrapped = !!leadBox && textBox.top >= leadBox.bottom - 1;
-		// The lead's own glyphs, not its box: its padding deliberately sits left of the line, under the clip.
+		// The lead's own letters, not its box: its padding deliberately sits left of the line, under the clip. A space
+		// that ends a wrapped line hangs past the line's edge by its own width and shows nothing, so spaces don't count.
 		const leadText = (() => {
 			if (!lead) return [];
-			const range = document.createRange();
-			range.selectNodeContents(lead);
-			return [...range.getClientRects()].filter((rect) => rect.width > 0);
+			const rects: DOMRect[] = [];
+			const walker = document.createTreeWalker(lead, NodeFilter.SHOW_TEXT);
+			for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+				for (let at = 0; at < node.data.length; at++) {
+					if (/\s/.test(node.data[at])) continue;
+					const range = document.createRange();
+					range.setStart(node, at);
+					range.setEnd(node, at + 1);
+					rects.push(...[...range.getClientRects()].filter((rect) => rect.width > 0));
+				}
+			}
+			return rects;
 		})();
 		const ellipsised = [line, ...line.querySelectorAll('*')].some((element) =>
 			getComputedStyle(element).textOverflow === 'ellipsis'

@@ -98,6 +98,29 @@ describe('autosize', () => {
 		expect(node.style.transition).toBe('');
 	});
 
+	it('refits when the field itself narrows, as when Send mounts beside text set all at once', async () => {
+		// A pasted or dictated reply is fitted at the full width; Send then mounts and the same text wraps to more rows.
+		const refit: Array<() => void> = []; const watched: Element[] = [];
+		const ResizeObserver = class {
+			constructor(callback: () => void) { refit.push(callback); }
+			observe(target: Element) { watched.push(target); } disconnect() {}
+		};
+		(globalThis as Record<string, unknown>).ResizeObserver = ResizeObserver;
+		let wide = 300, tall = 54;
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const node = field(() => tall, 'none'); owner.append(node);
+		Object.defineProperty(node, 'clientWidth', { get: () => wide, configurable: true });
+		const action = autosize(node, 'a pasted paragraph');
+		expect(node.style.height).toBe('54px');
+		expect(watched).toContain(node);
+		wide = 272; tall = 90;
+		refit[0]?.();
+		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		expect(node.style.height).toBe('90px');
+		action.destroy();
+		delete (globalThis as Record<string, unknown>).ResizeObserver;
+	});
+
 	it('waits for the height ease before a refit, so the ease is not aborted', async () => {
 		let view = 200, tall = 100; const refit: Array<() => void> = [];
 		const ResizeObserver = class {
