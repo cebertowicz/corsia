@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from typing import NamedTuple
 
 import plans.node_states as node_states
+from infra import admission_read_hold
 from plans import writer_context
 
 #: ``done``, ``failed``, ``closed``, ``in_work``.
@@ -191,8 +192,13 @@ def ready(connection: sqlite3.Connection) -> bool:
 
     The answer is kept per connection until its schema changes (``PRAGMA schema_version``).
     """
+    hold = admission_read_hold.current(connection)
+    if hold is not None and hold.aggregate_ready is not None:
+        return hold.aggregate_ready
     version = connection.execute("PRAGMA schema_version").fetchone()[0]
     if _READY.get(connection) == version:
+        if hold is not None:
+            hold.aggregate_ready = True
         return True
     # The statement form: a table-valued ``pragma_table_info(...)`` traces as ``PRAGMA table_info='...'``,
     # which a lane's write classifier reads as a PRAGMA assignment.
@@ -203,6 +209,8 @@ def ready(connection: sqlite3.Connection) -> bool:
     found = any(row[1] == "sub_open" for row in columns)
     if found:
         _READY[connection] = version
+    if hold is not None:
+        hold.aggregate_ready = found
     return found
 
 

@@ -28,6 +28,8 @@ import re
 import sqlite3
 from typing import Any
 
+from infra import admission_read_hold
+
 #: REALs packed as text are 0 or between these magnitudes; others fall back.
 _REAL_MIN, _REAL_MAX = "1e-20", "1e20"
 #: How a packed REAL appears in the JSON; no text value can contain it unescaped.
@@ -53,11 +55,23 @@ def _packed_sql(sql: str, width: int) -> str:
     return f"WITH q({columns}) AS ({sql}) SELECT json_group_array(json_array({values})) FROM q"
 
 
+_NO_FACTORY = object()
+
+
 def fetch_all(db, sql: str, params: Any = ()) -> list:
     """Return ``db.execute(sql, params).fetchall()`` for one SELECT, stepped once."""
     sql = sql.strip().rstrip(";")
-    # LIMIT 0 prepares the read for its column names without running it.
-    shape = db.execute(f"SELECT * FROM ({sql}) LIMIT 0", params)
+    scope = admission_read_hold.current(db)
+    factory = getattr(db, "row_factory", _NO_FACTORY)
+    cache = scope.shapes if scope is not None and (factory is None or factory is sqlite3.Row) else None
+    shape = cache.get(sql) if cache is not None else None
+    if shape is None:
+        # LIMIT 0 prepares the read for its column names without running it.
+        shape = db.execute(f"SELECT * FROM ({sql}) LIMIT 0", params)
+        if cache is not None and isinstance(shape, sqlite3.Cursor):
+            cache[sql] = shape
+    else:
+        shape.row_factory = factory
     if not isinstance(shape, sqlite3.Cursor):
         return db.execute(sql, params).fetchall()
     names = [column[0] for column in shape.description]

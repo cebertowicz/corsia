@@ -5,12 +5,12 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Callable, Iterator
 
 import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
-from infra import write_effects, write_lock_window
+from infra import admission_read_hold, write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_hold_callers import hold_callers
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
@@ -217,7 +217,8 @@ def write_transaction(
             connection.execute(f"SAVEPOINT {savepoint}")
             effects_mark = write_effects.enter(connection)
             try:
-                yield connection
+                with admission_read_hold.hold(connection) if scope == "admit_input" else nullcontext():
+                    yield connection
             except BaseException:
                 write_effects.leave(connection, effects_mark, ok=False)
                 connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
@@ -236,7 +237,8 @@ def write_transaction(
             write_effects.begin(connection)
             started_at = time.monotonic()
             with startup_progress.database_writes(connection):
-                yield connection
+                with admission_read_hold.hold(connection) if scope == "admit_input" else nullcontext():
+                    yield connection
                 connection.commit()
             committed = write_effects.take(connection)
         except BaseException:

@@ -36,6 +36,9 @@ from plans import node_waits
 @contextmanager
 def account_read_snapshot(db):
     """The authorized Plans read owns kind and advisory readiness in one snapshot."""
+    if db.in_transaction:
+        yield
+        return
     db.execute('SAVEPOINT plan_account_read')
     try:
         yield
