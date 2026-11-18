@@ -1,6 +1,8 @@
 """Authenticated subscription metadata, ordered policy and explicit binding controls."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
@@ -89,11 +91,17 @@ async def _read(fn, *args, **kwargs):
     return await _account_errors(run_read(fn, *args, **kwargs))
 
 
-async def _account_errors(job):
+@contextmanager
+def _account_conflicts():
     try:
-        return await job
+        yield
     except accounts.AccountError as error:
         raise HTTPException(409, str(error)) from error
+
+
+async def _account_errors(job):
+    with _account_conflicts():
+        return await job
 
 
 def _usage(account) -> dict:
@@ -118,9 +126,13 @@ def _billing_views() -> dict[str, dict]:
         db.close()
 
 
+def _known_vendors(providers) -> set[str]:
+    return {provider for provider in providers if provider in accounts.VENDORS}
+
+
 async def _no_usable_model(providers, rows=None) -> set[str]:
     """The accounts, across these vendors, that signed in but have no model CORSIA can run."""
-    wanted = {provider for provider in providers if provider in accounts.VENDORS}
+    wanted = _known_vendors(providers)
     return await run_read(accounts_without_usable_model, wanted, rows) if wanted else set()
 
 
@@ -137,17 +149,15 @@ async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_
     return await run_read(_account_view, account, rows, numbered_rows, billing_views, no_model)
 
 
-def _list_read(fn, *args, **kwargs):
-    """Preserve the list endpoint's account-conflict translation within one read job."""
-    try:
+def _account_operation(fn, *args, **kwargs):
+    """Translate account lookup conflicts inside a list or single-account read job."""
+    with _account_conflicts():
         return fn(*args, **kwargs)
-    except accounts.AccountError as error:
-        raise HTTPException(409, str(error)) from error
 
 
 def _account_view(row, rows, numbered_rows, billing_views, no_model):
     """Compose the shared account view on the read lane."""
-    return _safe(row) | {"duplicate_of": _list_read(accounts.duplicate_of, row, rows=rows),
+    return _safe(row) | {"duplicate_of": _account_operation(accounts.duplicate_of, row, rows=rows),
                          "allow_overage": _allow_overage(row),
                          "no_usable_model": row["id"] in no_model,
                          "label": account_label(row, rows=numbered_rows),
@@ -157,11 +167,11 @@ def _account_view(row, rows, numbered_rows, billing_views, no_model):
 
 def _list_vendor_accounts(provider: str | None, include_removed: bool):
     """Build the list on the read lane without a separate worker handoff per field."""
-    rows = _list_read(accounts.list_accounts, provider=provider, include_removed=include_removed)
-    numbered_rows = rows if include_removed else _list_read(
+    rows = _account_operation(accounts.list_accounts, provider=provider, include_removed=include_removed)
+    numbered_rows = rows if include_removed else _account_operation(
         accounts.list_accounts, provider=provider, include_removed=True)
     billing_views = _billing_views()
-    wanted = {row["provider"] for row in rows if row["provider"] in accounts.VENDORS}
+    wanted = _known_vendors(row["provider"] for row in rows)
     no_model = accounts_without_usable_model(wanted, rows) if wanted else set()
     return {"accounts": [_account_view(row, rows, numbered_rows, billing_views, no_model) for row in rows]}
 
@@ -256,10 +266,7 @@ async def update_vendor_account_usage(account_id: str, body: AccountUsage):
 
 
 async def _control(fn, *args, **kwargs):
-    try:
-        return await fn(*args, **kwargs)
-    except accounts.AccountError as error:
-        raise HTTPException(409, str(error)) from error
+    return await _account_errors(fn(*args, **kwargs))
 
 
 async def _left(result):
