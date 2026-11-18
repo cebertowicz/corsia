@@ -193,6 +193,9 @@ test.describe('recipient line with three names 1440', () => {
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await installWorkspace(page, viewer, [{ artifactId, path: docPath, fileName: 'Rollout plan.md' }], 0, { visible: true, splitWidth: 700 });
 			await openThread(page, viewer, 'Rollout review');
+			// The case is the 1440 card with the Workspace panel closed; a fresh browser opens it, which widens the card until the three names fit one row.
+			const panelToggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+			if (!(await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed')))) { await panelToggle.click(); await expect(page.locator('.pane')).toHaveClass(/\bcollapsed\b/); }
 			await expect(page.locator('.cm-content')).toContainText(WORD);
 			await page.locator('.cm-comment-anchor').first().click();
 			await settled(page);
