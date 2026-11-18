@@ -7,8 +7,7 @@ JOURNAL_SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS feedback_recipient_migration_
     after_rows TEXT NOT NULL
 );"""
 
-DOC_FEEDBACK_SCHEMA_SQL = f"""
-    {JOURNAL_SCHEMA_SQL}
+DOC_FEEDBACK_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_feedback_batches (
         id TEXT PRIMARY KEY,
         artifact_id TEXT NOT NULL REFERENCES artifact_identities(id),

@@ -151,12 +151,7 @@ def change_refusal(current: str | None, new_owner: str | None, multi_person: boo
 
 
 def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, multi_person: bool) -> dict[str, Any]:
-    """The owner, the effective supervisor and the picker's choices for one document.
-
-    The choices are the only agents the ownership PUT accepts: the document's
-    own scope's ``pickable_agents``, and none while the document can't be
-    changed or its scope can't be resolved.
-    """
+    """Return the owner, effective supervisor and scoped picker choices for a document."""
     owner = artifact_owner(str(artifact["id"]), db=db)
     kind = owner_kind(owner)
     owner_user_id = parse_metadata(artifact.get("metadata")).get("owner_user_id")

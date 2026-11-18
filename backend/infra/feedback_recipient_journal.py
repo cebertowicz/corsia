@@ -26,6 +26,8 @@ def record(db, batch_ids, before):
 
 def reverse(db):
     """Restore in reverse operation order, atomically refusing any subsequent change."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_recipient_migration_journal'").fetchone():
+        return
     db.execute('SAVEPOINT reverse_feedback_recipients')
     try:
         rows = db.execute('SELECT batch_ids,before_rows,after_rows FROM feedback_recipient_migration_journal ORDER BY seq DESC').fetchall()

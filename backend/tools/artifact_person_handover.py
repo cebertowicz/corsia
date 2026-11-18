@@ -3,7 +3,6 @@
 from infra import config
 from registry import models
 from registry.document_ownership_change import OwnershipBody, apply_change
-from registry.document_supervisor import owner_kind
 from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_project, scope_conductor
 
 
