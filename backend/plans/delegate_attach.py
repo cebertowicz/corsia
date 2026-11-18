@@ -55,14 +55,38 @@ NOT_ATTACHED = (
 )
 
 
+#: What a worker handed a reviewer step reads first, written from the plan, not by the author.
+REVIEWER_BRIEF = (
+    'You are the reviewer for the workflow step "{title}". Judge the work against this step and '
+    "what was asked, not against how its author describes it.\n\nWhat was asked: {intent}\n\n"
+    "The step's check: {check}"
+)
+REVIEWER_HOW = "\n\nHow to review: {instruction}"
+#: The author's own message, kept as help in finding the work.
+AUTHOR_NOTE = (
+    "From the author, to help you find the work (where it is, what changed); "
+    "it is not what you judge against:\n\n{message}"
+)
+
+
 @dataclass(frozen=True)
 class Step:
-    """The plan task a worker will take over, or already took on a send retry."""
+    """The plan task a worker will take over, or already took on a send retry.
+
+    ``brief`` is a reviewer step's own brief, set only on its first hand-over.
+    """
 
     plan_id: str
     node_id: str
     title: str
     already_attached: bool = False
+    brief: str | None = None
+
+    def lead(self, message: str) -> str:
+        """The worker's message: a reviewer step's brief first, the author's text as a note."""
+        if self.brief is None:
+            return message
+        return f"{self.brief}\n\n{AUTHOR_NOTE.format(message=message)}"
 
 
 def kept(requested: Any) -> bool:
@@ -101,13 +125,8 @@ def _choose(
                 " your task ids, 'none', or omit it for your current task"
             )
         _require_open(node, attached_worker=attached_worker)
-        return _step(
-            node,
-            already_attached=(
-                attached_worker is not None
-                and node["spawned_thread_id"] == attached_worker
-            ),
-        )
+        already = attached_worker is not None and node["spawned_thread_id"] == attached_worker
+        return _step(node, already_attached=already, brief=None if already else _reviewer_brief(db, node))
     if plan is None:
         return None
     current = selection_validity.attributed_selection(db, parent_thread_id)
@@ -116,7 +135,31 @@ def _choose(
     node = db.execute(
         "SELECT * FROM plan_nodes WHERE id=?", (current["node_id"],),
     ).fetchone()
-    return _step(node) if node["spawned_thread_id"] is None else None
+    return _step(node, brief=_reviewer_brief(db, node)) if node["spawned_thread_id"] is None else None
+
+
+def _reviewer_brief(db, node) -> str | None:
+    """The brief of a workflow step another agent checks, from the step and its run's intent.
+
+    The check comes from the plan so the reviewer does not inherit the author's
+    framing of the work. None for any other task.
+    """
+    from plans import handoff_brief, intent_creation, workflow_fields
+    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES
+
+    if node["workflow_step"] is None or workflow_fields.creation_payload(db, str(node["id"])).get("workflow_by") != "reviewer":
+        return None
+    source = intent_creation.canonical(db, str(node["id"]))
+    brief = REVIEWER_BRIEF.format(
+        title=node["title"], intent=source["intent"] or source["title"], check=node["acceptance_criteria"],
+    )
+    if node["description"]:
+        # The worker reads from its own plan, never the step's, so a cut names the step's thread.
+        field = handoff_brief.bounded_field(db, node, own_plan_id="")
+        brief += REVIEWER_HOW.format(
+            instruction=field(str(node["description"]), REVISION_BRIEF_MAX_BYTES, what="description"),
+        )
+    return brief
 
 
 def _require_open(node, *, attached_worker: str | None = None) -> None:
@@ -143,9 +186,9 @@ def is_doing_open_step(db, thread_id: str, node_id: str) -> bool:
     ).fetchone() is not None
 
 
-def _step(node, *, already_attached: bool = False) -> Step:
+def _step(node, *, already_attached: bool = False, brief: str | None = None) -> Step:
     return Step(
-        str(node["plan_id"]), str(node["id"]), str(node["title"]), already_attached,
+        str(node["plan_id"]), str(node["id"]), str(node["title"]), already_attached, brief,
     )
 
 

@@ -149,7 +149,7 @@ def with_task_line(message: str, step, parent_thread_id: str) -> str:
     if step is None:
         return message
     return (
-        f'{message}\n\nYour plan task: "{step.title}" ({step.node_id}). Read its intent and '
+        f'{step.lead(message)}\n\nYour plan task: "{step.title}" ({step.node_id}). Read its intent and '
         f"acceptance criteria with plan_read(thread_id='{parent_thread_id}', "
         f"node_id='{step.node_id}') before you start, and again if you're told it changed."
     )
