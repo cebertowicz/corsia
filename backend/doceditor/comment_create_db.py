@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
-from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
+from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed, not_active_message
 from doceditor.comment_creation import Anchor, CreateReceipt
 from doceditor.comments import CommentAccessDenied, CommentTargetMoved  # storage raises the first too, for a reply's parent
 from doceditor.doc_text import read_doc_text
@@ -119,7 +119,7 @@ def _record_tags(connection, request: CommentInput, row: dict) -> None:
 def _refuse_retired_target(request: CommentInput, connection) -> None:
     """A promote retired the document after the caller's check; its comments live on the successor."""
     if request.artifact_id is not None and registry_models.successor_id(request.artifact_id, db=connection) is not None:
-        raise CommentTargetMoved(request.artifact_id)
+        raise CommentTargetMoved(not_active_message(request.artifact_id))  # the reason an agent's tool shows
 
 
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):

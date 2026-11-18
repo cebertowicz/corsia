@@ -15,8 +15,8 @@ from api.doc_comment_models import TaggedAgentMention
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError
 from doceditor.comment_actions import SUGGESTION_REASON_MAX_CHARS, CommentActionError, validate_create
-from doceditor.comment_action_errors import decision_only_error
-from doceditor.comments import CommentTargetMoved, CrossArtifactIdError, not_active_message, validate_client_id
+from doceditor.comment_action_errors import decision_only_error, not_active_message
+from doceditor.comments import CommentTargetMoved, CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import authenticate, may_access_artifact
 from infra.database import get_db, write_transaction

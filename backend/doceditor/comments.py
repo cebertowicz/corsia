@@ -28,19 +28,8 @@ class CommentAccessDenied(PermissionError):
     """The validated target stopped being accessible before its DB create; routes answer it as not found."""
 
 
-def not_active_message(artifact_id: str) -> str:
-    """The sentence every caller gives an artifact_id that no longer names an active document."""
-    return f"artifact_id does not resolve to an active artifact: {artifact_id}"
-
-
 class CommentTargetMoved(CommentAccessDenied):
-    """A promote retired the target document between the caller's check and the write; its comments live on the successor.
-
-    The message is the sentence the preflight gives a retired id, so the agent tool and the delegation
-    route show a reason; the browser route answers it with its own 409 text instead."""
-
-    def __init__(self, artifact_id: str):
-        super().__init__(not_active_message(artifact_id))
+    """A promote retired the target document between the route's check and the write; its comments live on the successor."""
 
 
 class ReplyParentNotFound(CommentAccessDenied):

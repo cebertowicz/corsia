@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from doceditor.comment_action_errors import CommentActionError
+from doceditor.comment_action_errors import CommentActionError, not_active_message
 from doceditor.comment_actions import validate_create
-from doceditor.comments import get_comment, not_active_message, validate_client_id
+from doceditor.comments import get_comment, validate_client_id
 from infra.auth import may_access_artifact
 from registry import models as registry_models
 from registry import service as registry_service
