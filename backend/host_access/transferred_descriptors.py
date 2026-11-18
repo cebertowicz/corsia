@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from functools import partial, update_wrapper
 import os
-from typing import Any, Callable
+from types import TracebackType
 
 
 class TransferredDescriptors:
@@ -12,6 +11,15 @@ class TransferredDescriptors:
 
     def __init__(self, descriptors: tuple[int, ...]) -> None:
         self.descriptors = descriptors
+
+    def __enter__(self) -> TransferredDescriptors:
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def close(self) -> None:
         """Release the parent copies; subsequent calls cannot close reused numbers."""
@@ -25,23 +33,3 @@ class TransferredDescriptors:
                 os.close(descriptor)
             except OSError:
                 pass
-
-
-class transfer_descriptors:
-    """Transfer launch descriptors for the whole async call, including admission."""
-
-    def __init__(self, function: Callable[..., Any]) -> None:
-        self.function = function
-        update_wrapper(self, function)
-
-    def __get__(self, instance: Any, owner: type | None = None) -> Any:
-        if instance is None:
-            return self
-        return partial(self.__call__, instance)
-
-    async def __call__(self, instance: Any, *args: Any, inherited_fds: tuple[int, ...] = (), **kwargs: Any) -> Any:
-        owned = TransferredDescriptors(inherited_fds)
-        try:
-            return await self.function(instance, *args, inherited_fds=owned, **kwargs)
-        finally:
-            owned.close()

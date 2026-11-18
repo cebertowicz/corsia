@@ -167,7 +167,6 @@ async def test_actual_envelope_transport_and_sibling(envelope, background, scena
         if observed != b"I":
             result = await target
             pytest.fail(f"descriptor unavailable/denied through generated envelope: received {observed!r}, child={result!r}")
-        assert observed == b"I", "sibling wrote attachment bytes"
         sibling_code, sibling_out, sibling_err = await sibling
         assert sibling_code == 0, (sibling_code, sibling_out, sibling_err)
         assert b"ATTACHED" not in sibling_out, sibling_out

@@ -24,7 +24,7 @@
     "backend/api/project_scaffolding.py": 451,
     "backend/core/step_handler.py": 417,
     "backend/core/thread_lifecycle.py": 481,
-    "backend/host_access/processes.py": 1371,
+    "backend/host_access/processes.py": 1370,
     "backend/host_access/redaction.py": 885,
     "backend/host_access/supervisor.py": 1696,
     "backend/infra/host_access_leases.py": 1177,

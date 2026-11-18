@@ -18,7 +18,7 @@ import re
 import secrets
 import signal
 import time
-from typing import Any, Callable, Literal, Mapping, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 import psutil
 from host_access.group_probe import current_control_plane_pids as _current_control_plane_pids, group_pids as _group_pids, is_zombie as _is_zombie
@@ -38,7 +38,7 @@ from host_access.process_launch import (
     launch_owned_process,
     prepare_spawn,
 )
-from host_access.transferred_descriptors import TransferredDescriptors, transfer_descriptors
+from host_access.transferred_descriptors import TransferredDescriptors
 from host_access.redaction import (
     REDACTED,
     redact_process_arguments as _redact_arguments,
@@ -590,7 +590,6 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
             self._cleanup_runtime_paths(runtime)
         return runtime.record
 
-    @transfer_descriptors
     async def spawn(
         self,
         argv: Sequence[str],
@@ -613,95 +612,95 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
         max_lifetime_seconds: float = LONG_RUNNING_MAX_LIFETIME_SECONDS,
     ) -> ForegroundProcessResult | BackgroundProcessResult:
         """Spawn an owned group, transferring inherited descriptors at entry."""
-        transferred = cast(TransferredDescriptors, inherited_fds)
-        spec = prepare_spawn(
-            argv, cwd=cwd, cwd_fd=cwd_fd, inherited_fds=transferred.descriptors,
-            cleanup_paths=cleanup_paths,
-            error_type=ProcessOwnerError,
-        )
-        if not thread_id or not turn_id:
-            raise ProcessOwnerError("owned process requires exact session and turn")
-        if timeout_seconds <= 0:
-            raise ProcessOwnerError("owned process timeout is invalid")
-        if long_running and (not background or not (description or "").strip()):
-            raise ProcessOwnerError("a long-running process is background and described")
-        if background and self._transition_callback is None:
-            raise ProcessOwnerError(
-                "durable background process persistence is unavailable"
+        with TransferredDescriptors(inherited_fds) as transferred:
+            spec = prepare_spawn(
+                argv, cwd=cwd, cwd_fd=cwd_fd, inherited_fds=transferred.descriptors,
+                cleanup_paths=cleanup_paths,
+                error_type=ProcessOwnerError,
             )
-        launch_argv, launch_cwd = spec.argv, spec.cwd
-        spawn_options, owned_cleanup_paths = spec.options, spec.cleanup_paths
-        gate_read_fd: int | None = None
-        gate_write_fd: int | None = None
-
-        async with self._owner_lock:
-            await self._require_process_admission(
-                thread_id=thread_id,
-                turn_id=turn_id,
-                lease_id=lease_id,
-                long_running=long_running,
-            )
-            self._prune_terminal_records()
-            handle = secrets.token_urlsafe(24)
-            owner_marker = secrets.token_urlsafe(32)
-            log_path = self._log_path_for(handle)
-            if background:
-                try:
-                    (
-                        launch_argv,
-                        spawn_options,
-                        gate_read_fd,
-                        gate_write_fd,
-                    ) = gated_launch_spec(launch_argv, spawn_options)
-                except BaseException:
-                    log_path.unlink(missing_ok=True)
-                    raise
-            child_env = dict(env)
-            child_env[PROCESS_OWNER_MARKER_ENV] = owner_marker
-            process, pid, creation_fingerprint = await launch_owned_process(
-                launch_argv, cwd=launch_cwd, env=child_env, options=spawn_options,
-                background=background, gate_read_fd=gate_read_fd,
-                gate_write_fd=gate_write_fd, log_path=log_path, handle=handle,
-                fingerprint=_process_creation_fingerprint, error_type=ProcessOwnerError,
-                transferred=transferred,
-            )
-            gate_read_fd = None
-            record = ProcessRecord(
-                handle=handle,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                lease_id=lease_id,
-                lease_revision=lease_revision,
-                permit_id=permit_id,
-                pid=pid,
-                pgid=pid,
-                creation_fingerprint=creation_fingerprint,
-                mode="background" if background else "foreground",
-                log_path=log_path,
-                terminal_state="running",
-                long_running=long_running,
-                description=(description or "").strip() or None,
-                started_at=self._clock(),
-                stall_after_seconds=stall_after_seconds if long_running else None,
-                max_lifetime_seconds=max_lifetime_seconds if long_running else None,
-            )
-            runtime = _RuntimeProcess(
-                record=record,
-                process=process,
-                owner_marker=owner_marker,
-                cleanup_paths=owned_cleanup_paths,
-                admitting=background,
-            )
-            self._runtimes[handle] = runtime
-            if background:
-                assert gate_write_fd is not None
-                return await self._persist_and_release_background(
-                    runtime, gate_write_fd, float(timeout_seconds),
+            if not thread_id or not turn_id:
+                raise ProcessOwnerError("owned process requires exact session and turn")
+            if timeout_seconds <= 0:
+                raise ProcessOwnerError("owned process timeout is invalid")
+            if long_running and (not background or not (description or "").strip()):
+                raise ProcessOwnerError("a long-running process is background and described")
+            if background and self._transition_callback is None:
+                raise ProcessOwnerError(
+                    "durable background process persistence is unavailable"
                 )
-            runtime.communicate_task = asyncio.create_task(
-                process.communicate(),
-                name=f"managed-process-output:{handle}",
-            )
+            launch_argv, launch_cwd = spec.argv, spec.cwd
+            spawn_options, owned_cleanup_paths = spec.options, spec.cleanup_paths
+            gate_read_fd: int | None = None
+            gate_write_fd: int | None = None
+
+            async with self._owner_lock:
+                await self._require_process_admission(
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    lease_id=lease_id,
+                    long_running=long_running,
+                )
+                self._prune_terminal_records()
+                handle = secrets.token_urlsafe(24)
+                owner_marker = secrets.token_urlsafe(32)
+                log_path = self._log_path_for(handle)
+                if background:
+                    try:
+                        (
+                            launch_argv,
+                            spawn_options,
+                            gate_read_fd,
+                            gate_write_fd,
+                        ) = gated_launch_spec(launch_argv, spawn_options)
+                    except BaseException:
+                        log_path.unlink(missing_ok=True)
+                        raise
+                child_env = dict(env)
+                child_env[PROCESS_OWNER_MARKER_ENV] = owner_marker
+                process, pid, creation_fingerprint = await launch_owned_process(
+                    launch_argv, cwd=launch_cwd, env=child_env, options=spawn_options,
+                    background=background, gate_read_fd=gate_read_fd,
+                    gate_write_fd=gate_write_fd, log_path=log_path, handle=handle,
+                    fingerprint=_process_creation_fingerprint, error_type=ProcessOwnerError,
+                    transferred=transferred,
+                )
+                gate_read_fd = None
+                record = ProcessRecord(
+                    handle=handle,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    lease_id=lease_id,
+                    lease_revision=lease_revision,
+                    permit_id=permit_id,
+                    pid=pid,
+                    pgid=pid,
+                    creation_fingerprint=creation_fingerprint,
+                    mode="background" if background else "foreground",
+                    log_path=log_path,
+                    terminal_state="running",
+                    long_running=long_running,
+                    description=(description or "").strip() or None,
+                    started_at=self._clock(),
+                    stall_after_seconds=stall_after_seconds if long_running else None,
+                    max_lifetime_seconds=max_lifetime_seconds if long_running else None,
+                )
+                runtime = _RuntimeProcess(
+                    record=record,
+                    process=process,
+                    owner_marker=owner_marker,
+                    cleanup_paths=owned_cleanup_paths,
+                    admitting=background,
+                )
+                self._runtimes[handle] = runtime
+                if background:
+                    assert gate_write_fd is not None
+                    return await self._persist_and_release_background(
+                        runtime, gate_write_fd, float(timeout_seconds),
+                    )
+                runtime.communicate_task = asyncio.create_task(
+                    process.communicate(),
+                    name=f"managed-process-output:{handle}",
+                )
 
         return await self._wait_foreground(
             runtime, timeout_seconds=float(timeout_seconds),

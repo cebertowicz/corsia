@@ -14,6 +14,8 @@ from typing import Any, Callable, Sequence
 
 import psutil
 
+from host_access.transferred_descriptors import TransferredDescriptors
+
 LAUNCH_GATE_REFUSED_EXIT = 125
 _LAUNCH_GATE_CODE = (
     "import os,sys;"
@@ -133,7 +135,7 @@ async def launch_owned_process(
     options: dict[str, Any], background: bool, gate_read_fd: int | None,
     gate_write_fd: int | None, log_path: Path, handle: str,
     fingerprint: Callable[[int], str], error_type: type[Exception],
-    transferred: Any,
+    transferred: TransferredDescriptors,
 ) -> tuple[asyncio.subprocess.Process, int, str]:
     """Create and bind the child while releasing transferred parent copies."""
     try:
