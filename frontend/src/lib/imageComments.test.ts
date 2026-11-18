@@ -84,6 +84,21 @@ describe('image comments', () => {
 		expect(comments.draft?.body).toBe('@Agent');
 	});
 
+	it('keeps the draft and shows the server\'s sentence, without "try again", when the document no longer takes comments', async () => {
+		const sentence = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused(`409 ${JSON.stringify({ detail: sentence, kind: 'not_commentable' })}`, 'not_commentable'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments, onCreated } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		await expect(comments.submit('Too dark')).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledWith(sentence, 'error');
+		expect(mocks.addRegionComment).toHaveBeenCalledOnce();
+		expect(comments.draft?.body).toBe('Too dark');
+		expect(comments.ui.state).toEqual({ kind: 'draft' });
+		expect(onCreated).not.toHaveBeenCalled();
+	});
+
 	it('keeps the composer and says why when posting fails', async () => {
 		mocks.addRegionComment.mockRejectedValueOnce(new Error('Offline'));
 		vi.spyOn(console, 'error').mockImplementation(() => {});

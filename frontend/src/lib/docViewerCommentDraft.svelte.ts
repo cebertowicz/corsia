@@ -6,7 +6,7 @@ import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 import { plainErrorText } from '$lib/plainError';
-import { submitDocumentComment } from '$lib/docViewerOperations';
+import { isNotCommentable, notCommentableMessage, submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
 export type ViewerSelection = SelectionOffer | null;
@@ -29,6 +29,8 @@ const aborted = () => new DOMException('Comment draft closed', 'AbortError');
 export function liveFailureMessage(error: unknown): string {
 	if (!(error instanceof Error)) return 'Could not post the comment; your draft is kept.';
 	if (error.message === SELECTION_LOST) return 'The selected text changed or was removed. Your comment draft is kept.';
+	const notCommentable = notCommentableMessage(error);
+	if (notCommentable) return notCommentable;
 	if (error.message.startsWith('409 ')) return 'The document changed before your comment could be attached. Your draft is kept. Try again.';
 	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
 	if (error.name === 'PostTimeoutError') return "We couldn't confirm your comment was posted. Check the comments before posting again. Your draft is kept.";
@@ -68,7 +70,8 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 		return await attempt();
 	} catch (error) {
 		// The server lost the range between capture and save: capture the still-tracked selection again before giving up.
-		const refused = error instanceof Error && error.message.startsWith('409 ');
+		// A document that no longer takes comments is not a lost range: a second attempt would only be refused again.
+		const refused = error instanceof Error && error.message.startsWith('409 ') && !isNotCommentable(error);
 		if (!refused || !selectionRange(selection) || !current() || controller.signal.aborted) throw error;
 		return attempt();
 	}
