@@ -5,11 +5,12 @@ import { expect, type Page, type Route } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails } from '../support/documentBar';
 import { raiseAsk } from '../support/reviewAsk';
+import { closeComments, openComments } from '../support/commentDrawer';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
  * Every count the document's bar shows reads whole, inside the bar and clear of its neighbours, on one row: the Comments button
- * ("N new" while a reply is unread, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
+ * (the unread number on the phone header, "N new" on desktop, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
  * you). At 320, 360 and 393 px phones, 700, 900 and 1440, with one-, two- and three-digit comment counts. What used to share the
  * toolbar (Send, Resolved, Deliver immediately, reviewers, Request review, History) is in Details; its switch keeps a whole hit area there.
  */
@@ -26,8 +27,8 @@ const CASES = [
 	{ width: 320, scheme: 'light' as const, resolved: 3 },
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
-/** What the Comments button shows: "N new" while a reply is unread, the total otherwise. */
-const countText = (threads: number, unread: number) => unread ? `${unread} new` : `${threads}`;
+/** What the Comments button shows in the compact phone header or desktop bar. */
+const countText = (threads: number, unread: number, phoneHeader: boolean) => unread ? `${unread}${phoneHeader ? '' : ' new'}` : `${threads}`;
 /** Its accessible name carries both, and what waits for Send. */
 const countName = (threads: number, unread: number) => new RegExp(`^${threads} ${threads === 1 ? 'comment' : 'comments'}${unread ? `, ${unread} new` : ''}(?:, \\d+ waiting for Send)?$`);
 /** The bar's controls are 44 px touch targets in a window up to 768 px and 36 px with a pointer (DocViewerStatus.svelte, `--bar-row`). */
@@ -53,7 +54,10 @@ async function measureBar(page: Page) {
 		const inner = comments.querySelector<HTMLElement>('span:last-of-type');
 		return {
 			bar: box(bar), comments: box(comments), details: box(details), needs: needs ? box(needs) : null,
+			name: bar.querySelector('[data-testid="header-document-title"]') ? box(bar.querySelector('[data-testid="header-document-title"]')!) : null,
+			controls: [...bar.querySelectorAll<HTMLElement>('button, [role="button"], .participant-slot')].filter((el) => el.getBoundingClientRect().width > 0).map((el) => ({ name: el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.className, box: box(el) })),
 			commentsText: comments.innerText.replace(/\s+/g, ' ').trim(), commentsName: comments.getAttribute('aria-label'),
+			phoneHeader: !!comments.closest('.shell-header') && window.innerWidth <= 768,
 			needsText: needs?.innerText.trim() ?? null, detailsName: details.getAttribute('aria-label'),
 			// Nothing inside either button is cut: the button holds its text, and the text span holds its own.
 			clipped: [comments, details, ...(inner ? [inner] : []), ...(needs ? [needs] : [])].filter((element) => element.scrollWidth > element.clientWidth + 0.5 && getComputedStyle(element).display !== 'inline').map((element) => element.className),
@@ -66,7 +70,7 @@ type BarMeasured = Awaited<ReturnType<typeof measureBar>>;
 
 /** Each count is whole, inside the bar and the window; no control in the bar overlaps another; the page does not scroll sideways. */
 async function expectCountsWhole(page: Page, measured: BarMeasured, label: string, { threads, unread, needs }: { threads: number; unread: number; needs: number }) {
-	expect.soft(measured.commentsText, `${label}: the Comments count reads whole`).toBe(countText(threads, unread));
+	expect.soft(measured.commentsText, `${label}: the Comments count reads whole`).toBe(countText(threads, unread, measured.phoneHeader));
 	expect.soft(measured.commentsName, `${label}: the Comments button names the total and the unread`).toMatch(countName(threads, unread));
 	expect.soft(measured.needsText, `${label}: the amber count beside Details`).toBe(needs ? `${needs}` : null);
 	expect.soft(measured.detailsName, `${label}: Details names what needs you`).toBe(`Document details${needs ? ` · ${needs} needs you` : ''}`);
@@ -145,26 +149,27 @@ for (const { width, scheme, resolved } of CASES) {
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		if (resolved) {
-			// Three resolved threads, nothing held: Details holds "Resolved · 3" and no Send, whole and inside the panel.
+			// Three resolved threads, nothing held: the drawer holds "Resolved · 3" and no Send, whole and inside the drawer.
 			shown.threads = resolved; shown.unread = 0; shown.resolved = resolved;
 			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
-			const panel = await openDetails(page);
-			const entry = panel.locator('.resolved-tool');
+			await openComments(page);
+			const panel = page.locator('[data-doc-comments-drawer]');
+			const entry = panel.locator('[data-resolved-entry]');
 			await expect(entry).toHaveText(`Resolved · ${resolved}`);
 			await expect(panel.locator('.sending-now')).toHaveCount(0);
 			await page.waitForTimeout(800);
 			const label = `Resolved · ${resolved} at ${width} ${scheme}`;
 			const fit = await panel.evaluate((element) => {
 				const panelBox = element.getBoundingClientRect();
-				const control = element.querySelector<HTMLElement>('.resolved-tool')!;
+				const control = element.querySelector<HTMLElement>('[data-resolved-entry]')!;
 				const box = control.getBoundingClientRect();
 				return { clipped: control.scrollWidth > control.clientWidth, inside: box.left >= panelBox.left - 0.5 && box.right <= panelBox.right + 0.5, sideways: element.scrollWidth - element.clientWidth };
 			});
 			expect.soft(fit.clipped, `${label}: Resolved is not clipped`).toBe(false);
-			expect.soft(fit.inside, `${label}: Resolved sits inside Details`).toBe(true);
-			expect.soft(fit.sideways, `${label}: Details does not scroll sideways`).toBeLessThanOrEqual(1);
+			expect.soft(fit.inside, `${label}: Resolved sits inside the drawer`).toBe(true);
+			expect.soft(fit.sideways, `${label}: the drawer does not scroll sideways`).toBeLessThanOrEqual(1);
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), fullPage: false });
-			await closeDetails(page);
+			await closeComments(page);
 			// The Comments button counts open threads, and all three are resolved.
 			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1 });
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -181,10 +186,11 @@ for (const { width, scheme, resolved } of CASES) {
 			shown.threads = threads; shown.unread = unread;
 			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
 			const pill = page.locator('[data-comments-entry]');
-			await expect(pill).toHaveText(countText(threads, unread), { useInnerText: true });
+			const phoneHeader = await pill.evaluate((el) => !!el.closest('.shell-header') && window.innerWidth <= 768);
+			await expect(pill).toHaveText(countText(threads, unread, phoneHeader), { useInnerText: true });
 			// A person sees the settled state: nothing may redraw the button after the store update.
 			await page.waitForTimeout(800);
-			await expect(pill).toHaveText(countText(threads, unread), { useInnerText: true });
+			await expect(pill).toHaveText(countText(threads, unread, phoneHeader), { useInnerText: true });
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const measured = await measureBar(page);
 			const label = `${threads}/${unread} at ${width} ${scheme}`;
@@ -205,16 +211,20 @@ for (const { width, scheme, resolved } of CASES) {
  * at 1440 and 1024, a wide pane (1000 px), and the pane open and closed. At each, Details opens with Send, the reviewers and the
  * delivery switch whole inside it, and the switch's hit area lands every tap on the switch and overlaps nothing.
  */
-const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393, 700].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
+const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 375, 393, 700].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
 const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index * 40), 900].sort((a, b) => a - b); // 800..1440, resized within one desktop load
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
-const FRAME_SIZES = [320, 360, 393, 560, 700, 900];
+const FRAME_SIZES = [320, 360, 375, 393, 560, 700, 900];
 
 /** Details' delivery switch: its button is the track; its hit area is the track or the 44 px touch size, and a tap on each corner and the centre lands on it. */
 async function measureSwitch(page: Page) {
 	const panel = await openDetails(page);
-	return panel.evaluate((root) => {
-		const toggle = root.querySelector<HTMLElement>('.delivery-toggle .tg')!;
+	const reviewerMore = await panel.locator('.reviewer-group .more').textContent();
+	await closeDetails(page);
+	await openComments(page);
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	const measured = await drawer.evaluate((root) => {
+		const toggle = root.querySelector<HTMLElement>('.delivery .tg')!;
 		toggle.scrollIntoView({ block: 'nearest' });
 		const button = toggle.getBoundingClientRect();
 		const area = (toggle.querySelector<HTMLElement>('.hit') ?? toggle).getBoundingClientRect();
@@ -223,22 +233,24 @@ async function measureSwitch(page: Page) {
 		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggle).map((el) => `${el?.tagName}.${el?.className}`);
 		const overlapOf = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
 		const hitOverlaps = [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => control !== toggle && !toggle.contains(control) && !control.contains(toggle) && control.getBoundingClientRect().width > 0 && overlapOf(area, control.getBoundingClientRect())).map((control) => control.getAttribute('aria-label') ?? control.className);
-		const send = root.querySelector<HTMLElement>('.p-send .btn');
+		const send = root.querySelector<HTMLElement>('.drawer-foot .btn');
 		const sendShort = send?.querySelector<HTMLElement>('.send-short');
 		const sendShown = sendShort && getComputedStyle(sendShort).display !== 'none' ? sendShort : send?.querySelector<HTMLElement>('.send-full') ?? send;
 		return {
+			panel: { left: panelBox.left, right: panelBox.right, top: panelBox.top, bottom: panelBox.bottom },
+			controls: [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((el) => el.getBoundingClientRect().width > 0).map((el) => { const r = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? el.className, box: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }; }),
 			button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 },
 			area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 },
 			tapMisses, hitOverlaps,
 			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right) },
 			touchMeant: window.innerWidth <= 768,
 			sendText: sendShown?.innerText.trim() ?? null, sendName: send?.getAttribute('aria-label') ?? null,
-			reviewerMore: root.querySelector('.reviewer-group .more')?.textContent ?? null,
-			deliverLabel: root.querySelector<HTMLElement>('.delivery-toggle .p-text')?.textContent?.trim() ?? null,
+			deliverLabel: root.querySelector<HTMLElement>('.delivery > span')?.textContent?.trim() ?? null,
 			sideways: root.scrollWidth - root.clientWidth,
 			panelInWindow: panelBox.left >= -0.5 && panelBox.right <= window.innerWidth + 0.5,
 		};
 	});
+	return { ...measured, reviewerMore };
 }
 
 function expectSwitchWhole(measured: Awaited<ReturnType<typeof measureSwitch>>, label: string) {
@@ -304,8 +316,10 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			await readers();
 			const panel = await openDetails(page);
 			await expect(panel.locator('.reviewer-group .more')).toHaveText('+2');
-			await expect(panel.locator('.p-send .btn')).toBeVisible();
 			await closeDetails(page);
+			await openComments(page);
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-foot .btn')).toBeVisible();
+			await closeComments(page);
 		};
 		const take = async (viewport: number, split: number | null, variant = '') => {
 			await settled(page, viewport);
@@ -316,7 +330,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			const details = await measureSwitch(page);
 			expectSwitchWhole(details, label);
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-details-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), fullPage: false });
-			await closeDetails(page);
+			await closeComments(page);
 			results.push({ label, bar: measured, panel: details });
 		};
 		for (const width of PHONE_SWEEP) {
@@ -575,13 +589,15 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		await expectCountsWhole(page, await measureBar(page), label, { threads: 120, unread: 45, needs: 0 });
 		if ([360, 393, 430].includes(width)) {
 			const panel = await openDetails(page);
-			await expect(panel.locator('.resolved-tool')).toHaveText('Resolved · 3');
 			await expect(panel.locator('.history-tool')).toBeVisible();
 			await expect(panel.locator('.review-request')).toBeVisible();
-			await expect(panel.locator('.delivery-toggle')).toBeVisible();
 			expect.soft(await panel.evaluate((element) => element.scrollWidth - element.clientWidth), `${label}: Details does not scroll sideways`).toBeLessThanOrEqual(1);
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `history-${width}.png`), fullPage: false });
 			await closeDetails(page);
+			await openComments(page);
+			await expect(page.locator('[data-resolved-entry]')).toHaveText('Resolved · 3');
+			await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toBeVisible();
+			await closeComments(page);
 		}
 	}
 	await page.unrouteAll({ behavior: 'ignoreErrors' });

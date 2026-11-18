@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { test } from '../support/test';
 import { expect, type TestInfo } from '@playwright/test';
 import { createSession } from '../support/corsia';
-import { backToChat, openDetails } from '../support/documentBar';
+import { backToChat } from '../support/documentBar';
+import { openComments } from '../support/commentDrawer';
 import {
 	batchRows, chatSend, chatSendGroup, heldIn, installWorkspace, isolatedDb, openThread, seedHeldComments, seedTextDocument,
 	setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments, watchSendRequests,
@@ -115,8 +116,9 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 				await page.getByRole('button', { name: /^Expand Files/ }).click();
 				await turnOffDocumentComments(page);
 			}
-			// Retry is in the document's Details, where its Send stood: open it as a person does.
-			const header = await openDetails(page);
+			// Retry is in the comments drawer, where its Send stood: open it as a person does.
+			await openComments(page);
+			const header = page.locator('[data-doc-comments-drawer]');
 			const retry = header.locator('.undelivered').getByRole('button', { name: /^Retry/ });
 			await expect(retry).toBeVisible();
 			// The panel slides in on a phone: read the boxes once it has stopped. Each must sit inside the document's own
@@ -126,7 +128,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 				const bounds = await header.boundingBox();
 				return box !== null && bounds !== null && box.x >= bounds.x - 0.5 && box.x + box.width <= bounds.x + bounds.width + 0.5;
 			};
-			await expect.poll(inside(retry), { message: 'Retry sits inside the document Details' }).toBe(true);
+			await expect.poll(inside(retry), { message: 'Retry sits inside the comments drawer' }).toBe(true);
 			// The whole reason stays reachable: laid out whole inside Details, or, in a narrow bar, carried by Retry itself.
 			const reason = page.locator('.undelivered [role="status"]').filter({ hasText: 'not delivered' });
 			await expect(reason).toContainText("its owner can't be reached");

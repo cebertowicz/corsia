@@ -17,22 +17,9 @@
 	import { toastTopSurface } from '$lib/stores/toastTop';
 	import { inlineReach } from '$lib/actions/inlineReach';
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
-	import type { View } from '$lib/homePaneConfig';
+	import type { HeaderProps } from '$lib/headerProps';
 
-	let { onToggleSidebar, onTogglePane, onMeasurement, onRightControlsWidth, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
-		onToggleSidebar: () => void;
-		onTogglePane: () => void;
-		/** Reports how far the right controls reach in from the header's inline end, so the canvas tabs can stop before them. */
-		onRightControlsWidth?: (width: number) => void;
-		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
-		onMeasurement?: () => void;
-		activeView: View;
-		conductorThreadId: string | null;
-		/** False where the view has no right pane; the panel toggle would open nothing. */
-		hasPane?: boolean;
-		/** Width reserved by an expanded artifact canvas and its divider. */
-		artifactHeaderInset?: number | null;
-	} = $props();
+	let { onToggleSidebar, onTogglePane, onMeasurement, onRightControlsWidth, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: HeaderProps = $props();
 
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
@@ -142,7 +129,7 @@
 	{/if}
 {/snippet}
 
-<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} data-document-bar-row data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} class:phone-document={phoneDocument} data-document-bar-row data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
@@ -221,6 +208,7 @@
 <style>
 	.shell-header {
 		position: absolute; top: 0; left: 0; right: 0;
+		width: 100%; min-width: 0; box-sizing: border-box;
 		z-index: 10;
 		height: var(--header-height);
 		--header-inline-end: 12px;
@@ -254,7 +242,7 @@
 		flex: 0 1 calc(100% - var(--artifact-header-inset));
 		max-width: calc(100% - var(--artifact-header-inset));
 	}
-	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+	.h-zone { display: flex; align-items: center; gap: var(--space-1); flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	/* An overlaid drawer covers the inline end; PaneShell publishes how much, so the controls keep clear of it. */
 	.h-right { margin-left: auto; padding-inline-end: var(--pane-overlay-inset, 0px); }
@@ -353,13 +341,13 @@
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
-			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
+			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
 		}
 		/* The desktop split wrapper collapses back to the existing three mobile header cells. */
 		.chat-header, .chat-header.with-canvas {
 			grid-column: 1 / -1;
-			width: 100%; max-width: none; flex: 1;
-			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
+			width: 100%; max-width: none; min-width: 0; flex: 1;
+			display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
 		/* The blur stays on this masked layer so it fades out with no hard edge.
@@ -388,11 +376,13 @@
 		/* inline-flex is content-sized; override so the 1fr cell bounds the title and
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
+		.shell-header.phone-document { padding-left: max(var(--space-1), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-1), env(safe-area-inset-right, 0px)); }
+		.phone-document .h-title { gap: var(--space-1); }
 		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
 		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
 		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
 		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
-		.h-icon { width: 44px; height: 44px; }
+		.h-icon { width: var(--touch-target); height: var(--touch-target); }
 		.h-back-label { display: none; }
 		.h-act.overflowable { display: none; }
 		.h-overflow { display: flex; }

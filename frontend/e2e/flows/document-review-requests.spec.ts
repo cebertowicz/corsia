@@ -8,6 +8,7 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 import { expectContrast, TEXT } from '../support/contrast';
 import { headerSend } from '../support/heldComments';
 import { detailsPanel, openDetails } from '../support/documentBar';
+import { closeComments, openComments } from '../support/commentDrawer';
 import { settled } from '../support/reviewFixtures';
 import { demoteAgent } from '../support/sharedLiveDocument';
 import { injectMessage, readMockCallCount, releaseMockGate, seedMockResponses } from '../support/mock';
@@ -231,8 +232,8 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		// The delivery Toggle is in Details: a window up to 768 px gives it its 44px target; a wider window keeps the desktop Toggle,
-		// whatever the canvas's width.
+		// The drawer's delivery Toggle keeps its track and touch target at phone widths.
+		await openComments(page);
 		if (width <= 768) {
 			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 			// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
@@ -255,6 +256,8 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 			const box = (await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).boundingBox())!;
 			expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
 		}
+		await closeComments(page);
+		await openDetails(page);
 		const trigger = reviewTrigger(page);
 		await trigger.click();
 		const surface = await reviewSurface(page);
@@ -517,18 +520,21 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 		setFeedbackFixture(doc.artifactId, state);
 		await openDocument(page, doc);
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
+		await openComments(page);
 		if (state !== 'undelivered') {
-			// The held comment waits for the header's Send in Details, whole inside the screen beside the review control.
+			// The held comment waits for Send in the drawer, whole inside the screen.
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('[data-drawer-unsent]')).toHaveCount(0);
-			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toHaveCount(1);
+			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(mobile ? 1 : 0);
 		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
-		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (state === 'undelivered') await expectContrast(page, info, `reviews-${count}-retry-${mobile ? 'phone' : 'desktop-narrow'}`, {
 			retry: { target: page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true }), min: TEXT },
 		});
+		await closeComments(page);
+		await openDetails(page);
+		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (count) {
 			await page.locator('.reviewer-group').click();
 			const surface = await reviewSurface(page);

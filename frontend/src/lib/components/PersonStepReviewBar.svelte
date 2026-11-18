@@ -85,7 +85,7 @@
 <ReviewBarShell
 	view={receipt ? 'receipt' : 'ask'}
 	who={personStep ? { name: personStep.owner_name, id: personStep.owner_thread_id } : undefined}
-	full={asks} {docked} named={commentTask}
+	full={asks} docked={docked && !commentTask} named={commentTask}
 	askLabel="Task for you" {busy} status={busy ? (commentTask ? 'Dismissing…' : 'Recording your answer…') : failure} {suppressed} bind:capsuleClearance
 	receipt={receipt ? { icon: receipt === 'done' ? 'check' : 'dash', label: 'Task answered', segments: [receipt === 'done' ? 'Done' : 'Won’t do'] } : null}
 >

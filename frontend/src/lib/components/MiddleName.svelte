@@ -42,6 +42,9 @@
 		fit();
 		const watcher = new ResizeObserver(fit);
 		watcher.observe(node);
+		// A neighbouring control can yield room without a window resize; watch the title button as well as the capped name.
+		const button = box.closest('button');
+		if (button) watcher.observe(button);
 		// A capped name doesn't see its container widen, so a window resize refits too.
 		window.addEventListener('resize', fit);
 		void document.fonts?.ready.then(fit);

@@ -3,9 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { closeComments, showAllThreads, openComments } from '../support/commentDrawer';
+import { closeComments, showAllThreads, openComments, openResolved } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { openDetails } from '../support/documentBar';
 import { deliveredBatches, headerSend, headerSent, headerSentStatus, heldIn, leaveUnsent, setDeliveryPreference, shownHeaderSend } from '../support/heldComments';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -22,7 +21,7 @@ async function expectHeaderSendFits(send: import('@playwright/test').Locator): P
 		const box = button.getBoundingClientRect();
 		const style = getComputedStyle(button);
 		const slot = button.closest<HTMLElement>('.sending-now');
-		const identity = button.closest<HTMLElement>('.doc-panel');
+		const identity = button.closest<HTMLElement>('.drawer-foot');
 		return {
 			fits: button.scrollWidth <= button.clientWidth && box.left >= 0 && box.right <= button.ownerDocument.defaultView!.innerWidth,
 			button: { clientWidth: button.clientWidth, scrollWidth: button.scrollWidth, width: box.width, minWidth: style.minWidth, maxWidth: style.maxWidth, flex: style.flex },
@@ -118,7 +117,8 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	await page.getByText(title, { exact: true }).first().click();
 	await page.locator('.cm-scroller').evaluate((scroller) => { scroller.scrollTop = scroller.scrollHeight; });
 	await expect(page.locator('.cm-comment-anchor')).toBeVisible();
-	// The held batch waits for the header's Send, in Details, which goes once the batch is delivered.
+	// The held batch waits for the drawer's Send, which goes once the batch is delivered.
+	await shownHeaderSend(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expectHeaderSendFits(await shownHeaderSend(page));
 	await captureDeliveryFrame(page, 'header-send');
@@ -192,18 +192,16 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
-	// A resolved thread leaves the open list for the Resolved entry in Details. The comments sheet is modal at this width and
-	// covers the bar, so a person closes it first.
-	await closeComments(page);
-	await (await openDetails(page)).locator('[data-resolved-entry]').click();
+	// A resolved thread leaves the open list for the drawer's Resolved view.
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
 	await resolved.getByRole('button', { name: 'Resolved · 1 message' }).click();
 	// The document has an owner, so the card says a re-open reaches it.
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
-	// The re-opened comment is held for the owner: the header's Send is its one sender, reachable once the drawer is closed.
-	await closeComments(page);
+	// The re-opened comment is held for the owner in the drawer's Send lane.
+	await openComments(page);
 	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
 	else {
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');

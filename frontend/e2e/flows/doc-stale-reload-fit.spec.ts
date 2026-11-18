@@ -2,10 +2,10 @@ import { test, expect } from '../support/test';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { detailsEntry, documentBarHost, expectOneRow } from '../support/documentBar';
 
-// Reload shows only on a snapshot document (a live session never offers it). While the canvas is compact (every width here)
-// it is the reload mark right after the document's name in the app bar; History and the rest are in Details. Its container queries need browser layout, so the status component is mounted
+// Reload shows only on a snapshot document (a live session never offers it). In a compact canvas it is the reload mark
+// after the name; in an expanded canvas it is a text button in the tab strip. Its container queries need browser layout, so the status component is mounted
 // inside the real canvas, as quiet-save-cue.spec.ts does, with the controls a recorded document carries.
-for (const width of [320, 375, 393, 480, 600]) {
+for (const width of [320, 375, 393, 480, 600, 1440]) {
 	test(`@surface:doc-header File changed · Reload stays inside the bar at ${width}`, async ({ page, request }, info) => {
 		test.skip(info.project.name.endsWith('-mobile'), 'The widths are set here; one project is enough.');
 		await page.setViewportSize({ width, height: 852 });
@@ -26,7 +26,8 @@ for (const width of [320, 375, 393, 480, 600]) {
 		const host = documentBarHost(page);
 		const reload = host.getByRole('button', { name: 'File changed · Reload' });
 		await expect(reload).toBeVisible();
-		// One File changed only: the bar's mark, not a second row in Details.
+		await expect(page.getByRole('button', { name: 'File changed · Reload' })).toHaveCount(1);
+		// One File changed only: the bar's control, not a second row in Details.
 		await expect(page.getByRole('button', { name: 'File changed · Reload', includeHidden: true })).toHaveCount(1);
 		const [inside, chip] = [await host.boundingBox(), await reload.boundingBox()];
 		expect(chip!.x).toBeGreaterThanOrEqual(Math.max(0, inside!.x) - 0.5);

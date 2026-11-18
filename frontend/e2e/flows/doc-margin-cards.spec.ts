@@ -6,7 +6,7 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
-import { resolvedList } from '../support/commentDrawer';
+import { openResolved, resolvedList } from '../support/commentDrawer';
 import { openDetails } from '../support/documentBar';
 import { editorText } from '../support/liveDocument';
 
@@ -262,8 +262,7 @@ test('@flow:doc-margin-cards the drawer lists only resolved threads, newest reso
 	// Resolved threads have left the column; the rest stay.
 	await expect(card(page, doc, ALPHA)).toHaveCount(0);
 	await expect(card(page, doc, BRAVO)).toHaveCount(1);
-	// "Resolved" is in the document's Details panel.
-	await (await openDetails(page)).locator('[data-resolved-entry]').click();
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const order = () => resolvedList(page).locator('[data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
 	await expect.poll(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
 });

@@ -3,10 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, TEST_TOKEN } from './corsia';
-import { closeDetails, openDetails } from './documentBar';
+import { closeComments, openComments } from './commentDrawer';
 
 // Held-comment delivery: a held comment waits for a person's Send. Its one sender is the surface that owns its lane:
-// the document header (document-held, in the open document's Details panel), the image viewer bar (image-held), and the
+// the open document's comments drawer (document-held), the image viewer bar (image-held), and the
 // chat for the thread's document-held comments whose own document is not on screen.
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -84,15 +84,15 @@ export async function holdDocumentComments(request: APIRequestContext): Promise<
 	await setDeliveryPreference(request, false);
 }
 
-/** Set the preference through the real document's Details panel, as a person does, then close Details again. */
+/** Set the preference through the comments drawer, then close it again. */
 export async function turnOffDocumentComments(page: Page): Promise<void> {
-	await openDetails(page);
+	await openComments(page);
 	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 	await expect(toggle).toBeVisible();
 	if (await toggle.getAttribute('aria-pressed') === 'true') await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 	await expect.poll(async () => (await readDeliveryPreference(page.request)).immediate).toBe(false);
-	await closeDetails(page);
+	await closeComments(page);
 }
 
 /** Makes `count` document-held comments on a document, as a person's would be with delivery-immediately off. */
@@ -172,11 +172,10 @@ export function makeHeldBatchDue(artifactId: string, policy: 'document-held' | '
 const SEND_NAME = /^Send( all)? \d+ comments?( to .+)?$/;
 
 /**
- * The open document's own header Send (its document-held lane), in its Details panel: hidden until Details is open. It is found
- * closed or open, so a count of none means no Send at all, never only a closed panel; press, focus or measure it only after
- * `shownHeaderSend` (or `openDetails`) has opened Details.
+ * The open document's Send in the comments drawer. Open the drawer before asserting either presence or absence;
+ * otherwise a count of zero only says that the drawer is closed.
  */
-export const headerSend = (page: Page): Locator => page.locator('.document-header').getByRole('button', { name: SEND_NAME, includeHidden: true });
+export const headerSend = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot').getByRole('button', { name: SEND_NAME, includeHidden: true });
 /**
  * How many lines a control's label is drawn on: the distinct tops of its text's own line boxes. Element boxes are left out, since a
  * span's box starts above its text by the half-leading whenever the line height is taller than the font's (a 1.5 line height puts
@@ -192,9 +191,9 @@ export const labelLines = (control: Locator): Promise<number> => control.evaluat
 	}
 	return tops.size;
 });
-/** Opens the open document's Details, as a person does to reach its Send, and returns that Send. */
+/** Opens the comments drawer, as a person does to reach its Send, and returns that Send. */
 export async function shownHeaderSend(page: Page): Promise<Locator> {
-	await openDetails(page);
+	await openComments(page);
 	return headerSend(page);
 }
 /** The image viewer bar's Send (its image-held lane), for an image over a document or an image file. */
@@ -235,7 +234,7 @@ export function visibleSenders(page: Page): Promise<Sender[]> {
 			// Nor is one covered by another surface (an image viewer laid over the document's header).
 			const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
 			if (!top || !(button.contains(top) || top.contains(button))) continue;
-			const where = button.closest('.document-header') ? 'header'
+			const where = button.closest('[data-doc-comments-drawer] .drawer-foot') ? 'header'
 				: button.closest('.image-comments') ? 'image-bar'
 				: button.closest('[aria-label="Document comments waiting to be sent"]') ? 'chat'
 				: null;
@@ -256,7 +255,7 @@ export async function watchSenders(page: Page): Promise<{ stop: () => Promise<st
 			for (const button of document.querySelectorAll<HTMLElement>('button')) {
 				const text = (button.querySelector('.send-full') ?? button).textContent?.replace(/\s+/g, ' ').trim() ?? '';
 				if (!/^Send( all)? \d+ comments?$/.test(text)) continue;
-				const where = button.closest('.document-header') ? 'header'
+				const where = button.closest('[data-doc-comments-drawer] .drawer-foot') ? 'header'
 					: button.closest('.image-comments') ? 'image-bar'
 					: button.closest('[aria-label="Document comments waiting to be sent"]') ? 'chat'
 					: 'other';
@@ -311,9 +310,9 @@ export const sentToast = (page: Page, text: string): Locator => page.locator('.t
  * The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered: in Details,
  * found closed or open like `headerSend`; check it is visible only after opening Details.
  */
-export const headerSent = (page: Page): Locator => page.locator('.document-header .sending-now .sent');
+export const headerSent = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot .sending-now .sent');
 /** The document header's spoken delivery status (what was sent, or what was not delivered), in Details' Comments section; read while closed too. */
-export const headerSentStatus = (page: Page): Locator => page.locator('.document-header .p-send [role="status"]');
+export const headerSentStatus = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot [role="status"]');
 
 // ---- Fixtures ----------------------------------------------------------------------------------------------------
 

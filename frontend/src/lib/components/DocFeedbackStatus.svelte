@@ -17,6 +17,7 @@
 		lane = null,
 		activityRoot = null,
 		countSep = ' ',
+		showControls = true,
 	}: {
 		artifactId: string | null;
 		targetInstanceId: string | null;
@@ -29,6 +30,8 @@
 		activityRoot?: HTMLElement | null;
 		/** Passed to DocFeedbackControls' short Send label (' · ' in the document's Details panel). */
 		countSep?: string;
+		/** The controller can outlive the surface that draws its controls. */
+		showControls?: boolean;
 	} = $props();
 
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId }), () => onFeedbackChanged?.());
@@ -77,4 +80,4 @@
 	});
 </script>
 
-<DocFeedbackControls {feedback} {compact} {lane} {countSep} />
+{#if showControls}<DocFeedbackControls {feedback} {compact} {lane} {countSep} />{/if}

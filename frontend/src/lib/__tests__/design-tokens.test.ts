@@ -22,6 +22,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
+	// DocViewerStatus.svelte writes the Details panel's horizontal correction.
+	'--panel-shift',
 	// BrowserLeaf assigns the shared session owner's colour with Svelte `style:--presence-color`.
 	'--presence-color',
 	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.

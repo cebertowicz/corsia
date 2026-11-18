@@ -86,17 +86,12 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	}
 	await shot(page, 'rs-13b-thread-replies-rendered', info);
 
-	// The resolved thread sits behind Resolved in the document's Details panel. Beside the text the open list stays as it was. On
-	// a phone the comments sheet is modal and covers the app bar, so a person's tap at Details lands on the backdrop and closes the
-	// sheet, their next tap opens Details, and Resolved there opens the resolved thread.
+	// The sheet remains modal over Details; the status switch is inside the comments drawer.
 	await expect(resolvedEntry(drawer)).toContainText('Resolved · 1');
-	// The entry is in Details, outside the drawer: found from the page, it stays reachable once the phone sheet closes.
-	const resolved = page.locator('[data-resolved-entry]');
-	await expect(resolved).toHaveCount(1);
+	await expect(resolvedEntry(drawer)).toHaveCount(1);
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	const resolvedRegion = page.getByRole('region', { name: /^Resolved comment by / });
 	if (mode === 'phone') {
-		// A person's tap at the app bar's Details button, which the modal sheet covers.
 		const details = page.locator('[data-document-details]');
 		const box = (await details.boundingBox())!;
 		const tap = () => info.project.use.hasTouch ? page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2) : page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -104,16 +99,15 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 		await expect(drawer).toBeHidden();
 		await tap();
 		await expect(details).toHaveAttribute('aria-expanded', 'true');
-		await resolved.click();
-		await expect(resolved).toHaveAttribute('aria-expanded', 'true');
-	} else await openResolved(drawer);
-	await expect(resolvedRegion).toHaveCount(1);
-	await shot(page, 'rs-14-resolved-entry-open', info);
-	if (mode === 'phone') {
-		await page.getByRole('dialog', { name: 'Resolved comments' }).getByRole('button', { name: 'Close', exact: true }).click();
+		await details.click();
 		await openComments(page);
 		await listShown(drawer);
-	} else await closeResolved(drawer);
+	}
+	await openResolved(drawer);
+	await expect(resolvedEntry(drawer)).toHaveAttribute('aria-pressed', 'true');
+	await expect(resolvedRegion).toHaveCount(1);
+	await shot(page, 'rs-14-resolved-entry-open', info);
+	await closeResolved(drawer);
 	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
 

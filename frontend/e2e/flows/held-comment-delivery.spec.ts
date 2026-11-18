@@ -9,6 +9,7 @@ import {
 	shownHeaderSend, labelLines,
 } from '../support/heldComments';
 import { backToChat, closeDetails, openDetails } from '../support/documentBar';
+import { closeComments, openComments } from '../support/commentDrawer';
 import {
 	bar, commentOnRegion, expectBarFits, openDocument, openImage, overlay, putSheetAway, seedImageDocument,
 } from '../support/docImageComments';
@@ -51,14 +52,14 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 				}
 				parent = parent.parentElement;
 			}
-			const tools = document.querySelector<HTMLElement>('.document-header .doc-panel:not([hidden])');
-			const header = tools?.closest<HTMLElement>('.document-header');
+			const tools = document.querySelector<HTMLElement>('[data-doc-comments-drawer] .drawer-foot');
+			const header = tools?.closest<HTMLElement>('[data-doc-comments-drawer]');
 			const headerBox = header?.getBoundingClientRect();
 			const headerStyle = header ? getComputedStyle(header) : null;
 			const headerTools = tools && headerBox && headerStyle ? {
 				contentLeft: headerBox.left + parseFloat(headerStyle.paddingLeft),
 				contentRight: headerBox.right - parseFloat(headerStyle.paddingRight),
-				controls: [...tools.querySelectorAll<HTMLElement>('.sending-now .btn, [aria-label="Deliver comments immediately"], .review-request')]
+				controls: [...tools.querySelectorAll<HTMLElement>('.sending-now .btn, [aria-label="Deliver comments immediately"]')]
 					.map((control) => {
 						const controlBox = control.getBoundingClientRect();
 						return { label: control.getAttribute('aria-label') ?? control.textContent?.trim(), left: controlBox.left, right: controlBox.right };
@@ -124,8 +125,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await page.locator('.sel-comment').click();
 			await page.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 			await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
+			await openComments(page);
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-			await putSheetAway(page);
+			await closeComments(page);
 		};
 		await post('Please clarify this sentence.');
 		expect(heldIn(doc.artifactId, 'document-held')).toBe(1);
@@ -137,10 +139,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
 		await expect(page.locator('.document-canvas .delivery-confirmation')).toHaveCount(0);
 		await captureFrame(page, 'document-sent', String(width) as '1440' | '393');
-		if (width === 1440) await page.keyboard.press('Escape');
-		await closeDetails(page);
+		await closeComments(page);
 		await post('Please check this revision too.');
-		await openDetails(page);
+		await openComments(page);
 		await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).click();
 		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
@@ -183,6 +184,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 
 		// Another tab is active: the held document's header is not on screen, so the chat is its sender.
 		await expect(chatSend(page)).toHaveText('Send 3 comments');
+		await openComments(page);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expectSenders(page, ['chat: Send 3 comments']);
 		await expect(page.locator('.cm-content')).toContainText('A commentable document.');
@@ -190,9 +192,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 
 		// Its own tab: the header is the sender (in Details) and the chat's Send leaves.
 		await page.getByRole('tab', { name: held.fileName }).click();
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 3 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
-		await openDetails(page);
 		await expectSenders(page, ['header: Send 3 comments']);
 
 		// A collapsed canvas shows no header: the chat is the sender again.
@@ -201,6 +203,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectSenders(page, ['chat: Send 3 comments']);
 		await captureFrame(page, 'chat-collapsed-canvas', '1440');
 		await page.getByRole('button', { name: /^Expand Files/ }).click();
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 3 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
 	});
@@ -219,8 +222,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await turnOffDocumentComments(page);
 		// Two documents each hold 2: the same count is two batches, so the chat is not suppressed by the equal number.
 		await expect(chatSend(page)).toHaveText('Send all 4 comments');
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
-		await openDetails(page);
 		await expectSenders(page, ['chat: Send all 4 comments', 'header: Send 2 comments']);
 		await captureFrame(page, 'chat-several-artifacts', '1440');
 
@@ -247,8 +250,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		const seeded = await seedImageDocument(page, request, 'held-overlay', null);
 		await seedHeldComments(request, seeded.artifactId, 2, 'Overlay', { text: 'Design', from: 2, to: 8 });
 		await openDocument(page, seeded, 1440);
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
-		await openDetails(page);
 		expect(await settledSenders(page), 'the open document\'s header is its only sender').toEqual(['header: Send 2 comments']);
 
 		// The viewer covers the header, so the chat is the sender for the document's comments.
@@ -297,7 +300,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		const watch = await watchSenders(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		// The header says Sent where its Send stands, for a moment, and its status says what the image sent; the document still
+		await openComments(page);
+		// The drawer says Sent where its Send stands, for a moment, and its status says what the image sent; the document still
 		// holds its own two, so its Send then returns.
 		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
@@ -333,8 +337,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await openThread(page, threadId, title);
 		await turnOffDocumentComments(page);
 		await expect(chatSend(page)).toHaveText('Send all 4 comments');
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
-		await openDetails(page);
 		const [header, chat] = await Promise.all([headerSend(page).elementHandle(), chatSend(page).elementHandle()]);
 		// Both senders in one task: whichever the server takes first delivers, and the other finds nothing left.
 		await page.evaluate(([a, b]) => { (a as HTMLElement).click(); (b as HTMLElement).click(); }, [header, chat]);
@@ -377,6 +381,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await page.getByText(seeded.sessionTitle).first().click();
 		await expect(page.locator('[data-document-details]')).toBeVisible();
 		await expect(overlay(page)).toHaveCount(0);
+		await openComments(page);
 		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
@@ -404,7 +409,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await captureFrame(page, 'image-bar-send-3', '393');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(headerSent(page), 'the header says the image\'s comments went, for a moment').toHaveText('Sent');
+		await openComments(page);
+		await expect(headerSent(page), 'the drawer says the image\'s comments went, for a moment').toHaveText('Sent');
 		// The status says so for the same moment, so it is read before the document's own Send returns in Sent's place.
 		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
@@ -501,6 +507,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		expect(heldIn(seeded.artifactId, 'document-held')).toBe(2);
 		expect(deliveredBatches(seeded.artifactId, 'image-held')).toBe(1);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	});
 
@@ -555,9 +562,10 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await installWorkspace(page, threadId, [doc], 0);
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
+			await openComments(page);
 			await expect(headerSend(page).locator('.send-full')).toHaveText(`Send ${count} comment${count === 1 ? '' : 's'}`);
 			await expectDetailsControlsFit(page, 1440);
-			await closeDetails(page);
+			await closeComments(page);
 			await page.setViewportSize({ width: 393, height: 852 });
 			await expectDetailsControlsFit(page, 393);
 		}
@@ -581,7 +589,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			});
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
+			await openComments(page);
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+			await closeComments(page);
 
 			await page.locator('.document-canvas').click({ position: { x: 8, y: 8 } });
 			await expect.poll(() => touched.length, 'the document activity touch').toBeGreaterThan(0);
@@ -601,7 +611,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			page.on('response', (response) => { if (response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST') touches.push(response.url()); });
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
+			await openComments(page);
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+			await closeComments(page);
 			// The document's first activity extends the batch's deadline, and activity is then throttled for 30 s. Take that
 			// touch (this click, or one the page already made) before the batch is made due, so none lands after it.
 			await page.locator('.document-canvas').click({ position: { x: 8, y: 8 } });
@@ -612,8 +624,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			makeHeldBatchDue(doc.artifactId, 'document-held');
 			const witness = await seedTextDocument(request, threadId, `${title}-wake`, 'wake');
 			await seedHeldComments(request, witness.artifactId, 1);
+			await openComments(page);
 			await expect(headerSend(page)).toHaveCount(0);
-			await expect(page.locator('.document-header .sent')).toHaveCount(0);
+			await expect(headerSent(page)).toHaveCount(0);
 			await expect(page.locator('.document-canvas .delivery-confirmation')).toHaveCount(0);
 			expect(deliveredBatches(doc.artifactId, 'document-held')).toBe(1);
 		});
@@ -631,7 +644,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await openThread(page, threadId, title);
 		await turnOffDocumentComments(page);
 
-		// On a phone the canvas is the whole screen: the header's Send, on one line, inside it.
+		// On a phone the canvas is the whole screen: the drawer's Send, on one line, inside it.
+		await openComments(page);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 101 comments');
 		await expectOneLine(await shownHeaderSend(page), 393);
 		await expectDetailsControlsFit(page, 393);
@@ -639,6 +653,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectSenders(page, ['header: Send 101 comments']);
 
 		// Back to chat: the document is no longer on screen, so the chat is the sender, on one line.
+		await closeComments(page);
 		await backToChat(page).click();
 		await expect(chatSend(page)).toHaveText('Send 101 comments');
 		await expectOneLine(chatSend(page), 393);
@@ -647,8 +662,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await expectOneLine(await shownHeaderSend(page), 1440);
 		await expectDetailsControlsFit(page, 1440);
-		await closeDetails(page);
 		await captureFrame(page, 'header-101', '1440');
+		await closeComments(page);
 		await page.getByRole('button', { name: 'Collapse Files' }).click();
 		await expectOneLine(chatSend(page), 1440);
 		await captureFrame(page, 'chat-101', '1440');
@@ -656,21 +671,27 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 });
 
 /**
- * Send and the document controls sit whole inside the Details panel at every supported canvas width, the panel never scrolls
- * sideways, and Comments and Details share the bar's one row. Opens Details, as a person does, and leaves it open.
+ * Send and delivery controls fit inside the comments drawer at every supported canvas width, without sideways scrolling.
+ * Comments and Details share the bar's one row; the drawer remains open.
  */
 async function expectDetailsControlsFit(page: Page, width: number) {
-	const panel = await openDetails(page);
+	await closeComments(page);
+	const details = await openDetails(page);
+	await expect(details.locator('.review-request')).toBeVisible();
+	await expect(details.locator('.sending-now, [aria-label="Deliver comments immediately"]')).toHaveCount(0);
+	await closeDetails(page);
+	await openComments(page);
+	const panel = page.locator('[data-doc-comments-drawer]');
 	const send = headerSend(page);
 	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 	const comments = page.locator('[data-comments-entry]');
 	await expect(send).toBeVisible();
 	await expect(toggle).toBeVisible();
-	await expect(panel.locator('.delivery-toggle > .p-text')).toHaveText('Deliver immediately');
+	await expect(panel.locator('.drawer-foot .delivery')).toContainText('Deliver immediately');
 	await expect(comments).toBeVisible();
 	await page.waitForTimeout(400);
 	const result = await panel.evaluate((element, selectors) => {
-		const inPanel = [selectors.send, selectors.toggle, selectors.review]
+		const inPanel = [selectors.send, selectors.toggle]
 			.map((selector) => element.querySelector<HTMLElement>(selector)).filter((item): item is HTMLElement => !!item)
 			.map((item) => item.getBoundingClientRect());
 		const bar = [selectors.comments, selectors.details]
@@ -687,8 +708,8 @@ async function expectDetailsControlsFit(page: Page, width: number) {
 			sideways: element.scrollWidth - element.clientWidth,
 			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
 		};
-	}, { send: '.sending-now .btn', toggle: '[aria-label="Deliver comments immediately"]', review: '.review-request', comments: '[data-comments-entry]', details: '[data-document-details]' });
-	expect(result.containsSend, 'Send is inside the Details panel').toBe(true);
+	}, { send: '.drawer-foot .sending-now .btn', toggle: '.drawer-foot [aria-label="Deliver comments immediately"]', comments: '[data-comments-entry]', details: '[data-document-details]' });
+	expect(result.containsSend, 'Send is inside the comments drawer').toBe(true);
 	expect(result.barCenters, 'Comments and Details are both in the bar').toHaveLength(2);
 	expect(Math.abs(result.barCenters[0] - result.barCenters[1]), `Comments and Details share one row at ${width}px`).toBeLessThanOrEqual(2);
 	expect(result.controls.every((box) => box.left >= result.contentLeft - 0.5), 'each control starts inside the panel content edge').toBe(true);

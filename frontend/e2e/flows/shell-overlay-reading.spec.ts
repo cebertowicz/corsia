@@ -150,12 +150,9 @@ async function closeList(page: Page) {
 	await page.waitForTimeout(600);
 }
 
-/**
- * Waits out the passing Sent in the Details panel, so a press aimed at the text never races the send's own settling (the
- * delivery status and the comment counts it updates).
- */
+/** Waits out a visible drawer's passing Sent before pressing the text. */
 async function headerSettled(page: Page) {
-	await expect(page.locator('.document-header .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });
+	await expect(page.locator('[data-doc-comments-drawer] .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });
 }
 
 /** The three forms the reader can be writing in, per DocCommentSurface: the list, a thread pinned in a popover, a new draft. */

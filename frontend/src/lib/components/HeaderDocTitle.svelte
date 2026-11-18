@@ -24,7 +24,7 @@
 
 <style>
 	/* A document's name is the control that opens its open-files list; the ⌄ after it says so. */
-	.h-doc-title { display: inline-flex; flex: 0 1 auto; align-items: center; gap: var(--space-1); min-width: 0; max-width: 100%; min-height: var(--touch-target); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
+	.h-doc-title { display: inline-flex; flex: 1 1 0; align-items: center; gap: var(--space-1); min-width: 0; max-width: 100%; min-height: var(--touch-target); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
 	.h-scope { display: grid; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 	.h-doc-title svg { flex: none; color: var(--text-tertiary); }
 	/* Another open file changed: the ⌄ takes the accent, as the open-files control did. */

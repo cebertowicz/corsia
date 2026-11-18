@@ -4,6 +4,7 @@ import type { WidgetLabelReader } from '$lib/docCommentLabels';
 import type { ImageCommentSurface, DocImageComments } from '$lib/docImageComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import type { DocFeedback } from '$lib/docFeedback.svelte';
 
 /** What DocCommentSurface takes; `resolvedCount` and `resolvedOpen` are bindable. */
 export interface DocCommentSurfaceProps {
@@ -45,6 +46,8 @@ export interface DocCommentSurfaceProps {
 	/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */
 	docPath?: string | null;
 	artifactId: string | null;
+	/** The document's long-lived feedback controller, shared with the drawer's delivery controls. */
+	feedback?: DocFeedback;
 	readOnly?: boolean;
 	/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 	onSuggestionBusy?: (busy: boolean, id?: string) => void;

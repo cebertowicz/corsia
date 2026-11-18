@@ -334,12 +334,12 @@ journey('send back after two comments', ALL, async ({ page, request, info, mode,
 	await expect(sendBack).toBeVisible();
 	await expectLayout(page, mode);
 	await expect(page.getByText('Place again')).toHaveCount(0);
-	// One primary on screen: the card's Approve. The held pair has the header's Send in Details, a secondary, and Comments names the unsent pair.
+	// One primary on screen: the card's Approve. The drawer's Send is secondary, and Comments names the unsent pair.
+	await openComments(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
-	await openDetails(page);
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
-	await closeDetails(page);
+	await closeComments(page);
 	await expect(page.locator('[data-comments-entry]')).toHaveAttribute('aria-label', /, 2 waiting for Send$/);
 	await expect(sendBack).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
@@ -586,7 +586,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await expect(page.locator('.rb-receipt')).toContainText('Sent back');
 });
 
-journey('held comments have the header Send, whole at every size, and the drawer has no footer', [
+journey('held comments have one drawer Send, whole at every size', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
@@ -597,7 +597,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	for (const [index, note] of notes.entries()) waiting.push(await comment(request, doc, note, index * 2 + 2));
 	for (const id of waiting) await leaveUnsent(request, id);
 	await open(page, doc, mode, theme);
-	// Details carries the held comments' one Send and Comments names what waits for it; the drawer has no footer.
+	// The drawer carries the held comments' one Send and Comments names what waits for it.
 	await expect(page.locator('[data-comments-entry]')).toHaveAttribute('aria-label', /, 6 waiting for Send$/);
 	const send = await shownHeaderSend(page);
 	await expect(send.locator('.send-full')).toHaveText('Send 6 comments');
@@ -633,12 +633,12 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
-	// The drawer lists the threads and ends with the last card: no footer, no second Send.
+	// The drawer lists the threads and has exactly one Send in its footer.
 	await openComments(page, /^6 comments, 6 waiting for Send$/);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expectCommentsShown(drawer);
-	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
-	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
+	await expect(drawer.locator('.drawer-foot')).toHaveCount(1);
+	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(1);
 	await settled(page);
 	if (mode === 'closed') {
 		// This canvas has room for the margin column, so the list is that column inside the document canvas, not a sheet over it.
@@ -647,11 +647,10 @@ journey('held comments have the header Send, whole at every size, and the drawer
 		expect(list!.x, 'the margin column starts inside the document column').toBeGreaterThanOrEqual(column!.x);
 		expect(list!.x + list!.width, 'the margin column ends inside the document column').toBeLessThanOrEqual(column!.x + column!.width + 0.5);
 	}
-	await shot(page, 'drawer-without-footer', info);
+	await shot(page, 'drawer-with-footer', info);
 	await closeComments(drawer);
 	await expect(drawer).toBeHidden();
-	// Opening Comments closed Details; open it again to reach the Send.
-	await openDetails(page);
+	await openComments(page);
 	await settled(page);
 
 	if (mode === 'phone') {
@@ -669,7 +668,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	await expect(send).toHaveCount(0);
 	await expect(page.locator('[data-comments-entry]')).not.toHaveAttribute('aria-label', /waiting for Send/);
 	if (output && mode === 'phone') {
-		await expect(page.locator('.document-header .doc-panel .sent')).toHaveText('Sent');
+		await expect(page.locator('[data-doc-comments-drawer] .drawer-foot .sent')).toHaveText('Sent');
 		await settled(page);
 		await page.screenshot({ path: path.join(output, `reviewbar-held-sent-393-${theme}.png`), scale: 'css' });
 	}

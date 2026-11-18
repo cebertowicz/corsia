@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import DocViewerStatus from './DocViewerStatus.svelte';
+import DocCommentDrawerFoot from './DocCommentDrawerFoot.svelte';
+import type { DocFeedback } from '$lib/docFeedback.svelte';
 import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
@@ -12,10 +14,17 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
+import { canvasCompact } from '$lib/stores/artifactCanvas';
 
 let host: HTMLElement;
 let bar: ReturnType<typeof mount> | null = null;
-let component: ({ commentCreated: () => void; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
+let component: ({ commentCreated: () => void; feedback: () => DocFeedback | undefined; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
+let foot: { $destroy: () => void; $set: (props: Record<string, unknown>) => void } | null = null;
+
+function renderFoot(overrides: Record<string, unknown> = {}) {
+	foot = createClassComponent({ target: host, component: DocCommentDrawerFoot, props: { feedback: component?.feedback(), resolvedCount: 0, resolvedOpen: false, resolvedInColumn: false, onOpenResolved: vi.fn(), ...overrides } });
+	flushSync();
+}
 
 function value(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -51,16 +60,19 @@ function render(freshness: DocumentFreshness, onMarkVerified = vi.fn().mockResol
 	// Comments and Details are drawn by the bar that holds the canvas; a stand-in draws them here.
 	bar = mount(DocumentBarTestHost, { target: host });
 	flushSync();
+	if (component?.feedback()) renderFoot(overrides);
 	return onMarkVerified;
 }
 
 afterEach(() => {
+	foot?.$destroy(); foot = null;
 	if (bar) { unmount(bar); bar = null; }
 	component?.$destroy();
 	component = null;
 	host?.remove();
 	vi.useRealTimers();
 	deliverCommentsImmediately.set(true);
+	canvasCompact.set(false);
 	deliveryConfirmation.dismiss();
 });
 
@@ -73,7 +85,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
 		expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('0 comments');
-		const delivery = header?.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
+		const delivery = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
 		flushSync();
@@ -91,12 +103,11 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector<HTMLElement>('.doc-panel')?.hidden).toBe(false);
 	});
 
-	it('announces a dialog from the Resolved control only where the resolved list opens as one', () => {
-		render(value(), undefined, { resolvedCount: 2, onOpenResolved: vi.fn(), resolvedInColumn: true });
-		const control = () => host.querySelector<HTMLButtonElement>('[data-resolved-entry]')!;
-		expect(control().hasAttribute('aria-haspopup')).toBe(false);
-		component!.$set({ resolvedInColumn: false }); flushSync();
-		expect(control().getAttribute('aria-haspopup')).toBe('dialog');
+	it('keeps the resolved view in Comments rather than Details', () => {
+		render(value());
+		host.querySelector<HTMLButtonElement>('[data-document-details]')!.click(); flushSync();
+		expect(host.querySelector('.doc-panel [data-resolved-entry]')).toBeNull();
+		expect(host.querySelector('[data-comments-entry]')).not.toBeNull();
 	});
 
 	it('withdraws Comments, Details and File changed from the bar while the document is off screen, and puts them back after', () => {
@@ -115,7 +126,18 @@ describe('DocViewerStatus freshness metadata', () => {
 		render(value(), undefined, { ready: false, commentCount: 0 });
 		const pill = host.querySelector<HTMLButtonElement>('[data-comments-entry]')!;
 		expect(pill.getAttribute('aria-label')).toBe('Comments unavailable until the document opens');
+		expect(pill.getAttribute('aria-busy')).toBe('true');
+		expect(pill.querySelector('.spinner[aria-hidden="true"]')).not.toBeNull();
 		expect(pill.textContent).not.toContain('0');
+	});
+
+	it('names and marks the Comments button while its count loads', () => {
+		render(value(), undefined, { commentsLoading: true });
+		const pill = host.querySelector<HTMLButtonElement>('[data-comments-entry]')!;
+		expect(pill.getAttribute('aria-label')).toBe('Loading comments');
+		expect(pill.getAttribute('aria-busy')).toBe('true');
+		expect(pill.disabled).toBe(true);
+		expect(pill.querySelector('.spinner[aria-hidden="true"]')).not.toBeNull();
 	});
 
 	it('marks and names unsent feedback on the Comments button; Send waits for held document comments', () => {
@@ -331,7 +353,11 @@ describe('DocViewerStatus toolbar', () => {
 		component!.$set({ stale: true });
 		flushSync();
 		expect(status()).toContain('File changed since you opened it');
-		expect(host.querySelector('.stale-control')?.textContent).toContain('File changed · Reload');
+		expect(host.querySelector('.bar-stale')?.textContent).toContain('File changed · Reload');
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
+		canvasCompact.set(true); flushSync();
+		expect(host.querySelector('.bar-reload')?.getAttribute('aria-label')).toBe('File changed · Reload');
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
 
 		component!.$set({ stale: false });
 		flushSync();
@@ -385,8 +411,8 @@ describe('DocViewerStatus held comments', () => {
 		expect(send.querySelector('.send-full')!.textContent!.trim()).toBe('Send 3 comments');
 		expect(send.querySelector('.send-short')!.textContent!.trim()).toBe('Send · 3');
 		expect(send.getAttribute('aria-label')).toBe('Send 3 comments to Style');
-		// Send is in Details, under Comments.
-		expect(send.closest('.doc-panel .p-send')).not.toBeNull();
+		// Send is in the comments drawer's foot.
+		expect(send.closest('.drawer-foot .send')).not.toBeNull();
 		// The Comments button's name still counts everything unsent on the document.
 		expect(host.querySelector('[data-comments-entry]')!.getAttribute('aria-label')).toContain('5 waiting for Send');
 	});
@@ -398,6 +424,7 @@ describe('DocViewerStatus held comments', () => {
 		component!.sync('artifact-1', held(2, 0));
 		component!.$set({ artifactId: 'artifact-1' });
 		flushSync();
+		renderFoot();
 		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''));
 		expect(send?.querySelector('.send-full')?.textContent?.trim()).toBe('Send 2 comments');
 	});

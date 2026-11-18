@@ -5,13 +5,13 @@
 	import MiddleName from './MiddleName.svelte';
 	import type { DocViewerStatusProps } from './docViewerStatusProps';
 	import DocReviewControls from './DocReviewControls.svelte';
-	import { Button, Toggle } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
+	import Spinner from './ui/Spinner.svelte';
 	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
-	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 	import { publishDocumentBar } from '$lib/stores/documentBar';
 	import { canvasCompact } from '$lib/stores/artifactCanvas';
 	import { isMobile } from '$lib/stores/viewport';
@@ -72,12 +72,12 @@
 	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	/** File changed, until Reload clears it. */
 	const urgent = $derived(stale && ready);
-	/** The app bar draws File changed after the name while the canvas is too narrow to split; wider, it is a row in Details. */
+	/** In the compact canvas, File changed sits after the name; the desktop tab strip draws the text control. */
 	const changeInBar = $derived($canvasCompact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
-	/** What needs you behind Details and is nowhere else on screen: Overdue, File changed where the bar doesn't show it, an ask whose card is hidden. */
-	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: urgent && !changeInBar, hiddenAsk: !!ask && !ask.onCard }));
+	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
+	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: false, hiddenAsk: !!ask && !ask.onCard }));
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
@@ -110,7 +110,12 @@
 		const panel = panelEl;
 		if (!panelOpen || !panel) { cardCovered = false; return; }
 		const fit = () => {
-			const top = panel.getBoundingClientRect().top;
+			// The document can sit beside the bar entry; keep its panel within the window in either position.
+			panel.style.removeProperty('--panel-shift');
+			const rect = panel.getBoundingClientRect();
+			const shift = rect.left < 8 ? 8 - rect.left : Math.min(0, window.innerWidth - 8 - rect.right);
+			panel.style.setProperty('--panel-shift', `${shift}px`);
+			const top = rect.top;
 			panelMax = Math.floor(window.innerHeight - top - 8);
 			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card]')?.getBoundingClientRect();
 			cardCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
@@ -149,13 +154,6 @@
 	$effect(() => offScreen ? undefined : publishDocumentBar({ tools: barTools, titleEnd: urgent ? barChange : null }));
 
 	function closeThen(fn?: () => void) { panelOpen = false; fn?.(); }
-
-	async function changeImmediateDelivery(value: boolean): Promise<void> {
-		if (!(await setDeliverCommentsImmediately(value))) return;
-		// Another client may have held a comment this one has not synced yet, so turning delivery on always asks the
-		// server to send the open document's held lane. An empty lane delivers nothing and shows nothing.
-		if (value) void feedbackStatus?.controller().sendDocument();
-	}
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -206,13 +204,14 @@
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
 	{#if presence}{@render presence()}{/if}
+	{#if urgent && !changeInBar}<button type="button" class="bar-stale stale-control" data-file-changed onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
 	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
-		aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
+		aria-busy={!ready || commentsLoading} aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
 		<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
 		<!-- Unread is text; the separate dot marks comments waiting for Send. -->
-		{#if !ready || commentsLoading}<span>…</span>{:else if unreadCount}<span class="bar-new">{unreadCount} new</span>{:else}<span>{commentCount}</span>{/if}
+		{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
 		{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
@@ -230,12 +229,12 @@
 	</button>
 {/snippet}
 
+{#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
 <header class="document-header" class:card-covered={cardCovered} bind:this={headerEl}>
 	{#if reviewBar}{@render reviewBar()}{/if}
-	<!-- Always mounted, so Send, the pickers and the review controls keep one instance; hidden while closed. It drops over the document. -->
+	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
-			{#if urgent && !changeInBar}<button type="button" class="p-row amber stale-control" data-file-changed onclick={() => closeThen(onReload)}>File changed · Reload</button>{/if}
 			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
@@ -251,12 +250,6 @@
 		</div>
 		{#if ownership && artifactId}<div class="p-section p-owner" class:held={headerStandIn} data-ownership-row>{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
 		{:else if freshness}<div class="p-section"><div class="p-row">Owner: {freshness.owner_name}</div></div>{/if}
-		<div class="p-section">
-			<span class="p-label-row">Comments</span>
-			{#if artifactId}<span class="p-row p-send"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" countSep=" · " /></span>{/if}
-			{#if resolvedCount && onOpenResolved}<button type="button" class="p-row resolved-tool" data-resolved-entry aria-haspopup={resolvedInColumn ? undefined : 'dialog'} aria-expanded={resolvedOpen} onclick={() => closeThen(onOpenResolved)}>Resolved · {resolvedCount}</button>{/if}
-			{#if artifactId}<span class="p-row delivery-toggle" title="When off, comments send when you close the document or pause for two minutes."><span class="p-text">Deliver immediately</span><Toggle size="sm" touch checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" /></span>{/if}
-		</div>
 		{#if artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
 			<span class="p-label-row">Review</span>
 			{#if artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
@@ -275,11 +268,19 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	/* The bar's controls: 36px with a pointer, 44px at phone width (IconButton lg's sizes), 16px apart (the hosts' gap). */
+	.bar-stale { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--amber-bg); color: var(--amber-text); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+	.bar-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
 	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
+	@media (max-width: 768px) {
+		:global(.shell-header) .bar-tools { gap: var(--space-1); }
+		:global(.shell-header) .bar-new-word { display: none; }
+	}
+	.bar-tools :global(.presence-row) { flex: none; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
 	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
@@ -296,7 +297,7 @@
 	.bar-reload svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 	/* The panel drops over the document (it never moves the text), on the Popover primitive's solid surface: the document would read through a translucent one. */
-	.doc-panel { position: absolute; z-index: 6; top: var(--space-1); right: var(--space-2); width: min(360px, calc(100% - 2 * var(--space-2))); max-height: var(--panel-max, min(70vh, 620px)); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); font-size: var(--text-footnote); color: var(--text-secondary); }
+	.doc-panel { position: absolute; z-index: 6; top: var(--space-1); right: var(--space-2); width: min(360px, calc(100% - 2 * var(--space-2)), calc(100vw - 2 * var(--space-2))); transform: translateX(var(--panel-shift, 0px)); max-height: var(--panel-max, min(70vh, 620px)); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); font-size: var(--text-footnote); color: var(--text-secondary); }
 	.doc-panel[hidden] { display: none; }
 	.p-section { display: flex; flex-direction: column; min-width: 0; }
 	.p-section:empty { display: none; }
@@ -311,23 +312,14 @@
 	.verification-action { flex: none; display: inline-flex; min-height: inherit; }
 	.p-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.p-label { color: var(--text-secondary); font-weight: var(--fw-regular); }
-	/* An empty Send row (nothing held, sending or failed) is not drawn. */
-	.p-send:not(:has(*)) { display: none; }
-	/* Send takes its short 'Send · N' wording at every window width, as Resolved · N does beside it. */
-	.p-send { container-type: inline-size; }
 	/* Owner and supervisor are rows too: the same 32px with a pointer. Only there: with touch, DocOwnerControl's own 44px must win. */
 	@media (min-width: 769px) and (not (any-pointer: coarse)) { .p-owner :global(.ownership > .item) { min-height: var(--space-7); } }
 	/* A remembered row waiting for its load is drawn exactly as the loaded one; its controls only don't act yet. */
 	.p-owner.held :global(button:disabled) { opacity: 1; cursor: default; }
-	/* Send and Request review are text actions in the panel, starting at its text edge: no outline, inset or centring. */
-	/* The delivery switch (Toggle, class tg) keeps its own track-sized box; its hit area comes from --toggle-hit. */
+	/* Request review is a text action at the panel's text edge. */
 	.doc-panel :global(button:not(.tg)) { justify-content: flex-start; }
 	.doc-panel.doc-panel :global(.btn.btn) { padding-inline: 0; border-width: 0; }
-	.p-send :global(button), .p-review :global(.review-request) { min-height: inherit; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--text-primary); font: inherit; }
-	.p-send :global(.sending-now) { flex: 1 1 auto; width: 100%; min-width: 0; }
-	.p-send :global(.sending-now > .btn) { width: 100%; min-width: 0; }
-	.p-send :global(.btn.btn) { background: none; color: var(--text-primary); }
-	.p-send :global(button) { font-weight: var(--fw-medium); line-height: normal; }
+	.p-review :global(.review-request) { min-height: inherit; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--text-primary); font: inherit; }
 	/* The review controls pass the row's height down, so Request review and the reviewers are row-tall targets, not text-tall. */
 	.p-review :global(.review-controls) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; min-height: inherit; }
 	.p-review :global(.reviewer-group) { min-height: inherit; }

@@ -2,6 +2,8 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { TabLoadSignal } from '$lib/artifactTabs';
 import type { DocumentImageRequest } from '$lib/docViewerImages';
 
+export type DocState = 'loading' | 'ready' | 'error';
+
 export type DocViewerProps = {
 	target: DocViewerTarget | null;
 	onClose?: () => void;

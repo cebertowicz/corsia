@@ -4,7 +4,7 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { isolatedDb } from '../support/heldComments';
-import { openDetails } from '../support/documentBar';
+import { openResolved } from '../support/commentDrawer';
 
 const image = '![Review screen](shots/screen.png)';
 const tableCell = 'The navigation remains visible while the document scrolls through a lengthy review with comments from several contributors.';
@@ -66,10 +66,9 @@ export const variants = {
   } },
   'resolved-open': { widths: [1440, 1920], apply: async (page: Page) => {
     if ((page.viewportSize()?.width ?? 0) < 1920) await closePanes(page, true);
-    // "Resolved" is in the document's Details panel.
-    await (await openDetails(page)).locator('[data-resolved-entry]').click();
+    await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
     // A resolved thread rests collapsed to its header; its comment shows once the reader opens it.
-    await expect(page.locator('[data-resolved-column], .resolved-pop').getByText('Resolved · 1 message', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-resolved-column]').getByText('Resolved · 1 message', { exact: true })).toBeVisible();
   } },
 };
 

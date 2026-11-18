@@ -38,7 +38,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { DocViewerProps } from '$lib/docViewerProps';
+	import type { DocState, DocViewerProps } from '$lib/docViewerProps';
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
 	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
@@ -57,7 +57,6 @@
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
 
-	type DocState = 'loading' | 'ready' | 'error';
 
 	let {
 		target,
@@ -120,7 +119,7 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
-	/** The resolved drawer over the document at every width: its count and whether it is open, shared by the header's control and the surface. */
+	/** The comments drawer's selected view and resolved count. */
 	let resolvedCount = $state(0), resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
@@ -157,7 +156,7 @@
 	const replyNavigation = createReplyNavigation({
 		target: () => target, ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
 		comments: () => listedComments, text: () => editText,
-		show: (thread, landing, picked) => { if (thread && landing) scroll.value = landing; if (thread) focusedDocComment.set(thread.id); commentUI.state = { kind: 'list' }; if (thread && picked) pickedComments.set(new Set([thread.id])); },
+		show: (thread, landing, picked) => { if (thread && landing) scroll.value = landing; if (thread) focusedDocComment.set(thread.id); resolvedOpen = !!thread?.resolved; commentUI.state = { kind: 'list' }; if (thread && picked) pickedComments.set(new Set([thread.id])); },
 		openImageOr: (id, otherwise) => { images.openOr([id], { id }, otherwise); pickedComments.set(new Set([id])); }, onLanded: () => onLanded?.(),
 	});
 	export function jumpToUnread(id: string, beforeText?: () => void) { replyNavigation.goTo(id, beforeText); }
@@ -292,7 +291,7 @@
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
 		unreadCount={unreadThreads.length}
-		{resolvedCount} {resolvedOpen} resolvedInColumn={columnFits()} onOpenResolved={() => resolvedOpen = !resolvedOpen}
+		{resolvedCount} {resolvedOpen}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -355,7 +354,8 @@
 		anchor={commentUI.anchor}
 		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
-		{commentsEntry} resolvedAnchor={detailsEntry}
+		{commentsEntry} resolvedAnchor={commentsEntry}
+		feedback={feedbackStatus?.feedback()}
 		narrow={isPaneDrawer()}
 		phone={$isMobile || $isShortTouch}
 		onRelease={commentUI.release}

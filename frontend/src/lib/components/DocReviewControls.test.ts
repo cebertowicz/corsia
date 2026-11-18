@@ -77,8 +77,8 @@ describe('document review toolbar and popover', () => {
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
-		expect([...document.body.querySelectorAll<HTMLElement>('[data-test-document-bar] button')].map(nameOf)).toEqual(['File changed · Reload', '1 comment', 'Document details · 1 needs you']);
-		expect([...document.body.querySelectorAll<HTMLElement>('.doc-panel button')].map(nameOf)).toEqual(['File changed · Reload', 'Deliver comments immediately', 'Request review']);
+		expect([...document.body.querySelectorAll<HTMLElement>('[data-test-document-bar] button')].map(nameOf)).toEqual(['File changed · Reload', '1 comment', 'Document details']);
+		expect([...document.body.querySelectorAll<HTMLElement>('.doc-panel button')].map(nameOf)).toEqual(['Request review']);
 		// Request review is a text action in Details, in the tool style it keeps wherever it is drawn.
 		expect(button('Request review').classList.contains('doc-tool')).toBe(true);
 	});

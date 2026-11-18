@@ -221,7 +221,7 @@ for (const [width, height, project] of layouts) {
 			await openComments(reader, /^2 comments\b/);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
-			await drawer.getByRole('button', { name: `Accept all from ${red.author}`, exact: true }).click();
+			await drawer.getByRole('button', { name: 'Accept suggestions', exact: true }).click();
 			// The skipped note belongs to this opening of the list; on a phone, reaching "Resolved" closes the sheet, which clears it.
 			await expect(drawer.getByText('1 skipped', { exact: true })).toBeVisible();
 			await inResolved(drawer, () => expect(resolvedList(reader).locator(`[data-comment-id="${red.id}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());

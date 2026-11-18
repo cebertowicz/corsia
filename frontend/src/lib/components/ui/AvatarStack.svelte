@@ -10,7 +10,7 @@
 		active?: boolean;
 	};
 
-	let { people, max = 3 }: { people: AvatarParticipant[]; max?: number } = $props();
+	let { people, max = 3, measure = false }: { people: AvatarParticipant[]; max?: number; measure?: boolean } = $props();
 	const visible = $derived(people.slice(0, max));
 	const remaining = $derived(Math.max(0, people.length - visible.length));
 	const remainingNames = $derived(people.slice(max).map((person) => person.name).join(', '));
@@ -41,14 +41,15 @@
 				style={`--participant-color:${person.color}`}
 				data-participant-id={participantId(person)}
 				aria-label={person.name}
-				aria-describedby={descriptionId(person)}
+				aria-describedby={measure ? undefined : descriptionId(person)}
+				tabindex={measure ? -1 : undefined}
 				onmouseenter={() => open(person)}
 				onmouseleave={close}
 				onfocus={() => open(person)}
 				onclick={() => openId === participantId(person) ? close() : open(person)}
 			>
 				<Avatar name={person.name} color={person.color} hidden />
-				<span id={descriptionId(person)} class="sr-only">{person.detail}</span>
+				<span id={measure ? undefined : descriptionId(person)} class="sr-only">{person.detail}</span>
 			</button>
 			{#if openId === participantId(person)}
 				<Popover anchor={anchors[participantId(person)]} open onClose={close} placement="bottom">
