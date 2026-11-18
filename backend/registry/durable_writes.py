@@ -17,7 +17,8 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_recovery import recovery_shared_target
+from registry.durable_write_preconditions import check_expected_content
+from registry.durable_write_recovery import recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
 from registry.promote_recovery_notice import INTERRUPTED, announce_undone_promote, recovery_path
@@ -55,18 +56,6 @@ def _remove_if_present(path: Path | None) -> None:
         unlink_bound_file(path)
     except FileNotFoundError:
         return
-
-
-def _remove_created_parent(path: Path) -> None:
-    """Remove an unpublished category directory, failing on foreign contents."""
-    try:
-        path.rmdir()
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        raise RuntimeError(
-            f"Unpublished shared category contains unexpected files: {path}"
-        ) from exc
 
 
 def _restore_target(target: Path, backup: Path | None) -> None:
@@ -108,7 +97,7 @@ def _finish_undo(
 
     recovered_source = _recover_unpublished_claim(claim, source, intent_id)
     if created_parent:
-        _remove_created_parent(target.parent)
+        remove_created_parent(target.parent)
     return recovered_source
 
 
@@ -378,6 +367,17 @@ def _complete_publication(
     }
 
 
+def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha256: str | None) -> None:
+    check_expected_content(target, expected_sha256)
+    if backup is not None:
+        copy_bound_file(target, backup)
+    check_expected_content(target, expected_sha256)
+    if backup is not None:
+        replace_bound_file(stage, target)
+    elif not restore_claimed_file(stage, target):
+        raise FileExistsError(f"Publication destination already exists: {target}")
+
+
 def _publish_bytes(
     shared: SharedTarget,
     content: bytes | None,
@@ -388,7 +388,7 @@ def _publish_bytes(
     operation: str,
     direct_user: bool = False,
     source: Path | None = None, origin: registration_writer.RegistrationOrigin | None = None,
-    notify: bool = True,
+    notify: bool = True, expected_sha256: str | None = None,
 ) -> dict:
     if (source is None) == (content is None):
         raise ValueError(
@@ -444,13 +444,7 @@ def _publish_bytes(
                 leaf=stage.name,
                 mode=target_mode,
             )
-        if backup is not None:
-            copy_bound_file(shared.path, backup)
-            replace_bound_file(stage, shared.path)
-        elif not restore_claimed_file(stage, shared.path):
-            raise FileExistsError(
-                f"Publication destination already exists: {shared.path}"
-            )
+        _publish_stage(shared.path, stage, backup, expected_sha256)
         file_applied = True
         intents.mark_applied(db, intent_id)
         artifact = _register_applied(
@@ -483,7 +477,7 @@ def _publish_bytes(
             _remove_if_present(stage)
             _remove_if_present(backup)
             if parent_created:
-                _remove_created_parent(shared.category_root)
+                remove_created_parent(shared.category_root)
         if claim is None or not claim.exists():
             intents.delete(db, intent_id)
         if recovered_source not in (None, source):
@@ -522,6 +516,7 @@ def write_text(
     direct_user: bool = False,
     origin: registration_writer.RegistrationOrigin | None = None,
     notify: bool = True,
+    expected_sha256: str | None = None,
 ) -> dict | WriteAuthority | None:
     """Publish governed shared text; for any other write, return the ownership decision to report.
 
@@ -558,7 +553,7 @@ def write_text(
             description=description,
             db=db,
             operation="write", direct_user=direct_user,
-            origin=origin, notify=notify,
+            origin=origin, notify=notify, expected_sha256=expected_sha256,
         )
     finally:
         db.close()
@@ -657,7 +652,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db, why: str = INTERRUPTE
         _remove_if_present(stage)
         _remove_if_present(backup)
         if row["created_parent"]:
-            _remove_created_parent(target.parent)
+            remove_created_parent(target.parent)
         intents.delete(db, row["id"])
         return
     if not applied:

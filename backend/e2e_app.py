@@ -13,6 +13,7 @@ import e2e_reset
 # A process restarted by POST /api/test/reset puts the captured seed back before anything opens the database.
 e2e_reset.restore_if_requested()
 
+import e2e_shared_save_race  # noqa: E402
 from e2e_live_faults import FaultConfiguration, FaultConfigurationError, FaultController, build_router  # noqa: E402
 from e2e_mock import mock_engine, router as mock_router  # noqa: E402
 from e2e_mock_catalog import seed_mock_catalog  # noqa: E402
@@ -36,7 +37,7 @@ async def _lifespan(_: FastAPI):
     # The Focus nudge starts a Turn of its own, which would take the next scripted
     # reply; no E2E or matrix cell models it (its own tests cover it).
     no_nudge = patch("infra.reply_not_visible_wake._focus_on", lambda _db: False)
-    with mock_engine(), checkpoint_hook, no_nudge:
+    with mock_engine(), checkpoint_hook, no_nudge, e2e_shared_save_race.install_gate():
         async with production_app.router.lifespan_context(production_app):
             from loguru import logger
             logger.info("E2E test roots: state_dir={} db_path={}", STATE_ROOT, DB_PATH)
@@ -52,6 +53,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(mock_router)
+app.include_router(e2e_shared_save_race.router)
 app.include_router(e2e_reset.router, prefix="/api/test", tags=["test"])
 _live_fault_router = build_router(_live_fault_controller, opt_in_requested=_live_fault_opt_in)
 if _live_fault_router is not None:

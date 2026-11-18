@@ -7,11 +7,11 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from core.skill_validation import is_skill_file
 from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
+from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside
 from doceditor.document_scope import (
     MAX_TEXT_BYTES,
     UI_THREAD,
@@ -48,16 +48,6 @@ class DocumentSave:
     create: bool = False
 
 
-class DocumentSaveError(ValueError):
-    """A domain refusal mapped by each transport adapter."""
-
-    def __init__(self, kind: str, message: str, detail: Any = None) -> None:
-        self.kind = kind
-        self.message = message
-        self.detail = detail
-        super().__init__(message)
-
-
 def _invalid_skill_save_error(errors: tuple[str, ...], line: str) -> DocumentSaveError:
     """Carry the canonical skill refusal through document-save adapters unchanged."""
     return DocumentSaveError(
@@ -75,14 +65,6 @@ def _refuse_invalid_skill(path: Path, text: str) -> None:
 
     if (refusal := invalid_skill_write({path: text.encode()})) is not None:
         raise _invalid_skill_save_error(refusal.errors, refusal.line)
-
-
-class FileChangedOutside(DocumentSaveError):
-    """The file no longer holds the bytes a live write was built on; nothing was replaced."""
-
-    def __init__(self) -> None:
-        super().__init__("stale", "The document changed outside CORSIA while this write was saving."
-                                  " Nothing was replaced; try again.")
 
 
 def _saved_payload(resolved: Path, actor_thread_id: str, extra: dict) -> dict:
@@ -129,15 +111,15 @@ def _guided_write(
 ) -> dict:
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
-    ``expected_sha256`` is checked once, by the history lock's compare-and-swap; ``history_required``
-    writes nothing unless the version is recorded. The owner report's diff runs after the save, never
-    under the history lock."""
+    ``expected_sha256`` is checked under the history lock and passed to the file writer for its
+    publication check. ``history_required`` writes nothing unless the version is recorded. The owner
+    report's diff runs after the save, never under the history lock."""
     payloads: list[dict] = []
     reports: list[Callable[[], None]] = []
     saved = save_with_history(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
-        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
+        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, expected_sha256, reports)),
         accepted_suggestions=accepted,
     )
     if saved.outcome == "refused":
@@ -272,6 +254,7 @@ def _write_document(
             description=body.description,
             direct_user=direct_user,
             notify=False,
+            expected_sha256=expected_sha256,
         )
     except DurableWritePolicyError as exc:
         raise DocumentSaveError("durable_write_policy", str(exc)) from exc

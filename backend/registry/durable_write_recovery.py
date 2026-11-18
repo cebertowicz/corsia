@@ -10,6 +10,18 @@ from registry.shared_principals import artifact_owner
 from registry.shared_target import SharedTarget
 
 
+def remove_created_parent(path: Path) -> None:
+    """Remove an unpublished category directory, failing on foreign contents."""
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unpublished shared category contains unexpected files: {path}"
+        ) from exc
+
+
 def recovery_shared_target(target: Path, row: dict, *, workspace: Path, db) -> SharedTarget:
     """Rebuild the policy decision already persisted in an interrupted intent."""
     actor = str(row["actor_thread_id"])
