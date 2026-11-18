@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_agent_verbs, browser_pane_state, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_history, browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -182,11 +182,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
-    note = None
+    note, filled_field_visit = None, False
     if guarded:
-        note = await browser_control.require_page_access(
+        access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
+        note, filled_field_visit = access.note, access.filled_field_visit
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
@@ -205,17 +206,22 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     except BaseException:
         # A history move that timed out or failed may still have restored the page.
         if history:
-            await _fresh_after_history(owner, runtime, thread_id, command)
+            await browser_history.fresh_after_history(owner, runtime, thread_id, command)
         raise
     finally:
         # A held pane shows nothing until this restart, so it runs however the command ends.
         await browser_pane_state.page_command_finished(thread_id, tuple(args))
     if history:
-        await _fresh_after_history(owner, runtime, thread_id, command)
+        await browser_history.fresh_after_history(owner, runtime, thread_id, command)
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
+    if filled_field_visit and args[0] == "snapshot":
+        hidden = hidden_snapshot(result)
+        if hidden is None:
+            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+        result = hidden
     rendered = owner._model_result(result, runtime.record)
     if saved_sign_in and not pane:
         rendered = browser_agent_verbs.model_error(args, rendered)
@@ -232,41 +238,19 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     return _noted(rendered, note)
 
 
-async def reopen_fresh(endpoint: str) -> None:
-    """Navigate the page to its own address again, replacing its history entry.
+def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandResult | None:
+    """A snapshot taken while a filled field shows: only `data.snapshot`, its values hidden; None for other output.
 
-    Nothing of the old entry is restored: not the back-forward cache's document, not form values.
+    Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
     """
-    async with browser_cdp.CdpClient(endpoint) as cdp:
-        history = await cdp.call("Page.getNavigationHistory")
-        entries = history.get("entries")
-        index = browser_cdp.protocol_int(history.get("currentIndex"))
-        url = entries[index].get("url") if isinstance(entries, list) and 0 <= index < len(entries) else None
-        if not isinstance(url, str) or not url:
-            raise BrowserSessionError("This page couldn't be checked")
-        await cdp.call("Page.navigate", url=url)
-
-
-async def _fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:
-    """Load a held page again after back or forward; if that can't be done, leave nothing readable.
-
-    A restored page keeps its document and filled values, so a failed check or reload blanks the page (and,
-    when even that fails, closes the session) before the error reaches the agent.
-    """
-    try:
-        endpoint = await browser_cdp.page_endpoint(command)
-        await browser_control.reopen_held_page(
-            thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(reopen_fresh, endpoint))
-    except BaseException:
-        try:
-            await command(("open", "about:blank"), 10)
-        except BaseException as blank_error:
-            # A cancel while blanking still closes the session; the cancel itself then propagates.
-            logging.getLogger(__name__).warning("browser page could not be blanked after history", exc_info=True)
-            await owner._close_one(runtime)
-            if isinstance(blank_error, asyncio.CancelledError):
-                raise
-        raise
+    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
+        return None
+    data = browser_cli.json_object(result.stdout).get("data")
+    snapshot = data.get("snapshot") if isinstance(data, dict) else None
+    if not isinstance(snapshot, str):
+        return None
+    stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
+    return replace(result, stdout=stdout, stderr="")
 
 
 def _noted(text: str, note: str | None) -> str:

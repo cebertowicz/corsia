@@ -11,6 +11,14 @@ from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_
 log = logging.getLogger("llm.providers.omlx.supervisor")
 
 
+def is_managed_server(server_id: str) -> bool:
+    """Resolve launch ownership from the canonical registered server classification."""
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_server
+
+    return is_corsia_managed_server(get_server(server_id) or {})
+
+
 def resolve_settings(cfg: dict) -> dict:
     """Merge row metadata and stored credentials, with explicit configuration winning."""
     sid = cfg.get("server_id")
@@ -70,6 +78,25 @@ def listen_host(resolved: str) -> str:
         log.warning("oMLX bind host unreadable (%s); using %s", exc, LOCAL_BIND)
         bind = LOCAL_BIND
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
+
+
+def managed_bind_host() -> str:
+    """Read the native managed listener choice, defaulting to a private listener."""
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    try:
+        raw = json.loads(managed_omlx_paths().settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "127.0.0.1"
+    server = raw.get("server") if isinstance(raw, dict) else None
+    host = server.get("host") if isinstance(server, dict) else None
+    return host if isinstance(host, str) and host.strip() else "127.0.0.1"
+
+
+def client_host(bind: str) -> str:
+    """Choose a concrete target from the native comma-separated listener list."""
+    host = next((part.strip() for part in bind.split(",") if part.strip()), bind)
+    return {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
 
 
 def _ssd_cache_folder(settings_path: Path, default: Path) -> str | None:

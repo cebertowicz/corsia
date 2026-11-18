@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from host_access import browser_agent_verbs as verbs
-from host_access import browser_cdp, browser_control, browser_launch, browser_step_lifecycle
+from host_access import browser_cdp, browser_control, browser_history, browser_launch, browser_step_lifecycle
 from host_access import browser_session_commands as commands
 from host_access.browser_session_state import BrowserSessionError
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
@@ -109,7 +109,7 @@ async def test_the_page_access_guard_runs_before_each_verb(saved, monkeypatch, a
         seen.append((thread_id, command))
         raise BrowserSessionError("This page asks for a password")
 
-    monkeypatch.setattr(browser_control, "require_page_access", refuse)
+    monkeypatch.setattr(browser_control, "check_page_access", refuse)
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await saved.owner.run("a", args)
     assert seen == [("a", tuple(args))]
@@ -125,7 +125,7 @@ async def test_history_after_a_held_page_loads_the_page_fresh(saved, monkeypatch
     async def reopen_fresh(endpoint):
         reopened.append(endpoint)
 
-    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(browser_history, "reopen_fresh", reopen_fresh)
     visible = frozenset({7}) if held == "visible_password" else frozenset()
 
     async def probe(endpoint, _known):
@@ -139,9 +139,9 @@ async def test_history_after_a_held_page_loads_the_page_fresh(saved, monkeypatch
         browser_step_lifecycle._answers["a"] = {("person", "earlier"): browser_step_lifecycle.Answer(1)}
     elif held == "open_step":
         browser_step_lifecycle._steps["a"] = object()
-        monkeypatch.setattr(browser_control, "require_page_access", _allow)
+        monkeypatch.setattr(browser_control, "check_page_access", _allow)
     if held == "visible_password":
-        monkeypatch.setattr(browser_control, "require_page_access", _allow)
+        monkeypatch.setattr(browser_control, "check_page_access", _allow)
     assert await saved.owner.run("a", [direction]) == verbs.ACKNOWLEDGED
     assert reopened == ["ws://synthetic.test/devtools/page/1"]
     browser_step_lifecycle._steps.pop("a", None)
@@ -149,7 +149,7 @@ async def test_history_after_a_held_page_loads_the_page_fresh(saved, monkeypatch
 
 
 async def _allow(*_args, **_kwargs):
-    return None
+    return browser_control.PageAccess(None, False)
 
 
 @pytest.mark.parametrize("direction", ["back", "forward"])
@@ -157,7 +157,7 @@ async def test_history_in_a_session_that_held_no_page_does_not_reload(saved, mon
     async def reopen_fresh(_endpoint):
         raise AssertionError("a page nobody held is not reloaded")
 
-    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(browser_history, "reopen_fresh", reopen_fresh)
     assert await saved.owner.run("a", [direction]) == verbs.ACKNOWLEDGED
     await saved.owner.shutdown()
 
@@ -182,9 +182,9 @@ async def _held_page(saved, monkeypatch, reopened):
     async def reopen_fresh(endpoint):
         reopened.append(endpoint)
 
-    monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
+    monkeypatch.setattr(browser_history, "reopen_fresh", reopen_fresh)
     browser_step_lifecycle._answers["a"] = {("person", "earlier"): browser_step_lifecycle.Answer(1)}
-    monkeypatch.setattr(browser_control, "require_page_access", _allow)
+    monkeypatch.setattr(browser_control, "check_page_access", _allow)
 
 
 @pytest.mark.parametrize("outcome", ["error", "timeout", "raises"])
@@ -233,7 +233,7 @@ async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, 
         async def reopen_fresh(_endpoint):
             raise RuntimeError("target gone")
 
-        monkeypatch.setattr(commands, "reopen_fresh", reopen_fresh)
+        monkeypatch.setattr(browser_history, "reopen_fresh", reopen_fresh)
     else:
         # The guard resolves the page once before the verb (the probe is skipped by _allow); the history check is next.
         monkeypatch.setattr(browser_cdp, failing, _fail_after(failing, browser_cdp, calls, 1 if failing == "page_endpoint" else 0))

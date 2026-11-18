@@ -287,27 +287,9 @@ def _append_tool_results_sync(
             )
             if media is not None:
                 projected = media.text
-            from core.plan_notice import with_notice
-            from core.repo_staleness_notice import repo_staleness_notice
-            from events.connectors.github_pr_notice import pr_event_notice
-            from tools.tool_surface import resolve_dispatch
-
-            dispatched_name, dispatched_arguments, _ = resolve_dispatch(
-                tc.name, tc.arguments,
+            projected = _with_result_notices(
+                projected, plan_notices, thread_id, tc, canonical, agent.workspace,
             )
-            projected = with_notice(projected, plan_notices.for_result(
-                turn_id=getattr(canonical, "turn_id", None),
-                tool_call_id=tc.id,
-                tool_name=dispatched_name,
-            ))
-            projected = with_notice(projected, repo_staleness_notice(
-                thread_id=thread_id,
-                tool_name=dispatched_name,
-                arguments=dispatched_arguments,
-                workspace=agent.workspace,
-            ))
-            projected = with_notice(projected, pr_event_notice(
-                thread_id=thread_id, tool_name=dispatched_name, arguments=dispatched_arguments))
         if media is not None and media.image is not None:
             media_images.append(media.image)
         messages = agent.context.add_tool_result(
@@ -319,6 +301,31 @@ def _append_tool_results_sync(
     if media_images:
         messages = agent.context.add_tool_media(messages, media_images)
     return enforce_native_image_request_limits(messages, model)
+
+
+def _with_result_notices(projected, plan_notices, thread_id, tc, canonical, workspace):
+    """Return one native result's model text with the notices its call earned."""
+    from core.attention_notice import attention_notice
+    from core.plan_notice import with_notice
+    from core.repo_staleness_notice import repo_staleness_notice
+    from events.connectors.github_pr_notice import pr_event_notice
+    from tools.tool_surface import resolve_dispatch
+
+    # Each notice classifies the tool the call dispatches to, not its wrapper.
+    name, arguments, _ = resolve_dispatch(tc.name, tc.arguments)
+    projected = with_notice(projected, plan_notices.for_result(
+        turn_id=getattr(canonical, "turn_id", None), tool_call_id=tc.id, tool_name=name,
+    ))
+    projected = with_notice(projected, repo_staleness_notice(
+        thread_id=thread_id, tool_name=name, arguments=arguments, workspace=workspace,
+    ))
+    projected = with_notice(projected, pr_event_notice(
+        thread_id=thread_id, tool_name=name, arguments=arguments,
+    ))
+    return with_notice(projected, attention_notice(
+        thread_id=thread_id, tool_name=name, arguments=arguments,
+        result=getattr(canonical, "content", None), workspace=workspace,
+    ))
 
 
 def _native_tool_media(canonical, model, *, image_count: int = 1):

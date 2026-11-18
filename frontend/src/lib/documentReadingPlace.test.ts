@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, heldPlace, holdPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
 import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
@@ -31,9 +31,11 @@ const numbered = (lines: number, image?: number) =>
 	Array.from({ length: lines }, (_, i) => (i === image ? IMAGE : `Line ${i}`)).join('\n');
 
 /**
- * A document pane on a model screen. The pane's top edge is at 0; its header is `header` px tall and the editor's scroller
- * fills the rest of its `height`. jsdom has no layout, so CodeMirror keeps its estimated line heights and the model lays
- * the text by them: a line is on screen at the scroller's top, less the offset, plus the line's height-map top. A frame
+ * A document pane on a model screen. The pane is laid out `top` px down the page (0, or below a status banner, which takes
+ * its height from the pane's), and the page is scrolled `page` px (a phone keyboard scrolling the page to show the caret),
+ * so the pane's top edge is on screen at `top - page`. Its header is `header` px tall and the editor's scroller fills the
+ * rest of its `height`. jsdom has no layout, so CodeMirror keeps its estimated line heights and the model lays the text
+ * by them: a line is on screen at the scroller's top, less the offset, plus the line's height-map top. A frame
  * runs as a browser runs one: scroll events, animation-frame callbacks (with the microtasks after each), layout (which
  * clamps the offset to the scroll range), resize observations, paint. A page change made in a task before the frame is
  * laid out before its scroll events, so a clamp it causes is seen as a scroll before the resize observation. `painted` is
@@ -43,7 +45,12 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const frameEl = document.createElement('div');
 	frameEl.className = 'doc';
 	root.appendChild(frameEl);
-	const screen = { header, height, offset: 0, width: 800 };
+	const screen = { top: 0, page: 0, header, height, offset: 0, width: 800, contentWidth: 800 };
+	/** Where the scroller's top edge is on screen, and how tall it is. */
+	const edge = () => screen.top - screen.page + screen.header;
+	const inner = () => screen.height - screen.top - screen.header;
+	// The browser keeps whole pixels of a laid-out offset; jsdom lays nothing out.
+	Object.defineProperty(frameEl, 'offsetTop', { configurable: true, get: () => Math.round(screen.top) });
 	let scrolled = false;
 	let queued: FrameRequestCallback[] = [];
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => queued.push(callback));
@@ -62,10 +69,10 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const view = new EditorView({ doc: numbered(lines, image), parent: frameEl, dispatchTransactions: dispatchKeepingPlace });
 	views.push(view);
 	const scroller = view.scrollDOM;
-	const max = () => Math.max(0, view.contentHeight - (screen.height - screen.header));
+	const max = () => Math.max(0, view.contentHeight - inner());
 	Object.defineProperties(scroller, {
 		scrollHeight: { configurable: true, get: () => view.contentHeight },
-		clientHeight: { configurable: true, get: () => screen.height - screen.header },
+		clientHeight: { configurable: true, get: () => inner() },
 		clientWidth: { configurable: true, get: () => screen.width },
 		scrollTop: {
 			configurable: true,
@@ -74,11 +81,12 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 			set: (value: number) => { screen.offset = Math.round(Math.min(max(), Math.max(0, value))); scrolled = true; },
 		},
 	});
+	Object.defineProperty(view.contentDOM, 'clientWidth', { configurable: true, get: () => screen.contentWidth });
 	// Zero-sized boxes keep CodeMirror on its estimated heights; only the tops matter here.
 	const box = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
-	vi.spyOn(frameEl, 'getBoundingClientRect').mockImplementation(() => box(0));
-	vi.spyOn(scroller, 'getBoundingClientRect').mockImplementation(() => box(screen.header));
-	vi.spyOn(view.contentDOM, 'getBoundingClientRect').mockImplementation(() => box(screen.header - screen.offset));
+	vi.spyOn(frameEl, 'getBoundingClientRect').mockImplementation(() => box(screen.top - screen.page));
+	vi.spyOn(scroller, 'getBoundingClientRect').mockImplementation(() => box(edge()));
+	vi.spyOn(view.contentDOM, 'getBoundingClientRect').mockImplementation(() => box(edge() - screen.offset));
 	const stop = keepPlaceWhenEditorMoves(view);
 
 	/** Where the line reading `text` starts on screen. */
@@ -91,7 +99,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const follow = (text: string) => { reading = text; painted.length = 0; };
 	const painted: number[] = [];
 	let laidOut = '';
-	const size = () => [screen.header, screen.height, screen.width, view.contentHeight].join();
+	const size = () => [screen.top, screen.header, screen.height, screen.width, screen.contentWidth, view.contentHeight].join();
 	laidOut = size();
 	/** Runs one frame; `layout` changes the page (a header growing) after the frame's callbacks, as a CSS transition does. */
 	const frame = async (layout?: () => void) => {
@@ -125,7 +133,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 		scroller.scrollTop = offset;
 		await frame();
 		await frame();
-		reading = view.state.doc.lineAt(view.lineBlockAtHeight(screen.header - view.documentTop).from).text;
+		reading = view.state.doc.lineAt(view.lineBlockAtHeight(edge() - view.documentTop).from).text;
 		painted.length = 0;
 		return onScreen(reading);
 	};
@@ -136,6 +144,38 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 const off = (painted: number[], top: number, px = 1) => painted.filter((at) => Math.abs(at - top) > px);
 
 describe('keepPlaceWhenEditorMoves', () => {
+	it('holds the selected place when the text column narrows before a layout scroll', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		const selected = captureDocumentPlace(page.view);
+		holdPlace(page.view, selected, true);
+		page.screen.contentWidth = 700;
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).toBe(selected.from);
+		expect(page.scroller.scrollTop).toBe(selected.scrollTop);
+		page.stop();
+	});
+
+	it('consumes the selecting press but lets a later wheel take over', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		page.scroller.dispatchEvent(new Event('pointerdown'));
+		const selected = captureDocumentPlace(page.view);
+		holdPlace(page.view, selected, true);
+		page.screen.width = 700;
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).toBe(selected.from);
+		expect(page.scroller.scrollTop).toBe(selected.scrollTop);
+		await page.frame();
+		page.scroller.dispatchEvent(new Event('wheel'));
+		page.scroller.scrollTop += 120;
+		page.scroller.dispatchEvent(new Event('scroll'));
+		expect(heldPlace(page.view)?.from).not.toBe(selected.from);
+		page.stop();
+	});
+
 	it('anchors after a clipped paragraph when that paragraph can rewrap above the first whole line', async () => {
 		const page = pane();
 		await page.readAt(1000);
@@ -161,6 +201,42 @@ describe('keepPlaceWhenEditorMoves', () => {
 		await page.frame(() => { page.screen.header += 30; });
 		await page.frame();
 		await page.frame(() => { page.screen.header -= 30; });
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	it('holds it while a status banner above the pane comes and goes, with the header growing under it', async () => {
+		const page = pane();
+		const top = await page.readAt(1500);
+		await page.frame(() => { page.screen.top += 31.5; });
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		await page.frame(() => { page.screen.top -= 31.5; });
+		await page.frame(() => { page.screen.header -= 20; });
+		await page.frame();
+		expect(page.painted).toHaveLength(6);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	it('leaves a scroll of the page around the pane to the page: the text moves with the pane, never against it', async () => {
+		const page = pane();
+		const top = await page.readAt(1500);
+		const offset = page.scroller.scrollTop;
+		// A phone keyboard opening scrolls the page to show the caret, and the scroller shrinks under it.
+		await page.frame(() => { page.screen.page += 120; page.screen.height -= 120; });
+		await page.frame();
+		expect(off(page.painted, top - 120)).toEqual([]);
+		expect(page.scroller.scrollTop).toBe(offset);
+		page.stop();
+	});
+
+	it('keeps a place taken under the banner where the reader had it once the banner goes', async () => {
+		const page = pane();
+		await page.frame(() => { page.screen.top += 31.5; });
+		const top = await page.readAt(1500);
+		await page.frame(() => { page.screen.top -= 31.5; });
 		await page.frame();
 		expect(off(page.painted, top)).toEqual([]);
 		page.stop();
@@ -198,19 +274,6 @@ describe('keepPlaceWhenEditorMoves', () => {
 		}
 	}
 
-	// The text rewraps at the new width and CodeMirror scrolls to keep its own anchor, which is not the reader's line.
-	it('lays the place again over a scroll the editor makes while the width changes', async () => {
-		const page = pane();
-		const top = await page.readAt(2000);
-		await page.frame(() => { page.screen.width = 500; });
-		page.scroller.scrollTop += 37;
-		await page.frame();
-		await page.frame(() => { page.screen.header += 20; });
-		await page.frame();
-		expect(off(page.painted, top)).toEqual([]);
-		page.stop();
-	});
-
 	it('takes the place from the reader\'s own scroll at the new width', async () => {
 		const page = pane();
 		await page.readAt(2000);
@@ -246,15 +309,76 @@ describe('keepPlaceWhenEditorMoves', () => {
 		page.stop();
 	});
 
+	// A key pressed before the text rewraps is not a scroll by hand at the new width: a scroll the next width change brings,
+	// seen before that change's resize observation, is still laid back.
 	it('still lays the place again over a key pressed before the width changes', async () => {
 		const page = pane();
 		const top = await page.readAt(2000);
 		page.scroller.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		await page.frame(() => { page.screen.width = 500; });
+		page.screen.width = 450;
 		page.scroller.scrollTop += 37;
 		await page.frame();
 		await page.frame();
 		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A panel opened and closed again, with a scroll with no input while it was open: the place taken from that scroll holds
+	// through the rewrap back, and the width it is then held at is the one it came back to.
+	it('holds the place through a rewrap back to the first width, and takes a scroll with no input there', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.width = 800; });
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		const back = page.scroller.scrollTop;
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(back + 300);
+		page.stop();
+	});
+
+	// The browser's find bar or a screen reader moves the document with no input on the page.
+	it('takes a scroll with no input as the reader\'s place once the rewrap at the new width is laid', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A jump to a comment can start while a panel is still sliding: it lets go of the place, scrolls, and the place is taken
+	// from where it lands.
+	it('keeps where a jump lands while the width is still changing, and takes a later scroll with no input at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 700; });
+		releasePlace(page.view);
+		page.scroller.scrollTop = 4000;
+		await page.frame();
+		await page.frame(() => { page.screen.width = 600; });
+		await page.frame(() => { page.screen.width = 500; });
+		expect(page.scroller.scrollTop).toBe(4000);
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(4300);
 		page.stop();
 	});
 
