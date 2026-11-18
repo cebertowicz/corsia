@@ -14,10 +14,14 @@ changed. Image region numbers are unique per document and image (``idx_doc_comme
 moved region comment whose number the live document already uses on that image takes the next free number there;
 its old number is in the ledger and the reverse restores it. Numbers that do not collide are kept.
 
+An open feedback batch that would collide with the live identity's open batch for the same author, recipient and
+lane (a unique index) is folded into it: its items join that batch, so its agent still hears about them
+(``infra.comment_identity_batch_folds``; the reverse splits them back out).
+
 What stays behind, counted and logged: a reply whose parent is a top-level comment on a document outside the
-lineage; a chain that ends at no active identity; an open feedback batch or a section line that would collide
-with one the live identity already holds (a unique index covers each). Comment rows always move, even when the
-batch or line beside them stays.
+lineage; a chain that ends at no active identity; an open batch with an edit item (it delivers to the live
+document when due, ``feedback_delivery``); a section line that would collide with one the live identity already
+holds. Comment rows always move, even when the batch or line beside them stays.
 
 Every moved row's original values go to ``comment_identity_moves`` in the same statement batch, and
 ``reverse_moves`` (run by ``scripts/migrations/reverse_comment_identity_move.py``) puts them back. Running the
@@ -33,9 +37,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from infra.comment_identity_batch_folds import LEDGER, fold_batch, reverse_folds
 from infra.doc_comments_schema import COMMENT_IDENTITY_MOVES_SQL
 
-LEDGER = "comment_identity_moves"
 CHUNK = 400  # ids per statement, below SQLite's bound-variable limit
 _SECTION = "section:"  # doceditor.writer_turns: a section line's root_id names the document identity
 # The columns a move changes, per table: the only ones the ledger records and the reverse restores.
@@ -56,6 +60,7 @@ class MoveReport:
     moved: dict[str, int] = field(default_factory=lambda: {table: 0 for table in MOVED_COLUMNS})
     left_behind: dict[str, int] = field(default_factory=dict)
     renumbered: int = 0  # moved region comments that took a new number to stay unique on the live document
+    folded: int = 0  # open batches whose items joined the live document's open batch
 
     def left(self, key: str, count: int = 1) -> None:
         self.left_behind[key] = self.left_behind.get(key, 0) + count
@@ -63,7 +68,7 @@ class MoveReport:
     def line(self) -> str:
         moved = " ".join(f"{table}={count}" for table, count in self.moved.items())
         left = " ".join(f"{key}={count}" for key, count in sorted(self.left_behind.items())) or "none"
-        return f"moved: {moved}; region numbers changed: {self.renumbered}; left behind: {left}"
+        return f"moved: {moved}; region numbers changed: {self.renumbered}; batches folded: {self.folded}; left behind: {left}"
 
 
 def _final_identity(conn: sqlite3.Connection, start: str, cache: dict[str, str | None]) -> str | None:
@@ -200,7 +205,11 @@ def _move_batches(conn, source, live, now, report) -> None:
             _record(conn, "doc_feedback_batches", batch_id, {"artifact_id": source}, live, now)
             report.moved["doc_feedback_batches"] += 1
         else:
-            report.left("open_feedback_batch_collision")
+            left = fold_batch(conn, batch_id, live, now)
+            if left is None:
+                report.folded += 1
+            else:
+                report.left(left)
 
 
 def _move_writer_lines(conn, source, live, now, report) -> None:
@@ -270,6 +279,7 @@ def reverse_moves(conn: sqlite3.Connection) -> dict[str, int]:
     break a unique index stays (``blocked``). The counts are what the caller reports; the ledger keeps what remains.
     """
     counts = {"reversed": 0, "changed_since": 0, "gone": 0, "blocked": 0}
+    reverse_folds(conn, counts)
     entries = conn.execute(f"SELECT table_name, row_id, original, moved_to FROM {LEDGER}").fetchall()
     for table, row_id, original, moved_to in entries:
         if table not in MOVED_COLUMNS:

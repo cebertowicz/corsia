@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
-from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
+from doc_feedback_helpers import add_comment, batches, linked_comment_ids, seed_document, seed_thread
 from doceditor import feedback_batches
 from infra.database import get_db
 from infra.doc_comments_schema import DOCUMENT_SCHEMA_SQL
@@ -225,7 +225,7 @@ def test_the_reverse_leaves_a_row_someone_changed_since_and_drops_one_that_is_go
     assert _held(db, "doc_comments", third) == [root["id"]]
 
 
-def test_a_batch_that_would_collide_stays_and_is_counted_apart_from_a_section_line_that_would(db):
+def test_a_batch_that_would_collide_is_folded_and_a_section_line_that_would_stays_and_is_counted(db):
     source, live = _chain(db, 1)
     comment = _comment_on(db, source)
     _comment_on(db, live)
@@ -239,28 +239,29 @@ def test_a_batch_that_would_collide_stays_and_is_counted_apart_from_a_section_li
     db.commit()
     assert len([b for b in batches(db, state="open") if b["artifact_id"] == source]) == 1
     report = move_comments_to_live_identities(db)
-    assert report.left_behind == {"open_feedback_batch_collision": 1, "section_writer_line_collision": 1}
+    assert report.left_behind == {"section_writer_line_collision": 1} and report.folded == 1
     assert comment["id"] in _held(db, "doc_comments", live)
-    assert [b["artifact_id"] for b in batches(db, state="open")].count(source) == 1
+    assert [b["artifact_id"] for b in batches(db, state="open")] == [live]
     assert _held(db, "doc_comment_writer_line", source) == [f"wl-{source}"]
 
 
-def test_a_comment_whose_batch_stayed_behind_is_still_listed_on_the_live_document(db, client):
+def test_a_comment_whose_batch_was_folded_is_listed_on_the_live_document_and_its_feedback_is_in_the_live_batch(db, client):
     source, live = _chain(db, 1)
     comment = _comment_on(db, source)
-    _comment_on(db, live)
+    other = _comment_on(db, live)
     db.commit()
     move_comments_to_live_identities(db)
     db.commit()
-    assert [b["artifact_id"] for b in batches(db, state="open")].count(source) == 1
+    (batch,) = batches(db, state="open")
+    assert batch["artifact_id"] == live and batch["item_count"] == 2
+    assert linked_comment_ids(db, batch["id"]) == sorted([comment["id"], other["id"]])
     for artifact in (live, source):
         response = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN)
         assert response.status_code == 200, response.text
         assert comment["id"] in {thread["id"] for thread in response.json()["comments"]}
 
 
-def test_a_batch_left_on_a_retired_identity_is_not_delivered_and_does_not_stop_the_others(db):
-    """What a collision costs: the stranded batch stays open (retried and logged each pass), the live one closes."""
+def test_a_folded_batch_is_delivered_with_the_live_one_and_nothing_stays_stranded(db):
     source, live = _chain(db, 1)
     _comment_on(db, source)
     _comment_on(db, live)
@@ -268,9 +269,119 @@ def test_a_batch_left_on_a_retired_identity_is_not_delivered_and_does_not_stop_t
     move_comments_to_live_identities(db)
     db.commit()
     feedback_batches.close_due(FAR_FUTURE, db=db)
-    states = {b["artifact_id"]: b["state"] for b in batches(db)}
-    assert states[source] == "open"
-    assert retired_identity_counts(db)[1] == 1
+    (batch,) = batches(db)
+    assert (batch["artifact_id"], batch["state"], batch["item_count"]) == (live, "delivered", 2)
+    assert retired_identity_counts(db) == (0, 0)
+
+
+def _feedback_state(db):
+    return (
+        [tuple(row) for row in db.execute("SELECT * FROM doc_feedback_batches ORDER BY id")],
+        [tuple(row) for row in db.execute("SELECT batch_id, comment_id, event FROM doc_feedback_batch_items ORDER BY 1, 2")],
+    )
+
+
+def test_the_reverse_splits_a_folded_batch_back_out_exactly(db):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    db.commit()
+    before, comments_before = _feedback_state(db), _snapshot(db)
+    move_comments_to_live_identities(db)
+    db.commit()
+    assert len(batches(db)) == 1 and _feedback_state(db) != before
+    counts = reverse_moves(db)
+    db.commit()
+    assert counts["blocked"] == counts["changed_since"] == 0
+    assert _feedback_state(db) == before and _snapshot(db) == comments_before
+    assert db.execute(f"SELECT COUNT(*) FROM {LEDGER}").fetchone()[0] == 0
+
+
+def test_the_reverse_leaves_a_fold_alone_once_the_live_batch_was_delivered(db):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    db.commit()
+    move_comments_to_live_identities(db)
+    db.commit()
+    feedback_batches.close_due(FAR_FUTURE, db=db)
+    assert reverse_moves(db)["changed_since"] == 1
+    assert [b["artifact_id"] for b in batches(db)] == [live]
+
+
+EDIT_SQL = (
+    "INSERT INTO doc_feedback_edit_items(batch_id, actor_display, baseline_sha256, baseline_text, latest_sha256,"
+    " latest_text, save_count, first_at, last_at) VALUES (?, 'a', 'h', 't', 'h', 't', 1,"
+    " '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+)
+
+
+def _open_batch_on(db, artifact: str) -> dict:
+    return next(b for b in batches(db, state="open") if b["artifact_id"] == artifact)
+
+
+def _edit_owners(db) -> list[str]:
+    return [row[0] for row in db.execute("SELECT batch_id FROM doc_feedback_edit_items")]
+
+
+def test_an_edit_snapshot_moves_with_a_fold_when_the_live_batch_has_none_and_the_reverse_puts_it_back(db):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    stranded = _open_batch_on(db, source)
+    db.execute(EDIT_SQL, (stranded["id"],))
+    db.commit()
+    before = _feedback_state(db)
+    report = move_comments_to_live_identities(db)
+    db.commit()
+    assert report.folded == 1 and report.left_behind == {}
+    assert _edit_owners(db) == [_open_batch_on(db, live)["id"]]
+    assert reverse_moves(db)["reversed"] >= 1
+    db.commit()
+    assert _edit_owners(db) == [stranded["id"]] and _feedback_state(db) == before
+
+
+def test_batches_with_an_edit_snapshot_on_both_are_not_folded_and_deliver_on_the_live_document_when_due(db):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    for artifact in (source, live):
+        db.execute(EDIT_SQL, (_open_batch_on(db, artifact)["id"],))
+    db.commit()
+    report = move_comments_to_live_identities(db)
+    db.commit()
+    assert report.left_behind == {"open_feedback_batch_edit_items_on_both": 1} and report.folded == 0
+    feedback_batches.close_due(FAR_FUTURE, db=db)
+    assert sorted((b["artifact_id"], b["state"]) for b in batches(db)) == [(live, "delivered"), (live, "delivered")]
+    assert retired_identity_counts(db) == (0, 0)
+
+
+def test_a_batch_whose_comment_is_in_the_live_batch_with_another_reopen_event_is_not_folded(db):
+    source, live = _chain(db, 1)
+    shared = _comment_on(db, source)
+    _comment_on(db, live)
+    stranded, target = _open_batch_on(db, source), _open_batch_on(db, live)
+    db.execute("INSERT INTO doc_feedback_batch_items(batch_id, comment_id, event, event_at, event_by)"
+               " VALUES (?, ?, 'reopened', '2026-01-02T00:00:00+00:00', 'u')", (target["id"], shared["id"]))
+    db.commit()
+    report = move_comments_to_live_identities(db)
+    assert report.left_behind == {"open_feedback_batch_event_conflict": 1} and report.folded == 0
+    assert {b["id"] for b in batches(db, state="open")} == {stranded["id"], target["id"]}
+
+
+def test_the_reverse_refuses_a_fold_whose_live_batch_changed_after_the_migration(db):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    move_comments_to_live_identities(db)
+    db.commit()
+    target = _open_batch_on(db, live)
+    added = _comment_on(db, live)  # joins the live batch after the migration
+    db.commit()
+    assert added["id"] in linked_comment_ids(db, target["id"])
+    counts = reverse_moves(db)
+    assert counts["changed_since"] == 1 and len(batches(db)) == 1
 
 
 def _region(db, comment: dict, number: int, image: str = "diagram.png") -> None:
@@ -343,8 +454,8 @@ def test_the_startup_counts_fall_to_zero_after_a_clean_move_and_show_what_stayed
     db.execute("UPDATE doc_comments SET parent_id=? WHERE id=?", (foreign_root["id"], stray["id"]))
     db.commit()
     move_comments_to_live_identities(db)
-    # the stray reply stays; its open batch collides with the one the first move put on the live document
-    assert retired_identity_counts(db) == (1, 1)
+    # the stray reply stays, and its open batch is folded into the live one: only the comment is left
+    assert retired_identity_counts(db) == (1, 0)
 
 
 def _ledger_database(path: Path) -> None:

@@ -137,7 +137,8 @@ WRITER_LINE_SCHEMA_SQL = """
 COMMENT_IDENTITY_MOVES_SQL = """
     CREATE TABLE IF NOT EXISTS comment_identity_moves (
         table_name TEXT NOT NULL CHECK (table_name IN (
-            'doc_comments','doc_feedback_batches','doc_review_requests','doc_comment_writer_line')),
+            'doc_comments','doc_feedback_batches','doc_review_requests','doc_comment_writer_line',
+            'doc_feedback_batch_folds','doc_feedback_batch_items','doc_feedback_edit_items')),
         row_id TEXT NOT NULL,
         original TEXT NOT NULL CHECK (json_valid(original)),
         moved_to TEXT NOT NULL,
