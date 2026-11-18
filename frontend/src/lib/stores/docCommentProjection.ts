@@ -34,6 +34,7 @@ export interface DocComment {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	refusalKind?: 'stale' | 'no_such_file';
 	/** The original text is gone: nothing of the quote is left to mark (a collapsed range, or a quote found nowhere in the document). One rule for a comment and for a decided suggestion that keeps its replies. */
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */

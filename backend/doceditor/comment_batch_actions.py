@@ -22,7 +22,7 @@ from doceditor.comment_actions import (
     suggestion_edit_span, validate_decision_reason,
 )
 from doceditor.comment_permissions import check_decider, owner_row
-from doceditor.doc_text import read_doc_text
+from doceditor.doc_text import read_suggestion_text
 from doceditor.feedback_edit_discard import discard_new_edit_item
 from doceditor.suggestion_overlap import is_pending_suggestion, suggestions_overlap
 from infra.database import get_db, write_transaction
@@ -170,7 +170,7 @@ async def _accept_batch(
         artifact, project_id, rows, actor_thread_id, user_id=user_id, suggestion_accept=suggestion_accept)
     if receipt is not None:
         return receipt["text"], receipt["accepted"], receipt["skipped"], receipt
-    source = await run_off_db(read_doc_text, artifact["path"])
+    source = await run_off_db(read_suggestion_text, artifact["path"])
     text, accepted, skipped = _batch_text(rows, source)
     if accepted:
         authors = ", ".join(dict.fromkeys(row["author"] for row in rows))
