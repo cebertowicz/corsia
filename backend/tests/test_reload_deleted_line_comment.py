@@ -106,6 +106,39 @@ def test_a_collapsed_comment_comes_back_where_its_text_is_restored():
     assert (comment["from_off"], comment["to_off"]) == (len(HEAD) + 2, len(HEAD) + 2 + len("deploy"))
 
 
+def test_collapsed_live_range_restores_the_same_place_as_reload():
+    live = {**_stored(OLD, 'deploy', collapsed_at=len(HEAD)), 'body': 'Keep this comment'}
+    reload = live.copy()
+    resolve_threads([live], OLD, ranges={'c': (len(HEAD), len(HEAD))})
+    resolve_threads([reload], OLD)
+    assert (live['orphaned'], live['from_off'], live['to_off']) == (reload['orphaned'], reload['from_off'], reload['to_off'])
+    assert live['orphaned'] is False
+    assert live['body'] == 'Keep this comment'
+
+
+def test_collapsed_live_range_refuses_one_sided_match_and_keeps_body():
+    live = {**_stored(OLD, 'deploy', collapsed_at=len(HEAD)), 'body': 'Keep this comment'}
+    start = NEW.index('deploy')
+    prefix, suffix = live['anchor_prefix'], live['anchor_suffix']
+    assert NEW[max(0, start - len(prefix)):start] == prefix
+    assert NEW[start + len('deploy'):start + len('deploy') + len(suffix)] != suffix
+    reload = live.copy()
+    resolve_threads([live], NEW, ranges={'c': (len(HEAD), len(HEAD))})
+    resolve_threads([reload], NEW)
+    assert live['orphaned'] is reload['orphaned'] is True
+    assert live['body'] == 'Keep this comment'
+
+
+def test_noncollapsed_live_range_keeps_its_edited_text():
+    comment = {**_stored(OLD, 'deploy'), 'body': 'Keep this comment'}
+    edited = OLD.replace('deploy queue', 'release queue', 1)
+    start = edited.index('release')
+    resolve_threads([comment], edited, ranges={'c': (start, start + len('release'))})
+    assert comment['orphaned'] is False
+    assert (comment['from_off'], comment['to_off'], comment['anchor_text']) == (start, start + len('release'), 'release')
+    assert comment['body'] == 'Keep this comment'
+
+
 def test_inside_a_long_line_the_one_sided_rule_still_applies():
     # Text inserted at the start of the line moves the words and one inserted after them changes the stored
     # suffix, so only the prefix matches; a comment that is not collapsed stays on its words as before.
