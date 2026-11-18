@@ -27,7 +27,8 @@
 	// The band owns the read because it owns the row: an empty row must never stand between the text and a drawer.
 	const rowFree = $derived(ready && !covered && !sheetModalOpen && !!artifactId);
 	const mayJump = $derived(rowFree && threads.length > 0);
-	const jump = createJumpRead(() => (mayJump ? root : undefined), () => threads);
+	// Keep the target current under a sheet so its control can render as soon as the sheet closes and take focus on that update.
+	const jump = createJumpRead(() => (ready && !covered && !!artifactId && threads.length > 0 ? root : undefined), () => threads);
 	const jumped = $derived(jumpedThread(threads, jump().target));
 	const hasJump = $derived(mayJump && !!jumped);
 	const hasToast = $derived(confirmsDelivery && !!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);

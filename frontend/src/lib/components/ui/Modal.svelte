@@ -4,6 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { focusStillOurs } from '$lib/actions/focusTrap';
+	import { returnFocus } from '$lib/focusReturn';
 	import { portal } from '$lib/actions/portal';
 	import { updateScreenVisible } from '$lib/update/screenStore';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -99,7 +100,7 @@
 
 		return () => {
 			mounted = false;
-			if (previousFocus?.isConnected && focusStillOurs(element, document.activeElement)) previousFocus.focus({ preventScroll: true });
+			if (previousFocus?.isConnected && focusStillOurs(element, document.activeElement)) returnFocus(previousFocus);
 		};
 	});
 </script>

@@ -21,7 +21,7 @@
 		headingMeta = null,
 		contextLabel = null,
 		leading, actions, compact = false,
-		doneLabel = 'Done', doneIcon = false, onClose, restoreFocus,
+		doneLabel = 'Done', doneIcon = false, onClose, restoreFocus, closeInput = createCloseInput(),
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
@@ -58,6 +58,7 @@
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
 		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */ doneIcon?: boolean;
+		closeInput?: ReturnType<typeof createCloseInput>;
 		onClose: (event?: Event, touch?: boolean) => void;
 		restoreFocus?: (previous: HTMLElement) => void;
 		children: Snippet;
@@ -101,7 +102,6 @@
 		return trackColumnBox(within, (next) => { box = next; });
 	});
 	// A half sheet, or one held below its height to leave its text room above it, grows when pulled up: the one drag path for both.
-	const closeInput = createCloseInput();
 	function close(event?: Event) { onClose(event, closeInput.close(event)); }
 	const drag = createSheetDrag({
 		expandable: () => detent === 'half' || sheetCapped(panel),
@@ -165,7 +165,7 @@
 	data-adaptive-drawer
 	data-keeps-text={keepsText || undefined}
 	onpointerdowncapture={(event) => closeInput.pointerDown(event)}
-		 onkeydowncapture={() => closeInput.clear()}
+		onkeydowncapture={() => closeInput.clear()}
 		onpointerdown={backdrop.down}
 		onclick={backdrop.click}
 		in:fade|global={fadeParams}

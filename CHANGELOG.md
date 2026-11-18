@@ -96,7 +96,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Agents now get a weekly reminder to review work set aside in Later, close what is no longer needed and bring forward what is ready, including work set aside before these reminders began.
 - Browser windows an agent opens no longer stay running and using your computer's processor after CORSIA stops unexpectedly while one is starting.
 - Chat comments and replies now post from their own boxes and stay with the highlighted text instead of appearing as chat messages. A dot marks a new or undelivered reply, and you can jump to it or retry it from the thread.
-- Closing a comment sheet, dialog, menu or any other panel leaves the page where you were reading; before, on a phone it could jump to the top of the document.
+- Closing a document comment keeps the page where you were reading, including on a phone.
 - Comment and reply boxes keep Send on screen as you type, including on a short window or a phone. When a thread doesn't fit, it scrolls inside its card above the reply field.
 - Comment replies in a document stay marked new until you open their thread; scrolling past them no longer marks them read. A thread with unread replies opens with them showing, including resolved threads and decided suggestions.
 - Comments you post on a document now appear immediately in its other open pages, even while your edits wait to reach the agent.

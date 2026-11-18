@@ -117,6 +117,18 @@ it.each([['Escape', 'keyboard'], ['outside', 'touch'], ['outside', 'mouse'], ['C
 	await vi.waitFor(() => expect(view.state.selection.main.empty).toBe(true));
 	expect(view.state.selection.main.head).toBe(10);
 });
+it('returns a touch-closed text draft to the non-editable document host', async () => {
+	phone.store!.set(true);
+	await open(); await select(); await compose();
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	const documentHost = host.querySelector<HTMLElement>('.md-editor')!;
+	const close = document.querySelector<HTMLElement>('[aria-label="Close"]')!;
+	close.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+	close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+	flushSync();
+	await vi.waitFor(() => expect(document.activeElement).toBe(documentHost));
+	expect(document.activeElement).not.toBe(view.contentDOM);
+});
 it('keeps an open draft focused when a live session is replaced', async () => {
 	await open(); await select(); await compose();
 	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;

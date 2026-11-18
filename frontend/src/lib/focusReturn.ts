@@ -8,16 +8,18 @@ export function isTouchClose(event: { type: string; pointerType?: string; detail
 /** One surface owns its pending pointer, consumed by the corresponding activation. */
 export function createCloseInput() {
 	let pointer: { target: EventTarget | null; touch: boolean } | null = null;
+	let touch = false;
 	return {
+		get touch() { return touch; },
 		pointerDown(event: PointerEvent) { pointer = { target: event.target, touch: isTouchClose(event) }; },
 		close(event?: Event): boolean {
 			const preceding = pointer;
 			pointer = null;
-			if (!event) return false;
-			if (event instanceof MouseEvent && event.type === 'click' && event.detail > 0 && preceding?.target === event.target) return preceding.touch;
-			return event instanceof PointerEvent && !!event.pointerType && isTouchClose(event);
+			if (!event) return touch = false;
+			if (event instanceof MouseEvent && event.type === 'click' && event.detail > 0 && preceding?.target === event.target) return touch = preceding.touch;
+			return touch = event instanceof PointerEvent && !!event.pointerType && isTouchClose(event);
 		},
-		clear() { pointer = null; },
+		clear() { pointer = null; touch = false; },
 	};
 }
 

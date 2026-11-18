@@ -31,6 +31,7 @@
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
+	import { createCloseInput } from '$lib/focusReturn';
 	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadSignal, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
@@ -164,9 +165,9 @@
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
-	let postTouch = false;
+	const closeInput = createCloseInput();
 	async function submitComment(text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) {
-		const touch = postTouch;
+		const touch = closeInput.touch;
 		const id = await draftController.submit(text, taggedAgentIds, target?.threadId ?? null, mentions);
 		if (!id) return;
 		scroll.toComment(id, true, 'comment-save', touch);
@@ -364,12 +365,12 @@
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
 		onThreadMissing={commentUI.focusRemainingThread}
-		restoreFocus={(touch) => touch ? focusDocumentEditor(docRoot, true) : commentUI.restoreFocus()}
+		{closeInput}
+		restoreFocus={(touch) => commentUI.restoreFocus(touch)}
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onSubmit={submitComment}
-		onSubmitInput={(touch) => postTouch = touch}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
 		onResolve={threadActions.resolve}

@@ -10,7 +10,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onSubmitInput, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, closeInput = createCloseInput(), onBody, onSubmit, onSubmitInput, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -29,6 +29,7 @@
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+		closeInput?: ReturnType<typeof createCloseInput>;
 		onSubmitInput?: (touch: boolean) => void;
 		onCancel: (touch?: boolean) => void;
 		/** Escape, when it should close without discarding the text (as a click outside does); Cancel by default. */
@@ -46,11 +47,11 @@
 		text;
 		untrack(() => onBody?.(text));
 	});
-	const closeInput = createCloseInput();
 	async function submit(event?: Event) {
 		const value = text.trim();
 		if (!value || posting || pending || disabledReason || (error && !retryable)) return;
-		onSubmitInput?.(closeInput.close(event));
+		const touch = closeInput.close(event);
+		onSubmitInput?.(touch);
 		posting = true;
 		const offset = text.length - text.trimStart().length;
 		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
