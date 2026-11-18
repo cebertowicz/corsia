@@ -84,6 +84,29 @@ async function settledSenders(page: Page): Promise<string[]> {
 	return senderLines(page);
 }
 
+for (const width of [320, 375, 393]) test(`drawer Send fits at ${width}px`, async ({ page, request }, info) => {
+	mockOnly(info);
+	await page.setViewportSize({ width, height: 852 });
+	const title = `drawer-send-fit-${width}-${Date.now()}`;
+	const threadId = await createSession(request, title);
+	const doc = await seedTextDocument(request, threadId, title, 'send-fit');
+	await seedHeldComments(request, doc.artifactId, 1);
+	await installWorkspace(page, threadId, [doc]);
+	await openThread(page, threadId, title);
+	await openComments(page);
+	const send = headerSend(page);
+	await expect(send).toBeVisible();
+	await expect(send.locator('.send-short')).toHaveText('Send · 1');
+	await expect(send.locator('.send-short')).toBeVisible();
+	await expect.poll(() => send.evaluate((button) => {
+		const box = button.getBoundingClientRect();
+		return { width: button.clientWidth, scrollWidth: button.scrollWidth, height: box.height, weight: getComputedStyle(button).fontWeight, inWindow: box.left >= 0 && box.right <= innerWidth };
+	})).toMatchObject({ height: expect.any(Number), weight: '500', inWindow: true });
+	const geometry = await send.evaluate((button) => ({ width: button.clientWidth, scrollWidth: button.scrollWidth, height: button.getBoundingClientRect().height }));
+	expect(geometry.height).toBeGreaterThanOrEqual(44);
+	expect(geometry.scrollWidth).toBe(geometry.width);
+});
+
 test.describe('@flow:held-comment-delivery @surface:documents held comments have one sender per place', () => {
 	test.beforeEach(async ({ page, request }) => {
 		await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
@@ -125,6 +148,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await page.locator('.sel-comment').click();
 			await page.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 			await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
+			await putSheetAway(page);
 			await openComments(page);
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await closeComments(page);
@@ -692,6 +716,19 @@ async function expectDetailsControlsFit(page: Page, width: number) {
 	await expect(panel.locator('.drawer-foot .delivery')).toContainText('Deliver immediately');
 	await expect(comments).toBeVisible();
 	await page.waitForTimeout(400);
+	const hit = await toggle.evaluate((button) => {
+		const box = button.getBoundingClientRect();
+		const track = getComputedStyle(button, '::before');
+		const x = box.right - parseFloat(track.right) - parseFloat(track.width) / 2;
+		const y = box.top + box.height / 2;
+		return {
+			height: box.height,
+			points: [[x, y], [x - 22, y], [x + 22, y], [x, y - 22], [x, y + 22]]
+				.map(([px, py]) => button.contains(document.elementFromPoint(px, py))),
+		};
+	});
+	expect(hit.height, `delivery row height at ${width}px`).toBeGreaterThanOrEqual(44);
+	expect(hit.points, `delivery track centre and four 22px offsets at ${width}px`).toEqual([true, true, true, true, true]);
 	const result = await panel.evaluate((element, selectors) => {
 		const inPanel = [selectors.send, selectors.toggle]
 			.map((selector) => element.querySelector<HTMLElement>(selector)).filter((item): item is HTMLElement => !!item)

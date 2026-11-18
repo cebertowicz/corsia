@@ -539,9 +539,19 @@ for (const theme of ['light', 'dark'] as const) {
 			await reloadComments(page, scenario.artifactId);
 			const commentsPill = page.getByRole('button', { name: '3 comments, 3 new' });
 			await expect(commentsPill).toBeVisible();
-			// At every width the bar's Comments button shows "3 new" alone while replies are unread (the row stays one line); its name
-			// carries the total too.
-			await expect(commentsPill).toHaveText(/^\s*3 new$/, { useInnerText: true });
+			// The phone shows the icon and count; desktop also shows "new". The accessible name carries both counts.
+			await expect(commentsPill).toHaveText(width <= 768 ? /^\s*3$/ : /^\s*3 new$/, { useInnerText: true });
+			await expect(commentsPill.locator('svg')).toBeVisible();
+			const unread = commentsPill.locator('.bar-new');
+			await expect(unread).toBeVisible();
+			expect(await unread.evaluate((el) => {
+				const reference = document.createElement('span');
+				reference.style.color = 'var(--accent-text)';
+				el.appendChild(reference);
+				const matches = getComputedStyle(el).color === getComputedStyle(reference).color;
+				reference.remove();
+				return matches;
+			}), 'unread count uses the accent text color').toBe(true);
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
 			// Opening the comments shows the three threads the pill counted. Hold the

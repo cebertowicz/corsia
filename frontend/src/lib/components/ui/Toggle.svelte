@@ -3,6 +3,8 @@
 		checked: boolean;
 		onchange: (next: boolean) => void;
 		ariaLabel?: string;
+		/** Make the label and track one button when the entire row is the control. */
+		label?: string;
 		/** The id of the text that says why the switch is locked or what it does; read after its name. */
 		describedBy?: string;
 		disabled?: boolean;
@@ -15,7 +17,7 @@
 		touch?: boolean;
 	}
 
-	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, held = false, size = 'md', touch = false }: Props = $props();
+	const { checked, onchange, ariaLabel, label, describedBy, disabled = false, locked = false, held = false, size = 'md', touch = false }: Props = $props();
 
 	function handle() {
 		if (disabled || locked || held) return;
@@ -28,6 +30,7 @@
 	class="tg {size}"
 	class:on={checked}
 	class:touch
+	class:row={!!label}
 	class:locked
 	class:held
 	aria-disabled={held || locked || undefined}
@@ -36,7 +39,7 @@
 	aria-label={ariaLabel}
 	aria-describedby={describedBy}
 	onclick={handle}
->{#if touch}<span class="hit" aria-hidden="true"></span>{/if}</button>
+>{#if label}<span class="row-label">{label}</span>{/if}{#if touch && !label}<span class="hit" aria-hidden="true"></span>{/if}</button>
 
 <style>
 	.tg {
@@ -52,6 +55,11 @@
 		padding: 0;
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
+	.tg.row { width: 100%; min-height: calc(2 * var(--space-6)); text-align: left; margin: 0; font: inherit; color: inherit; }
+	.row-label { font: inherit; }
+	.tg.row::before { left: auto; right: var(--space-2); transform: translateY(-50%); }
+	.tg.row::after { left: auto; right: calc(var(--space-2) + var(--w) - var(--knob) - 2.5px); }
+	.tg.row.on::after { left: auto; right: calc(var(--space-2) + 1.5px); }
 	.tg.md {
 		--w: 34px;
 		--h: 19px;

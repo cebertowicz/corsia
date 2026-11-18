@@ -9,14 +9,14 @@ import { shoot, useScheme } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
 
-/** The task's docked card (with Dismiss all) is tucked away while a comment sheet is up: a touch at the centre of `target` lands on it, never on the card over it. */
+/** The task's review bar (with Dismiss all) is tucked away while a comment sheet is up: a touch at the centre of `target` lands on it, never on the bar over it. */
 async function expectTouchLands(target: Locator, what: string) {
 	await target.scrollIntoViewIfNeeded();
 	const box = await target.boundingBox();
 	if (!box) throw new Error(`${what} has no bounds`);
 	const hit = await target.evaluate((el, at) => {
 		const found = document.elementFromPoint(at.x, at.y);
-		return { onTarget: !!found && el.contains(found), capsule: !!found?.closest('[data-ask-card]') };
+		return { onTarget: !!found && el.contains(found), capsule: !!found?.closest('.review-bar.ask[aria-label="Task for you"]') };
 	}, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
 	expect(hit.capsule, `the ask's card covers ${what}`).toBe(false);
 	expect(hit.onTarget, `the touch point at the centre of ${what} lands on it`).toBe(true);
@@ -80,7 +80,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 		await press(row.getByRole('button').first());
 		if (narrow) await press(page.getByRole('button', { name: 'Done', exact: true }));
 	};
-	const bar = page.locator('[data-ask-card]');
+	const bar = page.locator('.review-bar.ask[aria-label="Task for you"]');
 	const frame = (name: string) => shoot(page, testInfo, `${width}-press-${name}`, true);
 	const log = async (label: string) => console.log(`PRESS ${width} ${label}: bar=${JSON.stringify(await bar.first().innerText({ timeout: 1000 }).catch(() => 'gone'))} row=${JSON.stringify(width > 1024 ? await row.innerText({ timeout: 1000 }).catch(() => 'gone') : 'n/a')}`);
 	// The count the person sees falls: the bar in the document always, and the plan row where it shows beside it.
@@ -250,7 +250,7 @@ test.describe('comment task highlight taps', () => {
 		await expect(row.locator('.count-text')).toHaveText('3 comments');
 		await row.getByRole('button').first().tap();
 		await page.getByRole('button', { name: 'Done', exact: true }).tap();
-		const bar = page.locator('[data-ask-card]');
+		const bar = page.locator('.review-bar.ask[aria-label="Task for you"]');
 		await expect(bar).toContainText('3 comments to review');
 
 		const sheet = page.locator('.drawer-panel');

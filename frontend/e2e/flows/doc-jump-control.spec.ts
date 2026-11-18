@@ -399,14 +399,27 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			// Opened at the top: both replies are below the fold, so the bottom band offers the jump once.
 			await expectControl(page, '2 new');
-			// The held Send is in the comments drawer: open it as a person does and measure both while it is open.
+			// On a phone the modal comments sheet hides the jump; on desktop both controls remain visible.
+			const beforeSheet = await controlFace(page);
 			await expect(await shownHeaderSend(page)).toBeVisible();
 			const sendBox = await hitBox(headerSend(page));
+			if (width <= 768) {
+				await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+				await expect(controlButton(page)).toHaveCount(0);
+				await closeComments(page);
+				await expect(controlButton(page)).toBeVisible();
+				const restored = await controlFace(page);
+				for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(restored[key] - beforeSheet[key]), `jump ${key} after closing the sheet`).toBeLessThanOrEqual(1);
+			} else {
+				const controlBounds = await controlFace(page);
+				expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
+				expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
+				expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
+				await closeComments(page);
+			}
 			const controlBounds = await controlFace(page);
 			expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
 			expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
-			expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
-			await closeComments(page);
 
 			// The label is the count alone; the thread it points at is named in the accessible name, and it is the first reply below the fold.
 			await expect(controlButton(page)).toHaveText(/^[↑↓]\d+ new$/);
