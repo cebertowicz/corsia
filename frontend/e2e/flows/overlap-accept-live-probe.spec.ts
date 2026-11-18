@@ -33,7 +33,7 @@ test('@probe:overlap-live accepting while typing in a live document', async ({ p
 	const secondEditor = second.locator('.cm-content');
 	await expect(secondEditor).toContainText('original sentence');
 	await expect.poll(() => openedSecond.has(doc.artifactId), { timeout: 15_000 }).toBe(true);
-	await expect(secondEditor).toHaveAttribute('aria-readonly', 'false');
+	await expect(secondEditor).not.toHaveAttribute('aria-readonly', 'true');
 	await openComments(page, /^1 comment\b/);
 	await expectCommentsShown(doc.drawer);
 	await showAllThreads(doc.drawer);
