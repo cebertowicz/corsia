@@ -42,6 +42,41 @@ def test_collision_preserves_send_count_until_due_then_reverse_refuses(isolated_
         db.close()
 
 
+def test_both_edit_collision_keeps_send_count_and_timing_until_ui_delivery(isolated_db, monkeypatch):
+    from doceditor import feedback_state
+    from infra.migration_200_to_201_feedback_recipients import migrate_200_to_201
+
+    db = get_db()
+    try:
+        artifact = seed_document(db, 'project:example')
+        monkeypatch.setattr(feedback_comments, 'comment_recipients', lambda *_a, **_kw: ('project:example',))
+        _, feedback = add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER,
+                                  delivery_policy='document-held')
+        source = feedback['batch_ids'][0]
+        db.execute("""INSERT INTO doc_feedback_batches
+            (id,artifact_id,author_kind,author_id,recipient_id,delivery_policy,state,opened_at,last_item_at,
+             closes_at,item_count,created_at,updated_at)
+            SELECT 'collision',artifact_id,author_kind,author_id,'ui',delivery_policy,state,opened_at,last_item_at,
+                   closes_at,1,created_at,updated_at FROM doc_feedback_batches WHERE id=?""", (source,))
+        db.executemany("INSERT INTO doc_feedback_edit_items VALUES (?,'Person','diff','a','old','b','new',1,'1','2')",
+                       [(source,), ('collision',)])
+        db.execute('UPDATE doc_feedback_batches SET item_count=2 WHERE id=?', (source,))
+        db.commit()
+        before = feedback_state.open_counts_for_document(db, artifact)
+        timing = [tuple(row) for row in db.execute('SELECT id,opened_at,last_item_at,closes_at FROM doc_feedback_batches ORDER BY id')]
+        migrate_200_to_201(db)
+        assert feedback_state.open_counts_for_document(db, artifact) == before
+        assert [tuple(row) for row in db.execute('SELECT id,opened_at,last_item_at,closes_at FROM doc_feedback_batches ORDER BY id')] == timing
+        assert tuple(db.execute('SELECT state,recipient_id FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('open', 'project:example')
+        db.commit()
+        assert not feedback_batches._close_due_batch(db, source, '0001-01-01T00:00:00+00:00')[0]
+        assert feedback_batches._close_due_batch(db, source, '9999-01-01T00:00:00+00:00')[0]
+        assert db.execute("SELECT state FROM doc_feedback_batches WHERE id='collision'").fetchone()[0] == 'open'
+        assert tuple(db.execute('SELECT state,recipient_id,delivery_outcome FROM doc_feedback_batches WHERE id=?', (source,)).fetchone()) == ('delivered', 'ui', 'ui')
+    finally:
+        db.close()
+
+
 def test_dev_era_project_owner_creates_conductor_and_sentinel_batches(isolated_db, monkeypatch):
     from registry import document_supervisor as legacy
     from registry.shared_principals import artifact_owner

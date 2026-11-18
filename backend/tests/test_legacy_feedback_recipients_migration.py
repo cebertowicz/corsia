@@ -122,14 +122,17 @@ def test_edit_snapshots_fold_only_when_compatible():
     db.close()
 
 
-def test_identical_edit_snapshots_fold_as_one_item():
+def test_identical_edit_snapshots_leave_source_open(caplog):
+    import logging
+    caplog.set_level(logging.INFO)
     db = _db()
     _batch(db, 'old', 'project:p')
     _batch(db, 'new', 'ui')
     db.executemany("INSERT INTO doc_feedback_edit_items VALUES (?,'Person','diff','a','old','b','new',1,'1','2')", [('old',), ('new',)])
     migrate_200_to_201(db)
-    assert db.execute('SELECT batch_id FROM doc_feedback_edit_items').fetchall() == [('new',)]
-    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='new'").fetchone() == (1,)
+    assert db.execute('SELECT batch_id FROM doc_feedback_edit_items ORDER BY batch_id').fetchall() == [('new',), ('old',)]
+    assert db.execute("SELECT state,recipient_id FROM doc_feedback_batches WHERE id='old'").fetchone() == ('open', 'project:p')
+    assert 'edit_conflicts=1' in caplog.text
     db.close()
 
 
@@ -146,6 +149,49 @@ def test_different_edit_snapshots_leave_source_open(caplog):
     assert db.execute('SELECT * FROM doc_feedback_edit_items ORDER BY batch_id').fetchall() == before
     assert db.execute("SELECT state,recipient_id FROM doc_feedback_batches WHERE id='old'").fetchone() == ('open', 'project:p')
     assert 'edit_conflicts=1' in caplog.text
+    db.close()
+
+
+def test_schema_200_fold_repair_only_open_targets_and_survives_reverse(caplog):
+    import logging
+    from infra.migration_200_to_201_feedback_recipients import reverse_201_to_200
+
+    caplog.set_level(logging.INFO)
+    db = _db()
+    db.execute('CREATE TABLE comment_identity_moves(table_name TEXT, row_id TEXT, original TEXT, moved_to TEXT, moved_at TEXT)')
+    _batch(db, 'old', 'project:p')
+    _batch(db, 'target', 'ui')
+    _batch(db, 'delivered', 'ui', 'delivered', 'b')
+    _batch(db, 'unrelated', 'ui', 'open', 'c')
+    db.executemany("INSERT INTO comment_identity_moves VALUES ('doc_feedback_batch_folds',?,'{}',?,'1')",
+                   [('source1', 'target'), ('source2', 'target'), ('source3', 'delivered')])
+    db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('target','c1'),('delivered','c2'),('unrelated','c')")
+    db.executemany("INSERT INTO doc_feedback_edit_items VALUES (?,'Person','diff','a','old','b','new',1,'1','2')",
+                   [('old',), ('target',), ('unrelated',)])
+    db.execute("UPDATE doc_feedback_edit_items SET latest_text='different' WHERE batch_id='old'")
+    migrate_200_to_201(db)
+    assert db.execute("SELECT id,item_count FROM doc_feedback_batches WHERE id IN ('target','delivered','unrelated') ORDER BY id").fetchall() == [('delivered', 1), ('target', 2), ('unrelated', 1)]
+    assert 'delivered_fold_targets=1' in caplog.text
+    reverse_201_to_200(db)
+    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='target'").fetchone() == (2,)
+    db.close()
+
+
+def test_fold_count_repair_survives_reversing_a_recipient_merge():
+    from infra.migration_200_to_201_feedback_recipients import reverse_201_to_200
+
+    db = _db()
+    db.execute('CREATE TABLE comment_identity_moves(table_name TEXT, row_id TEXT, original TEXT, moved_to TEXT, moved_at TEXT)')
+    _batch(db, 'old', 'project:p')
+    _batch(db, 'target', 'ui')
+    db.execute("INSERT INTO comment_identity_moves VALUES ('doc_feedback_batch_folds','source','{}','target','1')")
+    db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('target','c1'),('old','c2')")
+    db.execute("INSERT INTO doc_feedback_edit_items VALUES ('target','Person','diff','a','old','b','new',1,'1','2')")
+    migrate_200_to_201(db)
+    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='target'").fetchone() == (3,)
+    reverse_201_to_200(db)
+    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='target'").fetchone() == (2,)
+    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id='old'").fetchone() == (1,)
     db.close()
 
 

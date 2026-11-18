@@ -3,6 +3,7 @@
 import logging
 import time
 
+from infra.comment_identity_batch_folds import FOLDS, _recount
 from infra.feedback_recipient_journal import record, reverse, snapshot
 from infra.doc_feedback_schema import JOURNAL_SCHEMA_SQL
 
@@ -30,7 +31,7 @@ def _collision_reasons(db, source, target, references):
             break
     edits = db.execute('SELECT * FROM doc_feedback_edit_items WHERE batch_id IN (?,?) ORDER BY batch_id',
                        (source, target)).fetchall()
-    if len(edits) == 2 and tuple(edits[0])[1:] != tuple(edits[1])[1:]:
+    if len(edits) == 2:
         reasons.add('edit_conflicts')
     if db.execute(
         """SELECT 1 FROM doc_feedback_batch_items a JOIN doc_feedback_batch_items b
@@ -66,11 +67,25 @@ def _merge_open(db, source, target):
     db.execute('DELETE FROM doc_feedback_batches WHERE id=?', (source,))
 
 
+def _repair_fold_counts(db):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment_identity_moves'").fetchone():
+        return 0
+    targets = db.execute(
+        """SELECT DISTINCT b.id, b.state FROM doc_feedback_batches b
+           JOIN comment_identity_moves m ON m.moved_to=b.id WHERE m.table_name=?""", (FOLDS,)
+    ).fetchall()
+    for batch_id, state in targets:
+        if state == 'open':
+            _recount(db, batch_id)
+    return sum(state == 'delivered' for _, state in targets)
+
+
 def migrate_200_to_201(db):
     started = time.monotonic()
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
     counts = dict(normalized=0, merged=0, reopen_conflicts=0, edit_conflicts=0, referenced=0)
+    delivered_fold_targets = _repair_fold_counts(db)
     references = _reference_columns(db)
     rows = db.execute(
         """SELECT id,author_kind,author_id,artifact_id,delivery_policy,state
@@ -102,8 +117,9 @@ def migrate_200_to_201(db):
                 counts['merged'] += 1
         record(db, ids, before)
     log.info('Legacy feedback recipients: total=%d normalized=%d merged=%d reopen_conflicts=%d '
-             'edit_conflicts=%d referenced=%d elapsed_ms=%d', len(rows), counts['normalized'], counts['merged'],
-             counts['reopen_conflicts'], counts['edit_conflicts'], counts['referenced'],
+             'edit_conflicts=%d referenced=%d delivered_fold_targets=%d (snapshots gone; counts not repairable) elapsed_ms=%d',
+             len(rows), counts['normalized'], counts['merged'], counts['reopen_conflicts'],
+             counts['edit_conflicts'], counts['referenced'], delivered_fold_targets,
              int((time.monotonic() - started) * 1000))
 
 

@@ -48,7 +48,8 @@ def _item_ids(conn: sqlite3.Connection, batch_id: str) -> list[str]:
 def _recount(conn: sqlite3.Connection, batch_id: str) -> None:
     conn.execute(
         "UPDATE doc_feedback_batches SET item_count=(SELECT COUNT(*) FROM doc_feedback_batch_items WHERE batch_id=?)"
-        " WHERE id=?", (batch_id, batch_id),
+        " + EXISTS(SELECT 1 FROM doc_feedback_edit_items WHERE batch_id=?) WHERE id=?",
+        (batch_id, batch_id, batch_id),
     )
 
 
