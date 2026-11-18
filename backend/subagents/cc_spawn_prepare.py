@@ -14,7 +14,6 @@ from subagents.cc_context_reconstruction import build_cc_context_reconstruction
 from subagents.cc_invocation import CONFINEMENT_NONE
 from subagents.cc_runtime_helpers import (
     _build_seed,
-    _check_live_cap,
     _parent_user_id,
     _write_seed_file,
 )
@@ -196,7 +195,6 @@ async def _build_live(
 
 async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
-    _check_live_cap()
     from connections.models import provider_may_run
     from registry.cc_session import notify_cc_session, persist_cc_session
 

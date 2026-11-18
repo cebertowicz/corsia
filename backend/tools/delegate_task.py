@@ -162,8 +162,7 @@ async def _spawn(
     """Start the worker; its receipt, or an error string with nothing started.
 
     ``rule_start`` is a rule-started worker's (R23), never a caller's: it records the
-    worker before its first turn, and a full Claude Code cap raises
-    ``LiveSpawnCapExceeded`` so the rule's runner can queue the start again.
+    worker before its first turn.
     """
     from infra.delegation import DelegationModelRequired, require_explicit_thread_model
 
@@ -344,7 +343,6 @@ async def _spawn_claude_code_child(
     """Spawn a Claude Code child."""
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
-    from infra.subagent_caps import LiveSpawnCapExceeded
     from subagents import cc_runtime
     from subagents.cc_runtime_helpers import CCWorkingDirMissing
     from infra.fresh_threads import resolve_spawn_working_dir
@@ -387,10 +385,6 @@ async def _spawn_claude_code_child(
             confinement=confinement, read_dirs=read_dirs, rule_start=rule_start,
             effort=effort, max_turns=max_turns,
         )
-    except LiveSpawnCapExceeded as e:
-        if rule_start is not None:
-            raise
-        return str(e)
     except CCWorkingDirMissing as e:
         return f"Cannot delegate to Claude Code: {e}"
     except Exception as e:

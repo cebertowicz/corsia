@@ -200,15 +200,13 @@ async def _rule_for(owner: str, request_value: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_a_waiting_start_gives_its_slot_to_a_younger_start_that_can_run(world, monkeypatch):
-    """With one slot free, the older start waits on an unread account and the younger start,
-    another owner's on a model that runs (the Default is limited for Sonnet alone), starts in
-    the same pass."""
+async def test_a_waiting_start_does_not_hold_back_a_younger_start_that_can_run(world, monkeypatch):
+    """The older start waits on an unread account and the younger start, another owner's on a
+    model that runs (the Default is limited for Sonnet alone), starts in the same pass."""
     from automation import worker_runner
     from infra.database import write_transaction
 
     _accounts(world, monkeypatch, rollover=True, sibling="unread", scope_model=MODEL)
-    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: 1)
     with write_transaction(None, scope="rule_worker_other_owner") as conn:
         conn.execute("INSERT INTO threads (id, user_id, title, model, project_id, created_at, updated_at) "
                      "VALUES (?, 'user-1', 'Other', 'claude-code/opus', ?, 't', 't')", (OTHER, world["project"]))
@@ -223,7 +221,7 @@ async def test_a_waiting_start_gives_its_slot_to_a_younger_start_that_can_run(wo
     assert starts(older)[0][0] == "queued" and starts(older)[0][3] is None
     [(outcome, _reason, _identity, worker)] = starts(younger)
     assert outcome == "started" and worker is not None
-    assert await worker_runner.drive() == 0  # no slot free now: the older start still waits
+    assert await worker_runner.drive() == 0  # the older start still waits on the unread account
     assert starts(older)[0][0] == "queued"
 
 

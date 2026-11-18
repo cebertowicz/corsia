@@ -41,6 +41,8 @@
 	import { createPlanDestinations } from './chatPlanDestinations';
 	import {
 		createPager,
+		refreshPager,
+		mergeTurnSummaries,
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
@@ -97,10 +99,7 @@
 	let focusRuns = $state<RunStub[]>([]), runLoads = $state<Record<string, RunLoad>>({});
 	const focusOn = () => $coreSettings?.features?.focus_mode === true;
 	const focusParam = () => (focusOn() ? '&view=focus' : '');
-	function mergeTurnSummaries(value: unknown): void {
-		if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-		turnSummaries = { ...turnSummaries, ...(value as Record<string, TurnSummary>) };
-	}
+	const adoptTurnSummaries = (value: unknown) => { turnSummaries = mergeTurnSummaries(turnSummaries, value); };
 
 	/** Drop the shown thread's pages, load state, summaries and run stubs: an open replaces them, and a new chat has none. */
 	function clearThreadTranscript(): void {
@@ -166,9 +165,10 @@
 	export async function fetchThreadMessages(threadId: string) {
 		// Another chat replaces the whole transcript, whichever path changed it. A
 		// same-thread refresh replaces only the first page: older rows, their
-		// summaries and run stubs stay until that page is actually unloaded.
+		// summaries and run stubs stay until that page is actually unloaded, and so does what the window knows of older
+		// history, so nothing above the reader comes or goes while the page is read.
 		if (lastFirstPageThreadId !== null && lastFirstPageThreadId !== threadId) clearThreadTranscript();
-		else { pagerGeneration++; pager = createPager(); }
+		else { pagerGeneration++; pager = refreshPager(pager); }
 		const myGen = pagerGeneration;
 		try {
 			await loadFirstPage(threadId, myGen);
@@ -194,7 +194,7 @@
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
 					setChatReplyAttention(threadId, page.chat_reply_items ?? [], sequence);
-					mergeTurnSummaries((page as MessagePage).turn_summaries);
+					adoptTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
 				return page;
@@ -202,7 +202,7 @@
 		}, focusOn() ? 1 : undefined, needsMore); // a Focus page is one request, never a chain
 	}
 	const runLoader = {
-		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: mergeTurnSummaries,
+		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: adoptTurnSummaries,
 		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
 	};
 	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
@@ -217,7 +217,7 @@
 		focusSeen = focusOn();
 		const id = get(activeThreadId);
 		if (!changed || !id) return;
-		[focusRuns, runLoads] = [[], {}];
+		clearThreadTranscript();
 		messages.update((current) => current.filter((row) => row.thread_id !== id));
 		void fetchThreadMessages(id);
 	});
@@ -261,7 +261,7 @@
 			firstLoadFailed = false;
 			setChatReplyAttention(threadId, data.chat_reply_items ?? [], sequence);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
-			mergeTurnSummaries(data.turn_summaries);
+			adoptTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);
 			adoptFirstPage(pager, data);
 			focusRuns = adoptFirstPageRuns(focusRuns, data, hydrated);
@@ -298,7 +298,7 @@
 			const sid = get(activeThreadId);
 			if (!sid) return;
 			pagerGeneration++;
-			pager = createPager();
+			pager = lastFirstPageThreadId === sid ? refreshPager(pager) : createPager();
 			const myGen = pagerGeneration;
 			await refreshVisibleThread(sid, loadFirstPage(sid, myGen));
 		};

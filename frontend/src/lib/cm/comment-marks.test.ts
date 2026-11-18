@@ -3,6 +3,8 @@ import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { highlightAtPress, pickHighlight, MAX_SCROLL_PASSES, scrollToRange, type CommentRange } from './comment-marks';
 import { widgetTarget } from './widget-scroll';
+import { trackOverlaySheet } from './visible-region';
+import { liftSheetCap } from '$lib/sheetClearance';
 
 vi.mock('./widget-scroll', () => ({ widgetTarget: vi.fn(() => null) }));
 // The reading place is the editor's own; these stand-in editors have no line blocks to take it from.
@@ -198,6 +200,30 @@ describe('a jump whose frame moves after it lands', () => {
 		settle();
 		expect(view.dispatch).toHaveBeenCalledTimes(before);
 		expect(watch.disconnected).toBe(true);
+	});
+
+	it('stops holding the place once the reader pulls the sheet over it up, so the keyboard that follows moves nothing', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, dom, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+		const panel = document.createElement('div');
+		const untrack = trackOverlaySheet(dom, () => panel);
+
+		scrollToRange(view, 450, 454);
+		settle();
+		const watch = observers.at(-1)!;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+
+		liftSheetCap(panel);
+		// The keyboard comes up and shrinks the pane, leaving the landing below the band.
+		moved = true;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		expect(watch.disconnected).toBe(true);
+		untrack();
 	});
 
 	it('never moves the reader from a check the pane queued before the reader scrolled', () => {

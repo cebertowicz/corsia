@@ -7,7 +7,7 @@
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
-	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
+	import { commentHighlight, commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
 	import { transcriptTextChanged } from './chatTranscriptMutations';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
@@ -306,8 +306,14 @@
 			if (!open) openHighlight(ids, hit, row);
 		};
 		const keydown = (event: KeyboardEvent) => {
-			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin.
-			if (event.key === 'Escape' && marginComments && !open && selectedCommentId) { selectedCommentId = null; returnFocus = null; return; }
+			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin,
+			// and focus in the card goes back to the text it came from: its highlight. An unsent reply stays in the card.
+			if (event.key === 'Escape' && marginComments && !open && selectedCommentId) {
+				const released = selectedCommentId, inCard = !!document.querySelector(`.chat-margin [data-comment-uuid="${CSS.escape(released)}"]`)?.contains(document.activeElement);
+				selectedCommentId = null; returnFocus = null;
+				if (inCard) commentHighlight(messageRoot(), released)?.focus({ preventScroll: true });
+				return;
+			}
 			if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.matches('[data-comment-ids][role="button"]')) {
 				event.preventDefault(); (event.target as HTMLElement).click();
 			}
@@ -350,10 +356,7 @@
 		void tick().then(() => requestAnimationFrame(() => {
 			if (!free()) return;
 			const reply = marginComments ? document.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"] textarea`) : null;
-			const row = messageRoot()?.querySelector(`[data-message-id="${CSS.escape(posted.messageId)}"]`);
-			const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
-				.find(item => item.dataset.commentIds?.split(',').includes(comment.id));
-			(reply ?? mark)?.focus({ preventScroll: true });
+			(reply ?? commentHighlight(messageRoot(), comment.id, posted.messageId))?.focus({ preventScroll: true });
 		}));
 	}
 </script>

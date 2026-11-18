@@ -10,14 +10,25 @@ export function browserAddressLabel(raw: string, domain?: string | null): string
 		const parsed = new URL(raw);
 		const host = parsed.hostname.toLowerCase();
 		if (!host) return raw;
-		const lead = domain && (host === domain || host.endsWith(`.${domain}`)) ? domain : host;
-		const subdomain = host.slice(0, Math.max(0, host.length - lead.length)).replace(/\.$/, '');
+		const { lead, rest } = hostLabelParts(host, domain);
 		const tail = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-		return [lead, subdomain || null, tail && tail !== '/' ? `…${tail.split('/').at(-1) || ''}` : null]
+		return [lead, rest, tail && tail !== '/' ? `…${tail.split('/').at(-1) || ''}` : null]
 			.filter(Boolean).join(' · ');
 	} catch {
 		return raw;
 	}
+}
+
+/**
+ * The two parts a host reads as: the registrable domain leads, the subdomain in front of it follows.
+ * One copy, shared by the pane's address and the chat chip, so both lead with the same domain.
+ *
+ * The backend's domain leads whenever the host sits inside it. Without one (the pane before the backend has
+ * named it) the whole host stands as itself: only the Public Suffix List knows where a site's domain starts.
+ */
+export function hostLabelParts(host: string, domain?: string | null): { lead: string; rest: string | null } {
+	if (!domain || !(host === domain || host.endsWith(`.${domain}`))) return { lead: host, rest: null };
+	return { lead: domain, rest: host.slice(0, host.length - domain.length).replace(/\.$/, '') || null };
 }
 
 export function browserTabLabel(title: string | null | undefined, url: string, domain?: string | null): string {
