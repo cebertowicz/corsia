@@ -100,18 +100,52 @@ for (const width of [1440, 393]) {
         await expect.poll(() => tree.locator('[data-node-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-node-id')))).toEqual(['task-1', 'task-2', 'task-0']);
       }
     });
-    test('refusal is visible with details and dismissal', async ({ page, request }, info) => {
+    test('refusal restores the dragged order without overlapping rows', async ({ page, request, context }, info) => {
       const { tree } = await openPlan(page, request, width, true);
-      await tree.locator('[data-node-id="task-1"] .row-body').focus();
-      await page.keyboard.press('Shift+F10');
-      await page.getByRole('menuitem', { name: 'Move up' }).click();
+      const source = tree.locator('[data-node-id="task-1"]');
+      const target = tree.locator('[data-node-id="task-0"]');
+      const order = () => tree.locator('[data-node-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-node-id')));
+      const before = await order();
+      await source.hover({ trial: true });
+      await target.hover({ trial: true });
+      const a = (await source.boundingBox())!, b = (await target.boundingBox())!;
+      if (width === 393) {
+        const cdp = await context.newCDPSession(page);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x + a.width / 2, y: a.y + a.height / 2 }] });
+        await page.waitForTimeout(650);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b.x + b.width / 2, y: b.y + b.height / 4 }] });
+        await expect(source).toHaveClass(/dragging/);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
+        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 4, { steps: 8 });
+        await expect(source).toHaveClass(/dragging/);
+        await page.mouse.up();
+      }
       const error = page.getByRole('alert').filter({ hasText: "Couldn't move this task. Try again." });
       await expect(error).toBeVisible();
-      await expect.poll(() => tree.locator('[data-node-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-node-id')))).toEqual(['task-0', 'task-1', 'task-2']);
-      await expect(tree.locator('[data-node-id="task-1"] .row-body')).toBeFocused();
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      const hit = (selector: string) => page.locator(selector).evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const found = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return { matches: found === element || element.contains(found), hit: found ? `${found.tagName}.${found.className}` : null, text: found?.textContent?.trim().slice(0, 60) ?? null, top: rect.top };
+      });
+      // The error line is never covered, even while the rows glide back.
+      const glidingErrorHit = await hit('[role="alert"] span');
+      expect(glidingErrorHit.matches).toBe(true);
+      // Rows cross mid-glide by design; the row probe reads the settled state.
+      await expect.poll(() => tree.evaluate((element) => element.getAnimations({ subtree: true }).filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
+      const errorHit = await hit('[role="alert"] span');
+      const rowHit = await hit('[data-node-id="task-0"] .row-title');
+      console.log('hit probe', width, JSON.stringify({ glidingErrorHit, errorHit, rowHit }));
+      expect(errorHit.matches).toBe(true);
+      expect(rowHit.matches).toBe(true);
+      await expect.poll(order).toEqual(before);
+      await expect(source.locator('.row-body')).toBeFocused();
+      await target.hover({ trial: true });
+      console.log('refusal evidence', JSON.stringify({ before, after: await order(), errorHit, rowHit }));
       await page.screenshot({ path: info.outputPath(`refusal-${width}.png`) });
-      await error.getByText('Details').click();
-      await expect(error).toContainText('Test refusal detail');
+      await expect(error.getByRole('button', { name: 'Dismiss' })).toHaveAttribute('title', 'Test refusal detail');
       await error.getByRole('button', { name: 'Dismiss' }).click();
       await expect(error).toHaveCount(0);
     });

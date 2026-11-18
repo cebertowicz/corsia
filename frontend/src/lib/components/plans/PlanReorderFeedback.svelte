@@ -1,17 +1,17 @@
 <script lang="ts">
- let { error, detail, announcement, dismiss }: { error: string | null; detail: string | null; announcement: string; dismiss: () => void } = $props();
+	import Button from '$lib/components/ui/Button.svelte';
+	let { error, detail, announcement, dismiss }: { error: string | null; detail: string | null; announcement: string; dismiss: () => void } = $props();
 </script>
 
 {#if error}
- <div class="reorder-error" role="alert">
-  <span>{error}</span>
-  {#if detail}<details><summary>Details</summary>{detail}</details>{/if}
-  <button type="button" onclick={dismiss}>Dismiss</button>
- </div>
+	<div class="reorder-error" role="alert">
+		<span>{error}</span>
+		<Button variant="ghost" size="sm" title={detail ?? undefined} description={detail ?? undefined} onclick={dismiss}>Dismiss</Button>
+	</div>
 {/if}
 <div class="sr-only" aria-live="polite">{announcement}</div>
 
 <style>
- .reorder-error { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; color: var(--red-text); }
- .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+	.reorder-error { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; color: var(--red-text); font-size: var(--text-subhead); }
+	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
