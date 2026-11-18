@@ -8,6 +8,8 @@ import { openLiveDocument } from '../support/liveDocument';
 import { agentComment, reviewerSession } from '../support/liveConcurrency';
 import { agentCreatesSharedDocument, demoteAgent, openAgentBeside, SHARED_CATEGORY } from '../support/sharedLiveDocument';
 
+test.use({ video: 'off' });
+
 const TARGET = 'Target sentence the reader comments on, in the middle of the document.';
 const TAG = '@flow:doc-comment-dismiss-reading-place @surface:documents';
 const promoted: string[] = [];
@@ -46,7 +48,7 @@ async function delayedCaretReveal(page: Page) {
 
 for (const width of [1440, 393]) {
 	test.describe(`${width} touch`, () => {
-		test.use({ viewport: { width, height: width === 1440 ? 900 : 852 }, hasTouch: true, isMobile: width === 393, video: 'off' });
+		test.use({ viewport: { width, height: width === 1440 ? 900 : 852 }, hasTouch: true, isMobile: width === 393 });
 		for (const exit of ['outside', 'escape', 'close'] as const) {
 			test(`${TAG} ${width} ${exit} holds the reading place`, async ({ browser, page, request }, testInfo) => {
 				test.skip(testInfo.project.name !== 'chromium-desktop');
