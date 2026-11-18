@@ -41,6 +41,7 @@ from tools.filesystem_effects import (
 _INTENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 logger = logging.getLogger(__name__)
 
+# Shared target policy is implemented in registry.shared_documents.
 
 def _remove_if_present(path: Path | None) -> None:
     if path is None:
