@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { colorAt } from '../support/browserCanvas';
 import { createSession, loginByUrl, sendChatMessage, sidebarThread, saveEvidenceScreenshot } from '../support/corsia';
+import { revealWorked } from '../support/documentOpen';
 import { seedMockResponses } from '../support/mock';
 import { startProbeServer } from '../support/probeServer';
 
@@ -72,6 +73,37 @@ test('one press on the sign-in chip shows the agent’s browser', async ({ page,
 		await page.getByRole('dialog').getByRole('button', { name: /Enter your password/ }).click();
 		await expectPagePixels(page);
 		await saveEvidenceScreenshot(page, info, `${width}-5-needs-you`, { fullPage: false });
+	} finally { await probe.close(); }
+});
+
+test('marking the sign-in step done wakes the agent and leaves the page to it', async ({ page, request }, info) => {
+	test.skip(info.project.name === 'chromium-mobile', 'desktop proof');
+	test.setTimeout(150_000);
+	const probe = await startProbeServer();
+	try {
+		const title = `sign-in-done-${Date.now()}`;
+		const thread = await createSession(request, title);
+		await loginByUrl(page);
+		await sidebarThread(page, title).click();
+		await reachPasswordPage(page, request, thread, probe.origin);
+		await chip(page).click();
+		await expectPagePixels(page);
+
+		// The person marks the step done with the password field still on the page; the agent wakes, reads the page
+		// and is not asked to hand it back.
+		await seedMockResponses(request, [
+			{ tool_calls: [{ id: 'read-after-done', name: 'browser_snapshot', arguments: JSON.stringify({}) }], finish_reason: 'tool_calls', match_thread: thread },
+			{ content: 'Signed in; carrying on.', finish_reason: 'stop', match_thread: thread },
+		]);
+		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
+		await planRow.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Mark done' }).click();
+		// Focus folds the woken turn's plain reply into its own work group, after the first turn's.
+		await expect(page.getByRole('button', { name: /Expand Worked/ })).toHaveCount(2, { timeout: 45_000 });
+		await revealWorked(page);
+		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 30_000 });
+		await expect(chip(page)).toHaveCount(0);
+		await saveEvidenceScreenshot(page, info, '1440-done-woken', { fullPage: false });
 	} finally { await probe.close(); }
 });
 

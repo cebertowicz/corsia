@@ -136,12 +136,15 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const drawer = page.locator('aside.pane');
 		// The strip ends before the first control, and each control takes its own pointer
 		// events (a trial click fails when the strip or an overlaid drawer would take them).
-		const assertControlsReachable = async () => {
-			await expect.poll(async () => {
+		// A compact canvas is one surface with no header strip.
+		const assertControlsReachable = async (expanded = true) => {
+			if (expanded) await expect.poll(async () => {
 				const [stripBox, measurementBox] = await Promise.all([strip.boundingBox(), measurement.boundingBox()]);
-				return stripBox!.x + stripBox!.width <= measurementBox!.x;
+				return !!stripBox && !!measurementBox && stripBox.x + stripBox.width <= measurementBox.x;
 			}).toBe(true);
-			for (const control of [measurement, settings, panelToggle]) await control.click({ trial: true });
+			else await expect(strip).toBeHidden();
+			// The compact surface's own header carries the panel toggle; measurement and chat settings live in the strip.
+			for (const control of expanded ? [measurement, settings, panelToggle] : [panelToggle]) await control.click({ trial: true });
 		};
 
 		await expect(drawer).not.toHaveClass(/(^|\s)(overlay|collapsed)(\s|$)/);
@@ -185,11 +188,12 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await saveEvidenceScreenshot(page, testInfo, 'header-icons-light-1440-drawer-collapsed', { fullPage: false });
 
 		// The drawer overlays the canvas only once inline it would leave less than the combined
-		// minimum; with the desktop sidebar open that first happens below 1440.
+		// minimum; with the desktop sidebar open that first happens below 1440. The canvas beside
+		// an overlaid drawer is laid out for the width the drawer leaves, so it is compact.
 		await page.setViewportSize({ width: 1300, height: 900 });
 		await panelToggle.click();
 		await expect(drawer).toHaveClass(/(^|\s)overlay(\s|$)/);
-		await assertControlsReachable();
+		await assertControlsReachable(false);
 		const [panelBox, drawerBox] = await Promise.all([panelToggle.boundingBox(), drawer.boundingBox()]);
 		expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(drawerBox!.x);
 		await saveEvidenceScreenshot(page, testInfo, 'header-icons-light-1300-drawer-overlaid', { fullPage: false });

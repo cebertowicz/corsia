@@ -108,6 +108,15 @@ export async function releaseMockGate(
     }
 }
 
+/**
+ * Slow every later input's delivery after the server has stored it, as a slow provider start does; 0 clears it.
+ * A mock gate holds the model's reply, not the send before it, so it cannot slow the request that carries the input.
+ */
+export async function setMockDeliveryDelay(request: APIRequestContext, seconds: number): Promise<void> {
+    const resp = await request.post(`${BASE_URL}/api/test/mock-delivery-delay`, { data: { seconds } });
+    if (!resp.ok()) throw new Error(`Failed to set the mock delivery delay: ${resp.status()} ${await resp.text()}`);
+}
+
 export async function injectMessage(
     request: APIRequestContext,
     sessionId: string,

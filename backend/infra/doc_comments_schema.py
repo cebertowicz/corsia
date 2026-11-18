@@ -131,5 +131,20 @@ WRITER_LINE_SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_doc_comment_writer_line_agent
         ON doc_comment_writer_line(agent_thread_id, state);
 """
+# What ``migration_199_to_200`` changed on each row it moved off a retired identity, so a move can be undone
+# row by row (``scripts/migrations/reverse_comment_identity_move.py``). ``original`` is the JSON of the changed
+# columns' values before the move; a row exists only while the move stands.
+COMMENT_IDENTITY_MOVES_SQL = """
+    CREATE TABLE IF NOT EXISTS comment_identity_moves (
+        table_name TEXT NOT NULL CHECK (table_name IN (
+            'doc_comments','doc_feedback_batches','doc_review_requests','doc_comment_writer_line',
+            'doc_feedback_batch_folds','doc_feedback_batch_items','doc_feedback_edit_items')),
+        row_id TEXT NOT NULL,
+        original TEXT NOT NULL CHECK (json_valid(original)),
+        moved_to TEXT NOT NULL,
+        moved_at TEXT NOT NULL,
+        PRIMARY KEY (table_name, row_id)
+    );
+"""
 DOCUMENT_SCHEMA_SQL = (DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL
-                       + COMMENT_RECIPIENT_SCHEMA_SQL + WRITER_LINE_SCHEMA_SQL)
+                       + COMMENT_RECIPIENT_SCHEMA_SQL + WRITER_LINE_SCHEMA_SQL + COMMENT_IDENTITY_MOVES_SQL)

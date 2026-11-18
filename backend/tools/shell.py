@@ -258,11 +258,8 @@ class BashTool(Tool):
         cwd_fd: int | None = None
 
         try:
-            from tools.host_access_gate import (
-                consume_current_action_permit,
-                protected_scope_denial,
-            )
-            from tools.host_path_policy import denial_guidance_prefix
+            from tools.host_access_gate import consume_current_action_permit
+            from tools.repo_worktree_guidance import shell_denial_guidance
 
             consumed = await consume_current_action_permit(
                 thread_id=thread_id,
@@ -455,16 +452,9 @@ class BashTool(Tool):
                     output_parts.append('\nIf the sandbox restricted the path, this guidance may help:')
                 append_denial_guidance(output_parts, thread_id, repo_guidance, chained_guidance)
                 if not repo_guidance and not chained_guidance:
-                    output_parts.append(
-                        "\n"
-                        + (guidance := await run_in_db(lambda: denial_guidance_prefix(combined_output, thread_id, canonical_cwd)))
-                        + ("" if leased or "No host-access lease can open it." in guidance else protected_scope_denial(
-                            ("the sandbox may restrict access to the path" if linux else
-                             "this command was blocked by the protected-mode sandbox"),
-                            lease_active=await _thread_has_live_lease(thread_id),
-                            conditional=linux,
-                        ))
-                    )
+                    output_parts.append("\n" + await shell_denial_guidance(
+                        combined_output, canonical_cwd, policies, thread_id, leased, linux,
+                    ))
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
             told, registration_warning = await run_in_db(

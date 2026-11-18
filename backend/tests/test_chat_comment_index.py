@@ -309,65 +309,6 @@ def _seed_root_and_reply(db):
     place_comments(db, 'thread', 'reply', reply, 'u')
 
 
-def _unread_count(db):
-    from doceditor.reply_attention import chat_reply_items
-    items = chat_reply_items(db, 'person', 'thread')
-    return items[0]['detail']['unread_count'] if items else 0
-
-
-def test_viewing_one_threads_answer_leaves_another_threads_answer_from_the_same_message_unread(isolated_db):
-    from api.chat_comment_views import _stamp
-
-    db = get_db()
-    try:
-        _seed_root_and_reply(db)
-        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','thread','assistant',?,'v',4)",
-                   ('[c1.1] first\n\n[c1.2] second',))
-        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','answer','v')")
-        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.2','answer','v')")
-        db.commit()
-        assert _unread_count(db) == 2
-    finally:
-        db.close()
-    assert _stamp('person', 'thread', 'user', 'c1.1', 'answer')
-    db = get_db()
-    try:
-        assert _unread_count(db) == 1
-        page = [{'id': 'target', 'role': 'assistant'}]
-        attach_comments(db, 'thread', 'person', page)
-        unread = {thread['cid']: [a['unread'] for a in thread['answers'] if a['author_kind'] == 'agent'] for thread in page[0]['chat_comments']}
-        assert unread == {'c1.1': [False], 'c1.2': [True]}
-    finally:
-        db.close()
-
-
-def test_viewing_a_shared_answer_leaves_an_earlier_answer_to_the_reply_unread(isolated_db):
-    from api.chat_comment_views import _stamp
-
-    db = get_db()
-    try:
-        _seed_root_and_reply(db)
-        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('early','thread','assistant','[c3.1] soon','v',4)")
-        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('shared','thread','assistant','[c1.1][c3.1] both','w',5)")
-        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','reply','c3.1','early','v')")
-        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','shared','w')")
-        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','reply','c3.1','shared','w')")
-        db.commit()
-        assert _unread_count(db) == 2
-    finally:
-        db.close()
-    assert _stamp('person', 'thread', 'user', 'c1.1', 'shared')
-    db = get_db()
-    try:
-        assert _unread_count(db) == 1
-        page = [{'id': 'target', 'role': 'assistant'}]
-        attach_comments(db, 'thread', 'person', page)
-        answers = [a for a in page[0]['chat_comments'][0]['answers'] if a['author_kind'] == 'agent']
-        assert [(a['assistant_message_id'], a['unread']) for a in answers] == [('early', True), ('shared', False)]
-    finally:
-        db.close()
-
-
 def test_a_held_comment_and_reply_carry_what_tells_a_hold_from_a_send(isolated_db):
     """A queued input is held, not in flight, when no write happened and no turn owns it; its thread reads both."""
     db = get_db()

@@ -8,7 +8,10 @@ export interface HeldDocument {
 	choice_pending: boolean;
 }
 
-/** The capture's selection and the browser's state, which the server tracks under the comment's id only if it is the live one. */
+/**
+ * The capture's selection, its text, and the browser's state. The server tracks it under the comment's id when that
+ * state is the live one or a recent one, and the selection, mapped to now, still holds exactly that text.
+ */
 export interface PositionReservation {
 	client_id: string;
 	from_off: number;
@@ -16,6 +19,7 @@ export interface PositionReservation {
 	vector: string;
 	digest: string;
 	text_length_utf16: number;
+	quote: string;
 }
 
 export interface DocumentFrame extends FailureObservation {

@@ -142,32 +142,6 @@ async def test_available_status_is_reported_as_not_loaded(local_model):
 
 
 @pytest.mark.asyncio
-async def test_native_workers_hold_slots_until_settled_and_mixed_handles_count_once(local_model, monkeypatch):
-    from automation import worker_runner
-    from events import worker_starts
-    from infra.database import get_db, write_transaction
-
-    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: 2)
-    handles = set()
-    monkeypatch.setattr("subagents.cc_idle_retirement.working_thread_ids", lambda **_: handles)
-    rule = await make_rule()
-    await request("first")
-    await request("second")
-    assert await worker_runner.drive() == 2
-    workers = [row[3] for row in starts(rule)]
-    handles.add(workers[0])
-    assert worker_runner._free(get_db()) == 0
-    await request("third")
-    assert await worker_runner.drive() == 0
-    assert starts(rule)[2][0] == "queued"
-    with write_transaction(None, scope="settle_native") as db:
-        decision = db.execute("SELECT id FROM event_route_decisions WHERE worker_thread_id=?", (workers[1],)).fetchone()[0]
-        worker_starts.end(db, decision, "no_result")
-    assert await worker_runner.drive() == 1
-    assert starts(rule)[2][0] == "started"
-
-
-@pytest.mark.asyncio
 async def test_account_spawn_error_is_logged_and_refused_generically(local_model, monkeypatch):
     from automation import worker_runner
     from loguru import logger

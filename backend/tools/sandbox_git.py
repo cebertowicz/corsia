@@ -18,11 +18,58 @@ def _is_plain_file(path: Path) -> bool:
 def sandbox_literal(path: Path) -> str:
     """Escape ``path`` for a Safehouse profile rule exactly as given, no resolve.
 
-    Precondition: a root ``list_repo_worktrees`` returned in this request, or
-    ``<root>/.git`` after ``verified_worktree_marker`` proved it a non-symlink
-    regular file. Any other path must be resolved first (``_sandbox_path``).
+    Use for already-resolved paths, and for the fixed ``<resolved repo>/.worktrees``
+    boundary, which is intentionally lexical: resolving that child could turn a
+    symlink into a grant outside the repository. Other paths must be resolved
+    first (``_sandbox_path``).
     """
     return str(path).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def worktree_folder_rules(repo: Path) -> list[str]:
+    """Constant denies for a protected base's ``.worktrees``, at any worktree count.
+
+    Each pattern is the exact literal subtree intersected with an any-case,
+    depth-anchored regex. The literal pins the repository spelling (the regex
+    root uses ``sandbox_any_case`` wildcards, never escapes), and the regex pins
+    the depth, so neither a similarly named sibling nor a deeper ``.worktrees``
+    matches. The folder and its immediate entries are pinned, so a ``.git``
+    prepared deeper cannot be renamed into place, and every immediate entry's
+    ``.git`` (file, directory, any case) stays unwritable. An immediate entry
+    keeps only its own metadata writable (mode, xattrs, flags, owner, ACL and
+    ``utimes``), so ``chmod`` and ``xattr`` still work at a worktree root.
+    Creating, removing or renaming an entry checks other operations, which
+    stay denied. Setting times through ``setattrlist`` (macOS ``utimensat``,
+    used by ``touch``, ``cp -p``, ``rsync -a`` and Python's ``os.utime``) is
+    checked as bare ``file-write*``, so it is refused on a worktree root:
+    allowing it would also allow creating, removing and renaming entries.
+    """
+    trees = repo / ".worktrees"
+    subtree = f'(subpath "{sandbox_literal(trees)}")'
+    pattern = sandbox_any_case(trees)
+
+    def rule(effect: str, regex: str) -> str:
+        return f'({effect} (require-all {subtree} (regex #"^{pattern}/{regex}")))'
+
+    return [
+        f'(deny file-write* (literal "{sandbox_literal(trees)}"))',
+        rule("deny file-write*", "[^/]+$"),
+        rule(f"allow {' '.join(ENTRY_METADATA_WRITES)}", "[^/]+$"),
+        rule("deny file-write*", "[^/]+/[.][Gg][Ii][Tt](/|$)"),
+    ]
+
+
+# Seatbelt operations that change an existing entry's own metadata, not its name.
+ENTRY_METADATA_WRITES = (
+    "file-write-times", "file-write-mode", "file-write-xattr",
+    "file-write-flags", "file-write-owner", "file-write-acl",
+)
+
+
+def worktree_pointer_rules(worktrees: list[Path]) -> list[str]:
+    """One literal ``.git`` deny per worktree the listing proved, as
+    unprotected repositories have always had."""
+    return [f'(deny file-write* (literal "{sandbox_literal(tree / ".git")}"))' for tree in worktrees]
 
 
 def sandbox_any_case(path: Path) -> str:

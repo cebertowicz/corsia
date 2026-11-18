@@ -120,6 +120,16 @@ def default_account(provider: str, *, db=None) -> dict[str, Any]:
             connection.close()
 
 
+def stored_account_rows(provider: str, *, db) -> list:
+    """``list_accounts(provider=...)``'s rows exactly as stored; ``project_row`` turns one into its dict.
+
+    For a reader that derives an answer from account rows and keeps it until the stored
+    rows change: every column ``list_accounts`` returns is here, so any write to one is a
+    different value.
+    """
+    return _account_rows(COLUMNS, provider=provider, include_removed=False, db=db).fetchall()
+
+
 @fact_memo.memoized_reader
 def list_accounts(*, provider: str | None = None, include_removed: bool = False, db=None) -> list[dict[str, Any]]:
     connection = db or get_db()
