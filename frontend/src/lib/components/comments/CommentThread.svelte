@@ -6,7 +6,6 @@
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import SuggestedEdit from './SuggestedEdit.svelte';
 	import { openAtNewestReply } from './openAtNewestReply';
-	import { surfaceOpen } from '$lib/surfaceOpen.svelte';
 	import { changedLabel } from '$lib/docImageComments';
 	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
@@ -148,8 +147,14 @@
 	const { openThread, openFromFocus, focusQuietly } = createThreadOpen(() => comment, () => chatSurface, stamp);
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	const openCount = surfaceOpen();
-	$effect(() => { const open = openCount(); if (flat && !inMargin && !inList && newestReply && el) openAtNewestReply(el, newestReply, open); });
+	/** A thread opened on its own, in a sheet or popover: not a margin card, nor one row of a list. */
+	const onItsOwn = $derived(flat && !inMargin && !inList);
+	const atNewest = (again = false) => { if (onItsOwn && newestReply && el) openAtNewestReply(el, newestReply, again); };
+	$effect(() => atNewest());
+	/** Zero-length: only marks the card's sheet or popover closing over it and opening again, a reopen during the close included. */
+	const withSurface = (_mark: Element) => ({});
+	let closedOver = false;
+	const reopened = () => { if (closedOver) atNewest(true); closedOver = false; };
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
 	// Opening reads what is unread at that moment: a chat thread its caller opened, or a thread the person picked (a click
@@ -187,6 +192,7 @@
 </script>
 
 <!-- Who started it and when: a resolved row says it before its quote is read. -->
+{#snippet surfaceMark()}{#if onItsOwn}<span hidden data-surface-mark transition:withSurface|global onoutrostart={() => (closedOver = true)} onintrostart={reopened}></span>{/if}{/snippet}
 {#snippet resolvedMeta()}<div class="ct-head ct-res-meta"><CommentMeta {author} color={avatarColor} at={comment.at} createdAt={comment.createdAt} /></div>{/snippet}
 {#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
 	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
@@ -211,6 +217,7 @@
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
+		{@render surfaceMark()}
 	</div>
 {:else if comment.resolved && !kept && !leaving}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -230,6 +237,7 @@
 				</div>
 			</div>
 		{/if}
+		{@render surfaceMark()}
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -288,6 +296,7 @@
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
 		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />{/if}
+		{@render surfaceMark()}
 	</div>
 {/if}
 

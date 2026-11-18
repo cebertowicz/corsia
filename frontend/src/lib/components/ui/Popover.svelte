@@ -11,7 +11,6 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	import { provideSurfaceOpen } from '$lib/surfaceOpen.svelte';
 	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', ariaLabel, sideKey, keepOpenOnPointer, covered = false, children }: {
 		anchor: Anchor;
 		open: boolean;
@@ -47,7 +46,6 @@
 		covered?: boolean;
 		children: import('svelte').Snippet;
 	} = $props();
-	provideSurfaceOpen(() => open);
 	let surface = $state<HTMLElement>();
 	let opener = $state<HTMLElement | null>(null);
 	let style = $state('left: 12px; top: 12px;');

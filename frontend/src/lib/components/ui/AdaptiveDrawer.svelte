@@ -13,8 +13,6 @@
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 	import { liftSheetCap, sheetCapped } from '$lib/sheetClearance';
 	import { coverUnderNav } from '$lib/stores/phoneNav.svelte';
-	import { provideSurfaceOpen } from '$lib/surfaceOpen.svelte';
-	import { scrimPress } from '$lib/scrimPress';
 
 	let {
 		ariaLabel,
@@ -94,7 +92,6 @@
 		/** The sheet's own element, for a caller that has to measure where it rests. */
 		panel?: HTMLElement | null;
 	} = $props();
-	provideSurfaceOpen(() => open);
 
 	let box = $state<ColumnBox | null>(null);
 	$effect(() => {
@@ -118,7 +115,17 @@
 	// The sheet's outro ends in onClosed, so under reduced motion it holds still for the crossfade instead of ending at once.
 	const flyParams = $derived(sheetFly($prefersReducedMotion, tightMs));
 
-	const scrim = scrimPress(() => { if (modal && detent !== 'half') onClose(); });
+	// A click dismisses only a press that began on the scrim. The click that follows the tap which opened this sheet
+	// lands on the new scrim with no press of its own on it, so it is not a tap outside.
+	let pressedScrim = false;
+	function onBackdropDown(event: PointerEvent): void {
+		pressedScrim = event.target === event.currentTarget;
+	}
+	function onBackdrop(event: MouseEvent): void {
+		const pressed = pressedScrim;
+		pressedScrim = false;
+		if (modal && detent !== 'half' && pressed && event.target === event.currentTarget) onClose();
+	}
 
 	$effect(() => {
 		if (!open || !panel) return;
@@ -163,8 +170,8 @@
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	data-keeps-text={keepsText || undefined}
-	onpointerdown={scrim.down}
-	onclick={scrim.click}
+	onpointerdown={onBackdropDown}
+	onclick={onBackdrop}
 		in:fade|global={fadeParams}
 		out:fade={fadeParams}
 		use:portal

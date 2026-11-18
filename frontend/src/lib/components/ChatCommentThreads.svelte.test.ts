@@ -85,8 +85,6 @@ it('opens a thread on its own at its newest reply, and a list of threads scrolls
 	component = mount(ChatCommentThreads, { target: host, props: { messageId: 'target', threadId: 'thread', comments: [answered('one')], onReply: async () => {} } });
 	flushSync();
 	expect(openAtNewest).toHaveBeenCalledTimes(1);
-	// Outside any sheet or popover the open count stays 0, so the card opens at its newest reply once.
-	expect(openAtNewest.mock.calls[0][2]).toBe(0);
 	unmount(component); openAtNewest.mockClear();
 	component = mount(ChatCommentThreads, { target: host, props: { messageId: 'target', threadId: 'thread', comments: [answered('one'), answered('two')], listed: true } });
 	flushSync();
