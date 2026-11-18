@@ -1,5 +1,5 @@
 import { test, expect } from '../support/test';
-import { open, seed } from '../support/reviewFixtures';
+import { comment, open, seed } from '../support/reviewFixtures';
 import { raiseAsk } from '../support/reviewAsk';
 
 const ask = (page: import('@playwright/test').Page, text: string) => page.getByRole('region', { name: new RegExp(text) });
@@ -94,6 +94,8 @@ test.describe('review bar recovery', () => {
 			await open(page, doc, 'default', 'light');
 			await intercepted;
 			raiseAsk(doc.threadId, doc.artifactId, 'Newer recovery ask');
+			// The fixture writes directly; a real comment emits the live refresh event.
+			await comment(request, doc, 'Refresh the review read.', 1);
 			await expect(ask(page, 'Newer recovery ask')).toBeVisible({ timeout: 15_000 });
 			release(); await completed;
 			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
