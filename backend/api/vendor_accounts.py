@@ -142,14 +142,36 @@ async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_
                              "usage": await run_read(_usage, account)}
 
 
+def _list_read(fn, *args, **kwargs):
+    """Preserve the list endpoint's account-conflict translation within one read job."""
+    try:
+        return fn(*args, **kwargs)
+    except accounts.AccountError as error:
+        raise HTTPException(409, str(error)) from error
+
+
+def _list_vendor_accounts(provider: str | None, include_removed: bool):
+    """Build the list on the read lane without a separate worker handoff per field."""
+    rows = _list_read(accounts.list_accounts, provider=provider, include_removed=include_removed)
+    numbered_rows = rows if include_removed else _list_read(
+        accounts.list_accounts, provider=provider, include_removed=True)
+    billing_views = _billing_views()
+    wanted = {row["provider"] for row in rows if row["provider"] in accounts.VENDORS}
+    no_model = accounts_without_usable_model(wanted, rows) if wanted else set()
+    return {"accounts": [
+        _safe(row) | {"duplicate_of": _list_read(accounts.duplicate_of, row, rows=rows),
+                      "allow_overage": _allow_overage(row),
+                      "no_usable_model": row["id"] in no_model,
+                      "label": account_label(row, rows=numbered_rows),
+                      **billing_views.get(row["id"], {"billing": None, "billing_revision": 0}),
+                      "usage": _usage(row)}
+        for row in rows
+    ]}
+
+
 @router.get("/vendor-accounts")
 async def list_vendor_accounts(provider: str | None = None, include_removed: bool = False):
-    rows = await _read(accounts.list_accounts, provider=provider, include_removed=include_removed)
-    numbered_rows = rows if include_removed else await _read(
-        accounts.list_accounts, provider=provider, include_removed=True)
-    billing_views = await run_read(_billing_views)
-    no_model = await _no_usable_model((row["provider"] for row in rows), rows)
-    return {"accounts": [await _shown(row, rows, numbered_rows, billing_views, no_model) for row in rows]}
+    return await run_read(_list_vendor_accounts, provider, include_removed)
 
 
 @router.post("/vendor-accounts")
