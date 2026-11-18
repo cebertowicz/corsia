@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Locator, type Page } from '../support/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
+import { expect, test } from '../support/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, releaseMockGate, seedMockResponses } from '../support/mock';
 import { commentEditor, commentOnMessage, openCommentThread, postedComments } from '../support/chatComments';
@@ -80,7 +81,7 @@ async function chatWithHeldAnswer(page: Page, request: APIRequestContext, width:
 		await commentOnMessage(row, 'a comment');
 		await expect.poll(async () => postedComments((await (await request.get(messagesUrl(thread))).json()).messages).length).toBe(2);
 	}
-	return { row, thread, gate };
+	return { row, thread, gate, title };
 }
 
 async function arrive(request: APIRequestContext, thread: string, gate: string) {
@@ -484,18 +485,24 @@ for (const way of ['card', 'tag'] as const) {
 		expect(created.ok(), await created.text()).toBeTruthy();
 		const id = (await created.json()).comment.id as string;
 		asAgent(seeded, id);
+		expect(await threadUnread(request, seeded.artifactId, id), 'setup: the agent note is unread').toBe(true);
+		const stamps = watchStamps(page);
 		await openDocument(page, seeded, 1440);
+		await page.waitForTimeout(SEEN_FOR_MS);
+		expect(stamps(), 'opening the document reads nothing').toEqual([]);
 		if (way === 'card') {
 			await widen(page, { artifactId: seeded.artifactId, ids: [id] } as never);
 			const card = page.locator(`[data-margin-card="${id}"]`);
 			await card.scrollIntoViewIfNeeded();
 			await page.waitForTimeout(SEEN_FOR_MS);
+			expect(stamps(), 'showing the card reads nothing').toEqual([]);
 			expect(await threadUnread(request, seeded.artifactId, id), 'showing the card reads nothing').toBe(true);
 			await card.getByText('An agent note on the image.').first().click();
 			await expect(overlay(page)).toBeVisible();
 		} else {
 			await openImage(page);
 			await page.waitForTimeout(SEEN_FOR_MS);
+			expect(stamps(), 'opening the image reads nothing').toEqual([]);
 			expect(await threadUnread(request, seeded.artifactId, id), 'opening the image reads nothing').toBe(true);
 			await imageTag(page, 1).click();
 		}
@@ -530,10 +537,15 @@ async function docWithUnread(page: Page, request: APIRequestContext, width: numb
 	} });
 }
 
-/** Goes to the chat titled `title` from the sidebar, opening the sidebar first when it is folded away. */
+/**
+ * Goes to the chat titled `title` from the sidebar, opening the sidebar first when it is folded away. A folded sidebar keeps
+ * its rows laid out beside the screen, so a row counts as shown only when it is inside the viewport.
+ */
 async function goToChat(page: Page, title: string) {
 	const item = page.locator('.thread-item').filter({ hasText: title }).first();
-	if (!(await item.isVisible())) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
+	const shown = () => item.evaluate((el) => { const box = el.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth; }).catch(() => false);
+	if (!(await shown())) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
+	await expect(item).toBeInViewport();
 	await item.click();
 }
 
@@ -585,7 +597,9 @@ test('document 1440: loading, scrolling past, switching chats and back, and relo
 	await expect(page.locator('.cm-content')).toContainText('document line', { timeout: 20_000 });
 	await page.waitForTimeout(SEEN_FOR_MS);
 	expect(await threadUnread(request, doc.artifactId, id), 'switching chats and back reads nothing').toBe(true);
+	// A reload lands on the workspace home; going back to the chat restores its document tab.
 	await page.reload();
+	await goToChat(page, 'suggestions-owner-');
 	await expect(page.locator('.cm-content')).toContainText('document line', { timeout: 20_000 });
 	await page.waitForTimeout(SEEN_FOR_MS);
 	expect(stamps(), 'no read was sent').toEqual([]);
@@ -598,11 +612,13 @@ test('chat 1440: loading, scrolling past, switching chats and back, and reloadin
 	const otherTitle = `Read every path other ${crypto.randomUUID()}`;
 	await createSession(request, otherTitle);
 	const stamps = watchStamps(page);
-	const { thread, gate } = await chatWithHeldAnswer(page, request, 1440);
+	const { thread, gate, title } = await chatWithHeldAnswer(page, request, 1440);
 	await raiseChatMargin(page);
 	await page.keyboard.press('Escape');
 	await arrive(request, thread, gate);
+	// A reload lands on the workspace home; the chat loads when the person goes back to it.
 	await page.reload();
+	await goToChat(page, title);
 	await waitForWsConnected(page);
 	await expect(page.locator('.cm-comment-anchor').filter({ hasText: QUOTE })).toBeVisible();
 	await page.waitForTimeout(SEEN_FOR_MS);
@@ -614,7 +630,7 @@ test('chat 1440: loading, scrolling past, switching chats and back, and reloadin
 	expect(await answerUnread(request, thread), 'scrolling past reads nothing').toBe(true);
 	await goToChat(page, otherTitle);
 	await page.waitForTimeout(1_000);
-	await goToChat(page, 'Read every path 1440');
+	await goToChat(page, title);
 	await expect(page.locator('.cm-comment-anchor').filter({ hasText: QUOTE })).toBeVisible();
 	await page.waitForTimeout(SEEN_FOR_MS);
 	expect(stamps(), 'no read was sent').toEqual([]);
@@ -713,8 +729,10 @@ for (const width of [1440, 393] as const) {
 		await expect(card.locator('.ct-new')).not.toHaveCount(0);
 		await card.getByText('Which details?').first().click();
 		await expect.poll(unread, { timeout: 10_000 }).toBe(false);
-		if (narrow) await page.getByRole('dialog').getByRole('button', { name: /^Close/ }).first().click();
-		else await page.keyboard.press('Escape');
+		if (narrow) {
+			await page.getByRole('dialog').getByRole('button', { name: /^Close/ }).first().click();
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+		} else await page.keyboard.press('Escape');
 
 		// Every count lets it go together.
 		await expect(bar).toHaveCount(0);
@@ -723,7 +741,9 @@ for (const width of [1440, 393] as const) {
 		await expect(card).toBeVisible();
 		await expect(card.locator('.ct-new'), 'the card’s New is gone').toHaveCount(0);
 		if (narrow) {
-			await page.getByRole('dialog').getByRole('button', { name: /^Close/ }).first().click();
+			const close = page.getByRole('dialog').getByRole('button', { name: /^Close/ }).first();
+			if (await close.isVisible()) await close.click();
+			await expect(page.getByRole('dialog')).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Toggle sidebar · Needs you', exact: true })).toHaveCount(0);
 			// A fresh load shows the menu toggle without the workspace's needs-you dot.
 			await openAppPastLanding(page);
