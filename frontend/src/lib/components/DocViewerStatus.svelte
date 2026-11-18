@@ -1,6 +1,5 @@
 <script lang="ts">
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
-	import { returnFocus } from '$lib/focusReturn';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import DocOwnerControl from './DocOwnerControl.svelte';
 	import type { DocOwnership } from '$lib/api/docOwnership';
@@ -155,7 +154,7 @@
 			event.preventDefault();
 			event.stopPropagation();
 			detailsOpen = false;
-			returnFocus(toggle);
+			toggle?.focus();
 		};
 		element.addEventListener('keydown', onKey);
 		return { destroy() { element.removeEventListener('keydown', onKey); } };

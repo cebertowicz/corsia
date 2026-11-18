@@ -1,8 +1,45 @@
+<script module lang="ts">
+	import { get as getStoreValue, writable } from 'svelte/store';
+
+	const inFlightDecisionAttempts = writable(new Map<string, symbol>());
+
+	/*
+	 * "A lease is asking the user right now" is deliberately NOT a module
+	 * global. A module value outlives every mount by construction, so an
+	 * unmounted control — ended session, cleared thread, sign-out — would leave
+	 * its last value suppressing a live consumer with no way to clear it. It is
+	 * bound out per instance instead, and cleared on teardown.
+	 */
+
+	function claimDecision(leaseId: string): symbol | null {
+		const attempt = Symbol(leaseId);
+		let claimed = false;
+		inFlightDecisionAttempts.update((current) => {
+			if (current.has(leaseId)) return current;
+			const next = new Map(current);
+			next.set(leaseId, attempt);
+			claimed = true;
+			return next;
+		});
+		return claimed ? attempt : null;
+	}
+
+	function isCurrentDecision(leaseId: string, attempt: symbol): boolean {
+		return getStoreValue(inFlightDecisionAttempts).get(leaseId) === attempt;
+	}
+
+	function releaseDecision(leaseId: string, attempt: symbol): void {
+		inFlightDecisionAttempts.update((current) => {
+			if (current.get(leaseId) !== attempt) return current;
+			const next = new Map(current);
+			next.delete(leaseId);
+			return next;
+		});
+	}
+</script>
+
 <script lang="ts">
-	import { claimDecision, inFlightDecisionAttempts, isCurrentDecision, releaseDecision } from '$lib/hostAccess/decisionAttempts';
-	// Whether a lease is asking stays per instance; only in-flight decisions are shared.
 	import { get } from 'svelte/store';
-	import { returnFocus } from '$lib/focusReturn';
 	import { onMount } from 'svelte';
 	import { Button, StatePill } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
@@ -113,7 +150,7 @@
 
 	function closeActiveDrawer(): void {
 		openActiveLeaseId = null;
-		returnFocus(openActiveTrigger);
+		openActiveTrigger?.focus();
 		openActiveTrigger = null;
 	}
 
@@ -123,7 +160,7 @@
 
 	function closePendingDrawer(): void {
 		pendingOpen = false;
-		returnFocus(pendingTriggerEl);
+		pendingTriggerEl?.focus();
 	}
 
 	async function reconcileAuthoritativeLeases(

@@ -1,5 +1,3 @@
-import { returnFocus } from '$lib/focusReturn';
-
 /** How long a finger rests on a row before it opens the menu. */
 export const LONG_PRESS_MS = 500;
 /** A finger that travels further than this is scrolling, not pressing. */
@@ -61,7 +59,7 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 	function close() {
 		const trigger = open?.trigger;
 		open = null;
-		if (trigger?.isConnected) returnFocus(trigger);
+		if (trigger?.isConnected) trigger.focus();
 	}
 
 	const api = {

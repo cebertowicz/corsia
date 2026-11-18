@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { returnFocus } from '$lib/focusReturn';
 	import Popover from './ui/Popover.svelte';
 	import DocCommentDrawerHeading from './DocCommentDrawerHeading.svelte';
 	import { drawerKeys } from '$lib/docCommentDrawer';
@@ -17,7 +16,7 @@
 		onClose: () => void;
 		list: Snippet;
 	} = $props();
-	function close() { onClose(); returnFocus(entry()); }
+	function close() { onClose(); entry()?.focus(); }
 </script>
 
 {#snippet body()}<DocCommentDrawerHeading title="Resolved" closeLabel="Close resolved comments" count={String(count)} filtered={false} onClose={close} /><div class="resolved-rows">{@render list()}</div>{/snippet}
@@ -25,7 +24,7 @@
 	<section class="resolved-column" data-resolved-column aria-label="Resolved comments" use:drawerKeys={close}>{@render body()}</section>
 {:else}
 	<!-- The control toggles the list itself, so a press on it is not an outside press. -->
-	<Popover anchor={entry()} placement="bottom-end" fill open={true} {onClose} restoreFocus={() => returnFocus(entry())} keepOpenOnPointer={(target) => target instanceof Element && !!target.closest('[data-resolved-entry]')}><section class="resolved-pop" aria-label="Resolved comments">{@render body()}</section></Popover>
+	<Popover anchor={entry()} placement="bottom-end" fill open={true} {onClose} restoreFocus={() => entry()?.focus()} keepOpenOnPointer={(target) => target instanceof Element && !!target.closest('[data-resolved-entry]')}><section class="resolved-pop" aria-label="Resolved comments">{@render body()}</section></Popover>
 {/if}
 
 <style>

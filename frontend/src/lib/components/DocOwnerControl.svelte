@@ -3,7 +3,6 @@
 	import AgentOptions from '$lib/components/reviews/AgentOptions.svelte';
 	import MiddleName from '$lib/components/MiddleName.svelte';
 	import { tick } from 'svelte';
-	import { returnFocus } from '$lib/focusReturn';
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
@@ -49,7 +48,7 @@
 	function close() { picker = null; }
 	// A row turns inert whenever it waits on a load, a switch to another document or a reload of this one; a picker left open would offer a pick that choose() drops without a word.
 	$effect(() => { if (inert) picker = null; });
-	function restoreFocus() { void tick().then(() => returnFocus(anchor?.isConnected ? anchor : null)); }
+	function restoreFocus() { void tick().then(() => (anchor?.isConnected ? anchor : null)?.focus()); }
 	function keys(event: KeyboardEvent) {
 		if (event.key === 'Enter' && matches.length) { event.preventDefault(); void choose(matches[Math.min(active, matches.length - 1)]); return; }
 		const index = agentOptionIndex(event.key, active, matches.length);

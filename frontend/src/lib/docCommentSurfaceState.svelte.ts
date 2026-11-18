@@ -1,6 +1,5 @@
 import { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
-import { focusWithoutMoving, returnFocus } from '$lib/focusReturn';
 import { get } from 'svelte/store';
 import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
@@ -21,42 +20,45 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
  * DOM selection was cleared, as it is when the comment popover's focused control is removed. With a table cell open, the
  * focus goes to that cell's editor: the document's caret is then in the table's source, which is drawn over and takes no typing.
  */
-export function focusDocumentEditor(root: HTMLElement | undefined, touch = false) {
-	const host = root?.querySelector<HTMLElement>('.md-editor');
-	// Look up the outer view first: a cell has its own nested CodeMirror view.
+export function focusDocumentEditor(root: HTMLElement | undefined) {
+	// Looked up from the outer `.cm-editor`: CodeMirror finds a view from the first `.cm-content` inside what it is given,
+	// which inside the document's own content is an open table cell's editor.
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
 	const view = dom && EditorView.findFromDOM(dom);
-	if (!view) { if (touch && host) returnFocus(host); return; }
+	if (!view) return;
 	const cell = view.state.field(openCellState, false) && view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
 	const cellView = cell && EditorView.findFromDOM(cell);
-	if (!cellView && !view.state.selection.main.empty) view.dispatch({ selection: { anchor: view.state.selection.main.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
-	if (touch) { if (host) returnFocus(host); return; }
-	returnFocus((cellView || view).contentDOM);
+	if (cellView) { cellView.focus(); return; }
+	const selection = view.state.selection.main;
+	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
+	// Restore the editor's caret before focus, so a delayed browser caret reveal sees the right line.
+	const caret = view.domAtPos(view.state.selection.main.head);
+	document.getSelection()?.setBaseAndExtent(caret.node, caret.offset, caret.node, caret.offset);
+	view.focus();
 }
 
 /**
- * Closes the table cell under a modal sheet and returns its focus handler. A keyboard or mouse close reopens the cell
- * at the document's caret; a touch close focuses the document host. Null when no cell was open.
+ * Closes the table cell open in the document's editor, and takes the focus out of it, so no caret or keyboard is left under
+ * a modal sheet drawn over it. Answers how to give the caret back, as `focusDocumentEditor` does for prose: the cell at the
+ * document's caret, which is still where the tap left it, opens again with the focus. Null when no cell was open.
  */
-export function closeDocumentCell(root: HTMLElement | undefined): ((touch?: boolean) => void) | null {
+export function closeDocumentCell(root: HTMLElement | undefined): (() => void) | null {
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
 	const view = dom && EditorView.findFromDOM(dom);
 	if (!view?.state.field(openCellState, false)) return null;
 	const active = document.activeElement;
 	if (active instanceof HTMLElement && active.closest(CELL_EDITOR)) active.blur();
 	view.dispatch({ effects: closeCell.of(null) });
-	return (touch = false) => {
-		if (touch) { focusDocumentEditor(root, true); return; }
+	return () => {
 		const cell = view.dom.isConnected ? cellAtPosition(view.state, view.state.selection.main.head) : null;
-		// The cell's editor takes focus as it opens, so a key still down lands at the tapped place.
-		if (cell) focusWithoutMoving(view.scrollDOM, () => view.dispatch({ effects: openCellAt.of(cell) }));
-		else focusDocumentEditor(root);
+		// The cell's editor takes the focus as it opens, so a key still down lands at the tapped place.
+		if (cell) view.dispatch({ effects: openCellAt.of(cell) }); else focusDocumentEditor(root);
 	};
 }
 
 /**
- * A modal sheet closes the cell beneath it, leaving no caret there. Its return handler uses the closing input to decide
- * whether to reopen the cell or focus the document host.
+ * On a phone the card a tap in a table cell opened is a modal sheet: the cell under it closes, leaving no caret beneath it,
+ * and closing the sheet (a key typed, Escape, Close) opens it again at the tapped place, as prose gets its caret back.
  */
 export function closeCellUnderSheet(commentUI: Pick<ReturnType<typeof createCommentSurfaceState>, 'sheetUp' | 'state' | 'returnFocusTo'>, root: () => HTMLElement | undefined) {
 	$effect(() => { const reopen = commentUI.sheetUp && commentUI.state?.kind === 'thread' && commentUI.state.fromText && closeDocumentCell(root()); if (reopen) commentUI.returnFocusTo(reopen); });
@@ -69,24 +71,24 @@ export const MARGIN_MIN = 660;
 export const hasRoomForMargin = (canvasWidth: number) => canvasWidth >= MARGIN_MIN;
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
-export function createCommentSurfaceState(restoreEditor: (touch?: boolean) => void, draftScope?: () => string, marginUp?: () => boolean) {
+export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string, marginUp?: () => boolean) {
 	let state = $state<CommentSurfaceState>(null);
 	let anchor = $state<CommentAnchor | null>(null);
 	/** The anchor is the point a click opened the card at: the card sits there instead of beside the text. */
 	let atClick = $state(false);
-	let restoreFocus = $state<(touch?: boolean) => void>(restoreEditor);
+	let restoreFocus = $state<() => void>(restoreEditor);
 	// Derived solely from createCommentSheet's modal lifecycle; the viewer uses it to hide its sibling selection control.
 	let sheetUp = $state(false);
 	function restoreReplyFocus(root: () => HTMLElement | undefined) {
-		restoreFocus = (touch) => void tick().then(() => {
+		restoreFocus = () => void tick().then(() => {
 			const button = root()?.querySelector<HTMLElement>('[data-doc-jump] button');
-			if (button) returnFocus(button);
+			button?.focus({ preventScroll: true });
 			// A control on its way out is inert and refuses focus: then the text takes it.
-			if (!button || document.activeElement !== button) restoreEditor(touch);
+			if (!button || document.activeElement !== button) restoreEditor();
 		});
 	}
 	/** Where closing the card gives the caret back, when that is not the document's own caret (a table cell the card closed). */
-	function returnFocusTo(restore: (touch?: boolean) => void) { restoreFocus = restore; }
+	function returnFocusTo(restore: () => void) { restoreFocus = restore; }
 	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
 	let hovered = $state<string | null>(null);
 	/** The column was shown on load, so the shell (sidebar, Workspace panel) is left as it is until the reader closes it. */
@@ -153,7 +155,7 @@ export function createCommentSurfaceState(restoreEditor: (touch?: boolean) => vo
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
-		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => returnFocus(opener);
+		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => opener.focus();
 		pickedComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {
@@ -194,7 +196,7 @@ export function createCommentSurfaceState(restoreEditor: (touch?: boolean) => vo
 		anchor = opener;
 		atClick = false;
 		// The column sits beside the text, so focus leaving it goes back to the caret; a list over the text hands it back to its button.
-		restoreFocus = marginUp?.() ? restoreEditor : () => returnFocus(opener);
+		restoreFocus = marginUp?.() ? restoreEditor : () => opener.focus();
 	}
 	return {
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; bump(); }, get opened() { return opened; },

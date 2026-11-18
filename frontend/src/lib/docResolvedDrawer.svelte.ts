@@ -1,4 +1,3 @@
-import { returnFocus } from '$lib/focusReturn';
 import type { DocComment } from '$lib/stores/docComments';
 
 /**
@@ -21,7 +20,7 @@ export function createResolvedDrawer(inputs: { enabled: () => boolean; resolved:
 		closed() {
 			mounted = false;
 			const active = document.activeElement;
-			if (!active || active === document.body) returnFocus(inputs.entry());
+			if (!active || active === document.body) inputs.entry()?.focus();
 		},
 	};
 }

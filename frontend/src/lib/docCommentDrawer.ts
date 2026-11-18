@@ -7,29 +7,6 @@ import { sheetHeld, TRANSCRIPT_MOVED } from '$lib/sheetClearance';
 /** Image comments follow their tag numbers. */
 export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 
-/** Keeps a followed card at its last position when its text becomes unplaced, so its refusal reason and reply remain available. */
-export function createCardAnchor() {
-	let last: { id: string; rect: DOMRect } | null = null;
-	return (anchor: import('$lib/docCommentSurfaceState.svelte').CommentAnchor | null, id: string | null, placeless: boolean) => {
-		if (typeof anchor !== 'function' || id === null) return anchor;
-		return () => {
-			const rect = placeless && last?.id === id ? last.rect : anchor();
-			if (rect) last = { id, rect };
-			return rect;
-		};
-	};
-}
-
-/** Reveal the picked thread once its popover has been placed. */
-export function revealPickedOnce() {
-	const revealed = new WeakSet<HTMLElement>();
-	return (card: HTMLElement) => {
-		if (revealed.has(card)) return;
-		revealed.add(card);
-		card.querySelector('[data-comment-id].focused')?.scrollIntoView({ block: 'nearest' });
-	};
-}
-
 /** An image drawer follows the viewer's grid track; a document drawer appears at once. */
 export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolean }, isImage: boolean) {
 	if (!isImage) return { duration: 0 };

@@ -1,5 +1,4 @@
 import { tick } from 'svelte';
-import { returnFocus } from '$lib/focusReturn';
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), '
 	+ 'textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -19,9 +18,7 @@ export function focusStillOurs(surface: Element | null, active: Element | null):
 
 export interface FocusTrapOptions {
 	/** Called when Escape is pressed inside the trap. */
-	onEscape?: (event: KeyboardEvent) => void;
-	/** A surface may choose its own return target for the close that just occurred. */
-	restoreFocus?: (previous: HTMLElement) => void;
+	onEscape?: () => void;
 	/** Skip moving focus into the trap on mount (rare — prefer the default). */
 	autoFocus?: boolean;
 }
@@ -46,7 +43,7 @@ export function focusTrap(node: HTMLElement, options: FocusTrapOptions = {}) {
 			// and stopping bubbling preserves sheet → artifact → app precedence.
 			e.preventDefault();
 			e.stopPropagation();
-			opts.onEscape(e);
+			opts.onEscape();
 			return;
 		}
 		if (e.key !== 'Tab') return;
@@ -88,9 +85,7 @@ export function focusTrap(node: HTMLElement, options: FocusTrapOptions = {}) {
 			// focus, and a trap that outlives an outro (the dock drawer's 260ms) would
 			// otherwise pull focus off the control that already took it back.
 			if (!focusStillOurs(node, document.activeElement)) return;
-			// Handing focus back never scrolls: a bare focus() brings the element's caret into view, which in an editor
-			// whose selection was cleared is the start of the document, and the page leaves the place the person was reading.
-			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) (opts.restoreFocus ?? returnFocus)(previousFocus);
+			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus();
 		},
 	};
 }

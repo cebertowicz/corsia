@@ -144,25 +144,6 @@ describe('the document jump control', () => {
 		} finally { (isMobile as Writable<boolean>).set(false); }
 	});
 
-	it('returns a touch-closed next-reply sheet to its jump button without moving the reader', async () => {
-		(isMobile as Writable<boolean>).set(true);
-		try {
-			await open([ALPHA, PIN_ONE]);
-			await vi.waitFor(() => expect(control()).not.toBeNull());
-			control()!.click();
-			await vi.waitFor(() => expect(document.querySelector('[data-adaptive-drawer]')).not.toBeNull());
-			expect(control()).toBeNull(); // No control remains in the accessibility tree or tab order under the sheet.
-			expect(get(docComments).artifact.find((comment) => comment.id === 'pin-one')?.newReplyIds).toEqual(['pin-one-r1']);
-			const scroller = host.querySelector<HTMLElement>('.cm-scroller')!;
-			scroller.scrollTop = 120;
-			const close = document.querySelector<HTMLElement>('button[aria-label="Close comments"]')!;
-			close.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
-			close.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-			await vi.waitFor(() => expect(document.activeElement).toBe(control()));
-			expect(scroller.scrollTop).toBe(120);
-		} finally { (isMobile as Writable<boolean>).set(false); }
-	});
-
 	it('stays beside the popover list it opened on a desktop canvas, which dims nothing', async () => {
 		await open([ALPHA, BETA]);
 		await vi.waitFor(() => expect(control()).not.toBeNull());

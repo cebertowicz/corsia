@@ -3,11 +3,29 @@ import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
-import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
+import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { createCommentSurfaceState, focusDocumentEditor } from './docCommentSurfaceState.svelte';
 
 afterEach(() => { focusedDocComment.set(null); pickedComments.set(new Set()); });
 
 describe('comment surface state', () => {
+	it('restores the collapsed document selection before returning focus', () => {
+		const root = document.body.appendChild(document.createElement('div'));
+		const view = new EditorView({ state: EditorState.create({ doc: 'A target line', selection: { anchor: 2, head: 8 } }), parent: root });
+		try {
+			const focus = vi.spyOn(view, 'focus').mockImplementation(() => {
+				const selection = document.getSelection()!;
+				const caret = view.domAtPos(8);
+				expect(selection.isCollapsed).toBe(true);
+				expect(selection.anchorNode).toBe(caret.node);
+				expect(selection.anchorOffset).toBe(caret.offset);
+			});
+			focusDocumentEditor(root);
+			expect(focus).toHaveBeenCalledOnce();
+		} finally { view.destroy(); root.remove(); }
+	});
+
 	it('reads a thread only when its highlight is pressed, never when the caret moves into it', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.focusComment('c1', new DOMRect());

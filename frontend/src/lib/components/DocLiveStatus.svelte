@@ -5,7 +5,6 @@
 
 <script lang="ts">
 	import { Button } from './ui';
-	import { returnFocus } from '$lib/focusReturn';
 	import Popover from './ui/Popover.svelte';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
@@ -91,7 +90,7 @@
 		confirmation = null;
 		if (selected) void run(selected.started, selected.run);
 	}
-	function closeDetails(): void { detailsOpen = false; returnFocus(opener); }
+	function closeDetails(): void { detailsOpen = false; opener?.focus(); }
 	// A load refusal, or a live session refused on reopen, keeps its text; damaged-store and reasonless non-live refusals have no Retry.
 	const refusal = $derived(openRefusal ?? view?.refusal ?? null);
 	const hasDetails = $derived(Boolean(settling || view?.held || view?.recovery.length || view?.deviceError));
@@ -159,7 +158,7 @@
 	{#if isPaneDrawer()}
 		<AdaptiveDrawer ariaLabel="Document recovery" heading="Document recovery" onClose={closeDetails} initialFocusSelector="button">{@render details()}</AdaptiveDrawer>
 	{:else}
-		<Popover anchor={opener} open={detailsOpen} onClose={closeDetails} restoreFocus={() => returnFocus(opener)} placement="bottom">{@render details()}</Popover>
+		<Popover anchor={opener} open={detailsOpen} onClose={closeDetails} restoreFocus={() => opener?.focus()} placement="bottom">{@render details()}</Popover>
 	{/if}
 {/if}
 <ConfirmDialog open={Boolean(confirmation)} title={confirmation?.title ?? ''} description={confirmation?.description ?? ''} confirmLabel={confirmation?.title} onConfirm={accept} onCancel={() => confirmation = null} />
