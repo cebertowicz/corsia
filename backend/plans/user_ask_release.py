@@ -28,6 +28,11 @@ def release(
         (artifact_id,),
     ).fetchall()
     detail = dict(ask_release.detail) if ask_release is not None else {}
+    if ask_release is not None and rows:
+        from plans import draft_binding
+
+        # The person's answer covers the draft as it is now (plans.draft_binding).
+        detail.update(draft_binding.answered(db, artifact_id))
     detail.update(user_ask.ask_endings.detail(why=why))
     causes = [
         holds.clear_write(

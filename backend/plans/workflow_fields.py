@@ -208,11 +208,13 @@ REVIEWER_ROUTE = (
 )
 PERSON_GATE_ROUTE = (
     "This step is the person's review: ask them with block_node on it (owner_kind user, "
-    "ask_artifact_id: the file they review). Close it after they answer that ask, not on a chat reply."
+    "ask_artifact_id: the file they review; reason: what in it they are deciding, in their words, "
+    "not the step's name). Close it after they answer that ask, not on a chat reply."
 )
 PERSON_GATE_READY = (
     'Next: "{title}" ({id}) is the person\'s review. Ask them now with block_node on it (owner_kind user, '
-    "ask_artifact_id: the file they review), not in chat, and close it after they answer that ask."
+    "ask_artifact_id: the file they review; reason: what in it they are deciding, not the step's name), "
+    "not in chat, and close it after they answer that ask."
 )
 
 
@@ -358,8 +360,12 @@ def refuse_unasked_person_gate(db, node_id: str, operation: str) -> None:
 
     if operation not in {"mark_done", "accept", "accept_with_follow_up"} or not person_gate(db, node_id):
         return
-    if gate_handoff_record.latest_verdict(db, service._node_row(db, node_id)) is None:
+    node = service._node_row(db, node_id)
+    if gate_handoff_record.latest_verdict(db, node) is None:
         raise service.PlanError(PERSON_GATE_ROUTE)
+    from plans import draft_binding
+
+    draft_binding.refuse_changed(db, node)
 
 
 def refuse_unready_close(db, node_id: str, operation: str, *, by_agent: bool = True) -> None:
