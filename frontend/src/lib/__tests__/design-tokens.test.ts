@@ -39,6 +39,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--drawer-bottom',
 	'--drawer-left',
 	'--drawer-h',
+	// documentHalfSheetRoom measures extra space and writes it on the drawer panel.
+	'--drawer-half-extra',
 	'--depth',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
