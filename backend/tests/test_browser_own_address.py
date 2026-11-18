@@ -1,6 +1,7 @@
 """The serving CORSIA's own addresses: which names and ports the agents' browser refuses."""
 from __future__ import annotations
 
+import asyncio
 import socket
 import subprocess
 import sys
@@ -15,15 +16,18 @@ from infra.devices_listener import DEFAULT_PORT, FALLBACK_PORTS
 
 SERVING, FRONTEND = 4242, 5173
 MACHINE = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]", "studio", "studio.local", "192.168.1.20"}
-TAILNET = {"mac.tail1234.ts.net", "100.64.1.2"}
+TAILNET = {"100.64.1.2"}
+OUTSIDE = ("mac.tail1234.ts.net", 443)
 
 
 @pytest.fixture
 def serving(monkeypatch):
     """An instance listening on SERVING with a frontend on FRONTEND, on a machine with a Tailscale name."""
+    monkeypatch.setattr(own, "_page_port", lambda: SERVING)
     monkeypatch.setattr(own, "_backend_ports", lambda: {SERVING})
     monkeypatch.setattr(own, "_frontend_ports", lambda ports: frozenset({FRONTEND}))
-    monkeypatch.setattr(own, "tailnet_hosts", lambda: set(TAILNET))
+    monkeypatch.setattr(own, "tailnet_addresses", lambda: set(TAILNET))
+    monkeypatch.setattr(own, "outside_endpoint", lambda: OUTSIDE)
     monkeypatch.setattr(own, "_machine_hosts", lambda: set(MACHINE))
 
 
@@ -33,7 +37,7 @@ def serving(monkeypatch):
     f"http://0.0.0.0:{SERVING}/", f"http://studio.local:{SERVING}/", f"http://STUDIO:{SERVING}/",
     f"http://192.168.1.20:{SERVING}/", f"https://127.0.0.1:{SERVING}/", f"ws://localhost:{SERVING}/socket",
     f"http://127.0.0.1:{FRONTEND}/", f"http://localhost:{DEFAULT_PORT}/", f"http://localhost:{FALLBACK_PORTS[-1]}/",
-    "http://mac.tail1234.ts.net/", "https://mac.tail1234.ts.net:8443/", "http://Mac.Tail1234.ts.net./",
+    "https://mac.tail1234.ts.net/", "https://mac.tail1234.ts.net:443/", "wss://Mac.Tail1234.ts.net./",
     "http://100.64.1.2:9999/", f"https://example.com:{SERVING}/",  # any name at the serving port: it may resolve here
 ])
 def test_the_serving_instance_is_its_own_address(serving, url):
@@ -44,6 +48,7 @@ def test_the_serving_instance_is_its_own_address(serving, url):
     f"http://127.0.0.1:{SERVING + 1}/", "http://localhost:3110/", f"http://[::1]:{SERVING - 1}/",
     f"http://a.localhost:{SERVING + 1}/", "https://example.com/", "http://studio.local:80/", "http://studio/",
     "https://192.168.1.20/", "http://100.64.1.3:9999/", "about:blank", "http://[bad",
+    "http://mac.tail1234.ts.net/", "https://mac.tail1234.ts.net:8443/",  # the outside name at another port
 ])
 def test_another_instance_and_the_web_stay_reachable(serving, url):
     assert not own.is_own_address(url), url
@@ -55,15 +60,18 @@ def test_well_known_ports_are_matched_by_machine_name_only(monkeypatch, serving)
     assert own.is_own_address("https://[::1]/")
     assert own.is_own_address("https://studio.local:443/")
     assert not own.is_own_address("https://example.com/")
-    rules = own.resolver_rules()
-    assert "MAP localhost:443 ~NOTFOUND" in rules and "MAP *:443" not in rules
+    assert own.is_own_address("https://a.localhost/")
+    rules = own.resolver_rules().split(", ")
+    assert {"MAP localhost:443 ~NOTFOUND", "MAP *.localhost:443 ~NOTFOUND"} <= set(rules)
+    assert not any(rule.startswith("MAP *:443") for rule in rules)
 
 
 def test_resolver_rules_name_each_port_and_each_tailscale_name(serving):
     rules = own.resolver_rules().split(", ")
     for port in (SERVING, FRONTEND, DEFAULT_PORT, *FALLBACK_PORTS):
         assert f"MAP *:{port} ~NOTFOUND" in rules
-    assert {"MAP mac.tail1234.ts.net ~NOTFOUND", "MAP 100.64.1.2 ~NOTFOUND"} <= set(rules)
+    assert {"MAP mac.tail1234.ts.net:443 ~NOTFOUND", "MAP 100.64.1.2 ~NOTFOUND"} <= set(rules)
+    assert "MAP mac.tail1234.ts.net ~NOTFOUND" not in rules
     assert all(not rule.startswith(("MAP *:80 ", "MAP *:443 ")) for rule in rules)
 
 
@@ -105,11 +113,66 @@ def test_a_frontend_in_front_of_this_backend_is_found_and_another_is_not(monkeyp
         theirs.kill()
 
 
-def test_tailscale_name_comes_from_the_saved_outside_address(monkeypatch):
-    monkeypatch.setattr(runtime, "outside_address", "https://Mac.Tail1234.ts.net.")
-    assert "mac.tail1234.ts.net" in own.tailnet_hosts()
-    monkeypatch.setattr(runtime, "outside_address", None)
-    assert "mac.tail1234.ts.net" not in own.tailnet_hosts()
+@pytest.mark.parametrize(("saved", "endpoint"), [
+    ("https://Mac.Tail1234.ts.net.", ("mac.tail1234.ts.net", 443)),
+    ("home.example.com:8443", ("home.example.com", 8443)),
+    (None, None),
+])
+def test_the_outside_address_is_refused_at_its_own_port_only(monkeypatch, saved, endpoint):
+    monkeypatch.setattr(runtime, "outside_address", saved)
+    assert own.outside_endpoint() == endpoint
+
+
+def test_a_saved_domain_with_a_port_leaves_its_website_reachable(monkeypatch, serving):
+    monkeypatch.setattr(own, "outside_endpoint", lambda: ("home.example.com", 8443))
+    assert own.is_own_address("https://home.example.com:8443/")
+    assert not own.is_own_address("https://home.example.com/")
+    rules = own.resolver_rules().split(", ")
+    assert "MAP home.example.com:8443 ~NOTFOUND" in rules and "MAP home.example.com ~NOTFOUND" not in rules
+    assert "https://home.example.com:8443" in own._serving_origins()
+
+
+def test_only_page_ports_are_cleared_not_the_measure_receivers(monkeypatch, serving):
+    monkeypatch.setattr(own, "_backend_ports", lambda: {SERVING, 47921})
+    origins = own._serving_origins()
+    assert f"http://localhost:{SERVING}" in origins and "https://mac.tail1234.ts.net" in origins
+    assert not any(origin.endswith(":47921") for origin in origins)
+
+
+def test_clearing_stops_at_its_budget_when_the_browser_stops_answering(monkeypatch, serving):
+    from host_access import browser_cdp
+
+    class Silent:
+        calls = 0
+
+        def __init__(self, endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def call(self, method, **params):
+            Silent.calls += 1
+            await asyncio.sleep(3600)
+
+    async def first_page(endpoint):
+        return "ws://127.0.0.1:1/page"
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", Silent)
+    monkeypatch.setattr(own, "_first_page", first_page)
+    monkeypatch.setattr(own, "_CLEAR_TIMEOUT", 0.05)
+    monkeypatch.setattr(own, "_CLEAR_BUDGET", 0.2)
+    loop = asyncio.new_event_loop()
+    try:
+        started = loop.time()
+        loop.run_until_complete(own.clear_serving_storage("ws://127.0.0.1:1/browser"))
+        assert loop.time() - started < 1.0
+    finally:
+        loop.close()
+    assert 0 < Silent.calls < len(own._serving_origins())
 
 
 def test_typing_the_serving_address_gives_the_agent_one_plain_line(serving):

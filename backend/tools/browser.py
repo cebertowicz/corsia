@@ -63,7 +63,7 @@ class BrowserOpenTool(Tool):
         from host_access.browser_navigation import normalize_url
         from host_access.browser_session_state import BrowserSessionError
         try:
-            effective_url = normalize_url(url)
+            effective_url = await asyncio.to_thread(normalize_url, url)
         except BrowserSessionError as exc:
             return f"Error: {exc}"
 

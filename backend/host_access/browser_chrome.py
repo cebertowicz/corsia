@@ -88,7 +88,7 @@ class ChromeProcess:
             assert target is not None
             target.mkdir(mode=0o700, parents=True, exist_ok=True)
             cdp_port, stream_port = cdp.getsockname()[1], stream.getsockname()[1]
-            argv = chrome_argv(executable, cdp_port, target, headless=headless, ua=ua)
+            argv = await asyncio.to_thread(chrome_argv, executable, cdp_port, target, headless=headless, ua=ua)
             cdp.close()
             # Shield the spawn so cancellation cannot lose a newly created child handle.
             spawning = asyncio.create_task(asyncio.create_subprocess_exec(

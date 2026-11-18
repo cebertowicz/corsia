@@ -4,12 +4,17 @@ Anyone who signs in to CORSIA in the shared browser hands that sign-in to every 
 the browser refuses the instance this backend belongs to. The serving instance is known by its ports,
 not by its names: a name can be anything that reaches this machine (``localhost``, an address, a
 host name, ``anything.localhost``, a public name that resolves to 127.0.0.1). So Chrome is launched with
-``--host-resolver-rules`` that make every host at a serving port unresolvable, plus the Tailscale name
-and addresses at any port (Tailscale serve fronts CORSIA on 443). Chrome applies these rules to every
-network request of every process: navigation, redirect, frame, popup, fetch, XHR, WebSocket, worker.
+``--host-resolver-rules`` that make every host at a serving port unresolvable, plus this machine's
+Tailscale addresses at any port, and the saved outside address (any name the person reaches CORSIA by from
+another device, such as a Tailscale name or their own domain) at its port only, 443 unless it names one.
+Chrome applies these rules to every network request of every process: navigation, redirect, frame, popup,
+fetch, XHR, WebSocket, worker.
 
 CORSIA keeps its sign-in in the page origin's ``localStorage``, never in a cookie, so launch also clears
-the stored data of each serving origin; origins are scheme, name and port, so no other port is touched.
+the stored data of each origin that serves its pages; origins are scheme, name and port, so no other port
+is touched.
+
+``serving_ports`` can scan every process on the machine, so async callers run these checks in a thread.
 """
 from __future__ import annotations
 
@@ -31,7 +36,8 @@ _SCHEME_PORT = {"http": 80, "https": 443, "ws": 80, "wss": 443}
 _LOOPBACK_NAMES = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")  # Tailscale addresses
 _SCAN_TTL = 30.0
-_CLEAR_TIMEOUT = 5.0
+_CLEAR_TIMEOUT = 5.0  # one origin
+_CLEAR_BUDGET = 15.0  # all of them, so a browser that stops answering delays launch by this at most
 _STORED_DATA = "local_storage,indexeddb,service_workers,cache_storage,file_systems"  # never cookies: per host
 _frontend_scan: tuple[float, frozenset[int]] = (-_SCAN_TTL, frozenset())
 
@@ -43,15 +49,20 @@ def _listening(process: psutil.Process) -> set[int]:
         return set()
 
 
+def _page_port() -> int:
+    """The port this backend serves its pages and API on, from the same source that binds it."""
+    from infra.default_port import DEFAULT_BACKEND_PORT
+    configured = os.environ.get("BACKEND_PORT", "")
+    return int(configured) if configured.isdigit() else DEFAULT_BACKEND_PORT
+
+
 def _backend_ports() -> set[int]:
     """This backend's own port and its measure receiver's candidates, from the same sources that bind them.
 
     Not every socket the process holds: a page server a test or tool starts in-process is someone else's site.
     """
-    from infra.default_port import DEFAULT_BACKEND_PORT
     from infra.otlp_listener import _ports as receiver_ports
-    configured = os.environ.get("BACKEND_PORT", "")
-    return {int(configured) if configured.isdigit() else DEFAULT_BACKEND_PORT, *receiver_ports()}
+    return {_page_port(), *receiver_ports()}
 
 
 def _frontend_ports(backend_ports: set[int]) -> frozenset[int]:
@@ -78,20 +89,24 @@ def serving_ports() -> frozenset[int]:
     return frozenset(backend | {DEFAULT_PORT, *FALLBACK_PORTS} | _frontend_ports(backend))
 
 
-def tailnet_hosts() -> set[str]:
-    """This machine's Tailscale name (the outside address setting) and Tailscale addresses, matched at any port."""
+def tailnet_addresses() -> set[str]:
+    """This machine's Tailscale addresses, matched at any port."""
     hosts: set[str] = set()
-    try:
-        from core.devices_runtime import runtime
-        address = runtime.outside_address or ""
-    except ImportError:
-        address = ""
-    if address and (host := re.sub(r"^https?://", "", address).split(":")[0].rstrip(".").lower()):
-        hosts.add(host)
     for entries in psutil.net_if_addrs().values():
         hosts |= {item.address for item in entries
                   if item.family == socket.AF_INET and ipaddress.ip_address(item.address) in _CGNAT}
     return hosts
+
+
+def outside_endpoint() -> tuple[str, int] | None:
+    """The saved outside address as a name and port (443 unless it names one), or None when none is saved."""
+    from core.devices_runtime import runtime
+    address = re.sub(r"^https?://", "", runtime.outside_address or "", flags=re.IGNORECASE).removesuffix("/")
+    host, _, port = address.partition(":")
+    host = host.rstrip(".").lower()
+    if not host:
+        return None
+    return host, int(port) if port.isdigit() else 443
 
 
 def _machine_hosts() -> set[str]:
@@ -107,8 +122,11 @@ def resolver_rules() -> str:
     """The Chrome ``--host-resolver-rules`` value that makes the serving instance unresolvable."""
     ports = serving_ports()
     rules = [f"MAP *:{port} ~NOTFOUND" for port in sorted(ports - _WELL_KNOWN)]
-    rules += [f"MAP {host}:{port} ~NOTFOUND" for port in sorted(ports & _WELL_KNOWN) for host in sorted(_machine_hosts())]
-    rules += [f"MAP {host} ~NOTFOUND" for host in sorted(tailnet_hosts())]
+    rules += [f"MAP {host}:{port} ~NOTFOUND" for port in sorted(ports & _WELL_KNOWN)
+              for host in [*sorted(_machine_hosts()), "*.localhost"]]
+    rules += [f"MAP {host} ~NOTFOUND" for host in sorted(tailnet_addresses())]
+    if (outside := outside_endpoint()) is not None:
+        rules.append(f"MAP {outside[0]}:{outside[1]} ~NOTFOUND")
     return ", ".join(rules)
 
 
@@ -121,7 +139,7 @@ def is_own_address(url: str) -> bool:
     except ValueError:
         return False
     host = f"[{host}]" if ":" in host else host  # an IPv6 literal, spelled as the machine names list it
-    if host in tailnet_hosts():
+    if host in tailnet_addresses() or (host, port) == outside_endpoint():
         return True
     ports = serving_ports()
     if port in ports - _WELL_KNOWN:
@@ -130,13 +148,19 @@ def is_own_address(url: str) -> bool:
 
 
 def _serving_origins() -> list[str]:
-    """Every scheme, name and port the serving instance's pages could have stored data under."""
-    backend = _backend_ports()
-    ports = backend | _frontend_ports(backend)
-    tailnet = tailnet_hosts()
+    """Every scheme, name and port the serving instance's pages could have stored data under.
+
+    Only ports that serve pages: the measure receiver's candidates take logs and never hold a sign-in.
+    """
+    ports = {_page_port()} | _frontend_ports(_backend_ports())
+    tailnet = tailnet_addresses()
     origins = [f"{scheme}://{host}:{port}" for scheme in ("http", "https")
                for host in _machine_hosts() | tailnet for port in ports]
-    return [*origins, *(f"https://{host}" for host in tailnet)]
+    origins += [f"https://{host}" for host in tailnet]
+    if (outside := outside_endpoint()) is not None:
+        host, port = outside
+        origins.append(f"https://{host}" if port == 443 else f"https://{host}:{port}")
+    return origins
 
 
 async def _first_page(endpoint: str) -> str:
@@ -154,12 +178,19 @@ async def _first_page(endpoint: str) -> str:
 async def clear_serving_storage(endpoint: str) -> None:
     """At launch, drop whatever the saved profile holds for each serving origin, notably the CORSIA sign-in."""
     from host_access.browser_cdp import CdpClient
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _CLEAR_BUDGET
     try:
         async with CdpClient(await _first_page(endpoint)) as cdp:
-            for origin in await asyncio.to_thread(_serving_origins):
+            origins = await asyncio.to_thread(_serving_origins)
+            for index, origin in enumerate(origins):
+                if (left := deadline - loop.time()) <= 0:
+                    logger.warning("stored data of %d serving origins was not cleared: the browser stopped answering "
+                                   "within %.0f s", len(origins) - index, _CLEAR_BUDGET)
+                    return
                 try:
                     await asyncio.wait_for(cdp.call("Storage.clearDataForOrigin", origin=origin,
-                                                    storageTypes=_STORED_DATA), _CLEAR_TIMEOUT)
+                                                    storageTypes=_STORED_DATA), min(_CLEAR_TIMEOUT, left))
                 except Exception:
                     logger.warning("stored data of %s could not be cleared from the browser profile", origin,
                                    exc_info=True)
