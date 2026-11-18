@@ -377,3 +377,32 @@ def test_the_pane_carries_the_oversize_signal_only_above_the_budget():
         assert status_context.projection(db, plan_row, actor=OWNER)["oversize"] == expected
     finally:
         db.close()
+
+
+def test_the_oversize_signal_counts_top_level_work_not_its_steps():
+    db = _db()
+    try:
+        plan = service.ensure_plan("thread", "owner", db=db)
+        budget = status_context.OPEN_NODE_BUDGET
+        for index in range(budget - 1):
+            _task(plan.id, f"Step {index}", db=db)
+        phase = service.add_node(
+            plan.id, kind="phase", title="Run", acceptance_criteria="Run is proven", db=db,
+        )
+        for index in range(9):
+            _task(plan.id, f"Run step {index}", parent_id=phase.id, db=db)
+
+        # Fifty open nodes, but forty pieces of work: the phase and its nine steps read as one.
+        entry, _nodes = _read(db)
+        assert entry["oversize"] is None
+        plan_row = service._plan_row(db, plan.id)
+        assert "oversize" not in status_context.projection(db, plan_row, actor=OWNER)
+
+        _task(plan.id, "One too many", db=db)
+        entry, _nodes = _read(db)
+        expected = {"open": budget + 1, "budget": budget}
+        assert entry["oversize"] == expected
+        plan_row = service._plan_row(db, plan.id)
+        assert status_context.projection(db, plan_row, actor=OWNER)["oversize"] == expected
+    finally:
+        db.close()

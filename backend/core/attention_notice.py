@@ -14,11 +14,17 @@ A call hands a document to the person when it:
   ``block_node`` with ``ask_artifact_id``);
 - gives the person a step with an instructions document (``plan_update`` with
   ``assignee: user`` and ``instructions_artifact_id``);
-- shows the person a document (``document_open``).
+- shows the person a document (``document_open``);
+- posts an update whose text names documents (``post_update``). The ones
+  counted are the ones chat shows the person as document cards under that
+  update, found with the same reader the cards use, so a path to code or a
+  file they cannot open is not counted.
 
 Whether a plan call took effect is read from Plans' own state through
 ``plans.public``, never from the result text, so a refused call carries no
 notice. ``document_open`` keeps no state, so its own reported outcome is read.
+An update is read back from its saved message, named by the call's receipt,
+so a refused update carries no notice either.
 The call has taken effect by the time this runs, so a read that fails here is
 logged and the result goes out without the line, never as an error.
 
@@ -28,39 +34,31 @@ bridge in ``subagents.harness_tool_bridge``. Nothing is persisted, so a
 rebuilt history omits the line. It reads the database and the document's
 file, so it must run off the event loop.
 
-Cost: the plan and document calls above are the only ones that read anything.
-Each reads one indexed set of open asks and the files this agent has waiting
-on the person; no model is called.
+Cost: the calls above are the only ones that read anything, and an update
+whose text names no file reads nothing. Each reads one indexed set of open
+asks and the files this agent has waiting on the person; an update also reads
+its own message row and looks up the files it names. No model is called.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.attention_measure import Measure, describe, measure_file, total_of
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
 LABEL = "[CORSIA attention notice]"
 
-#: Average adult silent reading rate for English non-fiction (Brysbaert 2019,
-#: "How many words do we read per minute?", Journal of Memory and Language).
-#: Reading to judge is slower, so the time stated is a floor.
-_WORDS_PER_MINUTE = 238
-
-_WORD = re.compile(r"[^\W_]+")
-#: Han and kana, which are written without spaces: a run of them is one
-#: ``_WORD`` match however long, so they are counted as characters instead.
-_UNSPACED = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
-_IMAGE = re.compile(r"!\[|<img\b", re.IGNORECASE)
-
-_OPENED = frozenset({"requested", "link", "already_open"})
+#: ``document_open`` outcomes that showed the person the document. ``link`` is
+#: not one: the tool returns it when it could not show the document, and the
+#: update that then posts the link carries the notice.
+_OPENED = frozenset({"requested", "already_open"})
 _LEAD = {
     "ask": "The person now has '{name}' to read before they can answer: {length}.",
     "step": "The person now has '{name}' to read before they can do their step: {length}.",
@@ -68,25 +66,26 @@ _LEAD = {
 }
 _WAITING = " You now have {count} documents waiting on them{total}."
 _CLOSE = (
-    " If they could act on less, cut the file now, before they open it: put "
+    " If they could act on less, cut the file now{before}: put "
     "first what they must decide or do, and keep only what they need for it."
+)
+#: Said only where the document is waiting for the person, not already open in front of them.
+_BEFORE_OPENING = ", before they open it"
+
+#: The first line of ``tools.post_update_text.result_text`` and of a replayed
+#: receipt: the update was saved, under this message id.
+_SAVED_UPDATE = re.compile(r"Update saved as message (\S+)\.")
+#: The card type chat gives a file made to be read (``registry.file_types``).
+_READ_TYPE = "document"
+_LINKED_ONE = "Your update links '{name}' for the person to read: {length}."
+_LINKED_MANY = "Your update links {count} documents for the person to read{total}."
+_LONGEST = " The longest is '{name}': {length}."
+_CLOSE_MANY = (
+    " If they could act on less, link fewer or cut them now, before they open "
+    "them: put first what they must decide or do, and keep only what they need for it."
 )
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _Measure:
-    """What one document asks of its reader."""
-
-    words: int
-    unspaced: int
-    images: int
-
-    @property
-    def in_words(self) -> bool:
-        """Whether word count describes the text (false for unspaced scripts)."""
-        return self.words >= self.unspaced
 
 
 def attention_notice(
@@ -96,6 +95,8 @@ def attention_notice(
     """Return the notice for a call that handed the person a document, else None."""
     if not thread_id or not isinstance(arguments, dict):
         return None
+    if tool_name == "post_update":
+        return _update_notice(thread_id, arguments, result)
     if tool_name == "plan_update":
         params = arguments.get("params")
         target = _plan_target(arguments.get("operation"), params) if isinstance(params, dict) else None
@@ -119,12 +120,78 @@ def attention_notice(
         return None
     finally:
         db.close()
-    measure = _measure(path)
-    others = [_measure(other) for other in waiting if other != path]
-    if kind == "ask" or path in waiting:
+    measure = measure_file(path)
+    others = [measure_file(other) for other in waiting if other != path]
+    # A step's own document waits on the person as an ask's does. The documents
+    # of this agent's other open person steps are not counted: Plans' public
+    # surface has no read for them.
+    if kind in ("ask", "step") or path in waiting:
         others.append(measure)
-    _record(thread_id, kind, measure, len(others))
+    _record(thread_id, "open" if kind == "open_path" else kind, [measure], len(others))
     return _render(kind, path.name, measure, others)
+
+
+def _update_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
+    """The notice for a saved update whose text names documents the person gets as cards."""
+    from registry.path_cards import targets
+
+    saved = _SAVED_UPDATE.match(result) if isinstance(result, str) else None
+    text = arguments.get("text")
+    # Most updates name no file: those open nothing.
+    if saved is None or not isinstance(text, str) or not targets(text):
+        return None
+    db = get_db()
+    try:
+        linked = _linked_documents(db, thread_id, saved.group(1))
+        waiting = _waiting_paths(db, thread_id) if linked else []
+    except (sqlite3.Error, ValueError, LookupError):
+        # The update is already saved: a failed read here must not turn its
+        # receipt into an error the agent would retry.
+        log.warning("attention notice: could not read what post_update linked", exc_info=True)
+        return None
+    finally:
+        db.close()
+    if not linked:
+        return None
+    measured = [(path, measure_file(path)) for path in linked]
+    others = [measure_file(other) for other in waiting if other not in linked]
+    _record(thread_id, "update", [measure for _path, measure in measured], len(others) + len(linked))
+    return _render_update(measured, others)
+
+
+def _linked_documents(db, thread_id: str, message_id: str) -> list[Path]:
+    """The documents chat shows the person as cards under this agent's saved update."""
+    from doceditor.document_scope import scope_roots
+    from infra import config
+    from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
+    from registry.path_cards import reference_cards
+
+    # Cards follow the text chat draws under the update: an answer section that
+    # was placed in its comment thread is not part of it.
+    row = db.execute(
+        f"SELECT {VISIBLE_CONTENT} AS content, t.user_id AS user_id, t.project_id AS project_id"
+        f" FROM messages AS m JOIN threads AS t ON t.id = m.thread_id {VISIBLE_CONTENT_JOIN}"
+        " WHERE m.id=? AND m.thread_id=?",
+        (message_id, thread_id),
+    ).fetchone()
+    if row is None or not isinstance(row["content"], str):
+        return []
+    # The text, the roots and the second origin are the ones ``api.thread_cards.attach_cards``
+    # gives the same reader; ``test_attention_notice_update_links`` holds the two together.
+    origin, bases = scope_roots(row["project_id"], db)
+    cards = reference_cards(
+        db, row["content"], bases, str(row["user_id"]), origin=origin,
+        fallback_origin=config.WORKSPACE.resolve() if row["project_id"] else None,
+    )
+    paths: list[Path] = []
+    for card in cards:
+        if card.get("type") != _READ_TYPE or not card.get("available"):
+            continue
+        artifact_id = card.get("artifact_id")
+        path = _artifact_path(db, str(artifact_id)) if artifact_id else Path(str(card["path"]))
+        if path is not None and path not in paths:
+            paths.append(path)
+    return paths
 
 
 def _plan_target(operation: Any, params: dict) -> tuple[str, str] | None:
@@ -139,7 +206,7 @@ def _plan_target(operation: Any, params: dict) -> tuple[str, str] | None:
 
 
 def _open_target(arguments: dict, result: Any) -> tuple[str, str] | None:
-    """The document a ``document_open`` call showed or linked, as ``(kind, reference)``."""
+    """The document a ``document_open`` call showed the person, as ``(kind, reference)``."""
     try:
         outcome = json.loads(result).get("outcome") if isinstance(result, str) else None
     except (ValueError, AttributeError):
@@ -213,67 +280,60 @@ def _artifact_path(db, artifact_id: str) -> Path | None:
     return path if path.is_absolute() else config.WORKSPACE / path
 
 
-def _measure(path: Path) -> _Measure | None:
-    """Count what the file asks of a reader, or None when it cannot be read as text."""
-    try:
-        text = path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    unspaced = len(_UNSPACED.findall(text))
-    words = len(_WORD.findall(_UNSPACED.sub(" ", text)))
-    return _Measure(words=words, unspaced=unspaced, images=len(_IMAGE.findall(text)))
-
-
-def _minutes(words: int) -> int:
-    return max(1, math.ceil(words / _WORDS_PER_MINUTE))
-
-
-def _duration(minutes: int) -> str:
-    hours, rest = divmod(minutes, 60)
-    parts = []
-    if hours:
-        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
-    if rest or not hours:
-        parts.append(f"{rest} minute{'s' if rest != 1 else ''}")
-    return " ".join(parts)
-
-
-def _length(measure: _Measure | None) -> str:
-    if measure is None:
-        return "its length could not be measured, because the file could not be read as text"
-    if measure.in_words:
-        length = f"{measure.words:,} words, at least {_duration(_minutes(measure.words))} to read"
-    else:
-        length = f"{measure.unspaced:,} characters"
-    if measure.images:
-        length += f", {measure.images} image{'s' if measure.images != 1 else ''}"
-    return length
-
-
-def _render(kind: str, name: str, measure: _Measure | None, waiting: list[_Measure | None]) -> str:
+def _render(kind: str, name: str, measure: Measure | None, waiting: list[Measure | None]) -> str:
     """The notice text: this document, what this agent has waiting in all, then the choice."""
     lead = _LEAD["open" if kind == "open_path" else kind]
-    text = f"{LABEL} " + lead.format(name=name, length=_length(measure))
+    text = f"{LABEL} " + lead.format(name=name, length=describe(measure))
     if len(waiting) > 1:
-        words = sum(item.words for item in waiting if item is not None and item.in_words)
-        total = f": {words:,} words and at least {_duration(_minutes(words))} in all" if words else ""
-        text += _WAITING.format(count=len(waiting), total=total)
+        text += _WAITING.format(count=len(waiting), total=total_of(waiting))
     # Nothing measured (an image, a missing file) gives no ground to suggest a cut.
-    return text + _CLOSE if measure is not None else text
+    if measure is None:
+        return text
+    return text + _CLOSE.format(before="" if kind in ("open", "open_path") else _BEFORE_OPENING)
 
 
-def _record(thread_id: str, kind: str, measure: _Measure | None, waiting: int) -> None:
-    """Record what was handed over, so its size can be read over time without a hand count."""
+def _render_update(
+    linked: list[tuple[Path, Measure | None]], others: list[Measure | None],
+) -> str:
+    """The notice for an update: what it links, what this agent has waiting in all, then the choice."""
+    measures = [measure for _path, measure in linked]
+    if len(linked) == 1:
+        path, measure = linked[0]
+        text = f"{LABEL} " + _LINKED_ONE.format(name=path.name, length=describe(measure))
+    else:
+        text = f"{LABEL} " + _LINKED_MANY.format(count=len(linked), total=total_of(measures))
+        longest = max(linked, key=lambda item: _size(item[1]))
+        if longest[1] is not None:
+            text += _LONGEST.format(name=longest[0].name, length=describe(longest[1]))
+    if others:
+        everything = measures + others
+        text += _WAITING.format(count=len(everything), total=total_of(everything))
+    if all(measure is None for measure in measures):
+        return text
+    return text + (_CLOSE.format(before=_BEFORE_OPENING) if len(linked) == 1 else _CLOSE_MANY)
+
+
+def _size(measure: Measure | None) -> int:
+    """How much one document asks, for picking the longest; unmeasured sorts first."""
+    return -1 if measure is None else max(measure.words, measure.unspaced)
+
+
+def _record(thread_id: str, handover: str, measures: list[Measure | None], waiting: int) -> None:
+    """Record what was handed over, so its size can be read over time without a hand count.
+
+    One event per call: an update that links several documents records their totals.
+    """
+    measured = [measure for measure in measures if measure is not None]
+    properties: dict[str, Any] = {
+        "handover": handover,
+        "measured": bool(measured),
+        "words": sum(measure.words for measure in measured) if measured else None,
+        "characters": sum(measure.unspaced for measure in measured) if measured else None,
+        "images": sum(measure.images for measure in measured) if measured else None,
+        "waiting_documents": waiting,
+    }
+    if handover == "update":
+        properties["linked_documents"] = len(measures)
     emit_product_event(
-        "attention_notice",
-        "notice_emitted",
-        thread_id=thread_id,
-        properties={
-            "handover": "open" if kind == "open_path" else kind,
-            "measured": measure is not None,
-            "words": measure.words if measure is not None else None,
-            "characters": measure.unspaced if measure is not None else None,
-            "images": measure.images if measure is not None else None,
-            "waiting_documents": waiting,
-        },
+        "attention_notice", "notice_emitted", thread_id=thread_id, properties=properties,
     )
