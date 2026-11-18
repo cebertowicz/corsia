@@ -160,6 +160,26 @@ def test_failed_first_commit_is_rolled_back_before_connection_cleanup(
     assert target.exists() == (operation == "recover")
 
 
+def test_recovery_propagates_operational_error_after_rollback(durable_scope, monkeypatch):
+    workspace, _project, thread, db = durable_scope
+    _seed_applied(durable_scope)
+    probe = ConnectionProbe(db)
+    monkeypatch.setattr(durable_writes, "get_db", lambda: probe)
+
+    def fail_row(row, *, workspace, db):
+        db.execute("UPDATE threads SET title='uncommitted' WHERE id=?", (thread,))
+        raise sqlite3.OperationalError("injected row failure")
+
+    monkeypatch.setattr(durable_writes, "_recover_one_intent", fail_row)
+    with pytest.raises(sqlite3.OperationalError, match="injected row failure"):
+        durable_writes.recover_write_intents(workspace=workspace)
+
+    assert probe.closed_dirty == [False]
+    assert not db.in_transaction
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents WHERE id='g34-applied'").fetchone()[0] == 1
+    assert db.execute("SELECT title FROM threads WHERE id=?", (thread,)).fetchone()[0] != "uncommitted"
+
+
 @pytest.mark.parametrize("fail_commit", [1, 2, 3, 4])
 def test_promotion_commit_failure_preserves_source_and_registry(
     durable_scope, monkeypatch, fail_commit,
