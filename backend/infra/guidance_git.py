@@ -11,7 +11,6 @@ changed since the caller read it.
 from __future__ import annotations
 
 import fcntl
-import logging
 import os
 import subprocess
 import tempfile
@@ -31,7 +30,7 @@ from infra.guidance_messages import (
     unforgeable,
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
-from infra.guidance_save_after import after_save
+from infra.guidance_save_after import after_save, conditional_lock_refusal
 from infra.guidance_save_types import KnownHead, SaveResult, _Commit
 from infra.guidance_targets import HistoryTarget
 from infra.history_ignore import ignored
@@ -353,10 +352,7 @@ def _save(
         handle, timing["lock_wait_ms"] = _acquire(repo, directory)
     except (_LockBusy, GitFault, ValueError) as exc:
         if require_history_lock and expected and any(value is not None for value in expected.values()):
-            if isinstance(exc, _LockBusy):
-                return SaveResult("deferred", "deferred-guidance-lock", line="The document is busy. Try saving again.")
-            logging.getLogger(__name__).error("Could not acquire document history lock: %s", exc)
-            return SaveResult("failed", "history-lock-failed", line="Could not lock document history. Your changes were not saved; try again.")
+            return conditional_lock_refusal(exc)
         outcome = "deferred" if isinstance(exc, _LockBusy) else "failed"
         why = "deferred-guidance-lock" if isinstance(exc, _LockBusy) else str(exc)
         return unrecorded(outcome, why, SAVE_FAILED.format(error=exc))

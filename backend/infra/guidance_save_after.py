@@ -11,6 +11,17 @@ from infra.guidance_save_types import SaveResult
 from infra.guidance_targets import HistoryTarget
 
 
+def conditional_lock_refusal(error: Exception) -> SaveResult:
+    """Report why a conditional save could not acquire its required lock."""
+    from infra.guidance_states import _LockBusy
+
+    if isinstance(error, _LockBusy):
+        return SaveResult("deferred", "deferred-guidance-lock", line="The document is busy. Try saving again.")
+    import logging
+    logging.getLogger(__name__).error("Could not acquire document history lock: %s", error)
+    return SaveResult("failed", "history-lock-failed", line="Couldn't save this document. Your changes are still here; try again.")
+
+
 def after_save(
     result: SaveResult, *, workspace: Path, writes: dict[Path, bytes], target: HistoryTarget, author: str,
     timing: dict[str, float], lesson_changes, lesson_observation_thread_id: str | None,

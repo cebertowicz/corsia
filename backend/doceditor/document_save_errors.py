@@ -2,7 +2,7 @@
 
 from typing import Any
 
-MISSING_DOCUMENT_MESSAGE = "The document no longer exists. Reopen or choose another file."
+MISSING_DOCUMENT_MESSAGE = "This file no longer exists."
 
 
 class DocumentSaveError(ValueError):

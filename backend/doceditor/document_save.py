@@ -169,7 +169,8 @@ def _validate_document_write(body: DocumentSave, user_id: str, *, moved_notice: 
         except OSError as exc:
             # Only inside this scope's roots, so a probe outside them learns nothing about promotes.
             moved = moved_save_message(path, db=db) if moved_notice and path_write_allowed(path.resolve(strict=False), bases) else None
-            raise DocumentSaveError("moved" if moved else "no_such_file", moved or f"No such file: {exc}") from exc
+            from doceditor.document_save_errors import MISSING_DOCUMENT_MESSAGE
+            raise DocumentSaveError("moved" if moved else "no_such_file", moved or MISSING_DOCUMENT_MESSAGE) from exc
         # Workspace context and System projection files are injected into every prompt.
         # They remain read-only through the document API so this endpoint
         # cannot become a system-prompt-injection vector.

@@ -375,7 +375,7 @@ async def test_conditional_save_refuses_without_history_lock(history_scope, monk
     if failure == 'busy':
         assert 'busy' in error.value.message
     else:
-        assert 'busy' not in error.value.message
+        assert error.value.message == "Couldn't save this document. Your changes are still here; try again."
         assert 'lock unavailable' in caplog.text
     assert path.read_text() == 'Original.\n'
     monkeypatch.setattr(guidance_git, '_acquire', real_acquire)
@@ -398,7 +398,8 @@ async def test_live_conditional_write_refuses_lock_fault(history_scope, tmp_path
     try:
         result = await lane.submit(Operation('flush', actor=WriteActor(thread_id, None)))
         assert isinstance(result.refusal, DocumentSaveError)
-        assert result.refusal.kind == 'save_failed' and 'busy' not in result.refusal.message
+        assert result.refusal.kind == 'save_failed'
+        assert result.refusal.message == "Couldn't save this document. Your changes are still here; try again."
         assert 'lock unavailable' in caplog.text
         assert path.read_text() == 'Original.\n' and live.text == 'Unsaved Original.\n'
     finally:

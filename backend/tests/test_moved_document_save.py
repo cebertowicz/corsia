@@ -104,7 +104,9 @@ def test_a_deleted_path_keeps_no_such_file(durable_scope):
     models.retire(source_id, tombstone=True, cause="file_gone", db=db)
     db.commit()
 
-    assert _refusal(db, thread_id, source).kind == "no_such_file"
+    refusal = _refusal(db, thread_id, source)
+    assert refusal.kind == "no_such_file"
+    assert refusal.message == "This file no longer exists."
 
 
 def test_a_path_never_registered_keeps_no_such_file(durable_scope):

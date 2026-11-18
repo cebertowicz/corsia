@@ -171,7 +171,8 @@ class DocumentLane:
                 if ordinary and isinstance(job.operation, Operation):
                     job.future.set_result(result)
                 else:
-                    if job.detached and isinstance(exc, (StoreRefused, OSError, sqlite3.Error)):
+                    from doceditor.live_text_write import HistoryLockBusy
+                    if job.detached and isinstance(exc, (StoreRefused, OSError, sqlite3.Error)) and not isinstance(exc, HistoryLockBusy):
                         await self.retry.record_failure(exc)
                     elif isinstance(exc, StoreRefused):
                         self.retry.notify()
