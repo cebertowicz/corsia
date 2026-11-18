@@ -44,15 +44,17 @@ def reverse(db):
 
 def _restore(db, ids, before):
     marks = ','.join('?' for _ in ids)
-    for table in reversed(TABLES[1:]):
-        db.execute(f'DELETE FROM {table} WHERE batch_id IN ({marks})', ids)
+    db.execute(f'DELETE FROM doc_feedback_edit_items WHERE batch_id IN ({marks})', ids)
+    db.execute(f'DELETE FROM doc_feedback_batch_items WHERE batch_id IN ({marks})', ids)
     batch = before[TABLES[0]]
     columns = batch['columns']
     updates = ','.join(f'{column}=excluded.{column}' for column in columns if column != 'id')
     for row in batch['rows']:
-        db.execute(f"INSERT INTO {TABLES[0]} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) "
+        db.execute(f"INSERT INTO doc_feedback_batches ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) "
                    f'ON CONFLICT(id) DO UPDATE SET {updates}', row)
-    for table in TABLES[1:]:
-        data = before[table]
-        columns = data['columns']
-        db.executemany(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", data['rows'])
+    items = before['doc_feedback_batch_items']
+    columns = items['columns']
+    db.executemany(f"INSERT INTO doc_feedback_batch_items ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", items['rows'])
+    edits = before['doc_feedback_edit_items']
+    columns = edits['columns']
+    db.executemany(f"INSERT INTO doc_feedback_edit_items ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", edits['rows'])

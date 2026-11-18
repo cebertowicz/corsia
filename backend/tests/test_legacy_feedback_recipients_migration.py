@@ -154,8 +154,10 @@ def test_reverse_restores_folded_rows_and_refuses_later_change():
     _batch(db, 'old', 'project:p')
     _batch(db, 'new', 'ui')
     db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('old','c1'),('new','c2')")
+    db.execute("INSERT INTO doc_feedback_edit_items VALUES ('old','Person','diff','a','old','b','new',1,'1','2')")
     before = db.execute('SELECT * FROM doc_feedback_batches ORDER BY id').fetchall()
     items = db.execute('SELECT * FROM doc_feedback_batch_items ORDER BY batch_id').fetchall()
+    edits = db.execute('SELECT * FROM doc_feedback_edit_items ORDER BY batch_id').fetchall()
     migrate_199_to_200(db)
     db.execute("UPDATE doc_feedback_batches SET state='delivered' WHERE id='new'")
     import pytest
@@ -166,4 +168,5 @@ def test_reverse_restores_folded_rows_and_refuses_later_change():
     reverse_200_to_199(db)
     assert db.execute('SELECT * FROM doc_feedback_batches ORDER BY id').fetchall() == before
     assert db.execute('SELECT * FROM doc_feedback_batch_items ORDER BY batch_id').fetchall() == items
+    assert db.execute('SELECT * FROM doc_feedback_edit_items ORDER BY batch_id').fetchall() == edits
     db.close()
