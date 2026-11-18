@@ -338,7 +338,10 @@ def test_the_list_on_the_old_id_reads_as_before_when_no_live_document_can_be_rea
 def test_an_agent_tool_comment_that_meets_a_promote_after_its_check_says_why_it_was_refused(isolated_db, monkeypatch):
     """doc_comment_create checks the target, then writes; a promote between the two gives the preflight's sentence, not a bare id."""
     import tools.documents as documents
+    from doceditor import live_runtime
 
+    # A document manager left by an earlier test in this process has no loop here; the write then waits on it.
+    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         artifact, root = _document_with_thread(db)
