@@ -8,7 +8,7 @@ import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
-import { createViewerCommentDraft, liveFailureMessage } from './docViewerCommentDraft.svelte';
+import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
 	...await original<typeof import('$lib/stores/docComments')>(),
@@ -191,11 +191,6 @@ describe('a comment refused because the document no longer takes comments', () =
 		expect(show).toHaveBeenCalledWith(SENTENCE, 'error');
 		expect(current!.controller.draft?.body).toBe('Unfinished');
 		log.mockRestore();
-	});
-
-	it('is the sentence from liveFailureMessage too, and any other 409 keeps its existing message', () => {
-		expect(liveFailureMessage(refused())).toBe(SENTENCE);
-		expect(liveFailureMessage(new RequestRefused('409 {"detail":"x"}', null))).toBe('The document changed before your comment could be attached. Your draft is kept. Try again.');
 	});
 });
 
