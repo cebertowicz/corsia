@@ -667,9 +667,10 @@ async def test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_
                 # The snapshot lists the page's embed first and the nested one last.
                 ref = await frame_link_ref(owner, thread_id, links=2)
             except AssertionError:
-                # agent-browser 0.31.2 lists no link in any frame on such a page, so no ref can name the nested one.
+                # agent-browser 0.31.2 lists the page's own embed's link but not the nested one's, so no ref can
+                # name the nested link.
                 snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
-                assert not re.findall(r'link \\?"Go\\?"', snapshot), snapshot
+                assert len(re.findall(r'link \\?"Go\\?"', snapshot)) == 1, snapshot
             else:
                 with pytest.raises(browser_dom_write.DomWriteRefused):
                     await owner.run(thread_id, ("click", ref), session="existing")
