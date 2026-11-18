@@ -1,6 +1,14 @@
 import type { CommentThreadData } from './CommentThreadData';
 
 /**
+ * A press that is not an engagement with the thread it lands in: one on a link in the body, or one that ends a text selection.
+ * Every card that reads on a press checks this first, so a link or a selection reads on no surface.
+ */
+export function notEngaging(event: Event): boolean {
+	return !!(event.target as Element | null)?.closest?.('a') || !(window.getSelection()?.isCollapsed ?? true);
+}
+
+/**
  * The one place a thread decides it is read. `engage` is every way the person engages with it: a press anywhere on its card
  * (its number disc and controls included), a press on its highlight, marker, image tag or jump control (a pick), opening it
  * from a list, sheet, popover or drawer, or moving focus into its reply field. Each reads what is unread at that moment,
@@ -11,14 +19,6 @@ import type { CommentThreadData } from './CommentThreadData';
  * while it was open is read when the person lets it go; closing a thread nobody engaged with reads nothing.
  * A chat thread stamps each unread answer; a document thread stamps its latest unread item.
  */
-/**
- * A press that is not an engagement with the thread it lands in: one on a link in the body, or one that ends a text selection.
- * Every card that reads on a press checks this first, so a link or a selection reads on no surface.
- */
-export function notEngaging(event: Event): boolean {
-	return !!(event.target as Element | null)?.closest?.('a') || !(window.getSelection()?.isCollapsed ?? true);
-}
-
 export function createThreadEngagement(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
 	let quiet = false;
 	let engaged = false;
