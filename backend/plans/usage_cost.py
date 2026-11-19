@@ -37,7 +37,7 @@ def stored_tokens(connection, column: str, ids: list[str], extra: tuple[str, ...
     the stored groups do not yet cover every node, and for any id whose groups hold an odd total. Rows come
     back in the ledger read's order: by ``column`` then ``extra``.
     """
-    if not ids or not node_usage_groups.ready(connection).complete:
+    if not ids or not node_usage_groups.ready(connection):
         return rows_in(connection, ledger_sql, ids)
     group = ",".join((column, *extra))
     rows = rows_in(connection, f"""SELECT {group},{STORED_TOKENS},SUM(total_odd) AS odd FROM {NODE_GROUPS_TABLE}
@@ -79,7 +79,7 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]], *, include_tur
     # Each id list is one JSON parameter, so no list is chunked and no row is read twice.
     # Node and commitment ids read the stored groups (``core.node_usage_groups``) once every node
     # is rebuilt under the current definition: the same grouped rows, from far fewer stored ones.
-    stored = set(wanted) <= _STORED_COLUMNS and node_usage_groups.ready(connection).complete
+    stored = set(wanted) <= _STORED_COLUMNS and node_usage_groups.ready(connection)
     alias = "g" if stored else "u"
     keys = {column: f"{alias}.{column}" for column in wanted}
     if include_turns:

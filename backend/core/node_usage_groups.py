@@ -10,8 +10,9 @@ depends on Measurement's classification SQL:
   classified replaces the triggers and rebuilds the rows;
 * ``ensure``, which does that before the server serves, from ``init_db``, in
   short transactions over ``plan_node_id`` ranges, recording how far it got;
-* ``ready``, which tells a reader which nodes the current definition covers, so
-  every other node is read from the ledger as before;
+* ``ready``, which tells a reader whether every node is rebuilt under the current
+  definition; until then (a tool that ran the migrations but not ``ensure``) it
+  reads the ledger as before;
 * ``recount``, the independent check: Measurement's own grouped read over the
   ledger, which the stored rows must equal.
 
@@ -24,7 +25,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
@@ -81,7 +81,8 @@ _COLUMNS = ("plan_node_id", "group_key", *_CLASSES, *_KEY[1:], "records", *_SUMS
 def _add(alias: str) -> str:
     """One upsert adding the row named ``alias`` to its group, creating the group when absent.
 
-    The classes are computed once, in the inner select; the primary key finds the group.
+    The classes are computed once, in the inner select; the primary key finds the group. A row
+    with no node (an update that clears its binding) adds nothing.
     """
     values = ",".join((f"{alias}.plan_node_id", _group_key(alias), *(f"c.{name}" for name in _CLASSES),
                        *(f"{alias}.{name}" for name in _KEY[1:]), "1", *_row_sums(alias, "c.admission"),
@@ -89,7 +90,8 @@ def _add(alias: str) -> str:
     classes = ",".join(f"{expression} AS {name}" for name, expression in zip(_CLASSES, _classes(alias)))
     sums = ",".join(f"{name}={name}+excluded.{name}" for name in _SUMS)
     return f"""
-        INSERT INTO llm_usage_node_groups({','.join(_COLUMNS)}) SELECT {values} FROM (SELECT {classes}) c WHERE true
+        INSERT INTO llm_usage_node_groups({','.join(_COLUMNS)}) SELECT {values} FROM (SELECT {classes}) c
+        WHERE {alias}.plan_node_id IS NOT NULL
         ON CONFLICT(plan_node_id,group_key,{','.join(_CLASSES)}) DO UPDATE SET
           records=records+1,{sums},last_at=MAX(last_at,excluded.last_at);"""
 
@@ -141,35 +143,14 @@ def definition() -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-@dataclass(frozen=True)
-class Coverage:
-    """Which nodes the stored groups answer for under the current definition."""
+def ready(db) -> bool:
+    """Whether the stored groups answer for every node under this build's definition.
 
-    complete: bool
-    rebuilt_below: str
-
-    def covers(self, node_id: str) -> bool:
-        return self.complete or str(node_id) < self.rebuilt_below
-
-    def params(self) -> dict[str, Any]:
-        """Binds for a SQL reader's ``(:groups_complete=1 OR node_id<:groups_below)``."""
-        return {"groups_complete": int(self.complete), "groups_below": self.rebuilt_below}
-
-
-NO_COVERAGE = Coverage(False, "")
-
-
-def ready(db) -> Coverage:
-    """The nodes a reader may take from the stored groups; ``NO_COVERAGE`` until a rebuild under this definition."""
-    try:
-        row = db.execute("SELECT definition,rebuilt_below,complete FROM llm_usage_node_state WHERE id=1").fetchone()
-    except Exception as error:  # a database without the table (older fixture) reads the ledger
-        if "no such table" in str(error):
-            return NO_COVERAGE
-        raise
-    if row is None or row[0] != definition():
-        return NO_COVERAGE
-    return Coverage(bool(row[2]), str(row[1]))
+    ``ensure`` makes it true before the server serves. ``rebuilt_below`` only lets an
+    interrupted start resume; no reader takes part of a rebuild.
+    """
+    row = db.execute("SELECT definition,complete FROM llm_usage_node_state WHERE id=1").fetchone()
+    return row is not None and row[0] == definition() and bool(row[1])
 
 
 def _installed(db) -> dict[str, str]:
@@ -242,11 +223,9 @@ def ensure(db) -> dict[str, Any]:
     When the definition or the installed triggers differ from this build's, the
     triggers are replaced and every node is rebuilt from the ledger, a ``REBUILD_ROWS``
     range per transaction; a start that stops part way resumes from ``rebuilt_below``.
-    Readers take only covered nodes from the groups meanwhile (``ready``).
+    Readers read the ledger until the rebuild completes (``ready``).
     """
     started = time.perf_counter()
-    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_usage_node_state'").fetchone() is None:
-        return {"rebuilt": False, "reason": "no_table"}
     state = db.execute("SELECT definition,rebuilt_below,complete FROM llm_usage_node_state WHERE id=1").fetchone()
     if _installed(db) != trigger_sql() or state is None or state[0] != definition():
         _adopt(db)

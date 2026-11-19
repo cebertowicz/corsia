@@ -81,9 +81,9 @@ def _figures(db, nodes: list[str]):
 
 def _assert_exact(db, monkeypatch, nodes: list[str]) -> None:
     assert groups.recount(db) == []
-    assert groups.ready(db).complete
+    assert groups.ready(db)
     with monkeypatch.context() as patch:
-        patch.setattr(groups, "ready", lambda _db: groups.NO_COVERAGE)
+        patch.setattr(groups, "ready", lambda _db: False)
         ledger = _figures(db, nodes)
     assert _figures(db, nodes) == ledger
 
@@ -150,6 +150,17 @@ def test_attribution_and_token_changes_move_the_contribution(db, monkeypatch):
     _assert_exact(db, monkeypatch, nodes)
 
 
+def test_clearing_a_rows_binding_takes_it_out_of_its_group(db, monkeypatch):
+    nodes = _mixed(db)
+    cleared = db.execute("SELECT COUNT(*) FROM llm_usage WHERE plan_node_id='b'").fetchone()[0]
+    db.execute("UPDATE llm_usage SET plan_id=NULL,plan_node_id=NULL,plan_attempt_id=NULL,plan_commitment_id=NULL,"
+               "plan_usage_role=NULL WHERE plan_node_id='b'")
+    db.commit()
+    assert cleared and db.execute("SELECT COUNT(*) FROM llm_usage_node_groups WHERE plan_node_id='b'").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM llm_usage_node_groups WHERE plan_node_id IS NULL").fetchone()[0] == 0
+    _assert_exact(db, monkeypatch, nodes)
+
+
 def test_a_node_move_changes_no_stored_row(db, monkeypatch):
     nodes = _mixed(db)
     _node(db, "c")
@@ -195,16 +206,16 @@ def test_a_changed_definition_rebuilds_in_node_batches_and_reads_stay_exact_part
     db.execute("DROP TRIGGER llm_usage_node_groups_insert")
     db.execute("DELETE FROM llm_usage_node_groups WHERE plan_node_id='a'")  # drift the old rows
     db.commit()
-    assert groups.ready(db) == groups.NO_COVERAGE
+    assert not groups.ready(db)
     with monkeypatch.context() as patch:
-        patch.setattr(groups, "ready", lambda _db: groups.NO_COVERAGE)
+        patch.setattr(groups, "ready", lambda _db: False)
         ledger = _figures(db, nodes)
     assert _figures(db, nodes) == ledger
-    # Stop part way: only node a's batch is rebuilt.
+    # Stop part way: only node a's batch is rebuilt, and readers still read the ledger.
     monkeypatch.setattr(groups, "REBUILD_ROWS", 3)
     groups._adopt(db)
     groups._rebuild_batch(db, "", "b")
-    assert groups.ready(db) == groups.Coverage(False, "b")
+    assert not groups.ready(db)
     assert groups.recount(db, ["a"]) == []
     assert _figures(db, nodes) == ledger
     result = groups.ensure(db)
@@ -230,7 +241,7 @@ def test_where_to_look_probes_each_chain_node_by_key_on_both_paths(db):
     from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 
     db.execute(CHAIN_DDL)
-    for coverage in ({"groups_complete": 1, "groups_below": ""}, {"groups_complete": 0, "groups_below": ""}):
+    for coverage in ({"groups_complete": 1}, {"groups_complete": 0}):
         details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE), coverage)]
         reads = sorted(detail for detail in details if detail.startswith(("SEARCH g ", "SEARCH l ", "SEARCH u ", "SCAN g", "SCAN l", "SCAN u")))
         assert reads == [

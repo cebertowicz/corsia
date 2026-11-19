@@ -71,9 +71,9 @@ _SEEDED_CHAIN_ROWS = f"({_ACCEPTED_ROWS} UNION ALL {_SEED_ROWS})"
 
 
 # A chain node's stored groups (``core.node_usage_groups``) are its calls up to settlement exactly when the
-# current definition has rebuilt that node and no group holds a call later than ``settled_at`` (``last_at`` is
+# current definition has rebuilt every node and no group holds a call later than ``settled_at`` (``last_at`` is
 # never below a group's latest call). Any other node is read from the ledger, as before.
-_STORED_EXACT = ("(:groups_complete=1 OR x.node_id<:groups_below) AND NOT EXISTS ("
+_STORED_EXACT = (":groups_complete=1 AND NOT EXISTS ("
                  "SELECT 1 FROM llm_usage_node_groups l WHERE l.plan_node_id=x.node_id AND l.last_at>x.settled_at)")
 
 
@@ -129,7 +129,7 @@ def query_model_costs(
     :func:`materialize_chain` filled for them (seeds included, if it was seeded: their rows carry no period and
     their own ``task_id``), so a caller that also reads the gaps walks the chains once."""
     prefix, source, bound = _chain_source(params, task_ids, chain_rows)
-    bound = {**bound, **node_usage_groups.ready(db).params()}
+    bound = {**bound, "groups_complete": int(node_usage_groups.ready(db))}
     rows = []
     for row in (dict(item) for item in fetch_all(db, prefix + _cost_sql(source), bound)):
         identity = resolve(row)
