@@ -38,7 +38,8 @@ WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 # Measured Nov 18 on this Mac: lsof +D took up to 2.60 s on worktrees with dependencies,
 # a lower bound (the agent sandbox hides other processes from lsof). 60 s is headroom.
 LSOF_TIMEOUT_SECONDS = 60.0
-# No reading: timing the open-PR list would itself be a bulk GitHub read.
+# No reading yet: nothing records how long the open-PR list below takes. Each pass
+# already makes that call, so its duration can be recorded with no extra GitHub read.
 GH_TIMEOUT_SECONDS = 60.0
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,

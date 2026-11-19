@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from automation.continuation.loop import CONTINUATION_SWEEP_INTERVAL
+from automation.continuation.cadence import CONTINUATION_SWEEP_INTERVAL
 from automation.schedules import Schedule, _parse, _row, first_cadence_run, next_slot
 from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
