@@ -102,7 +102,8 @@ def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str) -> RunRepor
     if run.timed_out:
         return _failure(
             schedule, "timeout",
-            f"did not finish within {schedule.timeout_seconds} s and was stopped",
+            f"did not finish within {schedule.timeout_seconds} s and was stopped; "
+            "if it needs longer, cancel it and schedule it again with a larger timeout_seconds",
         )
     if run.over_cap:
         return _failure(

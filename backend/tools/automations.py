@@ -301,7 +301,6 @@ class AutomationScheduleTool(Tool):
                 "timeout_seconds": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": script_schedules.MAX_TIMEOUT_SECONDS,
                     "description": "script kind: stop a run after this long. Default 60.",
                 },
             },
