@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from plans import service
 from plans.review_settle import REVIEW_FAILED, VERDICT_ELSEWHERE, VERDICT_REQUIRED
 from prompts import plan_wakes as wakes_text
@@ -187,16 +189,23 @@ def test_a_pass_needs_a_pass_on_every_returned_step(db):
     assert json.loads(told.split("\n", 1)[1])["review"]["evidence"] == "Totals right.\n\nHeading right."
 
 
-def test_the_reviewer_cannot_finish_with_mark_done(db):
-    """mark_done would return the review with no verdict and leave it to its author."""
+@pytest.mark.parametrize(("operation", "params"), [("mark_done", ACCEPT), ("fail", {"evidence": "Totals wrong"})])
+def test_the_reviewer_cannot_end_its_work_without_a_verdict(db, operation, params):
+    """mark_done would return the review with no verdict; a failed step is not among the
+    returned steps, so a pass on another step would accept a review with a failed check."""
     from plans.review_settle import VERDICT_NOT_DONE
 
-    plan, _phase, steps = run(db)
+    plan, _phase, steps = run(db, THREE)
     build_done(db, plan.id, steps["build"])
     hand(db, steps["review"], "reviewer")
     child, node = work(db, "reviewer")
 
-    assert act(db, child, "mark_done", node, as_thread="reviewer", **ACCEPT) == VERDICT_NOT_DONE
+    assert act(db, child, operation, node, as_thread="reviewer", **params) == VERDICT_NOT_DONE
+    assert act(db, child, "request_review", node, as_thread="reviewer", evidence=FINDINGS, verdict="fail")
+    submit(db, "reviewer", verdict="pass", evidence="Heading checked; right.")
+    assert steps["review"] in harvest(db)
+    review = service._node_row(db, steps["review"])
+    assert (review["state"], review["sent_back"]) == ("closed", 1)
     hand(db, steps["build"], "builder")
     builder_plan, built = work(db, "builder")
-    assert not isinstance(act(db, builder_plan, "mark_done", built, as_thread="builder", **ACCEPT), str)
+    assert not isinstance(act(db, builder_plan, operation, built, as_thread="builder", **params), str)

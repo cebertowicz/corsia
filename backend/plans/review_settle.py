@@ -33,10 +33,10 @@ VERDICT_REQUIRED = (
     "This step is a review you were handed: request_review needs verdict 'pass' or 'fail', "
     "with your findings in evidence. The verdict settles the review; you change nothing yourself."
 )
-#: Refusal R1 for mark_done: the reviewer finishes its work without a verdict.
+#: Refusal R1 for mark_done and fail: the reviewer ends its work without a verdict.
 VERDICT_NOT_DONE = (
     "This step is a review you were handed: finish it with request_review and verdict 'pass' or 'fail', "
-    "with your findings in evidence, not mark_done."
+    "with your findings in evidence, not mark_done or fail. close_node a step a new brief replaced."
 )
 #: Refusal R2: a verdict anywhere else.
 VERDICT_ELSEWHERE = "verdict is only for the reviewer of a review step; submit this step with evidence alone."
@@ -84,12 +84,16 @@ def _is_reviewer(db, node_id: str, thread_id: str | None) -> bool:
 def check_verdict(db, node_id: str, thread_id: str | None, verdict, *, operation: str = "request_review") -> None:
     """Require a verdict from the reviewer of a review step and refuse one anywhere else.
 
-    The reviewer finishes its work only through request_review, so a mark_done of
-    its own is refused: a return with no verdict would leave the review to its author.
+    The reviewer finishes its work only through request_review, so its own mark_done
+    or fail is refused: a mark_done would return the review with no verdict, and a
+    failed step is not among the returned steps whose verdicts settle it, so a pass
+    on another step would accept a review with a failed check.
     """
-    if operation == "mark_done":
+    if operation in ("mark_done", "fail"):
         if _is_reviewer(db, node_id, thread_id):
             raise service.PlanError(VERDICT_NOT_DONE)
+        return
+    if operation != "request_review":
         return
     if verdict is not None and verdict not in VERDICTS:
         raise service.PlanInputError("verdict must be 'pass' or 'fail'")
