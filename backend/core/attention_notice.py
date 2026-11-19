@@ -29,8 +29,9 @@ logged and the result goes out without the line, never as an error.
 
 Both live projection paths call this per result, beside the plan and
 repository notices: native in ``core.turns_steps`` and the Claude Code/Codex
-bridge in ``subagents.harness_tool_bridge``. Nothing is persisted, so a
-rebuilt history omits the line. It reads the database and the document's
+bridge in ``subagents.harness_tool_bridge``. The line itself is not persisted,
+so a rebuilt history omits it; an update's row records only when its notice
+was shown (``message_update_state.notice_at``), for Measurement. It reads the database and the document's
 file, so it must run off the event loop.
 
 Cost: a saved update reads its own message row; linked documents additionally
@@ -185,7 +186,26 @@ def _update_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
     notice = f"{LABEL} Your update: {describe(update_measure)}."
     if linked:
         notice += " " + _render_update(measured, others).removeprefix(f"{LABEL} ")
+    _mark_notice_shown(thread_id, saved.group(1))
     return notice + "\n" + _CHECK + " (replace it while it is unseen)"
+
+
+def _mark_notice_shown(thread_id: str, message_id: str) -> None:
+    """Record the first time this update's check was shown; a failed write only loses the reading."""
+    from infra.database import TransactionOwnershipError, write_transaction
+    from infra.db_connection import LaneWriteError
+    from infra.time import utc_now_iso
+
+    try:
+        with write_transaction(None, scope="update_notice_shown") as conn:
+            conn.execute(
+                "UPDATE message_update_state SET notice_at=COALESCE(notice_at,?)"
+                " WHERE message_id=? AND thread_id=?",
+                (utc_now_iso(), message_id, thread_id),
+            )
+    # The notice still goes out: the call has taken effect and the line is the agent's check.
+    except (sqlite3.Error, TransactionOwnershipError, LaneWriteError):
+        log.warning("attention notice: could not record notice time for %s", message_id, exc_info=True)
 
 
 def _decision_notice(thread_id: str, arguments: dict, result: Any) -> str | None:

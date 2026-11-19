@@ -282,24 +282,24 @@ def model_family_sql(grain: Grain, scope_threads: str) -> str:
     """
 
 
-#: An update its agent replaced this soon after posting it was taken back in answer to what the post
-#: returned (the attention check), not overtaken by later news.
-REPLACED_SOON_MINUTES = 15
+_REPLACED_AFTER_NOTICE = "s.replaced_at IS NOT NULL AND s.replaced_at >= s.notice_at"
 
 
 def update_family_sql(grain: Grain, scope_threads: str) -> str:
-    """Return the scope's posted updates per period and how many were replaced soon after posting.
+    """Return, per period, the scope's updates shown the check notice, how many their agent replaced
+    after it, and each such replacement's delay from the notice as ``id:seconds``.
 
-    Only an unseen update can be replaced (``infra.message_update_state.validate_targets``), so the
-    count is of updates the person never read in their first form.
+    The rule and its series live in ``api.measurement_updates``. An update with no notice time (posted
+    before it was recorded, or whose notice could not be read) had no notice to answer, so it is left out.
     """
     return f"""
       SELECT {grain.bucket('s.posted_at')} AS period,COUNT(*) AS n,
-        SUM(CASE WHEN s.replaced_at IS NOT NULL
-                  AND (julianday(s.replaced_at)-julianday(s.posted_at))*1440 <= {REPLACED_SOON_MINUTES}
-                 THEN 1 ELSE 0 END) AS replaced_soon
+        SUM(CASE WHEN {_REPLACED_AFTER_NOTICE} THEN 1 ELSE 0 END) AS replaced_after_notice,
+        GROUP_CONCAT(CASE WHEN {_REPLACED_AFTER_NOTICE} THEN s.message_id || ':' ||
+          CAST(ROUND((julianday(s.replaced_at)-julianday(s.notice_at))*86400) AS INTEGER) END) AS delays
       FROM message_update_state s
-      WHERE s.update_kind='post_update' AND s.thread_id IN (SELECT id FROM {scope_threads})
+      WHERE s.update_kind='post_update' AND s.notice_at IS NOT NULL
+        AND s.thread_id IN (SELECT id FROM {scope_threads})
         AND {range_filter("s.posted_at")} GROUP BY period ORDER BY period
     """
 
@@ -318,7 +318,9 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
     grain is refused rather than answered with scope-wide rows.
     """
     if family == "updates":  # reads no usage, so it skips the rollup bound usage_params refreshes
-        return _in_range(db.execute(update_family_sql(params["grain"], PREPARED_SCOPE), query_params(params)).fetchall())
+        from api.measurement_updates import update_rows
+
+        return update_rows(_in_range(db.execute(update_family_sql(params["grain"], PREPARED_SCOPE), query_params(params)).fetchall()))
     bound = usage_params(db, params)
     grain = bound["grain"]
     scope_threads, outcomes = PREPARED_SCOPE, PREPARED_OUTCOMES
