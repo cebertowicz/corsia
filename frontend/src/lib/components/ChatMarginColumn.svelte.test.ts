@@ -198,3 +198,63 @@ it('keeps an unsent reply when the canvas narrows and the same thread opens in i
 	expect(popover.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('The one in the closet');
 	chatCommentDrafts.set('lost', '');
 });
+
+it('picks a card on a press on its body, and never on a press on a link in it or one that ends a text selection', () => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => { step(0); return 1; });
+	transcript(); thread();
+	messages.update((rows) => rows.map((row) => ({ ...row, chat_comments: row.chat_comments?.map((item) => item.id === 'kept' ? { ...item, note: 'See [the guide](https://example.com/guide) first.' } : item) })) as never);
+	const picks: string[] = [];
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
+	flushSync();
+	const card = scroller.querySelector<HTMLElement>('[data-margin-card="kept"] .chat-margin-card')!;
+	const link = card.querySelector<HTMLAnchorElement>('a')!;
+	expect(link).not.toBeNull();
+	link.addEventListener('click', (event) => event.preventDefault());
+	link.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+	link.click();
+	expect(picks).toEqual([]);
+	// A press that ends a text selection on the card picks nothing either.
+	const selection = window.getSelection()!;
+	const range = document.createRange();
+	range.selectNodeContents(card.querySelector('.ct')!);
+	selection.removeAllRanges(); selection.addRange(range);
+	card.querySelector<HTMLElement>('.ct')!.click();
+	expect(picks).toEqual([]);
+	selection.removeAllRanges();
+	card.querySelector<HTMLElement>('.ct')!.click();
+	expect(picks).toEqual(['kept']);
+});
+
+it('picks nothing for a drag that selects text on a card, though the press focused the card before the selection existed', () => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => { step(0); return 1; });
+	transcript(); thread();
+	const picks: string[] = [];
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
+	flushSync();
+	const card = scroller.querySelector<HTMLElement>('[data-margin-card="kept"] .chat-margin-card')!;
+	const focusable = card.querySelector<HTMLElement>('.chat-comment-thread')!;
+	const selection = window.getSelection()!;
+	selection.removeAllRanges();
+	// Down: the focusable thread takes focus while nothing is selected yet. The drag selects; the release ends it.
+	card.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	focusable.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+	const range = document.createRange();
+	range.selectNodeContents(card.querySelector('.ct')!);
+	selection.addRange(range);
+	card.dispatchEvent(new Event('pointerup', { bubbles: true }));
+	card.querySelector<HTMLElement>('.ct')!.click();
+	expect(picks).toEqual([]);
+	selection.removeAllRanges();
+	focusable.blur();
+	// A plain press that selects nothing picks the card on its release.
+	card.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	focusable.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+	expect(picks).toEqual([]);
+	card.dispatchEvent(new Event('pointerup', { bubbles: true }));
+	expect(picks).toEqual(['kept']);
+	// Focus from the keyboard picks at once.
+	focusable.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+	expect(picks).toEqual(['kept', 'kept']);
+});
