@@ -41,7 +41,7 @@ def _script(tmp_path: Path, body: str = "print('x')") -> Path:
     return path
 
 
-def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner"):
+def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner", timeout=30):
     path = _script(tmp_path)
     return store.create_script(
         thread,
@@ -51,7 +51,7 @@ def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner")
         cadence_seconds=cadence,
         series=series
         or [store.Series("cost", "usd", 0.0, 10.0)],
-        timeout_seconds=30,
+        timeout_seconds=timeout,
         now=now,
         db=db,
     )
@@ -664,3 +664,16 @@ def test_the_cadence_floor_is_the_sweep_interval_and_has_no_ceiling(tmp_path):
     db = _db()
     _register(db, tmp_path, cadence=store.MIN_CADENCE_SECONDS)
     _register(db, tmp_path, cadence=31 * 24 * 60 * 60, thread="owner")
+
+
+def test_the_run_timeout_has_a_floor_and_no_ceiling(tmp_path):
+    """The author sets how long a run may take; a slow machine's real need is never refused."""
+    db = _db()
+    with pytest.raises(ValueError, match="at least 1"):
+        _register(db, tmp_path, timeout=0)
+    row = _register(db, tmp_path, timeout=24 * 60 * 60)
+    assert row.timeout_seconds == 24 * 60 * 60
+    from automation.script_readings import build_report
+
+    report = build_report(row, _run(timed_out=True), run_id="r")
+    assert "larger timeout_seconds" in report.error
