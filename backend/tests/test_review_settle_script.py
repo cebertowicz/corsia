@@ -8,27 +8,14 @@ from plans import review_settle_script as script, service
 from plans.fresh_reviewer import NOT_FRESH
 from plans.review_settle import VERDICT_ELSEWHERE
 from tests.child_parent_notice_helpers import db
-from tests.review_settle_helpers import act, build_done, ended, hand, harvest, revision_of, run, submit, wakes
+from tests.review_settle_helpers import TWO, act, build_done, ended, hand, harvest, revision_of, run, submit, wakes
 
 __all__ = ["db"]
 
 
 def scripted(db):
-    """A run whose review step names a settle script, its build accepted and the review started.
-
-    Nothing writes ``workflow_settle`` until the ``settle:`` step field lands, and events are
-    append-only, so the key is added as the review step's creation event is written.
-    """
-    write = service._event
-
-    def with_settle(connection, node_id, event, *args, payload=None, **kwargs):
-        if event == "node_created" and (payload or {}).get("workflow_by") == "reviewer":
-            payload = {**payload, "workflow_settle": "check-totals"}
-        return write(connection, node_id, event, *args, payload=payload, **kwargs)
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(service, "_event", with_settle)
-        plan, phase, steps = run(db)
+    """A run whose review step names a settle script (``settle:``), its build accepted and the review started."""
+    plan, phase, steps = run(db, [TWO[0], {**TWO[1], "settle": "check-totals"}])
     build_done(db, plan.id, steps["build"])
     review = steps["review"]
     assert script.step_settle_script(db, review) == "check-totals"

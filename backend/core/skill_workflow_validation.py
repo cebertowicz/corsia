@@ -24,6 +24,7 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "instruction",
         "by",
         "gate",
+        "settle",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
@@ -64,6 +65,8 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
         errors.append(f"{label}.gate must be one of acceptance, alignment")
     elif "gate" in step and "workflow" in step:
         errors.append(f"{label}.gate can't be set on a step that runs a workflow; set gate on that workflow's own steps")
+    if "settle" in step and (text_value(step["settle"]) is None or step.get("by") != "reviewer"):
+        errors.append(f"{label}.settle must name a settle script, on a step with by: reviewer")
     if "instruction" in step and not _is_heading(step["instruction"]):
         errors.append(f"{label}.instruction must be a SKILL.md heading, such as '## Draft'")
     quality = step.get("quality")
