@@ -36,6 +36,23 @@ def test_an_agent_that_left_the_chat_is_not_named(isolated_db):
     assert _annotated(db, artifact, [root])[root["id"]] == ["owner"]
 
 
+def test_a_reply_and_a_new_comment_list_the_documents_recipients_in_the_same_order(isolated_db):
+    from registry.document_supervisor import SUPERVISOR_KEY
+    from registry.identity_metadata import merge_identity_metadata
+
+    db = get_db()
+    for name in ("owner", "picked", "third"):
+        seed_thread(db, name)
+    artifact_id = seed_document(db, "owner")
+    merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: "picked"})
+    db.commit()
+    artifact = registry_models.get_artifact(artifact_id, db=db)
+    root, _ = add_comment(db, artifact_id, author_id="third")  # neither the supervisor nor the owner has replied
+    new_comment = [entry["id"] for entry in comment_audience.annotate(db, artifact, [root])]
+    assert new_comment == ["picked", "owner"]
+    assert _annotated(db, artifact, [root])[root["id"]] == ["picked", "owner", "third"]
+
+
 def test_an_owner_that_is_not_a_thread_is_not_named(isolated_db):
     db = get_db()
     seed_thread(db, "first")

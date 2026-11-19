@@ -115,9 +115,11 @@ def recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
     return _resolve(document, comment, root, _thread_facts(db, [root_id])[root_id], ask_raised=ask_raised)
 
 
-def recipients_for_replies(db, artifact: dict[str, Any], roots: list[dict[str, Any]]) -> dict[str, tuple[str, ...]]:
-    """Who the person's next reply on each thread reaches, by the same rule as `recipients`, in a fixed number of reads."""
-    document = artifact_recipients(db, artifact)
+def recipients_for_replies(db, document: tuple[str, ...], roots: list[dict[str, Any]]) -> dict[str, tuple[str, ...]]:
+    """Who the person's next reply on each thread reaches, by the same rule as `recipients`, in a fixed number of reads.
+
+    ``document`` is the document's recipients (`artifact_recipients`), resolved once by the caller.
+    """
     facts = _thread_facts(db, [str(root["id"]) for root in roots])
     reply = {"author_kind": "user", "tagged_agent_ids": []}
     return {str(root["id"]): _resolve(document, reply, root, facts[str(root["id"])], ask_raised=False) for root in roots}
