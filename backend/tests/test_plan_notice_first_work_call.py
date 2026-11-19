@@ -114,7 +114,7 @@ async def _bridge(batch: list[dict], monkeypatch) -> list[str]:
 
     async def persist_delivery(**_kwargs):
         return SimpleNamespace(
-            invocation_id="inv", assistant_step_id="step",
+            invocation_id="inv", assistant_step_id="step", content="result\n",
             render_for_model=lambda **_kw: "result\n",
         )
 

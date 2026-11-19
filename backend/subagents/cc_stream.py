@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 OnEvent = Callable[[dict], Awaitable[object | None]]
 OnExit = Callable[[int | None, str], Awaitable[None]]
 
-STDOUT_LIMIT = 16 * 1024 * 1024
+STDOUT_LIMIT = 16 * 1024 * 1024  # No reading yet: the largest stream line is not recorded.
 
 
 class CCStreamSession:

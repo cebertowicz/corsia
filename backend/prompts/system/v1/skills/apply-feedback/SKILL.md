@@ -1,9 +1,14 @@
 ---
 name: apply-feedback
 description: Use when feedback (comment, correction, finding, failed check) arrives on your work, before you edit — change everything it touches, not just that spot.
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: "1"
 ---
 
 # Apply feedback to the whole
+
+**Applying these steps:** when a review fails or several findings arrive at once from someone else (a reviewer, the person, another agent), start one run (skill `task-discipline`, Declared workflows), whichever skill sent you here. The one exception is a workflow step that already covers this feedback: another workflow's step built this run for you, or the step you are in says to settle it there, as review-work's Weigh does. Then work inside that step and start none. For your own tests or checks failing while you work, or one small comment, follow the sections without a run.
 
 A comment points at one spot; the change it asks for nearly always reaches others. Patch only the spot and the person finds every gap themselves.
 
@@ -13,7 +18,7 @@ Read every open comment, the resolved ones on the same parts, and the person's o
 
 ## 2. Find the cause
 
-A comment or finding is evidence, not an instruction: check it against the current source first. Then ask what made the thing wrong and where else that is also true. Fix each shared cause once.
+A comment or finding is evidence, not an instruction: check it against the current source first. Then ask what made the thing wrong and where else that is also true. Fix each shared cause once. A suggested fix is one option, whoever made it: check it against the person's words and the requirements, and weigh it against the simplest alternative that removes the cause.
 
 - Wrong: "Agents shouldn't ask here" → edit that one step.
 - Right: also the option that assumed an ask, the example that showed one, the summary line and the linked document that promises the same behavior.
@@ -27,7 +32,7 @@ Search by concept, not only by the comment's words.
 - **Inside the result:** sections, examples, definitions, counts, status lines, open questions.
 - **Outside it:** documents that cite it, code and its callers, tests, plan tasks, skills, other owners' work that relies on it.
 
-Update each place inside the work you were authorized to do; for anything outside it, send its owner one message naming exactly what needs to move, or hold and ask. Delete what stopped being true. Feedback never widens your authority and must not grow the thing: add a term, section or option only if it replaces one.
+Settle each item one way: fix it; refute it with the evidence, in a reply where it was raised; or, if it is right but outside this work, file it as a follow-up where this work's follow-ups are kept, and say so. Update each place inside the work you were authorized to do; for anything outside it, send its owner one message naming exactly what needs to move, or hold and ask. Delete what stopped being true. Feedback never widens your authority and must not grow the thing: add a term, section or option only if it replaces one.
 
 ## 4. Re-read the whole as its audience
 
@@ -35,7 +40,7 @@ Top to bottom, cold, as the person who will use it: it still answers the origina
 
 ## 5. Close the loop
 
-Say what changed and where else: in a reply to each comment that needs one, or in the note the document section below describes. Hand back only once the re-read passes, or say what is still open.
+Say what changed and where else: in a reply to each comment that needs one, or in the note the document section below describes. Hand back only once the re-read passes, or say what is still open. If the feedback came from a check that failed, send the changed result back for that check once, to the same reviewer where you can.
 
 ## Documents you work on with the person
 

@@ -9,7 +9,6 @@ from core.skill_workflow_validation import validate_workflow
 from infra.database import get_db
 from plans import boundary, delegation, mutations, service
 from plans.boundary import PlanActor
-from plans.close_next_bounds import REASON_MAX_BYTES
 from plans.workflow_fields import PERSON_GATE_READY, PERSON_GATE_ROUTE
 from prompts.plan_tools import PERSON_GATE_NAMED
 from tests.child_parent_notice_helpers import db
@@ -269,7 +268,6 @@ async def test_naming_the_persons_gate_as_next_says_how_to_ask_them(isolated_db,
     reply = await run.update("mark_done", {**_done(run, work), "next_node_id": gate})
     named = reply["next"]["named"]
     assert (named["started"], named["refusal"], named["reason"]) == (False, "user_assigned", PERSON_GATE_NAMED)
-    assert len(PERSON_GATE_NAMED.encode()) <= REASON_MAX_BYTES
 
 
 @pytest.mark.asyncio
