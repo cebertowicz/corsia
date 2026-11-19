@@ -34,9 +34,9 @@ from infra.node_usage_schema import NODE_GROUPS_TABLE, NODE_USAGE_TABLES
 
 log = logging.getLogger(__name__)
 
-#: Ledger rows per rebuild transaction. At this size one transaction holds the
-#: write lock well under two seconds on a 900k-row ledger (see the PR evidence).
-REBUILD_ROWS = 50_000
+#: Ledger rows per rebuild transaction. A batch's write hold grows with the rows it
+#: reads and groups (about 0.1-0.2 s at this size on a 900k-row ledger; see the PR evidence).
+REBUILD_ROWS = 10_000
 
 _KEY = ("plan_node_id", "plan_commitment_id", "turn_id", "model", "context_manifest_id")
 _CLASSES = ("admission", "input_tier", "idle_hours")
@@ -73,6 +73,8 @@ def _row_sums(alias: str, admission: str | None = None) -> tuple[str, ...]:
     )
 
 
+#: Writes name ``llm_usage_node_groups`` (``NODE_GROUPS_TABLE``) literally: the plan-aggregate
+#: writer gate (tests/test_plan_aggregate_input_writers.py) flags any write whose table is a placeholder.
 _COLUMNS = ("plan_node_id", "group_key", *_CLASSES, *_KEY[1:], "records", *_SUMS, "last_at")
 
 
@@ -87,7 +89,7 @@ def _add(alias: str) -> str:
     classes = ",".join(f"{expression} AS {name}" for name, expression in zip(_CLASSES, _classes(alias)))
     sums = ",".join(f"{name}={name}+excluded.{name}" for name in _SUMS)
     return f"""
-        INSERT INTO {NODE_GROUPS_TABLE}({','.join(_COLUMNS)}) SELECT {values} FROM (SELECT {classes}) c WHERE true
+        INSERT INTO llm_usage_node_groups({','.join(_COLUMNS)}) SELECT {values} FROM (SELECT {classes}) c WHERE true
         ON CONFLICT(plan_node_id,group_key,{','.join(_CLASSES)}) DO UPDATE SET
           records=records+1,{sums},last_at=MAX(last_at,excluded.last_at);"""
 
@@ -101,8 +103,8 @@ def _remove(alias: str) -> str:
     classes = " AND ".join(f"{name}=({expression})" for name, expression in zip(_CLASSES, _classes(alias)))
     sums = ",".join(f"{name}={name}-{amount}" for name, amount in zip(_SUMS, _row_sums(alias, "admission")))
     return f"""
-        UPDATE {NODE_GROUPS_TABLE} SET records=records-1,{sums} WHERE {key} AND {classes};
-        DELETE FROM {NODE_GROUPS_TABLE} WHERE {key} AND records=0;"""
+        UPDATE llm_usage_node_groups SET records=records-1,{sums} WHERE {key} AND {classes};
+        DELETE FROM llm_usage_node_groups WHERE {key} AND records=0;"""
 
 
 @cache
@@ -221,9 +223,9 @@ def _rebuild_batch(db, low: str, high: str | None) -> None:
         if state is None or state[0] != definition() or state[2] or state[1] != low:
             return  # another start rebuilt this range
         bounds = {"low": low, "high": high}
-        db.execute(f"DELETE FROM {NODE_GROUPS_TABLE} WHERE plan_node_id>=:low{upper}", bounds)
+        db.execute(f"DELETE FROM llm_usage_node_groups WHERE plan_node_id>=:low{upper}", bounds)
         db.execute(
-            f"INSERT INTO {NODE_GROUPS_TABLE}({columns}) "
+            f"INSERT INTO llm_usage_node_groups({columns}) "
             + _grouped_select(f"u.plan_node_id>=:low{upper.replace('plan_node_id', 'u.plan_node_id')}"),
             bounds,
         )
