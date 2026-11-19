@@ -18,8 +18,8 @@ workflow:
       instruction: "## Check"
     - id: weigh
       title: Weigh and address the findings
-      required: true
-      check: "each failure weighed at its source and fixed or its rejection explained; changed result sent back once; anything still open goes into the hand-over"
+      required: false          # close with reason only when the reviewer returned PASS
+      workflow: apply-feedback
+      check: "apply-feedback completed on the reviewer's findings; anything still open goes into the hand-over"
       after: [check]
       difficulty: {default: standard}
-      instruction: "## Weigh"
