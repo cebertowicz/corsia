@@ -14,7 +14,7 @@ This is the floor under work that has no workflow of its own. It carries the ste
 
 ## Ground
 
-Start here, before acting. Models like you fail in two known ways: you start on the first thing that looks like the result, and you fill gaps with things that sound right. Write this block in the run phase's `intent`, one line per item for a small job, more for a large one; leave out a line only when it has nothing in it:
+Start here, before acting. Models like you fail in two known ways: you start on the first thing that looks like the result, and you fill gaps with things that sound right. Put only Goal and Done when in the run phase's `intent`: it is short, and every step of the run sees it, the reviewer's included. Write the whole block as the evidence you give when you finish the Ground step, one line per item for a small job, more for a large one; leave out a line only when it has nothing in it:
 
 ```
 Goal: <what the person wants to be true when this is done, and why they want it>
@@ -58,7 +58,7 @@ Optional. Do it when the result will be sent outside, is hard to undo, is large,
 
 ## Review
 
-Run skill `review-work` on the result before the person sees it, including any draft to be sent, published, paid, filed or deleted.
+CORSIA builds this step as a run of skill `review-work` under it: work through those steps on the result before the person sees it, including any draft to be sent, published, paid, filed or deleted. Start no second review run.
 
 ## Hand over
 

@@ -8,7 +8,7 @@ metadata:
 
 # Review work
 
-**Applying these steps:** when this skill's description covers the result, start one run (skill `task-discipline`, Declared workflows). A review workflow made for this kind of work comes first.
+**Applying these steps:** when this skill's description covers the result, start one run (skill `task-discipline`, Declared workflows). When another workflow's step already built this run for you, work in that one and start none. A review workflow made for this kind of work comes first.
 
 ## Brief
 

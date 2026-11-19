@@ -5,7 +5,7 @@ workflow:
     - id: ground
       title: Understand the ask and what is known
       required: true
-      check: "the run's intent holds Goal, Done when in the person's terms, Reaches, 1 to 3 Could be wrong if lines, Kind of work and First job; each Assumed line is marked checked, wrong, asked or stated"
+      check: "the run's intent holds only Goal and Done when, in the person's terms; this step's evidence holds the whole block, with Reaches, 1 to 3 Could be wrong if lines, Kind of work and First job, and each Assumed line marked checked, wrong, asked or stated"
       difficulty: {default: standard, hard_if: "the work is in a field whose rules the agent does not hold"}
       instruction: "## Ground"
     - id: premortem
