@@ -77,6 +77,17 @@ _DELEGATION_REFUSED_UNREACHABLE = (
     "thread is retired, so its result can never be harvested — fail or "
     "reject this node instead, then archive"
 )
+#: The same two refusals on a review step, which no agent fails.
+_REVIEW_DELEGATION_REFUSED = (
+    "archive requires this review step's delegation to be settled first: harvest "
+    "the reviewer's result, then accept or reject this node"
+)
+_REVIEW_DELEGATION_REFUSED_UNREACHABLE = (
+    "archive requires this review step's delegation to be settled first: the "
+    "reviewer's thread is retired, so hand the step to a new worker: start one "
+    "with delegate_task (plan_node_id='none'), then plan_update "
+    "replace_spawned_thread on this step"
+)
 
 
 def archive_node(node_id: str, *, actor_id: str | None = None,
@@ -292,15 +303,17 @@ def _require_settled_delegation(connection, node) -> None:
     differs, so ``fail_node``/``reject_review`` (unconditional transitions)
     are named instead when the child cannot be harvested from.
     """
-    from plans import delegation
+    from plans import delegation, workflow_fields
 
     spawned = node["spawned_thread_id"]
     if spawned is None:
         return
     if delegation._is_live_attachment(node):
+        review = workflow_fields.reviewer_step(connection, node["id"])
         if _child_thread_reachable(connection, spawned):
-            raise service.PlanError(_DELEGATION_REFUSED)
-        raise service.PlanError(_DELEGATION_REFUSED_UNREACHABLE)
+            raise service.PlanError(_REVIEW_DELEGATION_REFUSED if review else _DELEGATION_REFUSED)
+        raise service.PlanError(
+            _REVIEW_DELEGATION_REFUSED_UNREACHABLE if review else _DELEGATION_REFUSED_UNREACHABLE)
 
 
 def settle_watches(connection, node_id: str) -> None:
