@@ -13,7 +13,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
-	import { imageDraftKey } from '$lib/stores/keptCommentDrafts';
+	import { imageDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
@@ -88,10 +88,11 @@
 	export function refresh() {
 		if (artifactId) return reload(artifactId);
 	}
+	// An image inside a document keeps its own drafts (a new comment's and its replies'), apart from the document's and its other images'.
+	const draftKey = $derived(imageDraftKey(artifactId, inDocument ? src : ''));
 	const image = createImageComments({
 		artifactId: () => artifactId,
-		// An image inside a document keeps its own draft, apart from the document's and its other images'.
-		draftKey: () => imageDraftKey(artifactId, inDocument ? src : ''),
+		draftKey: () => draftKey,
 		threadId: () => target?.threadId ?? null,
 		readOnly: () => !canComment,
 		diagramSource: () => diagramSource,
@@ -307,6 +308,7 @@
 			{target}
 			{docPath}
 			{artifactId}
+			draftScope={draftKey}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
 			onSheetModalChange={(up) => { sheetUp = up; if (!up) lightbox?.clearSheet(); }}

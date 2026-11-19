@@ -9,6 +9,8 @@ import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 import { shouldReloadPresenceEdit } from '$lib/docPresence';
 import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
 
 /** One message per known reason the server refuses a comment's tags, picked by the refusal's `kind`. */
 const TAG_REFUSALS: Record<string, string> = {
@@ -144,10 +146,28 @@ export function reloadDocumentFeedback(
 /** Reply, resolve and agree on the open document's threads; a reply also tells the feedback status a comment arrived. */
 export function createThreadActions(artifactId: () => string | null, commentCreated: () => void, threadId: () => string | null = () => null) {
 	return {
-		async reply(id: string, text: string, taggedAgentIds: string[] = [], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
+		/**
+		 * Post a reply kept under `draftKey` (`replyDraftKey`): every press posts under the draft's one id, a failure keeps
+		 * the text with the reason the card shows, and text typed while it posted stays (`keptCommentDrafts.posted`).
+		 */
+		async reply(id: string, text: string, taggedAgentIds: string[] = [], mentions: MentionOccurrence[] = [], draftKey = '') {
 			const artifact = artifactId();
 			if (!artifact) return;
-			await submitDocumentComment(() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions));
+			keptCommentDrafts.clearError(draftKey);
+			const kept = keptCommentDrafts.get(draftKey);
+			const press = keptCommentDrafts.claim(draftKey, kept?.body ?? text, kept?.mentionSelection ?? createMentionSelection(text));
+			let failure = '';
+			try {
+				await submitDocumentComment(
+					() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions, press.clientId, press.again),
+					(_toastId, message) => { failure = message; },
+				);
+			} catch (error) {
+				const now = keptCommentDrafts.get(draftKey);
+				if (now && failure) keptCommentDrafts.fail(draftKey, now.body, now.mentionSelection, failure, error instanceof EarlierVersionPosted);
+				throw error;
+			}
+			keptCommentDrafts.posted(draftKey, text);
 			commentCreated();
 		},
 		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },

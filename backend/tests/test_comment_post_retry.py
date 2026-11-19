@@ -114,3 +114,26 @@ async def test_an_identity_refusal_reaches_the_browser_by_its_kind(monkeypatch):
     await document_control.handle_frame(object(), {"id": "u"}, {"type": "doc_reserve", "artifact_id": "a", "request_id": "r"})
     assert sent == [{"type": "doc_error", "artifact_id": "a", "request_id": "r", "kind": "identity_in_use",
                      "blocking": False, "message": "Comment identity is already in use"}]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_posted_again_under_its_drafts_id_is_stored_once(ownership_scope, tmp_path, monkeypatch):
+    """A reply's retry posts under the draft's one id: the server answers with the reply stored first, never a second one."""
+    _, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
+    app_loop.capture(asyncio.get_running_loop())
+    root = (await invoke("http", ownership_scope, entry, "root-thread"))["comment"]["id"]
+    app = FastAPI()
+    app.include_router(doc_comments.router)
+    url = f"/api/artifacts/{entry.artifact_id}/comments"
+    reply = dict(delivery_policy="immediate", parent_id=root, client_id="reply-one-id")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post(url, params={"token": OWNER_TOKEN}, json={**reply, "body": "Half a reply"})
+        again = await client.post(url, params={"token": OWNER_TOKEN}, json={**reply, "body": "Half a reply"})
+        # Changed after a press with no answer: still the stored reply, which the browser shows as the earlier version.
+        changed = await client.post(url, params={"token": OWNER_TOKEN}, json={**reply, "body": "Half a reply, changed"})
+    assert [r.status_code for r in (first, again, changed)] == [200, 200, 200], (first.text, again.text, changed.text)
+    assert {r.json()["comment"]["id"] for r in (first, again, changed)} == {"reply-one-id"}
+    assert changed.json()["comment"]["body"] == "Half a reply"
+    listed = await doc_comments.list_comments(entry.artifact_id, OWNER_TOKEN)
+    thread = next(c for c in listed["comments"] if c["id"] == root)
+    assert [r["id"] for r in thread["replies"]] == ["reply-one-id"]

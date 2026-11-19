@@ -3,6 +3,7 @@
 	import { loadMentionRoster } from './comments/mentionRoster.svelte';
 	import { createMentionSelection, type MentionOccurrence } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
+	import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 	import { get } from 'svelte/store';
 	import { Button } from './ui';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -40,7 +41,7 @@
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
-	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
+	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
 		state: CommentSurfaceState;
 		onThreadMissing?: (remaining: string[]) => void;
 		/** The column opened on its own at load, so opening it does not hide the sidebar or the Workspace panel. */
@@ -70,7 +71,8 @@
 		restoreFocus: () => void;
 		onFocus: (id: string, placement?: 'top') => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
-		onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+		/** `draftKey` keys the reply in `keptCommentDrafts` (CommentList). */
+		onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[], draftKey: string) => Promise<void>;
 		/** With `wait` the comment changes only once the request is answered; the promise says whether it was taken. */
 		onResolve: (id: string, resolved: boolean, wait?: boolean) => void | Promise<boolean>;
 		onAgree: (id: string, agreed: boolean) => void;
@@ -79,6 +81,8 @@
 		/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */
 		docPath?: string | null;
 		artifactId: string | null;
+		/** The document or image its replies are kept under (`documentDraftKey`, `imageDraftKey`): a reply being typed outlives this surface. */
+		draftScope?: string;
 		readOnly?: boolean;
 		/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 		onSuggestionBusy?: (busy: boolean, id?: string) => void;
@@ -152,14 +156,12 @@
 	const threadView = createListThreadView(() => drawer);
 	const openedComment = $derived(!margin && surfaceState?.kind === 'list' && threadView.id ? comments.find((comment) => comment.id === threadView.id) ?? null : null);
 	const draftTags = createMentionSelection();
-	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
 	$effect(() => { if (!draft) draftTags.clear(); });
-	let replyDrafts = $state<Record<string, string>>({});
-	let replySelections = $state<Record<string, [number, number]>>({});
+	const replyText = (id: string) => keptCommentDrafts.get(replyDraftKey(draftScope, id))?.body ?? '';
 	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
 	/** What the list holds. A document's margin column, popover and sheet hold the open threads; the resolved ones are only in the resolved list the header opens; an image's drawer has its own Filter. */
 	const view = $derived(image ? filter : 'open');
-	const held = keptThreads({ comments: () => comments, drafts: () => replyDrafts, leavesOnRelease: () => view === 'open', reduced: () => get(prefersReducedMotion), crossfaded: () => get(prefersReducedMotion) && sheetDrawer && surfaceState?.kind === 'list' });
+	const held = keptThreads({ comments: () => comments, draft: replyText, leavesOnRelease: () => view === 'open', reduced: () => get(prefersReducedMotion), crossfaded: () => get(prefersReducedMotion) && sheetDrawer && surfaceState?.kind === 'list' });
 	const unreadListed = retainUnreadList(() => surfaceState?.kind === 'list', () => comments);
 	const column = $derived(bounds?.closest<HTMLElement>('.leaf-body') ?? bounds);
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
@@ -210,7 +212,7 @@
 	/** A phone sheet showing one thread carries that thread's Agree and Resolve in its header row, apart from Close, so the card draws neither. */
 	const threadActionsUp = $derived(cardMode() === 'sheet' && sheet.state?.kind === 'thread' && displayed.length === 1);
 	const threadHead = $derived(threadActionsUp && !readOnly ? displayed[0] : undefined);
-	const ownClose = closeOnOwnResolve(() => threadActionsUp ? displayed[0] : undefined, (id) => !!(replyDrafts[id] ?? '').trim(), onClose);
+	const ownClose = closeOnOwnResolve(() => threadActionsUp ? displayed[0] : undefined, (id) => !!replyText(id).trim(), onClose);
 	const stackedTitle = $derived(sheet.state?.kind === 'thread' && sheet.state.ids && sheet.state.ids.length > 1 ? `${sheet.state.ids.length} comments` : null);
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
@@ -315,7 +317,7 @@
 
 {#snippet imageHead(row: unknown[])}<DocCommentImageHead {row} {images} />{/snippet}
 {#snippet threadList(items: DocComment[], reply?: boolean, inMargin?: boolean, underTextChanged?: boolean, flat?: boolean, replyView: 'recent' | 'all' | 'summary' = 'recent', actionsAbove?: boolean)}
-	<CommentList {actionsAbove} {replyView} onOpenThread={replyView === 'summary' ? threadView.open : undefined} {replyTags} {underTextChanged} {flat} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+	<CommentList {actionsAbove} {replyView} onOpenThread={replyView === 'summary' ? threadView.open : undefined} {draftScope} {underTextChanged} {flat} docPath={target?.path ?? docPath} leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 {/snippet}
 {#snippet threadActions()}{#if threadHead}<ThreadSheetActions head={threadHead} onAgree={onAgree} onResolve={(id) => ownClose.resolving(id, resolveThread(id, true))} />{/if}{/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->

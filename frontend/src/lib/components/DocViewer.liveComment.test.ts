@@ -10,7 +10,7 @@ import { encodeUpdate, textDigest } from '$lib/stores/documentWire';
 import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
 import { toasts } from '$lib/stores/toast';
 import { docComments } from '$lib/stores/docComments';

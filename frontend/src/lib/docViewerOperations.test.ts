@@ -20,7 +20,10 @@ import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshne
 import { emit } from '$lib/ws/events';
 import { createCommentRetryToast, createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
-import { RequestRefused } from '$lib/api/docs';
+import { RequestRefused, type ServerComment } from '$lib/api/docs';
+import { EarlierVersionPosted, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
+import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -175,5 +178,68 @@ describe('subscribeToDocumentCommentChanges', () => {
 		emit('doc_comment_changed', { artifact_id: 'artifact-current' });
 		expect(reload).toHaveBeenCalledTimes(1);
 		expect(reload).toHaveBeenCalledWith('artifact-current');
+	});
+});
+
+describe('a reply kept until it posts', () => {
+	const key = replyDraftKey('scope', 'root');
+	const row = { id: 'stored', author: 'you', author_kind: 'user', body: 'My reply', created_at: '2026-10-02T00:00:00Z' } as ServerComment;
+	function quiet() {
+		vi.mocked(addReply).mockReset();
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		return () => { report.mockRestore(); log.mockRestore(); keptCommentDrafts.reset(); vi.mocked(addReply).mockReset(); };
+	}
+
+	it('posts every press under the draft’s one id, keeps the reason a press failed, and lets it go once stored', async () => {
+		const restore = quiet();
+		try {
+			const commentCreated = vi.fn();
+			const actions = createThreadActions(() => 'artifact', commentCreated);
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			const first = vi.mocked(addReply).mock.calls[0];
+			expect(first[8]).toBe(false);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: "Couldn't post the comment — try again", clientId: first[7] });
+			await actions.reply('root', 'My reply', [], [], key);
+			const retry = vi.mocked(addReply).mock.calls[1];
+			expect(retry[7]).toBe(first[7]);
+			expect(retry[8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toBeUndefined();
+			expect(commentCreated).toHaveBeenCalledOnce();
+		} finally { restore(); }
+	});
+
+	it('keeps text typed while the reply posted, under a fresh id', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			const tags = createMentionSelection();
+			keptCommentDrafts.keepReply(key, 'My reply', tags);
+			let finish!: () => void;
+			vi.mocked(addReply).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+			const posting = actions.reply('root', 'My reply', [], [], key);
+			keptCommentDrafts.keepReply(key, 'My reply and more', tags);
+			finish(); await posting;
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply and more', mentionSelection: tags });
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
+	});
+
+	it('keeps changes made after an unanswered press, with the sentence, under a fresh id, when the earlier version was posted', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			const tags = createMentionSelection();
+			keptCommentDrafts.keepReply(key, 'My reply', tags);
+			keptCommentDrafts.claim(key, 'My reply', tags);
+			keptCommentDrafts.keepReply(key, 'My reply, changed', tags);
+			vi.mocked(addReply).mockRejectedValueOnce(new EarlierVersionPosted(row));
+			await expect(actions.reply('root', 'My reply, changed', [], [], key)).rejects.toBeInstanceOf(EarlierVersionPosted);
+			expect(vi.mocked(addReply).mock.calls[0][8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply, changed', error: EARLIER_VERSION_POSTED });
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
 	});
 });

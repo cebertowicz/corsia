@@ -29,7 +29,7 @@ import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
 const row = (id: string, number: number, x: number) => ({
@@ -383,6 +383,19 @@ describe('ImageCommentLightbox', () => {
 			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
 		});
 
+		it('keeps a reply typed on a thread when the viewer goes away and comes back', async () => {
+			// Picking a tag lands focus on its card's Reply field.
+			const field = () => document.activeElement as HTMLTextAreaElement;
+			const pick = async () => { tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); await settle(); expect(field().classList.contains('ct-input')).toBe(true); };
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await pick();
+			field().value = 'half a reply'; field().dispatchEvent(new Event('input', { bubbles: true })); await settle();
+			unmount(component!); component = null;
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await pick();
+			expect(field().value).toBe('half a reply');
+		});
+
 		it('does not focus a reply whose anchor is outside the canvas', async () => {
 			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 			const root = host.querySelector<HTMLElement>('.layout')!;
@@ -568,6 +581,20 @@ describe('ImageCommentLightbox', () => {
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'also-here' } });
 			expect(host.querySelector('[data-region-tag="2"]')!.getAttribute('aria-pressed')).toBe('true');
 			expect(document.body.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
+		});
+
+		// The overlay is keyed by the image it shows: Back to the document, or the next image, unmounts it.
+		it('keeps a reply typed on a thread when the overlay goes away and comes back', async () => {
+			for (const name of ['scrollTo', 'scrollIntoView']) {
+				Object.defineProperty(Element.prototype, name, { configurable: true, value: vi.fn() });
+				onTestFinished(() => { delete (Element.prototype as unknown as Record<string, unknown>)[name]; });
+			}
+			const field = () => document.body.querySelector<HTMLTextAreaElement>('[data-popover] .ct-input')!;
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here' } });
+			field().value = 'half a reply'; field().dispatchEvent(new Event('input', { bubbles: true })); await settle();
+			unmount(component!); component = null;
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here' } });
+			expect(field().value).toBe('half a reply');
 		});
 
 		it('opened to move a stale pin, starts placing it again', async () => {

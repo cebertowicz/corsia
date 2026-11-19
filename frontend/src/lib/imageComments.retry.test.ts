@@ -9,7 +9,7 @@ vi.mock('$lib/stores/toast', () => ({ toasts: { show: vi.fn(() => 'toast'), dism
 
 import { PostTimeoutError } from '$lib/api/boundedRequest';
 import { docComments, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { addDocImageComment } from '$lib/stores/imageRegionComments';
 import { resetCommentPostTiming } from '$lib/stores/commentPostTiming';
 import { createImageComments } from './imageComments.svelte';

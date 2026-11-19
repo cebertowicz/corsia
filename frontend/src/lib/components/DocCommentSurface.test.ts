@@ -22,6 +22,8 @@ import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { sidebarCollapsed } from '$lib/stores/ui';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from './comments/mentionSelection';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -79,6 +81,8 @@ afterEach(() => {
 	canvases.forEach((canvas) => canvas.remove()); canvases = [];
 	vi.unstubAllGlobals();
 	suggestionRefusals.set({});
+	// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+	keptCommentDrafts.reset();
 	vi.clearAllMocks();
 });
 
@@ -1041,5 +1045,53 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const decided = (id: string) => ({ ...suggestion, id, decision: 'accepted' as const, replies: [{ id: 'r', author: 'you', text: 'Thanks', at: 'now' }] });
 		render({ state: { kind: 'list' }, comments: [decided('a'), decided('b')] });
 		expect(document.body.textContent).not.toMatch(/accept all/i);
+	});
+});
+
+describe('DocCommentSurface: a reply being typed', () => {
+	const plain = { ...suggestion, replacement: undefined };
+	const scope = documentDraftKey(target);
+	const field = () => document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+	function type(text: string, caret: [number, number]) {
+		const input = field();
+		input.value = text; input.setSelectionRange(...caret);
+		input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	}
+	function again(overrides: Record<string, unknown> = {}) {
+		unmount(component!); component = null; host.remove();
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+	afterEach(() => { delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollIntoView; });
+	function open(overrides: Record<string, unknown> = {}) {
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+
+	// Every exit that loses a reply on dev (another conversation, another tab, the pane closed, Back on a phone) unmounts this surface.
+	it('keeps its text and caret when the surface goes away and comes back', () => {
+		open();
+		type('half a reply', [2, 6]);
+		again();
+		expect(field().value).toBe('half a reply');
+		expect([field().selectionStart, field().selectionEnd]).toEqual([2, 6]);
+	});
+
+	it('shows why it did not post under its field, and keeps the text', () => {
+		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment — try again');
+		open();
+		expect(field().value).toBe('half a reply');
+		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment — try again');
+	});
+
+	it('posts under its own key, and text typed while it posted stays in the field', async () => {
+		let finish!: () => void;
+		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+		open({ onReply });
+		type('first', [5, 5]);
+		field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); flushSync();
+		type('first and more', [14, 14]);
+		finish(); await tick(); await tick(); flushSync();
+		expect(field().value).toBe('first and more');
+		expect(onReply).toHaveBeenCalledWith('comment-1', 'first', [], [], replyDraftKey(scope, 'comment-1'));
 	});
 });

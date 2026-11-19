@@ -11,7 +11,7 @@
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
-	import { documentDraftKey } from '$lib/stores/keptCommentDrafts';
+	import { documentDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createPressReveal } from '$lib/docPressReveal.svelte';
@@ -376,6 +376,7 @@
 		onAgree={threadActions.agree}
 		{target}
 		artifactId={loadedArtifactId}
+		draftScope={documentDraftKey(target)}
 		readOnly={readonly || confirming}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}

@@ -14,7 +14,7 @@ import { encodeUpdate } from '$lib/stores/documentWire';
 import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { discardCommentDraft } from '$lib/stores/commentDraft';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
 import { docComments, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import { resetCommentPostTiming } from '$lib/stores/commentPostTiming';

@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
 import { commentDraft, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import { postLive } from '$lib/stores/liveCommentPost';
 import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';

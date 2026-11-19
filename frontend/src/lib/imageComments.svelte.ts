@@ -10,7 +10,7 @@ import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion, type ImagePress } from '$lib/stores/imageRegionComments';
 import { forgetDraft, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
-import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */

@@ -9,7 +9,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 const rect = () => new DOMRect(10, 10, 40, 20);

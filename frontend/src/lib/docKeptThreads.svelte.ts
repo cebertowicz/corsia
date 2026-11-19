@@ -11,7 +11,8 @@ import { leaveDuration } from '$lib/actions/leaveRow';
  */
 export function keptThreads(source: {
 	comments: () => Array<{ id: string; resolved: boolean }>;
-	drafts: () => Record<string, string>;
+	/** The reply being typed on a thread (`keptCommentDrafts`). */
+	draft: (id: string) => string;
 	/** Only the Open list drops a kept thread; the other filters list it either way. */
 	leavesOnRelease: () => boolean;
 	reduced: () => boolean;
@@ -21,7 +22,7 @@ export function keptThreads(source: {
 	/** Threads that were open when a reply to them was started. */
 	const started = new SvelteSet<string>();
 	const leaving = new SvelteSet<string>();
-	const typing = (id: string) => !!source.drafts()[id]?.trim();
+	const typing = (id: string) => !!source.draft(id).trim();
 	/** Resolved by someone else mid-reply, with the reply still unsent. */
 	const kept = (comment: { id: string; resolved: boolean }) => comment.resolved && started.has(comment.id) && typing(comment.id);
 	const timers = new Set<ReturnType<typeof setTimeout>>();
