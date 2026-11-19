@@ -45,6 +45,17 @@ def _recovery(monkeypatch, coroutine):
     monkeypatch.setattr(plans, "recover_person_comments", coroutine)
 
 
+async def _shutdown(task):
+    """Cancel the drive as shutdown does; it must finish cancelled within seconds, not hang."""
+    task.cancel()
+    done, _pending = await asyncio.wait({task}, timeout=5)
+    if not done:
+        task.cancel()  # unstick a hung drive so a failure here cannot hang the suite
+        await asyncio.gather(task, return_exceptions=True)
+    assert done, "the drive did not finish after shutdown cancelled it"
+    assert task.cancelled()
+
+
 async def test_recovery_failure_is_logged_and_does_not_fail_the_drive(isolated_db, monkeypatch, drive_parts):
     seen, done = drive_parts
     log = _Log()
@@ -85,9 +96,7 @@ async def test_recovery_hang_does_not_delay_other_startup_work_and_shutdown_canc
     assert log.has("info", "restart continuity drive complete")
     assert (seen.continuity, seen.settled) == (1, 1)
     assert not task.done() and not cancelled.is_set()
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await _shutdown(task)
     assert cancelled.is_set()
 
 
@@ -108,8 +117,6 @@ async def test_shutdown_cancel_during_drive_work_still_reaches_recovery(isolated
     never = asyncio.get_running_loop().create_future()
     task = asyncio.create_task(restart_startup.run_startup_drive(never, None, (), None, log))
     await asyncio.wait_for(started.wait(), 5)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await _shutdown(task)
     assert cancelled.is_set()
     assert not log.has("info", "restart continuity drive complete")
