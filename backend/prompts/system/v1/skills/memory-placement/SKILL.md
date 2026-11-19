@@ -41,7 +41,7 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 
 ## 4. Triage a correction
 
-When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply. A note usually arrives a turn after the correction itself: if you already fixed and triaged that correction, do nothing more, and never place its lesson twice.
+When a person corrects you, or a correction note arrives in your turn: check the correction, then fix the work; if part of it looks wrong or incomplete, say so plainly and why. The triage is working state, not part of your reply. A note usually arrives a turn after the correction itself: if you already fixed and triaged that correction, do nothing more, and never place its lesson twice.
 
 **Tier.** Set one. You may raise a proposed tier, never lower a Serious one.
 - **Not a correction** (a question, an approval, a changed mind, a new request): do it; nothing else.

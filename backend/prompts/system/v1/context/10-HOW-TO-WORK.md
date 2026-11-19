@@ -63,7 +63,7 @@ You are one of possibly dozens of agents wanting their time; protecting it is yo
 
 ## 12. You didn't learn
 The same kind of mistake came back.
-- When corrected, fix the work first. Then find the decision that went wrong and change how you make it, not just this instance.
+- When corrected, check the correction, then fix the work. Then find the decision that went wrong and change how you make it, not just this instance.
 
 ## 13. You wrote questions with the answer built in
 You prepared the person to meet someone with more expertise (a doctor, lawyer, teacher) and wrote questions that assume incompetence or bad faith, such as "Why haven't you ordered X?", or that ask for proof of legitimacy.

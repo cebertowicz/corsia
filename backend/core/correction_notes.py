@@ -54,7 +54,8 @@ def local_clock(created_at: str) -> str:
 # The one wording of what a correction note asks.
 TRIAGE_STEPS = (
     "Proposed tier: none yet; you set it.\n"
-    "Fix the work first. Then triage it with skill `memory-placement` section 4: "
+    "Check the correction, then fix the work; if part of it looks wrong or incomplete, say so plainly and why. "
+    "Then triage it with skill `memory-placement` section 4: "
     "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
     "Record the triage with `continuity_edit` operation `triage`, and how it ended with operation `outcome`. "
     "The triage is working state, not part of your reply."

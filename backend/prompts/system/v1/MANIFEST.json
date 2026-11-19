@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7718,
+      "bytes": 7739,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "efcfa3502602bb06409d08abd354d53703a07ca7854186159d8010531bc58bb5"
+      "sha256": "0619e1d6031167efc1f2c509c3adeb7bc38436fe764d502984c8c82fb89016b4"
     },
     {
       "bytes": 830,
@@ -370,10 +370,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8928,
+      "bytes": 9014,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "a7f7490bac983cc3319db9016c32094d7d0b8deb61ace2d09b1ac1822950682d"
+      "sha256": "1283e0c60db6825cfbbadd98874479c1bddd1f5374bb62e81eb3ea82d9487e6d"
     },
     {
       "bytes": 5914,
