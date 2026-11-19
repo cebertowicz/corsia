@@ -117,7 +117,6 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
         gate_mode, gate_state = gate_handoff.mode_for(db, phase, step["id"]) if gate == "acceptance" else (None, None)
         if gate_mode == "agent":
             by = "reviewer"
-        settle = step.get("settle") if by == "reviewer" else None
         check = step.get("check") or f"Done: {title}"
         description = step.get("instruction")
         if gate_mode == "agent":
@@ -144,7 +143,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             provenance="plans.workflow_run", node_id=service._id(),
             intent_node_id=intent_node_id, required_step=step.get("required") is True, workflow_by=by,
             person_step=not (by == "person" and step.get("after")),
-            workflow_gate=gate, workflow_gate_mode=gate_mode, workflow_settle=settle,
+            workflow_gate=gate, workflow_gate_mode=gate_mode, workflow_settle=step.get("settle") if by == "reviewer" else None,
         )
         if gate_mode == "dropped" and gate_state is not None:
             closure.close_node(
