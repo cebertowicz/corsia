@@ -71,7 +71,7 @@ def _merge_edits(db, batch_ids, target, artifact_id):
                tuple(latest.values()))
 
 
-def merge_open(db, sources, target, references):
+def merge_open(db, sources, target):
     """Fold the whole collision group once, retaining the canonical destination id.
 
     Pairwise folds lose chronology once an intervening snapshot is flattened into a
@@ -83,9 +83,6 @@ def merge_open(db, sources, target, references):
     newest = max(batches, key=lambda batch: (batch['last_item_at'], batch['updated_at'], batch['id']))
     _merge_comments(db, batch_ids, target)
     _merge_edits(db, batch_ids, target, newest['artifact_id'])
-    for source in sources:
-        for table, column in references:
-            db.execute(f'UPDATE {table} SET {column}=? WHERE {column}=?', (target, source))
     # open_batch owns first/open timestamps; touch_batch owns the latest event and its
     # deadline (not MIN/MAX deadline: an edit and a comment have different quiet times).
     db.execute(

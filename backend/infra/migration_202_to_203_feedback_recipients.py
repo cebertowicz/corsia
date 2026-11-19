@@ -9,19 +9,6 @@ from infra.feedback_recipient_folds import merge_open
 log = logging.getLogger(__name__)
 
 
-def _reference_columns(db):
-    references = []
-    for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
-        if table in {'doc_feedback_batch_items', 'doc_feedback_edit_items'}:
-            continue
-        quoted = '"' + table.replace('"', '""') + '"'
-        for fk in db.execute(f'PRAGMA foreign_key_list({quoted})').fetchall():
-            if fk[2] == 'doc_feedback_batches':
-                column = '"' + fk[3].replace('"', '""') + '"'
-                references.append((quoted, column))
-    return references
-
-
 def _repair_fold_counts(db):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment_identity_moves'").fetchone():
         return 0
@@ -40,7 +27,6 @@ def migrate_202_to_203(db):
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
     repaired = _repair_fold_counts(db)
-    references = _reference_columns(db)
     rows = db.execute(
         """SELECT id,author_kind,author_id,artifact_id,delivery_policy,state,recipient_id
            FROM doc_feedback_batches WHERE recipient_id LIKE 'project:%'
@@ -68,7 +54,7 @@ def migrate_202_to_203(db):
         else:
             target_id = target[0]
         if sources:
-            merge_open(db, sources, target_id, references)
+            merge_open(db, sources, target_id)
             merged += len(sources)
     log.info('Legacy feedback recipients: total=%d normalized=%d merged=%d fold_counts_repaired=%d elapsed_ms=%d',
              len(rows), len(rows) - merged, merged, repaired, int((time.monotonic() - started) * 1000))

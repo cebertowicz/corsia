@@ -790,7 +790,8 @@ _CASES = {
     ): partial(_user_block, ask_artifact_id="missing-artifact"),
     (
         "artifact_links.py",
-        '"ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises"',
+        '"ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises, " '
+        '"or a project-owned document whose conductor is this thread"',
     ): _user_block_on_foreign_document,
     (
         "user_ask.py",

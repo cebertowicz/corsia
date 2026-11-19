@@ -71,17 +71,16 @@ def test_delivered_batches_items_snapshots_and_counts_untouched(db):
 
 
 @pytest.mark.parametrize('foreign_keys', [False, True])
-def test_collisions_repoint_all_foreign_key_columns_before_deleting_source(db, foreign_keys):
+def test_collisions_move_items_and_edits_to_the_target_before_deleting_the_source(db, foreign_keys):
     db.commit()
     db.execute(f'PRAGMA foreign_keys={int(foreign_keys)}')
-    db.execute('CREATE TABLE "external link" ("first batch" TEXT REFERENCES doc_feedback_batches(id), second TEXT REFERENCES doc_feedback_batches(id))')
     _batch(db, 'old', 'project:p')
     _batch(db, 'target', 'conductor')
-    db.execute('INSERT INTO "external link" VALUES (?,?)', ('old', 'old'))
     db.execute("INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES ('old','c1'),('target','c2')")
     _edit(db, 'old')
     migrate_202_to_203(db)
-    assert db.execute('SELECT * FROM "external link"').fetchone() == ('target', 'target')
+    assert db.execute('SELECT batch_id,comment_id FROM doc_feedback_batch_items ORDER BY comment_id').fetchall() == [
+        ('target', 'c1'), ('target', 'c2')]
     assert db.execute('SELECT id,recipient_id,item_count FROM doc_feedback_batches').fetchall() == [('target', 'conductor', 3)]
     assert db.execute('SELECT batch_id FROM doc_feedback_edit_items').fetchall() == [('target',)]
     assert db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -199,12 +198,10 @@ def test_ladder_to_203_from_201_and_202_keeps_node_usage_tables(db, start):
     assert db.execute("SELECT value FROM settings WHERE key='person_comment_recovery_pending'").fetchone() == ('1',)
 
 
-def test_migration_framework_rolls_back_repair_and_references_on_failure(db):
+def test_migration_framework_rolls_back_the_repair_on_failure(db):
     from infra.database_migrations import migrate_to_current
     _batch(db, 'old', 'project:p')
     _batch(db, 'target', 'conductor')
-    db.execute('CREATE TABLE refs(batch TEXT REFERENCES doc_feedback_batches(id))')
-    db.execute("INSERT INTO refs VALUES ('old')")
     db.execute("CREATE TRIGGER refuse_delete BEFORE DELETE ON doc_feedback_batches BEGIN SELECT RAISE(ABORT,'cannot delete'); END")
     db.commit()
     db.execute('PRAGMA user_version=201')
@@ -212,7 +209,6 @@ def test_migration_framework_rolls_back_repair_and_references_on_failure(db):
     with pytest.raises(Exception, match='cannot delete'):
         migrate_to_current(db, 203)
     assert _snapshot(db) == before
-    assert db.execute('SELECT * FROM refs').fetchone() == ('old',)
     assert db.execute('PRAGMA user_version').fetchone() == (201,)
 
 

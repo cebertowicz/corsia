@@ -69,7 +69,7 @@ async def test_handover_ask_follows_current_supervisor(owned_document):
             reason="test", source_path="test", db=db,
         )
         assert _ask(db, artifact_id, "agent-1") == artifact_id
-        with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
+        with pytest.raises(service.PlanInputError, match="or a project-owned document whose conductor is this thread"):
             _ask(db, artifact_id, "agent-2")
     finally:
         db.close()
