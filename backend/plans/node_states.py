@@ -210,7 +210,9 @@ def work_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     return {node_id for node_id, in_work in answer.items() if in_work}
 
 
-def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
+def parent_ids(
+    rows: Iterable[Mapping | sqlite3.Row], *, work: set[str] | None = None,
+) -> set[str]:
     """The one rule for who is a parent: a node with a child in work.
 
     Every reader that splits a plan into parents and leaves -- leaves,
@@ -219,7 +221,8 @@ def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     at once. ``has_child_in_work_sql`` is the same rule for SQL readers.
     """
     rows = list(rows)
-    work = work_ids(rows)
+    if work is None:
+        work = work_ids(rows)
     listed = {
         str(row["parent_id"]) for row in rows
         if row["parent_id"] is not None and str(row["id"]) in work
@@ -315,7 +318,9 @@ def folded_subtrees(
     }
 
 
-def folded_ids(nodes: Iterable[Mapping]) -> set[str]:
+def folded_ids(
+    nodes: Iterable[Mapping], *, with_children: set[str] | None = None,
+) -> set[str]:
     """Fold one plan's nodes: the single rule the pane, the reads and progress share.
 
     A folded node heads a branch with no open work left in it, and it folds
@@ -325,7 +330,8 @@ def folded_ids(nodes: Iterable[Mapping]) -> set[str]:
     """
     rows = list(nodes)
     parents: dict[str, str | None] = {str(node["id"]): node["parent_id"] for node in rows}
-    with_children = parent_ids(rows)
+    if with_children is None:
+        with_children = parent_ids(rows)
     own = {
         str(node["id"]): folded(
             node["state"], node.get("archived_at"),
@@ -336,7 +342,9 @@ def folded_ids(nodes: Iterable[Mapping]) -> set[str]:
     return folded_subtrees(parents, own)
 
 
-def leaves(rows: list) -> list:
+def leaves(
+    rows: list, *, work: set[str] | None = None, parents: set[str] | None = None,
+) -> list:
     """Return the leaves -- work with no child in work -- of one plan's rows.
 
     The one definition of "the leaves of a plan": progress, liveness, the
@@ -344,19 +352,28 @@ def leaves(rows: list) -> list:
     out of the work is a leaf (``work_ids``): not a closed node, and not what
     sits beneath one.
     """
-    work = work_ids(rows)
-    parents = parent_ids(rows)
+    if work is None:
+        work = work_ids(rows)
+    if parents is None:
+        parents = parent_ids(rows, work=work)
     return [row for row in rows if str(row["id"]) in work and str(row["id"]) not in parents]
 
 
-def in_play(rows: list) -> list:
+def in_play(
+    rows: list, *, leaf_rows: list | None = None, with_children: set[str] | None = None,
+) -> list:
     """Return the leaves whose root branch has not folded.
 
     A root branch leaves the progress count the moment it folds, so the ratio
     is about work still in play: a fully finished plan reads 0/0 while its
     folded nodes stay on the plan, one expansion away.
     """
-    fold = folded_ids(dict(row) for row in rows)
+    if leaf_rows is not None and all(row["parent_id"] is None for row in rows):
+        return [
+            row for row in leaf_rows
+            if not folded(row["state"], dict(row).get("archived_at"), container=False)
+        ]
+    fold = folded_ids((dict(row) for row in rows), with_children=with_children)
     parents = {row["id"]: row["parent_id"] for row in rows}
 
     def root(node_id: str) -> str:
@@ -366,4 +383,6 @@ def in_play(rows: list) -> list:
             seen.add(node_id)
         return node_id
 
-    return [leaf for leaf in leaves(rows) if root(leaf["id"]) not in fold]
+    if leaf_rows is None:
+        leaf_rows = leaves(rows)
+    return [leaf for leaf in leaf_rows if root(leaf["id"]) not in fold]

@@ -124,7 +124,8 @@ def _present_node(
 
 
 def distribution_from_buckets(
-    rows: list[dict], buckets: dict[str, str],
+    rows: list[dict], buckets: dict[str, str], *,
+    work: set[str] | None = None, holders: set[str] | None = None,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Count compact raw-row leaves bottom-up, independent of input row order.
 
@@ -132,8 +133,8 @@ def distribution_from_buckets(
     children are not among ``rows``: it adds no leaf of its own.
     """
     ids = {str(row["id"]) for row in rows}
-    work = work_ids(rows)
-    holders = parent_ids(rows)
+    work = work_ids(rows) if work is None else work
+    holders = parent_ids(rows, work=work) if holders is None else holders
     children: dict[str, list[str]] = {}
     parent_of: dict[str, str] = {}
     for row in rows:
