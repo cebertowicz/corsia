@@ -35,8 +35,30 @@ def _run_phase(db, node) -> bool:
     if node["kind"] != "phase" or node["workflow_ref"] is None:
         return False
     return db.execute(
-        "SELECT 1 FROM plan_nodes WHERE parent_id=? AND workflow_step IS NOT NULL LIMIT 1", (node["id"],),
+        "SELECT 1 FROM plan_nodes WHERE plan_id=? AND parent_id=? AND workflow_step IS NOT NULL LIMIT 1",
+        (node["plan_id"], node["id"]),
     ).fetchone() is not None
+
+
+def _open_below(db, phase_id: str, where: str = "") -> list[str]:
+    """Open nodes beneath ``phase_id``, deepest first, through the in-work walk.
+
+    The walk keys on (plan_id, parent_id) so it rides the plan tree index: its cost is the
+    run's own subtree, not the plan's settled history. ``where`` narrows the open rows.
+    """
+    return [str(row["id"]) for row in db.execute(
+        "WITH RECURSIVE below(id,plan_id,depth) AS ("
+        " SELECT n.id,n.plan_id,1 FROM plan_nodes p JOIN plan_nodes n"
+        " ON n.plan_id=p.plan_id AND n.parent_id=p.id WHERE p.id=?"
+        f" AND {node_states.in_work_sql('n')}"
+        " UNION ALL SELECT n.id,n.plan_id,below.depth+1 FROM below JOIN plan_nodes n"
+        " ON n.plan_id=below.plan_id AND n.parent_id=below.id"
+        f" WHERE {node_states.in_work_sql('n')})"
+        # CROSS JOIN keeps the walk's rows as the outer loop; a plain join let SQLite scan all of plan_nodes.
+        " SELECT n.id FROM below CROSS JOIN plan_nodes n ON n.id=below.id"
+        f" WHERE {node_states.open_sql('n')}{where}"
+        " ORDER BY below.depth DESC,n.order_key", (phase_id,),
+    )]
 
 
 def open_nodes(db, phase_id: str) -> list[str]:
@@ -46,18 +68,37 @@ def open_nodes(db, phase_id: str) -> list[str]:
     container whose children are in work have no work of their own: they read
     as their leaves, the same rule the fold uses.
     """
-    return [str(row["id"]) for row in db.execute(
-        "WITH RECURSIVE below(id,depth) AS ("
-        " SELECT n.id,1 FROM plan_nodes n WHERE n.parent_id=?"
-        f" AND {node_states.in_work_sql('n')}"
-        " UNION ALL SELECT n.id,below.depth+1 FROM plan_nodes n JOIN below ON n.parent_id=below.id"
-        f" WHERE {node_states.in_work_sql('n')})"
-        " SELECT n.id FROM below JOIN plan_nodes n ON n.id=below.id"
-        f" WHERE {node_states.open_sql('n')}"
+    return _open_below(
+        db, phase_id,
         " AND NOT (n.kind='phase' AND n.workflow_step IS NOT NULL)"
-        f" AND NOT {node_states.is_container_sql('n')}"
-        " ORDER BY below.depth DESC,n.order_key", (phase_id,),
-    )]
+        f" AND NOT {node_states.is_container_sql('n')}",
+    )
+
+
+def close_run(node_id: str, reason: str, common: dict, *, expected_revision: int | None = None) -> list[str]:
+    """Before a workflow run's phase closes, close the run's open work beneath it with the same reason.
+
+    Closing the phase ends the whole run, required steps included, so an abandoned run never leaves
+    steps no agent may close. That covers a whole run abandoned and an optional step that runs a nested
+    workflow skipped; whether that step may be skipped is ``workflow_fields.refuse_required_skip``'s
+    call, made before this. Deepest first, so each inner phase closes after its own steps. A close that
+    is refused (a delegated worker still has open work) raises, and the caller's write rolls the whole
+    close back. ``expected_revision`` is the phase's, checked before anything closes. Returns the ids
+    closed, for release.
+    """
+    import plans.errors as errors
+    from plans import closure
+
+    db = common["db"]
+    node = service._live_node_row(db, node_id)
+    if node["kind"] != "phase" or node["workflow_ref"] is None:
+        return []
+    if expected_revision is not None:
+        errors.require_node_revision(node, expected_revision)
+    below = _open_below(db, node_id)
+    for open_id in below:
+        closure.close_node(open_id, reason=reason, actor_id=common["actor_id"], provenance=common["provenance"], db=db)
+    return below
 
 
 def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[str], list[str]]:
@@ -205,7 +246,12 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         last = rows[-1]
         created = creation_payload(db, rows[0]["id"])
         inner = _ended(db, last["id"]) if last["kind"] == "phase" else None
-        if inner is not None:
+        if inner is not None and last["state"] == service.CLOSED and last["id"] not in by_failure \
+                and skipped.get(last["id"]):
+            # An agent or the person closed the nested step itself with a reason (``close_run``):
+            # the step was skipped, whatever its abandoned inner run recorded.
+            state = service.CLOSED
+        elif inner is not None:
             if all(item["state"] == _NOT_RUN for item in inner["steps"]):
                 state = _NOT_RUN
             else:

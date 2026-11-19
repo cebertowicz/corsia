@@ -257,14 +257,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         mutations.fail_node(node_id, **fields.expected(params), **common)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
-        from plans import closure
+        from plans import closure, run_end
         workflow_fields.refuse_required_skip(db, node_id)
-        closure.close_node(
-            node_id, reason=fields.text(params, "reason"),
-            **fields.expected(params), **common,
-        )
+        reason = fields.text(params, "reason")
+        below = run_end.close_run(node_id, reason, common, **fields.expected(params))
+        # The nested closes moved the step's revision; it was checked before them.
+        closure.close_node(node_id, reason=reason, **({} if below else fields.expected(params)), **common)
         return after.after_close(
-            node_id, service.CLOSED, params, common, executor=acting,
+            node_id, service.CLOSED, params, common, executor=acting, closed_below=below,
         )
     if operation == "attach_spawned_thread":
         return mutations.attach_spawned_thread(
