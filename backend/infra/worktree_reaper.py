@@ -39,9 +39,8 @@ from infra.worktree_reaper_store import forget_pr_terminal, pr_terminal_heads, r
 IDLE_THRESHOLD_SECONDS = 7 * 86400
 MAX_REMOVALS_PER_RUN = 100
 # No reading yet. RUN_BUDGET_SECONDS needs nightly pass durations, which nothing records.
-# METRIC_ITEM_CAP's item counts are recorded in each worktree_reaper.run_completed product
-# event (skip_counts, skipped_truncated, salvaged, quarantine_entry_count, remaining_count)
-# but have not been read.
+# METRIC_ITEM_CAP's counts are recorded in each worktree_reaper.run_completed event (skip_counts,
+# skipped_truncated, salvaged, quarantine_entry_count, remaining_count) but have not been read.
 RUN_BUDGET_SECONDS = 600.0
 METRIC_ITEM_CAP = 50
 REMAINING_WARNING = 50
