@@ -1,0 +1,38 @@
+handler:
+  kind: instruction
+workflow:
+  steps:
+    - id: read
+      title: Read all the feedback first
+      required: true
+      check: "every open item, the resolved ones on the same parts and the person's earlier words on the subject were read before anything changed"
+      difficulty: {default: routine}
+      instruction: "## 1. Read everything first"
+    - id: cause
+      title: Find the causes
+      required: true
+      check: "each item checked at its current source and against the person's words and requirements; items grouped by shared cause; for each cause the suggested fix weighed against the simplest alternative that removes the cause"
+      after: [read]
+      difficulty: {default: standard}
+      instruction: "## 2. Find the cause"
+    - id: change
+      title: Settle every item
+      required: true
+      check: "each item fixed everywhere its cause reaches, refuted with evidence where it was raised, or filed as a follow-up where this work's follow-ups are kept; nothing outside the authorized work changed without its owner"
+      after: [cause]
+      difficulty: {default: standard}
+      instruction: "## 3. Map and change everything it touches"
+    - id: reread
+      title: Re-read the whole
+      required: true
+      check: "the whole result re-read cold as its audience and the check that fits it run on the changed version"
+      after: [change]
+      difficulty: {default: routine}
+      instruction: "## 4. Re-read the whole as its audience"
+    - id: close
+      title: Close the loop
+      required: true
+      check: "each item that needs a reply has one saying what changed and where else; a changed result that came from a failed check has gone back for that check once"
+      after: [reread]
+      difficulty: {default: routine}
+      instruction: "## 5. Close the loop"

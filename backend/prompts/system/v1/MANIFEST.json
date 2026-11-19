@@ -130,10 +130,16 @@
       "sha256": "312c94365e7236730e095411b26c7b1ead15bcc9afb91b7b55884c4233c8fd36"
     },
     {
-      "bytes": 3370,
+      "bytes": 4531,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
-      "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
+      "sha256": "9f78449fdf03464c2632f0e425bf8074b488fee551830d10abd47bedfba41e84"
+    },
+    {
+      "bytes": 1817,
+      "kind": "skill",
+      "path": "skills/apply-feedback/corsia.yaml",
+      "sha256": "4eeae76bcabd61d565e9ec0e4280af3123290b66380369e02584d321e01db40f"
     },
     {
       "bytes": 3294,
@@ -424,16 +430,16 @@
       "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
     },
     {
-      "bytes": 2189,
+      "bytes": 2223,
       "kind": "skill",
       "path": "skills/review-work/SKILL.md",
-      "sha256": "f8f04c0224fa73539b262080f4a431cbd1e64b88feb8c29f7a3f38f59581fc71"
+      "sha256": "9b289e2702ef60b36bd9de780f2983b3238af7ba28f88d63ac7fb735ae60c537"
     },
     {
-      "bytes": 1295,
+      "bytes": 1407,
       "kind": "skill",
       "path": "skills/review-work/corsia.yaml",
-      "sha256": "79edb448b711d4b1148ace06f2c1e5bdf80ed093f1cb54bdaac7c82804aeef6f"
+      "sha256": "9e9d48f712d3f8b364d3798712080e7e40f5e5b3e3963e94529d9ae5ddb5690a"
     },
     {
       "bytes": 3154,
