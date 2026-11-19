@@ -1,4 +1,4 @@
-"""Schema 200 -> 201: tables for each plan node's usage grouped at write.
+"""Schema 201 -> 202: tables for each plan node's usage grouped at write.
 
 Purely additive; runs inside the migration runner's transaction and never commits.
 It creates the empty tables only. The triggers and the backfill are not built here:
@@ -14,7 +14,7 @@ import sqlite3
 from infra.node_usage_schema import NODE_USAGE_TABLES
 
 
-def migrate_200_to_201(conn: sqlite3.Connection) -> None:
+def migrate_201_to_202(conn: sqlite3.Connection) -> None:
     """Create the fresh-schema tables when the usage table exists."""
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_usage'").fetchone():
         for statement in NODE_USAGE_TABLES.values():
