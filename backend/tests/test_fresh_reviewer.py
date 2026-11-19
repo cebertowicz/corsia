@@ -116,6 +116,42 @@ def test_an_agent_cannot_fail_a_review_step_but_the_person_can(db):
     assert _act(db, parent.id, "fail", review, kind="user", evidence="Review failed")["node"]["state"] == "failed"
 
 
+def test_the_author_fail_refusal_route_works_once_the_review_is_back(db):
+    """Fail is refused on a returned review too; the route it names, reject with feedback, is taken."""
+    parent, build, review = _run(db)
+    _return(db, build, "builder")
+    _return(db, review, "reviewer")
+    assert _act(db, parent.id, "fail", review, evidence="Review failed") == AUTHOR_FAIL
+    revision = _act(db, parent.id, "reject", review, feedback="Fixed the edge case; check again")["revision"]["node_id"]
+    assert service._node_row(db, revision)["spawned_thread_id"] == "reviewer"
+
+
+def test_a_nested_runs_review_reaches_the_work_of_the_outer_run(db):
+    """A run that is itself a step checks the outer run's work: its builder can't settle the inner review."""
+    parent = service.ensure_plan("thread", "parent", db=db)
+    outer = service.add_node(parent.id, kind="phase", title="Run", acceptance_criteria="Done", intent="Ship it", db=db)
+    listed = workflow_fields.build_run(db, outer, [
+        {"id": "build", "difficulty": "routine"},
+        {"id": "check", "workflow": "inner", "difficulty": "routine", "steps": [STEPS[1]]},
+    ], causing_executor="parent")
+    build, review = listed[0]["id"], listed[1]["steps"][0]["id"]
+    _return(db, build, "builder")
+    _act(db, parent.id, "accept", build, **ACCEPT)
+    _return(db, review, "builder")
+    assert _act(db, parent.id, "accept", review, **ACCEPT) == NOT_FRESH.format(worker="builder")
+
+
+def test_a_worker_on_a_build_steps_sub_task_cannot_settle_the_review(db):
+    """A sub-task under a build step is part of the run's work, so its worker has seen it."""
+    parent, build, review = _run(db)
+    service.transition_node(build, "active", db=db)
+    helper = service.add_node(parent.id, kind="task", title="Gather figures", acceptance_criteria="Done", parent_id=build, db=db)
+    _return(db, helper.id, "helper")
+    _act(db, parent.id, "accept", helper.id, **ACCEPT)
+    _return(db, review, "helper")
+    assert _act(db, parent.id, "accept", review, **ACCEPT) == NOT_FRESH.format(worker="helper")
+
+
 @pytest.mark.parametrize("operation", ["accept", "fail"])
 def test_other_steps_are_untouched(db, operation):
     parent, build, review = _run(db)

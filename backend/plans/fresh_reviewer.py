@@ -3,11 +3,11 @@
 A reviewer step (``by: reviewer``) is settled from the return of a worker started
 for that step. The step's lineage is the step and its send-back revisions: the
 nodes under the same parent with the same workflow step, so the same reviewer
-may take the next attempt. The work the step checks is its run, the outer run
-when the run is itself a step, or the task the run serves. A worker that was
-handed or executed any other node there has seen the
-work, and its return can't settle the step. Only an agent is held to this; the
-person settles any step.
+may take the next attempt. The work the step checks is its run, or the outer
+run when the run is itself a step; a run never sits under a task, since a step
+holds tasks only. A worker that was handed or executed any other node there has
+seen the work, and its return can't settle the step. Only an agent is held to
+this; the person settles any step.
 """
 
 from __future__ import annotations
@@ -20,8 +20,9 @@ NOT_FRESH = (
     "then plan_update replace_spawned_thread on this step."
 )
 AUTHOR_FAIL = (
-    "An agent can't fail a review step. To act on a failing review, send it back "
-    "(reject with feedback) and restart it once the work is fixed."
+    "An agent can't fail a review step: a worker that has not seen the work checks it. "
+    "While the step is open, start that worker on it with delegate_task. Once its review is back, "
+    "accept it, or fix the work first and then reject with feedback, which sends it back to that reviewer."
 )
 
 
@@ -30,10 +31,6 @@ def _work_root(db, step) -> str:
     node = service._node_row(db, step["parent_id"])
     while node["workflow_step"] is not None and node["parent_id"] is not None:
         node = service._node_row(db, node["parent_id"])
-    if node["parent_id"] is not None:
-        serves = service._node_row(db, node["parent_id"])
-        if serves["kind"] == "task":
-            return str(serves["id"])
     return str(node["id"])
 
 
