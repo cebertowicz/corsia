@@ -26,7 +26,7 @@ Check each factual premise you need to proceed before building on it. Probe the 
 
 ## Verification methods
 
-Check the result against the aligned acceptance evidence on the real artifact or surface: recalculate, render, run, re-read against sources, or test with a reader. Bind fresh evidence to each acceptance item. Use an independent checker when a wrong result is costly, and give it the intent and the primary artifact. For behavior changes, record the success signal, failure signal, and when it will be measured.
+Check the result against the aligned acceptance evidence on the real artifact or surface: recalculate, render, run, re-read against sources, or test with a reader. Bind fresh evidence to each acceptance item. When a wrong result is costly, have a fresh agent check it as skill `review-work` says. For behavior changes, record the success signal, failure signal, and when it will be measured.
 
 ### Persistent-owner readiness
 
@@ -34,7 +34,7 @@ Before claiming domain expertise is ready, compare representative outcomes with 
 
 ## No established workflow
 
-Look first for a workflow or skill that fits the work, and use it. If none does and you will do this kind of work again, beyond a step or two, make one with skill `workflow-design`. A one-off is a plan: do it directly.
+Look first for a workflow or skill that fits the work, and use it. If none does and the work takes more than a step or two, run skill `general-work`. If you will do this kind of work again, make a workflow for it with skill `workflow-design`.
 
 ## Plan
 

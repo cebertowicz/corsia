@@ -22,20 +22,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from automation.schedules import MAX_CADENCE_SECONDS, Schedule, _parse, _row, next_slot
+from automation.continuation.cadence import CONTINUATION_SWEEP_INTERVAL
+from automation.schedules import Schedule, _parse, _row, first_cadence_run, next_slot
 from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
 SCRIPT_KIND = "script"
-MIN_CADENCE_SECONDS = 300
+# Script runs are claimed by the continuation sweep, so a cadence shorter than its
+# interval can't be kept; any longer floor would refuse a cadence the sweep can keep.
+MIN_CADENCE_SECONDS = CONTINUATION_SWEEP_INTERVAL
+# Hang guard for a script whose author set no timeout. Basis: a requirement, not a speed
+# reading -- a hung run must free its run slot -- and an expiry is reported, never silent:
+# the owner gets a timeout signal naming the seconds.
 DEFAULT_TIMEOUT_SECONDS = 60
+# The most an author may set. A run holds one of the instance's shared run slots
+# (script_runner.SCRIPT_RUN_CAP) until it ends, so this also bounds how long hung runs
+# can keep every other agent's scripts waiting. No reading yet: run durations are not
+# recorded (running_since is cleared, only last_run_at kept).
 MAX_TIMEOUT_SECONDS = 300
 MAX_PER_AGENT = 10
 MAX_PER_INSTANCE = 100
 MAX_SERIES = 20
+# No reading yet: needs the sizes of registered script trees.
 MAX_SCRIPT_BYTES = 1_000_000
 # The runs counter keeps counting; a script row is never exhausted.
 UNBOUNDED_RUNS = 2**31 - 1
+# No reading yet: needs the lengths of last_error values agents act on.
 MAX_ERROR_CHARS = 500
 
 #: Run outcomes written to ``last_status``, worst first.
@@ -161,13 +173,10 @@ def create_script(
     run, so the sweep never claims it, it never runs without an event and never reports
     no data.
     """
-    if cadence_seconds is not None and (isinstance(cadence_seconds, bool) or not (
-        MIN_CADENCE_SECONDS <= cadence_seconds <= MAX_CADENCE_SECONDS
-    )):
-        raise ValueError(
-            f"cadence_seconds must be between {MIN_CADENCE_SECONDS} and "
-            f"{MAX_CADENCE_SECONDS}"
-        )
+    if cadence_seconds is not None:
+        if isinstance(cadence_seconds, bool) or cadence_seconds < MIN_CADENCE_SECONDS:
+            raise ValueError(f"cadence_seconds must be at least {MIN_CADENCE_SECONDS}")
+        first_cadence_run(_parse(now), cadence_seconds)  # the slot after the first run must fit the calendar
     if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
     payload_data: dict[str, Any] = {"series": [vars(s) for s in series], "workflow": workflow}
