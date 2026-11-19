@@ -63,6 +63,22 @@ def test_a_worker_that_built_the_work_cannot_settle_its_review(db):
     assert service._node_row(db, review)["state"] == "review_requested"
 
 
+def test_the_refusal_route_leads_to_a_settled_step(db):
+    """The refusal names replace_spawned_thread; following it, a new worker's return settles the step."""
+    parent, build, review = _run(db)
+    _return(db, build, "builder")
+    _act(db, parent.id, "accept", build, **ACCEPT)
+    _return(db, review, "builder")
+    assert "replace_spawned_thread" in _act(db, parent.id, "accept", review, **ACCEPT)
+    db.execute(
+        "INSERT INTO threads (id,user_id,project_id,spawned_by,model,created_at,updated_at)"
+        " VALUES ('fresh','user-1','project-1','parent','native/model','t','t')",
+    )
+    assert not isinstance(_act(db, parent.id, "replace_spawned_thread", review, spawned_thread_id="fresh"), str)
+    _return(db, review, "fresh")
+    assert _act(db, parent.id, "accept", review, **ACCEPT)["node"]["state"] == "accepted"
+
+
 def test_a_fresh_worker_settles_it(db):
     parent, build, review = _run(db)
     _return(db, build, "builder")

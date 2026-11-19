@@ -16,12 +16,12 @@ import plans.service as service
 
 NOT_FRESH = (
     "This review can't settle the step: the worker that returned it ({worker}) already worked on this task. "
-    "Hand the step to a new worker (delegate_task with plan_node_id and no thread of this task), "
-    "or ask the person to settle it."
+    "Hand the step to a new worker: start one with delegate_task (plan_node_id='none'), "
+    "then plan_update replace_spawned_thread on this step."
 )
 AUTHOR_FAIL = (
-    "Only the reviewer's verdict can fail this step. To act on a failing review, send it back "
-    "(reject with feedback) and restart it once the work is fixed. To drop the work, ask the person."
+    "An agent can't fail a review step. To act on a failing review, send it back "
+    "(reject with feedback) and restart it once the work is fixed."
 )
 
 
