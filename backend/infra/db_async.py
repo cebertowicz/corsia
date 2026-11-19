@@ -67,12 +67,15 @@ def _run_db_job(fn, scope: str):
             _admission.notify_all()
 
 
-def _run_timed_db_job(fn, scope: str) -> _TimedResult:
-    """Run one database job while measuring only the worker execution window."""
+def _run_timed_db_job(fn, scope: str, pool: str) -> _TimedResult:
+    """Run one database job while measuring only the worker execution window.
+
+    ``pool`` names the executor the job was sent to, for the CPU sampler's per-pool totals.
+    """
     started_at = time.perf_counter()
     try:
         if (sampler := cpu_sampler._sampler) is not None:
-            value = cpu_sampler.run_profiled_db_job(sampler, _run_db_job, fn, scope)
+            value = cpu_sampler.run_profiled_db_job(sampler, _run_db_job, fn, scope, pool)
         else:
             value = _run_db_job(fn, scope)
     except BaseException as error:
@@ -170,13 +173,15 @@ async def _run_shielded(executor, lane, fn, /, *args, **kwargs):
     scope = getattr(fn, "__qualname__", type(fn).__name__)
     if args or kwargs:
         fn = partial(fn, *args, **kwargs)
+    # The default executor (run_off_db) is not a DB pool; its CPU is counted apart from "db".
+    pool = f"db-{lane}" if lane else ("off-db" if executor is None else "db")
     submitted_at = time.perf_counter()
     queued = None
     if lane is None:
-        future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope)
+        future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope, pool)
     else:
         # What run_in_executor does, keeping the pool's future so an unstarted job can be withdrawn.
-        queued = executor.submit(_run_timed_db_job, fn, scope)
+        queued = executor.submit(_run_timed_db_job, fn, scope, pool)
         future = asyncio.wrap_future(queued, loop=loop)
     try:
         timed = await asyncio.shield(future)
