@@ -136,12 +136,15 @@ export interface DocWriteResult {
 	context_notice_error?: string | null;
 }
 
-export async function writeContent(path: string, text: string, opts: { projectId?: string | null; threadId?: string | null; create?: boolean; description?: string | null } = {}): Promise<DocWriteResult> {
+export async function writeContent(path: string, text: string, opts: { projectId?: string | null; threadId?: string | null; create?: boolean; description?: string | null; expectedSha256?: string | null } = {}): Promise<DocWriteResult> {
 	return ok(await apiFetch(`/api/files/content`, {
 		sessionInAddress: true,
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ path, text, description: opts.description ?? null, project_id: opts.projectId ?? null, thread_id: opts.threadId ?? null, create: opts.create ?? false })
+		// expected_sha256 is the text this tab started from (issue #3049): the save is refused
+		// unless the file still holds it, so an outside edit is never overwritten. Null = the
+		// plain overwrite this endpoint always did.
+		body: JSON.stringify({ path, text, description: opts.description ?? null, project_id: opts.projectId ?? null, thread_id: opts.threadId ?? null, create: opts.create ?? false, expected_sha256: opts.expectedSha256 ?? null })
 	}));
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -17,6 +18,7 @@ from api.files_roots import (
     walk,
 )
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
+from doceditor.document_save_errors import EDITOR_STALE_CODE, EDITOR_STALE_MESSAGE
 from doceditor.document_scope import UI_THREAD
 from infra import config
 from infra.auth import authenticate, owns_thread
@@ -24,6 +26,8 @@ from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
 from registry import service as registry_service
 from registry.path_access import path_allowed
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -139,6 +143,9 @@ class WriteBody(BaseModel):
     project_id: str | None = None
     thread_id: str | None = None
     create: bool = False  # allow creating a new file (New document)
+    #: SHA-256 of the bytes the editor's tab started from (issue #3049). Optional: an
+    #: older client omits it and keeps the plain-overwrite behavior it always had.
+    expected_sha256: str | None = None
 
 
 DOCUMENT_SAVE_HTTP_STATUS = {
@@ -169,21 +176,41 @@ def document_save_http_exception(exc: DocumentSaveError) -> HTTPException:
     )
 
 
+#: The missing-digest line is a signal about which clients send their base, not a per-request
+#: diagnostic, so it is said once per process.
+_digest_absence_logged = False
+
+
 @router.put("/content")
 async def write_content(token: str, body: WriteBody):
     """Persist the editor's autosave (plain overwrite — CRDT merge is a later
     layer; the doc editor is single-writer today). Registers the write to the
-    session when one is in scope (register-on-write, registry §0.0 1.4)."""
+    session when one is in scope (register-on-write, registry §0.0 1.4).
+
+    With ``expected_sha256`` the save is refused unless the file still holds those
+    bytes, so an outside edit is never overwritten (issue #3049); without it the
+    write behaves exactly as it did before.
+    """
+    global _digest_absence_logged
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    fields = body.model_dump()
+    expected_sha256 = fields.pop("expected_sha256")
+    if expected_sha256 is None and not _digest_absence_logged:
+        _digest_absence_logged = True
+        log.warning("document save arrived without expected_sha256; the write is not guarded against an outside edit")
     try:
-        return await save_document_text(DocumentSave(**body.model_dump()), user["id"])
+        return await save_document_text(DocumentSave(**fields), user["id"], expected_sha256=expected_sha256)
     except DocumentSaveError as exc:
         if exc.kind == "no_such_file":
             from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
 
             raise HTTPException(404, MISSING_SAVE_MESSAGE) from exc
+        if exc.kind == "stale":
+            # The writer's own stale lines are worded for suggestion batches and live writes.
+            # Typed text is different: nothing retries, the tab keeps it, and the person decides.
+            raise HTTPException(409, {"code": EDITOR_STALE_CODE, "message": EDITOR_STALE_MESSAGE}) from exc
         raise document_save_http_exception(exc) from exc
 
 

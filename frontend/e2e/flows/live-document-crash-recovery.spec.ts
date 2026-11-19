@@ -9,7 +9,7 @@ const viewports = [
 ] as const;
 const edits = ['insert', 'delete'] as const;
 const choices = ['corsia', 'file'] as const;
-const heldMessage = 'This file changed outside CORSIA while a write was being saved.';
+const heldMessage = 'This document changed just as it was being saved, so that save didn’t go through. Nothing was lost; open Details to choose which text to keep.';
 
 async function confirmChoice(page: Page, choice: typeof choices[number]): Promise<void> {
 	const label = choice === 'corsia' ? 'Keep CORSIA text, overwrite the file' : "Use the file's text, replace CORSIA text";

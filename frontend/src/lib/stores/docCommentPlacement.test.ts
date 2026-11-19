@@ -79,6 +79,7 @@ async function loadLost() {
 }
 
 afterEach(() => {
+	vi.unstubAllGlobals();
 	liveDocumentBindings.set({});
 	docComments.set({});
 	commentLoads.set({});
@@ -99,6 +100,13 @@ describe('comment placement in a live document (4.2)', () => {
 		await expect(capture).resolves.toMatchObject({ quote: 'beta' });
 		expect(row().placement).toBe('placing');
 		doc.answer(placement);
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
+	});
+
+	it('places a row from a matching answer by software hash when the browser has no WebCrypto', async () => {
+		const doc = await opened('älpha beta 🙂 gamma');
+		vi.stubGlobal('crypto', {});
+		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
 	});
 

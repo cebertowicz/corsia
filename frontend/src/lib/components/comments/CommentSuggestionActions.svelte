@@ -17,7 +17,7 @@
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	const named = (verb: string) => (name ? `${verb}: ${name}` : verb);
 	/** Why Accept is off, for its tooltip; the card already says it on the screen (`.ct-orphan`). */
-	const cantAccept = $derived(refusalKind === 'no_such_file' ? 'Can’t accept: the file no longer exists.' : textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
+	const cantAccept = $derived(refusalKind === 'no_such_file' ? 'Can’t accept: this document is deleted.' : textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && cantAccept)) return;
 		decisionBusy = decision;

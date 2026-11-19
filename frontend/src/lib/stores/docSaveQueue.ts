@@ -4,7 +4,8 @@ import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
-import { saveErrorMessage } from './docSaveError';
+import { saveErrorCode, saveErrorMessage } from './docSaveError';
+import { createBaseDigests, EDITOR_STALE_CODE } from './docSaveBase';
 import { createDocSaveActivityProjection } from './docSaveActivity';
 export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -45,6 +46,10 @@ const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
 const confirmationsOwed = new Map<string, true>();
+// The base text a save was refused on because the file changed after it. That base is never sent
+// again: typing on keeps the draft and its error, and only a new base (a reload) can save.
+const refusedBases = new Map<string, string>();
+const baseDigests = createBaseDigests();
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;
 const publishActivity = activity.publish;
@@ -173,12 +178,20 @@ async function runSave(key: string): Promise<boolean> {
 		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
 		return true;
 	}
+	// The same stale base is refused once, then kept: the draft and its error stay as they are.
+	if (!live && refusedBases.get(key) === draft.savedText) {
+		patchDraft(key, { status: 'error' });
+		return false;
+	}
 	const textAtStart = draft.editText;
+	// The file's text when this write was built on it; taken with the text it writes so the two cannot drift.
+	const baseAtStart = draft.savedText;
 	patchDraft(key, { status: 'saving' });
 	const p = (async () => {
 		try {
 			const result = live ? await live.flush() : await writeContent(draft.target.path, textAtStart, {
 				projectId: draft.target.projectId, threadId: draft.target.threadId,
+				expectedSha256: await baseDigests.for(key, baseAtStart),
 			});
 			// A live flush is settled by this tab's own transactions, never by the file's digest: the remaining
 			// difference is remote edits the server owns. Local work that is unacked, or was typed after this
@@ -211,6 +224,7 @@ async function runSave(key: string): Promise<boolean> {
 				return false;
 			}
 			console.error('doc save failed', e);
+			if (!live && saveErrorCode(e) === EDITOR_STALE_CODE) refusedBases.set(key, baseAtStart);
 			const message = saveErrorMessage(e);
 			if (getDraft(key)) patchDraft(key, { status: 'error', error: message });
 			toasts.show(message, 'error');
@@ -258,6 +272,8 @@ export function clearDraft(target: TargetIdentity): void {
 	if (timer) clearTimeout(timer);
 	timers.delete(key);
 	needsResave.delete(key);
+	refusedBases.delete(key);
+	baseDigests.clear(key);
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
 	confirmationsOwed.delete(key);

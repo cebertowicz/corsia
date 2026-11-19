@@ -2,8 +2,15 @@
 
 from typing import Any
 
-MISSING_DOCUMENT_MESSAGE = "This file no longer exists, so nothing was changed. You can close it."
-MISSING_SAVE_MESSAGE = "This file no longer exists, so your changes weren’t saved. They’re still here; copy them before you close."
+MISSING_DOCUMENT_MESSAGE = "This document is deleted, so nothing changed."
+MISSING_SAVE_MESSAGE = "Couldn’t save: this document is deleted. Your text stays here until you close it."
+
+#: The editor PUT's own stale refusal (issue #3049). The writer's ``stale`` is worded for
+#: suggestion batches and live writes and invites a retry, which is wrong for typed text
+#: whose base is gone: the tab keeps the text and the person decides. ``PUT /api/files/content``
+#: answers with this code and message; the tab keys its one-refusal-per-base rule on the code.
+EDITOR_STALE_CODE = "stale_base"
+EDITOR_STALE_MESSAGE = "Couldn’t save: this document changed after you started editing. Your text stays here."
 
 
 class DocumentSaveError(ValueError):
@@ -20,5 +27,5 @@ class FileChangedOutside(DocumentSaveError):
     """The file no longer holds the bytes a live write was built on; nothing was replaced."""
 
     def __init__(self) -> None:
-        super().__init__("stale", "The document changed outside CORSIA while this write was saving."
-                                  " Nothing was replaced; try again.")
+        super().__init__("stale", "This document changed just as it was being saved, so that save didn’t go through."
+                                  " Nothing was lost; try again.")

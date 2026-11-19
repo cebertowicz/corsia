@@ -117,7 +117,7 @@
 	}
 	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
 	// Cards keep the caller's order and one each block: a thread whose section changes only changes its heading, because moving its card would take the person out of the reply box.
-	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.refusalKind === 'no_such_file' ? 'File deleted' : comment.orphaned ? 'Text changed' : 'Open comments';
+	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.refusalKind === 'no_such_file' ? 'Document deleted' : comment.orphaned ? 'Text changed' : 'Open comments';
 	const current = $derived(comments.filter((comment) => !comment.resolved || keptIds.has(comment.id)));
 	const resolved = $derived(comments.filter((comment) => comment.resolved && !keptIds.has(comment.id)));
 </script>
@@ -144,8 +144,8 @@
 				{#snippet header()}
 					{#if restCards && row.key !== null && comment === row.comments[0]}{@render groupHead?.(row.comments)}{/if}
 					{#if !region && !showsOwnQuote(comment)}
-						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.refusalKind === 'no_such_file' ? 'Show comment: file deleted' : comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
-							{#if comment.refusalKind === 'no_such_file'}File deleted{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
+						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.refusalKind === 'no_such_file' ? 'Show comment: document deleted' : comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
+							{#if comment.refusalKind === 'no_such_file'}Document deleted{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
 						</button>
 					{/if}
 				{/snippet}

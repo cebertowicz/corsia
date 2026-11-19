@@ -54,7 +54,7 @@ for (const layout of LAYOUTS) {
 			await page.keyboard.type('Q');
 			const failures: string[] = [];
 			for (let i = 0; i < REPEATS; i++) {
-				// Wait out the header's "write is still settling" notice: it shifts the document 78px for ~0.5s after typing, so a click aimed then lands a row off, in prose too.
+				// Wait out the header's "Couldn’t confirm this save" notice: it shifts the document 78px for ~0.5s after typing, so a click aimed then lands a row off, in prose too.
 				await page.waitForTimeout(2000);
 				await expect(page.locator('.live-block')).toHaveCount(0);
 				const before = await wordAt(page, 1 + (i % 4));
