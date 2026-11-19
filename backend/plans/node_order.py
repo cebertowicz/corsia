@@ -171,11 +171,11 @@ def ordered_nodes_with_paths(db, plan_id: str) -> list[tuple[object, tuple[str, 
 
 #: The open nodes and their ancestors in plan order, each with the two facts
 #: a reader cannot get from the open rows alone: whether the node is itself
-#: open, and whether any child of it is in work (settled children count).
+#: open, and whether it is a parent (``node_states.parent_sql``).
 _OPEN_ORDERED_TAIL_SQL = f"""SELECT node.*, ordered.ancestor_path,
            ordered.stranded,
            ({node_states.open_sql("node")}) AS is_open,
-           ({node_states.has_child_in_work_sql("node")}) AS has_child_in_work
+           ({node_states.parent_sql("node")}) AS is_parent
     FROM ordered CROSS JOIN plan_nodes AS node ON node.id=ordered.id
     """ + _ORDER_BY_SQL
 
@@ -186,8 +186,9 @@ def open_nodes_with_paths(db, plan_id: str) -> list[tuple[Any, tuple[str, ...]]]
     The read costs the open work, never the settled history: an open node is
     never under a retired one (``node_states.retired``), so climbing from the
     open nodes reaches every ancestor they need. Each row carries
-    ``has_child_in_work`` from ``node_states.has_child_in_work_sql``, so a
-    parent whose children all settled is still a parent. A node under a
+    ``is_parent`` from ``node_states.parent_sql``, so a plain
+    parent whose children all settled is still a parent, and a workflow step
+    whose children all settled is a leaf again. A node under a
     retired ancestor is out of the work and is not returned.
     """
     rows = fetch_all(db, _open_cte(db) + _OPEN_ORDERED_TAIL_SQL, (plan_id, plan_id))

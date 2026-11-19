@@ -10,7 +10,9 @@ A rule-started run whose stored event names a repository also gets a GitHub
 read channel for that repository (``script_github_channel``) and the
 ``corsia github read`` client. An approved authenticated run instead gets the
 ``corsia`` client, the owner tool channel and a ``gh`` forwarder, so it acts
-with its agent's access; every other run gets none of these.
+with its agent's access; every other run gets none of these. The forwarder adds
+the agents' account's credential, or, when there is no agents' account, the host
+``gh`` login's, the login agent shells then use too.
 
 Each run hides the person's and agents' GitHub homes from the script itself.
 """
@@ -18,6 +20,7 @@ Each run hides the person's and agents' GitHub homes from the script itself.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import tempfile
@@ -31,6 +34,7 @@ from automation.script_tool_channel import SOCKET_ENV, tool_channel
 from connections import github_agent
 from connections.github_agent import AgentAccountView, Cause
 from connections.github_agent_home import configured_root, default_home
+from connections.github_person import person_forwarder_credential
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
@@ -55,6 +59,8 @@ from tools.shell_policy import load_shell_repo_policies
 from tools.sandbox_git import sandbox_any_case, sandbox_literal
 import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root, corsia_temp_root_for_bind
+
+log = logging.getLogger(__name__)
 
 #: Stdout the runner will read. One extra byte is kept so a longer stream is seen.
 STDOUT_CAP_BYTES = 64 * 1024
@@ -212,10 +218,15 @@ async def _authenticated_client(thread_id: str, view: AgentAccountView):
         client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
         client.chmod(0o700)
         config_dir = None
-        if view.ready:
+        if view.ready or (view.absent and await asyncio.to_thread(_host_login_available)):
+            from events.connectors.github_read_budget import budget, person_budget
+
+            # With no agents' account an approved script reads as the host gh login, as agent shells do.
+            credential = ((lambda: github_agent.script_forwarder_credential(view)) if view.ready
+                          else person_forwarder_credential)
             github_socket = socket_dir / "g"
             await stack.enter_async_context(github_proxy(
-                github_socket, lambda: github_agent.script_forwarder_credential(view),
+                github_socket, credential, read_budget=budget if view.ready else person_budget,
             ))
             config_dir = client_dir / "gh"
             config_dir.mkdir(mode=0o700)
@@ -248,19 +259,30 @@ _NO_LOGIN: dict[Cause, str] = {
                        "in as the agents' own account"),
 }
 _NOT_READY = "the agents' GitHub account isn't ready"
-_UNAPPROVED = ("scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
-               "only if it failed on a GitHub call that needs that account, schedule it with "
+_UNAPPROVED = ("scripts get no GitHub login: this script isn't approved to use GitHub; "
+               "only if it failed on a GitHub call that needs a login, schedule it with "
                "authenticated=true so the person can approve it")
+_NO_HOST_LOGIN = ("there is no agents' GitHub account and no GitHub CLI login on this computer; the person "
+                  "needs to sign in to GitHub CLI or connect an agents' GitHub account")
 
 
-def github_lock_reason(view: AgentAccountView, *, approved: bool = True) -> str | None:
-    """Why a run gets no GitHub login; None only for an approved run on a verified account."""
-    if view.ready:
-        return None if approved else _UNAPPROVED
-    if view.absent:
-        why: str | None = "there is no agents' GitHub account"
-    else:
-        why = _NO_LOGIN.get(view.cause) if view.cause else None
+def _host_login_available() -> bool:
+    """Whether the host ``gh`` login can serve a forwarder; the credential read is discarded."""
+    try:
+        person_forwarder_credential()
+    except ValueError:
+        return False
+    return True
+
+
+def github_lock_reason(view: AgentAccountView, *, approved: bool = True, host_login: bool = True) -> str | None:
+    """Why a run gets no GitHub login, or None: approved runs read as a verified agents' account
+    or, with none, as the host ``gh`` login when ``host_login`` says it exists."""
+    if view.ready or view.absent:
+        if not approved:
+            return _UNAPPROVED
+        return None if view.ready or host_login else f"scripts get no GitHub login: {_NO_HOST_LOGIN}"
+    why = _NO_LOGIN.get(view.cause) if view.cause else None
     return f"scripts get no GitHub login: {why or _NOT_READY}"
 
 
@@ -367,9 +389,12 @@ async def _run_with_channel(
     if not isinstance(owned, ForegroundProcessResult):
         raise ScriptSandboxError("process owner returned an invalid result")
     await shell_sandbox.recheck_after(owned)
+    locked = github_lock_reason(view, approved=socket_dir is not None, host_login=config_dir is not None)
+    if locked is not None and socket_dir is not None:
+        log.warning("approved script ran with no GitHub login thread=%s run=%s: %s", thread_id, run_id, locked)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
-        github_lock_reason(view, approved=socket_dir is not None),
+        locked,
         # A script that ended with 0 finished its work, whatever the owner did after it.
         stopped_by_shutdown=owned.stop_reason == "backend_shutdown" and owned.returncode != 0,
     )

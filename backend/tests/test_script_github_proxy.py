@@ -26,12 +26,12 @@ class Writer:
         pass
 
 
-async def _request(host, credential, upstream, target="/user"):
+async def _request(host, credential, upstream, target="/user", **kwargs):
     reader = asyncio.StreamReader()
     reader.feed_data(f"GET {target} HTTP/1.1\r\nHost: {host}\r\nAuthorization: token placeholder\r\n\r\n".encode())
     reader.feed_eof()
     writer = Writer()
-    await _serve(reader, writer, credential=credential, transport=httpx.MockTransport(upstream))
+    await _serve(reader, writer, credential=credential, transport=httpx.MockTransport(upstream), **kwargs)
     return bytes(writer.data)
 
 
@@ -107,8 +107,6 @@ async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(mo
     import gzip
     import json
 
-    import automation.script_github_proxy as proxy
-
     recorded = []
 
     class Budget:
@@ -118,7 +116,6 @@ async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(mo
         def record(self, status, headers, body):
             recorded.append((status, body))
 
-    monkeypatch.setattr(proxy, "budget", Budget())
     message = {"message": "You have exceeded a secondary rate limit."}
     raw = gzip.compress(json.dumps(message).encode())
 
@@ -126,9 +123,21 @@ async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(mo
         return httpx.Response(403, headers={"content-encoding": "gzip", "content-type": "application/json"},
                               stream=httpx.ByteStream(raw))
 
-    response = await _request("api.github.com", lambda: "synthetic-value", upstream)
+    response = await _request("api.github.com", lambda: "synthetic-value", upstream, read_budget=Budget())
     assert recorded == [(403, message)]
     assert raw in response
+
+
+@pytest.mark.asyncio
+async def test_proxy_asks_and_feeds_the_budget_it_was_given():
+    from events.connectors.github_read_budget import ReadBudget
+
+    given = ReadBudget(clock=lambda: 1000.0)
+    given.record(429, {"retry-after": "60"})
+
+    response = await _request("api.github.com", lambda: "synthetic-value",
+                              lambda request: httpx.Response(200), read_budget=given)
+    assert b"429" in response and b"paused by the shared rate-limit budget" in response
 
 
 @pytest.mark.asyncio
