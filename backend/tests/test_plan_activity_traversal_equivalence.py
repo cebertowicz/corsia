@@ -35,11 +35,11 @@ def test_shared_traversal_facts_match_canonical_summaries(rows):
     leaves = node_states.leaves(rows, work=work, parents=parents)
     buckets = {item["id"]: "active" for item in rows}
     assert leaves == node_states.leaves(rows)
-    assert node_states.in_play(rows, leaf_rows=leaves, with_children=parents) == node_states.in_play(rows)
+    assert node_states.in_play(rows, leaf_rows=leaves, parents=parents) == node_states.in_play(rows)
     reduced = {node_id: SimpleNamespace(bucket=bucket) for node_id, bucket in buckets.items()}
     full = operator_nodes.distribution_from_buckets(rows, buckets)[1]
     assert operator_nodes.distribution_from_buckets(
-        rows, buckets, work=work, holders=parents, include_branches=False,
+        rows, buckets, work=work, parents=parents, include_branches=False,
     ) == ({}, full)
     assert activity_reducer.distribution_counts(rows, reduced) == (leaves, parents, full)
 

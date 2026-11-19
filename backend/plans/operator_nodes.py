@@ -24,32 +24,18 @@ from plans.node_states import folded_ids, is_container, parent_ids, work_ids
 
 def distribution_from_buckets(
     rows: list[dict], buckets: dict[str, str], *,
-    work: set[str] | None = None, holders: set[str] | None = None,
+    work: set[str] | None = None, parents: set[str] | None = None,
     include_branches: bool = True,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Count compact raw-row leaves bottom-up, independent of input row order.
 
     A row saying ``is_parent`` (a read of the open work) is a parent though its
     children are not among ``rows``: it adds no leaf of its own.
-    Passed ``work`` and ``holders`` sets must be computed from these same rows.
+    Passed ``work`` and ``parents`` sets must be computed from these same rows.
     With ``include_branches=False`` the first result is empty; totals are unchanged.
     """
     work = work_ids(rows) if work is None else work
-    holders = parent_ids(rows, work=work) if holders is None else holders
-    if all(row["parent_id"] is None for row in rows):
-        plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
-        flat_branches = {}
-        for row in rows:
-            node_id = str(row["id"])
-            leaf = node_id in work and node_id not in holders
-            if leaf:
-                plan[buckets[node_id]] += 1
-            if include_branches:
-                own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
-                if leaf:
-                    own[buckets[node_id]] = 1
-                flat_branches[node_id] = own
-        return flat_branches, plan
+    parents = parent_ids(rows, work=work) if parents is None else parents
     ids = {str(row["id"]) for row in rows}
     children: dict[str, list[str]] = {}
     parent_of: dict[str, str] = {}
@@ -68,7 +54,7 @@ def distribution_from_buckets(
     while ready:
         node_id = ready.popleft()
         child_ids = children.get(node_id, [])
-        leaf = not child_ids and node_id in work and node_id not in holders
+        leaf = not child_ids and node_id in work and node_id not in parents
         if include_branches:
             own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
             if leaf:

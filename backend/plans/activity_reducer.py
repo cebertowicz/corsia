@@ -163,7 +163,7 @@ def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
     parents = node_states.parent_ids(rows, work=work)
     leaves = node_states.leaves(rows, work=work, parents=parents)
     counts = operator_nodes.distribution_from_buckets(
-        rows, buckets, work=work, holders=parents, include_branches=False,
+        rows, buckets, work=work, parents=parents, include_branches=False,
     )[1]
     return leaves, parents, counts
 
@@ -175,7 +175,7 @@ def plan_state(
     """Reduce compact node states into canonical plan progress and motion."""
     if leaves is None:
         leaves = node_states.leaves(rows)
-    counted = node_states.in_play(rows, leaf_rows=leaves, with_children=parents)
+    counted = node_states.in_play(rows, leaf_rows=leaves, parents=parents)
     incomplete = [
         reduced[str(row["id"])]
         for row in leaves

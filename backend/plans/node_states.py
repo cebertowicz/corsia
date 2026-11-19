@@ -327,33 +327,26 @@ def folded_subtrees(
     }
 
 
-def folded_ids(nodes: Iterable[Mapping], *, with_children: set[str] | None = None) -> set[str]:
+def folded_ids(nodes: Iterable[Mapping], *, parents: set[str] | None = None) -> set[str]:
     """Fold one plan's nodes: the single rule the pane, the reads and progress share.
 
     A folded node heads a branch with no open work left in it, and it folds
     the moment that becomes true; the pane's fold wave is where the user sees
     it go. Each node carries ``id``, ``parent_id``, ``state``,
     ``spawned_thread_id`` and, when it can be archived, ``archived_at``.
-    A passed ``with_children`` set must be computed from these same nodes.
+    A passed ``parents`` set (``parent_ids``) must be computed from these same nodes.
     """
     rows = list(nodes)
-    if with_children is None:
-        with_children = parent_ids(rows)
-    if all(node["parent_id"] is None for node in rows):
-        return {
-            str(node["id"]) for node in rows
-            if folded(node["state"], node.get("archived_at"),
-                      container=is_container(node, str(node["id"]) in with_children))
-        }
-    parents: dict[str, str | None] = {str(node["id"]): node["parent_id"] for node in rows}
+    if parents is None:
+        parents = parent_ids(rows)
     own = {
         str(node["id"]): folded(
             node["state"], node.get("archived_at"),
-            container=is_container(node, str(node["id"]) in with_children),
+            container=is_container(node, str(node["id"]) in parents),
         )
         for node in rows
     }
-    return folded_subtrees(parents, own)
+    return folded_subtrees({str(node["id"]): node["parent_id"] for node in rows}, own)
 
 
 def leaves(rows: list, *, work: set[str] | None = None, parents: set[str] | None = None) -> list:
@@ -373,23 +366,22 @@ def leaves(rows: list, *, work: set[str] | None = None, parents: set[str] | None
 
 
 def in_play(
-    rows: list, *, leaf_rows: list | None = None, with_children: set[str] | None = None,
+    rows: list, *, leaf_rows: list | None = None, parents: set[str] | None = None,
 ) -> list:
     """Return the leaves whose root branch has not folded.
 
     A root branch leaves the progress count the moment it folds, so the ratio
     is about work still in play: a fully finished plan reads 0/0 while its
-    folded nodes stay on the plan, one expansion away.
+    folded nodes stay on the plan, one expansion away. Passed ``leaf_rows``
+    (``leaves``) and ``parents`` (``parent_ids``) must be computed from these same rows.
     """
-    fold = folded_ids((dict(row) for row in rows), with_children=with_children)
-    if leaf_rows is not None and all(row["parent_id"] is None for row in rows):
-        return [row for row in leaf_rows if str(row["id"]) not in fold]
-    parents = {row["id"]: row["parent_id"] for row in rows}
+    fold = folded_ids((dict(row) for row in rows), parents=parents)
+    by_parent = {row["id"]: row["parent_id"] for row in rows}
 
     def root(node_id: str) -> str:
         seen = {node_id}
-        while parents.get(node_id) in parents and parents[node_id] not in seen:
-            node_id = parents[node_id]
+        while by_parent.get(node_id) in by_parent and by_parent[node_id] not in seen:
+            node_id = by_parent[node_id]
             seen.add(node_id)
         return node_id
 
