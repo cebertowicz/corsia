@@ -75,6 +75,7 @@
 	let docState = $state<DocState>('loading');
 	let openRefusal = $state<DocOpenRefusal | null>(null);
 	let liveUnavailable = $state<ViewerContent['liveUnavailable']>(null);
+	let passedNotice = $state<string | null>(null);
 	let loadedArtifactId = $state<string | null>(null);
 	let readonly = $state(false);
 	let confirming = $state(false);
@@ -195,7 +196,7 @@
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
-				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true); passedNotice = value.passedVersion?.notice ?? null;
 				header.loaded(d, value); docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
@@ -234,7 +235,7 @@
 			confirming = opened.confirming;
 			if (opened.text !== null) editText = opened.text;
 			header.begin(d);
-			openRefusal = null; liveUnavailable = null;
+			openRefusal = null; liveUnavailable = null; passedNotice = null;
 			docState = opened.text === null ? 'loading' : 'ready';
 			signal(opened.signal);
 			void loadViewerContent({
@@ -292,7 +293,7 @@
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, header.freshness, header.settling(target, loadedArtifactId).freshness)}
 		liveSession={liveSession ?? null}
-		{openRefusal} {liveUnavailable}
+		{openRefusal} {liveUnavailable} {passedNotice}
 		tabText={editText}
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}

@@ -28,6 +28,17 @@ export interface DocContent {
 	live_unavailable?: string;
 	/** Set when the file's draft record says it is an email draft: the record's id and the header as the server read it. */
 	email_draft?: EmailDraftInfo | null;
+	/** Set when the file holds agent text newer than its last fresh read: the text served is the passed version. */
+	passed_version?: PassedVersion | null;
+}
+
+/** The version a fresh read passed, shown in place of newer agent text the reader has not passed yet. */
+export interface PassedVersion {
+	sha256: string;
+	fresh_read_id: string | null;
+	current_sha256: string;
+	/** The line the viewer shows the person about why they see this version. */
+	notice: string;
 }
 
 export interface DocRevision {

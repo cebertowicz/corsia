@@ -3,6 +3,7 @@ from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.fact_extraction_schema import FACT_EXTRACTION_SCHEMA_SQL
+from infra.fresh_read_schema import FRESH_READ_SCHEMA_SQL
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.event_watch_schema import EXPECTED_EVENT_WATCH_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
@@ -39,7 +40,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 200
+SCHEMA_VERSION = 201
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -472,11 +473,10 @@ SCHEMA_SQL = f"""
     );
     CREATE INDEX IF NOT EXISTS idx_artifact_reconcile_receipts_session
         ON artifact_reconcile_receipts(thread_id, created_at DESC);
-
     {ARTIFACT_RELOCATION_SCHEMA_SQL}
     {HELD_REPLIES_SCHEMA_SQL}
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_BREAKS_SCHEMA_SQL}{MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}{SCOPED_HISTORY_INDEX_SQL}
-    {LEARNING_INDEX_SQL}
+    {LEARNING_INDEX_SQL}{FRESH_READ_SCHEMA_SQL}
 """

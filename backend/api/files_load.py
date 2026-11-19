@@ -127,6 +127,12 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         draft = draft_at(p, "email", db=db)
     finally:
         db.close()
+    from core.fresh_read_view import served
+
+    # A document an agent handed over shows the person the version that passed its fresh read.
+    passed = served(art, p, raw, writable)
+    if passed is not None:
+        text, writable = passed["text"], passed["writable"]
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
     from infra.guidance_targets import document_target, guidance_target
 
@@ -138,6 +144,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     recorded = target is not None or document is not None
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
+            "passed_version": passed["passed_version"] if passed is not None else None,
             "freshness": freshness, "ownership": ownership, "_recorded": recorded,
             # The draft record makes this file an email draft, which the viewer opens as an email.
             "email_draft": email_draft_view(draft["id"], text) if draft else None,

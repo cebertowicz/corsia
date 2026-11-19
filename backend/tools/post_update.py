@@ -165,7 +165,8 @@ def _running_turn_model_metadata(
     }
 
 
-def _persist_update(thread_id, text, node_id, idempotency_key, turn_id, replace=(), replace_reason=None):
+def _persist_update(thread_id, text, node_id, idempotency_key, turn_id, replace=(), replace_reason=None,
+                    fresh_read_id=None):
     """Write a complete replacement and its exact receipt under one write transaction."""
     from contextlib import ExitStack
     from infra.message_update_seen import snapshot
@@ -195,6 +196,8 @@ def _persist_update(thread_id, text, node_id, idempotency_key, turn_id, replace=
                         **_running_turn_model_metadata(db, thread_id, turn_id, ahead)}
             if node_id is not None:
                 metadata["node_id"] = node_id
+            if fresh_read_id is not None:
+                metadata["fresh_read_id"] = fresh_read_id
             if idempotency_key is not None:
                 metadata[_IDEMPOTENCY_METADATA_KEY] = idempotency_key
             if replace:
@@ -252,6 +255,10 @@ class PostUpdateTool(Tool):
                     "type": "string", "enum": ["corrects", "updates"],
                     "description": "Required with replace: corrects a wrong claim, or updates the same subject.",
                 },
+                "note_to_reader": {
+                    "type": "string",
+                    "description": "Optional note to the fresh reader answering a finding; the user never sees it.",
+                },
             },
             "required": ["text"],
         }
@@ -281,9 +288,15 @@ class PostUpdateTool(Tool):
             return refuse("idempotency_key must be non-empty when passed.")
         try:
             replace, replace_reason = replacement_args(kwargs)
-            message_id, duplicate, user_id, saved = await run_in_db(
-                partial(_persist_update, thread_id, text, node_id, idempotency_key, turn_id, replace, replace_reason),
-            )
+            from tools.post_update_fresh_read import read_update
+
+            verdict = await read_update(thread_id, text, node_id, idempotency_key, _clean_text(kwargs.get("note_to_reader")))
+            if not verdict.passed:
+                return f"Error: {verdict.message}"  # the verdict already says nothing was sent
+            message_id, duplicate, user_id, saved = await run_in_db(partial(
+                _persist_update, thread_id, text, node_id, idempotency_key, turn_id, replace, replace_reason,
+                verdict.fresh_read_id,
+            ))
         except ValueError as exc:
             return refuse(str(exc))
         except Exception as exc:

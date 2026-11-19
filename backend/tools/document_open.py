@@ -60,8 +60,14 @@ def _open_document(
     actor: dict[str, Any],
     artifact_id: str | None,
     path: str | None,
+    read: bool = False,
+    fresh_read_id: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve one target, snapshot presence, and schedule its request once."""
+    """Resolve one target, snapshot presence, and schedule its request once.
+
+    Until ``read`` it stops where it would send, answering ``needs_read`` with the
+    document it would show: the caller passes it through the fresh read and calls again.
+    """
     db = get_db()
     try:
         thread = get_thread_for_user(actor_thread_id, actor["user_id"], db=db)
@@ -104,6 +110,8 @@ def _open_document(
             return {"outcome": "already_open", "reason": None, "count": 0}
         if not snapshot.eligible_session_ids:
             return _link_result("user_cannot_show", title, resolved_path)
+        if not read:
+            return {"outcome": "needs_read", "artifact_id": resolved_id, "path": resolved_path, "title": title}
 
         count = state.send_to_thread_sessions(
             actor_thread_id,
@@ -114,6 +122,7 @@ def _open_document(
                 "artifact_id": resolved_id,
                 "path": resolved_path,
                 "title": title,
+                "fresh_read_id": fresh_read_id,
             },
         )
         if not count:
@@ -121,6 +130,24 @@ def _open_document(
         return {"outcome": "requested", "reason": None, "count": count, "message": _REQUESTED.format(count=count)}
     finally:
         db.close()
+
+
+async def _read_then_open(actor_thread_id: str, actor: dict[str, Any], pending: dict[str, Any],
+                          note: str | None) -> dict[str, Any]:
+    """Pass the exact bytes the person will be shown through the fresh read, then send the open."""
+    from core.fresh_read_view import read_document
+
+    try:
+        data = await run_in_db(Path(pending["path"]).read_bytes)
+    except OSError:
+        return _refused("not_found")
+    verdict = await read_document(pending["artifact_id"], pending["title"], data, kind="document_open",
+                                  writer_thread_id=actor_thread_id, user_id=actor["user_id"],
+                                  note=note if isinstance(note, str) and note.strip() else None)
+    if not verdict.passed:
+        return {"outcome": "refused", "reason": "not_delivered", "message": verdict.message}
+    return await run_in_db(_open_document, actor_thread_id, actor, pending["artifact_id"], None, True,
+                            verdict.fresh_read_id)
 
 
 class DocumentOpenTool(Tool):
@@ -142,6 +169,7 @@ class DocumentOpenTool(Tool):
         return _tool_schema({
             "path": {"type": ["string", "null"]},
             "artifact_id": {"type": ["string", "null"]},
+            "note_to_reader": {"type": ["string", "null"]},
         })
 
     async def execute(self, **kwargs: Any) -> str:
@@ -156,6 +184,8 @@ class DocumentOpenTool(Tool):
         if path:
             path = tool_path(path, self._workspace)
         result = await run_in_db(_open_document, actor_thread_id, actor, artifact_id, path)
+        if result["outcome"] == "needs_read":
+            result = await _read_then_open(actor_thread_id, actor, result, kwargs.get("note_to_reader"))
         emit_product_event(
             "document",
             "agent_open",

@@ -161,6 +161,62 @@ Source: `backend/infra/continuation_schema.py`.
 
 Indexes: `idx_continuation_triggers_live` (dedupe_key, partial unique), `idx_continuation_triggers_scope` (scope_id, created_at), `idx_continuation_triggers_state` (state, next_attempt_at), `sqlite_autoindex_continuation_triggers_1` (id, unique).
 
+### `fresh_read_bytes`
+
+Source: `backend/infra/fresh_read_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `sha256` | TEXT | Yes | No | — | — |
+| `body` | BLOB | No | Yes | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_fresh_read_bytes_1` (sha256, unique).
+
+### `fresh_read_views`
+
+Source: `backend/infra/fresh_read_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `artifact_id` | TEXT | Yes | No | — | — |
+| `sha256` | TEXT | No | Yes | — | — |
+| `fresh_read_id` | TEXT | No | Yes | — | — |
+| `holder_thread_id` | TEXT | No | No | — | — |
+| `node_id` | TEXT | No | No | — | — |
+| `recheck_sha256` | TEXT | No | No | — | — |
+| `recheck_verdict` | TEXT | No | No | — | — |
+| `updated_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_fresh_read_views_1` (artifact_id, unique).
+
+### `fresh_reads`
+
+Source: `backend/infra/fresh_read_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `kind` | TEXT | No | Yes | — | — |
+| `item_ref` | TEXT | No | Yes | — | — |
+| `sha256` | TEXT | No | Yes | — | — |
+| `verdict` | TEXT | No | Yes | — | — |
+| `findings` | TEXT | No | No | — | — |
+| `attempts` | TEXT | No | No | — | — |
+| `writer_thread_id` | TEXT | No | No | — | — |
+| `node_id` | TEXT | No | No | — | — |
+| `reader_model` | TEXT | No | No | — | — |
+| `input_cap` | INTEGER | No | No | — | — |
+| `messages_cut_from` | TEXT | No | No | — | — |
+| `elapsed_ms` | INTEGER | No | No | — | — |
+| `prompt_tokens` | INTEGER | No | No | — | — |
+| `completion_tokens` | INTEGER | No | No | — | — |
+| `cost_usd` | REAL | No | No | — | — |
+| `cost_source` | TEXT | No | No | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_fresh_reads_item` (kind, item_ref, sha256, verdict), `sqlite_autoindex_fresh_reads_1` (id, unique).
+
 ### `held_replies`
 
 Source: `backend/infra/held_replies_schema.py`.

@@ -42,6 +42,7 @@
 		liveSession = null,
 		openRefusal = null,
 		liveUnavailable = null,
+		passedNotice = null,
 		tabText = '',
 		onReopen,
 		onRead,
@@ -84,6 +85,8 @@
 		liveSession?: LiveDocumentSession | null;
 		openRefusal?: DocOpenRefusal | null;
 		liveUnavailable?: LiveUnavailable | null;
+		/** Why the person sees the version a fresh read passed rather than the file's newer agent text. */
+		passedNotice?: string | null;
 		tabText?: string;
 		onReopen?: () => void;
 		onRead?: () => void;
@@ -259,7 +262,9 @@
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
 	connectionStatusId={connectionDescriptionId} />
 <span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
-{#if readonly && ready}
+{#if passedNotice && ready}
+	<div class="readonly-note" role="status">{passedNotice}</div>
+{:else if readonly && ready}
 	<div class="readonly-note">Read-only.</div>
 {/if}
 <!-- Delivery controls above remain mounted with the document identity so they never force a second header row. -->

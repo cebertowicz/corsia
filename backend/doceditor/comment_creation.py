@@ -141,9 +141,15 @@ async def create_validated_comment(request, client_id):
     """One producer path after transport-specific shape, author and access checks."""
     from functools import partial
     from doceditor.comment_create_db import create_in_db
+    from doceditor.comment_fresh_read import check_new_comment
 
     if request.region is not None:
         check_region_target(request.path, request.quote)
+    # Before any range is reserved or row written: an agent comment that reaches the person is read first,
+    # under the id it will be stored as, so the read names the comment it passed.
+    if request.author_kind == "agent":
+        client_id = client_id or uuid4().hex
+        await check_new_comment(request, client_id)
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:

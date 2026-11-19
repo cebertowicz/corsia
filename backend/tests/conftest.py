@@ -492,6 +492,22 @@ def _focus_nudge_only_where_marked(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_read_passes_unless_marked(request, monkeypatch):
+    """Every item an agent hands the person passes its fresh read without a reader, unless marked.
+
+    The gate calls a model; tests of the doors' own behavior do not model one. Modules marked
+    ``fresh_read`` run the real gate with its reader seam replaced.
+    """
+    if request.node.get_closest_marker("fresh_read") is None:
+        from core import fresh_read
+
+        async def passed(_item):
+            return fresh_read.Verdict(True, None)
+
+        monkeypatch.setattr(fresh_read, "check", passed)
+
+
+@pytest.fixture(autouse=True)
 def _no_public_model_catalog(monkeypatch):
     """External discovery reads models.dev; no test reaches the internet for it."""
     monkeypatch.setenv("CORSIA_MODEL_CATALOG_URL", "")

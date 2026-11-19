@@ -16,7 +16,7 @@ def test_document_open_tool_surface_is_trigger_first():
     assert tool.name == "document_open"
     assert tool.description == "Show a document to the user in this thread's canvas"
     assert tool.parameters["required"] == []
-    assert set(tool.parameters["properties"]) == {"path", "artifact_id"}
+    assert set(tool.parameters["properties"]) == {"path", "artifact_id", "note_to_reader"}
 
 
 @pytest.mark.asyncio
@@ -79,6 +79,7 @@ async def test_document_open_returns_link_when_session_handoff_is_dropped(deleg_
         {"user_id": "u-test"},
         None,
         str(path),
+        True,
     )
 
     assert result["outcome"] == "link"
@@ -178,8 +179,13 @@ async def test_document_open_has_a_result_for_each_nonrequest_outcome(
     async def run_in_db(fn, *args):
         return fn(*args)
 
+    async def read_passed(thread_id, actor, pending, _note):
+        # The outcomes here are each after a passed fresh read; the read itself is test_fresh_read_gate's.
+        return await run_in_db(document_open._open_document, thread_id, actor, pending["artifact_id"], None, True, "r")
+
     events: list[tuple[str, str, dict]] = []
     monkeypatch.setattr(document_open, "run_in_db", run_in_db)
+    monkeypatch.setattr(document_open, "_read_then_open", read_passed)
     monkeypatch.setattr(document_open, "emit_product_event", lambda *args, **kwargs: events.append((*args, kwargs)))
 
     result = json.loads(await document_open.DocumentOpenTool().execute(artifact_id="artifact"))

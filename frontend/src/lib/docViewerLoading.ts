@@ -1,4 +1,5 @@
 import { fetchContent, fetchRevision, type DocContent } from '$lib/api/docs';
+import type { PassedVersion } from '$lib/api/docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { DocOwnership } from '$lib/api/docOwnership';
 import type { EmailDraftInfo } from '$lib/emailDraft';
@@ -24,12 +25,14 @@ export interface ViewerContent {
 	history?: boolean;
 	/** Set when the file's draft record makes it an email draft; absent when the load had no content response to read. */
 	emailDraft?: EmailDraftInfo | null;
+	/** The text is the version a fresh read passed, not the file's newer agent text. */
+	passedVersion?: PassedVersion | null;
 }
 /** The viewer's form of an HTTP content response, which never carries a live session. */
 export function viewerContent(response: DocContent, fallbackArtifactId: string | null): ViewerContent {
 	return { text: response.text, artifactId: response.artifact?.id ?? fallbackArtifactId, writable: response.writable !== false,
 		freshness: response.freshness, ownership: response.ownership, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response),
-		history: response.history === true, emailDraft: response.email_draft ?? null };
+		history: response.history === true, emailDraft: response.email_draft ?? null, passedVersion: response.passed_version ?? null };
 }
 interface LoadOptions {
 	target: DocViewerTarget;

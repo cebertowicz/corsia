@@ -92,6 +92,11 @@ async def _open(socket, user: dict, data: dict) -> None:
     if data.get("expected_artifact_id") and artifact["id"] != data["expected_artifact_id"]:
         await send_to_client(socket, {"type": "doc_opened", "live": False, "request_id": data.get("request_id")})
         return
+    if loaded.get("passed_version"):
+        # The live copy would sync to the file's newer bytes; the person is shown the passed version instead.
+        await send_to_client(socket, {"type": "doc_opened", "live": False, "passed_version": loaded["passed_version"],
+                                      "request_id": data.get("request_id")})
+        return
     resolved = Path(artifact["path"])
     actor = WriteActor(thread_id or UI_THREAD, project_id, direct_user=True, user_id=user["id"])
     try:

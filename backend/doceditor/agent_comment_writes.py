@@ -289,12 +289,20 @@ def _update_in_db(comment_id: str, fields: dict[str, Any], thread_id: str, user_
         db.close()
 
 
+async def _gated_update(comment_id: str, fields: dict[str, Any], thread_id: str, user_id: str, regions: bool):
+    """An edit of a comment's text that reaches the person is read before it is written."""
+    from doceditor.comment_fresh_read import check_comment_edit
+
+    await check_comment_edit(comment_id, fields, thread_id)
+    return await run_in_db(_update_in_db, comment_id, fields, thread_id, user_id, regions)
+
+
 async def update(comment_id: str, fields: dict[str, Any], *, thread_id: str, user_id: str, regions: bool = True):
     """Resolve, re-open, edit or move an agent's comment; returns (row, path), None when not found, or ``Queued``.
 
     An Agree on its own never waits. ``regions`` checks a moved image region (the native tool; the CLI has none).
     """
-    run = lambda: run_in_db(_update_in_db, comment_id, fields, thread_id, user_id, regions)  # noqa: E731
+    run = lambda: _gated_update(comment_id, fields, thread_id, user_id, regions)  # noqa: E731
     if _is_agree(fields):
         return await run()
     target = await run_in_db(_target, comment_id, user_id, _updatable(fields, thread_id))
@@ -318,7 +326,7 @@ async def _replay(op: dict[str, Any], thread_id: str, user_id: str):
         return {"comment": await _decide_now(
             op["comment_id"], op["decision"], thread_id=thread_id, user_id=user_id,
             decided_by=op["decided_by"], reason=op.get("reason"))}
-    updated = await run_in_db(_update_in_db, op["comment_id"], op["fields"], thread_id, user_id, op.get("regions", True))
+    updated = await _gated_update(op["comment_id"], op["fields"], thread_id, user_id, op.get("regions", True))
     if updated is None:
         raise CommentActionError("not_found", "Comment not found")
     return {"comment": updated[0]}

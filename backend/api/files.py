@@ -178,7 +178,10 @@ async def write_content(token: str, body: WriteBody):
     if not user:
         raise HTTPException(401)
     try:
-        return await save_document_text(DocumentSave(**body.model_dump()), user["id"])
+        from core.fresh_read_person_save import person_save
+
+        save = DocumentSave(**body.model_dump())
+        return await person_save(body.path, lambda expected: save_document_text(save, user["id"], expected_sha256=expected))
     except DocumentSaveError as exc:
         raise document_save_http_exception(exc) from exc
 
