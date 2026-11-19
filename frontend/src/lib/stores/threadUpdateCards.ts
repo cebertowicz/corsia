@@ -24,6 +24,8 @@ export const visitDividers = writable<Record<string, VisitDividerState>>({});
 
 const readSeq = new Map<string, number>();
 const requestedWindows = new Map<string, number>();
+const inFlight = new Map<string, number>();
+const dirty = new Set<string>();
 /** Identifies the visit whose one opening divider read may still commit. */
 const visitSeq = new Map<string, number>();
 
@@ -39,24 +41,36 @@ export async function loadUpdateCards(
 	readSeq.set(threadId, mine);
 	const visit = options.divider ? (visitSeq.get(threadId) ?? 0) + 1 : null;
 	if (visit !== null) visitSeq.set(threadId, visit);
-	const result = await readUpdateCards(threadId, { fromSeq, divider: Boolean(options.divider) });
-	if (!result) {
-		if (visit !== null && visitSeq.get(threadId) === visit) {
-			visitDividers.update((all) => ({ ...all, [threadId]: { divider: null, failed: true } }));
-			openAtDivider.update((open) => open === threadId ? null : open);
+	inFlight.set(threadId, (inFlight.get(threadId) ?? 0) + 1);
+	try {
+		const result = await readUpdateCards(threadId, { fromSeq, divider: Boolean(options.divider) });
+		if (!result) {
+			if (visit !== null && visitSeq.get(threadId) === visit) {
+				visitDividers.update((all) => ({ ...all, [threadId]: { divider: null, failed: true } }));
+				openAtDivider.update((open) => open === threadId ? null : open);
+			}
+			return;
 		}
-		return;
+		if (visit !== null && visitSeq.get(threadId) === visit) {
+			visitDividers.update((all) => ({ ...all, [threadId]: { divider: result.divider, failed: false } }));
+		}
+		if (readSeq.get(threadId) !== mine) return;
+		threadUpdateCards.update((all) => ({ ...all, [threadId]: { fromSeq, cards: result.cards } }));
+	} finally {
+		const remaining = (inFlight.get(threadId) ?? 1) - 1;
+		if (remaining) inFlight.set(threadId, remaining);
+		else {
+			inFlight.delete(threadId);
+			const fromSeq = requestedWindows.get(threadId);
+			if (dirty.delete(threadId) && fromSeq !== undefined) void loadUpdateCards(threadId, fromSeq);
+		}
 	}
-	if (visit !== null && visitSeq.get(threadId) === visit) {
-		visitDividers.update((all) => ({ ...all, [threadId]: { divider: result.divider, failed: false } }));
-	}
-	if (readSeq.get(threadId) !== mine) return;
-	threadUpdateCards.update((all) => ({ ...all, [threadId]: { fromSeq, cards: result.cards } }));
 }
 
 /** The visit ended: the next open reads a fresh divider. */
 export function endVisit(threadId: string): void {
 	requestedWindows.delete(threadId);
+	dirty.delete(threadId);
 	// Invalidate an opening read that may still be in flight for the old visit.
 	visitSeq.set(threadId, (visitSeq.get(threadId) ?? 0) + 1);
 	readSeq.set(threadId, (readSeq.get(threadId) ?? 0) + 1);
@@ -81,7 +95,11 @@ export function watchUpdateCardNudges(): void {
 	const reload = (ids: string[]) => {
 		for (const id of new Set(ids)) {
 			const fromSeq = requestedWindows.get(id);
-			if (fromSeq !== undefined) void loadUpdateCards(id, fromSeq);
+			if (fromSeq === undefined) continue;
+			if (inFlight.has(id)) {
+				dirty.add(id);
+				readSeq.set(id, (readSeq.get(id) ?? 0) + 1);
+			} else void loadUpdateCards(id, fromSeq);
 		}
 	};
 	on('plans_changed', (message: PlansChangedMessage) => {
