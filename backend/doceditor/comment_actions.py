@@ -22,7 +22,7 @@ from weakref import WeakValueDictionary
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_validation import validate_create
-from doceditor.doc_text import read_doc_text
+from doceditor.doc_text import read_suggestion_text
 from doceditor.quote_anchor import _cp_at_u16, reanchor
 from doceditor.comment_permissions import check_agent_update, check_decider, owner_row
 from infra.database import get_db, write_transaction
@@ -292,7 +292,7 @@ async def _decide_suggestion(
         from doceditor.live_suggestions import accept_live
         live_receipt = await accept_live(artifact, project_id, [comment], actor_thread_id, user_id=user_id, single=True)
         if live_receipt is None:
-            document_text = await run_off_db(read_doc_text, artifact["path"])
+            document_text = await run_off_db(read_suggestion_text, artifact["path"])
             await write(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",

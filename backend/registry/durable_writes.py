@@ -17,7 +17,8 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_recovery import recover_intents, recovery_shared_target
+from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected, restore_if_owned
+from registry.durable_write_recovery import recover_intents, recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
 from registry.promote_recovery_notice import INTERRUPTED, announce_undone_promote, recovery_path
@@ -28,10 +29,8 @@ from registry.promotion_source import promotion_source
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
 from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
-    bound_file_mode,
     claim_bound_file,
     copy_bound_file,
-    replace_bound_file,
     restore_claimed_file,
     stage_bound_bytes,
     stage_bound_file,
@@ -42,9 +41,7 @@ from tools.filesystem_effects import (
 _INTENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 logger = logging.getLogger(__name__)
 
-
 # Shared target policy is implemented in registry.shared_documents.
-
 
 def _remove_if_present(path: Path | None) -> None:
     if path is None:
@@ -57,19 +54,7 @@ def _remove_if_present(path: Path | None) -> None:
         return
 
 
-def _remove_created_parent(path: Path) -> None:
-    """Remove an unpublished category directory, failing on foreign contents."""
-    try:
-        path.rmdir()
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        raise RuntimeError(
-            f"Unpublished shared category contains unexpected files: {path}"
-        ) from exc
-
-
-def _restore_target(target: Path, backup: Path | None) -> None:
+def _restore_target(target: Path, backup: Path | None, content_hash: str) -> None:
     if backup is None:
         _remove_if_present(target)
         return
@@ -78,7 +63,7 @@ def _restore_target(target: Path, backup: Path | None) -> None:
             f"{backup.name.removesuffix('.backup')}.stage"
         )
         copy_bound_file(backup, rollback_stage)
-        replace_bound_file(rollback_stage, target)
+        restore_if_owned(rollback_stage, target, content_hash)
 
 
 def _finish_undo(
@@ -98,9 +83,11 @@ def _finish_undo(
                 raise RuntimeError(
                     f"Durable write intent {intent_id} no longer owns its target."
                 )
-            _restore_target(target, None)
+            _restore_target(target, None, content_hash)
     elif backup.exists():
-        _restore_target(target, backup)
+        # Recovery may resume after the restore itself but before the intent advanced.
+        if not target.is_file() or _sha256_file(target) != _sha256_file(backup):
+            _restore_target(target, backup, content_hash)
     else:
         raise RuntimeError(
             f"Durable write intent {intent_id} lost its rollback backup."
@@ -108,7 +95,7 @@ def _finish_undo(
 
     recovered_source = _recover_unpublished_claim(claim, source, intent_id)
     if created_parent:
-        _remove_created_parent(target.parent)
+        remove_created_parent(target.parent)
     return recovered_source
 
 
@@ -378,6 +365,16 @@ def _complete_publication(
     }
 
 
+def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha256: str | None) -> None:
+    check_expected_content(target, expected_sha256)
+    if backup is not None:
+        checked_copy_target(target, backup, expected_sha256)
+    if backup is not None:
+        replace_if_expected(stage, target, expected_sha256)
+    elif not restore_claimed_file(stage, target):
+        raise FileExistsError(f"Publication destination already exists: {target}")
+
+
 def _publish_bytes(
     shared: SharedTarget,
     content: bytes | None,
@@ -388,7 +385,7 @@ def _publish_bytes(
     operation: str,
     direct_user: bool = False,
     source: Path | None = None, origin: registration_writer.RegistrationOrigin | None = None,
-    notify: bool = True,
+    notify: bool = True, expected_sha256: str | None = None,
 ) -> dict:
     if (source is None) == (content is None):
         raise ValueError(
@@ -437,20 +434,14 @@ def _publish_bytes(
             intents.record_source_hash(db, intent_id, content_hash)
         else:
             assert content is not None
-            target_mode = bound_file_mode(shared.path) if backup is not None else 0o600
+            target_mode = checked_file_mode(shared.path, expected_sha256) if backup is not None else 0o600
             stage_bound_bytes(
                 shared.path,
                 content,
                 leaf=stage.name,
                 mode=target_mode,
             )
-        if backup is not None:
-            copy_bound_file(shared.path, backup)
-            replace_bound_file(stage, shared.path)
-        elif not restore_claimed_file(stage, shared.path):
-            raise FileExistsError(
-                f"Publication destination already exists: {shared.path}"
-            )
+        _publish_stage(shared.path, stage, backup, expected_sha256)
         file_applied = True
         intents.mark_applied(db, intent_id)
         artifact = _register_applied(
@@ -483,7 +474,7 @@ def _publish_bytes(
             _remove_if_present(stage)
             _remove_if_present(backup)
             if parent_created:
-                _remove_created_parent(shared.category_root)
+                remove_created_parent(shared.category_root)
         if claim is None or not claim.exists():
             intents.delete(db, intent_id)
         if recovered_source not in (None, source):
@@ -522,6 +513,7 @@ def write_text(
     direct_user: bool = False,
     origin: registration_writer.RegistrationOrigin | None = None,
     notify: bool = True,
+    expected_sha256: str | None = None,
 ) -> dict | WriteAuthority | None:
     """Publish governed shared text; for any other write, return the ownership decision to report.
 
@@ -558,7 +550,7 @@ def write_text(
             description=description,
             db=db,
             operation="write", direct_user=direct_user,
-            origin=origin, notify=notify,
+            origin=origin, notify=notify, expected_sha256=expected_sha256,
         )
     finally:
         db.close()
@@ -657,7 +649,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db, why: str = INTERRUPTE
         _remove_if_present(stage)
         _remove_if_present(backup)
         if row["created_parent"]:
-            _remove_created_parent(target.parent)
+            remove_created_parent(target.parent)
         intents.delete(db, row["id"])
         return
     if not applied:
