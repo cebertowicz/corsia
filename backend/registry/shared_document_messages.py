@@ -48,7 +48,7 @@ def owner_refusal(path: Path, scope_root: Path, owner: str, *, db) -> str:
     """The refusal for a non-owner write to an owned document."""
     label = owner_label(owner, db=db)
     editors = "Only the person edits it directly." if owner == "ui" else (
-        "Only its owner, the conductor, or the user edits it directly."
+        "Only its owner, the conductor, or the person edits it directly."
     )
     return f"{scope_relative(path, scope_root)} is owned by {label}. {editors} {_suggest_instruction(path)}"
 

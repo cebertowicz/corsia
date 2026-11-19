@@ -51,7 +51,7 @@ async def test_conductor_and_worker_cannot_edit_person_owned_document_but_sugges
         _write_text(scope, path, actor)
     refusal = str(caught.value)
     assert "Only the person edits it directly." in refusal
-    assert "the conductor, or the user edits" not in refusal
+    assert "the conductor, or the person edits" not in refusal
     assert "doc_comment_create" in refusal and "comment instead" in refusal
     assert path.read_text(encoding="utf-8") == "alpha beta gamma\n"
     assert await _suggestion(scope, path, author=actor)
