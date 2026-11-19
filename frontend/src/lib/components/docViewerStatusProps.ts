@@ -7,6 +7,11 @@ import type { DocumentAsk } from '$lib/stores/documentBar';
 
 export interface DocViewerStatusProps {
 	presence?: Snippet;
+	touchReading?: boolean;
+	editing?: boolean;
+	canEdit?: boolean;
+	onEnterEdit?: () => void;
+	onDone?: () => void;
 	/** The ask's card, docked to the canvas's bottom edge; its buttons come before the document in tab order. */
 	reviewBar?: Snippet;
 	ask?: DocumentAsk | null;

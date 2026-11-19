@@ -10,7 +10,7 @@
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
-	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
+	import { commentDraft, commentDraftScope, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createPressReveal } from '$lib/docPressReveal.svelte';
@@ -23,7 +23,7 @@
 	import DocHistorySurface from './DocHistorySurface.svelte';
 	import { createViewerHistory } from '$lib/docViewerHistory.svelte';
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
-	import { handleViewerFailure } from '$lib/docViewerFailure';
+	import { loadCurrentViewer } from '$lib/docViewerContentLoad';
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
@@ -32,7 +32,7 @@
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
 	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
-	import { leavePreviousTarget, loadSignal, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
+	import { leavePreviousTarget, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
@@ -40,7 +40,6 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { DocState, DocViewerProps } from '$lib/docViewerProps';
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
-	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
@@ -56,6 +55,7 @@
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
+	import { createDocumentReading } from '$lib/docViewerReading.svelte';
 
 
 	let {
@@ -122,6 +122,9 @@
 	/** The comments drawer's selected view and resolved count. */
 	let resolvedCount = $state(0), resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
+	const typingAvailable = () => docState === 'ready' && !readonly && !confirming && !openRefusal && suggestionBusyId === null;
+	const reading = createDocumentReading({ opening: () => target?.instanceId ?? null, offScreen: () => offScreen && !covered, available: typingAvailable,
+		clearSelection: () => { editorSurface?.clearInputSelection(); draftController.select(null); } });
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
@@ -226,36 +229,24 @@
 			const d = target;
 			if (!d) return;
 			const seq = ++loadSeq;
-			const signal = loadSignal(onSignal, d);
-
 			prevTarget = leavePreviousTarget(prevTarget, d);
-
 			draftController.select(null);
 			commentUI.closeAll();
-			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
-			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
-			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
-			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
-			readonly = opened.unsaved;
-			confirming = opened.confirming;
-			if (opened.text !== null) editText = opened.text;
-			header.begin(d);
-			openRefusal = null; liveUnavailable = null;
-			docState = opened.text === null ? 'loading' : 'ready';
-			signal(opened.signal);
-			void loadViewerContent({
-				target: d, isCurrent: () => seq === loadSeq,
-				onReady: (content) => { liveUnavailable = content.liveUnavailable; applyViewerContent(d, content, seq); },
-				onSnapshot: (text) => { editText = text; },
-				onUnavailable: () => signal({ status: 'unavailable' }),
-			})
-				.catch((e) => {
-					if (seq !== loadSeq) return;
-					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
-						fail: (failure) => { openRefusal = failure.refusal; docState = failure.state;
-							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
-					});
-				});
+			loadCurrentViewer({ target: d, previous: prevTarget, isCurrent: () => seq === loadSeq, onSignal,
+				begin: (nextId, opened) => {
+					// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
+					if (nextId !== loadedArtifactId) serverReadOnly = false;
+					loadedArtifactId = nextId; readonly = opened.unsaved; confirming = opened.confirming;
+					if (opened.text !== null) editText = opened.text;
+					header.begin(d); openRefusal = null; liveUnavailable = null;
+					docState = opened.text === null ? 'loading' : 'ready';
+				},
+				ready: (content) => { liveUnavailable = content.liveUnavailable; applyViewerContent(d, content, seq); },
+				snapshot: (text) => { editText = text; },
+				failure: (failure) => { openRefusal = failure.refusal; docState = failure.state;
+					if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
+				reloadAttention: () => { void reloadAttentionQueue(); },
+			});
 		});
 	});
 
@@ -280,6 +271,7 @@
 			onFeedback={(id, feedback) => feedbackStatus?.sync(id, feedback)} />
 	{/if}
 	<DocViewerStatus
+		touchReading={reading.touch} editing={reading.editing} canEdit={typingAvailable()} onEnterEdit={reading.enter} onDone={reading.finish}
 		ask={documentAsk}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
@@ -337,6 +329,7 @@
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
+		reading={reading.reading} touchReading={reading.touch}
 		readOnly={readonly || confirming || suggestionBusyId !== null}
 		imageBase={target && { ...target, imageCacheKey: imageKey.current }}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}

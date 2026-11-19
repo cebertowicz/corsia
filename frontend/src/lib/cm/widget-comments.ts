@@ -10,7 +10,7 @@ import { CELL_EDITOR } from './widget-cell-state';
 import { cellClicked } from './widget-cell-click';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
-import { paintOpenCell } from './widget-cell-comment';
+import { emptyCellSelection, paintOpenCell } from './widget-cell-comment';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -84,8 +84,20 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const widget = target && widgetOf(this.view, target);
 			// A tap that edits a cell is the cell editor's: selecting the cell's text here would take the caret off its editor.
 			if (!widget || target.closest('a') || target.closest(CELL_EDITOR) || cellClicked(this.view, target, { x: event.clientX, y: event.clientY })) return;
-			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
+			const cell = widget.matches(TABLE) ? target.closest<HTMLTableCellElement>('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
+			if (cell && !this.view.state.facet(EditorView.editable)) {
+				const empty = emptyCellSelection(this.view, cell);
+				if (empty) {
+					const range = document.createRange();
+					range.selectNodeContents(cell);
+					range.collapse(true);
+					selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
+					this.raised = true;
+					hooks.onSelect(empty);
+					return;
+				}
+			}
 			const range = document.createRange();
 			if (cell) range.selectNodeContents(cell); else range.selectNodeContents(widget);
 			selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });

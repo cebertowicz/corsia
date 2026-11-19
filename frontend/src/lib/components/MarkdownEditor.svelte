@@ -3,7 +3,7 @@
 	import type * as Y from 'yjs';
 	import { liveDocumentBinding } from '$lib/cm/live-document-binding';
 	import { EditorView, keymap } from '@codemirror/view';
-	import { EditorState, Compartment, type ChangeDesc } from '@codemirror/state';
+	import { Compartment, type ChangeDesc } from '@codemirror/state';
 	import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { GFM } from '@lezer/markdown';
@@ -18,7 +18,7 @@
 	import { CaretRule, releasesPress } from '$lib/cm/caret-rule';
 	import { commentMarks, coveredByMove, highlightAtPress, highlightsAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
-	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
+	import { type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
@@ -32,7 +32,10 @@
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { jumpToComment, type JumpTarget } from '$lib/cm/comment-jump';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { captureDocumentPlace, dispatchKeepingPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
+	import { captureDocumentPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
+
+	import { commentComposerAnchor } from '$lib/cm/comment-composer-anchor';
+	import { documentInputPolicy, dispatchReadingTransactions, clearDocumentInput } from '$lib/cm/document-reading';
 
 	let {
 		value = $bindable(''),
@@ -40,6 +43,7 @@
 		typingAllowed = false,
 		previews = null,
 		readOnly = false,
+		reading = false,
 		imageBase = null,
 		onOpenImage,
 		onOpenLink,
@@ -65,6 +69,7 @@
 		/** Where an agent's edits arrive while it is still writing them; they type out before they are saved. */
 		previews?: PreviewFrameSource | null;
 		readOnly?: boolean;
+		reading?: boolean;
 		/** Where this document lives, so its markdown images resolve against it; none means they stay links. */
 		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
@@ -107,22 +112,10 @@
 	let syncing = false;
 	let curHighlights: CommentRange[] = [];
 
-	/**
-	 * Where the new-comment card sits. Once its composer is open the draft's own captured range is the answer, because
-	 * that range already follows every local and remote edit; the selection's offsets are only good until then. A range
-	 * the draft has lost keeps the card where it was last drawn, so its message stays readable. Text in a table cell (selected in
-	 * its open editor) anchors as prose does, to the lines its words are drawn on.
-	 */
-	function composerAnchor(v: EditorView, from: number, to: number): () => DOMRect | null {
-		let drawn: DOMRect | null = null;
-		return () => {
-			const range = pendingComment ? selectionRange(pendingComment) : { from, to };
-			if (!range) return drawn;
-			const rows = range.to <= v.state.doc.length ? cellTextRows(v, range.from, range.to) ?? rowsOf(v, range.from, range.to) : null;
-			if (rows) drawn = rows;
-			return rows;
-		};
-	}
+	const composerAnchor = (v: EditorView, from: number, to: number) => commentComposerAnchor(v, from, to, () => pendingComment);
+
+	/** Clear document input at an explicit mode boundary, preserving independent comment focus. */
+	export function clearInputSelection() { if (view) clearDocumentInput(view); }
 
 	let moved = false;
 	/** Tell open cards their text may have moved. The layout is read once CodeMirror has finished updating. */
@@ -144,7 +137,7 @@
 	}
 
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
-	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
+	import { emptyCellKey } from '$lib/cm/widget-cell-comment';
 	import { openCellState } from '$lib/cm/widget-cell-state';
 	import { cellEditorExtensions } from '$lib/cm/widget-cell-setup';
 
@@ -209,7 +202,7 @@
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
-			dispatchTransactions: dispatchKeepingPlace,
+			dispatchTransactions: dispatchReadingTransactions,
 			extensions: [
 				documentComp.of(binding?.extensions ?? localHistory),
 				saveKey,
@@ -233,7 +226,7 @@
 				typedReveal,
 				EditorView.lineWrapping,
 				EditorView.contentAttributes.of({ spellcheck: 'true' }),
-				roComp.of(EditorState.readOnly.of(readOnly)),
+				roComp.of(documentInputPolicy(readOnly, reading)),
 				EditorView.domEventHandlers({
 					mousedown(press, v) {
 						caretRule.pressStarted();
@@ -324,8 +317,8 @@
 	});
 
 	$effect(() => {
-		const ro = readOnly;
-		view?.dispatch({ effects: roComp.reconfigure(EditorState.readOnly.of(ro)) });
+		const policy = documentInputPolicy(readOnly, reading);
+		view?.dispatch({ effects: roComp.reconfigure(policy) });
 	});
 
 	$effect(() => {

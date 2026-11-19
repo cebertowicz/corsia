@@ -19,6 +19,11 @@
 
 	let {
 		presence,
+		touchReading = false,
+		editing = false,
+		canEdit = false,
+		onEnterEdit,
+		onDone,
 		reviewBar,
 		ask = null,
 		commentsOpen = false,
@@ -215,7 +220,8 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
-	{#if presence}{@render presence()}{/if}
+	{#if touchReading && editing}<button type="button" class="bar-done" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={onDone}>Done</button>{/if}
+	<span class="bar-presence" hidden={touchReading && editing}>{#if presence}{@render presence()}{/if}</span>
 	{#if urgent && !changeInBar}<button type="button" class="bar-stale stale-control" data-file-changed onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
 	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
@@ -234,7 +240,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsCount ? ` · ${needsCount} needs you` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsCount ? ` · ${needsCount} needs you` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>
@@ -253,6 +259,7 @@
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
+			{#if touchReading}<button type="button" class="p-row p-edit" disabled={!canEdit || editing} onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { panelOpen = false; onEnterEdit?.(); }}>Edit</button>{/if}
 			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
@@ -289,8 +296,8 @@
 	.bar-stale { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--amber-bg); color: var(--amber-text); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
 	.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
 	.bar-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
-	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
+	.bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
+	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
@@ -309,10 +316,14 @@
 	.bar-comments .bar-sent svg, .bar-comments .bar-sent-measure svg { flex: none; }
 	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
-	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible, .bar-done:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	.bar-done { width: var(--touch-target); min-width: var(--touch-target); min-height: var(--touch-target); color: var(--accent-text); font-weight: var(--fw-semibold); }
+	.bar-presence { display: contents; }
+	.bar-presence[hidden] { display: none; }
+	.p-edit { min-height: var(--touch-target); }
 	.bar-details { padding: 0 var(--space-2); }
 	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }

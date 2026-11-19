@@ -1,6 +1,6 @@
 import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
+import { blockRange, cellElement, drawnTableAt, widgetOf } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
 import { tableCells } from './widget-cells';
 import { heldText, heldToSource, sourceToHeld } from './widget-cell-row';
@@ -88,13 +88,21 @@ export const emptyCellKey = (state: EditorState) => {
  * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed on that cell: centred vertically
  * in it, with its right end at the cell's right edge (beside or below the table when the cell is too narrow). Null otherwise.
  * Its one writer is the editor's own selection flow (`selectionOffer`), which raises it for a
- * caret there and clears it once the cell has text; the widget comment flow reads only selections drawn inside a widget.
+ * caret there and clears it once the cell has text. Reading supplies the drawn cell instead of opening input;
+ * both paths use selectionIn as the sole source mapper.
  */
-export function emptyCellSelection(view: EditorView): WidgetSelection | null {
+export function emptyCellSelection(view: EditorView, drawnEmptyCell?: HTMLTableCellElement): WidgetSelection | null {
 	const cell = emptyOpenCell(view.state);
-	const widget = cell && drawnTableAt(view, cell.tableFrom);
-	const td = widget && cellElement(widget, cell);
+	const widget = drawnEmptyCell ? widgetOf(view, drawnEmptyCell) : cell && drawnTableAt(view, cell.tableFrom);
+	const td = drawnEmptyCell ?? (widget && cell ? cellElement(widget, cell) : null);
 	if (!widget || !td) return null;
+	const block = blockRange(view, widget);
+	if (!block) return null;
+	if (drawnEmptyCell) {
+		// Source emptiness, not rendered text: an image-only cell is not an empty cell.
+		const span = tableCells(view.state.sliceDoc(block.from, block.to)).find((candidate) => cellElement(widget, candidate) === td);
+		if (!span || span.from !== span.to) return null;
+	}
 	// The same range a tap on an empty cell selects: the cell's contents, which for an empty cell is a caret at its start.
 	const range = document.createRange();
 	range.selectNodeContents(td);
@@ -105,7 +113,7 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	// cell holds no text for it to cover: it sits inside the cell, at its far end, away from the caret at the start.
 	// A cell too narrow to hold it (a phone's last column) puts it beside or below the table, as the offer for selected text goes.
 	const box = td.getBoundingClientRect();
-	if (box.width < OFFER_ROOM) return { ...raised, above: false, ...offerPlace(view, cell.tableFrom, box) };
+	if (box.width < OFFER_ROOM) return { ...raised, above: false, ...offerPlace(view, cell?.tableFrom ?? block.from, box) };
 	return { ...raised, above: false, exact: true, end: true, top: (box.top + box.bottom) / 2, left: box.right - OFFER_GAP };
 }
 
