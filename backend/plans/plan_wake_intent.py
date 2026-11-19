@@ -55,7 +55,7 @@ def _executor(db, node) -> str | None:
 
 def _content(db, node, recipient: str) -> str:
     from plans import plan_wake
-    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap, bounded
+    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap, bounded, title as bounded_title
     from prompts import plan_wakes as wakes
 
     own_plan = service.ensure_plan("thread", recipient, db=db)
@@ -65,13 +65,13 @@ def _content(db, node, recipient: str) -> str:
         own_plan.id,
         recipient,
         wakes.WAKE_INTENT_REVISED.format(
-            title=bounded(str(node["title"]), plan_wake.RETURNED_TITLE_MAX_BYTES),
+            title=bounded_title(str(node["title"])),
             requirements_revision=revision,
         ),
         intent_revision={
             "node_id": str(node["id"]),
             "requirements_revision": revision,
-            "title": bounded(str(node["title"]), plan_wake.RETURNED_TITLE_MAX_BYTES),
+            "title": bounded_title(str(node["title"])),
             "intent": bounded(str(node["intent"] or ""), cap),
             "acceptance_criteria": bounded(str(node["acceptance_criteria"]), cap),
         },

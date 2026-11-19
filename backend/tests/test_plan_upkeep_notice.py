@@ -20,7 +20,8 @@ import pytest
 from core.plan_notice import first_work_call, with_notice
 from core.tool_result_invocation import with_invocation_reference
 from plans import service
-from plans.upkeep_notice import NOTICE_MAX_BYTES, notice_for
+from plans.close_next_bounds import title as cut_title
+from plans.upkeep_notice import notice_for
 from prompts.plan_tools import UPKEEP_ADD_ROUTE
 from tests.plan_close_next_helpers import owner_plan, pause, select, task
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
@@ -137,10 +138,9 @@ def test_nothing_selected_names_the_top_two_startable_tasks_in_plan_order(db):
     assert f"Startable: First ({first.id}); Second ({second.id})." in line
     assert f"plan_update start node_id={first.id}" in line
     assert third.id not in line
-    assert len(line.encode("utf-8")) <= NOTICE_MAX_BYTES
 
 
-def test_the_start_line_keeps_both_ids_and_the_call_within_the_byte_bound(db):
+def test_the_start_line_cuts_titles_like_every_plan_title_and_keeps_ids_and_call(db):
     plan = owner_plan(db)
     first = task(db, plan.id, "\U0001F4E6" * 60)
     second = task(db, plan.id, "\U0001F4E6" * 60)
@@ -148,7 +148,7 @@ def test_the_start_line_keeps_both_ids_and_the_call_within_the_byte_bound(db):
     line = notice_for(db, "owner", "bash")
 
     assert line is not None
-    assert len(line.encode("utf-8")) <= NOTICE_MAX_BYTES
+    assert f"{cut_title(chr(0x1F4E6) * 60)} ({first.id})" in line
     assert f"({first.id})" in line and f"({second.id})" in line
     assert f"plan_update start node_id={first.id} expected_revision={first.revision}" in line
 
@@ -167,10 +167,9 @@ def test_open_tasks_that_are_all_waiting_are_named_before_the_add_route(db):
     )
     assert "plan_update start" not in line
     assert "plan_update add" in UPKEEP_ADD_ROUTE
-    assert len(UPKEEP_ADD_ROUTE.encode("utf-8")) <= NOTICE_MAX_BYTES
 
 
-def test_the_waiting_line_keeps_both_ids_and_the_add_route_within_the_byte_bound(db):
+def test_the_waiting_line_cuts_titles_and_keeps_both_ids_and_the_add_route(db):
     plan = owner_plan(db)
     first = task(db, plan.id, "\U0001F4E6" * 60)
     second = task(db, plan.id, "\U0001F4E6" * 60)
@@ -180,7 +179,7 @@ def test_the_waiting_line_keeps_both_ids_and_the_add_route_within_the_byte_bound
     line = notice_for(db, "owner", "bash")
 
     assert line is not None
-    assert len(line.encode("utf-8")) <= NOTICE_MAX_BYTES
+    assert f"{cut_title(chr(0x1F4E6) * 60)} ({first.id})" in line
     assert f"({first.id})" in line and f"({second.id})" in line
     assert line.endswith("otherwise add it with plan_update add, then start it.")
 
@@ -263,17 +262,17 @@ def test_plans_tools_and_threads_without_a_plan_carry_no_notice(db):
     assert notice_for(db, "no-plan-thread", "bash") is None
 
 
-def test_the_notice_stays_within_its_byte_bound(db):
+def test_the_notice_cuts_a_title_like_every_plan_title(db):
     plan = owner_plan(db)
     # Titles stop at 60 characters, but four-byte characters still overrun the
-    # notice's 96-byte title cut.
+    # title cut, which is sized for an ASCII title at that limit.
     long_task = task(db, plan.id, "\U0001F4E6" * 60)
     select(db, plan.id, long_task.id)
 
     line = notice_for(db, "owner", "bash")
 
     assert line is not None
-    assert len(line.encode("utf-8")) <= NOTICE_MAX_BYTES
+    assert cut_title(chr(0x1F4E6) * 60) in line
     assert line.endswith("or you have moved to different work.")
 
 

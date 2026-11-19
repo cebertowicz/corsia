@@ -23,8 +23,8 @@ from plans import service
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     CRITERIA_MARKER,
+    MARKER,
     NEXT_BLOCK_CAP,
-    REASON_CAP,
     TITLE_CAP,
     WAIT_CAP,
     assert_block_shape,
@@ -138,7 +138,7 @@ def test_the_worst_case_block_keeps_every_row_and_cuts_text_by_serialized_bytes(
         assert_truncated(item["wait"], "paused: " + reason, WAIT_CAP)
     named = block["named"]
     assert (named["started"], named["refusal"]) == (False, "not_ready")
-    assert_truncated(named["reason"], "paused: " + reason, REASON_CAP)
+    assert_truncated(named["reason"], "paused: " + reason, WAIT_CAP)
     _assert_criteria_fill_the_block(block, "z" * 5000)
 
 
@@ -244,3 +244,14 @@ def test_rows_drop_from_the_tail_until_the_block_fits_and_the_label_follows(
     assert row_ids(block) == [node.id for node in pending[:shown]]
     assert block["open_tasks_listed"] == listed(shown, 4)
     assert_rows_exact(db, block)
+
+
+def test_a_title_the_plan_accepts_is_never_cut_and_a_longer_one_is():
+    from plans import close_next_bounds
+
+    at_limit = "x" * service.MAX_NODE_TITLE
+    assert close_next_bounds.title(at_limit) == at_limit
+    longer = at_limit + "y"
+    cut = close_next_bounds.title(longer)
+    assert cut != longer and cut.endswith(MARKER)
+    assert close_next_bounds.json_bytes(cut) <= TITLE_CAP

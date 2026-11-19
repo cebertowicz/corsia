@@ -7,17 +7,23 @@ remaining room on the selected task's acceptance criteria before it drops any
 listed row.
 
 It composes nothing and reads no state, so ``plans.close_next`` depends on it
-and it depends on nobody.
+and it depends only on the plan's title limit.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from functools import partial
 from typing import Any
 
+from plans.service import MAX_NODE_TITLE
 from prompts import plan_tools as text
+
+
+def json_bytes(value: Any) -> int:
+    """Return the size the tool emits for a value: sorted-key, ASCII-escaped JSON."""
+    return len(json.dumps(value, sort_keys=True))
+
 
 #: Serialized-byte caps, measured as the tool emits them (``json_bytes``). The
 #: selected task's criteria take the bytes the rest of the block leaves, at least
@@ -25,13 +31,18 @@ from prompts import plan_tools as text
 #: and 10-digit revisions, that floor still fits beside three rows and a named
 #: refusal. A slot-held reason cuts the holder's title, never its action.
 NEXT_BLOCK_MAX_BYTES = 2048
-TITLE_MAX_BYTES = 96
+#: Every emitted node title, in every plan read, wake and reply. Derived from the
+#: title input limit (``service.MAX_NODE_TITLE``, the one-line pane row): the
+#: emitted size of an ASCII title at that limit, so a title the plan accepts is
+#: never cut. A title in another script, or one older than the limit, ends in
+#: the ellipsis at the same byte cost, so a list of titles costs the same bytes
+#: whatever script it is in.
+TITLE_MAX_BYTES = json_bytes("x" * MAX_NODE_TITLE)
 WAIT_MAX_BYTES = 72
 FEEDBACK_MAX_BYTES = 480
 #: A rejection's handoff is its holder's whole brief, sent once per rejection,
 #: so its feedback and criteria are bounded only by this safety ceiling (#2835).
 REVISION_BRIEF_MAX_BYTES = 16384
-REASON_MAX_BYTES = 96
 CRITERIA_MIN_BYTES = 640
 
 
@@ -44,28 +55,19 @@ class CloseNextInvariantError(RuntimeError):
     """
 
 
-def json_bytes(value: Any) -> int:
-    """Return the size the tool emits for a value: sorted-key, ASCII-escaped JSON."""
-    return len(json.dumps(value, sort_keys=True))
-
-
 def bounded(value: str, max_bytes: int) -> str:
     """Bound one label by the bytes the tool emits for it."""
     return text.bounded_text(value, max_bytes, measure=json_bytes)
 
 
+def title(value: str) -> str:
+    """Return a node title as every plan surface emits it (``TITLE_MAX_BYTES``)."""
+    return bounded(value, TITLE_MAX_BYTES)
+
+
 def slot_held_reason(state: str, holder) -> str:
-    """Return the slot-held action, cutting the holder's title so the action fits."""
-    title = text.bounded_text(
-        str(holder["title"]), REASON_MAX_BYTES,
-        measure=partial(_slot_held_bytes, state),
-    )
-    return text.slot_held_reason(title, state)
-
-
-def _slot_held_bytes(state: str, title: str) -> int:
-    """Return the emitted size of the slot-held reason that names ``title``."""
-    return json_bytes(text.slot_held_reason(title, state))
+    """Return the slot-held action naming the holder by its title, cut like any title."""
+    return text.slot_held_reason(title(str(holder["title"])), state)
 
 
 def fit(
