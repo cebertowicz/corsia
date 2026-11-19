@@ -1,0 +1,51 @@
+handler:
+  kind: instruction
+workflow:
+  steps:
+    - id: inventory
+      title: List the set
+      required: true
+      by: agent
+      check: "The current set is listed from source this run: workflows with owner and standard, skills, always-loaded instruction files with their size, agents, measures. Any workflow with no owner or no standard is named as a finding."
+      difficulty: {default: routine, hard_if: "A source can't be read"}
+      instruction: "## List the set"
+    - id: findings
+      title: Find what's wrong
+      required: true
+      by: agent
+      check: "Findings recorded, each with evidence: overlaps and near-copies; stale or unused items; rules with no home or two homes; recurring work done outside any workflow; failures from every workflow and the final review this week, each traced to the earliest step that could have caught it; always-loaded lines and cross-agent lessons reviewed. 'None found' is stated per kind, never left blank."
+      after: [inventory]
+      difficulty: {default: standard, hard_if: "A failure pattern spans several owners"}
+      instruction: "## Find what's wrong"
+    - id: decide
+      title: Decide the changes
+      required: true
+      by: agent
+      check: "Each finding has a decision: change (what, where, owner), route to its owner, or leave (why). Each change has a premortem: how it fails, what it costs to carry, and what simpler option was weighed. Anything the person decides is marked for them, not made."
+      after: [findings]
+      difficulty: {default: standard, hard_if: "A change moves authority or what a person sees"}
+      instruction: "## Decide the changes"
+    - id: make
+      title: Make the changes
+      required: true
+      by: agent
+      check: "Each decided change made by its owner, or sent to its owner as one complete task; each changed workflow or skill passes the platform's validator; nothing added without the weekly check for overlap."
+      after: [decide]
+      difficulty: {default: standard}
+      instruction: "## Make the changes"
+    - id: review
+      title: Fresh-eyes review
+      required: true
+      by: reviewer
+      check: "A reviewer that did none of this week's work read each change against its finding and its premortem, and read the run evidence of the daily loop for box-ticking. Each objection fixed or answered."
+      after: [make]
+      difficulty: {default: standard}
+      instruction: "## Fresh-eyes review"
+    - id: record
+      title: List what changed
+      required: true
+      by: agent
+      check: "One dated list of what changed and why, where the project keeps decisions made for the person, with each change's undo; each change is one line for the next daily Tell; nothing went to the person to review except a change the project reserves for them, raised as one decision. The next weekly run is scheduled."
+      after: [review]
+      difficulty: {default: routine}
+      instruction: "## List what changed"

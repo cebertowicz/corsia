@@ -1,0 +1,67 @@
+handler:
+  kind: instruction
+workflow:
+  steps:
+    - id: ground
+      title: Ground
+      required: true
+      by: agent
+      check: "Record the time of this run and of the last one; the priorities as read now; each agent's plan state (active, paused, stalled) read this run; and every message, comment and correction from the person since the last run, from every inbound channel the project standard lists, each with its source. Anything that could not be read is named; on a first run, the last seven days are read."
+      difficulty: {default: routine, hard_if: "A source can't be read, or plan state contradicts what the person said"}
+      instruction: "## Ground"
+    - id: asks
+      title: Asks
+      required: true
+      by: agent
+      check: "Every ask from the Ground record is one task in its owner's plan in the person's words, or is named as already answered or tracked with where; every correction has its triage and outcome recorded; every change of direction reached each agent it affects. No ask is left unrouted."
+      after: [ground]
+      difficulty: {default: standard, hard_if: "An ask has no clear owner, or its owner is paused"}
+      instruction: "## Asks"
+    - id: problems
+      title: Problems
+      required: true
+      by: agent
+      check: "Each new problem has a register row with evidence, a root cause one owner can change, the owner's task, the fix and the evidence that will prove it; each open row due a check was checked against that evidence; a row closes only on its evidence and a repeat reopens it. No row carries a status of its own."
+      after: [asks]
+      difficulty: {default: standard, hard_if: "The root cause spans owners"}
+      instruction: "## Problems"
+    - id: measures
+      title: Measures
+      required: true
+      by: agent
+      check: "Today's reading of each project measure is recorded with its source and conditions; any reading moving the wrong way is named for Tell with its numbers; any out-of-range alert was handled with movement-review. With no measures defined, a task to define them exists in the conductor's plan."
+      after: [ground]
+      difficulty: {default: routine, hard_if: "A measure can't be read or its definition changed"}
+      instruction: "## Measures"
+    - id: order
+      title: Order
+      required: true
+      by: agent
+      check: "Work across agents is ranked against the current priorities, highest first, with the cut stated; the live status page matches the plans as read this run; any stall is named and its owner chased with the outcome wanted."
+      after: [asks, problems, measures]
+      difficulty: {default: standard, hard_if: "Two owners compete for the same slot"}
+      instruction: "## Order"
+    - id: plate
+      title: Your plate
+      required: true
+      by: agent
+      check: "Every item waiting on the person was listed and judged on two questions: does it matter now, and can they act on it from its top? Each that failed was dropped (with where it went) or fixed (with what changed)."
+      after: [order]
+      difficulty: {default: routine, hard_if: "An item is the person's own standing ask"}
+      instruction: "## Your plate"
+    - id: spot-check
+      title: Spot check
+      required: true
+      by: reviewer
+      check: "A fresh worker that ran no step read the project standard, this run's record and the person's raw messages and comments since the last run, and listed every ask, correction or item waiting on the person that the record missed or marked tracked without saying where. Each miss was routed before Tell."
+      after: [plate]
+      difficulty: {default: routine, hard_if: "The raw feed can't be read"}
+      instruction: "## Spot check"
+    - id: tell
+      title: Tell
+      required: true
+      by: agent
+      check: "Either one message went to the person and every item in it needs them, is a deliverable they asked for, or is a one-line call made for them since the last message with how to reverse it; or nothing was sent and the record says why. The run ends with the next run scheduled and every item waiting on someone carrying a wake with a stated default after a bound; a run that leaves open work with neither fails."
+      after: [spot-check]
+      difficulty: {default: routine}
+      instruction: "## Tell"

@@ -154,10 +154,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 9618,
+      "bytes": 9753,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "d7c48c7eed05b19479fca95357d522f6a5b197de8b2a317c85df545d122177ef"
+      "sha256": "a2667d847267dd3a69a25895a9cf08df869c77fafab259169ac9a075d43529f8"
     },
     {
       "bytes": 6186,
@@ -364,6 +364,24 @@
       "sha256": "aa339537a025214fdfdfa67ccd87d0ca48fa5a303ec3ef22446b769856bf374d"
     },
     {
+      "bytes": 3400,
+      "kind": "skill",
+      "path": "skills/keep-the-set/SKILL.md",
+      "sha256": "920af4722975ced6a6041e1f96311580f653b3052cc9b2973df7c2e312889910"
+    },
+    {
+      "bytes": 2953,
+      "kind": "skill",
+      "path": "skills/keep-the-set/corsia.yaml",
+      "sha256": "79901775e69bf5c0c7e363e67393ba72717d67236ed83b9719abb90a2fe62eef"
+    },
+    {
+      "bytes": 608,
+      "kind": "skill",
+      "path": "skills/keep-the-set/references/project-standards.md",
+      "sha256": "18feae36b3649e056ef16b02e97afee605a4194c07cdea74c5d2e3d80b4335ad"
+    },
+    {
       "bytes": 3634,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
@@ -410,6 +428,24 @@
       "kind": "skill",
       "path": "skills/product-thinking/SKILL.md",
       "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
+    },
+    {
+      "bytes": 4997,
+      "kind": "skill",
+      "path": "skills/run-the-project/SKILL.md",
+      "sha256": "4c8d5f3f3d22a35d7116cb85049997e50e678c544c94e1801eaa4237615b717f"
+    },
+    {
+      "bytes": 4282,
+      "kind": "skill",
+      "path": "skills/run-the-project/corsia.yaml",
+      "sha256": "c826ab938e60afd6773a1748e35428d994e7fc2abaf7ad0afa864b61ea5b26f4"
+    },
+    {
+      "bytes": 846,
+      "kind": "skill",
+      "path": "skills/run-the-project/references/project-standards.md",
+      "sha256": "98f6d8bfe64becdcc2437ba2a2b50233c758b125070407a27b8e71234d730e5c"
     },
     {
       "bytes": 3154,
