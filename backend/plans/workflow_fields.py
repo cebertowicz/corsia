@@ -204,7 +204,8 @@ def added(db, node, placing, steps, *, causing_executor: str | None):
 
 REVIEWER_ROUTE = (
     "This step is checked by someone else: hand it to a reviewer "
-    "(delegate_task with plan_node_id) and accept or send back what they return."
+    "(delegate_task with plan_node_id) and accept or send back what they return. "
+    "The reviewer gets the step's check and what was asked from the plan; say only where the work is."
 )
 PERSON_GATE_ROUTE = (
     "This step is the person's review: ask them with block_node on it (owner_kind user, "
