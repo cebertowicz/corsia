@@ -180,7 +180,7 @@ def _refuse(connection, node, parent_id: str) -> None:
     # What the parent's own state forbids is creation's rule, so a regroup refuses
     # exactly what an `add` under the same node would; the task check above is
     # this module's only because the hint to make a branch is a regroup's own.
-    node_creation._validate_parent(connection, node["plan_id"], parent_id)
+    node_creation._validate_parent(connection, node["plan_id"], parent_id, node["kind"])
     # The stored chain, archived rows included, not the live chain readers use
     # (``node_states.live_chain`` stops at an archived row, so it would miss the
     # node above a stranded one); the seen set ends the walk on any loop.

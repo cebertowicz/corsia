@@ -180,7 +180,7 @@ def _blockers(db, node_plans) -> dict[str, str | None]:
     parents = {
         str(row["id"]) for row in db.execute(
             f"SELECT n.id FROM plan_nodes n WHERE n.id IN ({marks}) "
-            f"AND {node_states.has_child_in_work_sql('n')}",
+            f"AND {node_states.parent_sql('n')}",
             tuple(str(node["id"]) for node, _plan in candidates),
         ).fetchall()
     }

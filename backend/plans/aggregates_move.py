@@ -63,7 +63,6 @@ def shift(
         if not (d_open or any(d_work) or child_delta or any(d_folded)):
             break
         ancestor["child_in_work"] += child_delta
-        aggregates.refresh_step_children(connection, ancestor)
         # Only a direct parent counts children; above it the change travels as
         # open and work figures, exactly as it does in `apply`.
         child_delta = 0

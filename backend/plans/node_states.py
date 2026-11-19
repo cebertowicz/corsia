@@ -211,9 +211,8 @@ def work_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
 
 
 def step_task(node: Mapping | sqlite3.Row) -> bool:
-    """A workflow task owns a check after its children settle."""
-    return ("kind" in node.keys() and node["kind"] == "task"
-            and "workflow_step" in node.keys() and node["workflow_step"] is not None)
+    """A workflow task owns a check after its children settle; a row without both columns raises."""
+    return node["kind"] == "task" and node["workflow_step"] is not None
 
 
 def child_counts(parent: Mapping | sqlite3.Row, child: Mapping | sqlite3.Row) -> bool:
@@ -226,7 +225,8 @@ def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
 
     A workflow task counts only open children so it can do its own check after
     they settle. Other parents count children in work, including settled ones.
-    ``has_child_in_work_sql`` is the same rule for SQL readers.
+    ``parent_sql`` is the same rule for SQL readers, ``stored_parent`` for a row
+    whose children are not read.
     """
     rows = list(rows)
     work = work_ids(rows)
@@ -239,8 +239,22 @@ def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     # A row of ``plans.open_rollup`` says so itself when its children are not among ``rows``.
     return listed | {
         str(row["id"]) for row in rows
-        if str(row["id"]) in work and "has_child_in_work" in row.keys() and row["has_child_in_work"]
+        if str(row["id"]) in work and "is_parent" in row.keys() and row["is_parent"]
     }
+
+
+def stored_parent(row: Mapping | sqlite3.Row) -> bool:
+    """``parent_ids`` for one row from its stored aggregates: a workflow task's children are
+    tasks (``node_creation._validate_parent``), so its open ones are those ``sub_open`` counts."""
+    return row["child_in_work"] > 0 and (not step_task(row) or row["sub_open"] > 0)
+
+
+def stored_parent_sql(alias: str) -> str:
+    """``stored_parent`` as a SQL condition on the ``plan_nodes`` row ``alias``."""
+    return (
+        f"({alias}.child_in_work>0 AND ({alias}.kind<>'task'"
+        f" OR {alias}.workflow_step IS NULL OR {alias}.sub_open>0))"
+    )
 
 
 def has_live_parent(node: Mapping | sqlite3.Row, live_ids: Iterable[str] | Mapping) -> bool:
@@ -264,8 +278,10 @@ def live_chain(chain: list[Mapping]) -> list[Mapping]:
     return kept
 
 
-def has_child_in_work_sql(alias: str) -> str:
+def parent_sql(alias: str) -> str:
     """``parent_ids`` as a SQL condition on the ``plan_nodes`` row ``alias``.
+
+    A child in work makes a parent; under a workflow task only an open one does.
 
     Row-level on the child is complete for the open ``alias`` rows its readers
     ask about: an open node has no retired ancestor, so the child's only
@@ -285,7 +301,7 @@ def has_child_in_work_sql(alias: str) -> str:
 def is_container_sql(alias: str) -> str:
     """``is_container`` as a SQL condition on the ``plan_nodes`` row ``alias``."""
     return (
-        f"({has_child_in_work_sql(alias)} AND {alias}.state='pending'"
+        f"({parent_sql(alias)} AND {alias}.state='pending'"
         f" AND {alias}.spawned_thread_id IS NULL)"
     )
 

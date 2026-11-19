@@ -238,10 +238,7 @@ class _Tree:
             own_folded=self.own_folded(node_id),
             folded=folded,
             in_work=node_id in self.work,
-            child_in_work=sum(
-                int(child in self.work and node_states.child_counts(self.by_id[node_id], self.by_id[child]))
-                for child in self.children[node_id]
-            ),
+            child_in_work=sum(int(child in self.work) for child in self.children[node_id]),
             sub_open=sub_open,
             open_total=int(not self.own_folded(node_id)) + sub_open,
             child_folded=self.level(self.children[node_id]),

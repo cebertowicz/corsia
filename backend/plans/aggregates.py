@@ -81,8 +81,10 @@ class Own(NamedTuple):
     work: Work
 
 
-def contribution(row: Mapping, child_in_work: int) -> Own:
+def contribution(row: Mapping, parent: bool) -> Own:
     """Restate today's classification for one row; the only place it lives.
+
+    ``parent`` is ``node_states.stored_parent``: the row has a child that counts.
 
     An archived row contributes zero to every field. ``open`` is the row-local
     fold answer; the all-descendants rule joins it with ``sub_open``.
@@ -90,10 +92,10 @@ def contribution(row: Mapping, child_in_work: int) -> Own:
     if row["archived_at"] is not None:
         return Own(0, False, False, NO_WORK)
     state = row["state"]
-    container = node_states.is_container(row, child_in_work > 0)
+    container = node_states.is_container(row, parent)
     folded = node_states.folded(state, None, container=container)
     retired = state == node_states.CLOSED
-    leaf = child_in_work == 0 and not retired
+    leaf = not parent and not retired
     return Own(
         open=int(not folded),
         folded=folded,
@@ -147,15 +149,6 @@ def _fold_tone(node: Mapping, own: Own, folded: bool) -> str | None:
     return "failed" if node["state"] == "failed" else "closed"
 
 
-def refresh_step_children(connection: sqlite3.Connection, node: dict) -> None:
-    """Store a workflow task's open-child count; plain parents keep their existing count."""
-    if node_states.step_task(node):
-        node["child_in_work"] = connection.execute(
-            f"SELECT COUNT(*) FROM plan_nodes c WHERE c.plan_id=? AND c.parent_id=? "
-            f"AND {node_states.open_sql('c')}", (node["plan_id"], node["id"]),
-        ).fetchone()[0]
-
-
 def refresh(node: dict, stamp: str) -> tuple[int, Work, Folded, int]:
     """Recompute one node from its row and stored sums, in place.
 
@@ -163,7 +156,7 @@ def refresh(node: dict, stamp: str) -> tuple[int, Work, Folded, int]:
     delta, the change in the node's tone and the change in its own ``in_work``.
     The delta is new minus stored, never a recomputation of the old value.
     """
-    own = contribution(node, node["child_in_work"])
+    own = contribution(node, node_states.stored_parent(node))
     child_delta = own.work[3] - node["own_in_work"]
     node["own_in_work"] = own.work[3]
     passed_open = own.open + node["sub_open"]
@@ -254,7 +247,6 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     if not chain:
         return
     head = chain[0]
-    refresh_step_children(connection, head)
     d_open, d_work, d_folded, child_delta = refresh(head, at)
     listed = int(head["archived_at"] is None)
     # ``top_roots`` counts rows with no parent at all (rebuild, recount); a row stranded
@@ -270,7 +262,6 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
             reached_top = False
             break
         parent["child_in_work"] += child_delta
-        refresh_step_children(connection, parent)
         child_delta = 0
         for tone, change in zip(TONES, d_folded):
             parent[f"child_folded_{tone}"] += change

@@ -57,7 +57,7 @@ def rebuild(connection: sqlite3.Connection, plan_id: str) -> None:
     for node_id in _post_order(children, roots):
         node = rows[node_id]
         kids = [rows[child] for child in children[node_id]]
-        node["child_in_work"] = sum(node_states.child_counts(node, kid) for kid in kids)
+        node["child_in_work"] = sum(kid["own_in_work"] for kid in kids)
         node["sub_open"] = sum(kid["prop_open"] for kid in kids)
         for name in ("done", "failed", "closed", "in_work"):
             node[f"sub_{name}"] = sum(kid[f"prop_{name}"] for kid in kids)
