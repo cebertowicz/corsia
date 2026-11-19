@@ -104,6 +104,7 @@ def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_
     expected = "outside edit" if outside_edit == "changed" else None
     assert (target.read_text() if target.exists() else None) == expected
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+    assert not list(target.parent.glob("*.stage"))
     assert not list(target.parent.glob(".corsia-write-*"))
     durable_writes.recover_write_intents(workspace=workspace)
     assert (target.read_text() if target.exists() else None) == expected
