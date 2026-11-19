@@ -189,7 +189,7 @@ def _open_ids_indexed(connection, plan_id: str, limit: int) -> tuple[str, ...]:
             f"""SELECT n.id FROM plan_nodes n
                WHERE n.plan_id=? AND {node_states.in_work_sql('n')} AND n.folded=0
                  AND n.state IN ({_OPEN_MARKS})
-                 AND NOT (n.child_in_work>0 AND n.state='pending' AND n.spawned_thread_id IS NULL)
+                 AND NOT ({node_states.stored_parent_sql('n')} AND n.state='pending' AND n.spawned_thread_id IS NULL)
                  AND NOT EXISTS (SELECT 1 FROM plan_nodes c
                       WHERE c.plan_id=n.plan_id AND c.parent_id=n.id AND c.folded=0
                         AND {in_work} AND c.state IN ({_OPEN_MARKS}))

@@ -33,6 +33,7 @@ from infra.worktree_reaper_scan import Candidate, idle_since, newest_tree_mtime
 # leaves once idle this long. So does a worktree whose owning worker is gone,
 # uncommitted and unpublished work included (copied out first unless the owner
 # is purged, since an archived worker can come back); its branch outlives the tree.
+# No reading yet: needs how long a gone owner's worktree is still returned to.
 SHORT_IDLE_THRESHOLD_SECONDS = 86400
 
 

@@ -71,10 +71,10 @@ def _append(db, source: Source, node, recipient: str, *, answer: list[str],
 
 def _content(db, node, source: Source, recipient: str, answer: list[str], *, context: str = "") -> str:
     from plans import plan_wake
-    from plans.close_next_bounds import bounded
+    from plans.close_next_bounds import bounded, title as bounded_title
     from prompts import plan_wakes as wakes
 
-    title = bounded(str(node["title"]), plan_wake.RETURNED_TITLE_MAX_BYTES)
+    title = bounded_title(str(node["title"]))
     revision = int(node["requirements_revision"])
     return plan_wake.with_next(
         db, service.ensure_plan("thread", recipient, db=db).id, recipient,

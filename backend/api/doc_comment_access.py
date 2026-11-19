@@ -9,12 +9,27 @@ a write lands there or is refused with ``NOT_COMMENTABLE``, and a read lists the
 from __future__ import annotations
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from infra.auth import may_access_artifact
 from registry import models as registry_models
 
 # The refusal of a comment write whose document moved to a place the writer can't use; the browser keeps the draft.
 NOT_COMMENTABLE = "Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here."
+# The machine-readable reason the browser matches on (as with the tag refusals' ``kind``), never the sentence.
+NOT_COMMENTABLE_KIND = "not_commentable"
+
+
+class NotCommentable(HTTPException):
+    """The 409 ``NOT_COMMENTABLE`` refusal: the write names a document that no longer takes it."""
+
+    def __init__(self) -> None:
+        super().__init__(409, NOT_COMMENTABLE)
+
+
+def not_commentable_response() -> JSONResponse:
+    """The comment-create route's answer to that refusal: the sentence as ``detail`` plus the ``kind`` the browser acts on."""
+    return JSONResponse({"detail": NOT_COMMENTABLE, "kind": NOT_COMMENTABLE_KIND}, status_code=409)
 
 
 def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
@@ -56,7 +71,7 @@ def _artifact_for_write(artifact_id: str, user_id: str, db) -> str:
     _assert_owns_artifact(artifact_id, user_id, db)
     live = _accessible_live_id(artifact_id, user_id, db)
     if live is None:
-        raise HTTPException(409, NOT_COMMENTABLE)
+        raise NotCommentable()
     return live
 
 

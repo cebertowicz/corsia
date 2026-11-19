@@ -1,10 +1,10 @@
-"""The two triage lines an agent reads when plan order and its own choice disagree.
+"""The triage line an agent reads when a start disagrees with plan order.
 
-``rank`` rides an ``add`` that lands below ready top-level work, and ``jumped``
-rides a named start that passes ready top-level work. Both are guidance in a
-tool result, never a refusal, and both are for the plan's own owner: a user's
-write, a conductor's append to another agent's plan and a delegating parent's
-write carry neither.
+``jumped`` rides a named start that passes ready top-level work. It is
+guidance in a tool result, never a refusal, and it is for the plan's own
+owner: a user's write, a conductor's write to another agent's plan and a
+delegating parent's write carry none. An add gets the top of the plan and a
+landing line instead (``plans.plan_top``).
 
 Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
@@ -33,9 +33,6 @@ JUMPED_READY_NODE_ID = "jumped_ready_node_id"
 
 #: Top-level states that take a rank: work still to settle or to review.
 RANKED_STATES = frozenset({"pending", "active", "review_requested"})
-
-#: Ready items the ``rank`` line names.
-READY_ABOVE_LIMIT = 2
 
 
 @dataclass(frozen=True)
@@ -106,7 +103,7 @@ def standing(db, plan) -> Standing:
     }
     leaves = [
         row for row, _path in ordered
-        if not row["has_child_in_work"] and not row["later"]
+        if not row["is_parent"] and not row["later"]
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])
@@ -127,27 +124,6 @@ def _owns(plan, actor_id: str | None) -> bool:
         actor_id is not None
         and plan["owner_kind"] == "thread"
         and str(plan["owner_id"]) == actor_id
-    )
-
-
-def add_line(db, plan, node_id: str, *, actor_id: str | None) -> str | None:
-    """Return the ``rank`` line for a task just added to its owner's plan, or None.
-
-    A line only when the new node is top-level and ready top-level work ranks
-    above it. ``insert`` never calls this: its caller chose the position.
-    """
-    node = service._node_row(db, node_id)
-    if node["parent_id"] is not None or not _owns(plan, actor_id):
-        return None
-    where = standing(db, plan)
-    above = where.ready_above(node_id)
-    rank = where.rank(node_id)
-    if not above or rank is None:
-        return None
-    return text.triage_rank(
-        rank, len(where.open_roots),
-        [(str(row["title"]), str(row["id"])) for row in above[:READY_ABOVE_LIMIT]],
-        position(db, str(plan["id"]), str(above[0]["id"])),
     )
 
 

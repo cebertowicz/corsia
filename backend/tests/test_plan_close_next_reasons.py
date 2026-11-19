@@ -15,7 +15,6 @@ import pytest
 
 from plans import selection_validity
 from tests.plan_close_next_helpers import (
-    MARKER,
     QUOTES,
     REASON_CAP,
     assert_block_shape,
@@ -138,17 +137,13 @@ def _slot_held_scene(db, variant: str) -> tuple[str, str, str]:
 
 
 def _assert_action_whole(reason: str, action: str) -> None:
-    """Assert the reason keeps its action whole and cuts only the holder's title."""
-    assert reason.startswith(SLOT_HELD_PREFIX)
-    assert reason.endswith(action)
-    title = reason[len(SLOT_HELD_PREFIX):-len(action)]
-    assert title.endswith(MARKER)
-    kept = title[:-len(MARKER)]
-    assert kept and LONG_TITLE.startswith(kept)
+    """Assert the reason names the holder by its whole title and keeps its action whole.
+
+    The holder's title is at the input limit, so the title cut, derived from
+    that limit, leaves it whole.
+    """
+    assert reason == SLOT_HELD_PREFIX + LONG_TITLE + action
     assert size(reason) <= REASON_CAP + QUOTES
-    # Longest cut: one more title character would not have fit.
-    fuller = SLOT_HELD_PREFIX + LONG_TITLE[: len(kept) + 1] + MARKER + action
-    assert size(fuller) > REASON_CAP
 
 
 @pytest.mark.parametrize(
@@ -158,7 +153,7 @@ def _assert_action_whole(reason: str, action: str) -> None:
         ("active", "; start this task after that task closes"),
     ],
 )
-def test_a_long_holder_title_is_cut_so_the_slot_held_action_stays_whole(db, variant, action):
+def test_a_holder_title_at_the_limit_arrives_whole_beside_the_slot_held_action(db, variant, action):
     plan_id, task_a_id, task_b_id = _slot_held_scene(db, variant)
     before = _durable(db, task_b_id)
 

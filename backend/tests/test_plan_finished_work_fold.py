@@ -79,7 +79,8 @@ def test_fold_needs_settled_work_or_an_unstarted_container(state, archived_at, c
 
 
 def _row(node_id, parent=None, state="accepted", spawned=None):
-    return {"id": node_id, "parent_id": parent, "state": state, "spawned_thread_id": spawned}
+    return {"id": node_id, "parent_id": parent, "state": state, "spawned_thread_id": spawned,
+            "kind": "task", "workflow_step": None}
 
 
 def test_an_unstarted_container_folds_with_its_finished_children():
