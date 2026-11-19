@@ -19,7 +19,7 @@
 <section class="block" id="text-field">
 	<header class="block-head">
 		<h2>Text field</h2>
-		<p>One control for free text: 1px border, large radius, 16px type. On a pane it takes the chip's glass fill; inside a card or sheet it is a plain outline. A multi-line field grows to about six lines, then scrolls.</p>
+		<p>One control for free text: 1px border, the buttons' small corners (--radius-sm), 16px type. On a pane it takes the chip's glass fill; inside a card or sheet it is a plain outline. A multi-line field grows to about six lines, then scrolls.</p>
 	</header>
 	<div class="card">
 		<h3>On a pane: chip</h3>

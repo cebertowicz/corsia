@@ -2,8 +2,9 @@
 
 At the context boundary a thread needs to know, without rereading its plan:
 which plan and revision this is, its state and progress, the current task and
-its revision, and only the next actionable step or the genuine wait -- plus
-the read that gets the exact detail. An idle or paused plan says so; nothing
+its revision, the top of its plan in priority order (``plans.plan_top``), and
+only the next actionable step or the genuine wait -- plus the read that gets
+the exact detail. An idle or paused plan says so; nothing
 here guesses a current step. Every node, completed history, descriptions and
 acceptance bodies stay out: they are one ``plan_read`` away.
 
@@ -25,7 +26,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from plans import not_moving, operator_nodes, service, status
+from plans import not_moving, operator_nodes, plan_top, service, status
 from prompts.plan_tools import DELEGATED_PLAN_GUIDANCE
 
 #: Engineering budget from the brief: the checkpoint plan projection is at
@@ -194,7 +195,8 @@ def _project(db, plan_row, *, actor, clock: str) -> dict[str, Any]:
         thin["note"] = "plan paused"
     elif overview["no_current_task"] and overview["next_step"] is None:
         thin.update(_nothing_ready(facts, overview["severity"], str(plan_row["owner_id"])))
-    return _fit(thin)
+    top = plan_top.compose(db, str(plan_row["id"]), facts)
+    return _fit(thin, top if top.lines else None)
 
 
 #: What open work is doing when the actor has no current task and nothing
@@ -241,14 +243,36 @@ def render(projection_: dict[str, Any]) -> str:
     return json.dumps(projection_, sort_keys=True, separators=(",", ":"))
 
 
-def _fit(thin: dict[str, Any]) -> dict[str, Any]:
-    """Drop the least necessary facts, in order, until the budget holds."""
-    for drop in ("open_step", "next_step", "current_task"):
-        if len(render(thin).encode()) <= CHECKPOINT_BYTES:
+def _fits(thin: dict[str, Any]) -> bool:
+    return len(render(thin).encode()) <= CHECKPOINT_BYTES
+
+
+def _fit(thin: dict[str, Any], top: plan_top.Top | None = None) -> dict[str, Any]:
+    """Drop the least necessary facts, in order, until the budget holds.
+
+    The open and next steps shrink to their reads first; then the top of the
+    plan loses rows from its bottom, its tail counting them, down to one row;
+    then the current task shrinks.
+    """
+    if top is not None:
+        thin["top_of_plan"] = top.shown()
+    for drop in ("open_step", "next_step"):
+        if _fits(thin):
             return thin
-        if thin.get(drop) is not None:
-            thin[drop] = {"id": thin[drop]["id"], "detail_read": thin[drop]["detail_read"]}
+        _shrink(thin, drop)
+    if top is not None:
+        for rows in range(len(top.lines), 0, -1):
+            thin["top_of_plan"] = top.shown(rows)
+            if _fits(thin):
+                return thin
+    if not _fits(thin):
+        _shrink(thin, "current_task")
     return thin
+
+
+def _shrink(thin: dict[str, Any], key: str) -> None:
+    if thin.get(key) is not None:
+        thin[key] = {"id": thin[key]["id"], "detail_read": thin[key]["detail_read"]}
 
 
 def _same_facts(previous: str, current: str) -> bool:
