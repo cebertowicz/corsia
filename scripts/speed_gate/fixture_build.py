@@ -45,12 +45,14 @@ FIRST = ("artifact_identities", "active_turns", "checkpoints")
 
 
 #: Tables with a partial unique index ("at most one live row"): the generic pass would
-#: make every row live, so these columns are pinned to a terminal value.
+#: make every row live, so these columns are pinned to a terminal value. A column under a CHECK of
+#: allowed values is pinned the same way, since generated text would fail it.
 TERMINAL = {
     "active_turns": {"status": "completed"},
     "checkpoints": {"status": "installed"},
     "host_access_leases": {"state": "expired"},
     "plan_node_holds": {"kind": "blocked"},
+    "fresh_reads": {"verdict": "passed"},
 }
 
 

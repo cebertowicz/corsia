@@ -65,6 +65,13 @@ GENERIC_SYNTHETIC_ROWS.update({name: max(1, round(PRODUCTION_ROWS["thread_update
     "message_update_state", "message_update_nodes",
 )})
 
+#: Fresh reads postdate the census too. Synthetic stress shape, built by the generic pass: one read, one
+#: kept document version and one shown-version row per agent update the census counts (``thread_updates``);
+#: assumptions, not production counts.
+GENERIC_SYNTHETIC_ROWS.update({name: max(1, round(PRODUCTION_ROWS["thread_updates"] * SCALE)) for name in (
+    "fresh_reads", "fresh_read_bytes", "fresh_read_views",
+)})
+
 #: The one thread at the largest production parent, and its sibling relations.
 MAX_THREAD_MESSAGES = 100_639
 MAX_THREAD_USAGE = 36_834
