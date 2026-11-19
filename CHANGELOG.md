@@ -17,6 +17,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A chat whose Claude Code session can't be resumed now sends your message again instead of sometimes ending with an error.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
+- A document comment or reply box now says under the field which agents it goes to. A tap on a comment's highlighted text now opens its card even when the text moved just before the tap.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A comment card in a document no longer hides behind the Workspace panel: with the panel open, the card sits beside its text. On a narrower window, the panel sits beside either the chat or the document instead of squeezing both. A reply you are writing keeps its text and cursor when you open or close the panel.
 - A comment card in the margin now appears once its place is ready, instead of flashing in the wrong place first. A new comment's field takes focus then, unless you have moved to another field.
