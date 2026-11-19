@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { expect, type Browser, type Page } from '@playwright/test';
 import { test } from '../support/test';
-import { e2eModel } from '../support/corsia';
+import { e2eModel, TEST_SESSION_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/heldComments';
 import { ownerItem, rolePicker, seedOwnedDocument } from '../support/documentOwnerSupervisor';
 import { beginComment, submitButton } from '../support/liveCommentProof';
@@ -21,6 +21,9 @@ for (const [label, width, height, project] of [
 			"connection.execute(\"INSERT OR IGNORE INTO users (id,password_hash,created_at,password_changed_at) VALUES ('Maya Chen','x','2026-01-01','2026-01-01'),('Jordan Lee','x','2026-01-01','2026-01-01')\")",
 			"connection.execute(\"INSERT INTO auth_tokens(token_hash,user_id,kind,created_at) VALUES (?,'Maya Chen','session','2026-01-01'),(?,'Jordan Lee','session','2026-01-01')\", (sys.argv[2],sys.argv[3]))",
 		], digest(mayaToken), digest(jordanToken));
+		// The creator first takes the agent-owned document, making it shared through the product route.
+		const share = await request.put(`/api/artifacts/${seeded.artifact}/ownership`, { params: { token: TEST_SESSION_TOKEN }, data: { owner: 'user' } });
+		expect(share.ok(), await share.text()).toBeTruthy();
 		const claim = await request.put(`/api/artifacts/${seeded.artifact}/ownership`, { params: { token: mayaToken }, data: { owner: 'user' } });
 		expect(claim.ok(), await claim.text()).toBeTruthy();
 
