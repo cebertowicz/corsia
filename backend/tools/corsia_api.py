@@ -28,6 +28,8 @@ from tools.conductor_api_identity import attribution_matches, bind_delegation_or
 # Match the native tool output budget; stop collecting, rather than buffering
 # an unbounded response and truncating it after execution.
 MAX_RESPONSE_BYTES = 32_768
+# No reading yet: needs request sizes and latencies (MAX_REQUEST_BYTES,
+# REQUEST_TIMEOUT_SECONDS).
 MAX_REQUEST_BYTES = 32_768
 REQUEST_TIMEOUT_SECONDS = 30
 

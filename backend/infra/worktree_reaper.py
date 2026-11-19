@@ -35,8 +35,11 @@ from infra.worktree_reaper_salvage import SalvageError, salvage_worktree
 from infra.worktree_reaper_scan import Candidate, Orphan, scan_repo
 from infra.worktree_reaper_store import forget_pr_terminal, pr_terminal_heads, remember_pr_terminal
 
+# No reading yet: needs how long worktrees sit idle before their owner returns to them.
 IDLE_THRESHOLD_SECONDS = 7 * 86400
 MAX_REMOVALS_PER_RUN = 100
+# No reading yet: needs nightly pass durations and item counts (RUN_BUDGET_SECONDS,
+# METRIC_ITEM_CAP).
 RUN_BUDGET_SECONDS = 600.0
 METRIC_ITEM_CAP = 50
 REMAINING_WARNING = 50

@@ -6,6 +6,7 @@ from host_access.processes import ForegroundProcessResult
 from events.connectors import ObservedArtifactDecl
 from tools.unix_socket_policy import thread_bind_root_withheld_reason
 
+# No reading yet: needs the sizes of results that carry a registration warning.
 REGISTRATION_WARNING_RESULT_CAP = 5_000
 
 
