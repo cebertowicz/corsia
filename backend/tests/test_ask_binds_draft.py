@@ -146,3 +146,26 @@ async def test_a_later_ask_that_ends_without_a_verdict_does_not_revive_the_earli
     result = await _close(run, gate)
 
     assert isinstance(result, str) and "approved an earlier draft" in result
+
+
+async def test_a_draft_that_cant_be_read_at_close_is_refused_as_unreadable(isolated_db, tmp_path, monkeypatch):
+    run, gate, draft = await _gate_answered(tmp_path, monkeypatch, "approved")
+    draft.unlink()
+
+    result = await _close(run, gate)
+
+    assert isinstance(result, str) and "can't be read now" in result, result
+    assert "earlier draft" not in result
+
+
+async def test_a_stored_file_that_cant_be_read_at_answer_time_is_logged(
+    isolated_db, tmp_path, monkeypatch, caplog,
+):
+    """The yes still records, with no draft to bind, and the missing file is not silent."""
+    with caplog.at_level("WARNING", logger="plans.draft_binding"):
+        run, gate, _draft = await _gate_answered(
+            tmp_path, monkeypatch, "approved", external_id="gone.md", path="gone.md",
+        )
+
+    assert any("can't be read" in record.getMessage() for record in caplog.records)
+    assert not isinstance(await _close(run, gate), str)
