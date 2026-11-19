@@ -84,7 +84,7 @@ function look(page: Page, touch: boolean): Promise<Look> {
 			// A control whose ::before is its larger hit area (an image comment's number) counts that area.
 			const before = getComputedStyle(el, '::before');
 			if (before.content !== 'none' && before.position === 'absolute') {
-				const inset = (side: string) => -(parseFloat(before.getPropertyValue(side)) || 0);
+				const inset = (side: string) => Math.max(0, -(parseFloat(before.getPropertyValue(side)) || 0));
 				width += inset('left') + inset('right'); height += inset('top') + inset('bottom');
 			}
 			return Math.min(width, height);

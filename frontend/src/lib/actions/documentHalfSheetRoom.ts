@@ -6,6 +6,8 @@ export function documentHalfSheetRoom(drawer: HTMLElement) {
 	const resize = new ResizeObserver(schedule);
 	function measure() {
 		const rows = Array.from(drawer.children).filter((child) => child.matches('.drawer-switch, .drawer-foot'));
+		const nestedFooter = drawer.querySelector('.drawer-comments > .drawer-foot');
+		if (nestedFooter) rows.push(nestedFooter);
 		const gap = parseFloat(getComputedStyle(drawer).rowGap) || 0;
 		const extra = rows.reduce((sum, row) => sum + row.getBoundingClientRect().height + gap, 0);
 		panel!.style.setProperty('--drawer-half-extra', `${extra}px`);
@@ -17,6 +19,8 @@ export function documentHalfSheetRoom(drawer: HTMLElement) {
 	function observeRows() {
 		resize.disconnect();
 		for (const row of drawer.children) if (row.matches('.drawer-switch, .drawer-foot')) resize.observe(row);
+		const nestedFooter = drawer.querySelector('.drawer-comments > .drawer-foot');
+		if (nestedFooter) resize.observe(nestedFooter);
 		schedule();
 	}
 	const mutation = new MutationObserver(observeRows);

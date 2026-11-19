@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { loadMentionRoster } from './comments/mentionRoster.svelte';
 	import { documentHalfSheetRoom } from '$lib/actions/documentHalfSheetRoom';
+	import { documentThreadFooterRoom } from '$lib/actions/documentThreadFooterRoom';
 	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
@@ -53,6 +54,7 @@
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let filterOpen = $state(false);
 	let drawer = $state<HTMLElement>();
+	let scrollThreadFooter = $state(false);
 	const canvasWidth = settledCanvasWidth(() => bounds, () => form.note());
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it the list is a popover from the comments control, and only a phone dims the document with a sheet. Image viewers already decide whether their canvas is a sheet.
 	const roomForMargin = $derived(hasRoomForMargin(canvasWidth.value));
@@ -286,8 +288,9 @@
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
 		{#if !isImage && resolvedOpen}<DocResolvedComments>{#snippet list()}{#if resolvedList.length}{@render threadList(resolvedList, true, true, false, true)}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">No resolved comments.</p>{/if}{/snippet}</DocResolvedComments>{:else if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} focusComposer={!form.redrawn} head={isImage && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError) ? acceptAllBar : null}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if openedComment}{@render threadList([openedComment], true, false, false, true, 'all')}{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
+		{#if scrollThreadFooter && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
 	</div>
-	{#if !margin && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
+	{#if !margin && !isImage && artifactId && !scrollThreadFooter}<DocCommentDrawerFoot {feedback} />{/if}
 {/snippet}
 {#snippet cardPopover()}<Popover fill anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={form.handoff ?? (image && !readOnly ? '.ct-input' : undefined)} takeFocus={form.redrawn ? !!form.handoff : !(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => isShellControl(target) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
 
@@ -295,7 +298,7 @@
 	{#if margin && surfaceState}
 		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:documentThreadFooterRoom={(scrolls) => scrollThreadFooter = scrolls} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list' && !image && !columnFits}
 		<!-- Below the column's threshold on a desktop canvas: a popover from the comments control, so nothing is dimmed or covered but the list itself. -->
 		<Popover anchor={listAnchor} placement="bottom-end" bounds={listBounds} fill {covered} initialFocus={form.handoff ?? undefined} takeFocus={!form.redrawn || !!form.handoff} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isShellControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
@@ -326,7 +329,9 @@
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */
 	.peers { display: grid; }
 	.peer { grid-area: 1 / 1; min-width: 0; }
-	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+	.drawer-comments { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+	/* In a cramped sheet the scrolling footer's row must fit beside a 44px reply target. */
+	.drawer-comments :global(.drawer-foot .tg.row) { min-height: var(--touch-target); }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
 	/* Retry sits on its own row under the sentence, so it never touches the end of a wrapped line. */
 	.drawer-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }

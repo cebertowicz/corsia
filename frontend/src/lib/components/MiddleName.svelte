@@ -74,7 +74,8 @@
 	.name-size { visibility: hidden; }
 	.name-shown { text-overflow: ellipsis; }
 	.name-read { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-	.name-measure { position: absolute; visibility: hidden; pointer-events: none; }
+	/* A zero-size clip, so the whole-name copies can be measured without widening a scrolling panel they sit in. */
+	.name-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 	.name-measure > span { position: absolute; width: max-content; }
 	.name-measure > span::before { content: attr(data-measure-value); }
 	.name-measure [data-name-minimum] { min-width: 4em; }

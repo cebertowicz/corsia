@@ -217,7 +217,7 @@ const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index *
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
 const FRAME_SIZES = [320, 360, 375, 393, 560, 700, 900];
 
-/** Details' delivery switch: its button is the track; its hit area is the track or the 44 px touch size, and a tap on each corner and the centre lands on it. */
+/** The delivery switch's whole row takes taps, while its visible track keeps the standard size. */
 async function measureSwitch(page: Page, width: number) {
 	const panel = await openDetails(page);
 	const reviewerMore = await panel.locator('.reviewer-group .more').textContent();
@@ -228,10 +228,12 @@ async function measureSwitch(page: Page, width: number) {
 	const measured = await drawer.evaluate((root) => {
 		const toggle = root.querySelector<HTMLElement>('.delivery .tg')!;
 		toggle.scrollIntoView({ block: 'nearest' });
-		const button = toggle.getBoundingClientRect();
-		const area = (toggle.querySelector<HTMLElement>('.hit') ?? toggle).getBoundingClientRect();
+		const area = toggle.getBoundingClientRect();
 		const panelBox = root.getBoundingClientRect();
-		const probes: Array<[number, number]> = [[area.left + 1, area.top + 1], [area.right - 1, area.top + 1], [area.left + 1, area.bottom - 1], [area.right - 1, area.bottom - 1], [area.left + area.width / 2, area.top + area.height / 2]];
+		const radius = Math.min(parseFloat(getComputedStyle(toggle).borderTopLeftRadius) || 0, area.width / 2, area.height / 2);
+		const x = area.left + area.width / 2, y = area.top + area.height / 2, inset = radius + 1;
+		const probes: Array<[number, number]> = [[x, y], [area.left + 1, y], [area.right - 1, y], [x, area.top + 1], [x, area.bottom - 1], [area.left + inset, area.top + inset], [area.right - inset, area.top + inset], [area.left + inset, area.bottom - inset], [area.right - inset, area.bottom - inset]];
+		const track = getComputedStyle(toggle, '::before');
 		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggle).map((el) => `${el?.tagName}.${el?.className}`);
 		const overlapOf = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
 		const hitOverlaps = [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => {
@@ -248,12 +250,12 @@ async function measureSwitch(page: Page, width: number) {
 		return {
 			panel: { left: panelBox.left, right: panelBox.right, top: panelBox.top, bottom: panelBox.bottom },
 			controls: [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((el) => el.getBoundingClientRect().width > 0).map((el) => { const r = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? el.className, box: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }; }),
-			button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 },
+			track: { width: parseFloat(track.width), height: parseFloat(track.height) },
 			area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 },
 			tapMisses, hitOverlaps,
-			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right) },
+			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right), top: Math.max(0, -area.top), bottom: Math.max(0, area.bottom - window.innerHeight) },
 			sendText: sendShown?.innerText.trim() ?? null, sendName: send?.getAttribute('aria-label') ?? null,
-			deliverLabel: root.querySelector<HTMLElement>('.delivery > span')?.textContent?.trim() ?? null,
+			deliverLabel: toggle.querySelector<HTMLElement>('.row-label')?.textContent?.trim() ?? null,
 			sideways: root.scrollWidth - root.clientWidth,
 			panelInWindow: panelBox.left >= -0.5 && panelBox.right <= window.innerWidth + 0.5,
 		};
@@ -262,12 +264,12 @@ async function measureSwitch(page: Page, width: number) {
 }
 
 function expectSwitchWhole(measured: Awaited<ReturnType<typeof measureSwitch>>, label: string) {
-	const { button, area, tapMisses } = measured;
-	expect.soft(Math.abs(button.width - 30) <= 0.5 && Math.abs(button.height - 17) <= 0.5, `${label}: the switch button is its 30 x 17 track, measured ${button.width} x ${button.height}`).toBe(true);
+	const { track, area, tapMisses } = measured;
+	expect.soft(Math.abs(track.width - 30) <= 0.5 && Math.abs(track.height - 17) <= 0.5, `${label}: the switch track is 30 x 17, measured ${track.width} x ${track.height}`).toBe(true);
 	expect.soft(area.width >= 43.5 && area.height >= 43.5, `${label}: the hit area is at least 44 x 44, measured ${area.width} x ${area.height}`).toBe(true);
 	expect.soft(measured.hitOverlaps, `${label}: the switch's hit area overlaps no other control in Details`).toEqual([]);
-	expect.soft(measured.hitOutside, `${label}: the switch's hit area stays inside Details`).toEqual({ left: 0, right: 0 });
-	expect.soft(tapMisses, `${label}: taps on the four corners and the centre of the switch's hit area land on the switch`).toEqual([]);
+	expect.soft(measured.hitOutside, `${label}: the switch's hit area stays inside the drawer and window`).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+	expect.soft(tapMisses, `${label}: taps across the switch row land on the switch`).toEqual([]);
 	expect.soft(measured.deliverLabel, `${label}: the delivery label is the full wording`).toBe('Deliver immediately');
 	expect.soft(measured.sendText, `${label}: Send's visible label is whole`).toMatch(/^Send(?: ·)? (?:10\d comments?|99\+)$/);
 	expect.soft(measured.sendName, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
