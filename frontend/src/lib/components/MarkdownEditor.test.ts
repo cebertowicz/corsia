@@ -169,6 +169,8 @@ describe('MarkdownEditor edits', () => {
 
 		// A tap or click on the struck text, as the browser delivers it: the press, then the caret it placed, then the frame that reads it.
 		const pressStruck = async (view: EditorView, anchor = 8) => {
+			// The press is read where it lands, when the pointer goes down: the position under the pointer is the caret's place to be.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(anchor);
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
 			view.dispatch({ selection: { anchor }, userEvent: 'select.pointer' });
 			window.dispatchEvent(new MouseEvent('mouseup'));
@@ -209,8 +211,13 @@ describe('MarkdownEditor edits', () => {
 		it('leaves a caret the editor already placed inside the pressed highlight where it is', async () => {
 			const view = open({ highlights: [suggestion('red')], onAnchorFocus: vi.fn(), cardMode: 'sheet' });
 			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			// The press landed at 9; the editor's caret reached 7, inside the same highlight: it stands.
 			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(9);
-			await pressStruck(view, 7);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 7 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
 			expect(view.state.selection.main.head).toBe(7);
 		});
 
