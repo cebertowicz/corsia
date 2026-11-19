@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from core.attention_measure import Measure, describe, measure_file, measure_text, total_of
+from core.update_documents import artifact_path, linked_documents
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -75,7 +76,6 @@ _BEFORE_OPENING = ", before they open it"
 #: receipt: the update was saved, under this message id.
 _SAVED_UPDATE = re.compile(r"Update saved as message (\S+)\.")
 #: The card type chat gives a file made to be read (``registry.file_types``).
-_READ_TYPE = "document"
 _LINKED_ONE = "Your update links '{name}' for the person to read: {length}."
 _LINKED_MANY = "Your update links {count} documents for the person to read{total}."
 _LONGEST = " The longest is '{name}': {length}."
@@ -172,7 +172,8 @@ def _update_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
         if row is None or not isinstance(row["content"], str):
             return None
         text = row["content"]
-        linked = _linked_documents(db, text, row["user_id"], row["project_id"]) if targets(text) else []
+        linked = ([path for _id, path in linked_documents(db, text, row["user_id"], row["project_id"])]
+                  if targets(text) else [])
         waiting = _waiting_paths(db, thread_id) if linked else []
     finally:
         db.close()
@@ -217,30 +218,6 @@ def _decision_notice(thread_id: str, arguments: dict, result: Any) -> str | None
         return None
     _record(thread_id, "decision", [], None, text_measure=measure)
     return f"{LABEL} Your decision: {describe(measure)}.\n{_CHECK}"
-
-
-def _linked_documents(db, text: str, user_id: str, project_id: str | None) -> list[Path]:
-    """The documents chat shows the person as cards under this agent's saved update."""
-    from doceditor.document_scope import scope_roots
-    from infra import config
-    from registry.path_cards import reference_cards
-
-    # The text, the roots and the second origin are the ones ``api.thread_cards.attach_cards``
-    # gives the same reader; ``test_attention_notice_update_links`` holds the two together.
-    origin, bases = scope_roots(project_id, db)
-    cards = reference_cards(
-        db, text, bases, str(user_id), origin=origin,
-        fallback_origin=config.WORKSPACE.resolve() if project_id else None,
-    )
-    paths: list[Path] = []
-    for card in cards:
-        if card.get("type") != _READ_TYPE or not card.get("available"):
-            continue
-        artifact_id = card.get("artifact_id")
-        path = _artifact_path(db, str(artifact_id)) if artifact_id else Path(str(card["path"]))
-        if path is not None and path not in paths:
-            paths.append(path)
-    return paths
 
 
 def _plan_target(operation: Any, params: dict) -> tuple[str, str] | None:
@@ -289,7 +266,7 @@ def _handed_over(db, thread_id: str, kind: str, reference: str, workspace: Path 
         step = person_step_instructions(reference, db=db)
         if step is None or str(step["owner_thread_id"]) != thread_id:
             return None
-    return _artifact_path(db, reference)
+    return artifact_path(db, reference)
 
 
 def _waiting_paths(db, thread_id: str) -> list[Path]:
@@ -304,29 +281,8 @@ def _waiting_paths(db, thread_id: str) -> list[Path]:
         f"SELECT DISTINCT artifact_id FROM ({asks}) WHERE owner_kind='thread' AND owner_id=?",
         (thread_id,),
     ).fetchall()
-    paths = (_artifact_path(db, str(row["artifact_id"])) for row in rows)
+    paths = (artifact_path(db, str(row["artifact_id"])) for row in rows)
     return [path for path in paths if path is not None]
-
-
-def _artifact_path(db, artifact_id: str) -> Path | None:
-    """Where a registered document's file is now, or None when it has none."""
-    from infra import config
-    from infra.workspace_paths import resolve_registered_path
-    from registry import models as registry_models
-
-    artifact = registry_models.get_artifact(artifact_id, db=db)
-    if artifact is None:
-        return None
-    try:
-        raw = resolve_registered_path(artifact.get("external_id"), artifact.get("path"))
-    except ValueError:
-        log.warning("attention notice: document %s is outside this workspace", artifact_id)
-        return None
-    raw = raw or artifact.get("external_id")
-    if not raw:
-        return None
-    path = Path(str(raw)).expanduser()
-    return path if path.is_absolute() else config.WORKSPACE / path
 
 
 def _render(kind: str, name: str, measure: Measure | None, waiting: list[Measure | None]) -> str:

@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from core.fresh_read_store import PERSON_EDIT, ReadRecord, record, sha256_bytes, view
+from core.fresh_read_store import record_person_edit, sha256_bytes, view
 from infra.db_async import run_in_db
 
 
@@ -103,9 +103,7 @@ def _history_commit(path: Path, data: bytes) -> str | None:
 
 def _record(artifact_id: str, written: bytes, db=None) -> None:
     """Blocking. Move the document's pass to ``written``, the person's own bytes."""
-    sha = sha256_bytes(written)
-    record(ReadRecord(kind="document", item_ref=artifact_id, sha256=sha, verdict=PERSON_EDIT,
-                      documents=((artifact_id, sha, written),)), db=db)
+    record_person_edit(artifact_id, sha256_bytes(written), written, db=db)
 
 
 def person_published(artifact_id: str, replaced: bytes, written: bytes, *, db) -> None:

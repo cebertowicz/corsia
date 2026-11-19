@@ -267,16 +267,33 @@ def _updatable(fields: dict[str, Any], thread_id: str):
     return check
 
 
+def _allowed(db, comment_id: str, fields: dict[str, Any], thread_id: str, user_id: str):
+    """The comment and its document when this agent may make this update; raises its refusal."""
+    comment = store.get_comment(comment_id, db=db)
+    if comment is None:
+        return None
+    art = registry_models.get_artifact(comment["artifact_id"], db=db)
+    if art is None or not may_access_artifact(art["parent_thread_id"], user_id, db=db):
+        return None
+    check_agent_update(comment, fields, actor_thread_id=thread_id, owner_thread_id=art["parent_thread_id"], db=db)
+    return comment, art
+
+
+def _may_update(comment_id: str, fields: dict[str, Any], thread_id: str, user_id: str) -> bool:
+    db = get_db()
+    try:
+        return _allowed(db, comment_id, fields, thread_id, user_id) is not None
+    finally:
+        db.close()
+
+
 def _update_in_db(comment_id: str, fields: dict[str, Any], thread_id: str, user_id: str, regions: bool):
     db = get_db()
     try:
-        comment = store.get_comment(comment_id, db=db)
-        if comment is None:
+        allowed = _allowed(db, comment_id, fields, thread_id, user_id)
+        if allowed is None:
             return None
-        art = registry_models.get_artifact(comment["artifact_id"], db=db)
-        if art is None or not may_access_artifact(art["parent_thread_id"], user_id, db=db):
-            return None
-        check_agent_update(comment, fields, actor_thread_id=thread_id, owner_thread_id=art["parent_thread_id"], db=db)
+        comment, art = allowed
         moved = doc_images.region_patch(
             db, comment, dict(fields), doc_path=art["path"], owner_thread_id=art["parent_thread_id"]) if regions else fields
         patch = reopen_fields(comment, moved)
@@ -290,9 +307,14 @@ def _update_in_db(comment_id: str, fields: dict[str, Any], thread_id: str, user_
 
 
 async def _gated_update(comment_id: str, fields: dict[str, Any], thread_id: str, user_id: str, regions: bool):
-    """An edit of a comment's text that reaches the person is read before it is written."""
+    """An edit of a comment's text that reaches the person is read before it is written.
+
+    Access and authorship are checked first, so a refused edit is refused as itself and never
+    sends the comment's thread to a reader."""
     from doceditor.comment_fresh_read import check_comment_edit
 
+    if not await run_in_db(_may_update, comment_id, fields, thread_id, user_id):
+        return None
     await check_comment_edit(comment_id, fields, thread_id)
     return await run_in_db(_update_in_db, comment_id, fields, thread_id, user_id, regions)
 

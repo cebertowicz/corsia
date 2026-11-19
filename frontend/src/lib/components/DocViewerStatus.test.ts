@@ -92,10 +92,10 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(control().getAttribute('aria-haspopup')).toBe('dialog');
 	});
 
-	it('says why the person sees the last checked version, in place of the read-only line', () => {
-		render(value(), undefined, { readonly: true, passedNotice: 'A newer version is waiting on its check; this is the last checked version.' });
+	it('says why the person sees the last reviewed version, in place of the read-only line', () => {
+		render(value(), undefined, { readonly: true, passedNotice: "An agent's newer version of this document is waiting for review. You're seeing the last reviewed version." });
 		const notes = [...host.querySelectorAll('.readonly-note')].map((note) => note.textContent);
-		expect(notes).toEqual(['A newer version is waiting on its check; this is the last checked version.']);
+		expect(notes).toEqual(["An agent's newer version of this document is waiting for review. You're seeing the last reviewed version."]);
 		component?.$set({ passedNotice: null });
 		flushSync();
 		expect([...host.querySelectorAll('.readonly-note')].map((note) => note.textContent)).toEqual(['Read-only.']);

@@ -76,6 +76,27 @@ def record(read: ReadRecord, db=None) -> str:
     return read_id
 
 
+def record_person_edit(artifact_id: str, sha: str, body: bytes, db=None) -> str:
+    """Move a document's pass to the person's own bytes; returns the record that now holds it.
+
+    A run of the person's writes is one record: when the view already rests on a person edit,
+    that record takes the new bytes instead of a new row per live-typing batch. An agent's pass
+    in between starts a new run.
+    """
+    with write_transaction(db, scope="fresh_read_person_edit") as db:
+        row = db.execute(
+            """SELECT r.id FROM fresh_read_views v JOIN fresh_reads r ON r.id = v.fresh_read_id
+               WHERE v.artifact_id=? AND r.verdict=?""", (artifact_id, PERSON_EDIT),
+        ).fetchone()
+        if row is None:
+            return record(ReadRecord(kind="document", item_ref=artifact_id, sha256=sha, verdict=PERSON_EDIT,
+                                     documents=((artifact_id, sha, body),)), db=db)
+        now = utc_now_iso()
+        db.execute("UPDATE fresh_reads SET sha256=?, created_at=? WHERE id=?", (sha, now, row["id"]))
+        move_view(db, artifact_id, sha, body, str(row["id"]), None, None, now)
+        return str(row["id"])
+
+
 def move_view(db, artifact_id: str, sha: str, body: bytes, read_id: str,
               holder: str | None, node_id: str | None, now: str) -> None:
     """Point a document's view at a passed version, keeping only bytes a view still names."""

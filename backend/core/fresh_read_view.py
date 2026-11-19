@@ -7,9 +7,11 @@ sits where the person reads it. When the file's bytes differ from the passed ver
   (``core.fresh_read_person_save``: ``person_edit``, no read), so it never differs here;
 - otherwise both opens serve the passed bytes, read-only for text (comments, replies and
   suggestion decisions stay open), and one background read of the current bytes starts,
-  once per document and version. On a pass the view moves; on a fail or no reader the
-  passed copy opens editable, and the person's save keeps the agent's bytes in history (or
-  the holding agent's scratch folder) and wakes that agent once.
+  once per document and version in flight. On a pass the view moves. On a fail the holding
+  agent is told once, with the reader's findings, and the passed copy opens editable; the
+  person's save keeps the agent's bytes in history (or the holding agent's scratch folder) and
+  wakes that agent once. When no reader could run, nothing is decided: the passed version
+  stays shown read-only and the next open reads the newer version again.
 
 A document no agent has handed over has no view and is served as it is.
 """
@@ -26,8 +28,8 @@ from core.fresh_read import Document, Item, Verdict
 from core.fresh_read_store import note_recheck, sha256_bytes, view
 from infra.db_async import run_in_db
 
-NOTICE_WAITING = "A newer version is waiting on its check; this is the last checked version."
-NOTICE_FAILED = "A newer version did not pass its check; this is the last checked version."
+NOTICE_WAITING = "An agent's newer version of this document is waiting for review. You're seeing the last reviewed version."
+NOTICE_FAILED = "An agent's newer version of this document didn't pass review. You're seeing the last reviewed version."
 _running: set[tuple[str, str]] = set()
 
 
@@ -56,10 +58,29 @@ async def _recheck(artifact_id: str, path: Path, data: bytes, holder: str | None
                                       writer_thread_id=holder, user_id=None, node_id=node_id)
         if not verdict.passed:
             await run_in_db(note_recheck, artifact_id, sha, "held" if verdict.held else "failed")
+        if not verdict.passed and not verdict.held and holder:
+            await _tell_holder(holder, artifact_id, path, sha, verdict.message)
     except Exception:  # noqa: BLE001  # a failed recheck leaves the passed version shown; the next open retries
         logger.exception("fresh read: background read of {} failed", artifact_id)
     finally:
         _running.discard((artifact_id, sha))
+
+
+async def _tell_holder(holder: str, artifact_id: str, path: Path, sha: str, findings: str | None) -> None:
+    """Tell the holding agent, once per version, that its newer version is not what the person sees."""
+    from events.delivery import deliver_to_thread
+
+    # The findings alone (``fresh_read.failed_message`` puts them between its first and last line; a quote
+    # may span lines); the door's "call again" advice does not apply to a background read.
+    lines = findings.split("\n", 1)[1].rsplit("\n", 1)[0] if findings and findings.count("\n") >= 2 else ""
+    summary = (f"Your newer version of {path.name} did not pass its fresh read, so the person still sees the "
+               f"version that passed. Revise the file; its next open reads it again.\n{lines}").rstrip()
+    try:
+        await deliver_to_thread(holder, "fresh_read.recheck_failed", summary,
+                                {"artifact_id": artifact_id, "path": str(path), "sha256": sha},
+                                delivery_id=f"fresh-read-recheck-failed:{artifact_id}:{sha}")
+    except Exception:  # noqa: BLE001  # the person still sees the passed version; a missed wake is logged
+        logger.exception("fresh read: telling {} its recheck failed did not reach it", holder)
 
 
 def start_recheck(artifact_id: str, path: Path, data: bytes, holder: str | None, node_id: str | None) -> None:
@@ -84,7 +105,8 @@ def served(artifact: dict[str, Any] | None, path: Path, raw: bytes, writable: bo
     current = sha256_bytes(raw)
     if row is None or row["sha256"] == current or row["body"] is None:
         return None
-    failed = row["recheck_sha256"] == current and row["recheck_verdict"] in ("failed", "held")
+    # A hold (no reader could run) decides nothing: the next open reads this version again.
+    failed = row["recheck_sha256"] == current and row["recheck_verdict"] == "failed"
     if not failed:
         start_recheck(str(artifact["id"]), path, raw, row["holder_thread_id"], row["node_id"])
     return {

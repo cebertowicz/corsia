@@ -358,10 +358,11 @@ async def test_an_agent_edit_of_its_comment_for_the_person_is_refused_and_not_wr
     from doceditor import agent_comment_writes
     from doceditor.comment_action_errors import CommentActionError
 
+    artifact, _path = _registered(deleg_db, "edited.md", "The passage.\n")
     deleg_db.execute(
         "INSERT INTO doc_comments (id, artifact_id, author, author_kind, author_thread_id, body, anchor_text, "
-        "tagged_user_id, created_at, updated_at) VALUES ('c1', 'a1', 'Agent', 'agent', 'sender-self', "
-        "'Old words.', 'the passage', 'u-test', 't', 't')")
+        "tagged_user_id, created_at, updated_at) VALUES ('c1', ?, 'Agent', 'agent', 'sender-self', "
+        "'Old words.', 'the passage', 'u-test', 't', 't')", (artifact["id"],))
     deleg_db.commit()
     written = []
     monkeypatch.setattr(agent_comment_writes, "_update_in_db", lambda *args: written.append(args))

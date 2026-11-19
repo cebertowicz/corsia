@@ -132,7 +132,7 @@ def user_prompt(kind: str, shown: str, documents: tuple[tuple[str, str], ...], c
     cut_from = None
     oldest = None
     for created_at, text in context.messages:
-        line = f"- {created_at}: {text}"
+        line = message_line(created_at, text)
         cost = None if room is None else measure(line)
         if room is None or cost is None or cost > room:
             cut_from = oldest or ("none: no input cap is known" if room is None else "none: none fit")
@@ -145,6 +145,11 @@ def user_prompt(kind: str, shown: str, documents: tuple[tuple[str, str], ...], c
         title += f" (cut: {cut_from})" if cut_from.startswith("none") else f" (cut: you have them only from {cut_from} on)"
     messages = "\n".join(lines) if lines else "(none)"
     return f"{fixed}\n\n{title}\n{messages}", cut_from
+
+
+def message_line(created_at: str, text: str) -> str:
+    """One of the person's messages as the reader gets it; its measure is what it costs the cap."""
+    return f"- {created_at}: {text}"
 
 
 def task_text(intent: dict[str, Any] | None) -> str | None:

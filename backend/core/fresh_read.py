@@ -21,8 +21,9 @@ from loguru import logger
 
 from core.fresh_read_candidates import Candidate, candidates, install_cap, seat_waiting
 from core.fresh_read_prompt import (
-    OUTPUT_SCHEMA, SYSTEM_PROMPT, Context, ReaderAnswer, task_text, user_prompt, validator,
+    OUTPUT_SCHEMA, SYSTEM_PROMPT, Context, ReaderAnswer, message_line, task_text, user_prompt, validator,
 )
+from core.message_history import NON_HUMAN_MARKERS
 from core.fresh_read_store import FAILED, HELD, PASSED, ReadRecord, record, sha256_bytes, sha256_text
 from host_access.review_limits import HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
 from infra.db_async import run_in_db
@@ -44,9 +45,10 @@ _CHECK_NAMES = {
 
 @dataclass(frozen=True)
 class Document:
-    """A registered document an item hands over, with the exact bytes the person will be shown."""
+    """A document an item hands over, with the exact bytes the person will be shown; ``artifact_id``
+    is None for a file with no registration, which is read but has no view to move."""
 
-    artifact_id: str
+    artifact_id: str | None
     name: str
     data: bytes
 
@@ -76,45 +78,76 @@ class Verdict:
     held: bool = False
 
 
-def _person_messages(db, thread_id: str | None) -> tuple[tuple[str, str], ...]:
-    """The person's own messages in the writer's chat and every chat up its delegating chain, newest first."""
-    from api.thread_message_rows import metadata_dict
-    from core.message_history import NON_HUMAN_MARKERS
+#: The person's own messages: a user row with words and none of the markers of a non-human input
+#: (as ``infra.reply_not_visible_wake`` reads them), newest first through ``idx_messages_session``.
+_PERSON_ROWS = (
+    "SELECT content, created_at FROM messages WHERE thread_id=? AND role='user' AND TRIM(COALESCE(content,''))<>'' "
+    "AND CASE WHEN json_valid(metadata) THEN "
+    + " AND ".join(f"json_extract(metadata,'$.{key}') IS NULL" for key in NON_HUMAN_MARKERS)
+    + " ELSE 1 END ORDER BY created_at DESC"
+)
 
+
+def _person_messages(db, thread_id: str | None, budget: int | None, measure) -> tuple[tuple[str, str], ...]:
+    """The person's own messages in the writer's chat and every chat up its delegating chain, newest first.
+
+    Only what can fill ``budget`` (the reader's input cap) is read: each chat stops once its own
+    newest messages pass it, since the merged list can hold no more. With no cap, none is read.
+    """
+    if budget is None:
+        return ()
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     while thread_id and thread_id not in seen:  # to the chain's root; a cycle stops at the first repeat
         seen.add(thread_id)
-        for row in db.execute(
-            "SELECT content, metadata, created_at FROM messages WHERE thread_id=? AND role='user'", (thread_id,),
-        ):
-            metadata = metadata_dict(row)
-            if any(metadata.get(key) for key in NON_HUMAN_MARKERS) or not (row["content"] or "").strip():
-                continue
-            found.append((str(row["created_at"]), str(row["content"]).strip()))
+        spent = 0
+        for row in db.execute(_PERSON_ROWS, (thread_id,)):
+            message = (str(row["created_at"]), str(row["content"]).strip())
+            found.append(message)
+            spent += measure(message_line(*message))
+            if spent > budget:
+                break
         parent = db.execute("SELECT parent_thread_id FROM threads WHERE id=?", (thread_id,)).fetchone()
         thread_id = parent["parent_thread_id"] if parent else None
     return tuple(sorted(found, key=lambda message: message[0], reverse=True))
 
 
-def _context(item: Item) -> Context:
-    """Blocking. The task the item names (always in full) and the person's messages."""
+def _task(db, node_id: str | None) -> str | None:
+    """The task the item names, in full; an unknown node names none and the read still runs."""
+    if not node_id:
+        return None
+    from plans import public
+
+    try:
+        return task_text(public.intent_of(node_id, db=db))
+    except public.PlanError as exc:  # an unknown node, or an intent cycle: no task to read against
+        logger.info("fresh read: node {} names no task ({})", node_id, exc)
+        return None
+
+
+def _prepare(item: Item, cap: int | None, model: str) -> tuple[str, str | None]:
+    """Blocking. The reader's input and where the cap cut the person's messages.
+
+    Any failure to read the task or the messages raises, and the check holds the item:
+    a read against less than it should have is never passed off as a pass.
+    """
+    from core.token_estimation import measure_text
     from infra.database import get_db
+
+    def measure(text: str) -> int:
+        return measure_text(text, model=model).tokens
 
     db = get_db()
     try:
-        task = None
-        if item.node_id:
-            from plans import public
-
-            try:
-                task = task_text(public.intent_of(item.node_id, db=db))
-            except Exception:  # noqa: BLE001  # an unknown node names no task; the read still runs
-                task = None
-        return Context(task=task, messages=_person_messages(db, item.writer_thread_id),
-                       note_to_reader=item.note_to_reader, where=item.where)
+        context = Context(task=_task(db, item.node_id),
+                          messages=_person_messages(db, item.writer_thread_id, cap, measure),
+                          note_to_reader=item.note_to_reader, where=item.where)
     finally:
         db.close()
+    # A document that is itself the item (an open) is read once, as the item.
+    documents = tuple((doc.name, text) for doc in item.documents
+                      if (text := doc.data.decode("utf-8", errors="replace")) != item.shown)
+    return user_prompt(item.kind, item.shown, documents, context, cap, measure)
 
 
 def _resolve(candidate: Candidate, writer_thread_id: str | None):
@@ -198,7 +231,9 @@ def held_message(attempts: list[dict[str, Any]]) -> str:
 
 
 def _documents(item: Item) -> tuple[tuple[str, str, bytes], ...]:
-    return tuple((doc.artifact_id, sha256_bytes(doc.data), doc.data) for doc in item.documents)
+    """The registered documents a pass moves; a file with no registration is read but has no view."""
+    return tuple((doc.artifact_id, sha256_bytes(doc.data), doc.data) for doc in item.documents
+                 if doc.artifact_id is not None)
 
 
 async def check(item: Item) -> Verdict:
@@ -207,19 +242,17 @@ async def check(item: Item) -> Verdict:
     deadline = started + CHECK_BOUND_SECONDS
     found = await run_in_db(candidates, item.writer_thread_id)
     cap = install_cap(found)
-    context = await run_in_db(_context, item)
-    from core.token_estimation import measure_text
-
-    model = found[0].model if found else "unknown"
-    # A document that is itself the item (an open) is read once, as the item.
-    documents = tuple((doc.name, text) for doc in item.documents
-                      if (text := doc.data.decode("utf-8", errors="replace")) != item.shown)
-    prompt, cut_from = user_prompt(item.kind, item.shown, documents, context, cap,
-                                   lambda text: measure_text(text, model=model).tokens)
     attempts: list[dict[str, Any]] = []
     base = ReadRecord(kind=item.kind, item_ref=item.item_ref, sha256=sha256_text(item.shown), verdict=HELD,
                       writer_thread_id=item.writer_thread_id, node_id=item.node_id, input_cap=cap,
-                      messages_cut_from=cut_from, documents=_documents(item))
+                      documents=_documents(item))
+    try:
+        prompt, base.messages_cut_from = await run_in_db(_prepare, item, cap, found[0].model if found else "unknown")
+    except Exception as exc:  # noqa: BLE001  # no input to read against: held, recorded, never passed
+        logger.exception("fresh read: could not gather what {} is read against", item.kind)
+        found, prompt = [], ""
+        attempts.append({"model": "none",
+                         "reason": f"could not read the task or the person's messages ({type(exc).__name__})"})
     for candidate in found:
         if not candidate.writer_own and await seat_waiting(candidate):
             attempts.append({"model": candidate.model, "reason": "local seat has waiting requests"})
@@ -241,7 +274,7 @@ async def check(item: Item) -> Verdict:
             base.cost_usd, base.cost_source = telemetry.cost_usd, telemetry.cost_source
         read_id = await run_in_db(record, base)
         _emit(item, base.verdict, read_id, {"reader_model": candidate.model, "elapsed_ms": base.elapsed_ms,
-                                            "input_cap": cap, "messages_cut": cut_from is not None,
+                                            "input_cap": cap, "messages_cut": base.messages_cut_from is not None,
                                             "skipped": len(attempts)})
         if answer.passed:
             return Verdict(True, read_id)

@@ -75,6 +75,22 @@ async def test_a_live_edit_by_the_person_is_served_as_written_with_no_read(deleg
 
 
 @pytest.mark.asyncio
+async def test_a_run_of_the_persons_live_edits_is_one_record_holding_the_last_bytes(deleg_db, monkeypatch):
+    from core.fresh_read_store import sha256_text, view
+
+    artifact, path, reader, rechecks = await _handed_over(deleg_db, monkeypatch, "typing.md")
+    text = PASSED
+    for word in ("one", "two", "three"):
+        _live_publish(deleg_db, path, text, text + word + "\n")
+        text += word + "\n"
+
+    edits = [row for row in _reads(deleg_db) if row["verdict"] == "person_edit"]
+    assert len(edits) == 1 and edits[0]["sha256"] == sha256_text(text)
+    assert view(artifact["id"])["sha256"] == sha256_text(text)
+    assert deleg_db.execute("SELECT COUNT(*) FROM fresh_read_bytes").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
 async def test_a_live_edit_on_an_unchecked_agent_version_still_waits_on_a_read(deleg_db, monkeypatch):
     """Typing into an agent's newer, unread version keeps its words in the result, so it is not laundered."""
     artifact, path, reader, rechecks = await _handed_over(deleg_db, monkeypatch, "patched.md")
