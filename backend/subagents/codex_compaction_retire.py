@@ -9,6 +9,7 @@ from subagents.codex_runtime_support import async_method
 # A liveness backstop, not a latency target: the adoption waits for a required
 # checkpoint to be written. Stop releases it sooner; this only guarantees a
 # stuck wait ends in a visible, settled Turn.
+# No reading yet: checkpoint-write times for Codex are not recorded.
 ADOPTION_TIMEOUT_SECONDS = 600.0
 
 

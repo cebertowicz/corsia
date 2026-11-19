@@ -29,13 +29,17 @@ from infra.database import write_transaction
 SCRIPT_KIND = "script"
 MIN_CADENCE_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 60
+# No reading yet: run durations are not recorded (running_since is cleared, only
+# last_run_at kept); record each run's duration to set this and DEFAULT_TIMEOUT_SECONDS.
 MAX_TIMEOUT_SECONDS = 300
 MAX_PER_AGENT = 10
 MAX_PER_INSTANCE = 100
 MAX_SERIES = 20
+# No reading yet: needs the sizes of registered script trees.
 MAX_SCRIPT_BYTES = 1_000_000
 # The runs counter keeps counting; a script row is never exhausted.
 UNBOUNDED_RUNS = 2**31 - 1
+# No reading yet: needs the lengths of last_error values agents act on.
 MAX_ERROR_CHARS = 500
 
 #: Run outcomes written to ``last_status``, worst first.
