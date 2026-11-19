@@ -172,6 +172,12 @@ def test_a_required_review_steps_skip_refusal_offers_no_fail(db):
     refusal = _act(db, parent.id, "close_node", review, reason="Not needed")
     assert refusal == workflow_fields.REQUIRED_REVIEW_STEP_SKIP.format(step="review", route=AUTHOR_FAIL)
     assert "or fail it" not in refusal
+    # The person may fail a review step, so archiving it they are told so, not given an agent's routes.
+    from plans import archival
+
+    with pytest.raises(service.PlanError) as person:
+        archival.archive_node(review, actor_id="user:user-1", db=db)
+    assert str(person.value) == workflow_fields.REQUIRED_STEP_SKIP.format(step="review")
     service.transition_node(build, "active", db=db)
     assert _act(db, parent.id, "close_node", build, reason="Not needed") == workflow_fields.REQUIRED_STEP_SKIP.format(step="build")
 
@@ -195,6 +201,10 @@ def test_archiving_a_delegated_review_step_offers_no_fail(db):
         archival.archive_node(review, actor_id="parent", db=db)
     assert str(gone.value) == archival._REVIEW_DELEGATION_REFUSED_UNREACHABLE
     assert "fail" not in str(live.value) + str(gone.value)
+    # The person may fail it, so they keep the route that says so.
+    with pytest.raises(service.PlanError) as person:
+        archival.archive_node(review, actor_id="user:user-1", db=db)
+    assert str(person.value) == archival._DELEGATION_REFUSED_UNREACHABLE
 
 
 def test_a_reviewers_failed_step_wakes_the_parent_without_offering_fail(db):

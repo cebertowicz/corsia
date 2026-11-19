@@ -77,7 +77,7 @@ _DELEGATION_REFUSED_UNREACHABLE = (
     "thread is retired, so its result can never be harvested — fail or "
     "reject this node instead, then archive"
 )
-#: The same two refusals on a review step, which no agent fails.
+#: The same two refusals to an agent on a review step, which no agent fails.
 _REVIEW_DELEGATION_REFUSED = (
     "archive requires this review step's delegation to be settled first: harvest "
     "the reviewer's result, then accept or reject this node"
@@ -103,14 +103,16 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
         _require_no_children(connection, node_id)
+        from plans.boundary import is_user_audit_id
         from plans.workflow_fields import refuse_required_skip
 
-        refuse_required_skip(connection, node_id)
+        by_agent = not is_user_audit_id(actor_id)
+        refuse_required_skip(connection, node_id, by_agent=by_agent)
         # Order is load-bearing: when the child is still working, that is the
         # actionable message. The delegation refusal is reserved for the case
         # where the child is genuinely finished and only the verdict is missing.
         _require_settled_spawned_work(connection, node)
-        _require_settled_delegation(connection, node)
+        _require_settled_delegation(connection, node, by_agent=by_agent)
         # After every refusal, so a refused archive leaves the graph untouched.
         from plans import user_ask
 
@@ -293,7 +295,7 @@ def _child_thread_reachable(connection, thread_id: str) -> bool:
     )
 
 
-def _require_settled_delegation(connection, node) -> None:
+def _require_settled_delegation(connection, node, *, by_agent: bool = True) -> None:
     """Refuse to end a delegation the node's own state still owns.
 
     The message must not lead with harvest when the child is unreachable:
@@ -309,7 +311,8 @@ def _require_settled_delegation(connection, node) -> None:
     if spawned is None:
         return
     if delegation._is_live_attachment(node):
-        review = workflow_fields.reviewer_step(connection, node["id"])
+        # An agent can't fail a review step, so it is given the review routes; the person can.
+        review = by_agent and workflow_fields.reviewer_step(connection, node["id"])
         if _child_thread_reachable(connection, spawned):
             raise service.PlanError(_REVIEW_DELEGATION_REFUSED if review else _DELEGATION_REFUSED)
         raise service.PlanError(
