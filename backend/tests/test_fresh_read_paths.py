@@ -13,6 +13,7 @@ import pytest
 from core import fresh_read, fresh_read_view
 from core.fresh_read import Item
 from delegation_fixtures import deleg_db  # noqa: F401
+from infra.fresh_read_schema import PERSON_INDEX_SQL
 from test_fresh_read_gate import Reader, _reads, _registered
 
 pytestmark = pytest.mark.fresh_read
@@ -87,11 +88,15 @@ def test_the_persons_messages_stop_once_a_chat_passes_the_cap():
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE messages (thread_id, role, content, metadata, created_at)")
+    db.execute(PERSON_INDEX_SQL)
     db.execute("CREATE TABLE threads (id, parent_thread_id)")
     db.execute("INSERT INTO threads VALUES ('child', 'parent'), ('parent', NULL)")
     for thread_id in ("child", "parent"):
         db.executemany("INSERT INTO messages VALUES (?, 'user', ?, NULL, ?)",
                        [(thread_id, f"{thread_id} message {i}", f"2026-11-19T00:{i:02d}") for i in range(50)])
+        db.executemany("INSERT INTO messages VALUES (?, ?, 'not the person', ?, ?)",
+                       [(thread_id, role, metadata, f"2026-11-19T01:{i:02d}") for i in range(20)
+                        for role, metadata in (("assistant", None), ("user", '{"sender_kind": "agent"}'))])
     measured: list[str] = []
 
     def measure(line: str) -> int:
@@ -103,6 +108,9 @@ def test_the_persons_messages_stop_once_a_chat_passes_the_cap():
     assert len(measured) == 6  # three per chat: the third passes the cap of 25
     assert [text for _at, text in found][:2] == ["child message 49", "parent message 49"]
     assert fresh_read._person_messages(db, "child", None, measure) == ()
+    # Only the person's rows are examined: the walk seeks the partial index in its own order.
+    plan = " ".join(str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + fresh_read._PERSON_ROWS, ("child",)))
+    assert "USING INDEX idx_messages_person" in plan and "TEMP B-TREE" not in plan
 
 
 @pytest.mark.asyncio

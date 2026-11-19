@@ -28,8 +28,10 @@ from core.fresh_read import Document, Item, Verdict
 from core.fresh_read_store import note_recheck, sha256_bytes, view
 from infra.db_async import run_in_db
 
-NOTICE_WAITING = "An agent's newer version of this document is waiting for review. You're seeing the last reviewed version."
-NOTICE_FAILED = "An agent's newer version of this document didn't pass review. You're seeing the last reviewed version."
+NOTICE_WAITING = ("An agent's newer version of this document hasn't passed its automatic read yet. "
+                  "You're seeing the last version that passed.")
+NOTICE_FAILED = ("An agent's newer version of this document didn't pass its automatic read. "
+                 "You're seeing the last version that passed.")
 _running: set[tuple[str, str]] = set()
 
 
@@ -59,20 +61,20 @@ async def _recheck(artifact_id: str, path: Path, data: bytes, holder: str | None
         if not verdict.passed:
             await run_in_db(note_recheck, artifact_id, sha, "held" if verdict.held else "failed")
         if not verdict.passed and not verdict.held and holder:
-            await _tell_holder(holder, artifact_id, path, sha, verdict.message)
+            await _tell_holder(holder, artifact_id, path, sha, verdict.findings)
     except Exception:  # noqa: BLE001  # a failed recheck leaves the passed version shown; the next open retries
         logger.exception("fresh read: background read of {} failed", artifact_id)
     finally:
         _running.discard((artifact_id, sha))
 
 
-async def _tell_holder(holder: str, artifact_id: str, path: Path, sha: str, findings: str | None) -> None:
+async def _tell_holder(holder: str, artifact_id: str, path: Path, sha: str,
+                       findings: tuple[dict[str, Any], ...]) -> None:
     """Tell the holding agent, once per version, that its newer version is not what the person sees."""
     from events.delivery import deliver_to_thread
 
-    # The findings alone (``fresh_read.failed_message`` puts them between its first and last line; a quote
-    # may span lines); the door's "call again" advice does not apply to a background read.
-    lines = findings.split("\n", 1)[1].rsplit("\n", 1)[0] if findings and findings.count("\n") >= 2 else ""
+    # The findings alone: the door's "call again" advice does not apply to a background read.
+    lines = fresh_read.finding_lines(findings)
     summary = (f"Your newer version of {path.name} did not pass its fresh read, so the person still sees the "
                f"version that passed. Revise the file; its next open reads it again.\n{lines}").rstrip()
     try:

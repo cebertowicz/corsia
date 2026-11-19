@@ -215,7 +215,7 @@ Source: `backend/infra/fresh_read_schema.py`.
 | `cost_source` | TEXT | No | No | — | — |
 | `created_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_fresh_reads_item` (kind, item_ref, sha256, verdict), `sqlite_autoindex_fresh_reads_1` (id, unique).
+Indexes: `idx_fresh_reads_item` (kind, item_ref, sha256, verdict), `idx_fresh_reads_writer` (writer_thread_id), `sqlite_autoindex_fresh_reads_1` (id, unique).
 
 ### `held_replies`
 
@@ -301,7 +301,7 @@ Source: `backend/infra/message_schema.py`.
 | `next_attempt_at` | TEXT | No | No | — | — |
 | `seq` | INTEGER | No | No | — | — |
 
-Indexes: `idx_measurement_human_messages_time` (thread_id, created_at, id), `idx_messages_active_turn` (active_turn_id, input_order), `idx_messages_checkpoint_hold` (thread_id, target_model, target_execution_epoch), `idx_messages_column_turn_seq` (thread_id, active_turn_id, seq), `idx_messages_delivery_attempt` (delivery_attempt_id, input_order), `idx_messages_id_session` (id, thread_id, unique), `idx_messages_input_order` (thread_id, input_order, partial unique), `idx_messages_installed_boundaries` (thread_id, seq, id), `idx_messages_meta_turn_seq` (thread_id, expression, seq), `idx_messages_queued_inputs` (thread_id, delivery_state, input_order), `idx_messages_retention_stub` (thread_id, seq), `idx_messages_session` (thread_id, created_at), `idx_messages_session_seq` (thread_id, seq, unique), `idx_messages_tool_lineage` (thread_id, role, expression, expression), `idx_messages_turn_calls` (thread_id, role, expression), `sqlite_autoindex_messages_1` (id, unique).
+Indexes: `idx_measurement_human_messages_time` (thread_id, created_at, id), `idx_messages_active_turn` (active_turn_id, input_order), `idx_messages_checkpoint_hold` (thread_id, target_model, target_execution_epoch), `idx_messages_column_turn_seq` (thread_id, active_turn_id, seq), `idx_messages_delivery_attempt` (delivery_attempt_id, input_order), `idx_messages_id_session` (id, thread_id, unique), `idx_messages_input_order` (thread_id, input_order, partial unique), `idx_messages_installed_boundaries` (thread_id, seq, id), `idx_messages_meta_turn_seq` (thread_id, expression, seq), `idx_messages_person` (thread_id, created_at), `idx_messages_queued_inputs` (thread_id, delivery_state, input_order), `idx_messages_retention_stub` (thread_id, seq), `idx_messages_session` (thread_id, created_at), `idx_messages_session_seq` (thread_id, seq, unique), `idx_messages_tool_lineage` (thread_id, role, expression, expression), `idx_messages_turn_calls` (thread_id, role, expression), `sqlite_autoindex_messages_1` (id, unique).
 
 ### `presence_focus_rollup`
 

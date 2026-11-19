@@ -19,14 +19,14 @@ from typing import Any
 
 from loguru import logger
 
-from core.fresh_read_candidates import Candidate, candidates, install_cap, seat_waiting
+from core.fresh_read_candidates import Candidate, candidates, install_cap, request_measure, seat_waiting
 from core.fresh_read_prompt import (
     OUTPUT_SCHEMA, SYSTEM_PROMPT, Context, ReaderAnswer, message_line, task_text, user_prompt, validator,
 )
-from core.message_history import NON_HUMAN_MARKERS
 from core.fresh_read_store import FAILED, HELD, PASSED, ReadRecord, record, sha256_bytes, sha256_text
 from host_access.review_limits import HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
 from infra.db_async import run_in_db
+from infra.fresh_read_schema import PERSON_ROW
 
 #: The longest one check holds a door call, across every candidate; each candidate gets what is
 #: left. PLACEHOLDER. Basis: the only precedent in the code for holding an agent's call on an
@@ -76,15 +76,15 @@ class Verdict:
     message: str | None = None
     #: No reader could run, as opposed to a reader failing the item.
     held: bool = False
+    #: A failed read's findings, each with its quote, check number and why.
+    findings: tuple[dict[str, Any], ...] = ()
 
 
-#: The person's own messages: a user row with words and none of the markers of a non-human input
-#: (as ``infra.reply_not_visible_wake`` reads them), newest first through ``idx_messages_session``.
+#: The person's own messages in one chat, newest first, through ``idx_messages_person``: the
+#: walk examines only rows it returns.
 _PERSON_ROWS = (
-    "SELECT content, created_at FROM messages WHERE thread_id=? AND role='user' AND TRIM(COALESCE(content,''))<>'' "
-    "AND CASE WHEN json_valid(metadata) THEN "
-    + " AND ".join(f"json_extract(metadata,'$.{key}') IS NULL" for key in NON_HUMAN_MARKERS)
-    + " ELSE 1 END ORDER BY created_at DESC"
+    f"SELECT content, created_at FROM messages INDEXED BY idx_messages_person "
+    f"WHERE thread_id=? AND {PERSON_ROW} ORDER BY created_at DESC"
 )
 
 
@@ -125,18 +125,15 @@ def _task(db, node_id: str | None) -> str | None:
         return None
 
 
-def _prepare(item: Item, cap: int | None, model: str) -> tuple[str, str | None]:
+def _prepare(item: Item, cap: int | None, found: list[Candidate]) -> tuple[str, str | None]:
     """Blocking. The reader's input and where the cap cut the person's messages.
 
     Any failure to read the task or the messages raises, and the check holds the item:
     a read against less than it should have is never passed off as a pass.
     """
-    from core.token_estimation import measure_text
     from infra.database import get_db
 
-    def measure(text: str) -> int:
-        return measure_text(text, model=model).tokens
-
+    measure = request_measure(found)
     db = get_db()
     try:
         context = Context(task=_task(db, item.node_id),
@@ -216,11 +213,14 @@ def _emit(item: Item, verdict: str, read_id: str, extra: dict[str, Any]) -> None
                        properties={"kind": item.kind, "fresh_read_id": read_id, "door_live": True, **extra})
 
 
+def finding_lines(findings: tuple[dict[str, Any], ...]) -> str:
+    return "\n".join(f'- "{finding["quote"]}" (check {finding["check"]}: {_CHECK_NAMES[finding["check"]]}): '
+                     f'{finding["why"]}' for finding in findings)
+
+
 def failed_message(findings: tuple[dict[str, Any], ...]) -> str:
-    lines = [f'- "{finding["quote"]}" (check {finding["check"]}: {_CHECK_NAMES[finding["check"]]}): {finding["why"]}'
-             for finding in findings]
     return ("Not delivered: a fresh reader found what the person would have to correct. Nothing was sent.\n"
-            + "\n".join(lines)
+            + finding_lines(findings)
             + "\nRevise and call again; new text gets a new read. To answer a finding, pass note_to_reader.")
 
 
@@ -247,7 +247,7 @@ async def check(item: Item) -> Verdict:
                       writer_thread_id=item.writer_thread_id, node_id=item.node_id, input_cap=cap,
                       documents=_documents(item))
     try:
-        prompt, base.messages_cut_from = await run_in_db(_prepare, item, cap, found[0].model if found else "unknown")
+        prompt, base.messages_cut_from = await run_in_db(_prepare, item, cap, found)
     except Exception as exc:  # noqa: BLE001  # no input to read against: held, recorded, never passed
         logger.exception("fresh read: could not gather what {} is read against", item.kind)
         found, prompt = [], ""
@@ -278,7 +278,7 @@ async def check(item: Item) -> Verdict:
                                             "skipped": len(attempts)})
         if answer.passed:
             return Verdict(True, read_id)
-        return Verdict(False, None, failed_message(answer.findings))
+        return Verdict(False, None, failed_message(answer.findings), findings=tuple(answer.findings))
     base.attempts, base.elapsed_ms = attempts, int((time.monotonic() - started) * 1000)
     read_id = await run_in_db(record, base)
     _emit(item, HELD, read_id, {"elapsed_ms": base.elapsed_ms, "attempts": attempts})

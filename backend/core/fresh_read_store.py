@@ -121,6 +121,28 @@ def move_view(db, artifact_id: str, sha: str, body: bytes, read_id: str,
         )
 
 
+def forget_thread(db, thread_id: str) -> None:
+    """A purged or deleted thread's reads go with it; a view keeps showing the version it names."""
+    db.execute("DELETE FROM fresh_reads WHERE writer_thread_id=?", (thread_id,))
+
+
+def forget_document(db, artifact_id: str) -> None:
+    """A retired document's view, the bytes no other view names, and the person's edits to it.
+
+    If it comes back, it has no view: it is served as the file is, like any document no
+    agent has handed over, and the next hand-over reads it.
+    """
+    old = db.execute("SELECT sha256 FROM fresh_read_views WHERE artifact_id=?", (artifact_id,)).fetchone()
+    db.execute("DELETE FROM fresh_read_views WHERE artifact_id=?", (artifact_id,))
+    if old is not None:
+        db.execute(
+            "DELETE FROM fresh_read_bytes WHERE sha256=? AND NOT EXISTS "
+            "(SELECT 1 FROM fresh_read_views WHERE sha256=?)", (old["sha256"], old["sha256"]),
+        )
+    db.execute("DELETE FROM fresh_reads WHERE kind='document' AND item_ref=? AND verdict=?",
+               (artifact_id, PERSON_EDIT))
+
+
 def note_recheck(artifact_id: str, sha: str, verdict: str) -> None:
     """Record that the background read of a newer version did not pass, so the passed copy opens editable."""
     with write_transaction(None, scope="fresh_read_recheck") as db:

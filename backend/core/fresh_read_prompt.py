@@ -109,13 +109,38 @@ class Context:
     where: str | None = None
 
 
+def request_text(user: str) -> str:
+    """The request's messages as sent, the text the input cap is measured on.
+
+    Its JSON role wrappers and escapes run longer than a chat template's own role
+    markers, so measuring this text bounds what the reader's model is given.
+    """
+    return json.dumps([{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}],
+                      ensure_ascii=False)
+
+
+def _as_sent(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)[1:-1]
+
+
+_NO_CAP = "none: no input cap is known"
+_NONE_FIT = "none: none fit"
+
+
+def _assemble(fixed: str, lines: list[str], cut_from: str | None) -> str:
+    title = "## The person's own messages, newest first"
+    if cut_from is not None:
+        title += f" (cut: {cut_from})" if cut_from.startswith("none") else f" (cut: you have them only from {cut_from} on)"
+    return f"{fixed}\n\n{title}\n" + ("\n".join(lines) if lines else "(none)")
+
+
 def user_prompt(kind: str, shown: str, documents: tuple[tuple[str, str], ...], context: Context,
                 cap: int | None, measure) -> tuple[str, str | None]:
     """The reader's input, and the date its person messages start from when the cap cut them.
 
-    The item, its documents and the task always go in full; the person's messages fill what
-    the cap leaves, newest first. With no cap known, no message goes in and the reader is
-    told so, since nothing bounds them.
+    ``cap`` bounds the whole request (:func:`request_text`) under ``measure``. The item, its
+    documents and the task always go in full; the person's messages fill what is left,
+    newest first. With no cap known, no message goes in and the reader is told so.
     """
     head = [f"## The item ({kind}), exactly as the person will see it\n{shown}"]
     if context.where:
@@ -127,24 +152,28 @@ def user_prompt(kind: str, shown: str, documents: tuple[tuple[str, str], ...], c
     if context.note_to_reader:
         head.append(f"## The writer's note to you (the person never sees it)\n{context.note_to_reader}")
     fixed = "\n\n".join(head)
-    room = None if cap is None else cap - measure(fixed)
-    lines: list[str] = []
-    cut_from = None
-    oldest = None
+    if cap is None:
+        return _assemble(fixed, [], _NO_CAP), _NO_CAP
+    # The title's longest cut note is held back before any message is placed.
+    longest = max((len(created_at) for created_at, _text in context.messages), default=0)
+    room = cap - max(measure(request_text(_assemble(fixed, [], "0" * longest))),
+                     measure(request_text(_assemble(fixed, [], _NONE_FIT))))
+    placed: list[tuple[str, str]] = []
     for created_at, text in context.messages:
         line = message_line(created_at, text)
-        cost = None if room is None else measure(line)
-        if room is None or cost is None or cost > room:
-            cut_from = oldest or ("none: no input cap is known" if room is None else "none: none fit")
+        cost = measure(_as_sent(line + "\n"))
+        if cost > room:
             break
         room -= cost
-        lines.append(line)
-        oldest = created_at
-    title = "## The person's own messages, newest first"
-    if cut_from is not None:
-        title += f" (cut: {cut_from})" if cut_from.startswith("none") else f" (cut: you have them only from {cut_from} on)"
-    messages = "\n".join(lines) if lines else "(none)"
-    return f"{fixed}\n\n{title}\n{messages}", cut_from
+        placed.append((created_at, line))
+    while True:  # the whole request is measured once more; a count that is not additive drops the oldest
+        cut_from = None
+        if len(placed) < len(context.messages):
+            cut_from = placed[-1][0] if placed else _NONE_FIT
+        prompt = _assemble(fixed, [line for _at, line in placed], cut_from)
+        if not placed or measure(request_text(prompt)) <= cap:
+            return prompt, cut_from
+        placed.pop()
 
 
 def message_line(created_at: str, text: str) -> str:

@@ -280,6 +280,7 @@ def _apply_archive(db, sid: str, now: datetime, reason: str) -> None:
 
 def _apply_purge(db, sid: str, now: datetime) -> None:
     """Commit permanent unavailability and coupled SQL before physical cleanup."""
+    from core.fresh_read_store import forget_thread
     from registry import models as registry_models
 
     _rehome_on_end(db, sid, "purged")
@@ -289,6 +290,7 @@ def _apply_purge(db, sid: str, now: datetime) -> None:
     delete_thread_checkpoints(db, sid)
     delete_thread_continuity(db, sid)
     delete_thread_chat_comment_index_rows(db, sid)
+    forget_thread(db, sid)
     # One rule: held input dies exactly when the transcript dies, never
     # otherwise. Held input rides the reactor's tables, so its one teardown
     # door drops all of them; nothing survives a purge a reversible archive keeps.

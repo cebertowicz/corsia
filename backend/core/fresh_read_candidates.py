@@ -6,17 +6,17 @@ model with no list price is not counted as cheaper, except the local seat. Local
 policy applies: a model the writer's scope may not send to is not resolved as a reader.
 
 Input cap: one number per install, the smallest over the candidates of
-``window - instructions - output allowance``, and no more than
-``long-context threshold - instructions`` where the price file has one. The window and
-output limit are the catalog's, the threshold the price file's; a call refused for
-length counts as that candidate unavailable, so a wrong stored value costs a candidate,
-never a delivery.
+``window - output allowance``, and no more than the long-context threshold where the
+price file has one. It bounds the whole request as sent (the reader's instructions
+included), measured by :func:`request_measure`. The window and output limit are the
+catalog's, the threshold the price file's; a call refused for length counts as that
+candidate unavailable, so a wrong stored value costs a candidate, never a delivery.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
 
 from infra.database import get_db
 
@@ -102,23 +102,34 @@ def candidates(writer_thread_id: str | None) -> list[Candidate]:
     return ordered
 
 
-@lru_cache(maxsize=64)
-def instruction_tokens(model: str) -> int:
-    """The reader's own instructions, measured from the prompt text once per model."""
-    from core.fresh_read_prompt import SYSTEM_PROMPT
+def _utf8_bytes(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def request_measure(found: list[Candidate]) -> Callable[[str], int]:
+    """How the cap counts text: never fewer than any candidate's own tokens for it.
+
+    A candidate whose tokenizer is bundled counts exactly; for any other (a local seat,
+    a Claude model) the count is the text's UTF-8 bytes, since a byte-level BPE
+    tokenizer never makes more tokens than bytes. The largest count among the
+    candidates is used, so one measure holds for whichever reader answers.
+    """
     from core.token_estimation import measure_text
 
-    return measure_text(SYSTEM_PROMPT, model=model).tokens
+    models = sorted({candidate.model for candidate in found})
+    if not models or any(not measure_text("", model=model).tokenizer_identity.startswith("tiktoken:")
+                         for model in models):
+        return _utf8_bytes
+    return lambda text: max(measure_text(text, model=model).tokens for model in models)
 
 
 def candidate_cap(candidate: Candidate) -> int | None:
-    """This candidate's room for the reader's input, or None when the catalog gives no window or threshold."""
-    room = instruction_tokens(candidate.model)
+    """This candidate's room for the whole request, or None when the catalog gives no window or threshold."""
     caps = []
     if candidate.window is not None:
-        caps.append(candidate.window - room - candidate.output_allowance)
+        caps.append(candidate.window - candidate.output_allowance)
     if candidate.long_context_bound is not None:
-        caps.append(candidate.long_context_bound - room)
+        caps.append(candidate.long_context_bound)
     return max(min(caps), 0) if caps else None
 
 

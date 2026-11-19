@@ -288,6 +288,9 @@ def retire(
             (passive_state, now, artifact_id),
         )
         plans_public.close_retired_comment_task(_db, artifact_id, cause)
+        from core.fresh_read_store import forget_document
+
+        forget_document(_db, artifact_id)
 
 
 def tombstone_promoted_path(left: dict, successor: str, *, db) -> bool:

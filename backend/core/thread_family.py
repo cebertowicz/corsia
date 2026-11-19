@@ -60,6 +60,7 @@ def _delete_one_thread_rows(
     entry index derived from it, the continuity store, and the chat-comment
     answer index and read stamps, through the same helpers retention uses (#2291).
     """
+    from core.fresh_read_store import forget_thread
     from infra.chat_comment_answers import delete_thread_chat_comment_index_rows
     from infra.checkpoint_entry_index import delete_thread_checkpoints
     from infra.continuity_store import delete_thread_continuity
@@ -89,6 +90,7 @@ def _delete_one_thread_rows(
     )
     db.execute(f"DELETE FROM event_rules WHERE id IN ({thread_rules})", (thread_id, thread_id))
     db.execute("DELETE FROM self_caused_events WHERE thread_id = ?", (thread_id,))
+    forget_thread(db, thread_id)
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
     delete_thread_chat_comment_index_rows(db, thread_id)
