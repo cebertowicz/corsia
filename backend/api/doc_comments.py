@@ -16,6 +16,7 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
@@ -54,7 +55,10 @@ router = APIRouter(prefix="/api", tags=["doc-comments"])
 
 
 @router.get("/artifacts/{artifact_id}/comments")
-async def list_comments(artifact_id: str, token: str, timing: str | None = Header(None, alias=COMMENT_TIMING_HEADER)):
+async def list_comments(
+    artifact_id: str, token: str,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
+):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
@@ -81,7 +85,7 @@ async def list_comments(artifact_id: str, token: str, timing: str | None = Heade
 @router.post("/artifacts/{artifact_id}/comments")
 async def create_comment(
     artifact_id: str, token: str, body: CommentCreate,
-    timing: str | None = Header(None, alias=COMMENT_TIMING_HEADER),
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
 ):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)

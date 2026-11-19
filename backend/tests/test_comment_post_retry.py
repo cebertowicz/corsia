@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 
 from api import doc_comments
+from api.doc_comment_models import CommentCreate
 from api.comment_post_timing import COMMENT_TIMING_HEADER, MAX_HEADER_BYTES, parse_comment_timing
 from auth_fixtures import OWNER_TOKEN
 from doceditor.live_document import IdentityInUse
@@ -73,6 +74,20 @@ async def test_get_and_post_log_a_good_header_and_ignore_a_bad_one(ownership_sco
         f"comment_post_timing method=POST artifact={entry.artifact_id} n=4 cap=9",
     ]
     assert all("Timing evidence" not in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_handlers_called_directly_without_the_timing_header_still_work(ownership_scope, tmp_path, monkeypatch):
+    """A direct call passes no header: the handlers must not see FastAPI's marker in its place."""
+    _, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
+    app_loop.capture(asyncio.get_running_loop())
+    reserve(ownership_scope, entry, "direct")
+    created = await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, CommentCreate(
+        delivery_policy="immediate", body="Direct call", anchor_text="b", from_off=2, to_off=3,
+        live_capture=True, client_id="direct"))
+    assert created["comment"]["id"] == "direct"
+    listed = await doc_comments.list_comments(entry.artifact_id, OWNER_TOKEN)
+    assert "direct" in [c["id"] for c in listed["comments"]]
 
 
 @pytest.mark.asyncio
