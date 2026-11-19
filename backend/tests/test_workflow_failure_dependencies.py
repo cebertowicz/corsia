@@ -102,3 +102,46 @@ async def test_nested_failure_propagates_without_closing_inner_independent_work(
     (record,) = _ended(run, outer)
     assert record["outcome"] == "failed"
     assert {s["step"]: s["state"] for s in record["steps"]} == {"x": "failed", "y": "not_run", "z": "done"}
+
+
+@pytest.mark.parametrize("person_close", [False, True])
+async def test_outer_work_on_a_failed_inner_step_closes_with_it(isolated_db, tmp_path, monkeypatch, person_close):
+    workflows = {
+        "outer": ("# Outer\n", (
+            "    - {id: x, workflow: inner, required: true, check: X, difficulty: {default: routine}}\n"
+            "    - {id: z, required: true, check: Z, difficulty: {default: routine}}\n"
+        )),
+        "inner": ("# Inner\n", (
+            "    - {id: a, required: true, check: A, difficulty: {default: routine}}\n"
+            "    - {id: c, required: true, check: C, difficulty: {default: routine}}\n"
+        )),
+    }
+    run = Run(tmp_path, monkeypatch, workflows)
+    reply = await run.start("outer")
+    outer = reply["node"]["id"]
+    x, z = (step["id"] for step in reply["steps"])
+    a, c = (step["id"] for step in reply["steps"][0]["steps"])
+    added = await run.update("add", {"parent_id": outer, "title": "d", "acceptance_criteria": "Done",
+                                     "size": "XS", "intent": "Complete work"})
+    assert not isinstance(added, str), added
+    d = added["node"]["id"]
+    edge = await run.update("add_dependency", _args(run, d, depends_on_node_id=a))
+    assert not isinstance(edge, str), edge
+    if person_close:
+        from infra.database import get_db
+        from plans import user_settle
+
+        db = get_db()
+        try:
+            user_settle.settle("close_node", _args(run, a), "user", {"db": db, "actor_id": "user", "provenance": "user"})
+            db.commit()
+        finally:
+            db.close()
+    else:
+        result = await run.update("fail", _args(run, a))
+        assert not isinstance(result, str), result
+    assert [_state(run, n) for n in (c, d, z)] == ["pending", "closed", "pending"]
+    await _finish(run, c)
+    await _finish(run, z)
+    (record,) = _ended(run, outer)
+    assert record["outcome"] == "failed"

@@ -523,9 +523,9 @@ async def test_failure_closes_dependents_anywhere_under_run(isolated_db, tmp_pat
         original = run_end._affected_ids
         seen = []
 
-        def capture(db, node, include_subwork):
+        def capture(db, node, include_subwork, *failed_below):
             seen.append(db.execute("SELECT COUNT(*) FROM plan_node_dependencies WHERE depends_on_node_id=?", (a,)).fetchone()[0])
-            return original(db, node, include_subwork)
+            return original(db, node, include_subwork, *failed_below)
 
         monkeypatch.setattr(run_end, "_affected_ids", capture)
         db = get_db()
