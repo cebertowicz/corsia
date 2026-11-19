@@ -4,9 +4,11 @@ import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes';
-import { apiFetch, type ApiInit } from './request';
+import { apiFetch } from './request';
+import { COMMENT_POST_TIMEOUT_MS, fetchWithTimeout } from './fetchTimeout';
 
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
+export { COMMENT_POST_TIMEOUT_MS, fetchWithTimeout, PostTimeoutError } from './fetchTimeout';
 export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
 
 /** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
@@ -27,28 +29,6 @@ export async function ok(res: Response) {
 		throw new RequestRefused(`${res.status} ${wellFormed ? detail : detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
-}
-
-export class PostTimeoutError extends Error {
-	constructor(ms: number) {
-		super(`request timed out after ${ms}ms (may have committed server-side)`);
-		this.name = 'PostTimeoutError';
-	}
-}
-
-export const COMMENT_POST_TIMEOUT_MS = 12_000;
-
-export async function fetchWithTimeout(input: string, init: ApiInit, ms: number): Promise<Response> {
-	const ctrl = new AbortController();
-	const timer = setTimeout(() => ctrl.abort(), ms);
-	try {
-		return await apiFetch(input, { ...init, signal: ctrl.signal });
-	} catch (e) {
-		if (e instanceof DOMException && e.name === 'AbortError') throw new PostTimeoutError(ms);
-		throw e;
-	} finally {
-		clearTimeout(timer);
-	}
 }
 
 export interface TreeNode {

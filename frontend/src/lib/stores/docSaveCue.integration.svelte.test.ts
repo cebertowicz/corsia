@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
 vi.mock('$lib/api/docs', () => ({ writeContent: mocks.write }));
 vi.mock('./docComments', () => ({ flushPositions: vi.fn() }));
 vi.mock('./toast', () => ({ toasts: { show: mocks.toast } }));
+// The save hashes its base before writing. The real hash is a browser task fake timers do not drive, so it
+// would race the timeline these tests step through; the digest value is not what they assert.
+vi.mock('./documentWire', async (original) => ({ ...(await original<typeof import('./documentWire')>()), textSha256: async () => 'digest' }));
 const target = { instanceId: 'cue-a', path: '/cue.md', name: 'cue.md', artifactId: null, projectId: null, threadId: null };
 const other = { ...target, instanceId: 'cue-b' };
 let dispose: () => void;
