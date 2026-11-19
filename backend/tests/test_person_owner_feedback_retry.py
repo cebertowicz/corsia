@@ -9,7 +9,7 @@ from registry.identity_metadata import merge_identity_metadata
 
 def test_migrated_comment_collision_delivers_once_and_reverse_preserves_it(isolated_db, monkeypatch):
     from doceditor import feedback_state
-    from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202, reverse_202_to_201
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203, reverse_203_to_202
 
     db = get_db()
     try:
@@ -29,12 +29,12 @@ def test_migrated_comment_collision_delivers_once_and_reverse_preserves_it(isola
         add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER, delivery_policy='document-held')
         before = feedback_state.open_counts_for_document(db, artifact)
         assert before['document_held_count'] == 2
-        migrate_201_to_202(db)
+        migrate_202_to_203(db)
         assert feedback_state.open_counts_for_document(db, artifact) == before
         assert db.execute('SELECT 1 FROM doc_feedback_batches WHERE id=?', (source,)).fetchone() is None
         db.commit()
         feedback_batches.close_due('9999-01-01T00:00:00+00:00', db=db)
-        reverse_202_to_201(db)
+        reverse_203_to_202(db)
         assert tuple(db.execute("SELECT state,recipient_id,delivery_outcome FROM doc_feedback_batches WHERE id='collision'").fetchone()) == ('delivered', 'ui', 'ui')
         assert db.execute('SELECT COUNT(*) FROM doc_feedback_batches').fetchone()[0] == 1
     finally:
@@ -43,7 +43,7 @@ def test_migrated_comment_collision_delivers_once_and_reverse_preserves_it(isola
 
 def test_migrated_edit_collision_coalesces_one_edit_and_delivers_on_deadline(isolated_db, monkeypatch):
     from doceditor import feedback_state
-    from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
 
     db = get_db()
     try:
@@ -63,7 +63,7 @@ def test_migrated_edit_collision_coalesces_one_edit_and_delivers_on_deadline(iso
         db.commit()
         before = feedback_state.open_counts_for_document(db, artifact)
         timing = tuple(db.execute('SELECT opened_at,last_item_at,closes_at FROM doc_feedback_batches WHERE id=?', (source,)).fetchone())
-        migrate_201_to_202(db)
+        migrate_202_to_203(db)
         assert feedback_state.open_counts_for_document(db, artifact)['document_held_count'] == before['document_held_count'] - 1
         assert tuple(db.execute("SELECT opened_at,last_item_at,closes_at FROM doc_feedback_batches WHERE id='collision'").fetchone()) == timing
         assert db.execute('SELECT 1 FROM doc_feedback_batches WHERE id=?', (source,)).fetchone() is None
@@ -111,8 +111,8 @@ def test_legacy_open_batch_delivers_to_person(isolated_db, monkeypatch):
         monkeypatch.setattr(feedback_comments, 'comment_recipients', lambda *_a, **_kw: ('project:example',))
         _, feedback = add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER)
         batch = feedback['batch_ids'][0]
-        from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202
-        migrate_201_to_202(db)
+        from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
+        migrate_202_to_203(db)
         db.commit()
         feedback_batches.close_batch(db, batch, 'send')
         assert db.execute('SELECT state,delivery_outcome FROM doc_feedback_batches WHERE id=?', (batch,)).fetchone()[:] == ('delivered', 'ui')
@@ -146,8 +146,8 @@ def test_old_project_batches_retry_without_duplicate_supervisor_delivery(isolate
             old_batches.append(sentinel)
         monkeypatch.setattr(feedback_comments, "comment_recipients", actual)
         before = len(feedback_nodes(db, "supervisor"))
-        from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202
-        migrate_201_to_202(db)
+        from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
+        migrate_202_to_203(db)
         db.commit()
         for batch in old_batches:
             assert feedback_batches.retry_batch(db, batch)[0]
@@ -160,7 +160,7 @@ def test_old_project_batches_retry_without_duplicate_supervisor_delivery(isolate
 
 
 def test_migrated_undelivered_batch_retries_to_conductor_once(isolated_db, monkeypatch):
-    from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202, reverse_202_to_201
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203, reverse_203_to_202
     db = get_db()
     try:
         seed_thread(db, 'conductor')
@@ -170,10 +170,10 @@ def test_migrated_undelivered_batch_retries_to_conductor_once(isolated_db, monke
         _, feedback = add_comment(db, artifact, author_kind='user', author_id=None, author=OWNER_USER)
         batch = feedback['batch_ids'][0]
         db.execute("UPDATE doc_feedback_batches SET state='undelivered',attempts=2,undelivered_reason='owner_unavailable' WHERE id=?", (batch,))
-        migrate_201_to_202(db)
+        migrate_202_to_203(db)
         db.commit()
         assert feedback_batches.retry_batch(db, batch)[0]
-        reverse_202_to_201(db)
+        reverse_203_to_202(db)
         assert tuple(db.execute('SELECT state,recipient_id,attempts,delivery_outcome,undelivered_reason FROM doc_feedback_batches WHERE id=?', (batch,)).fetchone()) == ('delivered', 'conductor', 3, 'node', None)
         assert not feedback_batches.retry_batch(db, batch)[0]
         assert len(feedback_nodes(db, 'conductor')) == 1

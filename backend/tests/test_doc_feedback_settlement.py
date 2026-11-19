@@ -130,7 +130,7 @@ def test_a_batch_that_carried_an_edit_is_never_settled_by_its_comments(isolated_
 
 
 def test_repaired_undelivered_fold_retry_keeps_edit_from_settling(isolated_db):
-    from infra.migration_201_to_202_feedback_recipients import migrate_201_to_202
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
 
     db = get_db()
     try:
@@ -147,7 +147,7 @@ def test_repaired_undelivered_fold_retry_keeps_edit_from_settling(isolated_db):
         db.execute("INSERT INTO comment_identity_moves VALUES ('doc_feedback_batch_folds','source','{}',?,'1')", (batch,))
         db.commit()
 
-        migrate_201_to_202(db)
+        migrate_202_to_203(db)
         assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
         db.commit()
         assert feedback_batches.retry_batch(db, batch)[0]

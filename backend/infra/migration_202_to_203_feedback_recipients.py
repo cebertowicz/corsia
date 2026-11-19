@@ -35,7 +35,7 @@ def _repair_fold_counts(db):
     return len(targets)
 
 
-def migrate_201_to_202(db):
+def migrate_202_to_203(db):
     started = time.monotonic()
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
@@ -74,5 +74,5 @@ def migrate_201_to_202(db):
              len(rows), len(rows) - merged, merged, repaired, int((time.monotonic() - started) * 1000))
 
 
-def reverse_202_to_201(db):
+def reverse_203_to_202(db):
     """Recipient and count repairs remain valid on downgrade; never restore legacy recipients."""
