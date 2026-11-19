@@ -50,6 +50,18 @@ def _activity_daily(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...
     return days, created
 
 
+def _decisions_raised(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...]) -> list[dict]:
+    return [dict(row) for row in db.execute(
+        f"SELECT CASE WHEN t.spawned_by IS NULL THEN 'root' ELSE 'delegated' END AS origin, "
+        "CASE WHEN e.actor_id IS NULL THEN 'server' ELSE 'agent' END AS raised_by, "
+        f"{_ARCHIVED} AS archived, count(DISTINCT n.id) AS decisions, count(*) AS raises "
+        + _PLAN_SCOPE + "CROSS JOIN plan_node_events e INDEXED BY idx_plan_node_events_node "
+        "ON e.node_id=n.id WHERE t.user_id=? AND e.event='decision_raised' AND " + _EVENT_WINDOW +
+        " GROUP BY origin,raised_by,archived ORDER BY origin,raised_by,archived",
+        (user_id, *bounds),
+    )]
+
+
 def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) -> list[dict]:
     """Read historic event counts and a separately timed current snapshot."""
     now = datetime.now(timezone.utc)
@@ -124,6 +136,7 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
         "plan_update_calls_per_active_agent_day": update_calls / active_days if active_days else None,
         "plan_read_calls": None,
         "plan_read_calls_reason": "no_structured_source",
+        "decisions_raised": _decisions_raised(db, user_id, bounds),
         "definitions": _PLAN_ACTIVITY_DEFINITIONS,
     }]
 
@@ -143,6 +156,13 @@ _PLAN_ACTIVITY_DEFINITIONS = {
                          "agent's own call that reuses one of those key prefixes is also "
                          "excluded, so this can undercount, never overcount.",
     "plan_read_calls": "Unavailable: no structured source records plan reads.",
+    "decisions_raised": "Decisions put in front of the person in the window, by the plan owner's "
+                        "thread: 'root' was not spawned by another thread (a chat or standing "
+                        "agent), 'delegated' was. raised_by 'server' is a raise CORSIA made "
+                        "itself, recorded with no actor (today only the gate hand-off "
+                        "offer), 'agent' a raise an agent made. decisions "
+                        "counts distinct decisions; raises counts every raise, so a decision "
+                        "edited back to draft and raised again counts twice there.",
     "conductor_adds": "Outcome is the node's current state; 'archived' is an unfinished "
                       "add that was later archived. kind_basis 'recorded' was stored at "
                       "creation; 'current_designation' uses today's conductor assignment.",
