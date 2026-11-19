@@ -204,7 +204,7 @@ describe('a comment refused because the document no longer takes comments', () =
 
 describe('a post that lands or fails after its composer closed and another opened', () => {
 	// Press Comment, Escape, select again and type more, then the first post ends.
-	const begin = async (outcome: 'lands' | 'fails') => {
+	const begin = async (outcome: 'lands' | 'fails', edit = true) => {
 		current = setup(false);
 		// The prose path posts under the draft's own id (the live path's capture is mocked to one fixed id).
 		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
@@ -220,7 +220,7 @@ describe('a post that lands or fails after its composer closed and another opene
 		current.escape();
 		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
 		current.controller.start(); prose(); flushSync();
-		current.controller.setBody('Too terse: say who reads it'); flushSync();
+		if (edit) { current.controller.setBody('Too terse: say who reads it'); flushSync(); }
 		end();
 		return first;
 	};
@@ -237,6 +237,60 @@ describe('a post that lands or fails after its composer closed and another opene
 		expect(addComment).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(addComment).mock.calls[1][7]).not.toBe(firstId);
 		expect(vi.mocked(addComment).mock.calls[1][11]).toBe(false);
+	});
+
+	it('lands unedited: the reopened composer is that draft and closes on the stored comment, so nothing is stored twice', async () => {
+		const first = await begin('lands', false);
+		expect(addComment).toHaveBeenCalledTimes(1);
+		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
+		// The id goes to the viewer, which closes the open composer on the stored comment, as it would for the original.
+		expect(first).toBe('posted');
+		current!.escape(); commentDraft.set(null); flushSync();
+		expect(current!.controller.hasText).toBe(false);
+	});
+
+	it('lands after its viewer closed: the composer reopened in a new viewer posts unedited under the same id, so the server answers with the stored comment', async () => {
+		current = setup(false);
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; return 'posted'; });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.stop();
+		current = setup(false);
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		expect(current.controller.draft?.body).toBe('Too terse');
+		end(); await first;
+		expect(await current.controller.submit('Too terse')).toBe('posted');
+		const [earlier, again] = vi.mocked(addComment).mock.calls;
+		expect(again[7]).toBe(earlier[7]);
+		expect(again[11]).toBe(true);
+	});
+
+	it('lands while its text and tags were edited: the kept edit keeps both, whatever the composer that pressed clears', async () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		current.controller.setBody('Ask'); flushSync();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; return 'posted'; });
+		const first = current.controller.submit('Ask');
+		const tags = current.controller.draft!.mentionSelection!;
+		tags.update('Ask @Ada'); tags.select('agent-ada', 4, '@Ada');
+		current.controller.setBody('Ask @Ada'); flushSync();
+		end(); await first;
+		// The composer that pressed empties its own tags once its post is stored (CommentComposer).
+		tags.clear();
+		const kept = keptCommentDrafts.get(keyOf('one'))!;
+		expect(kept.body).toBe('Ask @Ada');
+		expect(kept.mentionSelection.occurrences(kept.body).map((item) => item.agent_id)).toEqual(['agent-ada']);
 	});
 
 	it('fails: what the field holds now is kept with the reason, not the text that was sent', async () => {

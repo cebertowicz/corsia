@@ -222,7 +222,9 @@ describe('a reply kept until it posts', () => {
 			const posting = actions.reply('root', 'My reply', [], [], key);
 			keptCommentDrafts.keepReply(key, 'My reply and more', tags);
 			finish(); await posting;
-			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply and more', mentionSelection: tags });
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply and more' });
+			// Its own copy of the tags: the field that pressed clears its own once the reply is stored.
+			expect(keptCommentDrafts.get(key)?.mentionSelection).not.toBe(tags);
 			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
 		} finally { restore(); }
 	});

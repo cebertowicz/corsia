@@ -10,7 +10,7 @@ import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion, type ImagePress } from '$lib/stores/imageRegionComments';
 import { forgetDraft, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
-import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { imageDraftKey, keptCommentDrafts, type DraftOrigin } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
@@ -61,6 +61,8 @@ export function createImageComments(context: {
 	let draftError = $state<string | undefined>(undefined);
 	let replacingDraft = $state(false);
 	let mentionSelection = createMentionSelection();
+	/** The kept draft the open box was drawn from, if Comment was pressed on it (`keptCommentDrafts.origin`). */
+	let draftOrigin: DraftOrigin | undefined;
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -125,7 +127,9 @@ export function createImageComments(context: {
 		const kept = keptCommentDrafts.get(key());
 		draftBody = kept?.body ?? '';
 		draftError = kept?.error;
-		mentionSelection = kept?.mentionSelection ?? createMentionSelection(draftBody);
+		// Its own copy of the tags: the box before it clears its own when its post lands.
+		mentionSelection = kept?.mentionSelection.copy() ?? createMentionSelection(draftBody);
+		draftOrigin = keptCommentDrafts.origin(key());
 		replacingDraft = false;
 		ui.openDraft(anchor);
 	}
@@ -138,7 +142,7 @@ export function createImageComments(context: {
 		draftError = undefined;
 		let id: string, failure = '';
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags);
+		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags, draftOrigin);
 		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
 		// a new region, while its tags can be the same object, carried over from the kept draft.
 		const pressing = () => draftRegion === region;
@@ -168,12 +172,14 @@ export function createImageComments(context: {
 			throw error;
 		}
 		retryToast.dismissAfterSuccess();
-		// Text typed since the press stays kept, with a fresh id for its own post.
-		keptCommentDrafts.posted(key(), text);
+		// Text or tags changed since the press stay kept, with a fresh id for their own post.
+		const stored = keptCommentDrafts.posted(key(), text, taggedAgentIds);
 		context.onCreated?.();
-		// Only the composer that pressed closes: a box drawn meanwhile keeps its text and tags.
-		if (!pressing()) return;
+		// The box that pressed closes. A box drawn meanwhile is that draft too once what it shows is stored, and closes the
+		// same way; one whose text or tags changed keeps them.
+		if (!pressing() && !(stored && draftRegion)) return;
 		draftRegion = null;
+		draftOrigin = undefined;
 		draftBody = '';
 		draftError = undefined;
 		mentionSelection = createMentionSelection();

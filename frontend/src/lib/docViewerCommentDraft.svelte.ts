@@ -85,6 +85,8 @@ export function createViewerCommentDraft(context: Context) {
 	let pending = $state<ViewerSelection>(null);
 	const keepKey = () => documentDraftKey(context.target());
 	let selected: CommentSelection | undefined;
+	/** Every composer this viewer opened: once a post's text is stored, one of these showing it is that draft. */
+	const opened = new WeakSet<object>();
 	// The pending mark of a posted widget comment, held (the draft is gone by then) until its placed mark is drawn.
 	let posted = $state.raw<{ id: string; selection: CommentSelection } | null>(null);
 	// The hold clears on every way out: the comment is drawn, or ends not_placed, orphaned or absent (the effect below);
@@ -152,9 +154,12 @@ export function createViewerCommentDraft(context: Context) {
 		// The next composer on this document starts from what the last one held, its tags and why it did not post.
 		const old = context.draft(), same = old?.scope === context.scope() ? old : null, kept = keptCommentDrafts.get(keepKey());
 		const body = same?.body ?? kept?.body ?? '';
-		const mentionSelection = same?.mentionSelection ?? kept?.mentionSelection ?? createMentionSelection(body);
+		// Its own copy of the tags: the composer before it clears its own when its post lands.
+		const mentionSelection = (same?.mentionSelection ?? kept?.mentionSelection)?.copy() ?? createMentionSelection(body);
+		const identity = {};
+		opened.add(identity);
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), selection: selected, identity: {}, sequence: 0 });
+			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -163,12 +168,11 @@ export function createViewerCommentDraft(context: Context) {
 		const draft = context.draft();
 		if (!draft || draft.scope !== context.scope()) return null;
 		const key = keepKey(), tags = draft.mentionSelection ?? createMentionSelection(text);
-		const current = () => context.draft()?.identity === draft.identity && context.scope() === draft.scope && context.isOpen();
 		const mine = (update: (value: CommentDraft) => CommentDraft | null) => commentDraft.update(value => value && value.identity === draft.identity ? update(value) : value);
 		keptCommentDrafts.clearError(key);
 		mine(value => ({ ...value, error: undefined }));
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press = keptCommentDrafts.claim(key, text, tags);
+		const press = keptCommentDrafts.claim(key, text, tags, draft.origin);
 		const id = await timedPost(press.clientId, () => submitDocumentComment(async () => {
 			if (draft.selection) return postLiveComment(draft, text, context, press, taggedAgentIds, threadId, mentions);
 			const artifactId = await timed(press.clientId, 'ens', () => context.ensureArtifactId());
@@ -184,12 +188,16 @@ export function createViewerCommentDraft(context: Context) {
 			context.onFailure(toastId, message);
 		}, draft.selection ? liveFailureMessage : undefined));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
-		// typed since the press (in this composer, or one opened after it closed) stays, with a fresh id for its own post.
-		keptCommentDrafts.posted(key, text);
-		if (!current()) mine(() => null);
+		// or tags changed since the press (in this composer, or one opened after it closed) stay, with a fresh id for their own post.
+		const stored = keptCommentDrafts.posted(key, text, taggedAgentIds);
+		// A composer this viewer opened from the draft while it posted, left unedited, shows what is stored now: it is that
+		// draft, and ends as the one that pressed does.
+		const that = (value: CommentDraft | null) => !!value && (value.identity === draft.identity || (stored && value.scope === draft.scope && opened.has(value.identity!)));
+		const open = () => that(context.draft()) && context.scope() === draft.scope && context.isOpen();
+		if (!open()) commentDraft.update(value => that(value) ? null : value);
 		// A widget comment's mark is painted by the widget after placement, so only it holds the pending mark that long.
-		if (current() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
-		return current() ? id : null;
+		if (open() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
+		return open() ? id : null;
 	}
 	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; }, get hasText() { return hasText; },
 		get pendingComment() { return pendingComment; }, get keepKey() { return keepKey(); }, select, leave, start, cancel, setBody, submit };

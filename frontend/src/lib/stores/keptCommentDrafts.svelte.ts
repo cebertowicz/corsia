@@ -5,12 +5,19 @@
 // it posts or the person empties its field, so leaving the viewer (another conversation, tab or pane) and coming back finds it.
 // It lives as long as the page, as a chat comment's draft does (`chatCommentDrafts`). From the first press of Comment
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
+// A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { newClientId } from './documentWire';
 
 export type MentionSelection = ReturnType<typeof createMentionSelection>;
 export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number] };
+/** The kept draft a box opened from, once Comment was pressed on it: its id, and the text and tags it held then. */
+export type DraftOrigin = { clientId: string; body: string; tags: string };
+
+/** A draft's tagged agents, compared as a set, as the server stores them. */
+const tagsOf = (tags: MentionSelection, body: string) => [...new Set(tags.occurrences(body).map((item) => item.agent_id))].sort().join('\n');
+const sameTags = (tags: MentionSelection, body: string, sent: string[]) => tagsOf(tags, body) === [...new Set(sent)].sort().join('\n');
 
 /**
  * One reactive cell per key, so a card reads only its own draft: typing in one reply changes nothing another card
@@ -75,13 +82,21 @@ export const keptCommentDrafts = {
 		const prior = key ? kept.get(key) : undefined;
 		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection });
 	},
+	/** What a box opening from this draft carries with it: the draft's id once Comment was pressed, with the text and tags it held. */
+	origin(key: string): DraftOrigin | undefined {
+		const prior = key ? kept.get(key) : undefined;
+		return prior?.clientId ? { clientId: prior.clientId, body: prior.body, tags: tagsOf(prior.mentionSelection, prior.body) } : undefined;
+	},
 	/**
 	 * Comment was pressed: the draft's one id, minted on its first press and kept with its text until it posts or is
-	 * cancelled. `again` says an earlier press used it, so that press may have stored the comment already.
+	 * cancelled. `again` says an earlier press used it, so that press may have stored the comment already. A box opened
+	 * from the draft (`origin`) whose post was stored meanwhile, in a viewer since closed, presses under the same id while
+	 * its text and tags are as it opened: the server answers with the stored comment. Any edit since posts fresh.
 	 */
-	claim(key: string, body: string, mentionSelection: MentionSelection): { clientId: string; again: boolean } {
+	claim(key: string, body: string, mentionSelection: MentionSelection, origin?: DraftOrigin): { clientId: string; again: boolean } {
 		const prior = key ? kept.get(key) : undefined;
 		if (prior?.clientId) return { clientId: prior.clientId, again: true };
+		if (!prior && origin && origin.body === body && origin.tags === tagsOf(mentionSelection, body)) return { clientId: origin.clientId, again: true };
 		const clientId = newClientId();
 		if (key) kept.set(key, { ...prior, body, mentionSelection, clientId });
 		return { clientId, again: false };
@@ -89,14 +104,16 @@ export const keptCommentDrafts = {
 	/** Cancel, or the server stored the comment. */
 	forget(key: string): void { kept.delete(key); },
 	/**
-	 * The server stored a reply posted as `sent`. If the field still holds just that, the draft goes; if more was typed
-	 * meanwhile, that text stays, with a fresh id for its own post.
+	 * The server stored the draft posted as `sent` with `sentTags`. If it still holds just that, the draft goes and this
+	 * says so (true); if its text or tags changed meanwhile, they stay, with their own copy of the tags (the box that
+	 * pressed clears its own) and a fresh id for their own post.
 	 */
-	posted(key: string, sent: string): void {
+	posted(key: string, sent: string, sentTags: string[]): boolean {
 		const prior = key ? kept.get(key) : undefined;
-		if (!prior) return;
-		if (prior.body.trim() === sent.trim()) kept.delete(key);
-		else kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, selection: prior.selection });
+		if (!prior) return false;
+		if (prior.body.trim() === sent.trim() && sameTags(prior.mentionSelection, prior.body, sentTags)) { kept.delete(key); return true; }
+		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection });
+		return false;
 	},
 	/** Tests only: a fresh page. */
 	reset(): void { for (const found of cells.values()) found.draft = undefined; },

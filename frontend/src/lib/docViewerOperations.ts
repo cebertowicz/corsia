@@ -167,7 +167,7 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 				if (now && failure) keptCommentDrafts.fail(draftKey, now.body, now.mentionSelection, failure, error instanceof EarlierVersionPosted);
 				throw error;
 			}
-			keptCommentDrafts.posted(draftKey, text);
+			keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
 			commentCreated();
 		},
 		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },

@@ -321,7 +321,8 @@ describe('a typed image comment is never lost', () => {
 		mocks.addRegionComment.mockResolvedValueOnce('new');
 		const { comments } = controller();
 		await tagged(comments);
-		await comments.submit('Hey @Agent\nlook');
+		// The composer sends the agents tagged in the text it posts (CommentComposer).
+		await comments.submit('Hey @Agent\nlook', ['agent-1'], KEPT.tags);
 		comments.close();
 		await comments.draw(BOX, rect);
 		expect(kept(comments)).toEqual({ body: '', tags: [] });

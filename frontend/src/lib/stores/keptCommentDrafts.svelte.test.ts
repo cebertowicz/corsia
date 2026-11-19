@@ -56,17 +56,33 @@ describe('a reply kept while it is typed', () => {
 		const tags = createMentionSelection();
 		keptCommentDrafts.keepReply(key, 'first ', tags);
 		const press = keptCommentDrafts.claim(key, 'first ', tags);
-		keptCommentDrafts.posted(key, 'first');
+		expect(keptCommentDrafts.posted(key, 'first', [])).toBe(true);
 		expect(keptCommentDrafts.get(key)).toBeUndefined();
 
 		keptCommentDrafts.keepReply(key, 'first', tags);
 		const again = keptCommentDrafts.claim(key, 'first', tags);
 		expect(again.clientId).not.toBe(press.clientId);
 		keptCommentDrafts.keepReply(key, 'first and more', tags);
-		keptCommentDrafts.posted(key, 'first');
-		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'first and more', mentionSelection: tags });
+		expect(keptCommentDrafts.posted(key, 'first', [])).toBe(false);
+		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'first and more' });
 		expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
 		expect(keptCommentDrafts.claim(key, 'first and more', tags).clientId).not.toBe(again.clientId);
+	});
+
+	it('a post stored while its tags changed keeps the new tags, in a copy the field that pressed cannot clear', () => {
+		const key = replyDraftKey(scope, 'comment-1');
+		const tags = createMentionSelection();
+		keptCommentDrafts.keepReply(key, 'Ask @Ada', tags);
+		keptCommentDrafts.claim(key, 'Ask @Ada', tags);
+		tags.update('Ask @Ada'); tags.select('agent-ada', 4, '@Ada');
+		keptCommentDrafts.keepReply(key, 'Ask @Ada', tags);
+		expect(keptCommentDrafts.posted(key, 'Ask @Ada', [])).toBe(false);
+		// The field that pressed empties its own tags once its post is stored.
+		tags.clear();
+		const kept = keptCommentDrafts.get(key)!;
+		expect(kept.body).toBe('Ask @Ada');
+		expect(kept.mentionSelection.occurrences(kept.body).map((item) => item.agent_id)).toEqual(['agent-ada']);
+		expect(kept.clientId).toBeUndefined();
 	});
 
 	it('typing in one reply re-runs nothing that reads another thread’s reply', () => {

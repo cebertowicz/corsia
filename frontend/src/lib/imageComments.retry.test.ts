@@ -108,6 +108,66 @@ for (const [kind, artifact, make] of surfaces) {
 		expect(new Set(api.postComment.mock.calls.map(([, fields]) => fields.client_id)).size).toBe(2);
 	});
 
+	it(`${kind}: a box drawn while a post is out, left unedited, is that draft: it closes when the post lands and nothing is stored twice`, async () => {
+		const comments = make();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		let land!: () => void;
+		const held = new Promise<void>(resolve => { land = resolve; });
+		const post = api.postComment.getMockImplementation()!;
+		api.postComment.mockImplementationOnce(async (...args: [string, Record<string, any>]) => { await held; return post(...args); });
+		const first = comments.submit('Too dark');
+		await comments.draw({ ...BOX, x: 0.5 }, rect);
+		expect(comments.draft?.body).toBe('Too dark');
+		land();
+		await first;
+		expect(comments.draft).toBeNull();
+		expect(comments.hasDraftText).toBe(false);
+		expect(keptCommentDrafts.get(artifact === 'image' ? imageKey : 'image:doc:a.png')).toBeUndefined();
+		expect(store.rows.size).toBe(1);
+	});
+
+	it(`${kind}: a box reopened in a new viewer after its post went out posts unedited under the same id, and one comment is stored`, async () => {
+		const closed = make();
+		await closed.draw(BOX, rect);
+		closed.setDraftBody('Too dark');
+		let land!: () => void;
+		const held = new Promise<void>(resolve => { land = resolve; });
+		const post = api.postComment.getMockImplementation()!;
+		api.postComment.mockImplementationOnce(async (...args: [string, Record<string, any>]) => { await held; return post(...args); });
+		const first = closed.submit('Too dark');
+		const comments = make();
+		await comments.draw({ ...BOX, x: 0.5 }, rect);
+		expect(comments.draft?.body).toBe('Too dark');
+		land();
+		await first;
+		await comments.submit('Too dark');
+		expect(store.rows.size).toBe(1);
+		expect(new Set(api.postComment.mock.calls.map(([, fields]) => fields.client_id)).size).toBe(1);
+		expect(comments.draft).toBeNull();
+	});
+
+	it(`${kind}: text and tags edited while the post is out stay kept, whatever the box that pressed clears`, async () => {
+		const comments = make();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Ask');
+		let land!: () => void;
+		const held = new Promise<void>(resolve => { land = resolve; });
+		const post = api.postComment.getMockImplementation()!;
+		api.postComment.mockImplementationOnce(async (...args: [string, Record<string, any>]) => { await held; return post(...args); });
+		const first = comments.submit('Ask');
+		const tags = comments.draft!.mentionSelection;
+		tags.update('Ask @Ada'); tags.select('agent-ada', 4, '@Ada');
+		comments.setDraftBody('Ask @Ada');
+		land();
+		await first;
+		// The box that pressed empties its own tags once its post is stored (CommentComposer).
+		tags.clear();
+		const kept = keptCommentDrafts.get(artifact === 'image' ? imageKey : 'image:doc:a.png')!;
+		expect(kept.body).toBe('Ask @Ada');
+		expect(kept.mentionSelection.occurrences(kept.body).map((item) => item.agent_id)).toEqual(['agent-ada']);
+	});
+
 	it(`${kind}: a post that fails keeps what the field holds now, not the text it sent`, async () => {
 		const comments = make();
 		await comments.draw(BOX, rect);

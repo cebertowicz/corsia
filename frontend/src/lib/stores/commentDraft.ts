@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import type { CommentSelection } from './commentSelection';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { createMentionSelection } from '$lib/components/comments/mentionSelection';
+import type { DraftOrigin } from './keptCommentDrafts.svelte';
 
 /** A name for what a comment is on, or a read of it that waits until a draft is started. */
 export type SelectionLabel = string | (() => string | undefined);
@@ -22,6 +23,8 @@ export interface CommentDraft {
 	scope?: string;
 	selection?: CommentSelection;
 	identity?: object;
+	/** The kept draft this composer opened from, if Comment was pressed on it (`keptCommentDrafts.origin`). */
+	origin?: DraftOrigin;
 	request?: AbortController;
 	sequence?: number;
 }
