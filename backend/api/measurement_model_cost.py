@@ -23,6 +23,7 @@ from api.measurement_chain import chain_ctes
 from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
+from core import node_usage_groups
 from core.cost_identity import IDENTITY_GROUP, ModelIdentity, identity_columns, identity_join
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_per_row_sql
 from infra.packed_rows import fetch_all
@@ -69,11 +70,19 @@ _CHAIN_ROWS = f"({_ACCEPTED_ROWS})"
 _SEEDED_CHAIN_ROWS = f"({_ACCEPTED_ROWS} UNION ALL {_SEED_ROWS})"
 
 
+# A chain node's stored groups (``core.node_usage_groups``) are its calls up to settlement exactly when the
+# current definition has rebuilt that node and no group holds a call later than ``settled_at`` (``last_at`` is
+# never below a group's latest call). Any other node is read from the ledger, as before.
+_STORED_EXACT = ("(:groups_complete=1 OR x.node_id<:groups_below) AND NOT EXISTS ("
+                 "SELECT 1 FROM llm_usage_node_groups l WHERE l.plan_node_id=x.node_id AND l.last_at>x.settled_at)")
+
+
 def _cost_sql(chain_rows: str) -> str:
     """The grouped, classifiable usage of each task's chain calls up to its settlement, one chain row at a time."""
     return grouped_usage_per_row_sql(
         {"period": "x.period", "task_id": "x.task_id"},
         f"{chain_rows} x", "u.plan_node_id=x.node_id AND u.created_at<=x.settled_at",
+        stored=("g.plan_node_id=x.node_id", _STORED_EXACT),
     )
 
 
@@ -120,6 +129,7 @@ def query_model_costs(
     :func:`materialize_chain` filled for them (seeds included, if it was seeded: their rows carry no period and
     their own ``task_id``), so a caller that also reads the gaps walks the chains once."""
     prefix, source, bound = _chain_source(params, task_ids, chain_rows)
+    bound = {**bound, **node_usage_groups.ready(db).params()}
     rows = []
     for row in (dict(item) for item in fetch_all(db, prefix + _cost_sql(source), bound)):
         identity = resolve(row)

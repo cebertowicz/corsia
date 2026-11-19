@@ -84,7 +84,9 @@ def test_the_cost_read_probes_the_node_index_once_per_chain_row_without_statisti
 
     db.execute(CHAIN_DDL)
     assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat1'").fetchone()
-    details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE))]
+    # Coverage none: every chain row reads the ledger, as it does before the stored groups are rebuilt.
+    coverage = {"groups_complete": 0, "groups_below": ""}
+    details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE), coverage)]
     usage = [detail for detail in details if detail.startswith(("SEARCH u ", "SCAN u"))]
     assert usage == ["SEARCH u USING INDEX idx_llm_usage_plan_node (plan_node_id=?)"], details
 

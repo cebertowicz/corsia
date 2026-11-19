@@ -13,13 +13,42 @@ from collections.abc import Callable, Collection, Mapping
 from typing import NamedTuple
 
 from core.cost_identity import IdentityResolver
-from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
+from core import node_usage_groups
+from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_stored_sql, grouped_usage_sql
+from infra.node_usage_schema import NODE_GROUPS_TABLE
 from infra.packed_rows import fetch_all
 from infra.turn_usage_remainder import pending_measurement_counts
 
 #: Tokens summed in SQL, so a read returns one row per group however many calls
 #: the ledger holds. ``SUM`` is NULL when every value is: "no known amount".
 USAGE_TOKENS = "SUM(total_tokens) AS tokens,SUM(total_tokens IS NULL) AS unknown_tokens"
+#: ``USAGE_TOKENS`` over stored node groups. A group holding a total that is neither NULL nor an
+#: integer (``total_odd``) is never read this way: its key is read from the ledger instead.
+STORED_TOKENS = ("CASE WHEN SUM(total_known)>0 THEN SUM(total_tokens) END AS tokens,"
+                 "SUM(records-total_known-total_odd) AS unknown_tokens")
+#: Ledger columns the stored groups are keyed by.
+_STORED_COLUMNS = frozenset({"plan_node_id", "plan_commitment_id"})
+
+
+def stored_tokens(connection, column: str, ids: list[str], extra: tuple[str, ...], ledger_sql: str, rows_in: Callable):
+    """``USAGE_TOKENS`` grouped by ``column`` (plus ``extra`` columns) for ``ids``, read from the stored groups.
+
+    ``ledger_sql`` is the caller's own ledger read, with one ``{marks}`` placeholder; it runs instead when
+    the stored groups do not yet cover every node, and for any id whose groups hold an odd total. Rows come
+    back in the ledger read's order: by ``column`` then ``extra``.
+    """
+    if not ids or not node_usage_groups.ready(connection).complete:
+        return rows_in(connection, ledger_sql, ids)
+    group = ",".join((column, *extra))
+    rows = rows_in(connection, f"""SELECT {group},{STORED_TOKENS},SUM(total_odd) AS odd FROM {NODE_GROUPS_TABLE}
+        WHERE {column} IN ({{marks}}) GROUP BY {group}""", ids)
+    odd = sorted({str(row[column]) for row in rows if row["odd"]})
+    kept = [{key: row[key] for key in (column, *extra, "tokens", "unknown_tokens")} for row in rows
+            if str(row[column]) not in odd]
+    if not odd:
+        return kept
+    merged = kept + [dict(row) for row in rows_in(connection, ledger_sql, odd)]
+    return sorted(merged, key=lambda row: tuple((row[key] is not None, row[key] or "") for key in (column, *extra)))
 
 
 def usage_dollars(connection, ids: Mapping[str, Collection[str]], *, include_turns: bool = False) -> dict[str, dict[str, dict]]:
@@ -43,19 +72,22 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]], *, include_tur
     }
     if not wanted:
         return dollars
-    # Each id list is one JSON parameter, so no list is chunked and no row is read twice.
-    keys = {column: f"u.{column}" for column in wanted}
     if include_turns:
-        keys["turn_id"] = "u.turn_id"
         for amounts in dollars.values():
             for amount in amounts.values():
                 amount["turns"] = set()
-    rows = [dict(row) for row in fetch_all(connection, grouped_usage_sql(
-        keys,
-        "llm_usage u WHERE " + " OR ".join(
-            f"u.{column} IN (SELECT value FROM json_each(?))" for column in wanted
-        ),
-    ), tuple(json.dumps(values) for values in wanted.values()))]
+    # Each id list is one JSON parameter, so no list is chunked and no row is read twice.
+    # Node and commitment ids read the stored groups (``core.node_usage_groups``) once every node
+    # is rebuilt under the current definition: the same grouped rows, from far fewer stored ones.
+    stored = set(wanted) <= _STORED_COLUMNS and node_usage_groups.ready(connection).complete
+    alias = "g" if stored else "u"
+    keys = {column: f"{alias}.{column}" for column in wanted}
+    if include_turns:
+        keys["turn_id"] = f"{alias}.turn_id"
+    picks = " OR ".join(f"{alias}.{column} IN (SELECT value FROM json_each(?))" for column in wanted)
+    sql = (grouped_stored_sql(keys, f"{NODE_GROUPS_TABLE} g WHERE {picks}") if stored
+           else grouped_usage_sql(keys, f"llm_usage u WHERE {picks}"))
+    rows = [dict(row) for row in fetch_all(connection, sql, tuple(json.dumps(values) for values in wanted.values()))]
     if not rows:
         return dollars
     resolve = IdentityResolver(connection)
@@ -119,11 +151,11 @@ def own_usage(
 
     A ``dollars`` map passed in must cover every node with usage (``amount``).
     """
-    rows = rows_in(
-        connection,
+    rows = stored_tokens(
+        connection, "plan_node_id", node_ids, (),
         f"""SELECT plan_node_id,{USAGE_TOKENS} FROM llm_usage
             WHERE plan_node_id IN ({{marks}}) GROUP BY plan_node_id""",
-        node_ids,
+        rows_in,
     )
     if dollars is None:
         dollars = usage_dollars(connection, {"plan_node_id": node_ids})["plan_node_id"]
