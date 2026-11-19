@@ -145,3 +145,44 @@ async def test_outer_work_on_a_failed_inner_step_closes_with_it(isolated_db, tmp
     await _finish(run, z)
     (record,) = _ended(run, outer)
     assert record["outcome"] == "failed"
+
+
+@pytest.mark.parametrize("person_close", [False, True])
+async def test_outer_work_on_inner_work_the_failure_closed_closes_with_it(isolated_db, tmp_path, monkeypatch, person_close):
+    # Outer d waits on inner b, which waits on the failed a; closing b drops d's edge, so d is found first.
+    workflows = {
+        "outer": ("# Outer\n", (
+            "    - {id: x, workflow: inner, required: true, check: X, difficulty: {default: routine}}\n"
+            "    - {id: z, required: true, check: Z, difficulty: {default: routine}}\n"
+        )),
+        "inner": ("# Inner\n", STEPS),
+    }
+    run = Run(tmp_path, monkeypatch, workflows)
+    reply = await run.start("outer")
+    outer = reply["node"]["id"]
+    x, z = (step["id"] for step in reply["steps"])
+    a, b, c = (step["id"] for step in reply["steps"][0]["steps"])
+    added = await run.update("add", {"parent_id": outer, "title": "d", "acceptance_criteria": "Done",
+                                     "size": "XS", "intent": "Complete work"})
+    assert not isinstance(added, str), added
+    d = added["node"]["id"]
+    edge = await run.update("add_dependency", _args(run, d, depends_on_node_id=b))
+    assert not isinstance(edge, str), edge
+    if person_close:
+        from infra.database import get_db
+        from plans import user_settle
+
+        db = get_db()
+        try:
+            user_settle.settle("close_node", _args(run, a), "user", {"db": db, "actor_id": "user", "provenance": "user"})
+            db.commit()
+        finally:
+            db.close()
+    else:
+        result = await run.update("fail", _args(run, a))
+        assert not isinstance(result, str), result
+    assert [_state(run, n) for n in (b, c, d, z)] == ["closed", "pending", "closed", "pending"]
+    await _finish(run, c)
+    await _finish(run, z)
+    (record,) = _ended(run, outer)
+    assert record["outcome"] == "failed"
