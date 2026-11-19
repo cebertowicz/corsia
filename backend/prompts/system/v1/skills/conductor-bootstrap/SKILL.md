@@ -70,7 +70,7 @@ Create a fresh thread in the project and ask it the five questions. If an effect
 
 ## 7. Hand off
 
-Start the project's two recurring runs as workflows: `run-the-project` daily and `keep-the-set` weekly, each scheduled before it ends. Answer-first: what is configured, the roles created, the baseline (or its gap), and the one thing still needed. File deferred work with its owner.
+Start the project's two recurring runs as workflows: skill `run-the-project` daily and skill `keep-the-set` weekly, each scheduled before it ends. Answer-first: what is configured, the roles created, the baseline (or its gap), and the one thing still needed. File deferred work with its owner.
 
 Failure signals: the owner explains purpose or decision rights twice; two documents claim the same authority within a month; the first prefix grows without a decision.
 
