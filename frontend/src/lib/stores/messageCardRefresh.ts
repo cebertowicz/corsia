@@ -13,15 +13,17 @@ import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHis
 import { token } from './auth';
 import { activeThreadId, messages, type Message } from './threads';
 import { apiFetch } from '$lib/api/request';
+// The server's own file: one definition of both bounds, read by the batch route too.
+import limits from '../../../../backend/api/card_refresh_limits.json';
 const DEBOUNCE_MS = 400;
 /** The newest carded messages re-read per nudge; older ones refresh when scrolled to and re-read. */
-export const MAX_CARDED = 12;
-export const TURN_RANGE_LIMIT = 50;
+const MAX_CARDED = limits.max_carded;
+const TURN_RANGE_LIMIT = limits.turn_range_limit;
 
 type Range = { from: string; to: string };
 type Selection = { messageIds: string[]; turn: Range | null };
 
-function selectionToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Selection {
+export function selectionToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Selection {
 	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic);
 	let turnFirst = -1;
 	let turn: Range | null = null;
@@ -35,15 +37,6 @@ function selectionToRefresh(rows: Message[], threadId: string, turnEnded: boolea
 		row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst)
 	)).slice(-MAX_CARDED).map((row) => row.id);
 	return { messageIds, turn };
-}
-
-/** The same page contexts as the previous individual range reads. */
-export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
-	const selection = selectionToRefresh(rows, threadId, turnEnded);
-	return [
-		...(selection.turn ? [selection.turn] : []),
-		...selection.messageIds.map((id) => ({ from: id, to: id })),
-	];
 }
 
 async function read(threadId: string, selection: Selection): Promise<unknown[]> {

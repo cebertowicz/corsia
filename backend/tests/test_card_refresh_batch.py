@@ -125,6 +125,45 @@ def test_batch_matches_ask_placement_and_hold_clearance(integration_client):
 
 
 @pytest.mark.integration
+def test_batch_read_empty_for_one_bad_range_keeps_the_other_ranges(integration_client):
+    """One stale range must not cost the cards of the messages beside it."""
+    from infra.database import get_db
+
+    client = integration_client
+    thread = client.post('/api/threads', params=_AUTH, json={'title': 'card batch bad range'}).json()['thread_id']
+    db = get_db()
+    ids = [f'{thread}-m{i}' for i in range(4)]
+    try:
+        for index, mid in enumerate(ids):
+            db.execute(
+                'INSERT INTO messages (id, thread_id, role, content, metadata, created_at, seq) VALUES (?,?,?,?,?,?,?)',
+                (mid, thread, 'assistant', f'body {index}', json.dumps({'for_user': True}), f'2026-01-01T00:00:0{index}', index + 1),
+            )
+        db.commit()
+
+        def individual(from_id: str, to_id: str):
+            response = client.get(f'/api/threads/{thread}/messages', params={
+                **_AUTH, 'limit': 50, 'from_id': from_id, 'to_id': to_id,
+            })
+            return response.status_code, response.json().get('messages')
+
+        # The separate ranged reads' own answers for the same two bad inputs.
+        assert individual('no-such-message', 'no-such-message') == (200, [])
+        assert individual(ids[3], ids[1])[0] == 400
+
+        response = client.post(f'/api/threads/{thread}/messages/refresh', params=_AUTH, json={
+            'message_ids': [ids[0], 'no-such-message', ids[2]],
+            'turn_range': {'from_id': ids[3], 'to_id': ids[1]},
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()['messages'] == [
+            *individual(ids[0], ids[0])[1], *individual(ids[2], ids[2])[1],
+        ]
+    finally:
+        db.close()
+
+
+@pytest.mark.integration
 def test_batch_requires_thread_access_and_rejects_too_many_ids(integration_client):
     client = integration_client
     assert client.post('/api/threads/nonexistent/messages/refresh', params=_AUTH, json={'message_ids': ['x']}).status_code == 404
