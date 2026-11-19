@@ -51,7 +51,7 @@ def _legacy_db() -> sqlite3.Connection:
 
 
 def test_v158_is_registered() -> None:
-    assert SCHEMA_VERSION == 200
+    assert SCHEMA_VERSION == 201
     assert MIGRATIONS[157] is migrate_157_to_158
 
 

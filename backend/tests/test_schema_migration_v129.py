@@ -71,7 +71,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 200
+    assert SCHEMA_VERSION == 201
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
 
@@ -232,7 +232,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 200
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 201
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
