@@ -4,16 +4,28 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from infra.audit_plan_activity import plan_activity
-from plans import service
-from plans.public import server_raised_decision_provenance
+from plans import decisions, service
 from tests.test_plan_conductor_task_adds import db  # noqa: F401
 
 
-def _raise(db, thread_id: str, *, times: int = 1, provenance: str = "test.decision") -> None:
+def _raise(db, thread_id: str, *, times: int = 1) -> None:
     plan = service.ensure_plan("thread", thread_id, db=db)
     node = service.add_node(plan.id, kind="task", title="Decide", acceptance_criteria="Answered", db=db)
     for _ in range(times):
-        service._event(db, node.id, "decision_raised", actor_id=thread_id, provenance=provenance)
+        service._event(db, node.id, "decision_raised", actor_id=thread_id, provenance="test.decision")
+    db.commit()
+
+
+def _server_raise(db, thread_id: str) -> None:
+    """Raise through CORSIA's own raise path, under a provenance no named writer uses."""
+    plan = service.ensure_plan("thread", thread_id, db=db)
+    node = service.add_node(plan.id, kind="task", title="Offer", acceptance_criteria="Answered", db=db)
+    decisions.raise_offer(
+        db, plan_id=plan.id, source_node_id=node.id, provenance="test.some_server_writer",
+        content={"title": "Take this over?", "context": "c", "tradeoff": "t", "recommendation": "A",
+                 "rationale": "r", "options": [{"id": "A", "label": "Yes"}, {"id": "B", "label": "No"}],
+                 "other_enabled": True},
+    )
     db.commit()
 
 
@@ -23,7 +35,7 @@ def test_decisions_raised_split_by_root_or_delegated_and_who_raised(db):
         " VALUES ('worker','user','project-a','lane','worker','test/model','t','t')"
     )
     _raise(db, "lane", times=2)
-    _raise(db, "lane", provenance=server_raised_decision_provenance)
+    _server_raise(db, "lane")
     _raise(db, "worker")
     service.add_node(service.ensure_plan("thread", "worker", db=db).id, kind="task", title="Plain",
                      acceptance_criteria="Done", db=db)
