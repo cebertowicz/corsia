@@ -100,6 +100,27 @@ async function openThread(page: Page, id: string): Promise<Locator> {
 	return reply;
 }
 
+/**
+ * What lies under a row of the card: `gap` is the space from the row's bottom to the card's bottom edge (what the card puts
+ * under its last row), `inside` the room left between the row and the bottom of its scroller's visible box, and `pad` that
+ * scroller's own bottom padding. Given the reply field, the row is the field's whole box in the card, not its text area.
+ */
+function spaceBelow(target: Locator) {
+	return target.evaluate((element) => {
+		let row: Element = element;
+		if (element instanceof HTMLTextAreaElement) while (row.parentElement && !row.parentElement.matches('[data-thread-id], .ct-res-body')) row = row.parentElement;
+		let scroller = row.parentElement;
+		while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+		if (!scroller) throw new Error('no scroller above the card');
+		const box = scroller.getBoundingClientRect(), bottom = row.getBoundingClientRect().bottom, top = box.top + scroller.clientTop;
+		return {
+			gap: row.closest('[data-comment-card]')!.getBoundingClientRect().bottom - bottom,
+			inside: top + scroller.clientHeight - bottom,
+			pad: parseFloat(getComputedStyle(scroller).paddingBottom),
+		};
+	});
+}
+
 async function frame(page: Page, name: string) {
 	if (!FRAMES) return;
 	fs.mkdirSync(FRAMES, { recursive: true });
@@ -153,12 +174,29 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			const reply = await openThread(page, id);
 			await reply.click();
 			await reply.pressSequentially(DRAFT);
+			await painted(page);
+			const before = await spaceBelow(reply);
 			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
 			await expect(page.locator('.toast').first(), 'the person is told it did not post').toBeVisible({ timeout: 30_000 });
 			await painted(page);
 			await frame(page, 'reply-failed');
 			await expect(reply, 'the text stays in the field').toHaveValue(DRAFT);
-			await expect(card(page, id).getByRole('alert'), 'the reason shows under the field').toBeVisible();
+			const reason = card(page, id).getByRole('alert');
+			await expect(reason, 'the reason shows under the field').toBeVisible();
+			expect(await reason.evaluate((line) => {
+				const probe = document.createElement('span');
+				probe.style.cssText = 'color: var(--red-text); font-size: var(--text-caption)';
+				line.parentElement!.append(probe);
+				const want = getComputedStyle(probe), got = getComputedStyle(line);
+				const looks = [got.color === want.color, got.fontSize === want.fontSize];
+				probe.remove();
+				return looks;
+			}), 'the reason has the card’s error look: caption size, error colour').toEqual([true, true]);
+			const after = await spaceBelow(reason);
+			expect(Math.abs(after.gap - before.gap), 'the space under the reason is the space that was under the field').toBeLessThanOrEqual(1);
+			if (phone(page)) {
+				expect(after.inside, 'the reason ends inside the sheet, above its bottom padding').toBeGreaterThanOrEqual(after.pad - 0.5);
+			}
 		});
 	});
 }

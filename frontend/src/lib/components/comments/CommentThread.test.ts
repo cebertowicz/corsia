@@ -567,6 +567,16 @@ describe('CommentThread', () => {
 		expect(host.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
 	});
 
+	it.each([false, true])('shows a reply’s failure under its field in the card’s error style (resolved: %s)', (resolved) => {
+		render(thread({ resolved }), false, { replyError: 'Couldn’t post the comment — try again' });
+		if (resolved) (host.querySelector('.ct-res-head') as HTMLElement).click();
+		flushSync();
+		const line = host.querySelector('[role="alert"]');
+		expect(line?.previousElementSibling?.querySelector('textarea'), 'the line sits right under the reply field').not.toBeNull();
+		expect(line?.textContent).toBe('Couldn’t post the comment — try again');
+		expect(line?.classList.contains('ct-reply-error')).toBe(true);
+	});
+
 	it('marks a rejected suggestion with a cross and an accepted one with a check', () => {
 		render(thread({ replacement: 'new text', decision: 'rejected', decidedBy: 'Ada', resolved: true }));
 		expect(host.textContent).toContain('Rejected by Ada');
