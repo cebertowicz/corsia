@@ -19,7 +19,7 @@ workflow:
     - id: weigh
       title: Weigh and address the findings
       required: true
-      check: "each failure weighed at its source and fixed or its rejection explained; changed result sent back once; anything still open goes into the hand-over"
+      check: "on PASS, marked done saying so; otherwise every failure settled by skill apply-feedback (fixed wherever its cause reaches, refuted with evidence, or filed as a follow-up), a changed result sent back for the check once, and anything still open in the hand-over"
       after: [check]
       difficulty: {default: standard}
       instruction: "## Weigh"

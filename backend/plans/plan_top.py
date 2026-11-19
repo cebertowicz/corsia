@@ -24,15 +24,14 @@ from typing import Any
 
 import plans.aggregates as aggregates
 import plans.service as service
-from plans.close_next_bounds import bounded
+from plans.close_next_bounds import bounded, title as bounded_title
 from prompts import plan_top as text
 
 #: Rows the list shows: the top ten, one short line each (the person's
 #: approved bound for the placing reply, 2026-11-18). The status fit may show
 #: fewer when its byte budget is spent; the tail line always counts the rest.
 TOP_ROWS = 10
-#: A listed title is cut to the plan's own title limit; older titles may be longer.
-TITLE_MAX_BYTES = service.MAX_NODE_TITLE + 4
+#: A listed title is cut like every plan title (``close_next_bounds.TITLE_MAX_BYTES``).
 #: What a waiting, blocked or paused row waits on, cut short.
 WAIT_MAX_BYTES = 40
 #: Conditions whose first cause is worth its bytes on a listed row.
@@ -91,7 +90,7 @@ def compose(db, plan_id: str, facts: dict, *, include: str | None = None) -> Top
 
 def _line(place: int, title: str, node: dict | None, status) -> str:
     """One listed row: place, title, and what it is doing."""
-    words = [f"{place} {bounded(title, TITLE_MAX_BYTES)}"]
+    words = [f"{place} {bounded_title(title)}"]
     doing = _doing(node, status)
     if doing:
         words.append(doing)

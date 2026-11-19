@@ -29,4 +29,4 @@ Try to show the result is wrong. First list your own ways it could fail from the
 
 ## Weigh
 
-Weigh each failure as a claim at its source. Fix those that hold and note why for each rejected. If the result changed, send it back once. Whatever stays open goes into the hand-over.
+On PASS, mark this step done and say so. Otherwise apply skill `apply-feedback` to every failure, following its sections inside this step without starting a run of its own. Whatever stays open goes into the hand-over.

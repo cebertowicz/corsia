@@ -29,6 +29,7 @@ from subagents.cc_runtime_state import Broadcast, _CLOSE_LIVE_TIMEOUT_S, _LIVE, 
 
 log = logging.getLogger("subagents.cc_runtime")
 
+# No reading yet: preempt-to-terminal times are not recorded.
 PREEMPT_TERMINAL_TIMEOUT_S = 10.0
 TOOL_BOUNDARY_ACTIVE = "tool_boundary_active"
 
