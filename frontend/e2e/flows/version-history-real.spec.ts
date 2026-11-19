@@ -6,6 +6,7 @@ import { test, expect } from '../support/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { openDetails } from '../support/documentBar';
+import { enterDocumentEdit } from '../support/documentReading';
 
 const authQuery = `?${['to', 'ken'].join('')}=${encodeURIComponent(TEST_TOKEN)}`;
 const skill = (body: string) => `---\nname: demo\ndescription: A test skill.\n---\n\n# Demo\n\n${body}\n`;
@@ -111,6 +112,8 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	// The refusal recorded nothing; the restore keeps the outside edit it replaces, then itself.
 	await expect.poll(count).toBe(before + 2);
 	if (out) await page.screenshot({ path: path.join(out, `history-restoring-${width}.png`), animations: 'disabled' });
+	// The second window shares the phone's touch context, so it opened in Reading; choose Edit before typing (a no-op with a mouse).
+	await enterDocumentEdit(other);
 	await other.locator('.cm-content').click();
 	await other.keyboard.press('ControlOrMeta+End');
 	await other.keyboard.type(' Typed while restoring.');

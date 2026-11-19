@@ -4,6 +4,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { layouts } from '../support/liveConcurrency';
+import { enterDocumentEdit } from '../support/documentReading';
 
 // The editor's inline marks for one suggestion: the struck quote and the drawn insert.
 const strike = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-del[data-suggestion-id="${id}"]`);
@@ -169,6 +170,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
+			// The phone layout runs in the touch project, which opens in Reading and takes no typing: choose Edit first (a no-op at 1440).
+			await enterDocumentEdit(page);
 			// On a phone a caret landing in a suggestion's quote opens no card, so the editor stays focused and takes the edit (#1009);
 			// at desktop widths it focuses the card beside the quote, and closing that card returns the editor to the caret.
 			await expect(strike(page, loose)).toHaveText('is loose');
@@ -199,6 +202,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
+			// The phone layout runs in the touch project, which opens in Reading and takes no typing: choose Edit first (a no-op at 1440).
+			await enterDocumentEdit(page);
 			// Neither canvas here is wide enough for the margin, so the list (a popover, or the phone's sheet) is closed before the
 			// document is touched, and the card is still listed when it opens again.
 			await openComments(page, drawer);

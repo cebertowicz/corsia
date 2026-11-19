@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { expectQuietSave, observeSaveCue, proveSaveCue, routeDocumentSaves } from '../support/docSaveCue';
+import { enterDocumentEdit } from '../support/documentReading';
 
 async function openChecklist(
 	page: Page,
@@ -141,11 +142,20 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await expect(page.getByRole('checkbox', { name: 'Mark task complete: checked' })).not.toBeChecked();
 	});
 
-	test('toggles a task by tap at mobile width', async ({ page, request }) => {
+	test('a tap toggles a task only after Edit at mobile width; Reading leaves it unchanged', async ({ page, request }) => {
 		test.skip((page.viewportSize()?.width ?? 0) > 1024, 'Mobile-specific tap assertion.');
 
 		await openChecklist(page, request, '- [ ] mobile item\n');
 		const checkbox = page.getByRole('checkbox', { name: 'Mark task complete: mobile item' });
+		const control = page.locator('.cm-md-task-control');
+		// A touch opening is Reading: nothing changes the document until Edit, so the box is disabled and a tap on it does nothing.
+		await expect(page.getByRole('button', { name: 'Done', exact: true })).toHaveCount(0);
+		await expect(checkbox).toBeDisabled();
+		await control.tap();
+		await expect(checkbox).not.toBeChecked();
+		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: mobile item' })).toHaveCount(0);
+		await enterDocumentEdit(page);
+		await expect(checkbox).toBeEnabled();
 		await checkbox.tap();
 		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: mobile item' })).toBeChecked();
 	});

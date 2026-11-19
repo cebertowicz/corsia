@@ -4,6 +4,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { openLiveDocument, seedLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 import { layouts } from '../support/liveConcurrency';
+import { enterDocumentEdit } from '../support/documentReading';
 
 /**
  * Typing in a document never moves it. Each stretch of typing is saved a moment after it stops, and the live session
@@ -78,6 +79,8 @@ async function open(page: Page, request: Parameters<typeof seedLiveDocument>[0],
 	// The table renders as a widget, so its pipe-delimited source lines are not in the editor's text.
 	await openLiveDocument(page, document, RENDERED);
 	await expect(page.locator('.cm-md-table table')).toBeVisible();
+	// The 393 layout runs in the touch project, which opens in Reading and takes no typing; choose Edit before the rest wait (a no-op at 1440).
+	await enterDocumentEdit(page);
 	// The editor at rest: nothing animating before the first sample.
 	await expect.poll(() => page.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length)).toBe(0);
 	return document;
