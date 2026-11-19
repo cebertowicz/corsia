@@ -103,7 +103,7 @@ def may_edit_document(
 
     The one decision for every write path. The owner, the owner's temporary
     subagents, and the user may edit. The scope conductor and its temporary
-    subagents may edit unless the person owns the document; other agents suggest.
+    subagents may edit unless the document is person-owned; other agents suggest.
     One ``acting_owner`` walk serves both subagent exceptions. ``conductor`` is
     the document's scope conductor, never the actor's. A mechanical
     ``INDEX.md`` entry is allowed to anyone, and an unowned document is
@@ -113,22 +113,18 @@ def may_edit_document(
         return WriteAuthority(basis, owner, path_rel, actor, artifact_id)
 
     if direct_user:
-        from infra.auth import is_owner_sentinel
-
-        basis = "unowned" if owner is None else "owner" if is_owner_sentinel(owner) else "user"
+        basis = "unowned" if owner is None else "owner" if owner == UI_PRINCIPAL else "user"
         return decide(basis, UI_PRINCIPAL)
     if owner is None:
         return decide("unowned", thread_id)
     if thread_id == owner:
         return decide("owner", thread_id)
-    from infra.auth import is_owner_sentinel
-
-    if thread_id == conductor and not is_owner_sentinel(owner):
+    if thread_id == conductor and owner != UI_PRINCIPAL:
         return decide("conductor", thread_id)
     principal = acting_owner(thread_id, False, db=db)
     if principal is not None and principal == owner:
         return decide("owner_subagent", principal)
-    if principal is not None and principal == conductor and not is_owner_sentinel(owner):
+    if principal is not None and principal == conductor and owner != UI_PRINCIPAL:
         return decide("conductor_subagent", principal)
     if mechanical_index:
         return decide("index_entry", principal or thread_id)
@@ -238,10 +234,11 @@ def artifact_owner(artifact_id: str, *, db) -> str | None:
 
 def owner_label(owner_thread_id: str, *, db) -> str:
     """Return a product-facing label for an owner principal."""
-    from infra.auth import is_owner_sentinel
-
-    if is_owner_sentinel(owner_thread_id):
+    if owner_thread_id == UI_PRINCIPAL:
         return "the user"
+    if owner_thread_id.startswith("project:"):
+        conductor = scope_conductor(owner_thread_id.removeprefix("project:"), db=db)
+        return owner_label(conductor, db=db) if conductor else "None"
     row = db.execute(
         "SELECT title FROM threads WHERE id=?",
         (owner_thread_id,),
@@ -252,11 +249,9 @@ def owner_label(owner_thread_id: str, *, db) -> str:
 
 def person_owner_label(owner: str | None, *, db, user_id: str | None = None, owner_user_id: str | None = None) -> str:
     """Show the recorded person's account name to other people, or You to the owner."""
-    from infra.auth import is_owner_sentinel
-
     if owner is None:
         return "None"
-    if is_owner_sentinel(owner):
+    if owner == UI_PRINCIPAL:
         return str(owner_user_id) if owner_user_id and user_id and owner_user_id != user_id else "You"
     return owner_label(owner, db=db)
 

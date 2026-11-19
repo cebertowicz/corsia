@@ -55,6 +55,42 @@ async def test_owner_worker_can_handover_but_unrelated_agent_is_refused(owned_do
 
 
 @pytest.mark.asyncio
+async def test_nested_worker_edit_and_handover_use_same_owner(owned_document):
+    from infra.database import get_db
+    from registry.shared_principals import may_edit_document
+    from tests.test_document_owner_supervisor import PERSON
+
+    _, artifact_id = owned_document
+    _one_person_account()
+    db = get_db()
+    db.execute("INSERT INTO threads (id,user_id,title,spawned_by,created_at,updated_at) VALUES ('worker-1',?,'Worker','agent-1','t','t')", (PERSON['id'],))
+    db.execute("INSERT INTO threads (id,user_id,title,spawned_by,created_at,updated_at) VALUES ('worker-2',?,'Worker','worker-1','t','t')", (PERSON['id'],))
+    db.commit()
+    assert may_edit_document('worker-2', False, owner='agent-1', conductor=None, path_rel='doc', db=db).basis == 'owner_subagent'
+    db.close()
+    assert json.loads(await _handover(artifact_id, 'worker-2'))['artifact']
+    db = get_db()
+    assert may_edit_document('worker-2', False, owner='ui', conductor=None, path_rel='doc', db=db).basis == 'refused'
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_handover_emits_ownership_events(owned_document, monkeypatch):
+    from infra import product_events
+
+    _, artifact_id = owned_document
+    _one_person_account()
+    events = []
+    monkeypatch.setattr(product_events, 'emit_product_event',
+                        lambda category, action, **kw: events.append((category, action, kw['properties'])))
+    assert json.loads(await _handover(artifact_id, 'agent-1'))['artifact']
+    assert events == [
+        ('documents', 'owner_changed', {'from': 'agent', 'to': 'person'}),
+        ('documents', 'supervisor_changed', {'from': 'none', 'to': 'agent'}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handover_succeeds_with_two_people(owned_document):
     _, artifact_id = owned_document
     result = json.loads(await _handover(artifact_id, "agent-1"))
@@ -116,9 +152,23 @@ async def test_project_conductor_hands_project_sentinel_document_to_person(assig
     )
     other = make_session(scope["db"], project_id="project-other", title="Other conductor", prefix="other-conductor")
     scope["db"].execute("UPDATE projects SET conductor_thread_id=? WHERE id='project-other'", (other,))
+    scope["db"].execute(
+        "INSERT INTO threads (id,user_id,title,spawned_by,created_at,updated_at) "
+        "SELECT 'conductor-worker',user_id,'Worker',id,'t','t' FROM threads WHERE id=?",
+        (scope["conductor"],),
+    )
     scope["db"].commit()
+    from registry.shared_principals import may_edit_document
+    assert may_edit_document(
+        "conductor-worker", False, owner="project:project-alpha", conductor=scope["conductor"],
+        path_rel="context/instruction.md", db=scope["db"],
+    ).basis == "conductor_subagent"
+    assert may_edit_document(
+        other, False, owner="project:project-alpha", conductor=scope["conductor"],
+        path_rel="context/instruction.md", db=scope["db"],
+    ).basis == "refused"
     assert await _handover(artifact_id, other) == "Error: Ask the document's owner or their worker to give it to the person; for an unowned project document, ask its conductor."
-    assert json.loads(await _handover(artifact_id, scope["conductor"]))["artifact"]
+    assert json.loads(await _handover(artifact_id, "conductor-worker"))["artifact"]
     assert _view(artifact_id)["owner"]["label"] == "You"
 
 

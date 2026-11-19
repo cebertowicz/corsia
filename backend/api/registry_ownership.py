@@ -18,7 +18,6 @@ from pydantic import BaseModel
 from infra.auth import authenticate, may_access_artifact, require_human_user
 from infra.database import write_transaction
 from infra.db_async import run_in_db
-from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from registry import models, service
 from registry.document_ownership_change import (
@@ -26,6 +25,7 @@ from registry.document_ownership_change import (
     PERSON_OR_AGENT_CHOICE_REFUSAL as PERSON_OR_AGENT_CHOICE_REFUSAL,
     OwnershipBody,
     apply_change as _apply_change,
+    emit_ownership_events,
     refusal_for as _refusal_for,
 )
 from registry.ownership_authority import (
@@ -240,6 +240,5 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
     assert result is not None
     changed, view, events = result
     service.notify_changed(changed)
-    for action, properties in events:
-        await asyncio.to_thread(emit_product_event, "documents", action, user_id=user["id"], properties=properties)
+    await asyncio.to_thread(emit_ownership_events, events, user["id"])
     return {"ownership": view}

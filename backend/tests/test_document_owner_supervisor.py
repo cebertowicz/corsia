@@ -20,7 +20,7 @@ SECOND_PERSON = OTHER_USER
 
 
 @pytest.mark.parametrize(("owner", "kind"), [(None, "none"), ("", "none"), ("ui", "person"),
-                                              ("project:p1", "person"), ("agent-1", "agent")])
+                                              ("project:p1", "none"), ("agent-1", "agent")])
 def test_owner_kind_classifies_owner_principals(owner, kind):
     from registry.document_supervisor import owner_kind
 
@@ -150,7 +150,7 @@ def _add_agent(thread_id: str, title: str) -> None:
         db.close()
 
 
-def test_project_person_owner_is_not_a_comment_delivery_recipient(owned_document, monkeypatch):
+def test_project_owner_sentinel_is_not_a_comment_delivery_recipient(owned_document, monkeypatch):
     """A project sentinel must not be sent to thread delivery alongside the supervisor."""
     from doceditor import feedback_delivery
     from infra.database import get_db
@@ -370,13 +370,13 @@ def test_a_released_document_routes_as_its_header_reads_and_never_to_no_one(owne
     assert _comment_recipients(artifact_id) == ("agent-2",)
 
 
-@pytest.mark.parametrize("person_owner", ["ui", "project:p1"])
-def test_each_person_can_take_a_person_owned_document(owned_document, person_owner):
+@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
+def test_each_person_can_take_a_shared_document(owned_document, shared_owner):
     """Both accounts can take it, and the identity of the latest taker is retained."""
     client, artifact_id = owned_document
     url = f"/api/artifacts/{artifact_id}/ownership"
-    _set_owner(artifact_id, person_owner)
-    assert _view(artifact_id)["owner"]["kind"] == "person"
+    _set_owner(artifact_id, shared_owner)
+    assert _view(artifact_id)["owner"]["kind"] == ("person" if shared_owner == "ui" else "none")
     assert _view(artifact_id)["owner"]["recorded_viewer"] is False
     assert client.put(url, json={"supervisor_thread_id": "agent-1"}).status_code == 200
     assert client.put(url, json={"owner": "user"}).status_code == 200

@@ -60,15 +60,16 @@ async def test_handover_ask_follows_current_supervisor(owned_document):
             _ask(db, artifact_id, "agent-1")
         assert _ask(db, artifact_id, "agent-2") == artifact_id
 
-        # Legacy project owners use the same person-owner rule.
+        # Project-owned documents follow the project's conductor, not a stored person supervisor.
+        db.execute("INSERT INTO projects(id,name,conductor_thread_id,created_at,updated_at) VALUES ('project-alpha','Alpha','agent-1','t','t')")
         artifact = models.get_artifact(artifact_id, db=db)
         models.rehome_artifact(
             integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
             new_owner_thread_id="project:project-alpha", actor_thread_id=None, authority="system",
             reason="test", source_path="test", db=db,
         )
-        assert _ask(db, artifact_id, "agent-2") == artifact_id
+        assert _ask(db, artifact_id, "agent-1") == artifact_id
         with pytest.raises(service.PlanInputError, match="must name an artifact this thread owns, or a person-owned document this thread supervises"):
-            _ask(db, artifact_id, "agent-1")
+            _ask(db, artifact_id, "agent-2")
     finally:
         db.close()

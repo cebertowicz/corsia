@@ -188,19 +188,23 @@ def require_ask_owner(db, artifact_id, thread_id):
     identity = db.execute(
         "SELECT type,state FROM artifact_identities WHERE id=?", (artifact_id.strip(),),
     ).fetchone()
-    if owner != thread_id and not supervises_person_document(db, artifact_id.strip(), owner, identity, thread_id):
+    if owner != thread_id and not may_ask_for_document(db, artifact_id.strip(), owner, identity, thread_id):
         raise service.PlanInputError(
-            "ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises"
+            "ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises, "
+            "or a project-owned document whose conductor is this thread"
         )
     return identity
 
 
-def supervises_person_document(db, artifact_id, owner, identity, thread_id) -> bool:
-    """Whether a thread supervises this person-owned document."""
+def may_ask_for_document(db, artifact_id, owner, identity, thread_id) -> bool:
+    """Whether this thread can ask for review of a shared-owned document."""
     from infra import config
     from registry import models
     from registry.document_supervisor import effective_supervisor, owner_kind
+    from registry.shared_principals import scope_conductor
 
+    if identity["type"] == "document" and owner and owner.startswith("project:"):
+        return scope_conductor(owner.removeprefix("project:"), db=db) == thread_id
     if identity["type"] != "document" or owner_kind(owner) != "person":
         return False
     artifact = models.get_artifact(artifact_id, db=db)

@@ -21,6 +21,7 @@ def test_person_comment_task_uses_conductor_for_person_owned_documents(isolated_
         seed_thread(db, 'conductor')
         seed_thread(db, 'agent-owner')
         seed_thread(db, 'author')
+        db.execute("INSERT INTO projects(id,name,conductor_thread_id,created_at,updated_at) VALUES ('example','Example','conductor','t','t')")
         monkeypatch.setattr(person_comment_task, '_supervisor', lambda _db, _artifact: 'conductor')
         artifact = seed_document(db, owner)
         with write_transaction(db, scope='test_person_comment') as connection:

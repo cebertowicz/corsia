@@ -51,7 +51,10 @@ def _owner(db, artifact: dict | None):
     if not artifact or artifact.get('relationship_state') not in OWNER_REGISTRATION_STATES:
         return None
     owner = artifact.get('parent_thread_id')
-    if owner_kind(owner) == 'person':
+    if owner and owner.startswith('project:'):
+        from registry.shared_principals import scope_conductor
+        owner = scope_conductor(owner.removeprefix('project:'), db=db)
+    elif owner_kind(owner) == 'person':
         owner = _supervisor(db, artifact)
     return db.execute('SELECT id, user_id, title FROM threads WHERE id=?', (owner,)).fetchone() if owner else None
 

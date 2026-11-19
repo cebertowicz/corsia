@@ -2,8 +2,7 @@
 
 from core.workspace_layout import thread_tray_owners
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
-from infra.auth import is_owner_sentinel
-from registry.shared_principals import is_scope_conductor_for_shared_path
+from registry.shared_principals import UI_PRINCIPAL, is_scope_conductor_for_shared_path
 
 
 class RelocationError(ValueError):
@@ -63,7 +62,7 @@ def authorized_identity(db, artifact_id: str, actor_thread_id: str) -> dict:
     if identity is None or identity["state"] != "active":
         raise RelocationError(f"artifact not found or inactive: {artifact_id}")
     owner_thread_id = owner_thread(db, artifact_id)
-    if owner_thread_id is not None and is_owner_sentinel(owner_thread_id) and identity["type"] == "document":
+    if owner_thread_id == UI_PRINCIPAL and identity["type"] == "document":
         raise RelocationError("Only the person may move their document.")
     if owner_thread_id != actor_thread_id:
         from infra.config import WORKSPACE

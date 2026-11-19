@@ -5,7 +5,7 @@ delivery (new comments and re-opens alike) asks ``comment_recipients``, and the
 ownership PUT asks ``ownership``'s choices before
 changing either. Who owns it follows the registry owner alone, the same reading
 ``may_edit_document`` makes: a ``ui`` owner is the person's, so agents suggest;
-a ``project:`` owner is also the person's.
+a ``project:`` owner is represented by that project's conductor.
 
 A supervisor pick is checked once, when the person makes it: it must be one of
 ``ownership``'s choices. Every reader then takes the stored pick as it is while
@@ -66,11 +66,11 @@ def _status(row, paused: set[str]) -> str:
 
 
 def owner_kind(owner: str | None) -> str:
-    """Classify both person sentinels consistently for display, routing and authority."""
-    if not owner:
-        return "none"
-    if is_owner_sentinel(owner):
+    """Classify the stored owner without treating a project as a person."""
+    if owner == UI_PRINCIPAL:
         return "person"
+    if not owner or is_owner_sentinel(owner):
+        return "none"
     return "agent"
 
 
@@ -129,7 +129,8 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
     row, _source = effective_supervisor(db, artifact, owner=owner, workspace=workspace)
-    recipient_owner = UI_PRINCIPAL if owner_kind(owner) == "person" else owner
+    recipient_owner = (scope_conductor(owner.removeprefix("project:"), db=db) or UI_PRINCIPAL
+                       if owner and owner.startswith("project:") else owner)
     found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, recipient_owner) if who))
     released_owner = artifact.get("parent_thread_id")
     return found or ((str(released_owner),) if owner is None and owner_kind(released_owner) == "agent" else ())
@@ -153,10 +154,12 @@ def change_refusal(current: str | None, new_owner: str | None, multi_person: boo
 def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, multi_person: bool) -> dict[str, Any]:
     """Return the owner, effective supervisor and scoped picker choices for a document."""
     owner = artifact_owner(str(artifact["id"]), db=db)
-    kind = owner_kind(owner)
+    display_owner = (scope_conductor(owner.removeprefix("project:"), db=db)
+                     if owner and owner.startswith("project:") else owner)
+    kind = owner_kind(display_owner)
     owner_user_id = parse_metadata(artifact.get("metadata")).get("owner_user_id")
     scope = _scope(db, artifact, workspace)
-    owner_row = _thread(db, owner) if kind == "agent" else None
+    owner_row = _thread(db, display_owner) if kind == "agent" else None
     row, source = effective_supervisor(db, artifact, owner=owner, workspace=workspace)
     agents = [] if scope is None else pickable_agents(scope[0], user_id, db=db)
     paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
@@ -170,8 +173,8 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
         for agent in agents
     ]
     return {
-        "owner": {"kind": kind, "id": owner if kind == "agent" else None,
-                  "name": str(owner_row["title"] or owner) if owner_row is not None else None,
+        "owner": {"kind": kind, "id": display_owner if kind == "agent" else None,
+                  "name": str(owner_row["title"] or display_owner) if owner_row is not None else None,
                   "label": person_owner_label(owner, db=db, user_id=user_id,
                                               owner_user_id=owner_user_id),
                   "recorded_viewer": owner == "ui" and bool(owner_user_id) and owner_user_id == user_id},

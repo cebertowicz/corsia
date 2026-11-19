@@ -19,6 +19,14 @@ AGENT_CHOICE_REFUSAL = "Pick one of the agents listed."
 PERSON_OR_AGENT_CHOICE_REFUSAL = "Pick yourself or one of the agents listed."
 
 
+def emit_ownership_events(events: list, user_id: str | None) -> None:
+    """Emit the same ownership measurements for each committed change path."""
+    from infra.product_events import emit_product_event
+
+    for action, properties in events:
+        emit_product_event("documents", action, user_id=user_id, properties=properties)
+
+
 def refusal_for(body: OwnershipBody, current: str | None, multi_person: bool, agents: set[str]) -> tuple[int, str] | None:
     """The status and sentence this change is refused with, or ``None``.
 

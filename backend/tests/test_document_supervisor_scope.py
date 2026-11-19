@@ -57,7 +57,7 @@ def test_two_people_can_take_a_project_document(owned_document):
     client, _ = owned_document
     artifact_id = _project_document()
     _set_owner(artifact_id, "project:p1")
-    assert _view(artifact_id)["owner"]["label"] == "You"
+    assert _view(artifact_id)["owner"]["label"] == "None"
     response = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"})
     assert response.status_code == 200, response.text
     assert response.json()["ownership"]["owner"]["label"] == "You"
@@ -68,6 +68,29 @@ def test_two_people_can_take_a_project_document(owned_document):
                          multi_person=True)["owner"]["label"] == PERSON["id"]
     finally:
         db.close()
+
+
+def test_project_owner_displays_and_routes_to_its_conductor(owned_document):
+    from infra.database import get_db
+
+    _client, _ = owned_document
+    _one_person_account()
+    artifact_id = _project_document()
+    _set_owner(artifact_id, "project:p1")
+    assert _view(artifact_id)["owner"]["label"] == "None"
+    # A person's own comment is not sent back to its author, even when ui is the fallback.
+    assert _comment_recipients(artifact_id) == ()
+    db = get_db()
+    try:
+        from doceditor.feedback_comments import document_recipients
+        assert document_recipients(db, {"artifact_id": artifact_id}) == ("ui",)
+        db.execute("UPDATE projects SET conductor_thread_id='proj-agent' WHERE id='p1'")
+        db.commit()
+    finally:
+        db.close()
+    owner = _view(artifact_id)["owner"]
+    assert (owner["id"], owner["label"]) == ("proj-agent", "Project agent")
+    assert _comment_recipients(artifact_id) == ("proj-agent",)
 
 
 def test_the_picker_lists_the_documents_own_project_agents_when_the_project_has_no_conductor(owned_document):
@@ -138,7 +161,7 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     db = get_db()
     try:
         assert person_owner_label("ui", db=db) == "You"
-        assert person_owner_label("project:p1", db=db) == "You"
+        assert person_owner_label("project:p1", db=db) == "None"
         assert person_owner_label(None, db=db) == "None"
         assert person_owner_label("agent-1", db=db) == "Document agent"
     finally:
@@ -160,18 +183,18 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     assert _view(artifact_id)["owner"]["label"] == "You"
     _one_person_account()
     _set_owner(artifact_id, "project:p1")
-    assert _view(artifact_id)["owner"]["label"] == "You"
+    assert _view(artifact_id)["owner"]["label"] == "None"
 
 
 def test_each_owner_or_supervisor_change_emits_one_event_and_a_no_op_none(owned_document, monkeypatch):
-    import api.registry_ownership as ownership_api
+    from infra import product_events
 
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
     events: list[tuple[str, str, dict]] = []
     monkeypatch.setattr(
-        ownership_api, "emit_product_event",
+        product_events, "emit_product_event",
         lambda category, action, **kw: events.append((category, action, kw["properties"])),
     )
     url = f"/api/artifacts/{artifact_id}/ownership"
@@ -338,11 +361,11 @@ def _archive_agent(thread_id: str) -> None:
 
 
 def _recording_events(monkeypatch) -> list[tuple[str, dict]]:
-    import api.registry_ownership as ownership_api
+    from infra import product_events
 
     events: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        ownership_api, "emit_product_event", lambda category, action, **kw: events.append((action, kw["properties"])),
+        product_events, "emit_product_event", lambda category, action, **kw: events.append((action, kw["properties"])),
     )
     return events
 
