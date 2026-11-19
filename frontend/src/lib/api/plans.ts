@@ -7,7 +7,7 @@
  */
 import type { ActivityIndexReadOutcome } from './activityIndexTypes';
 import { decodeActivityIndexEnvelope } from './activityIndexDecode';
-import type { OperatorReadOutcome, OperatorUserAction } from './plansTypes';
+import type { OperatorNodeAction, OperatorReadOutcome } from './plansTypes';
 import { decodeOperatorEnvelope } from './plansDecode';
 import { measureServerClock, onClientClock } from './planClock';
 
@@ -100,14 +100,15 @@ export async function mutatePlanLifecycle(
 	}, 'Could not update this plan.');
 }
 
-/** Apply the user's control on a task: Mark done, Pause, Resume or Won't do (with its reason). */
+/** Apply the user's control on a task: Mark done, Pause, Resume, Won't do (with its reason) or a move (with its place). */
 export async function mutateUserTask(
 	planId: string,
-	operation: OperatorUserAction,
+	operation: OperatorNodeAction,
 	nodeId: string,
 	expectedRevision: number,
 	mutationId: string,
 	reason?: string,
+	orderKey?: number,
 ): Promise<PlanLifecycleMutationOutcome> {
 	return postPlanMutation(planId, {
 		operation,
@@ -116,6 +117,7 @@ export async function mutateUserTask(
 			node_id: nodeId,
 			expected_revision: expectedRevision,
 			...(reason ? { reason } : {}),
+			...(orderKey === undefined ? {} : { order_key: orderKey }),
 		},
 	}, 'Could not update this task.', true);
 }

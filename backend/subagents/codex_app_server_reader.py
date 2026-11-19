@@ -11,6 +11,7 @@ from core._tool_result_delivery_support import ToolResultBindingError
 from infra.write_admission import sqlite_errorname_tag
 from tools.recorded_call import CompletedToolFailure
 
+# No reading yet: process exit times are not recorded.
 PROCESS_EXIT_TIMEOUT_SECONDS = 10.0
 
 

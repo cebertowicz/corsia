@@ -228,7 +228,6 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
 
 #: The result wake is bounded like every default read (brief: numeric budgets).
 RETURNED_STEPS_MAX = 12
-RETURNED_TITLE_MAX_BYTES = 96
 RETURNED_EVIDENCE_MAX_BYTES = 480
 
 def notify_returned(
@@ -256,7 +255,7 @@ def notify_revision(
     while the revision is the worker's open, unheld step (#1731).
     """
     from plans import handoff_brief, service
-    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap, bounded
+    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap, bounded, title as bounded_title
     from prompts import plan_wakes as wakes
 
     with service._connection(db) as connection:
@@ -283,7 +282,7 @@ def notify_revision(
                     "node_id": node_id,
                     "worker_step_id": worker_step_id,
                     "revision": int(node["revision"]),
-                    "title": bounded(str(node["title"]), RETURNED_TITLE_MAX_BYTES),
+                    "title": bounded_title(str(node["title"])),
                     "acceptance_criteria": field(
                         str(node["acceptance_criteria"]), cap, what="criteria",
                     ),

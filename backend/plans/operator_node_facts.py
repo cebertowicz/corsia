@@ -333,14 +333,14 @@ def folded_changes(db, container_ids: list[str]) -> dict[str, str]:
     found: dict[str, str] = {}
     for container_id in container_ids:
         row = db.execute(
-            "SELECT own_last_changed,folded_at,child_in_work FROM plan_nodes "
+            "SELECT own_last_changed,folded_at,child_in_work,sub_open,kind,workflow_step FROM plan_nodes "
             f"WHERE parent_id=? AND {node_states.unarchived_sql('plan_nodes')} AND folded=1 "
             "ORDER BY own_last_changed DESC LIMIT 1",
             (container_id,),
         ).fetchone()
         if row is not None:
             stamp = str(row["own_last_changed"])
-            if row["child_in_work"] > 0 and row["folded_at"]:
+            if node_states.stored_parent(row) and row["folded_at"]:
                 stamp = max(stamp, str(row["folded_at"]))
             found[container_id] = stamp
     return found

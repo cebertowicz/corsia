@@ -54,8 +54,8 @@ SELF_PARENT = "parent_id must name a different node: a node cannot be its own pa
 #: wanting a branch under a task is the common case, and the phase does not
 #: exist yet.
 UNDER_TASK = (
-    "task nodes are leaves and cannot contain children: make a phase with "
-    "add kind='phase', then move these under it"
+    "task nodes are leaves and cannot contain children unless they are workflow steps: "
+    "make a phase with add kind='phase', then move these under it"
 )
 #: The cause, the fact that makes it so, and the fix -- in the caller's own words
 #: back at it, because a refused move usually means the ids were mixed up.
@@ -96,8 +96,8 @@ def plan(connection, node, parent_id) -> Move | None:
 
     Raises:
         PlanInputError: ``node`` is a workflow run's step, or ``parent_id`` names
-            this node, a node of another plan or no node, a task, or a descendant
-            of the node being moved.
+            this node, a node of another plan or no node, a plain task or person
+            step, or a descendant of the node being moved.
         PlanError: The new parent is retired or finished, the same refusals an
             ``add`` under it would give (``node_creation._validate_parent``).
     """
@@ -175,12 +175,12 @@ def _refuse(connection, node, parent_id: str) -> None:
     parent = connection.execute("SELECT * FROM plan_nodes WHERE id=?", (parent_id,)).fetchone()
     if parent is None or parent["plan_id"] != node["plan_id"]:
         raise service.PlanInputError(NOT_IN_PLAN)
-    if parent["kind"] == "task":
+    if parent["kind"] == "task" and parent["workflow_step"] is None:
         raise service.PlanInputError(UNDER_TASK)
     # What the parent's own state forbids is creation's rule, so a regroup refuses
     # exactly what an `add` under the same node would; the task check above is
     # this module's only because the hint to make a branch is a regroup's own.
-    node_creation._validate_parent(connection, node["plan_id"], parent_id)
+    node_creation._validate_parent(connection, node["plan_id"], parent_id, node["kind"])
     # The stored chain, archived rows included, not the live chain readers use
     # (``node_states.live_chain`` stops at an archived row, so it would miss the
     # node above a stranded one); the seen set ends the walk on any loop.

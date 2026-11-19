@@ -35,12 +35,11 @@ import plans.triage_lines as triage_lines
 from plans.close_next_bounds import (
     CRITERIA_MIN_BYTES,
     NEXT_BLOCK_MAX_BYTES,
-    REASON_MAX_BYTES,
-    TITLE_MAX_BYTES,
     WAIT_MAX_BYTES,
     CloseNextInvariantError,
     bounded,
     fit,
+    title as bounded_title,
     json_bytes,
     FEEDBACK_MAX_BYTES,
 )
@@ -190,7 +189,7 @@ def _named(named: NamedStart, started: bool) -> dict[str, Any]:
     if named.refusal is None or named.reason is None:
         raise CloseNextInvariantError("reconciliation displaced the named next task")
     return {
-        "reason": bounded(named.reason, REASON_MAX_BYTES),
+        "reason": named.reason,
         "refusal": named.refusal,
         "started": False,
     }
@@ -296,7 +295,7 @@ def _task_row(node_id, revision, state, title, wait: str | None) -> dict[str, An
         "id": str(node_id),
         "revision": int(revision),
         "state": str(state),
-        "title": bounded(str(title), TITLE_MAX_BYTES),
+        "title": bounded_title(str(title)),
         "wait": wait,
     }
 
