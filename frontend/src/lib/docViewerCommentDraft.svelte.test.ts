@@ -243,10 +243,11 @@ describe('a post that lands or fails after its composer closed and another opene
 		const first = await begin('lands', false);
 		expect(addComment).toHaveBeenCalledTimes(1);
 		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
-		// The id goes to the viewer, which closes the open composer on the stored comment, as it would for the original.
+		// The press hands the stored id back while the reopened, unedited composer is the one open (the edited case above
+		// gets null and stays open). That id is what the viewer closes the open composer on (DocViewer submitComment); the
+		// close itself is the viewer's, so this unit test stops at the id.
+		expect(current!.controller.draft?.body).toBe('Too terse');
 		expect(first).toBe('posted');
-		current!.escape(); commentDraft.set(null); flushSync();
-		expect(current!.controller.hasText).toBe(false);
 	});
 
 	it('lands after its viewer closed: the composer reopened in a new viewer posts unedited under the same id, so the server answers with the stored comment', async () => {

@@ -215,16 +215,24 @@ describe('a reply kept until it posts', () => {
 		const restore = quiet();
 		try {
 			const actions = createThreadActions(() => 'artifact', vi.fn());
+			// As the mention picker does: it reads the field's text, then records the agent picked in it.
 			const tags = createMentionSelection();
-			keptCommentDrafts.keepReply(key, 'My reply', tags);
+			tags.update('Ask @Agent');
+			tags.select('agent-1', 4, '@Agent');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent', tags);
 			let finish!: () => void;
 			vi.mocked(addReply).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
-			const posting = actions.reply('root', 'My reply', [], [], key);
-			keptCommentDrafts.keepReply(key, 'My reply and more', tags);
+			const posting = actions.reply('root', 'Ask @Agent', ['agent-1'], [], key);
+			// Typed at the end, as the field reports it (beforeinput, then input).
+			tags.begin(10, 10, 'insertText'); tags.update('Ask @Agent and more');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent and more', tags);
 			finish(); await posting;
-			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply and more' });
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'Ask @Agent and more' });
 			// Its own copy of the tags: the field that pressed clears its own once the reply is stored.
-			expect(keptCommentDrafts.get(key)?.mentionSelection).not.toBe(tags);
+			const copy = keptCommentDrafts.get(key)!.mentionSelection;
+			expect(copy).not.toBe(tags);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual([{ agent_id: 'agent-1', start: 4, end: 10 }]);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual(tags.occurrences('Ask @Agent and more'));
 			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
 		} finally { restore(); }
 	});
