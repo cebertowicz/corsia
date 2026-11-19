@@ -1,0 +1,50 @@
+"""plan_activity counts decisions raised to the person, by the raising plan's origin."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from infra.audit_plan_activity import plan_activity
+from plans import service
+from plans.public import server_raised_decision_provenance
+from tests.test_plan_conductor_task_adds import db  # noqa: F401
+
+
+def _raise(db, thread_id: str, *, times: int = 1, provenance: str = "test.decision") -> None:
+    plan = service.ensure_plan("thread", thread_id, db=db)
+    node = service.add_node(plan.id, kind="task", title="Decide", acceptance_criteria="Answered", db=db)
+    for _ in range(times):
+        service._event(db, node.id, "decision_raised", actor_id=thread_id, provenance=provenance)
+    db.commit()
+
+
+def test_decisions_raised_split_by_root_or_delegated_and_who_raised(db):
+    db.execute(
+        "INSERT INTO threads (id,user_id,project_id,spawned_by,title,model,created_at,updated_at)"
+        " VALUES ('worker','user','project-a','lane','worker','test/model','t','t')"
+    )
+    _raise(db, "lane", times=2)
+    _raise(db, "lane", provenance=server_raised_decision_provenance)
+    _raise(db, "worker")
+    service.add_node(service.ensure_plan("thread", "worker", db=db).id, kind="task", title="Plain",
+                     acceptance_criteria="Done", db=db)
+    db.commit()
+    now = datetime.now(timezone.utc)
+
+    row = plan_activity(db, "user", (now - timedelta(hours=1)).isoformat(), (now + timedelta(hours=1)).isoformat())[0]
+
+    assert {(r["origin"], r["raised_by"], r["archived"], r["decisions"], r["raises"])
+            for r in row["decisions_raised"]} == {
+        ("root", "agent", 0, 1, 2),
+        ("root", "server", 0, 1, 1),
+        ("delegated", "agent", 0, 1, 1),
+    }
+    assert "decisions_raised" in row["definitions"]
+
+
+def test_decisions_raised_outside_the_window_are_not_counted(db):
+    _raise(db, "lane")
+    later = datetime.now(timezone.utc) + timedelta(days=2)
+
+    row = plan_activity(db, "user", later.isoformat(), (later + timedelta(hours=1)).isoformat())[0]
+
+    assert row["decisions_raised"] == []

@@ -326,6 +326,7 @@ from plans.delegation_harvest import returned_steps as returned_worker_steps
 from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdict_ages, owed_verdicts
 from plans.later_review import due as later_reviews_due, reviews as review_later_piles
 from plans import automated_mutation_keys
+from plans.gate_handoff import PROVENANCE as server_raised_decision_provenance
 from plans.hierarchy import shown_worker_plan
 from plans.service import _transition as transition_node_in
 from plans.worker_retirement import (
