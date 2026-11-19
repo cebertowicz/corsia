@@ -11,6 +11,7 @@ import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
 import plans.bulk_fields as bulk_fields
 import plans.bulk_nodes as bulk_nodes
+import plans.handoff_brief as handoff_brief
 import plans.later_fields as later_fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
@@ -74,10 +75,12 @@ def _dispatch_admission(operation: str, params: dict[str, Any], actor, common: d
     jump = triage_lines.jump_for_start(
         common["db"], node, actor_id=actor.thread_id if actor.kind == "thread" else None,
     )
+    was_selected = admission.attempts.open_attempt(common["db"], node["id"]) is not None
     reply = admission.make_current(
         params["node_id"], **fields.expected(params), **common,
         payload=None if jump is None else jump.payload,
     )
+    reply.update(handoff_brief.started_hint(common["db"], node, reply, was_selected=was_selected))
     if jump is not None and reply["admission"].get("selection") is not None:
         reply["jumped"] = jump.line
     conflict = reply["admission"].get("conflict") or {}

@@ -169,8 +169,8 @@ def test_the_pane_rollup_equals_the_full_rollup_on_every_row_it_lists() -> None:
     The pane lists the open work and, per level, the newest folded rows; a row beneath a
     folded parent is not listed (the folded route pages it). Every listed row must carry the
     full rollup's fields; the plan's progress and moving state must match too. The one
-    difference is ``has_child_in_work``, a field only the pane's rows add: it must equal
-    ``node_states.has_child_in_work_sql``.
+    difference is ``is_parent``, a field only the pane's rows add: it must equal
+    ``node_states.parent_sql``.
     """
     from plans import open_rollup, rollup
 
@@ -190,10 +190,10 @@ def test_the_pane_rollup_equals_the_full_rollup_on_every_row_it_lists() -> None:
             expected = by_id.get(node["id"])
             assert expected is not None, f"seed {seed}: {node['id']} listed but not in the full rollup"
             in_work = db.execute(
-                f"SELECT {node_states.has_child_in_work_sql('n')} FROM plan_nodes n WHERE n.id=?", (node["id"],),
+                f"SELECT {node_states.parent_sql('n')} FROM plan_nodes n WHERE n.id=?", (node["id"],),
             ).fetchone()[0]
-            assert node["has_child_in_work"] == bool(in_work), f"seed {seed}: {node['id']} has_child_in_work"
-            for key in sorted(set(node) - {"has_child_in_work"} | set(expected)):
+            assert node["is_parent"] == bool(in_work), f"seed {seed}: {node['id']} is_parent"
+            for key in sorted(set(node) - {"is_parent"} | set(expected)):
                 if _dump(node.get(key)) != _dump(expected.get(key)):
                     differing.setdefault(key, []).append(f"seed {seed} {node['id']}")
             compared += 1

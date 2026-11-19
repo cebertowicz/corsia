@@ -195,7 +195,7 @@ def waiting_on_answer(connection, plan_id: str) -> bool:
            WHERE w.plan_id=? AND w.archived_at IS NULL AND w.assignee='user'
              AND w.state IN ('pending','active','review_requested')
              AND {open_row_sql(connection, 'w')}
-             AND NOT {node_states.has_child_in_work_sql('w')}
+             AND NOT {node_states.parent_sql('w')}
            LIMIT 1""",
         (plan_id,),
     ).fetchone() is not None

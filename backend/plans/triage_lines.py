@@ -103,7 +103,7 @@ def standing(db, plan) -> Standing:
     }
     leaves = [
         row for row, _path in ordered
-        if not row["has_child_in_work"] and not row["later"]
+        if not row["is_parent"] and not row["later"]
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])

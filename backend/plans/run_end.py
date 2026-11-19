@@ -64,9 +64,9 @@ def _open_below(db, phase_id: str, where: str = "") -> list[str]:
 def open_nodes(db, phase_id: str) -> list[str]:
     """Open work beneath a run's phase, deepest first.
 
-    The walk is the in-work walk of ``user_settle``; a nested run's phase and a
-    container whose children are in work have no work of their own: they read
-    as their leaves, the same rule the fold uses.
+    The walk is the in-work walk of ``user_settle``. A task step remains open
+    until it settles, even with children. A nested run's phase and other containers
+    whose children are in work read as their leaves.
     """
     return _open_below(
         db, phase_id,
