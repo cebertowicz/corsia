@@ -176,6 +176,29 @@ def test_schema_200_runs_notice_and_feedback_migrations_with_recovery_marker(db)
     assert db.execute("SELECT value FROM settings WHERE key='person_comment_recovery_pending'").fetchone() == ('1',)
 
 
+def _node_usage_tables(db):
+    return {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_usage_node%'")}
+
+
+@pytest.mark.parametrize('start', [201, 202])
+def test_ladder_to_203_from_201_and_202_keeps_node_usage_tables(db, start):
+    from infra.database_migrations import migrate_to_current
+    from infra.migration_201_to_202_node_usage_groups import migrate_201_to_202
+    db.execute('CREATE TABLE llm_usage(id TEXT PRIMARY KEY)')
+    if start == 202:
+        migrate_201_to_202(db)
+    present = _node_usage_tables(db)
+    assert bool(present) == (start == 202)
+    _batch(db, 'old', 'project:p')
+    db.commit()
+    db.execute(f'PRAGMA user_version={start}')
+    assert migrate_to_current(db, 203).migrated
+    assert db.execute('PRAGMA user_version').fetchone() == (203,)
+    assert "llm_usage_node_groups" in _node_usage_tables(db)
+    assert db.execute("SELECT recipient_id FROM doc_feedback_batches WHERE id='old'").fetchone() == ('conductor',)
+    assert db.execute("SELECT value FROM settings WHERE key='person_comment_recovery_pending'").fetchone() == ('1',)
+
+
 def test_migration_framework_rolls_back_repair_and_references_on_failure(db):
     from infra.database_migrations import migrate_to_current
     _batch(db, 'old', 'project:p')
