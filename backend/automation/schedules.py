@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 from infra.database import write_transaction
 
 MAX_SCHEDULE_RUNS = 1000
-MAX_CADENCE_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -51,13 +50,20 @@ def _parse(value: str) -> datetime:
 
 
 def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
-    """The first cadence slot after ``now``, anchored on the due time: no replay."""
+    """The first cadence slot after ``now``, anchored on the due time: no replay.
+
+    A slot past the last date the calendar holds never comes, so the row waits at that date
+    instead of failing the sweep that advances it.
+    """
     due, current = _parse(due_at), _parse(now)
     step = timedelta(seconds=cadence_seconds)
     if due > current:
         return due.isoformat()
     missed = int((current - due) / step) + 1
-    return (due + missed * step).isoformat()
+    try:
+        return (due + missed * step).isoformat()
+    except OverflowError:
+        return datetime.max.replace(tzinfo=timezone.utc).isoformat()
 
 
 def _row(row) -> Schedule:
@@ -87,11 +93,20 @@ def _next_run(kind: str, spec: str, now: str, max_runs: int) -> str:
         seconds = int(spec)
     except (TypeError, ValueError) as exc:
         raise ValueError("cadence spec must be integer seconds") from exc
-    if not 1 <= seconds <= MAX_CADENCE_SECONDS:
-        raise ValueError(
-            f"cadence seconds must be between 1 and {MAX_CADENCE_SECONDS}"
-        )
-    return (now_dt + timedelta(seconds=seconds)).isoformat()
+    if seconds < 1:
+        raise ValueError("cadence seconds must be at least 1")
+    return first_cadence_run(now_dt, seconds).isoformat()
+
+
+def first_cadence_run(now: datetime, cadence_seconds: int) -> datetime:
+    """The first run one cadence after ``now``.
+
+    Any cadence the calendar can hold is accepted; ``next_slot`` handles every length.
+    """
+    try:
+        return now + timedelta(seconds=cadence_seconds)
+    except OverflowError:
+        raise ValueError("cadence seconds put the next run past the last date the calendar holds") from None
 
 
 def create(

@@ -65,6 +65,16 @@ export function isVisibleFinished(node: OperatorNode, openBlocked: ReadonlySet<s
 	return isFinished(node) && !openBlocked.has(node.id);
 }
 
+/** The two open groups that keep their server order; timed and scheduled rows do not. */
+export function planOrderGroup(node: OperatorNode, now: number, openBlocked: ReadonlySet<string>): 'work' | 'untimed' | null {
+	if (isVisibleFinished(node, openBlocked) || isScheduledMember(node, now) || waitEndsAtMs(node) !== null) return null;
+	return waitsWithoutEnd(node) ? 'untimed' : 'work';
+}
+
+function waitsWithoutEnd(node: OperatorNode): boolean {
+	return node.display.tone_key === 'waiting' && node.execution.condition !== 'ready' && waitEndsAtMs(node) === null;
+}
+
 /**
  * Ids of terminal nodes that keep their plan-order place because a
  * descendant is still open: a finished parent whose subtree still holds open
@@ -192,9 +202,7 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 		// blocked yet reads "Waiting · After …", and sits with the other waits. Ready
 		// work nobody is moving also reads Waiting ("Not started") but stays with the
 		// open work: nothing but the agent's turn holds it.
-		const waitsWithoutEnd = (node: OperatorNode) =>
-			node.display.tone_key === 'waiting' && node.execution.condition !== 'ready'
-			&& waitEndsAtMs(node) === null;
+		// This same predicate identifies the untimed group eligible for manual ordering.
 		const scheduled = open.filter(quiet);
 		const ordinary = open.filter((node) => !quiet(node));
 		const timed = ordinary.filter((node) => waitEndsAtMs(node) !== null).sort(byEnd);
