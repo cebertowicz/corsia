@@ -118,8 +118,10 @@ def _wakes(db):
 
 def test_registration_bounds_and_series_validation(tmp_path):
     db = _db()
-    with pytest.raises(ValueError, match="cadence_seconds"):
-        _register(db, tmp_path, cadence=60)
+    with pytest.raises(ValueError, match="cadence_seconds must be at least"):
+        _register(db, tmp_path, cadence=store.MIN_CADENCE_SECONDS - 1)
+    with pytest.raises(ValueError, match="calendar"):
+        _register(db, tmp_path, cadence=10**12)
     with pytest.raises(ValueError, match="min must not exceed max"):
         store.parse_series([{"key": "a", "min": 5, "max": 1}])
     with pytest.raises(ValueError, match="unique"):
@@ -651,3 +653,14 @@ async def test_run_is_recorded_at_its_finish_time_not_its_start(tmp_path, monkey
     row = schedules.get(schedule.id, db=db)
     assert (row.last_run_at, row.noted_at) == (finish, finish)
     assert row.next_run_at > T0  # the claimed slot still came from the start
+
+
+def test_the_cadence_floor_is_the_sweep_interval_and_has_no_ceiling(tmp_path):
+    """Script runs are claimed by the continuation sweep, so its interval is the shortest
+    cadence that can be kept; any longer one, a month included, is accepted."""
+    from automation.continuation.loop import CONTINUATION_SWEEP_INTERVAL
+
+    assert store.MIN_CADENCE_SECONDS == CONTINUATION_SWEEP_INTERVAL
+    db = _db()
+    _register(db, tmp_path, cadence=store.MIN_CADENCE_SECONDS)
+    _register(db, tmp_path, cadence=31 * 24 * 60 * 60, thread="owner")
