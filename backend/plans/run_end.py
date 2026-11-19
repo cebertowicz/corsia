@@ -55,7 +55,7 @@ def open_nodes(db, phase_id: str) -> list[str]:
         " SELECT n.id FROM below JOIN plan_nodes n ON n.id=below.id"
         f" WHERE {node_states.open_sql('n')}"
         " AND NOT (n.kind='phase' AND n.workflow_step IS NOT NULL)"
-        f" AND NOT (n.workflow_step IS NULL AND {node_states.is_container_sql('n')})"
+        f" AND NOT {node_states.is_container_sql('n')}"
         " ORDER BY below.depth DESC,n.order_key", (phase_id,),
     )]
 

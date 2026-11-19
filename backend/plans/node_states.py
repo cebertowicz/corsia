@@ -210,19 +210,31 @@ def work_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     return {node_id for node_id, in_work in answer.items() if in_work}
 
 
-def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
-    """The one rule for who is a parent: a node with a child in work.
+def step_task(node: Mapping | sqlite3.Row) -> bool:
+    """A workflow task owns a check after its children settle."""
+    return ("kind" in node.keys() and node["kind"] == "task"
+            and "workflow_step" in node.keys() and node["workflow_step"] is not None)
 
-    Every reader that splits a plan into parents and leaves -- leaves,
-    containers, folds, branch counts, next and open tasks, the status read --
-    asks this, so a closed child hands its parent back as a leaf everywhere
-    at once. ``has_child_in_work_sql`` is the same rule for SQL readers.
+
+def child_counts(parent: Mapping | sqlite3.Row, child: Mapping | sqlite3.Row) -> bool:
+    """Whether this direct child keeps its parent a parent."""
+    return not retired(child) and (not step_task(parent) or child["state"] not in _TERMINAL_STATES)
+
+
+def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
+    """The one rule for who is a parent: a node with a counting child.
+
+    A workflow task counts only open children so it can do its own check after
+    they settle. Other parents count children in work, including settled ones.
+    ``has_child_in_work_sql`` is the same rule for SQL readers.
     """
     rows = list(rows)
     work = work_ids(rows)
+    by_id = {str(row["id"]): row for row in rows}
     listed = {
         str(row["parent_id"]) for row in rows
         if row["parent_id"] is not None and str(row["id"]) in work
+        and (str(row["parent_id"]) not in by_id or child_counts(by_id[str(row["parent_id"])], row))
     }
     # A row of ``plans.open_rollup`` says so itself when its children are not among ``rows``.
     return listed | {
@@ -264,7 +276,9 @@ def has_child_in_work_sql(alias: str) -> str:
     return (
         f"EXISTS (SELECT 1 FROM plan_nodes work_child"
         f" WHERE work_child.plan_id={alias}.plan_id"
-        f" AND work_child.parent_id={alias}.id AND {in_work_sql('work_child')})"
+        f" AND work_child.parent_id={alias}.id AND {in_work_sql('work_child')}"
+        f" AND ({alias}.kind <> 'task' OR {alias}.workflow_step IS NULL"
+        f" OR ({open_sql('work_child')})))"
     )
 
 

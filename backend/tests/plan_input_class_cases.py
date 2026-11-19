@@ -52,14 +52,14 @@ def _workflow_fields_before_migration(db, scene):
     )
 
 
-def _child_of_person_step(db, scene):
+def _child_of_non_agent_step(db, scene, *, by):
     step = service._create_node(
-        db, scene.plan_id, kind="task", title="Person step", acceptance_criteria="Answered",
+        db, scene.plan_id, kind="task", title="Other step", acceptance_criteria="Answered",
         parent_id=None, order_key=None, description=None, workflow_ref=None,
-        workflow_version=None, workflow_step="person", difficulty="routine", size="S",
-        checkpoint_exception=False, assignee="user", spawn_kind=None,
+        workflow_version=None, workflow_step=by, difficulty="routine", size="S",
+        checkpoint_exception=False, assignee="user" if by == "person" else None, spawn_kind=None,
         watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
-        node_id=service._id(), workflow_by="person",
+        node_id=service._id(), workflow_by=by,
     )
     db.commit()
     return partial(
@@ -801,7 +801,9 @@ _CASES = {
             "parent_id": NODE,
         }),
     ("node_creation.py", '"The person does that step, so the agent\'s work goes in its own step or task."'):
-        _child_of_person_step,
+        partial(_child_of_non_agent_step, by="person"),
+    ("node_creation.py", '"A reviewer does that step independently, so it cannot contain author subtasks."'):
+        partial(_child_of_non_agent_step, by="reviewer"),
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
     ("node_creation.py", '"task intent requires schema version 138"'): _intent_before_migration,

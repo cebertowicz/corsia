@@ -37,9 +37,14 @@ def _validate_parent(
             raise service.PlanInputError("task nodes are leaves and cannot contain children unless they are workflow steps")
         from plans.workflow_fields import creation_payload
 
-        if creation_payload(connection, parent_id).get("workflow_by") == "person":
+        by = creation_payload(connection, parent_id).get("workflow_by")
+        if by == "person":
             raise service.PlanInputError(
                 "The person does that step, so the agent's work goes in its own step or task."
+            )
+        if by == "reviewer":
+            raise service.PlanInputError(
+                "A reviewer does that step independently, so it cannot contain author subtasks."
             )
 
 

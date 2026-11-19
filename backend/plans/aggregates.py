@@ -147,6 +147,15 @@ def _fold_tone(node: Mapping, own: Own, folded: bool) -> str | None:
     return "failed" if node["state"] == "failed" else "closed"
 
 
+def refresh_step_children(connection: sqlite3.Connection, node: dict) -> None:
+    """Store a workflow task's open-child count; plain parents keep their existing count."""
+    if node_states.step_task(node):
+        node["child_in_work"] = connection.execute(
+            f"SELECT COUNT(*) FROM plan_nodes c WHERE c.plan_id=? AND c.parent_id=? "
+            f"AND {node_states.open_sql('c')}", (node["plan_id"], node["id"]),
+        ).fetchone()[0]
+
+
 def refresh(node: dict, stamp: str) -> tuple[int, Work, Folded, int]:
     """Recompute one node from its row and stored sums, in place.
 
@@ -245,6 +254,7 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     if not chain:
         return
     head = chain[0]
+    refresh_step_children(connection, head)
     d_open, d_work, d_folded, child_delta = refresh(head, at)
     listed = int(head["archived_at"] is None)
     # ``top_roots`` counts rows with no parent at all (rebuild, recount); a row stranded
@@ -260,6 +270,7 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
             reached_top = False
             break
         parent["child_in_work"] += child_delta
+        refresh_step_children(connection, parent)
         child_delta = 0
         for tone, change in zip(TONES, d_folded):
             parent[f"child_folded_{tone}"] += change

@@ -177,13 +177,13 @@ def _blockers(db, node_plans) -> dict[str, str | None]:
     if not candidates:
         return blockers
     marks = ",".join("?" for _ in candidates)
-    parents = node_states.parent_ids(
-        db.execute(
-            "SELECT id,parent_id,state,archived_at FROM plan_nodes"
-            f" WHERE parent_id IN ({marks}) AND {node_states.unarchived_sql('plan_nodes')}",
+    parents = {
+        str(row["id"]) for row in db.execute(
+            f"SELECT n.id FROM plan_nodes n WHERE n.id IN ({marks}) "
+            f"AND {node_states.has_child_in_work_sql('n')}",
             tuple(str(node["id"]) for node, _plan in candidates),
         ).fetchall()
-    )
+    }
     leaves = []
     for node, plan in candidates:
         if str(node["id"]) in parents:

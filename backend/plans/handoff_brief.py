@@ -8,10 +8,10 @@ still to make.
 
 Both ways a task reaches its executor, the work-selected wake and the result
 of the close that selects it, ask this module the same questions, so they
-cannot answer them differently: whether the task's description is carried, and
-how a carried field is bounded. A handoff field is whole up to a ceiling and
-past it names the read that returns the rest. One writer builds every such
-field, so the cut is made and worded once, wherever the handoff is composed.
+cannot answer them differently: whether the task's description and step hint are
+carried, and how a carried description is bounded. A description is whole up
+to a ceiling and past it names the read that returns the rest. One writer makes
+that cut wherever the handoff is composed.
 
 Every handoff of such a task carries its description, a task set aside and
 taken back included. Nothing records what was carried, so nothing can claim
@@ -80,7 +80,7 @@ def step_hint(db, node) -> dict:
         return {}
     from plans.workflow_fields import creation_payload
 
-    if creation_payload(db, node["id"]).get("workflow_by") == "person":
+    if creation_payload(db, node["id"]).get("workflow_by") in ("person", "reviewer"):
         return {}
     node_id = str(node["id"])
     return {"step_hint": (
@@ -90,10 +90,10 @@ def step_hint(db, node) -> dict:
 
 
 def fact(db, node_id: str, executor: str) -> dict:
-    """Return the description fact one handoff of a task carries.
+    """Return the description and step hint owed on a handoff.
 
-    Empty when the handoff owes no description (``owed``), so a caller adds
-    what this returns and the key is absent rather than null. ``cut`` is the
+    Either fact may be absent; an eligible agent step carries its hint even
+    without a description. ``cut`` is the
     writer's own answer to whether the text was cut at its ceiling: a field
     that differs from the stored description is a cut one. Resolves the
     executor's own thread plan through ``service.ensure_plan``, which creates
