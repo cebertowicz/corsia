@@ -291,7 +291,6 @@
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
 		unreadCount={unreadThreads.length}
-		{resolvedCount} {resolvedOpen}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -354,7 +353,7 @@
 		anchor={commentUI.anchor}
 		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
-		{commentsEntry} resolvedAnchor={commentsEntry}
+		{commentsEntry}
 		feedback={feedbackStatus?.feedback()}
 		narrow={isPaneDrawer()}
 		phone={$isMobile || $isShortTouch}

@@ -204,7 +204,7 @@ for (const { label, view } of CASES) {
 			for (const control of top.acceptSuggestions) if (!control.reachable) fail(`list top: "${control.name}" can't be reached`);
 			if (top.acceptSuggestions.length === 1 && top.acceptSuggestions[0].reachable) {
 				await page.locator(DRAWER).getByRole('button', { name: 'Accept suggestions', exact: true }).click();
-				const choices = page.getByRole('group', { name: 'Suggesters' });
+				const choices = page.getByRole('group', { name: 'Choose whose suggestions to accept' });
 				const suggesters = choices.getByRole('checkbox');
 				if (await suggesters.count() !== 2) fail('list: expected both suggesters in the checklist');
 				for (const direction of ['North', 'South']) if (!(await choices.getByRole('checkbox', { name: new RegExp(`Review Agent ${direction}`) }).count())) fail(`list: missing ${direction} suggester`);

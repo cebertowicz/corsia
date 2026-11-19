@@ -190,12 +190,11 @@
 				: null;
 			if (place) {
 				restoringDocument = { instanceId: signal.instanceId, covered: !signal.shown };
-				documentRestore.restore(place, {
-					mode: 'tab-return',
-					onPlaced: () => {
-						if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
-					},
-				});
+				const uncover = () => {
+					if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
+				};
+				// If placement fails or stalls, return the document to use rather than covering it indefinitely.
+				documentRestore.restore(place, { mode: 'tab-return', onPlaced: uncover }, uncover, 4000);
 			}
 		} else if (signal.status === 'error' || signal.status === 'unavailable') {
 			failArtifactOpen(signal.instanceId);

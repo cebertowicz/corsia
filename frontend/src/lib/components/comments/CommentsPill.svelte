@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The image viewer's comments pill (RSR-4); the document's Comments button is drawn by DocViewerStatus and opens the same drawer.
 	// It counts the comments shown by the image's default list, never as a bare number: with their noun, or with the comment icon and
-	// number on a canvas up to 600px, or in an image bar while Send shows; while a reply is unread, up to 600px, the icon and "N new"
+	// number on a canvas up to 600px, or in an image bar while Send shows; while a reply is unread, up to 600px, the icon and "N unread"
 	// alone, the word the document's button uses. It carries a dot while the person's comments and edits wait for Send. The host gives
 	// it its own button look through `class`.
 	let { count, unread = 0, unsent = 0, loading = false, unknown = false, expanded = false, disabled = false, imageBadge = false, element = $bindable(), class: look = '', onOpen, ...data }: {
@@ -24,8 +24,8 @@
 	} & { [attribute: `data-${string}`]: string | boolean } = $props();
 
 	// Comments, unread ones and what waits for Send each contribute their already-visible status to the pill name; what waits is
-	// the person's comments and edits together, so it takes no noun of its own, as "new" takes none.
-	const unreadPhrase = $derived(`${unread} new`);
+	// the person's comments and edits together, so it takes no noun of its own, as "unread" takes none.
+	const unreadPhrase = $derived(`${unread} unread`);
 	const unsentPhrase = $derived(`${unsent} waiting for Send`);
 	const noun = $derived(count === 1 ? 'comment' : 'comments');
 	const label = $derived(unknown ? 'Comments unavailable until the document opens' : `${count} ${noun}${unread ? `, ${unreadPhrase}` : ''}${unsent ? `, ${unsentPhrase}` : ''}`);
@@ -54,7 +54,7 @@
 		.image-badge .unsent-dot { position: absolute; top: calc(var(--space-1) + 1px); right: var(--space-1); }
 	}
 	@container doc-canvas (max-width: 600px) {
-		/* Up to 600px the count is the icon and its number. While a reply is unread it is the icon and "N new" alone: the total and its noun
+		/* Up to 600px the count is the icon and its number. While a reply is unread it is the icon and "N unread" alone: the total and its noun
 		   would not fit beside the other tools, and a wrapped row pushes the whole document down. The accessible name still says both. */
 		.count-unit, .unread-sep, .count.unread-led { display: none; }
 	}

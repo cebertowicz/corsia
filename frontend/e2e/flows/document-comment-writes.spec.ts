@@ -122,7 +122,7 @@ test('@flow:resolved-reply a person can reply to an agent on a resolved thread',
 	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	// The agent's reply is still unread after the agent resolved the thread, so the default list keeps it, open.
-	await openCommentsPill(page, /^1 comment, 1 new\b/);
+	await openCommentsPill(page, /^1 comment, 1 unread\b/);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved.getByRole('button', { name: 'Resolved · 2 messages' })).toBeVisible();

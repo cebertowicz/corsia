@@ -78,6 +78,4 @@ export interface DocCommentSurfaceProps {
 	resolvedOpen?: boolean;
 	/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
 	commentsEntry?: HTMLElement | null;
-	/** The visible control the Resolved list opened from (Details); its row sits in a panel that closes as the list opens. */
-	resolvedAnchor?: HTMLElement | null;
 }

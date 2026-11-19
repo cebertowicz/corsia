@@ -8,6 +8,9 @@
 	let { name, tail: keep, refit }: { name: string; tail?: string; refit?: unknown } = $props();
 	const parts = $derived(name.length > 20 ? { head: name.slice(0, -4), tail: name.slice(-4) } : { head: name, tail: '' });
 	const fitted = $derived(!!keep && name.endsWith(keep) && name.length > keep.length);
+	// The same kept ending drives the cut and its minimum-width measurement.
+	const end = $derived(keep && name.length > keep.length + 1 ? name.slice(-(keep.length + 1)) : keep ?? '');
+	const minimum = $derived(fitted ? `${name.slice(0, 1)}…${end}` : name);
 
 	let cell = $state<HTMLElement | null>(null);
 	let root = $state<HTMLElement | null>(null);
@@ -19,7 +22,7 @@
 		void refit;
 		if (!fitted || !keep || !node || !box || typeof ResizeObserver === 'undefined') return;
 		// An extension alone after the ellipsis reads as four dots ("rev….md"): the cut keeps the name's last character before it.
-		const end = full.length > keep.length + 1 ? full.slice(-(keep.length + 1)) : keep;
+		void end;
 		const context = document.createElement('canvas').getContext('2d');
 		const fit = () => {
 			box.style.maxWidth = '';
@@ -53,9 +56,9 @@
 </script>
 
 {#if fitted}
-	<span class="name fitted" title={name} bind:this={root}><span class="name-size" aria-hidden="true" bind:this={cell}>{name}</span><span class="name-shown" aria-hidden="true" data-testid="middle-name-shown">{shown || name}</span><span class="name-read">{name}</span></span>
+	<span class="name fitted" title={name} bind:this={root}><span class="name-size" aria-hidden="true" bind:this={cell}>{name}</span><span class="name-shown" aria-hidden="true" data-testid="middle-name-shown">{shown || name}</span><span class="name-read">{name}</span><span class="name-measure" aria-hidden="true"><span data-name-full data-measure-value={name}></span><span data-name-minimum data-measure-value={minimum}></span></span></span>
 {:else}
-	<span class="name" class:cut={!!parts.tail} title={name}><span class="name-head">{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}</span>
+	<span class="name" class:cut={!!parts.tail} title={name}><span class="name-head">{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}<span class="name-measure" aria-hidden="true"><span data-name-full data-measure-value={name}></span><span data-name-minimum data-measure-value={minimum}></span></span></span>
 {/if}
 
 <style>
@@ -71,4 +74,8 @@
 	.name-size { visibility: hidden; }
 	.name-shown { text-overflow: ellipsis; }
 	.name-read { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+	.name-measure { position: absolute; visibility: hidden; pointer-events: none; }
+	.name-measure > span { position: absolute; width: max-content; }
+	.name-measure > span::before { content: attr(data-measure-value); }
+	.name-measure [data-name-minimum] { min-width: 4em; }
 </style>

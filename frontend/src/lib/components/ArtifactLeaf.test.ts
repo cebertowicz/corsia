@@ -630,6 +630,18 @@ describe('reply stamping through the document canvas', () => {
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 	});
+	it.each(['early return', 'stalled'] as const)('unhides the document and its bar after a restore %s', async (outcome) => {
+		const pending = deferred<void>();
+		mocks.restoreDocumentPlace.mockImplementation(() => pending.promise);
+		const tab = seedReply();
+		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		await vi.waitFor(() => expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(true));
+		expect(host.querySelector('[data-comments-entry]')).toBeNull();
+		if (outcome === 'early return') pending.resolve();
+		await vi.waitFor(() => expect(host.querySelector('[data-comments-entry]')).not.toBeNull(), { timeout: 6000 });
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+	});
 });
 
 describe('ArtifactLeaf load-status ownership', () => {

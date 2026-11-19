@@ -53,10 +53,6 @@
 		historyAvailable = false,
 		historyOpen = false,
 		onOpenHistory,
-		resolvedCount = 0,
-		resolvedOpen = false,
-		resolvedInColumn = false,
-		onOpenResolved,
 		commentsEntry = $bindable(null),
 		detailsEntry = $bindable(null),
 	}: DocViewerStatusProps = $props();
@@ -93,7 +89,7 @@
 		return () => observer?.disconnect();
 	});
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
-		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} new` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
+		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} unread` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
 	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
 	const statusText = $derived(freshnessPresentation
 		? freshnessPresentation.overdue
@@ -224,7 +220,7 @@
 		<span class="bar-comments-content" class:receipt-hidden={sent && !commentsOpen}>
 			<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
 			<!-- Unread is text; the separate dot marks comments waiting for Send. -->
-			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
+			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' unread'}</span></span>{:else}<span>{commentCount}</span>{/if}
 			{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 		</span>
 		{#if sent && !commentsOpen}<span class="bar-sent-container" data-comments-sent aria-hidden="true" bind:this={receiptBox}>

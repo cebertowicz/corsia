@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { captureDocumentPlace, dispatchKeepingPlace, heldPlace, holdPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
-import { restoreDocumentPlace } from './documentImagePlace';
+import { documentRestorer, restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
 import imageSource from './documentImagePlace.ts?raw';
@@ -617,6 +617,25 @@ describe('restoreDocumentPlace', () => {
 	it('does nothing when the document is not on screen', async () => {
 		await expect(restoreDocumentPlace(undefined, { from: 0, top: 0, scrollTop: 300 })).resolves.toBeUndefined();
 		await expect(restoreDocumentPlace(root, { from: 0, top: 0, scrollTop: 300 })).resolves.toBeUndefined();
+	});
+
+	it('finishes the real restore when no editor exists', async () => {
+		const finished = vi.fn();
+		const restorer = documentRestorer(() => root);
+		restorer.restore({ from: 0, top: 0, scrollTop: 300 }, { mode: 'tab-return' }, finished, 4000);
+		await vi.waitFor(() => expect(finished).toHaveBeenCalledOnce());
+		restorer.abort();
+	});
+
+	it('reports actual placement before waiting for frames', async () => {
+		const page = pane();
+		const { place } = await leftAt(page, 3000);
+		const placed = vi.fn();
+		const restorer = documentRestorer(() => root);
+		restorer.restore(place, { mode: 'tab-return', onPlaced: placed }, undefined, 4000);
+		await vi.waitFor(() => expect(placed).toHaveBeenCalledOnce());
+		restorer.abort();
+		page.stop();
 	});
 
 	it('ends when the reader scrolls, and never moves the document back over them', async () => {

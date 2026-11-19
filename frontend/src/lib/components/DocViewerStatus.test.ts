@@ -22,7 +22,7 @@ let component: ({ commentCreated: () => void; feedback: () => DocFeedback | unde
 let foot: { $destroy: () => void; $set: (props: Record<string, unknown>) => void } | null = null;
 
 function renderFoot(overrides: Record<string, unknown> = {}) {
-	foot = createClassComponent({ target: host, component: DocCommentDrawerFoot, props: { feedback: component?.feedback(), resolvedCount: 0, resolvedOpen: false, resolvedInColumn: false, onOpenResolved: vi.fn(), ...overrides } });
+	foot = createClassComponent({ target: host, component: DocCommentDrawerFoot, props: { feedback: component?.feedback(), ...overrides } });
 	flushSync();
 }
 
@@ -233,8 +233,8 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill.getAttribute('aria-label')).toBe('1 comment');
 		// Unread shows as text, never a dot.
 		component!.$set({ unreadCount: 25 }); flushSync();
-		expect(pill.textContent?.trim()).toBe('25 new');
-		expect(pill.getAttribute('aria-label')).toBe('1 comment, 25 new');
+		expect(pill.textContent?.trim()).toBe('25 unread');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment, 25 unread');
 	});
 
 	it('closes Details on scoped Escape, restores its toggle, and leaves Escape elsewhere to its own control', () => {

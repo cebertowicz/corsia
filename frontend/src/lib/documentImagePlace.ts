@@ -17,14 +17,28 @@ export interface RestoreDocumentPlaceOptions {
 /** Cancel an older restore before starting a new one, and run its completion only if current. */
 export function documentRestorer(root: () => HTMLElement | undefined, restore = restoreDocumentPlace) {
 	let current: AbortController | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	function abort() {
+		current?.abort();
+		current = null;
+		if (timer !== null) clearTimeout(timer);
+		timer = null;
+	}
 	return {
-		abort() { current?.abort(); },
-		restore(place: OpenImageRequest | TextDocumentPlace, options: RestoreDocumentPlaceOptions = {}, then?: () => void) {
-			current?.abort();
+		abort,
+		restore(place: OpenImageRequest | TextDocumentPlace, options: RestoreDocumentPlaceOptions = {}, then?: () => void, timeoutMs?: number) {
+			abort();
 			const controller = new AbortController();
 			current = controller;
-			void restore(root(), place, { ...options, signal: controller.signal }).finally(() => {
-				if (current === controller) { current = null; then?.(); }
+			const finish = () => {
+				if (current !== controller) return;
+				abort();
+				then?.();
+			};
+			if (timeoutMs !== undefined) timer = setTimeout(finish, timeoutMs);
+			void restore(root(), place, { ...options, signal: controller.signal }).then(finish, (error) => {
+				console.error('Document place restore failed', error);
+				finish();
 			});
 		},
 	};

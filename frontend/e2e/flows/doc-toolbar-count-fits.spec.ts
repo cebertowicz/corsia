@@ -10,7 +10,7 @@ import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seed
 
 /**
  * Every count the document's bar shows reads whole, inside the bar and clear of its neighbours, on one row: the Comments button
- * (the unread number on the phone header, "N new" on desktop, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
+ * (the unread number on the phone header, "N unread" on desktop, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
  * you). At 320, 360 and 393 px phones, 700, 900 and 1440, with one-, two- and three-digit comment counts. What used to share the
  * toolbar (Send, Resolved, Deliver immediately, reviewers, Request review, History) is in Details; its switch keeps a whole hit area there.
  */
@@ -28,9 +28,9 @@ const CASES = [
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
 /** What the Comments button shows in the compact phone header or desktop bar. */
-const countText = (threads: number, unread: number, phoneHeader: boolean) => unread ? `${unread}${phoneHeader ? '' : ' new'}` : `${threads}`;
+const countText = (threads: number, unread: number, phoneHeader: boolean) => unread ? `${unread}${phoneHeader ? '' : ' unread'}` : `${threads}`;
 /** Its accessible name carries both, and what waits for Send. */
-const countName = (threads: number, unread: number) => new RegExp(`^${threads} ${threads === 1 ? 'comment' : 'comments'}${unread ? `, ${unread} new` : ''}(?:, \\d+ waiting for Send)?$`);
+const countName = (threads: number, unread: number) => new RegExp(`^${threads} ${threads === 1 ? 'comment' : 'comments'}${unread ? `, ${unread} unread` : ''}(?:, \\d+ waiting for Send)?$`);
 /** The bar's controls are 44 px touch targets in a window up to 768 px and 36 px with a pointer (DocViewerStatus.svelte, `--bar-row`). */
 const barMin = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768 ? 44 : 36;
 
@@ -206,7 +206,7 @@ for (const { width, scheme, resolved } of CASES) {
 }
 
 /**
- * The worst content at once: Send 99+, a reviewer group that overflows into "+2", "120 comments, 45 new", four readers and
+ * The worst content at once: Send 99+, a reviewer group that overflows into "+2", "120 comments, 45 unread", four readers and
  * Overdue. The bar's counts stay whole on one row at every width from 320 to 1440 px (a fresh load at each phone and tablet width,
  * one desktop load resized across the rest; the Workspace panel closed so the document has the room), in a narrow desktop split
  * at 1440 and 1024, a wide pane (1000 px), and the pane open and closed. At each, Details opens with Send, the reviewers and the
@@ -320,7 +320,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			await expect(page.locator('.cm-content')).toContainText('A commentable document.');
 			if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
 			await turnOffDocumentComments(page);
-			await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 new\b/);
+			await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 unread\b/);
 			await readers();
 			const panel = await openDetails(page);
 			await expect(panel.locator('.reviewer-group .more')).toHaveText('+2');
@@ -579,7 +579,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 	await page.setViewportSize({ width: 430, height: 900 });
 	await installWorkspace(page, threadId, [doc], 0);
 	await openThread(page, threadId, title);
-	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 new\b/);
+	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 unread\b/);
 	if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 	for (let width = 430; width >= 360; width--) {
 		await page.setViewportSize({ width, height: 900 });
