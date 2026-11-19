@@ -191,7 +191,7 @@ async def test_harness_bridge_path_attaches_repo_notice_to_read_result(tmp_path,
 
     async def persist_delivery(**_kwargs):
         return SimpleNamespace(
-            invocation_id="inv", assistant_step_id="step",
+            invocation_id="inv", assistant_step_id="step", content="one\n",
             render_for_model=lambda **_kw: "one\n",
         )
 
@@ -236,7 +236,7 @@ async def test_harness_bridge_resolves_relative_path_against_its_own_workspace(
 
     async def persist_delivery(**_kwargs):
         return SimpleNamespace(
-            invocation_id="inv", assistant_step_id="step",
+            invocation_id="inv", assistant_step_id="step", content="one\n",
             render_for_model=lambda **_kw: "one\n",
         )
 

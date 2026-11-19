@@ -137,6 +137,19 @@ async def test_skill_and_script_install_reaches_effective_next_turn_list(isolate
 
 
 @pytest.mark.asyncio
+async def test_an_install_larger_than_32_kib_is_written_whole(isolated_db, tmp_path, monkeypatch):
+    """No bundle size bound: the file's own length is the person's and the agent's call."""
+    _, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    content = "# Responsibility\n" + "Own the authorized checks.\n" * 2_000
+    assert len(content) > 32_768
+    receipt = json.loads(await ConductorInstructionFileCreateTool().execute(
+        target, "responsibility", "absent", content, _thread_id=actor,
+    ))
+    assert receipt["ok"], receipt
+    assert Path(receipt["path"]).read_text() == content
+
+
+@pytest.mark.asyncio
 async def test_untrusted_actor_and_foreign_scope_cannot_install(isolated_db, tmp_path, monkeypatch):
     workspace, actor, target, ordinary, foreign = _setup(tmp_path, monkeypatch)
     tool = ConductorInstructionFileCreateTool()
