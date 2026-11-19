@@ -41,7 +41,7 @@ def _script(tmp_path: Path, body: str = "print('x')") -> Path:
     return path
 
 
-def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner"):
+def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner", timeout=30):
     path = _script(tmp_path)
     return store.create_script(
         thread,
@@ -51,7 +51,7 @@ def _register(db, tmp_path, *, series=None, cadence=600, now=T0, thread="owner")
         cadence_seconds=cadence,
         series=series
         or [store.Series("cost", "usd", 0.0, 10.0)],
-        timeout_seconds=30,
+        timeout_seconds=timeout,
         now=now,
         db=db,
     )
@@ -664,3 +664,15 @@ def test_the_cadence_floor_is_the_sweep_interval_and_has_no_ceiling(tmp_path):
     db = _db()
     _register(db, tmp_path, cadence=store.MIN_CADENCE_SECONDS)
     _register(db, tmp_path, cadence=31 * 24 * 60 * 60, thread="owner")
+
+
+def test_a_timed_out_run_states_its_limit_and_offers_no_reschedule(tmp_path):
+    """Event rules start a script by its id, so a timeout report never tells the owner to
+    cancel and schedule it again: the new id would be one no rule starts. The ceiling holds."""
+    db = _db()
+    below = _register(db, tmp_path, timeout=30)
+    report = build_report(below, _run(timed_out=True), run_id="r")
+    assert report.error.endswith("did not finish within 30 s and was stopped")
+    assert "schedule it again" not in report.error
+    with pytest.raises(ValueError, match="between 1 and"):
+        _register(db, tmp_path, timeout=store.MAX_TIMEOUT_SECONDS + 1)
