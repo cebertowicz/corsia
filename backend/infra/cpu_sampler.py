@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 from types import FrameType
 
+from infra.db_connection import thread_lane
 from infra.thread_cpu import ThreadCpuUnavailable, thread_cpu_seconds
 
 log = logging.getLogger(__name__)
@@ -124,8 +125,8 @@ def run_profiled_db_job(sampler, worker, fn, scope):
     finally:
         try:
             elapsed = time.thread_time_ns() - started
-            thread_name = threading.current_thread().name
-            lane = next((name for name in ("db-read", "db-bulk", "db") if thread_name.startswith(name + "_")), "off-db")
+            worker_lane = thread_lane()
+            lane = f"db-{worker_lane}" if worker_lane else "db"
             sampler.record_job_cpu(lane, _callable_name(fn), elapsed)
         except BaseException:
             sampler.count_job_error()

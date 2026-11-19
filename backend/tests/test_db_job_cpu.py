@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from infra import cpu_sampler, db_async
+from infra.db_connection import mark_thread_lane
 
 
 def short_cpu_job():
@@ -34,9 +35,26 @@ async def test_short_jobs_named_by_lane_and_unwrapped(monkeypatch, caplog):
     await db_async.run_off_db(short_cpu_job)
     sampler.emit_summary()
     record = next(r.message for r in caplog.records if r.message.startswith("cpu sampler jobs:"))
-    assert "db:" in record and "db-read:" in record and "db-bulk:" in record and "off-db:" in record
+    assert "db:" in record and "db-read:" in record and "db-bulk:" in record
     assert "short_cpu_job" in record and "Work.method" in record
     assert "idle" not in record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lane", ["read", "bulk"])
+async def test_renamed_thread_keeps_its_lane(monkeypatch, lane):
+    sampler = cpu_sampler.CpuSampler()
+    monkeypatch.setattr(cpu_sampler, "_sampler", sampler)
+
+    def rename():
+        threading.current_thread().name = "renamed-worker"
+
+    with ThreadPoolExecutor(max_workers=1, initializer=mark_thread_lane, initargs=(lane,)) as pool:
+        monkeypatch.setattr(db_async, f"_{lane}_pool", pool)
+        run = db_async.run_read if lane == "read" else db_async.run_bulk
+        await run(rename)
+        await run(short_cpu_job)
+    assert sum(count for (job_lane, _), (count, _, _) in sampler._job_cpu.items() if job_lane == f"db-{lane}") == 2
 
 
 @pytest.mark.asyncio
