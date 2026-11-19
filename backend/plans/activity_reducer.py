@@ -162,14 +162,9 @@ def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
     work = node_states.work_ids(rows)
     parents = node_states.parent_ids(rows, work=work)
     leaves = node_states.leaves(rows, work=work, parents=parents)
-    if all(row["parent_id"] is None for row in rows):
-        counts = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)
-        for row in leaves:
-            counts[buckets[str(row["id"])]] += 1
-    else:
-        counts = operator_nodes.distribution_from_buckets(
-            rows, buckets, work=work, holders=parents,
-        )[1]
+    counts = operator_nodes.distribution_from_buckets(
+        rows, buckets, work=work, holders=parents,
+    )[1]
     return leaves, parents, counts
 
 

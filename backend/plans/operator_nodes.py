@@ -35,20 +35,6 @@ def _artifact_fields(link: dict) -> dict:
     }
 
 
-def _child_summary(
-    projected: rollup.PlanRollup | None,
-    thread_id: str | None,
-) -> dict | None:
-    if projected is None or thread_id is None:
-        return None
-    return {
-        "available": True,
-        "plan_id": projected.plan["id"],
-        "thread_id": thread_id,
-        "progress": dict(projected.progress),
-    }
-
-
 def _present_node(
     node: dict,
     review_targets: dict[str, dict],
@@ -107,7 +93,7 @@ def _present_node(
         "scheduled_until": None,
         "attention_path": attention_path,
         "completion": completion,
-        "child": _child_summary(node["child_plan"], node["spawned_thread_id"]),
+        "child": plan_header.child_summary(node["child_plan"], node["spawned_thread_id"]),
         "review": review_targets.get(node["id"]),
         "user_actions": user_steering.offered(
             node, review_targets.get(node["id"]), execution["causes"],
@@ -131,10 +117,22 @@ def distribution_from_buckets(
 
     A row saying ``has_child_in_work`` (a read of the open work) is a parent though its
     children are not among ``rows``: it adds no leaf of its own.
+    Passed ``work`` and ``holders`` sets must be computed from these same rows.
     """
-    ids = {str(row["id"]) for row in rows}
     work = work_ids(rows) if work is None else work
     holders = parent_ids(rows, work=work) if holders is None else holders
+    if all(row["parent_id"] is None for row in rows):
+        plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
+        flat_branches = {}
+        for row in rows:
+            node_id = str(row["id"])
+            own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
+            if node_id in work and node_id not in holders:
+                own[buckets[node_id]] = 1
+                plan[buckets[node_id]] += 1
+            flat_branches[node_id] = own
+        return flat_branches, plan
+    ids = {str(row["id"]) for row in rows}
     children: dict[str, list[str]] = {}
     parent_of: dict[str, str] = {}
     for row in rows:

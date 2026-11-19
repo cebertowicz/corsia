@@ -219,6 +219,7 @@ def parent_ids(
     containers, folds, branch counts, next and open tasks, the status read --
     asks this, so a closed child hands its parent back as a leaf everywhere
     at once. ``has_child_in_work_sql`` is the same rule for SQL readers.
+    A passed ``work`` set must be computed from these same rows.
     """
     rows = list(rows)
     if work is None:
@@ -327,11 +328,18 @@ def folded_ids(
     the moment that becomes true; the pane's fold wave is where the user sees
     it go. Each node carries ``id``, ``parent_id``, ``state``,
     ``spawned_thread_id`` and, when it can be archived, ``archived_at``.
+    A passed ``with_children`` set must be computed from these same nodes.
     """
     rows = list(nodes)
-    parents: dict[str, str | None] = {str(node["id"]): node["parent_id"] for node in rows}
     if with_children is None:
         with_children = parent_ids(rows)
+    if all(node["parent_id"] is None for node in rows):
+        return {
+            str(node["id"]) for node in rows
+            if folded(node["state"], node.get("archived_at"),
+                      container=is_container(node, str(node["id"]) in with_children))
+        }
+    parents: dict[str, str | None] = {str(node["id"]): node["parent_id"] for node in rows}
     own = {
         str(node["id"]): folded(
             node["state"], node.get("archived_at"),
@@ -350,7 +358,8 @@ def leaves(
     The one definition of "the leaves of a plan": progress, liveness, the
     return wake and the harvest all read it, in the rows' plan order. Nothing
     out of the work is a leaf (``work_ids``): not a closed node, and not what
-    sits beneath one.
+    sits beneath one. Passed ``work`` and ``parents`` sets must be computed
+    from these same rows.
     """
     if work is None:
         work = work_ids(rows)
@@ -368,12 +377,9 @@ def in_play(
     is about work still in play: a fully finished plan reads 0/0 while its
     folded nodes stay on the plan, one expansion away.
     """
-    if leaf_rows is not None and all(row["parent_id"] is None for row in rows):
-        return [
-            row for row in leaf_rows
-            if not folded(row["state"], dict(row).get("archived_at"), container=False)
-        ]
     fold = folded_ids((dict(row) for row in rows), with_children=with_children)
+    if leaf_rows is not None and all(row["parent_id"] is None for row in rows):
+        return [row for row in leaf_rows if str(row["id"]) not in fold]
     parents = {row["id"]: row["parent_id"] for row in rows}
 
     def root(node_id: str) -> str:
