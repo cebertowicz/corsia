@@ -72,6 +72,7 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
     end_day = (datetime.fromisoformat(until).date() + timedelta(days=1)).isoformat()
     bounds = (start_day, end_day, since, until)
     days, created = _activity_daily(db, user_id, bounds)
+    from infra.audit_plan_text_sizes import text_sizes
     from infra.corsia_agent import get_corsia_agent
 
     workspace_conductor = get_corsia_agent(db=db)
@@ -137,6 +138,7 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
         "plan_read_calls": None,
         "plan_read_calls_reason": "no_structured_source",
         "decisions_raised": _decisions_raised(db, user_id, bounds),
+        "text_sizes": text_sizes(db, user_id, bounds),
         "definitions": _PLAN_ACTIVITY_DEFINITIONS,
     }]
 
@@ -163,6 +165,15 @@ _PLAN_ACTIVITY_DEFINITIONS = {
                         "offer), 'agent' a raise an agent made. decisions "
                         "counts distinct decisions; raises counts every raise, so a decision "
                         "edited back to draft and raised again counts twice there.",
+    "text_sizes": ("Size of the text agents wrote into plans inside the window, never the text: n texts, and "
+                   "nearest-rank p50/p90/p99 and max of their length in characters and in bytes as a plan "
+                   "tool emits them (ASCII-escaped JSON, quotes included). Fields: hold_reason (holds of "
+                   "every kind placed), blocked_wait_reason and set_aside_reason (waits armed), "
+                   "review_feedback (rejections), review_evidence (review submissions, as stored: a "
+                   "resubmission carries the earlier evidence), intent and "
+                   "person_step_description (tasks created, the latter assigned to the person). Text the "
+                   "plan refused at input is not counted, so a field with an input limit never shows sizes "
+                   "above it."),
     "conductor_adds": "Outcome is the node's current state; 'archived' is an unfinished "
                       "add that was later archived. kind_basis 'recorded' was stored at "
                       "creation; 'current_designation' uses today's conductor assignment.",
