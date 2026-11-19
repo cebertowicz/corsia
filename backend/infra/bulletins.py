@@ -14,8 +14,8 @@ from infra.system_package import SYSTEM_VERSION
 
 # Releases ship keys. Keeping this empty deliberately disables the live feed.
 PUBLIC_KEYS: tuple[str, ...] = ()
-# No reading yet: no bulletin has been published (PUBLIC_KEYS is empty), so these four size caps
-# have no sizes to rest on.
+# No reading yet: no bulletin has been published (PUBLIC_KEYS is empty), so these five caps
+# (four sizes and the index entry count) have nothing to rest on.
 MAX_BULLETIN_BYTES = 64 * 1024
 MAX_INDEX_BYTES = 64 * 1024
 MAX_INDEX_ENTRIES = 20
