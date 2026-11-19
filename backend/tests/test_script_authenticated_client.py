@@ -130,61 +130,6 @@ def test_person_forwarder_credential_reads_the_host_login(monkeypatch, returncod
     assert calls == [["gh", "auth", "token", "--hostname", "github.com"]]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("state", ["ready", "absent"])
-async def test_forwarder_reads_as_the_agents_account_else_the_host_login(tmp_path, monkeypatch, state):
-    from connections import github_agent
-    from events.connectors.github_read_budget import budget, person_budget
-
-    seen = {}
-
-    @asynccontextmanager
-    async def fake_channel(*args, **kwargs):
-        yield
-
-    @asynccontextmanager
-    async def fake_proxy(path, credential, *, read_budget):
-        seen.update(credential=credential(), budget=read_budget)
-        yield
-
-    monkeypatch.setattr(script_sandbox, "tool_channel", fake_channel)
-    monkeypatch.setattr(script_sandbox, "github_proxy", fake_proxy)
-    monkeypatch.setattr(script_sandbox, "corsia_temp_root", lambda: tmp_path)
-    monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
-    monkeypatch.setattr(github_agent, "script_forwarder_credential", lambda view: "agents-synthetic")
-    monkeypatch.setattr(script_sandbox, "person_forwarder_credential", lambda: "person-synthetic")
-    view = (AgentAccountView("ready", home=str(tmp_path), login="example") if state == "ready"
-            else AgentAccountView("not_installed", absent=True))
-    async with script_sandbox._authenticated_client("owner", view) as (_, _, config, _):
-        assert config is not None
-        assert "synthetic" not in (config / "hosts.yml").read_text()
-    assert seen == ({"credential": "agents-synthetic", "budget": budget} if state == "ready"
-                    else {"credential": "person-synthetic", "budget": person_budget})
-
-
-@pytest.mark.parametrize("returncode, stdout, expected", [
-    (0, "person-synthetic\n", "person-synthetic"), (0, "\n", None), (1, "", None)])
-def test_person_forwarder_credential_reads_the_host_login(monkeypatch, returncode, stdout, expected):
-    import subprocess
-
-    from connections import github_person
-
-    calls = []
-
-    def fake_run(argv, **kwargs):
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, returncode, stdout, "")
-
-    monkeypatch.setattr(github_person.subprocess, "run", fake_run)
-    if expected is None:
-        with pytest.raises(ValueError, match="unavailable") as raised:
-            github_person.person_forwarder_credential()
-        assert "synthetic" not in str(raised.value)
-    else:
-        assert github_person.person_forwarder_credential() == expected
-    assert calls == [["gh", "auth", "token", "--hostname", "github.com"]]
-
-
 @pytest.mark.parametrize("nested", [False, True])
 def test_forwarder_reads_synthetic_account_credential(tmp_path, nested):
     import yaml
