@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from core.workspace_layout import resolve_thread_working_root
-from doceditor.document_save_errors import FileChangedOutside
 from infra.database import SchemaVersionError, TransactionOwnershipError
 from infra.db_connection import LaneWriteError
 from infra.db_loop_guard import LoopThreadWriteError
@@ -84,7 +83,33 @@ def _run(scope, operation, source=None):
     )
 
 
-def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_scope, monkeypatch):
+@pytest.mark.parametrize("outside_edit", ["changed", "deleted"])
+def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_scope, monkeypatch, outside_edit):
+    workspace, project, thread, db = durable_scope
+    target = project / "shared" / "planning" / "transaction.md"
+    kwargs = dict(thread_id=thread, project_id="project-alpha", workspace=workspace,
+                  description="Transaction proof", notify=False)
+    durable_writes.write_text(target, "original", **kwargs)
+
+    def fail_after_outside_edit(*args, **kwargs):
+        if outside_edit == "changed":
+            target.write_text("outside edit")
+        else:
+            target.unlink()
+        raise sqlite3.OperationalError("injected registration failure")
+
+    monkeypatch.setattr(durable_writes, "_register_applied", fail_after_outside_edit)
+    with pytest.raises(sqlite3.OperationalError, match="injected registration failure"):
+        durable_writes.write_text(target, "candidate", **kwargs)
+    expected = "outside edit" if outside_edit == "changed" else None
+    assert (target.read_text() if target.exists() else None) == expected
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+    assert not list(target.parent.glob(".corsia-write-*"))
+    durable_writes.recover_write_intents(workspace=workspace)
+    assert (target.read_text() if target.exists() else None) == expected
+
+
+def test_recovery_finishes_interrupted_undo_after_outside_edit(durable_scope, monkeypatch):
     workspace, project, thread, db = durable_scope
     target = project / "shared" / "planning" / "transaction.md"
     kwargs = dict(thread_id=thread, project_id="project-alpha", workspace=workspace,
@@ -95,14 +120,21 @@ def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_
         target.write_text("outside edit")
         raise sqlite3.OperationalError("injected registration failure")
 
+    def interrupt_undo(*args, **kwargs):
+        raise RuntimeError("injected interruption")
+
     monkeypatch.setattr(durable_writes, "_register_applied", fail_after_outside_edit)
-    with pytest.raises(FileChangedOutside):
+    original_finish = durable_writes._finish_undo
+    monkeypatch.setattr(durable_writes, "_finish_undo", interrupt_undo)
+    with pytest.raises(RuntimeError, match="injected interruption"):
         durable_writes.write_text(target, "candidate", **kwargs)
-    assert target.read_text() == "outside edit"
-    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
+    assert db.execute("SELECT undoing FROM durable_write_intents").fetchone()[0] == 1
+
+    monkeypatch.setattr(durable_writes, "_finish_undo", original_finish)
     durable_writes.recover_write_intents(workspace=workspace)
     assert target.read_text() == "outside edit"
-    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+    assert not list(target.parent.glob(".corsia-write-*"))
 
 
 @pytest.mark.parametrize("operation", ["write", "promote", "recover"])

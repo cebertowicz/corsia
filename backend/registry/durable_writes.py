@@ -9,6 +9,7 @@ import re
 from uuid import uuid4
 
 from core.workspace_layout import resolve_project_root, resolve_thread_working_root
+from doceditor.document_save_errors import DocumentSaveError
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from registry.shared_category_index import (
     _index_lists_file,
@@ -87,7 +88,13 @@ def _finish_undo(
     elif backup.exists():
         # Recovery may resume after the restore itself but before the intent advanced.
         if not target.is_file() or _sha256_file(target) != _sha256_file(backup):
-            _restore_target(target, backup, content_hash)
+            try:
+                _restore_target(target, backup, content_hash)
+            except DocumentSaveError as exc:
+                if exc.kind not in ("stale", "no_such_file"):
+                    raise
+                # A newer outside edit or deletion owns the target now. Finish
+                # the remaining undo without replacing that newer state.
     else:
         raise RuntimeError(
             f"Durable write intent {intent_id} lost its rollback backup."
