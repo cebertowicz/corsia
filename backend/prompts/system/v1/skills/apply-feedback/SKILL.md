@@ -8,7 +8,7 @@ metadata:
 
 # Apply feedback to the whole
 
-**Applying these steps:** when a check fails or several findings arrive at once, start one run (skill `task-discipline`, Declared workflows). When another workflow's step already built this run for you, work in that one and start none. For one small comment, follow the sections without a run.
+**Applying these steps:** when a check fails or several findings arrive at once, start one run (skill `task-discipline`, Declared workflows). When another workflow's step already built this run for you, work in that one and start none. When a step of another workflow tells you to apply this skill, or for one small comment, follow the sections without a run.
 
 A comment points at one spot; the change it asks for nearly always reaches others. Patch only the spot and the person finds every gap themselves.
 
