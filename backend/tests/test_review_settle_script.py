@@ -74,6 +74,31 @@ def test_a_fail_report_sends_the_step_back(db):
     assert wakes(db, "review_failed")
 
 
+def test_a_sent_back_steps_revision_still_settles_from_its_script(db):
+    phase, review = scripted(db)
+    pending(db, review)
+    assert report(db, review, verdict="fail") == "sent_back"
+    (revision,) = revision_of(db, review)
+    revision_id = revision["id"]
+
+    assert script.step_settle_script(db, revision_id) == "check-totals"
+    hand(db, revision_id, "reviewer")
+    refused, _leaf = submit(db, "reviewer", verdict="pass")
+    assert refused == VERDICT_ELSEWHERE
+
+    script.record_pending_settle(
+        db, node_id=revision_id, attempt_id="a2", reviewer_thread_id="checker", version="v2",
+    )
+    script.bind_settle_run(db, node_id=revision_id, attempt_id="a2", run_id="run-2")
+    assert script.settle_step_from_script(
+        db, node_id=revision_id, attempt_id="a2", run_id="run-2", verdict="pass",
+        findings="Totals right now.", version="v2",
+    ) == "accepted"
+
+    assert service._node_row(db, revision_id)["state"] == "accepted"
+    assert ended(db, phase)[0]["outcome"] == "completed"
+
+
 def test_work_that_moved_since_the_review_read_it_goes_back_stale(db):
     _phase, review = scripted(db)
     pending(db, review, version="v1")

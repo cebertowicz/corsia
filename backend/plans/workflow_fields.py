@@ -313,6 +313,7 @@ def same_step_fields(db, source) -> dict[str, Any]:
         "workflow_by": created.get("workflow_by", "agent"),
         "workflow_gate": created.get("workflow_gate"),
         "workflow_gate_mode": created.get("workflow_gate_mode"),
+        "workflow_settle": created.get("workflow_settle"),
     }
 
 
