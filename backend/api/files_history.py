@@ -136,6 +136,10 @@ async def _restore_live(entry, text: str, reason: str, base_sha256: str, user_id
         result = await entry.lane.restore(Operation("replace", content=text, actor=actor, reason=reason, history_required=True), base_sha256)
         result.require_landed()
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            from api.files import document_save_http_exception
+
+            raise document_save_http_exception(exc) from exc
         return _refused(exc.kind if exc.kind in _REFUSED else "failed")
     except Exception:
         logger.opt(exception=True).warning("live restore of {} refused", entry.artifact_id)

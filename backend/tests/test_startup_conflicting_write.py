@@ -29,7 +29,7 @@ def pause(*args, **kwargs):
 if cut == 'applied':
     durable_writes._register_applied = pause
 else:
-    durable_writes.replace_bound_file = pause
+    durable_writes.replace_if_expected = pause
 durable_writes.write_text(Path(target), 'new bytes', thread_id=owner, project_id='project-alpha', workspace=workspace, update_trigger='test fixture')
 '''
 SERVER = r'''
