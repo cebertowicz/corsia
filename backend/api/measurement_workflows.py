@@ -356,9 +356,9 @@ def _failed_step_id(record: Mapping[str, Any] | None) -> str | None:
 def _caught(run: Run, record: Mapping[str, Any] | None) -> str | None:
     """How the run came to light as wrong: the agent's own failed step, a send-back, or a later correction.
 
-    The order is the order the facts can arrive: a failed required step ends the run
-    (``plans.run_end.fail_run``), a person's send-back keeps it running, and a correction follows a run
-    that settled. A run that settled clean and was never corrected reads None; a run whose only
+    The order is the order the facts can arrive: a failed required step closes dependent work
+    (``plans.run_end.fail_run``), and the run records failure once its remaining work settles;
+    a person's send-back keeps it running, and a correction follows a run that settled. A run that settled clean and was never corrected reads None; a run whose only
     not-done step was closed some other way (the person's Won't do, a handed-off gate) reads None too,
     since none of the three words fits it.
     """

@@ -1,4 +1,4 @@
-"""A workflow run ends once: a failed required step ends it, it is sized once, and it leaves one record."""
+"""A workflow run records its outcome once after its remaining work settles."""
 
 import json
 
@@ -483,6 +483,70 @@ async def test_the_persons_wont_do_on_a_required_step_fails_the_run(isolated_db,
         assert closure.settled_reasons(db, [service._node_row(db, polish)]) == {polish: "Closed because required task review was not done."}
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("person_closes", [False, True])
+async def test_failure_closes_dependents_anywhere_under_run(isolated_db, tmp_path, monkeypatch, person_closes):
+    from plans import user_settle
+
+    steps = (
+        "    - {id: a, required: true, check: A, difficulty: {default: routine}}\n"
+        "    - {id: c, workflow: inner, check: C, difficulty: {default: routine}}\n"
+    )
+    inner = "    - {id: x, check: X, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps), "inner": (SHIP_BODY, inner)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    a, c = (step["id"] for step in reply["steps"])
+
+    x = run.children(c)[0]["id"]
+
+    async def add(parent, title, kind="task"):
+        result = await run.update("add", {"parent_id": parent, "title": title, "kind": kind,
+                                          "acceptance_criteria": "Done", "size": "XS", "intent": "Complete work"})
+        assert not isinstance(result, str), result
+        return result["node"]["id"]
+
+    c1 = await add(c, "c1", "phase")
+    child = await add(c1, "c1 child")
+    direct = await add(phase, "direct")
+    outside = await add(None, "outside")
+    indirect = await add(phase, "indirect")
+    for node in (c1, direct, outside):
+        result = await run.update("add_dependency", _args(run, node, depends_on_node_id=a))
+        assert not isinstance(result, str), result
+    result = await run.update("add_dependency", _args(run, indirect, depends_on_node_id=outside))
+    assert not isinstance(result, str), result
+
+    if person_closes:
+        # The snapshot must see live edges, before the close removes them.
+        original = run_end._affected_ids
+        seen = []
+
+        def capture(db, node, include_subwork):
+            seen.append(db.execute("SELECT COUNT(*) FROM plan_node_dependencies WHERE depends_on_node_id=?", (a,)).fetchone()[0])
+            return original(db, node, include_subwork)
+
+        monkeypatch.setattr(run_end, "_affected_ids", capture)
+        db = get_db()
+        try:
+            user_settle.settle("close_node", _args(run, a), "user",
+                               {"db": db, "actor_id": "user", "provenance": "user"})
+            db.commit()
+        finally:
+            db.close()
+        assert seen == [3]
+    else:
+        result = await run.update("fail", _args(run, a))
+        assert not isinstance(result, str), result
+
+    assert [_state(run, node) for node in (c, c1, child, direct, indirect, outside)] == [
+        "pending", "closed", "closed", "closed", "closed", "pending",
+    ]
+    assert _ended(run, phase) == []
+    result = await _finish(run, x)
+    assert not isinstance(result, str), result
+    assert _ended(run, phase)[0]["outcome"] == "failed"
 
 
 async def test_a_run_step_stays_in_its_run_when_regrouped(isolated_db, tmp_path, monkeypatch):
