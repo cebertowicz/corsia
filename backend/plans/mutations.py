@@ -328,24 +328,21 @@ def request_review(
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
     owner_thread_id: str | None = None,
-    db=None, verdict: str | None = None,
+    db=None,
+    verdict: str | None = None,
 ) -> PlanNode:
     """Submit evidence and move active work to review through one event owner.
 
     ``owner_thread_id`` is the thread submitting, when one is: the results it
-    owns are linked to the node as part of the submission; ``verdict`` is a reviewer's (``review_settle``).
+    owns are linked to the node as part of the submission. ``verdict`` is a
+    reviewer's pass or fail (``plans.review_settle``).
     """
     from plans import review_evidence
 
     with service._connection(db) as connection, service._write(connection):
         return review_evidence.submit(
-            node_id,
-            evidence=evidence,
-            artifact_ids=artifact_ids,
-            expected_revision=expected_revision,
-            actor_id=actor_id,
-            provenance=provenance,
-            owner_thread_id=owner_thread_id,
+            node_id, evidence=evidence, artifact_ids=artifact_ids, expected_revision=expected_revision,
+            actor_id=actor_id, provenance=provenance, owner_thread_id=owner_thread_id,
             db=connection, verdict=verdict,
         )
 

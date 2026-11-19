@@ -396,6 +396,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # two more bulk bodies inside that budget: the rule is trim, never raise, so `edit` and
 # `close_node` bought their shape lines by putting every bulk verb in one "one: …; many: …"
 # idiom, and by shortening the nested `affected_nodes` revision note to its own words.
+# plan_update 9,620 -> 9,841 (+221): `request_review` takes a reviewer's `verdict`, which
+# settles a review step; the field line is the reviewer's only instruction to give one, and
+# its wording was tested on a small model as written.
 _PUBLISHED_BYTES = {"plan_update": 9_841, "plan_decision": 3_100}
 
 
