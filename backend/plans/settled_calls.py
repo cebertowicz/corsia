@@ -6,11 +6,9 @@ Two kinds, each read from its one canonical record:
   is its only writer and ``answered`` is terminal (``MUTABLE_STATES``), so the
   record is the decision identity's body: ``state``, ``answer``, ``answered_at``.
 - ``ask_verdict``: the person's verdict on a review ask. Its record is the
-  ``hold_cleared`` event that ``user_ask_release`` appends with provenance
-  ``user.ask_cleared``; a person's answer carries ``detail.verdict``
-  (``doceditor.review_bar``). A retired ask or an agent's route-back carries no
-  verdict, so it is no call of the person's and is left out, as in
-  ``gate_handoff_record._answers``.
+  ``hold_cleared`` event ``user_ask_release`` appends, read through that
+  module's ``person_answer``. A document has one open ask at a time
+  (``one_open_ask``), so one answer is one event and one row.
 
 Scope is the thread's own plans and those of every thread that delegated to it
 (``threads.spawned_by`` upward), because a worker writes under its parent's
@@ -20,12 +18,10 @@ budget, not this read's.
 
 from __future__ import annotations
 
-import json
-
+from plans import decision_projection
 from plans.decision_fields import chosen_ids
 from plans.decision_projection import DECISION_TYPE
-
-_ASK_ANSWERED_BY_PERSON = "user.ask_cleared"
+from plans.user_ask_release import PROVENANCE as _ASK_ANSWERED_BY_PERSON, person_answer
 
 #: The thread and, when asked, every thread above it by ``spawned_by``. UNION
 #: (not UNION ALL) ends the walk on a cycle.
@@ -82,20 +78,20 @@ def read(db, thread_id: str, *, include_delegating_chain: bool) -> list[dict]:
 def _decisions(cursor) -> list[dict]:
     rows = []
     for row in cursor:
-        body = _json(row["metadata"]).get("plan_decision")
-        if not isinstance(body, dict) or body.get("state") != "answered":
+        body = decision_projection._body(row)
+        if body is None or body["state"] != "answered":
             continue
         stored = body.get("answer")
         answer: dict = stored if isinstance(stored, dict) else {}
         labels = {
             option.get("id"): option.get("label")
-            for option in body.get("options") or [] if isinstance(option, dict)
+            for option in body["options"] if isinstance(option, dict)
         }
         chosen = [str(labels.get(option_id) or option_id) for option_id in chosen_ids(body, answer)]
         rows.append({
             "kind": "decision",
             "id": str(row["external_id"]),
-            "question": str(body.get("title") or ""),
+            "question": str(body["title"] or ""),
             "answer": "; ".join(chosen) or None,
             "note": answer.get("text") or None,
             "answered_at": str(body.get("answered_at") or ""),
@@ -107,8 +103,8 @@ def _decisions(cursor) -> list[dict]:
 def _ask_verdicts(cursor) -> list[dict]:
     rows = []
     for row in cursor:
-        detail = _json(row["payload_json"]).get("detail")
-        if not isinstance(detail, dict) or not isinstance(detail.get("verdict"), str):
+        detail = person_answer(row["payload_json"])
+        if detail is None:
             continue
         verdict = detail["verdict"]
         rows.append({
@@ -121,11 +117,3 @@ def _ask_verdicts(cursor) -> list[dict]:
             "thread_id": str(row["thread_id"]),
         })
     return rows
-
-
-def _json(value) -> dict:
-    try:
-        parsed = json.loads(value) if value else {}
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}

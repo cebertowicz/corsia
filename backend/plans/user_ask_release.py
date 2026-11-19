@@ -1,7 +1,26 @@
 """Release and wake mechanics for a user ask after its lifecycle ends."""
 from __future__ import annotations
 
-_PROVENANCE = "user.ask_cleared"
+import json
+
+#: The provenance of every ``hold_cleared`` event this module appends; readers match on it.
+PROVENANCE = "user.ask_cleared"
+
+
+def person_answer(payload_json) -> dict | None:
+    """The person's answer in a ``hold_cleared`` payload this module wrote, or None.
+
+    A person's answer carries ``detail.verdict`` (``doceditor.review_bar``); a
+    retired ask or an agent's route-back carries none and is no call of the person's.
+    """
+    try:
+        payload = json.loads(payload_json) if payload_json else {}
+    except (TypeError, ValueError):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict) or not isinstance(detail.get("verdict"), str):
+        return None
+    return detail
 
 
 def release(
@@ -32,7 +51,7 @@ def release(
     causes = [
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
-            actor_id=None, provenance=_PROVENANCE, db=db,
+            actor_id=None, provenance=PROVENANCE, db=db,
             detail=detail or None,
         )
         for row in rows
@@ -98,7 +117,7 @@ def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], di
             executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
         )
         reconciled = admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
+            plan_id, actor_id=None, provenance=PROVENANCE, causing_executor=causing, db=db,
         )
         if causing is not None:
             handoffs[(plan_id, causing)] = plan_wake.selected_fact(db, reconciled, causing)

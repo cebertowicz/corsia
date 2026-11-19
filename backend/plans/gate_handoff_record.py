@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from plans.user_ask_release import PROVENANCE as _ANSWERED_BY_PERSON, person_answer
+
 OFFER_EVENT = "gate_handoff_offered"
-_ANSWERED_BY_PERSON = "user.ask_cleared"
 #: An offer's decision states that end it: answered, or withdrawn (the person's Won't do, a closed run, an archive).
 _SETTLED = ("answered", "invalidated")
 
@@ -115,9 +116,8 @@ def _answers(db, node_ids: list[str], order: str):
         f" AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at {order},rowid {order}",
         (_ANSWERED_BY_PERSON, _ids(node_ids)),
     ):
-        verdict = (json.loads(row["payload_json"] or "{}").get("detail") or {}).get("verdict")
-        if isinstance(verdict, str):
-            yield row["node_id"], verdict, row["created_at"]
+        if (answer := person_answer(row["payload_json"])) is not None:
+            yield row["node_id"], answer["verdict"], row["created_at"]
 
 
 def _corrections(db, phases: list[tuple[str, str]]) -> list[tuple[str, str]]:

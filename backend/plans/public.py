@@ -119,7 +119,7 @@ from plans.user_ask import (
 )
 from plans.user_ask_cards import ask_holds
 from plans.decision_projection import DECISION_TYPE, identity_row as decision_identity_row
-# The person's settled calls a fresh reader checks a draft against (row 7.1).
+# The calls the person already settled, for a reader checking a draft against them.
 from plans.settled_calls import read as settled_calls
 from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path

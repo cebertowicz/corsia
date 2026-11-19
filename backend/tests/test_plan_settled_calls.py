@@ -126,3 +126,18 @@ def test_ask_verdicts_join_decisions_newest_first_and_an_ask_ended_without_one_i
         "proposal.md", "approved", "Ship it.", "owner",
     )
     assert rows[0]["answered_at"] >= rows[1]["answered_at"]
+
+
+def test_a_decision_body_missing_a_required_field_is_left_out(db):
+    import json
+
+    decision = _answered(db, "owner", "Which store?", option_id="A")
+    row = db.execute(
+        "SELECT id,metadata FROM artifact_identities WHERE external_id=?", (decision["id"],),
+    ).fetchone()
+    metadata = json.loads(row["metadata"])
+    del metadata["plan_decision"]["tradeoff"]
+    db.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (json.dumps(metadata), row["id"]))
+    db.commit()
+
+    assert public.settled_calls(db, "owner", include_delegating_chain=False) == []
