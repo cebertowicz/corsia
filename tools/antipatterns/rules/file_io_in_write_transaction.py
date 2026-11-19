@@ -20,13 +20,14 @@ _OS_METHODS = {"replace", "rename", "remove", "unlink", "makedirs", "mkdir", "rm
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 _FIX = "Move file I/O outside the write_transaction body. This rule checks direct calls only."
 # Known violations kept by this change: each is an ordering fence with DB state
-# that its owner must move. Each is limited to its one call, so new file I/O in
-# the same function is still flagged; delete an entry once its call has moved.
+# that its owner must move, tracked by the issue on its line. An entry exempts
+# every call with that exact text in that function; file I/O written any other
+# way in the function is still flagged. Delete an entry once its call has moved.
 _EXCEPTIONS = {
-    ("backend/connections/account_projection.py", "ensure_projection", "os.rename"),
-    ("backend/connections/account_projection.py", "cleanup_stale", "destination.unlink"),
-    ("backend/registry/durable_writes.py", "_register_applied", "shared.path.read_bytes"),
-    ("backend/tools/conductor_instruction_create.py", "_install", "path.read_bytes"),
+    ("backend/connections/account_projection.py", "ensure_projection", "os.rename"),  # #3134
+    ("backend/connections/account_projection.py", "cleanup_stale", "destination.unlink"),  # #3135
+    ("backend/registry/durable_writes.py", "_register_applied", "shared.path.read_bytes"),  # #3136
+    ("backend/tools/conductor_instruction_create.py", "_install", "path.read_bytes"),  # #3137
 }
 
 
