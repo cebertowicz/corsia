@@ -167,6 +167,59 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
+		// A tap or click on the struck text, as the browser delivers it: the press, then the caret it placed, then the frame that reads it.
+		const pressStruck = async (view: EditorView, anchor = 8) => {
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+		};
+
+		for (const readOnly of [false, true]) {
+			it(`a tap or click on the struck text opens the suggestion in every card mode, in a ${readOnly ? 'read-only' : 'writable'} document`, async () => {
+				for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+					const onAnchorFocus = vi.fn();
+					const view = open({ highlights: [suggestion('red')], onAnchorFocus, cardMode, readOnly });
+					vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+					await pressStruck(view);
+					expect(onAnchorFocus, cardMode).toHaveBeenLastCalledWith('sug', expect.anything(), true, expect.any(MouseEvent));
+					unmount(component!); component = null; host.remove();
+				}
+			});
+		}
+
+		it('opens the same card whichever order a comment and a suggestion over the same text are listed in, in every card mode', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				for (const order of ['suggestion first', 'comment first']) {
+					const onAnchorFocus = vi.fn(), onMarkerFocus = vi.fn();
+					const comment = { from: 6, to: 11, id: 'comment', onMarkerFocus };
+					const view = open({ highlights: order === 'suggestion first' ? [suggestion('red'), comment] : [comment, suggestion('red')], onAnchorFocus, cardMode });
+					vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+					await pressStruck(view);
+					expect(onAnchorFocus.mock.calls.map((call) => call[0]), `${cardMode}, ${order}`).toEqual(['sug']);
+					unmount(component!); component = null; host.remove();
+				}
+			}
+		});
+
+		it('opens the smallest highlight under the press in every card mode: a one-word comment inside the quote, the suggestion where it is the narrower', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				const word = vi.fn(), wide = vi.fn();
+				const onMarkerFocus = vi.fn();
+				const inside = open({ highlights: [suggestion('red'), { from: 7, to: 9, id: 'word', onMarkerFocus }], onAnchorFocus: word, cardMode });
+				vi.spyOn(inside, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				await pressStruck(inside, 8);
+				expect(word.mock.calls.map((call) => call[0]), `${cardMode} inside`).toEqual(['word']);
+				unmount(component!); component = null; host.remove();
+				const spanning = open({ highlights: [suggestion('red'), { from: 2, to: 9, id: 'span', onMarkerFocus }], onAnchorFocus: wide, cardMode });
+				vi.spyOn(spanning, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				await pressStruck(spanning, 8);
+				expect(wide.mock.calls.map((call) => call[0]), `${cardMode} spanning`).toEqual(['sug']);
+				unmount(component!); component = null; host.remove();
+			}
+		});
+
 		it('opens a pressed suggestion even when two comments surround it, never a list that leaves it out', async () => {
 			const onAnchorFocus = vi.fn();
 			const onMarkerFocus = vi.fn();

@@ -184,12 +184,12 @@
 		const r = v.state.selection.main;
 		const offer = selectionOffer(v, composerAnchor);
 		if (r.empty && !offer) {
-			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights, cardMode !== 'sheet') : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
+			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights) : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
 			if (!read) return;
 			onSelect?.(null);
 			const { hit, arrived } = read;
-			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
-			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
+			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A tap or click opens a suggestion's card in every mode; a caret that keys moved into a suggestion opens none on the phone (`pickHighlight`).
+			const opens = cardMode === 'margin' ? arrived || !!click : !!click;
 			const stacked = hit && !hit.suggestion && click ? highlightsAtPress(v, click, curHighlights).filter((h) => !h.suggestion) : [];
 			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click, true);  // two or more threads on the pressed text open as a list, as their margin marker does; a press whose innermost highlight is a suggestion opens that suggestion, as on dev
 			else if (hit && opens && v.coordsAtPos(r.from)) {
