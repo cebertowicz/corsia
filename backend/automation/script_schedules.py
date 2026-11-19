@@ -33,7 +33,7 @@ SCRIPT_KIND = "script"
 MIN_CADENCE_SECONDS = CONTINUATION_SWEEP_INTERVAL
 # Hang guard for a script whose author set no timeout. Basis: a requirement, not a speed
 # reading -- a hung run must free its run slot -- and an expiry is reported, never silent:
-# the owner gets a timeout signal naming the seconds and how to allow longer.
+# the owner gets a timeout signal naming the seconds.
 DEFAULT_TIMEOUT_SECONDS = 60
 # The most an author may set. A run holds one of the instance's shared run slots
 # (script_runner.SCRIPT_RUN_CAP) until it ends, so this also bounds how long hung runs

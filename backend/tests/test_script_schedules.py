@@ -666,15 +666,13 @@ def test_the_cadence_floor_is_the_sweep_interval_and_has_no_ceiling(tmp_path):
     _register(db, tmp_path, cadence=31 * 24 * 60 * 60, thread="owner")
 
 
-def test_a_timed_out_run_says_how_to_allow_longer_up_to_the_ceiling(tmp_path):
-    """A timeout below the ceiling names the fix and the most allowed; at the ceiling it offers none."""
+def test_a_timed_out_run_states_its_limit_and_offers_no_reschedule(tmp_path):
+    """Event rules start a script by its id, so a timeout report never tells the owner to
+    cancel and schedule it again: the new id would be one no rule starts. The ceiling holds."""
     db = _db()
     below = _register(db, tmp_path, timeout=30)
     report = build_report(below, _run(timed_out=True), run_id="r")
-    assert "larger timeout_seconds" in report.error
-    assert f"at most {store.MAX_TIMEOUT_SECONDS}" in report.error
-    at_max = _register(db, tmp_path, timeout=store.MAX_TIMEOUT_SECONDS)
-    report = build_report(at_max, _run(timed_out=True), run_id="r")
-    assert "larger" not in report.error
+    assert report.error.endswith("did not finish within 30 s and was stopped")
+    assert "schedule it again" not in report.error
     with pytest.raises(ValueError, match="between 1 and"):
         _register(db, tmp_path, timeout=store.MAX_TIMEOUT_SECONDS + 1)
