@@ -11,7 +11,7 @@ from typing import Iterable
 
 from ..findings import Finding
 from ._base import Rule, RuleContext
-from .direct_commit_outside_write_transaction import _scope_name
+from .direct_commit_outside_write_transaction import _inside_writer, _scope_name
 
 _RULE_ID = "file-io-in-write-transaction"
 _PATH_METHODS = {"read_text", "write_text", "read_bytes", "write_bytes", "unlink", "mkdir", "touch"}
@@ -19,46 +19,28 @@ _AMBIGUOUS = {"open", "rename", "replace"}
 _OS_METHODS = {"replace", "rename", "remove", "unlink", "makedirs", "mkdir", "rmdir", "fsync"}
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 _FIX = "Move file I/O outside the write_transaction body. This rule checks direct calls only."
+# Known violations kept by this change: each is an ordering fence with DB state
+# that its owner must move. Each is limited to its one call, so new file I/O in
+# the same function is still flagged; delete an entry once its call has moved.
 _EXCEPTIONS = {
-    ("backend/connections/account_projection.py", "ensure_projection"),  # ordering fence with DB state; owner to move
-    ("backend/connections/account_projection.py", "cleanup_stale"),  # ordering fence with DB state; owner to move
-    ("backend/registry/durable_writes.py", "_register_applied"),  # ordering fence with DB state; owner to move
-    ("backend/tools/conductor_instruction_create.py", "_install"),  # ordering fence with DB state; owner to move
+    ("backend/connections/account_projection.py", "ensure_projection", "os.rename"),
+    ("backend/connections/account_projection.py", "cleanup_stale", "destination.unlink"),
+    ("backend/registry/durable_writes.py", "_register_applied", "shared.path.read_bytes"),
+    ("backend/tools/conductor_instruction_create.py", "_install", "path.read_bytes"),
 }
 
 
-def _imports(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
-    writers = {"write_transaction"}
+def _imports(tree: ast.AST) -> dict[str, str]:
     modules: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name in {"os", "shutil", "json", "pickle", "pathlib"}:
                     modules[alias.asname or alias.name] = alias.name
-        elif isinstance(node, ast.ImportFrom):
+        elif isinstance(node, ast.ImportFrom) and node.module in {"os", "shutil", "json", "pickle", "pathlib"}:
             for alias in node.names:
-                if alias.name == "write_transaction" and (node.module or "").endswith("database"):
-                    writers.add(alias.asname or alias.name)
-                elif node.module in {"os", "shutil", "json", "pickle", "pathlib"}:
-                    modules[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-    return writers, modules
-
-
-def _inside_writer(node: ast.AST, parents: dict[ast.AST, ast.AST], writers: set[str]) -> bool:
-    while node in parents:
-        parent = parents[node]
-        if isinstance(parent, _SCOPES):
-            return False
-        if isinstance(parent, (ast.With, ast.AsyncWith)) and node in parent.body:
-            for item in parent.items:
-                expr = item.context_expr
-                if isinstance(expr, ast.Call) and (
-                    isinstance(expr.func, ast.Name) and expr.func.id in writers
-                    or isinstance(expr.func, ast.Attribute) and expr.func.attr == "write_transaction"
-                ):
-                    return True
-        node = parent
-    return False
+                modules[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return modules
 
 
 def _path_type(node: ast.AST, modules: dict[str, str]) -> bool:
@@ -135,12 +117,12 @@ def _has_file_arg(node: ast.Call) -> bool:
 def _check(ctx: RuleContext) -> Iterable[Finding]:
     if not ctx.is_python or not ctx.file_path.startswith("backend/") or ctx.ast_tree is None:
         return
-    writers, modules = _imports(ctx.ast_tree)
+    modules = _imports(ctx.ast_tree)
     parents = {child: parent for parent in ast.walk(ctx.ast_tree) for child in ast.iter_child_nodes(parent)}
     for node in ast.walk(ctx.ast_tree):
-        if not isinstance(node, ast.Call) or not _inside_writer(node, parents, writers):
+        if not isinstance(node, ast.Call) or not _inside_writer(node, parents):
             continue
-        if (ctx.file_path, _scope_name(node, parents)) in _EXCEPTIONS:
+        if (ctx.file_path, _scope_name(node, parents), ast.unparse(node.func)) in _EXCEPTIONS:
             continue
         if _file_call(node, modules, _path_names(node, parents, modules)):
             yield Finding(rule_id=_RULE_ID, severity="error", file=ctx.file_path,

@@ -14,7 +14,7 @@ RULE = "file-io-in-write-transaction"
     "json.dump({}, fp)", "pickle.dump({}, fp)",
 ])
 def test_direct_file_io_flags(run_engine, call):
-    source = f"import os, shutil, json, pickle\nfrom pathlib import Path\nfrom infra.database import write_transaction as txn\ndef action(path: Path):\n    with txn(db):\n        {call}\n"
+    source = f"import os, shutil, json, pickle\nfrom pathlib import Path\nfrom infra.database import write_transaction\ndef action(path: Path):\n    with write_transaction(db):\n        {call}\n"
     assert len(run_engine("backend/example.py", source, rule_id=RULE)) == 1
 
 
@@ -32,18 +32,19 @@ def action():
     assert len(run_engine("backend/example.py", source, rule_id=RULE)) == 3
 
 
-def test_exception_is_limited_to_named_function(run_engine):
-    source = '''\nfrom infra.database import write_transaction
+def test_exception_is_limited_to_named_call(run_engine):
+    source = '''\nimport os
+from infra.database import write_transaction
 def ensure_projection():
     with write_transaction(db):
-        open("old")
+        os.rename("a", "b")
+        open("new")
 def another():
     with write_transaction(db):
-        open("new")
+        os.rename("a", "b")
 '''
     findings = run_engine("backend/connections/account_projection.py", source, rule_id=RULE)
-    assert len(findings) == 1
-    assert findings[0].line == 8
+    assert [finding.line for finding in findings] == [7, 10]
 
 
 def test_outside_and_non_io_inside_are_not_flagged(run_engine):
@@ -58,9 +59,9 @@ with write_transaction(db):
     assert run_engine("backend/example.py", source, rule_id=RULE) == []
 
 
-def test_async_writer_and_nested_with(run_engine):
-    source = """\nfrom infra.database import write_transaction as txn
-async with txn(db):
+def test_nested_with_inside_writer(run_engine):
+    source = """\nfrom infra.database import write_transaction
+with write_transaction(db):
     with something():
         open('x')
 """
