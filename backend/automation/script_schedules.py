@@ -31,9 +31,14 @@ SCRIPT_KIND = "script"
 # Script runs are claimed by the continuation sweep, so a cadence shorter than its
 # interval can't be kept; any longer floor would refuse a cadence the sweep can keep.
 MIN_CADENCE_SECONDS = CONTINUATION_SWEEP_INTERVAL
+# Hang guard for a script whose author set no timeout. Basis: a requirement, not a speed
+# reading -- a hung run must free its run slot -- and an expiry is reported, never silent:
+# the owner gets a timeout signal naming the seconds and how to allow longer.
 DEFAULT_TIMEOUT_SECONDS = 60
-# No reading yet: run durations are not recorded (running_since is cleared, only
-# last_run_at kept); record each run's duration to set this and DEFAULT_TIMEOUT_SECONDS.
+# The most an author may set. A run holds one of the instance's shared run slots
+# (script_runner.SCRIPT_RUN_CAP) until it ends, so this also bounds how long hung runs
+# can keep every other agent's scripts waiting. No reading yet: run durations are not
+# recorded (running_since is cleared, only last_run_at kept).
 MAX_TIMEOUT_SECONDS = 300
 MAX_PER_AGENT = 10
 MAX_PER_INSTANCE = 100

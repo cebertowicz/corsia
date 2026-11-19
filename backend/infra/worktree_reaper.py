@@ -38,7 +38,7 @@ from infra.worktree_reaper_store import forget_pr_terminal, pr_terminal_heads, r
 # No reading yet: needs how long worktrees sit idle before their owner returns to them.
 IDLE_THRESHOLD_SECONDS = 7 * 86400
 MAX_REMOVALS_PER_RUN = 100
-# No reading yet. RUN_BUDGET_SECONDS needs nightly pass durations, which nothing records.
+# RUN_BUDGET_SECONDS: hang guard, not a speed reading; expiry skips the rest as cap_reached for next pass.
 # METRIC_ITEM_CAP's counts are recorded in each worktree_reaper.run_completed event (skip_counts,
 # skipped_truncated, salvaged, quarantine_entry_count, remaining_count) but have not been read.
 RUN_BUDGET_SECONDS = 600.0
