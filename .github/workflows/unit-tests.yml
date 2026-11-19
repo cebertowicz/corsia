@@ -101,15 +101,19 @@ jobs:
           # failed attempt took about 95 s, so the retries add at most about
           # 7 minutes, which fits the room the 35-minute hang guard leaves
           # beside the slowest shard. A longer outage still fails this step.
-          for attempt in 1 2 3; do
-            if sudo apt-get install --yes --no-install-recommends ripgrep bubblewrap; then
+          # apparmor-profiles is fetched here too: install-linux-sandbox.sh
+          # installs it, without a retry, when bubblewrap alone can't open a
+          # sandbox, and finding it already installed it downloads nothing.
+          tries=3
+          for attempt in $(seq 1 "$tries"); do
+            if sudo apt-get install --yes --no-install-recommends ripgrep bubblewrap apparmor-profiles; then
               break
             fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::apt-get install failed 3 times; the package mirror is likely down"
+            if [ "$attempt" -eq "$tries" ]; then
+              echo "::error::apt-get install failed $tries times; the package mirror is likely down"
               exit 1
             fi
-            echo "::warning::apt-get install failed (attempt $attempt of 3); retrying in 60 s"
+            echo "::warning::apt-get install failed (attempt $attempt of $tries); retrying in 60 s"
             sleep 60
           done
           bash scripts/install-linux-sandbox.sh
