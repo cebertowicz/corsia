@@ -25,6 +25,9 @@ import subprocess
 from infra.backend_git import git_argv
 from infra.bulletins import PUBLIC_REPOSITORY
 
+# Measured Nov 18 on this Mac: the slowest probe call was 0.63 s (worktree list over 968
+# worktrees, 4,433 remote refs); status on a tree with dependencies took 0.33 s.
+# 30 s is headroom for a slower or loaded machine, not a reading.
 GIT_TIMEOUT_SECONDS = 30.0
 # Removing a worktree deletes its whole tree, dependencies and build caches
 # included; the owner measured 27-55 s on this Mac's real worktrees on Nov 12, so
@@ -32,7 +35,10 @@ GIT_TIMEOUT_SECONDS = 30.0
 # It stays bounded -- one hung child must not stall the nightly pass -- and
 # whatever this timeout still cuts off, the next pass finishes: sweep_quarantine.
 WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
+# Measured Nov 18 on this Mac: lsof +D took up to 2.60 s on worktrees with dependencies,
+# a lower bound (the agent sandbox hides other processes from lsof). 60 s is headroom.
 LSOF_TIMEOUT_SECONDS = 60.0
+# No reading: timing the open-PR list would itself be a bulk GitHub read.
 GH_TIMEOUT_SECONDS = 60.0
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,

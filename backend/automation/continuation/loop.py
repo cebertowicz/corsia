@@ -11,6 +11,8 @@ import infra.sweep_wake as sweep_wake
 from infra.db_async import run_in_db
 
 CONTINUATION_SWEEP_INTERVAL = 60
+# Restart jitter offsets are whole seconds (restart_jitter_seconds returns an int), so polling
+# at that resolution during startup releases each held item at its own offset.
 STARTUP_POLL_SECONDS = 1
 
 
