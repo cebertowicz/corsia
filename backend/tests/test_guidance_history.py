@@ -566,6 +566,32 @@ def test_a_busy_lock_still_saves_and_shows_the_failure(history_scope, monkeypatc
     assert _count(workspace) == 1
 
 
+def test_busy_lock_outside_edit_is_refused_at_publication(history_scope, monkeypatch):
+    import hashlib
+    from doceditor.document_save import FileChangedOutside, write_atomic_plain
+    from infra import guidance_git
+
+    workspace, _ = history_scope
+    path = _history(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('original')
+    expected = hashlib.sha256(b'original').hexdigest()
+    monkeypatch.setattr(guidance_git, '_LOCK_WAIT_SECONDS', 0.05)
+    holder = os.open(workspace / '.git' / 'corsia-guidance.lock', os.O_RDWR | os.O_CREAT)
+    fcntl.flock(holder, fcntl.LOCK_EX)
+
+    def outside_then_write(target, data):
+        target.write_text('outside edit')
+        write_atomic_plain(target, data.decode(), expected)
+
+    try:
+        with pytest.raises(FileChangedOutside):
+            _save(workspace, path, 'replacement', expected={path: expected}, write=outside_then_write)
+        assert path.read_text() == 'outside edit'
+    finally:
+        os.close(holder)
+
+
 def test_a_commit_fault_retries_once_then_saves_with_the_failure(history_scope, monkeypatch):
     from infra import guidance_git
 
