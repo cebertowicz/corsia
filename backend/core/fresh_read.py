@@ -24,16 +24,16 @@ from core.fresh_read_prompt import (
     OUTPUT_SCHEMA, SYSTEM_PROMPT, Context, ReaderAnswer, message_line, task_text, user_prompt, validator,
 )
 from core.fresh_read_store import FAILED, HELD, PASSED, ReadRecord, record, sha256_bytes, sha256_text
-from host_access.review_limits import HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
 from infra.db_async import run_in_db
 from infra.fresh_read_schema import PERSON_ROW
 
 #: The longest one check holds a door call, across every candidate; each candidate gets what is
-#: left. PLACEHOLDER. Basis: the only precedent in the code for holding an agent's call on an
-#: isolated reviewer call, the host-access reviewer's (``host_access/review_limits.py``). The
-#: disposable-instance proof (design step 3) measures each candidate's p95, and its results file
-#: replaces this before merge.
-CHECK_BOUND_SECONDS = HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
+#: left. Basis: measured. The slowest of three reads registered before the run, each at the
+#: full input cap on a local Qwen3.8 Flash Next seat with nothing else running: 120.04 s on the
+#: cold read (the two cache-warm reads took 47 s and 50 s), rounded up. Method and numbers are
+#: in the PR that set it (#3114, "Bounds and their basis"). Cloud readers are unmeasured, and so
+#: is a seat under load.
+CHECK_BOUND_SECONDS = 121.0
 
 _CHECK_NAMES = {
     1: "the person can't act on it from what it shows",

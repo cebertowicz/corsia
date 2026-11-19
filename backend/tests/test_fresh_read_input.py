@@ -10,7 +10,7 @@ import pytest
 from core.fresh_read_candidates import Candidate, install_cap, request_measure
 from core.fresh_read_prompt import Context, request_text, user_prompt
 from core.fresh_read_store import (
-    PASSED, ReadRecord, forget_thread, record, record_person_edit, sha256_bytes, view,
+    PASSED, ReadRecord, record, record_person_edit, sha256_bytes, view,
 )
 from delegation_fixtures import deleg_db  # noqa: F401
 from test_fresh_read_gate import _registered
@@ -56,15 +56,6 @@ def test_with_no_cap_no_message_goes_in_and_the_reader_is_told():
 def _pass_document(db, artifact_id: str, body: bytes, writer: str) -> str:
     return record(ReadRecord(kind="document_open", item_ref=artifact_id, sha256=sha256_bytes(body), verdict=PASSED,
                              writer_thread_id=writer, documents=((artifact_id, sha256_bytes(body), body),)), db=db)
-
-
-def test_a_purged_or_deleted_threads_reads_go_with_it(deleg_db):
-    record(ReadRecord(kind="update", item_ref="m1", sha256="a", verdict=PASSED, writer_thread_id="gone"), db=deleg_db)
-    record(ReadRecord(kind="update", item_ref="m2", sha256="b", verdict=PASSED, writer_thread_id="kept"), db=deleg_db)
-
-    forget_thread(deleg_db, "gone")
-
-    assert [row["writer_thread_id"] for row in deleg_db.execute("SELECT writer_thread_id FROM fresh_reads")] == ["kept"]
 
 
 def test_retiring_a_document_drops_its_view_bytes_and_the_persons_edits(deleg_db):

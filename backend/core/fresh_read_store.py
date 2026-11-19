@@ -121,11 +121,6 @@ def move_view(db, artifact_id: str, sha: str, body: bytes, read_id: str,
         )
 
 
-def forget_thread(db, thread_id: str) -> None:
-    """A purged or deleted thread's reads go with it; a view keeps showing the version it names."""
-    db.execute("DELETE FROM fresh_reads WHERE writer_thread_id=?", (thread_id,))
-
-
 def forget_document(db, artifact_id: str) -> None:
     """A retired document's view, the bytes no other view names, and the person's edits to it.
 

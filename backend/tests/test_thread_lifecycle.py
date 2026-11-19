@@ -30,6 +30,7 @@ from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.continuity_schema import CONTINUITY_SCHEMA_SQL
 from infra.continuity_staging import STAGING_SCHEMA_SQL
+from infra.fresh_read_schema import FRESH_READ_SCHEMA_SQL
 from infra.held_replies_schema import HELD_REPLIES_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
@@ -180,6 +181,7 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(THREAD_UPDATES_SCHEMA_SQL)
     conn.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
     conn.executescript(HELD_REPLIES_SCHEMA_SQL)
+    conn.executescript(FRESH_READ_SCHEMA_SQL)
     # Archive/purge now carries a plan-decision consequence too, so the
     # fixture loads those real schemas rather than a hand-copied subset.
     conn.executescript(ARTIFACT_IDENTITY_SCHEMA_SQL)
