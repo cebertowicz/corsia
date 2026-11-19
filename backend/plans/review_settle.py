@@ -33,6 +33,11 @@ VERDICT_REQUIRED = (
     "This step is a review you were handed: request_review needs verdict 'pass' or 'fail', "
     "with your findings in evidence. The verdict settles the review; you change nothing yourself."
 )
+#: Refusal R1 for mark_done: the reviewer finishes its work without a verdict.
+VERDICT_NOT_DONE = (
+    "This step is a review you were handed: finish it with request_review and verdict 'pass' or 'fail', "
+    "with your findings in evidence, not mark_done."
+)
 #: Refusal R2: a verdict anywhere else.
 VERDICT_ELSEWHERE = "verdict is only for the reviewer of a review step; submit this step with evidence alone."
 #: What ``settle_at_harvest`` returns for a return that is no verdict to settle.
@@ -64,20 +69,31 @@ def settled_by_review(created: dict) -> bool:
     return created.get("workflow_by") == "reviewer" and not created.get("workflow_settle")
 
 
-def check_verdict(db, node_id: str, thread_id: str | None, verdict) -> None:
+def _is_reviewer(db, node_id: str, thread_id: str | None) -> bool:
+    """Whether ``thread_id`` owns ``node_id``'s plan and is the worker on a review step of its
+    parent plan with no settle script."""
+    if thread_id is None:
+        return False
+    plan = service._plan_row(db, service._node_row(db, node_id)["plan_id"])
+    if plan["owner_kind"] != "thread" or plan["owner_id"] != thread_id or not plan["parent_plan_id"]:
+        return False
+    step = _reviewer_step(db, plan["parent_plan_id"], thread_id)
+    return step is not None and settled_by_review(json.loads(step["created_json"] or "{}"))
+
+
+def check_verdict(db, node_id: str, thread_id: str | None, verdict, *, operation: str = "request_review") -> None:
     """Require a verdict from the reviewer of a review step and refuse one anywhere else.
 
-    The reviewer is the thread whose own plan holds ``node_id`` and that is the
-    worker on a review step of its parent plan with no settle script.
+    The reviewer finishes its work only through request_review, so a mark_done of
+    its own is refused: a return with no verdict would leave the review to its author.
     """
+    if operation == "mark_done":
+        if _is_reviewer(db, node_id, thread_id):
+            raise service.PlanError(VERDICT_NOT_DONE)
+        return
     if verdict is not None and verdict not in VERDICTS:
         raise service.PlanInputError("verdict must be 'pass' or 'fail'")
-    reviewer = False
-    if thread_id is not None:
-        plan = service._plan_row(db, service._node_row(db, node_id)["plan_id"])
-        if plan["owner_kind"] == "thread" and plan["owner_id"] == thread_id and plan["parent_plan_id"]:
-            step = _reviewer_step(db, plan["parent_plan_id"], thread_id)
-            reviewer = step is not None and settled_by_review(json.loads(step["created_json"] or "{}"))
+    reviewer = _is_reviewer(db, node_id, thread_id)
     if reviewer and verdict is None:
         raise service.PlanError(VERDICT_REQUIRED)
     if not reviewer and verdict is not None:
@@ -85,21 +101,30 @@ def check_verdict(db, node_id: str, thread_id: str | None, verdict) -> None:
 
 
 def _returned_verdict(db, node) -> tuple[str | None, str]:
-    """The verdict and findings of the latest evidence on the steps this return handed back."""
+    """The verdict and findings of every step this return handed back, each read at its latest evidence.
+
+    Any fail fails the review, with the findings of every failed step. A pass needs a
+    pass on every step; a step with no verdict (a reviewer from before verdicts) leaves
+    the return to its author.
+    """
     from plans import delegation_harvest
 
     ids = [str(leaf["id"]) for leaf in delegation_harvest.returned_steps(db, node)]
     if not ids:
         return None, ""
-    row = db.execute(
-        f"""SELECT payload_json FROM plan_node_events
+    latest: dict[str, dict] = {node_id: {} for node_id in ids}
+    for row in db.execute(
+        f"""SELECT node_id,payload_json FROM plan_node_events
             WHERE node_id IN ({",".join("?" * len(ids))}) AND event='review_evidence_submitted'
-            ORDER BY created_at DESC,rowid DESC LIMIT 1""",
+            ORDER BY created_at,rowid""",
         ids,
-    ).fetchone()
-    payload = json.loads(row["payload_json"] or "{}") if row is not None else {}
-    verdict = payload.get("verdict")
-    return (verdict if verdict in VERDICTS else None), str(payload.get("evidence") or "")
+    ).fetchall():
+        latest[str(row["node_id"])] = json.loads(row["payload_json"] or "{}")
+    for verdict in ("fail", "pass"):
+        matching = [payload for payload in latest.values() if payload.get("verdict") == verdict]
+        if matching and (verdict == "fail" or len(matching) == len(latest)):
+            return verdict, "\n\n".join(str(payload.get("evidence") or "") for payload in matching)
+    return None, ""
 
 
 def settle_at_harvest(db, node, worker: str):

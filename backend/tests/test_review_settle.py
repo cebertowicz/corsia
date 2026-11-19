@@ -153,3 +153,50 @@ def test_the_person_may_still_settle_a_review_step(db):
     plan, _phase, steps = run(db)
     service.transition_node(steps["review"], "active", db=db)
     assert act(db, plan.id, "mark_done", steps["review"], user=True, **ACCEPT)["node"]["state"] == "accepted"
+
+
+def test_any_fail_among_the_returned_steps_fails_the_review_with_its_findings(db):
+    """A fail on one step and a later pass on another is a fail: the pass can't hide the findings."""
+    plan, _phase, steps = run(db, THREE)
+    build_done(db, plan.id, steps["build"])
+    hand(db, steps["review"], "reviewer")
+    submit(db, "reviewer", verdict="fail")
+    submit(db, "reviewer", verdict="pass", evidence="Heading checked; right.")
+
+    assert steps["review"] in harvest(db)
+
+    review = service._node_row(db, steps["review"])
+    assert (review["state"], review["sent_back"]) == ("closed", 1)
+    rejected = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (review["id"],),
+    ).fetchone()
+    assert json.loads(rejected["payload_json"])["feedback"] == FINDINGS
+
+
+def test_a_pass_needs_a_pass_on_every_returned_step(db):
+    plan, _phase, steps = run(db)
+    build_done(db, plan.id, steps["build"])
+    hand(db, steps["review"], "reviewer")
+    submit(db, "reviewer", verdict="pass", evidence="Totals right.")
+    submit(db, "reviewer", verdict="pass", evidence="Heading right.")
+
+    assert steps["review"] in harvest(db)
+
+    assert service._node_row(db, steps["review"])["state"] == "accepted"
+    (told,) = wakes(db, "review_passed")
+    assert json.loads(told.split("\n", 1)[1])["review"]["evidence"] == "Totals right.\n\nHeading right."
+
+
+def test_the_reviewer_cannot_finish_with_mark_done(db):
+    """mark_done would return the review with no verdict and leave it to its author."""
+    from plans.review_settle import VERDICT_NOT_DONE
+
+    plan, _phase, steps = run(db)
+    build_done(db, plan.id, steps["build"])
+    hand(db, steps["review"], "reviewer")
+    child, node = work(db, "reviewer")
+
+    assert act(db, child, "mark_done", node, as_thread="reviewer", **ACCEPT) == VERDICT_NOT_DONE
+    hand(db, steps["build"], "builder")
+    builder_plan, built = work(db, "builder")
+    assert not isinstance(act(db, builder_plan, "mark_done", built, as_thread="builder", **ACCEPT), str)

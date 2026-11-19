@@ -31,29 +31,10 @@ def test_by_validation():
     assert errors({"by": "agent", "workflow": "other"}) == []
 
 
-def test_settle_validation():
-    def errors(step):
-        return validate_workflow({"workflow": {"steps": [{"id": "one", **step}]}})
-
-    assert errors({"by": "reviewer", "settle": "check-totals"}) == []
-    for step in ({"settle": "check-totals"}, {"by": "person", "settle": "x"}, {"by": "reviewer", "settle": " "}):
-        assert ".settle must name a settle script, on a step with by: reviewer" in errors(step)[0]
-
-
-@pytest.mark.asyncio
-async def test_a_review_steps_settle_name_reaches_the_step_from_its_definition(isolated_db, tmp_path, monkeypatch):
-    from plans.review_settle_script import step_settle_script
-
-    steps = (
-        "    - {id: review, by: reviewer, settle: check-totals, required: true, check: Totals right, difficulty: {default: routine}}\n"
-        "    - {id: plain, difficulty: {default: routine}}\n"
-    )
-    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
-    reply = await run.start("ship")
-    review, plain = (entry["id"] for entry in reply["steps"])
-    with get_db() as connection:
-        assert step_settle_script(connection, review) == "check-totals"
-        assert step_settle_script(connection, plain) is None
+def test_settle_is_not_a_definition_key_until_a_runner_runs_it():
+    """settle: enters definitions with the script runner that reads it; until then a definition can't set it."""
+    errors = validate_workflow({"workflow": {"steps": [{"id": "one", "by": "reviewer", "settle": "check-totals"}]}})
+    assert any(".settle is an unknown key" in error for error in errors)
 
 
 @pytest.mark.asyncio

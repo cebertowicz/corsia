@@ -113,8 +113,6 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
         }
         if step.get("gate") in {"acceptance", "alignment"}:
             built["gate"] = step["gate"]
-        if isinstance(step.get("settle"), str) and step["settle"].strip():
-            built["settle"] = step["settle"].strip()
         hard_if = difficulty.get("hard_if") if isinstance(difficulty, dict) else None
         if isinstance(hard_if, str) and hard_if.strip():
             built["hard_if"] = hard_if.strip()
