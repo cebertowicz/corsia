@@ -70,6 +70,14 @@ async def test_replaced_update_receipt_carries_attention_notice(deleg_db, monkey
     assert rendered and "Your update: 3 words" in rendered
     assert rendered.endswith("(replace it while it is unseen)")
     assert events[-1]["properties"]["handover"] == "update"
+    # What the Measurement series updates_replaced_soon_pct reads: the replace path stamps the old row.
+    from api.measurement_queries import REPLACED_SOON_MINUTES
+
+    row = deleg_db.execute(
+        "SELECT update_kind,(julianday(replaced_at)-julianday(posted_at))*1440 AS minutes "
+        "FROM message_update_state WHERE message_id=?", (original_id,)).fetchone()
+    assert row["update_kind"] == "post_update"
+    assert 0 <= row["minutes"] <= REPLACED_SOON_MINUTES
 
 
 @pytest.mark.asyncio

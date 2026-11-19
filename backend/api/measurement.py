@@ -124,16 +124,11 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
     elif metric in COVERAGE_METRICS: value, n = coverage_value(metric, source)
     elif metric in MACHINERY_METRICS: value, n = machinery_value(metric, source)
-    elif metric == "took_recommendation_pct":
-        n = int(source.get("answered", 0) or 0)
-        value = source.get("recommendation", 0) / n if n else None
-    elif metric == "answered_other_pct":
-        n = int(source.get("answered", 0) or 0)
-        value = source.get("other", 0) / n if n else None
-    elif metric == "answered_neither_pct":
-        n = int(source.get("answered", 0) or 0)
-        value = source.get("neither", 0) / n if n else None
+    elif metric in {"took_recommendation_pct", "answered_other_pct", "answered_neither_pct"}:
+        n, answer = int(source.get("answered", 0) or 0), {"took_recommendation_pct": "recommendation", "answered_other_pct": "other"}.get(metric, "neither")
+        value = source.get(answer, 0) / n if n else None
     elif metric == "under_workflow_pct": value = source.get("under_workflow", 0) / n if n else None
+    elif metric == "updates_replaced_soon_pct": value = source.get("replaced_soon", 0) / n if n else None
     elif metric == "fresh_tokens":
         # The calls behind the period: it is measured when any were recorded. A period whose
         # every call carried no count has no figure, and is never served as zero tokens.
