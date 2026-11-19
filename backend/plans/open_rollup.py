@@ -113,6 +113,36 @@ def read_facts(connection, rows: Iterable[Any]) -> GroupFacts:
     )
 
 
+def _prime_leaf_worker_states(connection, child_plans, memo, parent_id):
+    """Read sibling workers without delegated leaves together in this projection."""
+    from plans import admission, aggregates
+
+    ids = list(dict.fromkeys(
+        str(plan["id"]) for plan in child_plans.values()
+        if str(plan["id"]) != parent_id and str(plan["id"]) not in memo
+    ))
+    if len(ids) < 2 or not aggregates.ready(connection):
+        return
+    for start in range(0, len(ids), _ID_CHUNK):
+        trees = open_tree_many.load_many(connection, ids[start:start + _ID_CHUNK])
+        eligible = {}
+        pairs = []
+        for plan_id, tree in trees.items():
+            leaves = [row for row in open_tree.leaves(tree) if row["state"] not in service._TERMINAL_STATES]
+            if any(row["spawned_thread_id"] is not None for row in leaves):
+                continue
+            eligible[plan_id] = tree
+            pairs.extend((row, tree.plan) for row in leaves)
+        if not eligible:
+            continue
+        projected = admission.project_many(pairs, db=connection, memo=memo)
+        for plan_id, tree in eligible.items():
+            projections._plan_state(
+                connection, plan_id, memo, plan=tree.plan, tree=tree,
+                projected=projected, aggregates_ready=True,
+            )
+
+
 def rollup_open(
     connection, tree: open_tree.OpenTree, memo: dict[str, PlanState], *,
     child_depth: int | None = 0, window: open_tree.FoldWindow | None = None,
@@ -135,6 +165,10 @@ def rollup_open(
     facts = facts or read_facts(connection, tree.rows)
     feedback = facts.feedback
     child_plans = facts.child_plans
+    _prime_leaf_worker_states(
+        connection, {str(row["id"]): child_plans[str(row["id"])] for row in rows
+                     if str(row["id"]) in child_plans}, memo, str(plan["id"]),
+    )
     waits = facts.waits
     titles = rollup._dependent_titles(connection, str(plan["id"]), rows)
     completed, linked = facts.completed, facts.linked

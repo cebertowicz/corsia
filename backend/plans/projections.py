@@ -44,7 +44,7 @@ _WALKING = PlanState(
 )
 
 
-def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=None, nodes=None, tree=None):
+def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=None, nodes=None, tree=None, projected=None, aggregates_ready=False):
     from plans import admission, service
 
     walked = memo.get(plan_id)
@@ -57,7 +57,7 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         plan = service._plan_row(connection, plan_id)
     settled_done = settled_failed = 0  # no full rows: the open tree, plus the stored settled leaves
     open_ids: open_tree.UnarchivedIds | None = None
-    if nodes is None and aggregates.ready(connection):
+    if nodes is None and (aggregates_ready or aggregates.ready(connection)):
         tree = tree or open_tree.load(connection, plan_id)
         rows, counted = open_tree.leaves(tree), open_tree.in_play(tree)
         settled_done, settled_failed = open_tree.settled_leaves_in_play(tree)
@@ -67,7 +67,8 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         rows, counted = node_states.leaves(nodes), node_states.in_play(nodes)
     done = settled_done + sum(row["state"] in service._ACCEPTED_STATES for row in counted)
     incomplete = [row for row in rows if row["state"] not in service._TERMINAL_STATES]
-    projected = admission.project_many([(row, plan) for row in incomplete], db=connection, memo=memo)
+    if projected is None:
+        projected = admission.project_many([(row, plan) for row in incomplete], db=connection, memo=memo)
     executions = [projected[str(row["id"])] for row in incomplete]
     conditions = [execution["condition"] for execution in executions]
     # A step waiting on its delegated child is this plan moving: the child's
