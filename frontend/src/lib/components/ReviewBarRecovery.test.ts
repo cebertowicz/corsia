@@ -79,6 +79,15 @@ describe('review bar recovery', () => {
   await vi.advanceTimersByTimeAsync(120_000); expect(api.fetchReviewBar).toHaveBeenCalledTimes(4);
   bar.deactivate();
  });
+ it('reloads on reconnect after the retries are spent', async () => {
+  api.fetchReviewBar.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
+   .mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(ask);
+  render(); await settle(); await vi.advanceTimersByTimeAsync(65_000); await settle();
+  expect(api.fetchReviewBar).toHaveBeenCalledTimes(4); expect(show()).toBeFalsy();
+  await vi.advanceTimersByTimeAsync(120_000); expect(api.fetchReviewBar).toHaveBeenCalledTimes(4);
+  ws.listeners.get('connected')?.(); await vi.advanceTimersByTimeAsync(150); await settle();
+  expect(api.fetchReviewBar).toHaveBeenCalledTimes(5); expect(show()).toBeTruthy();
+ });
  it('reloads on visibility even when the previous read never settles', async () => {
   let finish!: (value: ReviewBarRead) => void;
   api.fetchReviewBar.mockReturnValueOnce(new Promise<ReviewBarRead>((resolve) => { finish = resolve; })).mockResolvedValueOnce(ask);

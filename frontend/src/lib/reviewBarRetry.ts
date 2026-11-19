@@ -1,5 +1,7 @@
-// Three tries over about 65 s outlast a brief restart or network drop, then stop
-// asking a server that is down. Return, focus and reconnect still reload the bar.
+// This timer covers a read that failed or hung while the socket stays up. It is not a restart
+// recovery: after a restart the socket reconnects, and the reconnect trigger already reloads the bar.
+// Decision: after three tries (about 65 s) the existing triggers (return, focus, reconnect) take over,
+// so the bar never polls forever against a server that is down.
 const RETRY_DELAYS = [5_000, 15_000, 45_000];
 
 /** Schedule at most three retries after a failed review-bar read. */

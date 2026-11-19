@@ -95,7 +95,7 @@ test.describe('review bar recovery', () => {
 		} finally { release(); }
 	});
 
-	// Preserve the existing load-sequence guard in reviewBarState.svelte.ts:22,47–53.
+	// Preserve the existing loadSequence guard in load() in reviewBarState.svelte.ts.
 	test('an older response cannot erase a newer real ask', async ({ page, request }) => {
 		const doc = await seed(request, 'Stale review');
 		let release!: () => void, entered!: () => void, finished!: () => void;
