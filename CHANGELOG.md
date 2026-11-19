@@ -41,6 +41,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A document you have open keeps your latest typing when an agent promotes it into a shared folder or moves it elsewhere: the typing is saved first and you reopen it at its new place. If it can’t be saved yet, the move is refused and the agent is told to try again shortly; before, the typing could be lost.
 - A document you open and close without changing it keeps its modified time, and its owner is no longer told it was edited; the same holds when an agent saves a document with the text it already has.
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
+- A failed workflow step now closes only work that depends on it; independent work stays open.
 - A folded working line in chat now counts the same steps as the list it opens; before, a step that only answered comments was counted but showed nothing.
 - A folder you choose in oMLX for its SSD cache is kept across CORSIA's restarts, crash recovery and updates; before, CORSIA replaced it with its own folder at the next launch.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
