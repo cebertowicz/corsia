@@ -157,13 +157,13 @@ def reduce_node(
 
 
 def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
-    """Share canonical node facts and avoid unused branch summaries for flat plans."""
+    """Share canonical node facts and avoid unused branch summaries."""
     buckets = {node_id: item.bucket for node_id, item in reduced.items()}
     work = node_states.work_ids(rows)
     parents = node_states.parent_ids(rows, work=work)
     leaves = node_states.leaves(rows, work=work, parents=parents)
     counts = operator_nodes.distribution_from_buckets(
-        rows, buckets, work=work, holders=parents,
+        rows, buckets, work=work, holders=parents, include_branches=False,
     )[1]
     return leaves, parents, counts
 

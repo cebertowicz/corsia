@@ -10,6 +10,7 @@ from collections import deque
 from datetime import datetime
 
 import plans.operator_display_state as display_state
+import plans.operator_node_presentation as node_presentation
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
 import plans.operator_scheduled as scheduled_work
@@ -21,103 +22,17 @@ from plans import open_tree
 from plans.node_states import folded_ids, is_container, parent_ids, work_ids
 
 
-def _artifact_fields(link: dict) -> dict:
-    return {
-        "id": link["artifact_id"],
-        "role": link["role"],
-        "integration": link["integration"],
-        "type": link["type"],
-        "external_id": link["external_id"],
-        "title": link.get("title"),
-        "path": link.get("path"),
-        "state": link["state"],
-        "attention_state": link.get("attention_state"),
-    }
-
-
-def _present_node(
-    node: dict,
-    review_targets: dict[str, dict],
-    state: dict,
-    plan_state: str,
-) -> dict:
-    links = node["artifact_links"]
-    discussion = next(
-        (link["artifact_id"] for link in links if link["role"] == "discussion"),
-        None,
-    )
-    completion = None
-    if node["completed_event_id"]:
-        completion = {
-            "event_id": node["completed_event_id"],
-            "at": node["completed_at"],
-            "witnessed": False,
-        }
-    execution = state["execution"]
-    # Precedence decides disclosure: only a primarily blocked node opens its
-    # ancestor path. A paused, review, or terminal node keeps its blocker as a
-    # detail cause without widening what the tree opens by default.
-    attention_path = (
-        [*node["path"], node["id"]] if execution["condition"] == "blocked" else []
-    )
-    return {
-        "id": node["id"],
-        "parent_id": node["parent_id"],
-        "depth": node["depth"],
-        "kind": node["kind"],
-        "title": node["title"],
-        "description": node["description"],
-        # A person step names only this plan's open dependents; cross-plan
-        # dependents remain private to their plan owner.
-        "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
-        "acceptance_criteria": node["acceptance_criteria"],
-        "state": node["state"],
-        "unmet_dependencies": list(node["unmet_dependencies"]),
-        "held_by": node["held_by"],
-        "assignee": node["assignee"],
-        "revision": node["revision"],
-        "requirements_revision": node["requirements_revision"],
-        "commitment_id": node["commitment_id"],
-        "updated_at": node["updated_at"],
-        "last_transition_at": state["last_transition_at"],
-        "requires_user_action": state["requires_user_action"],
-        "executor": state["executor"],
-        "execution": execution,
-        "display": state["display"],
-        "status_reason": state["status_reason"],
-        "evidence": state["evidence"],
-        "commitment_cost": state["commitment_cost"],
-        "node_cost": state["node_cost"],
-        "initiative": state["initiative"],
-        "branch_progress": None,
-        "scheduled_until": None,
-        "attention_path": attention_path,
-        "completion": completion,
-        "child": plan_header.child_summary(node["child_plan"], node["spawned_thread_id"]),
-        "review": review_targets.get(node["id"]),
-        "user_actions": user_steering.offered(
-            node, review_targets.get(node["id"]), execution["causes"],
-            plan_state=plan_state,
-            worker_plan_state=(
-                node["child_plan"].plan["state"] if node["child_plan"] else None
-            ),
-        ),
-        "discussion_artifact_id": discussion,
-        "artifacts": [
-            _artifact_fields(link) for link in links if link["role"] != "discussion"
-        ],
-    }
-
-
 def distribution_from_buckets(
     rows: list[dict], buckets: dict[str, str], *,
     work: set[str] | None = None, holders: set[str] | None = None,
+    include_branches: bool = True,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Count compact raw-row leaves bottom-up, independent of input row order.
 
     A row saying ``has_child_in_work`` (a read of the open work) is a parent though its
     children are not among ``rows``: it adds no leaf of its own.
     Passed ``work`` and ``holders`` sets must be computed from these same rows.
+    With ``include_branches=False`` the first result is empty; totals are unchanged.
     """
     work = work_ids(rows) if work is None else work
     holders = parent_ids(rows, work=work) if holders is None else holders
@@ -126,11 +41,14 @@ def distribution_from_buckets(
         flat_branches = {}
         for row in rows:
             node_id = str(row["id"])
-            own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
-            if node_id in work and node_id not in holders:
-                own[buckets[node_id]] = 1
+            leaf = node_id in work and node_id not in holders
+            if leaf:
                 plan[buckets[node_id]] += 1
-            flat_branches[node_id] = own
+            if include_branches:
+                own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
+                if leaf:
+                    own[buckets[node_id]] = 1
+                flat_branches[node_id] = own
         return flat_branches, plan
     ids = {str(row["id"]) for row in rows}
     children: dict[str, list[str]] = {}
@@ -143,27 +61,35 @@ def distribution_from_buckets(
             parent_of[node_id] = parent_id
 
     branches: dict[str, dict[str, int]] = {}
+    plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
+    processed = 0
     remaining = {node_id: len(children.get(node_id, [])) for node_id in ids}
     ready = deque(node_id for node_id, count in remaining.items() if count == 0)
     while ready:
         node_id = ready.popleft()
-        own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
         child_ids = children.get(node_id, [])
-        if not child_ids and node_id in work and node_id not in holders:
-            own[buckets[node_id]] = 1
-        for child_id in child_ids:
-            for key, value in branches[child_id].items():
-                own[key] += value
-        branches[node_id] = own
+        leaf = not child_ids and node_id in work and node_id not in holders
+        if include_branches:
+            own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
+            if leaf:
+                own[buckets[node_id]] = 1
+            for child_id in child_ids:
+                for key, value in branches[child_id].items():
+                    own[key] += value
+            branches[node_id] = own
+        elif leaf:
+            plan[buckets[node_id]] += 1
+        processed += 1
         parent_id = parent_of.get(node_id)
         if parent_id is not None:
             remaining[parent_id] -= 1
             if remaining[parent_id] == 0:
                 ready.append(parent_id)
-    if len(branches) != len(ids):
+    if processed != len(ids):
         raise ValueError("plan node hierarchy contains a cycle")
+    if not include_branches:
+        return branches, plan
 
-    plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
     for row in rows:
         if row["parent_id"] not in ids:
             for key, value in branches[str(row["id"])].items():
@@ -356,7 +282,7 @@ def present_plan(
     if owner is None or projected.plan["state"] == "archived":
         return None
     nodes = [
-        _present_node(
+        node_presentation.present_node(
             node, review_targets, states[node["id"]], projected.plan["state"],
         )
         for node in projected.nodes

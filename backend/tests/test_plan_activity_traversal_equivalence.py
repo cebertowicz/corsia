@@ -23,6 +23,8 @@ def row(node_id, state, parent=None, *, child=False, archived=None):
     [row("p", "pending"), row("a", "active", "p"),
      row("b", "failed", "p"), row("c", "closed"), row("d", "active", "c")],
     [row("orphan", "active", "missing"), row("leaf", "review_requested")],
+    [row("root", "pending"), row("partial", "pending", "root", child=True),
+     row("done", "accepted", "root"), row("archived", "active", "root", archived="date")],
 ])
 def test_shared_traversal_facts_match_canonical_summaries(rows):
     work = node_states.work_ids(rows)
@@ -32,9 +34,11 @@ def test_shared_traversal_facts_match_canonical_summaries(rows):
     assert leaves == node_states.leaves(rows)
     assert node_states.in_play(rows, leaf_rows=leaves, with_children=parents) == node_states.in_play(rows)
     reduced = {node_id: SimpleNamespace(bucket=bucket) for node_id, bucket in buckets.items()}
-    assert activity_reducer.distribution_counts(rows, reduced) == (
-        leaves, parents, operator_nodes.distribution_from_buckets(rows, buckets)[1],
-    )
+    full = operator_nodes.distribution_from_buckets(rows, buckets)[1]
+    assert operator_nodes.distribution_from_buckets(
+        rows, buckets, work=work, holders=parents, include_branches=False,
+    ) == ({}, full)
+    assert activity_reducer.distribution_counts(rows, reduced) == (leaves, parents, full)
 
 
 def test_nested_cycle_still_raises():
