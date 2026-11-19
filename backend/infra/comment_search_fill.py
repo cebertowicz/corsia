@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from loguru import logger as log
 
 from infra.database import write_transaction
-from infra.db_fts import comment_search_words_sql
+from infra.db_fts import comment_field_sql, comment_search_words_sql, comments_of_sql
 from infra.settings import get_setting, set_setting
 
 #: Progress, then completion: ``{"ceiling", "through", "filled"}``, plus ``completed_at``.
@@ -40,11 +40,10 @@ _FILL_SQL = (
 )
 
 _UNPLACED_SQL = (
-    "SELECT count(*) FROM messages m, json_each(CASE WHEN json_valid(m.metadata) THEN m.metadata "
-    "ELSE '{}' END, '$.reply_context.comments') j "
+    f"SELECT count(*) FROM messages m, {comments_of_sql('m')} j "
     "WHERE m.role = 'user' AND m.metadata LIKE '%\"comments\"%' "
     "AND NOT EXISTS (SELECT 1 FROM chat_comments cc WHERE cc.user_message_id = m.id "
-    "AND cc.cid = CASE WHEN j.type = 'object' THEN json_extract(j.value, '$.cid') END)"
+    f"AND cc.cid = {comment_field_sql('j', 'cid')})"
 )
 
 

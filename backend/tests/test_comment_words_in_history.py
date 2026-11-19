@@ -195,6 +195,43 @@ def test_words_split_over_two_comments_of_one_input_are_not_found_together(chat)
     assert _search("pelicans zebras") == []
 
 
+def test_a_comment_stored_by_admission_is_found_by_its_quote(chat):
+    """The real path: ``accept_thread_input`` places the comments in the transaction that stores the input."""
+    from infra.input_admission import accept_thread_input
+
+    db = _db()
+    accept_thread_input(
+        THREAD, role="user", content="", intent="apply_now", message_id="m2",
+        metadata={"reply_context": {"comments": [_comment("c2.1", "release plan is ready", "pelicans")]}},
+        db=db,
+    )
+    db.execute("UPDATE messages SET delivery_state = 'delivered' WHERE id = 'm2'")
+    db.commit()
+
+    assert db.execute("SELECT count(*) FROM chat_comments WHERE user_message_id = 'm2'").fetchone()[0] == 1
+    assert _search("pelicans") == ["m2"]
+    assert _search("release plan") == ["m1", "m2"]
+
+
+def test_the_fallback_matches_only_comment_quotes_and_notes(chat):
+    """Without ``comment_fts`` search falls back to LIKE over the same quote and note fields.
+
+    A word that appears only in another part of the metadata (a key name, the in-view or
+    first-unread line) is not a word the person wrote, so it finds nothing.
+    """
+    _drop_comment_index()
+    _row(2, "user", "", {"reply_context": {
+        "in_view": [[1, 1]],
+        "first_unread": {"seq": 1, "truncated": True},
+        "comments": [_comment("c2.1", "release plan", "ask about pelicans")],
+    }})
+
+    assert _search("pelicans") == ["m2"]
+    assert _search("unread") == []
+    assert _search("truncated") == []
+    assert _search("reply_context") == []
+
+
 def test_a_bad_comment_never_blocks_storing_the_input(chat):
     """The index trigger runs inside the input's transaction, so it must not raise."""
     from infra.chat_comment_index import place_comments

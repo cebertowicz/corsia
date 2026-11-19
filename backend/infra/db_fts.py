@@ -80,17 +80,39 @@ def comment_search_words_sql(user_message_id: str, cid: str) -> str:
     Malformed metadata or a non-object comment yields no row rather than an error, because the
     trigger runs inside the transaction that stores the person's input.
     """
-    comments = (
-        "json_each(CASE WHEN json_valid(m.metadata) THEN m.metadata ELSE '{}' END, "
-        "'$.reply_context.comments')"
-    )
-    field = "CASE WHEN j.type = 'object' THEN json_extract(j.value, '$.{name}') END"
     return (
-        f"(SELECT coalesce(m.content, '') || char(10) || coalesce({field.format(name='quote')}, '') "
-        f"|| char(10) || coalesce({field.format(name='note')}, '') "
-        f"FROM messages m, {comments} j "
-        f"WHERE m.id = {user_message_id} AND {field.format(name='cid')} = {cid} LIMIT 1)"
+        f"(SELECT coalesce(m.content, '') || char(10) || {_comment_words('j')} "
+        f"FROM messages m, {comments_of_sql('m')} j "
+        f"WHERE m.id = {user_message_id} AND {comment_field_sql('j', 'cid')} = {cid} LIMIT 1)"
     )
+
+
+def comment_words_like_sql(message: str) -> str:
+    """SQL that is true when one of ``message``'s chat comments has a quote or note LIKE ``?``.
+
+    The search fallback's counterpart of ``comment_search_words_sql``: the same comments and the
+    same quote and note fields, so a word that appears only in another metadata key or line
+    (``in_view``, ``first_unread``, attachment fields, the key names themselves) never matches.
+    ``message`` is the SQL alias of the ``messages`` row; it takes one parameter, the pattern.
+    """
+    return f"EXISTS (SELECT 1 FROM {comments_of_sql(message)} j WHERE {_comment_words('j')} LIKE ?)"
+
+
+def comments_of_sql(message: str) -> str:
+    """The comments of a ``messages`` row; malformed metadata yields none rather than an error."""
+    return (f"json_each(CASE WHEN json_valid({message}.metadata) THEN {message}.metadata ELSE '{{}}' END, "
+            "'$.reply_context.comments')")
+
+
+def comment_field_sql(comment: str, name: str) -> str:
+    """One field of a comment from ``comments_of_sql``; NULL for a comment that is not an object."""
+    return f"CASE WHEN {comment}.type = 'object' THEN json_extract({comment}.value, '$.{name}') END"
+
+
+def _comment_words(comment: str) -> str:
+    """The searchable words of one comment: its quote, then its note."""
+    return (f"coalesce({comment_field_sql(comment, 'quote')}, '') || char(10) "
+            f"|| coalesce({comment_field_sql(comment, 'note')}, '')")
 
 
 def _init_comment_fts(conn: sqlite3.Connection) -> None:

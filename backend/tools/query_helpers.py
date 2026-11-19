@@ -6,7 +6,7 @@ from __future__ import annotations
 # definition lives with the index definitions in infra so that memory/ can
 # use it without importing back up into the tool layer.
 from core.reply_context import with_comment_lines
-from infra.db_fts import fts5_escape
+from infra.db_fts import comment_words_like_sql, fts5_escape
 from infra.project_fence import HistoryFence
 from infra.message_update_schema import not_replaced_sql
 from infra.thread_confinement import Reader, hidden_clause
@@ -118,7 +118,7 @@ def search_messages_fts(
             f"{sender_expression} AS sender, NULL as bm25_score "
             "FROM messages m "
             "JOIN threads t ON t.id = m.thread_id "
-            f"WHERE (m.content LIKE ? OR (m.role = 'user' AND m.metadata LIKE ?)){like_filters} "
+            f"WHERE (m.content LIKE ? OR (m.role = 'user' AND {comment_words_like_sql('m')})){like_filters} "
             "ORDER BY m.created_at DESC LIMIT ?"
         )
         return db.execute(sql, like_params).fetchall()
