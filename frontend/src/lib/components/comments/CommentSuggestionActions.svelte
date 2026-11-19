@@ -2,8 +2,9 @@
 	import './comment-link.css';
 	import { IconButton, Spinner } from '$lib/components/ui';
 
-	let { orphaned, textChanged = false, readOnly, decisionError, name = '', onDecide }: {
+	let { orphaned, textChanged = false, refusalKind, readOnly, decisionError, name = '', onDecide }: {
 		orphaned: boolean;
+		refusalKind?: 'stale' | 'no_such_file';
 		/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
 		textChanged?: boolean;
 		readOnly: boolean;
@@ -16,9 +17,9 @@
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	const named = (verb: string) => (name ? `${verb}: ${name}` : verb);
 	/** Why Accept is off, for its tooltip; the card already says it on the screen (`.ct-orphan`). */
-	const cantAccept = $derived(textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
+	const cantAccept = $derived(refusalKind === 'no_such_file' ? 'Can’t accept: the file no longer exists.' : textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
 	async function decide(decision: 'accept' | 'reject') {
-		if (readOnly || decisionBusy || (decision === 'accept' && (orphaned || textChanged))) return;
+		if (readOnly || decisionBusy || (decision === 'accept' && cantAccept)) return;
 		decisionBusy = decision;
 		try {
 			await onDecide(decision);
@@ -33,7 +34,7 @@
 {#if !readOnly}
 	<!-- The same icon button the comment list's Close uses (`ui/IconButton`), with its name beside the icon: a touch screen has no tooltip. The accessible name adds which suggestion it decides. While a decision is in flight the pair is disabled and the pressed one shows a spinner and "Accepting…" or "Rejecting…". On a touch screen each is a 44 px target with room between them. -->
 	<div class="ct-suggestion-actions">
-		<IconButton class="ct-suggestion-accept" variant="ghost" size="lg" ariaLabel={decisionBusy === 'accept' ? named('Accepting') : named('Accept')} busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || orphaned || textChanged} title={cantAccept ?? named('Accept')} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>
+		<IconButton class="ct-suggestion-accept" variant="ghost" size="lg" ariaLabel={decisionBusy === 'accept' ? named('Accepting') : named('Accept')} busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || !!cantAccept} title={cantAccept ?? named('Accept')} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>
 			{#if decisionBusy === 'accept'}<Spinner size={16} />{:else}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>{/if}
 			<span class="ct-act-label">{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</span>
 		</IconButton>

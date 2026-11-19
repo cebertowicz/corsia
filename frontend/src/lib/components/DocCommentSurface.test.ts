@@ -644,7 +644,7 @@ describe('DocCommentSurface suggestions', () => {
 		accept().click();
 		await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')).not.toBeNull());
 		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
-		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': 'The text changed on the server' } });
+		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': { message: 'The text changed on the server', kind: 'stale' } } });
 		// The card's note changed, but the card did not move: anything typed in it stays where it was.
 		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
@@ -711,7 +711,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ get state() { return liveState.current; }, get artifactId() { return liveArtifact.current; } });
 		const refuse = async () => {
 			document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!.click();
-			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': 'The text changed on the server' }));
+			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': { message: 'The text changed on the server', kind: 'stale' } }));
 		};
 		await refuse();
 		state.set(null); flushSync();

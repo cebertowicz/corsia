@@ -309,13 +309,18 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
         else:
             await _operate(socket, user, data)
     except (HTTPException, ValueError, PermissionError, StoreRefused, OSError) as exc:
+        from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
+
         title = getattr(exc, "title", None)
+        message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        if data["type"] == "doc_flush" and getattr(exc, "kind", None) == "no_such_file":
+            message = MISSING_SAVE_MESSAGE
         await send_to_client(socket, {"type": "doc_error", "artifact_id": data.get("artifact_id"),
                                     "request_id": data.get("request_id"),
                                     "kind": getattr(exc, "kind", "store_refused" if isinstance(exc, StoreRefused) else "refused"),
                                     "blocking": isinstance(exc, StoreRefused) or getattr(exc, "blocking", False),
                                     **({"title": title} if title else {}),
-                                    "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
+                                    "message": message})
     except Exception as error:
         if closed_socket_error(error):
             log.debug("Live-document frame not delivered to a closed socket: %s", error)

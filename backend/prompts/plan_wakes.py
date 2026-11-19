@@ -98,7 +98,7 @@ WAKE_CHILD_ROUND_RETURNED = (
     "[CORSIA plan] The child delegated for {title} worked again after it"
     " returned and has now stopped with nothing left open, so it is waiting"
     " on you. Its step still awaits your verdict: read its reply with"
-    " delegate_status, then accept, reject with feedback, or fail the step."
+    " delegate_status, then accept it or reject it with feedback."
 )
 #: A step failed during the worker's Turn and the worker stopped with other
 #: work still open, so no return is coming yet (decided at Turn end, #2216).

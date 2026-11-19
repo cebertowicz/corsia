@@ -120,7 +120,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new SuggestionRefused('The text changed on the server', 409, 'stale'));
 		await settled();
-		expect(get(suggestionRefusals)).toEqual(sameOpening ? { 'artifact-1': { 'comment-1': 'The text changed on the server' } } : {});
+		expect(get(suggestionRefusals)).toEqual(sameOpening ? { 'artifact-1': { 'comment-1': { message: 'The text changed on the server', kind: 'stale' } } } : {});
 	});
 
 	it.each(meanwhile)('accept-all succeeds after $what: its text goes to its own document', async ({ act, sameOpening, sameDocument }) => {

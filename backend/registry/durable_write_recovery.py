@@ -18,6 +18,18 @@ from registry.shared_target import SharedTarget
 logger = logging.getLogger(__name__)
 
 
+def remove_created_parent(path: Path) -> None:
+    """Remove an unpublished category directory, failing on foreign contents."""
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unpublished shared category contains unexpected files: {path}"
+        ) from exc
+
+
 def recover_intents(db, workspace: Path, recover_one) -> None:
     """Hold document failures; propagate database faults. Cleanup remains best effort."""
     rows = db.execute(

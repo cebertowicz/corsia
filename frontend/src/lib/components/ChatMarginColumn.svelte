@@ -6,6 +6,7 @@
 	import DocMarginStack from './DocMarginStack.svelte';
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { commentLanding } from './chatUnreadTargets';
+	import { notEngaging } from './comments/threadOpen';
 
 	/**
 	 * The chat comment threads as cards in the transcript's right margin, each level with the text its comment was cut
@@ -56,14 +57,33 @@
 		// Its rows: one that grows with no change to the DOM (an image loading) moves every highlight below it.
 		resized: () => (scroller ? [...scroller.children].filter(row => !row.classList.contains('chat-margin')) : []),
 	};
+	/**
+	 * A press moves focus into the card on its way down, before a drag has made a selection, so a focus that comes from a
+	 * press waits for its release: the card is picked then only if the press did not end a selection.
+	 */
+	let pressing = false;
+	let pressFocus: string | null = null;
+	function focusIn(event: FocusEvent, id: string) {
+		if (notEngaging(event)) return;
+		if (pressing) pressFocus = id;
+		else onSelect(id);
+	}
+	function release(picks: boolean) {
+		const id = pressFocus;
+		pressing = false;
+		pressFocus = null;
+		if (picks && id && (window.getSelection()?.isCollapsed ?? true)) onSelect(id);
+	}
 </script>
+
+<svelte:window onpointerup={() => release(true)} onpointercancel={() => release(false)} />
 
 <section class="chat-margin" aria-label="Chat comments" use:marginOnCanvas={{ root: scroller?.parentElement ?? null, scroller: '.messages' }}>
 	<DocMarginStack source={anchors} pinned={entries} {selectedId} {composer}>
 		{#snippet card(entry)}
-			<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard, and moving into it picks the card, as a document card does, so the stack keeps it in view. -->
+			<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard, and moving into it picks the card, as a document card does, so the stack keeps it in view. A link in its body, or a press that ends a selection, picks nothing (`notEngaging`), since a pick reads it; a focus a press brings in waits for the press's release (`focusIn`). -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={() => onSelect(entry.id)} onfocusin={() => onSelect(entry.id)}>
+			<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={(event) => { if (!notEngaging(event)) onSelect(entry.id); }} onpointerdown={() => { pressing = true; }} onfocusin={(event) => focusIn(event, entry.id)}>
 				<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin picked={selectedId === entry.id} onReply={(text) => sendCommentReply(entry.message, entry.comment, text, onSendReply)} />
 			</div>
 		{/snippet}
