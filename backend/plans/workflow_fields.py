@@ -89,6 +89,8 @@ REQUIRED_STEP_SKIP = (
     "required workflow step {step} can't be skipped: close it with evidence "
     "(mark_done, request_review, accept) or fail it"
 )
+#: The same refusal to an agent on a review step, which no agent fails: its routes instead.
+REQUIRED_REVIEW_STEP_SKIP = "required workflow step {step} can't be skipped. {route}"
 
 
 def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[str, Any]]:
@@ -329,16 +331,23 @@ def follow_up_step_fields(db, source, step: FollowUpStep) -> dict[str, Any]:
     return NOT_A_STEP
 
 
-def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
-    """Require a harvested worker return before a reviewer step is marked done or accepted."""
-    from plans import delegation_harvest
+def refuse_reviewer_self_close(db, node_id: str, operation: str, *, by_agent: bool = True) -> None:
+    """Require a fresh worker's harvested return before a reviewer step is marked done or accepted;
+    an agent never fails one, since only the reviewer's verdict does."""
+    from plans import delegation_harvest, fresh_reviewer
 
-    if operation not in {"mark_done", "accept", "accept_with_follow_up"}:
+    if operation not in {"mark_done", "accept", "accept_with_follow_up", "fail"}:
         return
     node, created = _open_step(db, node_id)
     if created.get("workflow_by") != "reviewer":
         return
+    if operation == "fail":
+        if by_agent:
+            raise service.PlanError(fresh_reviewer.AUTHOR_FAIL)
+        return
     if operation != "mark_done" and delegation_harvest.harvest_review(db, node) is not None:
+        if by_agent:
+            fresh_reviewer.refuse_unfresh(db, node)
         return
     raise service.PlanError(REVIEWER_ROUTE)
 
@@ -368,14 +377,23 @@ def refuse_unready_close(db, node_id: str, operation: str, *, by_agent: bool = T
     gate an agent closes before the person answered, or a rejected gate."""
     from plans import gate_handoff
 
-    refuse_reviewer_self_close(db, node_id, operation)
+    refuse_reviewer_self_close(db, node_id, operation, by_agent=by_agent)
     if by_agent:
         refuse_unasked_person_gate(db, node_id, operation)
     gate_handoff.refuse_rejected(db, node_id, operation)
 
 
-def refuse_required_skip(db, node_id: str) -> None:
-    """Refuse closing or archiving an unfinished required step of a workflow run."""
+def refuse_required_skip(db, node_id: str, *, by_agent: bool = True) -> None:
+    """Refuse skipping an unfinished required run step; only an agent, who can't fail a review step, gets its routes."""
+    from plans import fresh_reviewer
+
     node, created = _open_step(db, node_id)
     if created.get("workflow_required") is True:
-        raise service.PlanError(REQUIRED_STEP_SKIP.format(step=node["workflow_step"]))
+        review = by_agent and created.get("workflow_by") == "reviewer"  # the person reaches this by archive
+        refusal = REQUIRED_REVIEW_STEP_SKIP if review else REQUIRED_STEP_SKIP
+        raise service.PlanError(refusal.format(step=node["workflow_step"], route=fresh_reviewer.AUTHOR_FAIL))
+
+
+def reviewer_step(db, node_id: str) -> bool:
+    """An unfinished step only its reviewer's verdict settles, so no agent is offered fail on it."""
+    return _open_step(db, node_id)[1].get("workflow_by") == "reviewer"
