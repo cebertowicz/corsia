@@ -12,15 +12,11 @@ def person_answer(payload_json) -> dict | None:
 
     A person's answer carries ``detail.verdict`` (``doceditor.review_bar``); a
     retired ask or an agent's route-back carries none and is no call of the person's.
+    A payload this module could not have written raises: read as "no answer", a
+    corrupt rejection would silently drop out of every reader's count.
     """
-    try:
-        payload = json.loads(payload_json) if payload_json else {}
-    except (TypeError, ValueError):
-        return None
-    detail = payload.get("detail") if isinstance(payload, dict) else None
-    if not isinstance(detail, dict) or not isinstance(detail.get("verdict"), str):
-        return None
-    return detail
+    detail = json.loads(payload_json or "{}").get("detail") or {}
+    return detail if isinstance(detail.get("verdict"), str) else None
 
 
 def release(

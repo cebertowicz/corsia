@@ -141,3 +141,25 @@ def test_a_decision_body_missing_a_required_field_is_left_out(db):
     db.commit()
 
     assert public.settled_calls(db, "owner", include_delegating_chain=False) == []
+
+
+
+def test_a_corrupt_ask_answer_raises_rather_than_reading_as_no_answer(db):
+    """Events are append-only, so the reader is fed the stored payload of a real answer, then a corrupt one."""
+    import json
+
+    import pytest
+
+    from plans.user_ask_release import PROVENANCE, person_answer
+
+    artifact_id = _ask(db, "owner", "proposal.md")
+    attention.clear_attention(artifact_id, outcome="answer", verdict="approved", db=db)
+    db.commit()
+    (stored,) = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE event='hold_cleared' AND provenance=?", (PROVENANCE,),
+    ).fetchone()
+
+    assert person_answer(stored)["verdict"] == "approved"
+    assert person_answer(None) is None
+    with pytest.raises(json.JSONDecodeError):
+        person_answer(stored[:-1])
