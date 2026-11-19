@@ -31,6 +31,16 @@ def replace_if_expected(stage: Path, target: Path, expected_sha256: str | None) 
     replace_bound_file(stage, target)
 
 
+def restore_if_owned(stage: Path, target: Path, content_hash: str) -> None:
+    """Restore only while the target still holds this publication's bytes."""
+    try:
+        replace_if_expected(stage, target, content_hash)
+    except DocumentSaveError as exc:
+        if exc.kind not in ("stale", "no_such_file"):
+            raise
+        # The outside edit or deletion owns the target; finish undo around it.
+
+
 def checked_file_mode(path: Path, expected_sha256: str | None) -> int:
     """Get target mode, preserving the missing-target refusal for conditional writes."""
     from tools.filesystem_effects import bound_file_mode

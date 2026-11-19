@@ -9,7 +9,6 @@ import re
 from uuid import uuid4
 
 from core.workspace_layout import resolve_project_root, resolve_thread_working_root
-from doceditor.document_save_errors import DocumentSaveError
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from registry.shared_category_index import (
     _index_lists_file,
@@ -18,7 +17,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected
+from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected, restore_if_owned
 from registry.durable_write_recovery import recover_intents, recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
@@ -64,7 +63,7 @@ def _restore_target(target: Path, backup: Path | None, content_hash: str) -> Non
             f"{backup.name.removesuffix('.backup')}.stage"
         )
         copy_bound_file(backup, rollback_stage)
-        replace_if_expected(rollback_stage, target, content_hash)
+        restore_if_owned(rollback_stage, target, content_hash)
 
 
 def _finish_undo(
@@ -88,13 +87,7 @@ def _finish_undo(
     elif backup.exists():
         # Recovery may resume after the restore itself but before the intent advanced.
         if not target.is_file() or _sha256_file(target) != _sha256_file(backup):
-            try:
-                _restore_target(target, backup, content_hash)
-            except DocumentSaveError as exc:
-                if exc.kind not in ("stale", "no_such_file"):
-                    raise
-                # A newer outside edit or deletion owns the target now. Finish
-                # the remaining undo without replacing that newer state.
+            _restore_target(target, backup, content_hash)
     else:
         raise RuntimeError(
             f"Durable write intent {intent_id} lost its rollback backup."
