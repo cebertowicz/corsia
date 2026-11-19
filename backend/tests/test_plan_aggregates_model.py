@@ -124,7 +124,7 @@ def check(sim: Sim) -> None:
         {
             "id": row.id, "parent_id": row.parent_id, "state": row.state,
             "archived_at": "t" if row.archived else None,
-            "spawned_thread_id": row.spawned,
+            "spawned_thread_id": row.spawned, "kind": "task", "workflow_step": None,
         }
         for row in (node.row for node in sim.tree.nodes.values())
     ]
