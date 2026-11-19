@@ -79,6 +79,7 @@ def _present_node(
         "parent_id": node["parent_id"],
         "depth": node["depth"],
         "kind": node["kind"],
+        "workflow_step": node["workflow_step"],  # ``node_states.parent_ids`` reads it
         "title": node["title"],
         "description": node["description"],
         # A person step names only this plan's open dependents; cross-plan
@@ -128,7 +129,7 @@ def distribution_from_buckets(
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Count compact raw-row leaves bottom-up, independent of input row order.
 
-    A row saying ``has_child_in_work`` (a read of the open work) is a parent though its
+    A row saying ``is_parent`` (a read of the open work) is a parent though its
     children are not among ``rows``: it adds no leaf of its own.
     """
     ids = {str(row["id"]) for row in rows}

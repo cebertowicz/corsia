@@ -180,17 +180,18 @@
 	/** Which highlight the reader is in: a press decides until a key or a later press moves the caret (`caret-rule.ts`). */
 	const caretRule = new CaretRule();
 
-	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
+	/** `pressed` is what the press landed on, read when it landed (a press only, never a caret report): the innermost highlight and the threads stacked on that text. */
+	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean, pressed?: { hit: CommentRange | undefined; stacked: CommentRange[] }) {
 		const r = v.state.selection.main;
 		const offer = selectionOffer(v, composerAnchor);
 		if (r.empty && !offer) {
-			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights, cardMode !== 'sheet') : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
+			const read = caretRule.read(!!click, !!typed, () => click ? (pressed ? pressed.hit : highlightAtPress(v, click, curHighlights, cardMode !== 'sheet')) : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
 			if (!read) return;
 			onSelect?.(null);
 			const { hit, arrived } = read;
 			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
 			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
-			const stacked = hit && !hit.suggestion && click ? highlightsAtPress(v, click, curHighlights).filter((h) => !h.suggestion) : [];
+			const stacked = hit && !hit.suggestion && click ? (pressed ? pressed.stacked : highlightsAtPress(v, click, curHighlights)).filter((h) => !h.suggestion) : [];
 			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click, true);  // two or more threads on the pressed text open as a list, as their margin marker does; a press whose innermost highlight is a suggestion opens that suggestion, as on dev
 			else if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
@@ -238,8 +239,10 @@
 					mousedown(press, v) {
 						caretRule.pressStarted();
 						onSelect?.(null);
+						// What the press landed on is read now, where the reader pressed: the frame that reads the press can come after the list reloads and the text moves, and the press does not follow it.
+						const pressed = { hit: highlightAtPress(v, press, curHighlights, cardMode !== 'sheet'), stacked: highlightsAtPress(v, press, curHighlights) };
 						// The press is read a frame after mouseup, once the editor has placed the caret; a key that moves it first supersedes the press.
-						const up = () => { caretRule.pressUp(press); requestAnimationFrame(() => { if (caretRule.settled(press)) handleSelection(v, press); }); };
+						const up = () => { caretRule.pressUp(press); requestAnimationFrame(() => { if (caretRule.settled(press)) handleSelection(v, press, undefined, pressed); }); };
 						window.addEventListener('mouseup', up, { once: true });
 						return false;
 					}

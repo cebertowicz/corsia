@@ -18,16 +18,17 @@ _log = logging.getLogger(__name__)
 
 
 def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) -> None:
-    """Blocking. The live lane's write: a recorded document is written and saved as a version by the
-    operation's actor under its reason, under the history lock, before this returns; any other file as
-    before. A changed file is never replaced (``FileChangedOutside``). An operation that requires history
-    (a restore) raises, with the file left as it was, unless its version is recorded.
+    """Blocking. The live lane's write records a version under the history lock when available;
+    otherwise it uses the existing unrecorded fallback. A change detected before replacement raises
+    ``FileChangedOutside``; any writer can still race the check and rename. A restore raises unless
+    its version is recorded.
 
     Text whose bytes equal the file's is not written: a flush with nothing new (the last viewer
     leaving) renames nothing and records no version. The lane still records and publishes it."""
     if hashlib.sha256(text.encode("utf-8")).hexdigest() == prior_sha256:
-        if hashlib.sha256(path.read_bytes()).hexdigest() != prior_sha256:
-            raise FileChangedOutside()
+        from registry.durable_write_preconditions import check_expected_content
+
+        check_expected_content(path, prior_sha256)
         return
     target = history_target(path, Path(config.WORKSPACE))
     if target is None or not target.document:
@@ -42,6 +43,9 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         write=lambda _path, data: document_save.write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
     )
     if saved.outcome == "stale":
+        from registry.durable_write_preconditions import check_expected_content
+
+        check_expected_content(path, prior_sha256)
         raise FileChangedOutside()
     if saved.outcome == "refused" or (required and saved.outcome not in ("written", "unchanged")):
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")

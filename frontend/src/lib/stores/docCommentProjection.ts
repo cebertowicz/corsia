@@ -34,6 +34,7 @@ export interface DocComment {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	refusalKind?: 'stale' | 'no_such_file';
 	/** The original text is gone: nothing of the quote is left to mark (a collapsed range, or a quote found nowhere in the document). One rule for a comment and for a decided suggestion that keeps its replies. */
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
@@ -46,6 +47,7 @@ export interface DocComment {
 	acked?: boolean;
 	/** Everyone who has acknowledged the thread, in order. */
 	acknowledgedBy?: Acknowledger[];
+	replyGoesTo?: { id: string; name: string }[];
 	review?: boolean;
 	replacement?: string | null;
 	insertAfter?: boolean;
@@ -102,6 +104,7 @@ export function fromServer(r: ServerComment): DocComment {
 		textChanged: !!r.text_changed,
 		acked: (r.acknowledged_by ?? []).some((ack) => ack.kind === 'user'),
 		acknowledgedBy: r.acknowledged_by ?? [],
+		replyGoesTo: r.reply_goes_to,
 		review: !!r.review,
 		replacement: r.replacement,
 		insertAfter: !!r.insert_after,

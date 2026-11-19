@@ -17,6 +17,7 @@ export type CommentThreadData = {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	refusalKind?: 'stale' | 'no_such_file';
 	/** The original text is gone from the document: the card says so, and keeps the old text in quotes. */
 	detached?: boolean;
 	/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
@@ -25,6 +26,8 @@ export type CommentThreadData = {
 	acked?: boolean;
 	/** Everyone who has acknowledged the thread, in order: the Agreed line names them. */
 	acknowledgedBy?: { id: string; name: string; kind: 'user' | 'agent' }[];
+	/** Who the person's next reply wakes. */
+	replyGoesTo?: { id: string; name: string }[];
 	replacement?: string | null;
 	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;

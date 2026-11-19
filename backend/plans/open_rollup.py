@@ -4,7 +4,7 @@
 ``plans.open_tree`` loaded (the open work, a recent window of settled leaves and the
 ancestors they climb through) into the same ``PlanRollup`` and node dicts, reading
 each per-node fact (completion, links, waits, a rejected round's feedback) for those
-rows alone. A node carries ``has_child_in_work``, the stored fact ``node_states``
+rows alone. A node carries ``is_parent``, the stored fact ``node_states``
 reads to know a parent whose children are not loaded.
 
 The full projection stays the reference for the pane and for the tests that hold the
@@ -18,7 +18,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import artifact_links, hierarchy, node_waits, open_tree, open_tree_many, projections, rollup, service
+from plans import (
+    artifact_links, hierarchy, node_states, node_waits, open_tree, open_tree_many, projections, rollup, service,
+)
 from plans.models import PlanState
 
 _ID_CHUNK = 400
@@ -144,7 +146,7 @@ def rollup_open(
             connection, row, path, completed, linked, waits, titles, 0, memo,
             child_plans, {},
         )
-        node["has_child_in_work"] = row["child_in_work"] > 0
+        node["is_parent"] = node_states.stored_parent(row)
         if child_depth != 0 and str(row["id"]) in child_plans:
             child = child_plans[str(row["id"])]
             node["child_plan"] = rollup_open(

@@ -50,6 +50,11 @@ severity = "error"
 enabled = true
 severity = "error"
 
+[rules.file-io-in-write-transaction]
+enabled = true
+severity = "error"
+include_globs = ["backend/*.py", "backend/**/*.py"]
+
 [rules.hardcoded-path-or-id]
 enabled = true
 severity = "error"

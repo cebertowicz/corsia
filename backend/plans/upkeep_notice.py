@@ -21,14 +21,13 @@ from __future__ import annotations
 from plans import (
     admission, admission_projection, node_order, node_states, selection_validity, service,
 )
+from plans.close_next_bounds import title as _title
 from prompts import plan_tools as text
 
-#: Serialized-byte ceiling for the whole notice line.
-NOTICE_MAX_BYTES = 320
-TITLE_MAX_BYTES = 96
-#: Title cut in the no-selection line, which also carries two 32-character ids
-#: and the start call inside the whole-line cap.
-START_TITLE_MAX_BYTES = 40
+#: The line needs no byte cap of its own: it is fixed words plus at most
+#: ``START_OFFER_MAX`` titles and ids, each title cut like every plan title
+#: (``close_next_bounds.TITLE_MAX_BYTES``), or one title and its wait cut. The
+#: start call it carries is never cut short.
 START_OFFER_MAX = 2
 WAIT_MAX_BYTES = 72
 _UNSETTLED_STATES = frozenset({"pending", "active", "review_requested"})
@@ -59,18 +58,18 @@ def notice_for(db, thread_id: str, tool_name: str) -> str | None:
     attempt = selection_validity.attributed_selection(db, thread_id)
     if attempt is not None:
         title = service._node_row(db, attempt["node_id"])["title"]
-        return _fit(text.upkeep_active(_cut(title, TITLE_MAX_BYTES)))
+        return text.upkeep_active(_title(title))
     held = _held_task(db, plan, thread_id)
     if held is not None:
         title, wait = held
-        return _fit(text.upkeep_held(_cut(title, TITLE_MAX_BYTES), _cut(wait, WAIT_MAX_BYTES)))
+        return text.upkeep_held(_title(title), _cut(wait, WAIT_MAX_BYTES))
     startable, waiting, later = _open_tasks(db, plan, thread_id)
     if startable:
-        return _fit(text.upkeep_start(_named(startable), int(startable[0]["revision"])))
+        return text.upkeep_start(_named(startable), int(startable[0]["revision"]))
     if not waiting:
         waiting = _unsettled_tasks(db, plan, thread_id)
     if waiting:
-        return _fit(text.upkeep_waiting(_named(waiting)))
+        return text.upkeep_waiting(_named(waiting))
     # The Later count keeps the add route truthful: the work is on the plan, below
     # the cut, so the agent adds only what is genuinely new.
     return text.upkeep_add_route(later)
@@ -118,7 +117,7 @@ def _open_tasks(db, plan, thread_id: str) -> tuple[list, list, int]:
 
 def _named(rows: list) -> list[tuple[str, str]]:
     return [
-        (_cut(str(row["title"]), START_TITLE_MAX_BYTES), str(row["id"]))
+        (_title(str(row["title"])), str(row["id"]))
         for row in rows[:START_OFFER_MAX]
     ]
 
@@ -145,10 +144,6 @@ def _held_task(db, plan, thread_id: str) -> tuple[str, str] | None:
 
 def _cut(value: str, max_bytes: int) -> str:
     return text.bounded_text(value, max_bytes, measure=_utf8_bytes)
-
-
-def _fit(line: str) -> str:
-    return text.bounded_text(line, NOTICE_MAX_BYTES, measure=_utf8_bytes)
 
 
 def _utf8_bytes(value: str) -> int:

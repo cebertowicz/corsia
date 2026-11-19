@@ -15,14 +15,13 @@ A call hands a document to the person when it:
 - gives the person a step with an instructions document (``plan_update`` with
   ``assignee: user`` and ``instructions_artifact_id``);
 - shows the person a document (``document_open``);
-- posts an update whose text names documents (``post_update``). The ones
-  counted are the ones chat shows the person as document cards under that
-  update, found with the same reader the cards use, so a path to code or a
-  file they cannot open is not counted.
+- saves an update (``post_update``), including its linked document cards;
+- drafts or updates a decision (``plan_decision``), before it is raised.
 
-Whether a plan call took effect is read from Plans' own state through
-``plans.public``, never from the result text, so a refused call carries no
-notice. ``document_open`` keeps no state, so its own reported outcome is read.
+A refused plan call can leave matching state from an earlier call. Refusal is
+therefore read from the dispatcher's result; the handover itself is read from
+Plans' state through ``plans.public``. ``document_open`` keeps no state, so its
+own reported outcome is read.
 An update is read back from its saved message, named by the call's receipt,
 so a refused update carries no notice either.
 The call has taken effect by the time this runs, so a read that fails here is
@@ -30,14 +29,14 @@ logged and the result goes out without the line, never as an error.
 
 Both live projection paths call this per result, beside the plan and
 repository notices: native in ``core.turns_steps`` and the Claude Code/Codex
-bridge in ``subagents.harness_tool_bridge``. Nothing is persisted, so a
-rebuilt history omits the line. It reads the database and the document's
+bridge in ``subagents.harness_tool_bridge``. The line itself is not persisted,
+so a rebuilt history omits it; an update's row records only when its notice
+was shown (``message_update_state.notice_at``), for Measurement. It reads the database and the document's
 file, so it must run off the event loop.
 
-Cost: the calls above are the only ones that read anything, and an update
-whose text names no file reads nothing. Each reads one indexed set of open
-asks and the files this agent has waiting on the person; an update also reads
-its own message row and looks up the files it names. No model is called.
+Cost: a saved update reads its own message row; linked documents additionally
+read the open asks and linked files. A decision reads its public projection.
+No model is called.
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from core.attention_measure import Measure, describe, measure_file, total_of
+from core.attention_measure import Measure, describe, measure_file, measure_text, total_of
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -85,6 +84,12 @@ _CLOSE_MANY = (
     "them: put first what they must decide or do, and keep only what they need for it."
 )
 
+_CHECK = (
+    "Before the person reads it: does each line carry its whole idea without leaving them a "
+    "question, and does it say whether it is how things are today, a plan, or already done? "
+    "If not, rewrite it now."
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -92,11 +97,32 @@ def attention_notice(
     *, thread_id: str | None, tool_name: str, arguments: Any, result: Any = None,
     workspace: Path | None = None,
 ) -> str | None:
-    """Return the notice for a call that handed the person a document, else None."""
+    """Add a notice without changing the outcome of the completed call."""
+    from doceditor.document_scope import ProjectNotFound
+
+    try:
+        return _attention_notice(
+            thread_id=thread_id, tool_name=tool_name, arguments=arguments,
+            result=result, workspace=workspace,
+        )
+    except (sqlite3.Error, ValueError, OSError, ProjectNotFound):
+        log.warning("attention notice: could not project %s", tool_name, exc_info=True)
+        return None
+
+
+def _attention_notice(
+    *, thread_id: str | None, tool_name: str, arguments: Any, result: Any = None,
+    workspace: Path | None = None,
+) -> str | None:
+    """Return a notice for a successful hand-over or a decision draft, else None."""
     if not thread_id or not isinstance(arguments, dict):
+        return None
+    if isinstance(result, str) and result.startswith("Error:"):
         return None
     if tool_name == "post_update":
         return _update_notice(thread_id, arguments, result)
+    if tool_name == "plan_decision":
+        return _decision_notice(thread_id, arguments, result)
     if tool_name == "plan_update":
         params = arguments.get("params")
         target = _plan_target(arguments.get("operation"), params) if isinstance(params, dict) else None
@@ -113,11 +139,6 @@ def attention_notice(
         if path is None:
             return None
         waiting = _waiting_paths(db, thread_id)
-    except (sqlite3.Error, ValueError):
-        # The call already took effect: a failed read here must not turn its
-        # result into an error the agent would retry.
-        log.warning("attention notice: could not read what %s handed over", tool_name, exc_info=True)
-        return None
     finally:
         db.close()
     measure = measure_file(path)
@@ -128,60 +149,88 @@ def attention_notice(
     if kind in ("ask", "step") or path in waiting:
         others.append(measure)
     _record(thread_id, "open" if kind == "open_path" else kind, [measure], len(others))
-    return _render(kind, path.name, measure, others)
+    return _render(kind, path.name, measure, others) + "\n" + _CHECK
 
 
 def _update_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
-    """The notice for a saved update whose text names documents the person gets as cards."""
+    """Measure a saved update and any documents the person gets as cards."""
     from registry.path_cards import targets
 
     saved = _SAVED_UPDATE.match(result) if isinstance(result, str) else None
-    text = arguments.get("text")
-    # Most updates name no file: those open nothing.
-    if saved is None or not isinstance(text, str) or not targets(text):
+    if saved is None:
         return None
     db = get_db()
     try:
-        linked = _linked_documents(db, thread_id, saved.group(1))
+        from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
+
+        row = db.execute(
+            f"SELECT {VISIBLE_CONTENT} AS content, t.user_id AS user_id, t.project_id AS project_id"
+            f" FROM messages AS m JOIN threads AS t ON t.id = m.thread_id {VISIBLE_CONTENT_JOIN}"
+            " WHERE m.id=? AND m.thread_id=?",
+            (saved.group(1), thread_id),
+        ).fetchone()
+        if row is None or not isinstance(row["content"], str):
+            return None
+        text = row["content"]
+        linked = _linked_documents(db, text, row["user_id"], row["project_id"]) if targets(text) else []
         waiting = _waiting_paths(db, thread_id) if linked else []
-    except (sqlite3.Error, ValueError, LookupError):
-        # The update is already saved: a failed read here must not turn its
-        # receipt into an error the agent would retry.
-        log.warning("attention notice: could not read what post_update linked", exc_info=True)
-        return None
     finally:
         db.close()
-    if not linked:
-        return None
     measured = [(path, measure_file(path)) for path in linked]
     others = [measure_file(other) for other in waiting if other not in linked]
-    _record(thread_id, "update", [measure for _path, measure in measured], len(others) + len(linked))
-    return _render_update(measured, others)
+    update_measure = measure_text(text)
+    _record(
+        thread_id, "update", [measure for _path, measure in measured],
+        len(others) + len(linked) if linked else None, text_measure=update_measure,
+    )
+    notice = f"{LABEL} Your update: {describe(update_measure)}."
+    if linked:
+        notice += " " + _render_update(measured, others).removeprefix(f"{LABEL} ")
+    _mark_notice_shown(thread_id, saved.group(1))
+    return notice + "\n" + _CHECK + " (replace it while it is unseen)"
 
 
-def _linked_documents(db, thread_id: str, message_id: str) -> list[Path]:
+def _mark_notice_shown(thread_id: str, message_id: str) -> None:
+    """Record the first time this update's check was shown; a failed write only loses the reading."""
+    from infra.database import TransactionOwnershipError, write_transaction
+    from infra.db_connection import LaneWriteError
+    from infra.time import utc_now_iso
+
+    try:
+        with write_transaction(None, scope="update_notice_shown") as conn:
+            conn.execute(
+                "UPDATE message_update_state SET notice_at=COALESCE(notice_at,?)"
+                " WHERE message_id=? AND thread_id=?",
+                (utc_now_iso(), message_id, thread_id),
+            )
+    # The notice still goes out: the call has taken effect and the line is the agent's check.
+    except (sqlite3.Error, TransactionOwnershipError, LaneWriteError):
+        log.warning("attention notice: could not record notice time for %s", message_id, exc_info=True)
+
+
+def _decision_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
+    """Read and measure a successful decision through Plans' public boundary."""
+    from core.attention_decision import measure_decision
+
+    measure = measure_decision(thread_id, arguments, result, get_db)
+    if measure is None:
+        return None
+    _record(thread_id, "decision", [], None, text_measure=measure)
+    return f"{LABEL} Your decision: {describe(measure)}.\n{_CHECK}"
+
+
+def _linked_documents(db, text: str, user_id: str, project_id: str | None) -> list[Path]:
     """The documents chat shows the person as cards under this agent's saved update."""
     from doceditor.document_scope import scope_roots
     from infra import config
-    from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
     from registry.path_cards import reference_cards
 
-    # Cards follow the text chat draws under the update: an answer section that
-    # was placed in its comment thread is not part of it.
-    row = db.execute(
-        f"SELECT {VISIBLE_CONTENT} AS content, t.user_id AS user_id, t.project_id AS project_id"
-        f" FROM messages AS m JOIN threads AS t ON t.id = m.thread_id {VISIBLE_CONTENT_JOIN}"
-        " WHERE m.id=? AND m.thread_id=?",
-        (message_id, thread_id),
-    ).fetchone()
-    if row is None or not isinstance(row["content"], str):
-        return []
     # The text, the roots and the second origin are the ones ``api.thread_cards.attach_cards``
     # gives the same reader; ``test_attention_notice_update_links`` holds the two together.
-    origin, bases = scope_roots(row["project_id"], db)
+    origin, bases = scope_roots(project_id, db)
     cards = reference_cards(
-        db, row["content"], bases, str(row["user_id"]), origin=origin,
-        fallback_origin=config.WORKSPACE.resolve() if row["project_id"] else None,
+        db, text, bases, str(user_id), origin=origin,
+        fallback_origin=config.WORKSPACE.resolve() if project_id else None,
     )
     paths: list[Path] = []
     for card in cards:
@@ -318,7 +367,10 @@ def _size(measure: Measure | None) -> int:
     return -1 if measure is None else max(measure.words, measure.unspaced)
 
 
-def _record(thread_id: str, handover: str, measures: list[Measure | None], waiting: int) -> None:
+def _record(
+    thread_id: str, handover: str, measures: list[Measure | None], waiting: int | None,
+    *, text_measure: Measure | None = None,
+) -> None:
     """Record what was handed over, so its size can be read over time without a hand count.
 
     One event per call: an update that links several documents records their totals.
@@ -334,6 +386,9 @@ def _record(thread_id: str, handover: str, measures: list[Measure | None], waiti
     }
     if handover == "update":
         properties["linked_documents"] = len(measures)
+    if text_measure is not None:
+        properties[f"{handover}_words"] = text_measure.words
+        properties[f"{handover}_characters"] = text_measure.unspaced
     emit_product_event(
         "attention_notice", "notice_emitted", thread_id=thread_id, properties=properties,
     )
