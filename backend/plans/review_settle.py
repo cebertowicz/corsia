@@ -59,7 +59,7 @@ def _reviewer_step(db, parent_plan_id: str, worker: str):
     ).fetchone()
 
 
-def _settled_by_review(created: dict) -> bool:
+def settled_by_review(created: dict) -> bool:
     """Whether a step with this creation payload is settled by its reviewer's own verdict."""
     return created.get("workflow_by") == "reviewer" and not created.get("workflow_settle")
 
@@ -77,7 +77,7 @@ def check_verdict(db, node_id: str, thread_id: str | None, verdict) -> None:
         plan = service._plan_row(db, service._node_row(db, node_id)["plan_id"])
         if plan["owner_kind"] == "thread" and plan["owner_id"] == thread_id and plan["parent_plan_id"]:
             step = _reviewer_step(db, plan["parent_plan_id"], thread_id)
-            reviewer = step is not None and _settled_by_review(json.loads(step["created_json"] or "{}"))
+            reviewer = step is not None and settled_by_review(json.loads(step["created_json"] or "{}"))
     if reviewer and verdict is None:
         raise service.PlanError(VERDICT_REQUIRED)
     if not reviewer and verdict is not None:
@@ -115,7 +115,7 @@ def settle_at_harvest(db, node, worker: str):
     from plans.workflow_fields import creation_payload
 
     node = service._node_row(db, node["id"])
-    if not _settled_by_review(creation_payload(db, node["id"])):
+    if not settled_by_review(creation_payload(db, node["id"])):
         return NOT_SETTLED
     verdict, findings = _returned_verdict(db, node)
     if verdict is None or fresh_reviewer.has_seen_the_work(db, node, worker):
