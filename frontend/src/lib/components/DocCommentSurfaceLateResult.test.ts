@@ -163,7 +163,7 @@ describe('a decision that settles after the surface moved on', () => {
 		expect(acceptAll().textContent).toBe('Accepting…');
 		await act();
 		// The request is the first document's; one at a time, so the button stays disabled wherever it is shown.
-		expect(acceptAll().textContent).toBe('Accept all from agent-1');
+		expect(acceptAll().textContent).toBe('Accept suggestions');
 		expect(acceptAll().disabled).toBe(true);
 		decision.succeed({ accepted: ['comment-1', 'comment-2'], skipped: [], text: 'accepted document', revision: 'r3' });
 		await settled();

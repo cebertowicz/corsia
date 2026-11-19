@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { expect, type Page, type APIRequestContext, type Locator } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 import { isolatedDb } from './heldComments';
+import { openDetails } from './documentBar';
 import { injectMessage } from './mock';
 
 export const LONG_NAME = 'Community outreach and neighbourhood volunteer coordination for the Garden Volunteers';
@@ -11,7 +12,8 @@ const AGENT_NAMES = ['Research coordinator', 'Community outreach', 'Garden volun
 /**
  * A registered planning document owned by the agent "Release planning", supervised by "Research coordinator", in a
  * scope with a few more agents ("Community outreach" has a paused plan). Returns `open(page)`, which opens the
- * document beside that agent's chat, and the ids a spec needs to move the document into another ownership state.
+ * document beside that agent's chat and then its Details, where the owner and supervisor are, and the ids a spec needs
+ * to move the document into another ownership state.
  */
 export async function seedOwnedDocument(page: Page, request: APIRequestContext, heading = 'Project planning') {
 	const owner = await createSession(request, 'Release planning');
@@ -51,6 +53,7 @@ export async function seedOwnedDocument(page: Page, request: APIRequestContext, 
 		if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await target.getByText('Release planning', { exact: true }).first().click();
 		await expect(target.locator('.cm-content .cm-md-h1')).toBeVisible();
+		await openDetails(target);
 		await expect(ownerItem(target)).toBeVisible();
 	}
 	/**

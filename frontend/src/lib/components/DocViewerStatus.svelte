@@ -2,23 +2,25 @@
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import DocOwnerControl from './DocOwnerControl.svelte';
-	import type { DocOwnership } from '$lib/api/docOwnership';
-	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
-	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
+	import MiddleName from './MiddleName.svelte';
+	import type { DocViewerStatusProps } from './docViewerStatusProps';
 	import DocReviewControls from './DocReviewControls.svelte';
-	import { headerStack } from '$lib/actions/headerStack';
-	import CommentsPill from './comments/CommentsPill.svelte';
-	import { Button, StatePill, Toggle } from '$lib/components/ui';
-	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { Button } from '$lib/components/ui';
+	import Spinner from './ui/Spinner.svelte';
+	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
-	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
+	import { publishDocumentBar } from '$lib/stores/documentBar';
+	import { canvasCompact } from '$lib/stores/artifactCanvas';
+	import { isMobile } from '$lib/stores/viewport';
+	import { paneOpen } from '$lib/stores/paneOpen';
 
 	let {
-		title = 'Document',
 		presence,
 		reviewBar,
+		ask = null,
 		commentsOpen = false,
 		commentsLoading = false,
 		saveStatus = 'idle',
@@ -46,6 +48,7 @@
 		onReopen,
 		onRead,
 		imageOpen = false,
+		offScreen = false,
 		activityRoot = null,
 		historyAvailable = false,
 		historyOpen = false,
@@ -54,82 +57,115 @@
 		resolvedOpen = false,
 		resolvedInColumn = false,
 		onOpenResolved,
-	}: {
-		title?: string;
-		presence?: import('svelte').Snippet;
-		/** The review bar sits first in the header, so its buttons come before the document in tab order. */
-		reviewBar?: import('svelte').Snippet;
-		commentsOpen?: boolean;
-		commentsLoading?: boolean;
-		saveStatus?: 'idle' | 'saving' | 'saved';
-		ready: boolean;
-		stale: boolean;
-		readonly: boolean;
-		commentCount: number;
-		unreadCount?: number;
-		artifactId: string | null;
-		targetInstanceId: string | null;
-		viewingThreadId?: string | null;
-		reviewTargetKey?: string | null;
-		onReload?: () => void;
-		onOpenComments: (opener: HTMLElement) => void;
-		freshness: DocumentFreshness | null;
-		/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
-		ownership?: DocOwnership | null;
-		/** The row is the one this tab last showed, drawn before the load answered: its owner pickers and Mark verified wait for the load. */
-		headerStandIn?: boolean;
-		onOwnershipChanged?: (value: DocOwnership) => void;
-		onFeedbackChanged?: () => void | Promise<void>;
-		onMarkVerified?: () => Promise<void>;
-		liveSession?: LiveDocumentSession | null;
-		openRefusal?: DocOpenRefusal | null;
-		liveUnavailable?: LiveUnavailable | null;
-		tabText?: string;
-		onReopen?: () => void;
-		onRead?: () => void;
-		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
-		imageOpen?: boolean;
-		activityRoot?: HTMLElement | null;
-		/** The file has recorded versions (slice 1: instruction files). Without them there is no History, and no count. */
-		historyAvailable?: boolean;
-		historyOpen?: boolean;
-		onOpenHistory?: () => void;
-		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
-		resolvedCount?: number;
-		resolvedOpen?: boolean;
-		/** The resolved list opens in the margin column's place, a plain region rather than a dialog. */
-		resolvedInColumn?: boolean;
-		onOpenResolved?: () => void;
-	} = $props();
+		commentsEntry = $bindable(null),
+		detailsEntry = $bindable(null),
+	}: DocViewerStatusProps = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
-	let detailsOpen = $state(false);
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
-	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
-	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
-	// Delivery controls mount in the identity row so Send holds the compact header line.
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
-	const showOwnership = $derived(!!(ownership && artifactId));
 	// The live-status row renders the stable connection description for unavailable actions.
 	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
+	/** File changed, until Reload clears it. */
+	const urgent = $derived(stale && ready);
+	/** In the compact canvas, File changed sits after the name; the desktop tab strip draws the text control. */
+	const changeInBar = $derived($canvasCompact);
+	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
+	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
+	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
+	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: false, hiddenAsk: !!ask && !ask.onCard }));
+	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
+	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
+	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
+	let receiptBox = $state<HTMLElement>(), receiptMeasure = $state<HTMLElement>();
+	let receiptTextFits = $state(false);
+	$effect(() => {
+		const box = receiptBox, measure = receiptMeasure;
+		if (!box || !measure) return;
+		const update = () => { receiptTextFits = measure.getBoundingClientRect().width <= box.getBoundingClientRect().width; };
+		update();
+		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+		observer?.observe(box); observer?.observe(measure);
+		return () => observer?.disconnect();
+	});
+	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
+		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} new` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
+	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
+	const statusText = $derived(freshnessPresentation
+		? freshnessPresentation.overdue
+			// Overdue names the last verification's date: it fits beside Mark verified at phone width, where an age cuts mid-word.
+			? `Overdue · ${freshnessPresentation.dateText ? `verified ${freshnessPresentation.dateText}` : freshnessPresentation.phrase}`
+			: freshnessPresentation.phrase
+		: '');
+
+	let headerEl = $state<HTMLElement | null>(null);
+	let panelEl = $state<HTMLElement | null>(null);
+	let panelOpen = $state(false);
+	let panelMax = $state<number | null>(null);
+	/** The open panel would reach down over the ask's card, so the card steps aside until it closes; Details then carries the ask. */
+	let cardCovered = $state(false);
+
 	$effect(() => {
 		artifactId;
-		detailsOpen = false;
+		panelOpen = false;
 		verificationError = '';
 		verificationNotice = '';
 		verifying = false;
 	});
 
-	async function changeImmediateDelivery(value: boolean): Promise<void> {
-		if (!(await setDeliverCommentsImmediately(value))) return;
-		// Another client may have held a comment this one has not synced yet, so turning delivery on always asks the
-		// server to send the open document's held lane. An empty lane delivers nothing and shows nothing.
-		if (value) void feedbackStatus?.controller().sendDocument();
-	}
+	// The panel takes the height left below its top, so it reaches its last row without scrolling wherever that fits.
+	$effect(() => {
+		const panel = panelEl;
+		if (!panelOpen || !panel) { cardCovered = false; return; }
+		const fit = () => {
+			// The document can sit beside the bar entry; keep its panel within the window in either position.
+			panel.style.removeProperty('--panel-shift');
+			const rect = panel.getBoundingClientRect();
+			const shift = rect.left < 8 ? 8 - rect.left : Math.min(0, window.innerWidth - 8 - rect.right);
+			panel.style.setProperty('--panel-shift', `${shift}px`);
+			const top = rect.top;
+			panelMax = Math.floor(window.innerHeight - top - 8);
+			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card]')?.getBoundingClientRect();
+			cardCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
+		};
+		fit();
+		window.addEventListener('resize', fit);
+		return () => window.removeEventListener('resize', fit);
+	});
+
+	// A press outside the panel and its button closes it; Escape closes it and returns to the button.
+	$effect(() => {
+		if (!panelOpen) return;
+		const outside = (event: PointerEvent) => {
+			const node = event.target as Node | null;
+			if (!node || panelEl?.contains(node) || detailsEntry?.contains(node)) return;
+			// A picker or review list opened from a row is drawn at the page's top level; pressing in it keeps the panel and that row.
+			if ((node instanceof Element ? node : node.parentElement)?.closest('[data-popover], [data-adaptive-drawer]')) return;
+			panelOpen = false;
+		};
+		// Escape closes it only from the panel or its button; anywhere else it belongs to that control (a composer, a sheet).
+		const keys = (event: KeyboardEvent) => {
+			const node = event.target as Node | null;
+			if (event.key !== 'Escape' || !node || !(panelEl?.contains(node) || detailsEntry?.contains(node))) return;
+			event.preventDefault();
+			event.stopPropagation();
+			panelOpen = false;
+			detailsEntry?.focus();
+		};
+		document.addEventListener('pointerdown', outside, true);
+		document.addEventListener('keydown', keys, true);
+		return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keys, true); };
+	});
+
+	// The bar that holds the canvas draws this document's controls (barTools, barChange): one instance, wherever they show. Off
+	// screen the document publishes nothing, so the bar never offers a list or panel for a document the person can't see.
+	$effect(() => offScreen ? undefined : publishDocumentBar({ tools: barTools, titleEnd: urgent ? barChange : null }));
+
+	function closeThen(fn?: () => void) { panelOpen = false; fn?.(); }
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -144,20 +180,6 @@
 		} finally {
 			if (artifactId === started) verifying = false;
 		}
-	}
-
-	function detailsKeys(element: HTMLElement) {
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape' || !detailsOpen || !(event.target instanceof Node)) return;
-			const toggle = element.querySelector<HTMLButtonElement>('.identity-details');
-			if (event.target !== toggle && !element.querySelector('.document-metadata')?.contains(event.target)) return;
-			event.preventDefault();
-			event.stopPropagation();
-			detailsOpen = false;
-			toggle?.focus();
-		};
-		element.addEventListener('keydown', onKey);
-		return { destroy() { element.removeEventListener('keydown', onKey); } };
 	}
 
 	// The viewer reads the document's feedback once, often before this row's status child exists (it mounts only once
@@ -191,183 +213,154 @@
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
-<header class="document-header" use:detailsKeys use:headerStack={reviewTargetKey}>
-	{#if reviewBar}{@render reviewBar()}{/if}
-	<div class="document-identity">
-		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
-			onclick={() => detailsOpen = !detailsOpen}>
-			<span class="document-title" title={title}>{title}</span>
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={showOwnership ? freshnessPresentation.phrase : `Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}>{#if !showOwnership}<span class="identity-owner">Owner: {freshness.owner_name}</span>{/if}<span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
-		</button>
-		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if presence}{@render presence()}{/if}
-		<span class="document-tools document-status-row">
-			<!-- Two groups, the only places the cluster may break: what is being sent and counted, then how it is delivered and reviewed. -->
-			<span class="tool-group tool-send">
-			{#if artifactId}
-				<!-- Send belongs to this tool cluster with the comment count, delivery preference, and review action. -->
-				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
-			{/if}
-			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
-			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" data-comments-entry count={commentCount} unread={unreadCount} {unsent}
-				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
-			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup={resolvedInColumn ? undefined : 'dialog'} aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
-			</span>
-			<span class="tool-group tool-more">
-			{#if artifactId}
-				<span class="tool-group tool-deliver">
-					<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
-						<span>Deliver immediately</span>
-						<Toggle size="sm" touch checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
-					</span>
-				</span>
-			{/if}
-			<span class="tool-group tool-review">
-			{#if artifactId}
-				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
-			{/if}
-			{#if historyAvailable && onOpenHistory}<button type="button" class="doc-tool history-tool" aria-label="History" title="History" aria-expanded={historyOpen} onclick={onOpenHistory}>
-				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>
-				<span class="label">History</span>
-			</button>{/if}
-			</span>
-			</span>
+<!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
+{#snippet barTools()}<span class="bar-tools">
+	{#if presence}{@render presence()}{/if}
+	{#if urgent && !changeInBar}<button type="button" class="bar-stale stale-control" data-file-changed onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
+	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
+	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
+		aria-busy={!ready || commentsLoading} aria-label={commentsLabel} onclick={(event) => onOpenComments(event.currentTarget)}>
+		<span class="bar-comments-content" class:receipt-hidden={sent && !commentsOpen}>
+			<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
+			<!-- Unread is text; the separate dot marks comments waiting for Send. -->
+			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
+			{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 		</span>
-		<!-- Document-held sender is mounted above, in the identity row. -->
-	</div>
-{#if (freshness && freshnessPresentation) || showOwnership}
-	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} class:held={headerStandIn} data-ownership-row={showOwnership || undefined}>
-		{#if ownership && artifactId}<div class="metadata-owner">{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
-		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
-		{#if freshnessPresentation?.datetime}
-			<time datetime={freshnessPresentation.datetime}>
-				{freshnessPresentation.phrase}
-				{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}
-			</time>
-		{:else if freshnessPresentation}
-			<span class="metadata-secondary">{freshnessPresentation.phrase}</span>
-		{/if}
-		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if freshness && shouldOfferVerification(freshness)}
-			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>
-		{/if}
-		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
-	</div>
-{/if}
+		{#if sent && !commentsOpen}<span class="bar-sent-container" data-comments-sent aria-hidden="true" bind:this={receiptBox}>
+			<span class="bar-sent"><svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg><svg class="sent-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg>{#if receiptTextFits}<span>Sent</span>{/if}</span>
+			<span class="bar-sent-measure" bind:this={receiptMeasure}><svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg><svg class="sent-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg><span>Sent</span></span>
+		</span>{/if}
+	</button>
+	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
+	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
+		aria-label={`Document details${needsCount ? ` · ${needsCount} needs you` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
+		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
+	</button>
+</span>{/snippet}
 
-<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
-	connectionStatusId={connectionDescriptionId} />
-<span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
-{#if readonly && ready}
-	<div class="readonly-note">Read-only.</div>
-{/if}
-<!-- Delivery controls above remain mounted with the document identity so they never force a second header row. -->
+<!-- File changed after the document's name in the app bar: the reload mark alone, amber, its name read out and on hover. -->
+{#snippet barChange()}
+	<button type="button" class="bar-reload stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
+		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+	</button>
+{/snippet}
+
+{#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
+<header class="document-header" class:card-covered={cardCovered} bind:this={headerEl}>
+	{#if reviewBar}{@render reviewBar()}{/if}
+	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
+	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
+		<div class="p-section">
+			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
+				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
+				<span class="p-full">{ask.text}</span>
+				{#each ask.others as other (other.name)}<span class="p-full"><strong>{other.name}</strong>: {other.reason}</span>{/each}
+			</div>{/if}
+			{#if freshnessPresentation}<div class="p-row" class:amber={freshnessPresentation.overdue}>
+				<span class="p-text"><span class="p-label">Status:</span> <time datetime={freshnessPresentation.datetime}>{statusText}{#if freshnessPresentation.dateText && !statusText.includes(freshnessPresentation.dateText)}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time></span>
+				{#if freshness && shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>{/if}
+			</div>{/if}
+			<!-- The bar says Saving… while it saves; Details keeps the settled state. -->
+			{#if saveStatus === 'saved'}<div class="p-row p-quiet" role="status">Saved</div>{/if}
+			{#if readonly && ready}<div class="p-row readonly-note">Read-only</div>{/if}
+		</div>
+		{#if ownership && artifactId}<div class="p-section p-owner" class:held={headerStandIn} data-ownership-row>{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
+		{:else if freshness}<div class="p-section"><div class="p-row">Owner: {freshness.owner_name}</div></div>{/if}
+		{#if artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
+			<span class="p-label-row">Review</span>
+			{#if artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
+			{#if historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
+		</div>{/if}
+		{#if paneHere}<div class="p-section"><button type="button" class="p-row" onclick={() => closeThen(() => paneOpen.set(true))}>Show panel</button></div>{/if}
+	</div>
+	<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead} connectionStatusId={connectionDescriptionId} />
+	<span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 </header>
 
 <style>
-	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; gap: 6px; padding-left: var(--doc-inset, 24px); background: var(--bg-primary); }
-	.document-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
-	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
-	.identity-age { display: none; }
-	.feedback-controls { display: contents; }
-	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
-	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
-	.document-status-row { gap: 4px; }
-	.document-status-row :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
-	.document-status-row :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
-	.document-status-row :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.document-status-row :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
-	.document-status-row :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
-	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
-	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
-	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	/* The owner and supervisor items draw their own hover fill and focus ring, which a clipped cell would cut off. */
-	.has-ownership .metadata-owner { overflow: visible; }
-	.verification-action { margin-left: -10px; }
-	/* A remembered row waiting for its load is drawn exactly as the loaded one, so its controls are neither dimmed nor filled on hover; they only don't act yet. */
-	.document-metadata.held :global(button:disabled) { opacity: 1; cursor: default; }
-	.document-metadata.held :global(button.item:disabled:hover) { background: transparent; color: var(--text-secondary); }
-	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
+	/* No row of its own: the document's controls are in the app bar or the tab strip; this holds the ask's card, the Details panel and the live status. */
+	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; padding-left: var(--doc-inset, 24px); background: var(--bg-primary); }
 	.metadata-error { color: var(--red); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-	/* After the base rules above: equal specificity, so the later rule wins at phone width. */
-	@container doc-canvas (max-width: 600px) {
-		.identity-details { min-height: 44px; justify-content: center; }
-		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
-		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
-		/* Owner and supervisor stay in view at every width; the rest of the row waits behind Document details. */
-		.document-metadata:not(.expanded):not(.has-ownership), .document-metadata.has-ownership:not(.expanded) > :not(.metadata-owner) { display: none; }
-		.has-ownership .metadata-owner { flex-basis: 100%; }
-		.document-status-row { flex-wrap: wrap; }
-		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
-	}
 
-	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
-	/* The header is a container, so the ask's line 1 can rearrange when it is narrow (ReviewBar). */
-	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); container: doc-header / inline-size; }
-	.document-identity { justify-content: flex-end; }
-	.identity-details { display: none; }
-	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
-	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
-	/* The cluster breaks only where content does not fit, in this order: between [Send · count] and the rest; inside the rest, between [Deliver immediately · switch] and [reviewers · Request review · History]; and, only when [Send · count] alone is wider than the header, between Send and the count. The label never leaves its switch, and the reviewers, Request review and History stay on one row. */
-	.tool-group { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); max-inline-size: 100%; }
-	.tool-deliver, .tool-review { flex-wrap: nowrap; }
-	.tool-review:not(:has(:global(*))) { display: none; }
-	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
-	.feedback-controls { flex: none; min-width: max-content; }
-	/* The label sits the chip padding from the switch at every width: the switch's touch size is a hit area inside the switch, so it never moves the label. */
-	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
-	@container doc-header (max-width: 32.5rem) {
-		.document-tools, .tool-group { gap: 0; }
-	}
-	@container doc-canvas (max-width: 37.5rem) {
-		.identity-details:has(.identity-age) { display: flex; }
-		.document-title { display: none; }
-		/* The delivery label is the full "Deliver immediately" at every width; at phone width only the tool padding and the switch's hit area change, and the cluster wraps between its groups when one row cannot hold it. */
-		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
-		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
-		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
-		.stale-control ~ .save-ghost { display: none; }
-		/* The count and Resolved sit closer, so "N comments · N unread" and "Resolved · N" keep one row in a 296px header. */
-		.document-header .tool-send :global(.comment-status:has(+ .resolved-tool)) { padding-inline-end: var(--space-1); }
-		.document-header .tool-send .resolved-tool { padding-inline-start: var(--space-1); }
-	}
-	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
-	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
-	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
-	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
-	/* A receipt is its own row under the tools at every width (the ask shares its first line with them), as it already is on a phone-sized header. */
-	.document-header:has(:global(.review-bar.receipt)) > :global(.rb-slot) { grid-row: 2 / 3; }
-	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
-	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
-	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
-	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
-	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
-	/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. `rb-stack` is set by headerStack when the review line cannot keep its floors beside the tools. */
-	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
-	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
-	/* History is a text button on a wide canvas and, like the Request review button beside it (DocReviewControls.svelte:97), an icon-only button once the canvas is phone-sized, so the row holds the same controls whatever the save state. */
-	.history-tool svg { display: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-	@container doc-canvas (max-width: 600px) {
-		.history-tool svg { display: block; }
-		.history-tool .label { display: none; }
-	}
-	/* Wherever the switch has its 44px target the switch's row is that tall, so the target sits inside the row and never over Send, the count or the document: a window up to 768px wide can still have a canvas wider than 600px, where the other tools are 28px. */
+	/* The bar's controls: 36px with a pointer, 44px at phone width (IconButton lg's sizes), 16px apart (the hosts' gap). */
+	.bar-stale { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--amber-bg); color: var(--amber-text); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+	.bar-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
+	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
+	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
+	/* Comments and Details, 16px apart, in whichever bar draws them. */
+	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
 	@media (max-width: 768px) {
-		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
+		:global(.shell-header) .bar-tools { gap: var(--space-1); }
+		:global(.shell-header) .bar-new-word { display: none; }
 	}
-	@media (any-pointer: coarse) {
-		@container doc-canvas (max-width: 600px) {
-			.document-header:has(:global(.rb-slot)) { align-items: center; }
-			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--touch-target); }
-		}
+	.bar-tools :global(.presence-row) { flex: none; }
+	.bar-comments { position: relative; }
+	.bar-comments-content { display: inline-flex; align-items: center; gap: var(--space-1); }
+	.bar-comments-content.receipt-hidden { visibility: hidden; }
+	.bar-sent-container { position: absolute; inset: 0; overflow: hidden; }
+	.bar-sent, .bar-sent-measure { display: flex; align-items: center; color: var(--green-text); }
+	.bar-sent { position: absolute; inset: 0; justify-content: center; }
+	.bar-sent-measure { position: absolute; width: max-content; visibility: hidden; pointer-events: none; }
+	.bar-comments .bar-sent svg, .bar-comments .bar-sent-measure svg { flex: none; }
+	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
+	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
+	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
+	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	.bar-details { padding: 0 var(--space-2); }
+	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }
+	.bar-tools .bar-save { flex: none; display: inline-flex; align-items: center; box-sizing: border-box; border-radius: var(--radius-pill); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; animation: fadein var(--dur-tight) ease-out; }
+	.bar-tools .bar-save:not(.saving) { color: var(--green); }
+	.bar-tools .bar-save.yields { display: none; }
+	.bar-needs { color: var(--amber-text); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
+	.bar-reload { width: var(--touch-target); height: var(--touch-target); padding: 0; color: var(--amber-text); }
+	.bar-reload svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+	/* The panel drops over the document (it never moves the text), on the Popover primitive's solid surface: the document would read through a translucent one. */
+	.doc-panel { position: absolute; z-index: 6; top: var(--space-1); right: var(--space-2); width: min(360px, calc(100% - 2 * var(--space-2)), calc(100vw - 2 * var(--space-2))); transform: translateX(var(--panel-shift, 0px)); max-height: var(--panel-max, min(70vh, 620px)); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); font-size: var(--text-footnote); color: var(--text-secondary); }
+	.doc-panel[hidden] { display: none; }
+	.p-section { display: flex; flex-direction: column; min-width: 0; }
+	.p-section:empty { display: none; }
+	/* One rhythm: rows 32px apart with a pointer, 44px at phone width, no gap between sections; a section label opens its group with 8px above it. */
+	.p-label-row { padding: var(--space-2) 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-medium); }
+	.p-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+	div.p-row, span.p-row { cursor: default; }
+	.p-row.amber { color: var(--amber-text); }
+	.p-row.p-quiet { color: var(--text-tertiary); }
+	.p-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	/* A row's action keeps its whole label; the row's text is what shortens (Mark verified beside a long Status line on a phone). */
+	.verification-action { flex: none; display: inline-flex; min-height: inherit; }
+	.p-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.p-label { color: var(--text-secondary); font-weight: var(--fw-regular); }
+	/* Owner and supervisor are rows too: the same 32px with a pointer. Only there: with touch, DocOwnerControl's own 44px must win. */
+	@media (min-width: 769px) and (not (any-pointer: coarse)) { .p-owner :global(.ownership > .item) { min-height: var(--space-7); } }
+	/* A remembered row waiting for its load is drawn exactly as the loaded one; its controls only don't act yet. */
+	.p-owner.held :global(button:disabled) { opacity: 1; cursor: default; }
+	/* Request review is a text action at the panel's text edge. */
+	.doc-panel :global(button:not(.tg)) { justify-content: flex-start; }
+	.doc-panel.doc-panel :global(.btn.btn) { padding-inline: 0; border-width: 0; }
+	.p-review :global(.review-request) { min-height: inherit; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--text-primary); font: inherit; }
+	/* The review controls pass the row's height down, so Request review and the reviewers are row-tall targets, not text-tall. */
+	.p-review :global(.review-controls) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; min-height: inherit; }
+	.p-review :global(.reviewer-group) { min-height: inherit; }
+	.p-review :global(.review-request) { order: -1; }
+	.p-review :global(.review-request svg) { display: none; }
+	.p-review :global(.review-request .label) { display: inline; }
+	/* The ask in full, while its card is not on screen: the name on one line, cut in the middle; the question wraps as prose. */
+	.p-ask { display: flex; flex-direction: column; gap: var(--space-1); padding-block: var(--space-1); line-height: var(--lh-normal); }
+	.p-who { display: flex; min-width: 0; white-space: nowrap; }
+	.p-who strong { display: grid; min-width: 0; }
+	.p-ask strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
+	.p-full { overflow-wrap: break-word; }
+	@media (max-width: 768px) {
+		.p-row { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
+		.doc-panel :global(button:not(.tg)), .p-review :global(.review-request) { min-height: var(--touch-target); min-width: var(--touch-target); }
 	}
 </style>

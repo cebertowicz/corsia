@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { documentBar } from '$lib/stores/documentBar';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
 		tabs: ArtifactTab[];
@@ -77,7 +78,7 @@
 	}
 </script>
 
-<div class="strip">
+<div class="strip" data-document-bar-row>
 	<div
 		class="tabs"
 		class:start-hidden={startHidden}
@@ -134,6 +135,8 @@
 			</div>
 		{/each}
 	</div>
+	<!-- The open document's Comments and Details sit after the tabs, before Collapse. -->
+	{#if $documentBar}<span class="doc-tools">{@render $documentBar.tools()}</span>{/if}
 	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
 	</button>
@@ -194,6 +197,7 @@
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }
 
+	.doc-tools { display: inline-flex; flex: none; padding-inline: var(--space-2); }
 	.collapse-btn {
 		display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 		width: 28px; height: 28px; margin-left: 4px; border-radius: var(--radius-xs);

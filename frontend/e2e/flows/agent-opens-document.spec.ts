@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { chatComposer } from '../support/corsia';
@@ -117,7 +118,7 @@ test(`@surface:agent-opens-document compact links from chat and never replaces t
 	const log = watchSocket(page);
 	const { threadId, a, b } = await openThreadView(page, request, log, 'compact');
 	const editor = page.locator('.cm-content');
-	const chatButton = page.getByRole('button', { name: 'Chat', exact: true });
+	const chatButton = backToChat(page);
 	const openA = page.getByRole('link', { name: 'Open A', exact: true });
 
 	// Compact shows one surface, so an agent can never put a document on it:

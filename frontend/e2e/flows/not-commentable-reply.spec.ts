@@ -49,7 +49,7 @@ test('a reply refused because its document no longer takes comments shows the se
 	const steps = page.getByRole('list', { name: 'Plan steps' });
 	await expect(steps).toBeVisible({ timeout: 30_000 });
 	await steps.getByRole('listitem').filter({ hasText: name }).first().getByRole('button').first().click();
-	await page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first().click();
+	await page.getByRole('button', { name: /\d+ comments?, \d+ new/ }).first().click();
 	await expect(page.getByRole('region', { name: /^Comment by / })).toHaveCount(4);
 
 	// Under the open pane the file is edited outside CORSIA, promoted, and the promoted copy is deleted.

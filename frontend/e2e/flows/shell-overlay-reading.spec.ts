@@ -150,12 +150,9 @@ async function closeList(page: Page) {
 	await page.waitForTimeout(600);
 }
 
-/**
- * Waits out the header's passing Sent. At a narrow document width it wraps the header's controls onto a second line; when
- * it leaves, the document moves up by that line, so a press aimed at the text before then lands where the text no longer is.
- */
+/** Waits out a visible drawer's passing Sent before pressing the text. */
 async function headerSettled(page: Page) {
-	await expect(page.locator('.document-header .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });
+	await expect(page.locator('[data-doc-comments-drawer] .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });
 }
 
 /** The three forms the reader can be writing in, per DocCommentSurface: the list, a thread pinned in a popover, a new draft. */
