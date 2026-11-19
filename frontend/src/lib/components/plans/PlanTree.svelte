@@ -1,11 +1,13 @@
 <script lang="ts">
-	import type { OperatorArtifactLink, OperatorNode, UserActionHandler } from '$lib/api/plans';
+	import type { OperatorNode } from '$lib/api/plans';
+	import type { PlanTreeProps } from './planTreeProps';
 	import { buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
 	import { isVisibleFinished, levelOf } from './planTreeFold';
-	import { buildFoldLevels, foldRemaining, type FoldedWork } from './planFoldLevels';
+	import { createPlanTreeReorder } from './planTreeReorder.svelte';
+	import { buildFoldLevels, foldRemaining } from './planFoldLevels';
 	import { createFoldHistory } from './foldHistory.svelte';
 	import { formatMoment, minuteClock } from '$lib/time';
-	import { createFoldWave, createPaneHold, type PaneView } from './foldMotion.svelte';
+	import { createFoldWave, createPaneHold } from './foldMotion.svelte';
 	import { createFocusKeeper } from './focusKeeper.svelte';
 	import { indentVar } from './planIndent';
 	import { createPlanTreeLayout } from './planTreeLayout.svelte';
@@ -22,12 +24,13 @@
 	import { doTarget, openStep } from '$lib/personStepChip';
 	import PlanRowDetails from './PlanRowDetails.svelte';
 	import PlanTaskMenuHost from './PlanTaskMenuHost.svelte';
+	import PlanReorderFeedback from './PlanReorderFeedback.svelte';
 	import { createTaskMenu } from './taskMenu.svelte';
 	import { createRowDisclosure } from './rowDisclosure.svelte';
 	import { createPlanTreeReveal } from './planTreeReveal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
-	import { EMPTY_CHILD_STATE, type ChildRowState } from './childExpansion.svelte';
+	import { EMPTY_CHILD_STATE } from './childExpansion.svelte';
 	/** A child plan renders whole: its depth continues its parent's, with no drill boundary. */
 	const CHILD_MAX_DEPTH = Number.MAX_SAFE_INTEGER;
 
@@ -51,36 +54,11 @@
 		onUserAction,
 		paneView = null,
 		folded = null,
-	}: {
-		nodes: OperatorNode[];
-		/** Scopes DOM ids, flip keys and fold levels when a child plan nests in this tree. */
-		planId?: string;
-		/** The depth this tree's roots render at: a nested child plan's parent row + 1. */
-		depthOffset?: number;
-		currentNodeIds?: string[];
-		nextNodeIds?: string[];
-		maxDepth?: number;
-		/** Drill-down owns a deliberately expanded focused subtree; overview does not. */
-		expandBranchesByDefault?: boolean;
-		isChildExpanded?: (nodeId: string) => boolean;
-		childRowState?: (nodeId: string) => ChildRowState;
-		onToggleChild?: (nodeId: string) => void;
-		onRetryChild?: (nodeId: string) => void;
-		onDrill?: (nodeId: string) => void;
-		onOpenChild?: (nodeId: string, threadId: string, title: string, stepId?: string) => void;
-		onOpenArtifact?: (artifact: OperatorArtifactLink, nodeTitle: string) => void;
-		onOpenLegacyDiscussion?: (artifactId: string, title: string) => void;
-		userActionBusy?: boolean;
-		onUserAction?: UserActionHandler;
-		/** What the user has seen of this plan in the pane; only the pane's own tree passes it. */
-		paneView?: PaneView | null;
-		/** The server's folds for this plan and where its older finished rows are read from; none: nothing is folded. */
-		folded?: FoldedWork | null;
-	} = $props();
+	}: PlanTreeProps = $props();
 
 	// Right-click, Shift+F10 or a long-press opens the row's actions, when it has any.
 	const taskMenu = createTaskMenu(
-		(node) => !userActionBusy && !!onUserAction && (node.user_actions.length > 0 || !!node.comment_attention),
+		(node) => !userActionBusy && !!onUserAction && hasMenu(node),
 	);
 
 	// Which tasks are quietly scheduled depends on the clock, so the tree re-arranges on its minute tick.
@@ -95,7 +73,7 @@
 	const foldView = $derived(buildFoldLevels({ nodes: shownNodes, held: hold.held, work: folded, history: history.level, maxDepth }));
 	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
 	const historyIds = $derived(new Set(foldView.extra.map((row) => row.id)));
-	const treeNodes = $derived(foldView.extra.length > 0 ? [...shownNodes, ...foldView.extra] : shownNodes);
+	const treeNodes = $derived.by(() => reorder.orderedNodes(shownNodes, foldView.extra));
 	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep, now: now.getTime() }));
 
 	const { isBranchExpanded, toggleBranch, openBranches, detailsExpanded, toggleDetails } = createRowDisclosure(
@@ -169,6 +147,14 @@
 		const nested = isChildExpanded(nodeId) ? childTrees[nodeId]?.carriedThreads() ?? [] : [];
 		return [...(below.get(nodeId) ?? []), ...nested];
 	}
+	const reorder = createPlanTreeReorder({
+		nodes: () => nodes, now: () => now.getTime(), openBlocked: () => index.openBlocked,
+		element: () => treeElement, apply: (node, position) => onUserAction?.(node, 'reorder', undefined, position),
+		enabled: () => !!onUserAction && !userActionBusy,
+		focusRow: (id) => rowControls.focusRow(id), menu: taskMenu,
+	});
+	const { hasMenu, eligible: canMove, availability: moveAvailability, moveRow, rowHandlers } = reorder;
+	const drag = $derived(reorder.drag);
 	createFocusKeeper(() => treeElement, () => items);
 	createFoldWave({
 		nodes: () => shownNodes,
@@ -189,8 +175,14 @@
 			class="tree-row" role="listitem"
 			in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}
 			class:details-open={detailsExpanded(node.id)}
-			class:has-menu={!!onUserAction && node.user_actions.length > 0}
-			{...taskMenu.rowHandlers(node)}
+			class:has-menu={!!onUserAction && hasMenu(node)}
+			{...rowHandlers(node)}
+			data-node-id={node.id}
+			class:dragging={drag?.id === node.id}
+			class:drag-live={!!drag}
+			class:can-drag={!!onUserAction && canMove(node) && !userActionBusy}
+			onclickcapture={(event) => { if (reorder.consumeClick()) { event.preventDefault(); event.stopPropagation(); } }}
+			style:transform={drag?.offsets[node.id] ? `translateY(${drag.offsets[node.id]}px)` : undefined}
 			id={rowControls.rowId(node.id)}
 			data-flip-key={`${scope}${node.id}`}
 			style={depthStyle(depthOffset + node.depth + nest)}
@@ -206,9 +198,9 @@
 				type="button"
 				aria-expanded={step.kind === 'details' ? detailsExpanded(node.id) : undefined}
 				aria-controls={step.kind === 'details' ? rowControls.detailsId(node.id) : undefined}
-				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
+				aria-haspopup={onUserAction && hasMenu(node) ? 'menu' : undefined}
 				title={step.kind === 'document' ? 'Open instructions' : step.kind === 'browser' ? 'Open browser' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
-				onclick={() => step.kind === 'document' ? onOpenArtifact(step.artifact, node.title) : openStep(null, step, node.title) || reveal.byRequest(() => toggleDetails(node.id))}
+				onclick={(event) => { if (reorder.consumeClick()) { event.preventDefault(); return; } step.kind === 'document' ? onOpenArtifact(step.artifact, node.title) : openStep(null, step, node.title) || reveal.byRequest(() => toggleDetails(node.id)); }}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
@@ -282,6 +274,7 @@
 		{/if}
 {/snippet}
 
+<PlanReorderFeedback error={reorder.error} announcement={reorder.announcement} dismiss={reorder.dismissError} />
 <div class="plan-tree" role="list" aria-label="Plan steps" bind:this={treeElement}>
 	<!-- Every item carries an out transition: Svelte 5 destroys a keyed batch only when all its removed items have one, so a bare Scheduled or fold row would keep a closed group's rows on screen. -->
 	{#each items as item (item.key)}
@@ -338,13 +331,17 @@
 	{/each}
 </div>
 
-<PlanTaskMenuHost menu={taskMenu} {onUserAction} />
+<PlanTaskMenuHost menu={taskMenu} {onUserAction} onMove={moveRow} {moveAvailability} />
 
 <style>
 	/* Relative, so a fold wave's ghosts lay over the rows they left. */
 	/* The reserve tracks the same <=620px breakpoint as the 44px chevron and chips: desktop furniture is measured at 110px plus a two-digit count margin; touch keeps its 148px reserve. */
 	.plan-tree { --plan-indent-reserve: 122px; position: relative; display: flex; flex-direction: column; }
 	@media (max-width: 620px) { .plan-tree { --plan-indent-reserve: 148px; } }
+	.tree-row.can-drag { touch-action: none; }
+	.tree-row.dragging { position: relative; z-index: 3; background: var(--bg-primary); box-shadow: var(--shadow-chip); }
+	/* Rows ease aside only while a drag is live. On drop the offsets clear in the same render as the DOM reorder, so the swap must be instant: a transition there slides the dropped row in from a slot past its place. */
+	.tree-row.drag-live { transition: transform 160ms ease; }
 	.tree-row, .drill-row {
 		--plan-row-line-height: calc(var(--text-subhead) * var(--lh-normal));
 		--plan-row-action-height: 28px;

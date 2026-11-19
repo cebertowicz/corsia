@@ -144,6 +144,7 @@ export interface OperatorEvidence {
 
 /** A control the user has on an open task; the server decides which apply. */
 export type OperatorUserAction = 'mark_done' | 'pause_node' | 'resume_node' | 'close_node';
+export type OperatorNodeAction = OperatorUserAction | 'reorder';
 
 /**
  * Applies one of those controls to a task. A handler that reports back returns
@@ -152,8 +153,9 @@ export type OperatorUserAction = 'mark_done' | 'pause_node' | 'resume_node' | 'c
  */
 export type UserActionHandler = (
 	node: OperatorNode,
-	action: OperatorUserAction,
+	action: OperatorNodeAction,
 	reason?: string,
+	orderKey?: number,
 ) => Promise<string | null> | void;
 
 /** A document's comments and suggestions waiting for the person; `system_task` marks the document's own comment task. */
@@ -212,7 +214,7 @@ export interface OperatorNode {
 	completion: OperatorCompletion | null;
 	child: OperatorChildSummary | null;
 	review: OperatorReview | null;
-	user_actions: OperatorUserAction[];
+	user_actions: OperatorNodeAction[];
 	discussion_artifact_id: string | null;
 	artifacts: OperatorArtifactLink[];
 }

@@ -37,6 +37,7 @@ LOOP = "loop"
 QUEUE_FULL = "queue full"
 #: Runs or worker starts one rule may have waiting; a match past it is skipped, so a
 #: looping script or a burst of requests stays bounded.
+# No reading yet: needs the peak number of waiting runs per rule.
 QUEUE_CAP = 50
 INTERRUPTED = "the run stopped before it settled; it is not replayed"
 TURNED_OFF = "the rule was turned off before its run started"

@@ -184,16 +184,16 @@ def _gate_notices(listed) -> list[str]:
     return lines
 
 
-def added(db, node, line, steps, *, causing_executor: str | None):
-    """The add reply: the node, its rank line, and the run built under a workflow phase."""
+def added(db, node, placing, steps, *, causing_executor: str | None):
+    """The add reply: the node, the top of the plan with its landing line, and any run's steps."""
     from plans.boundary import node_projection
 
     listed = build_run(db, node, steps, causing_executor=causing_executor) if steps else []
-    if line is None and not listed:
+    if placing is None and not listed:
         return node
     result: dict[str, Any] = {"node": node_projection(service._node_from_row(db, service._node_row(db, node.id)))}
-    if line is not None:
-        result["rank"] = line
+    if placing is not None:
+        result.update(placing)
     if listed:
         result["steps"] = listed
         result["notice"] = " ".join(
@@ -204,7 +204,8 @@ def added(db, node, line, steps, *, causing_executor: str | None):
 
 REVIEWER_ROUTE = (
     "This step is checked by someone else: hand it to a reviewer "
-    "(delegate_task with plan_node_id) and accept or send back what they return."
+    "(delegate_task with plan_node_id) and accept or send back what they return. "
+    "The reviewer gets the step's check and what was asked from the plan; say only where the work is."
 )
 PERSON_GATE_ROUTE = (
     "This step is the person's review: ask them with block_node on it (owner_kind user, "

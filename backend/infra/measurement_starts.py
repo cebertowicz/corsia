@@ -65,6 +65,8 @@ _FIRST_ROW_SQL = {
     # Triage had no structured fact before it was first recorded, so coverage has no period earlier.
     "first_correction_triage": f"SELECT MIN(ts) FROM outcome_events WHERE event_name='{TRIAGE_EVENT}'",
     "first_machinery_day": f"SELECT MIN(ts) FROM outcome_events WHERE event_name='{MACHINERY_DAY_EVENT}'",
+    # Notice times are recorded from schema 201 on; an earlier update has none, so it is not a zero.
+    "update_notices": "SELECT MIN(posted_at) FROM message_update_state WHERE update_kind='post_update' AND notice_at IS NOT NULL",
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
     """,
@@ -92,6 +94,10 @@ _LIVE_SOURCE = {
     "estimated_human_hours_per_active_hour": "accepted_size_ratings",
     "limit_hits": "limit_hits",
     "machinery": "first_machinery_day",
+    # From the first update shown a notice, each is either replaced after it or not, so a later quiet period is a measured zero.
+    "updates_replaced_after_notice_pct": "update_notices",
+    "update_replace_delay_median_seconds": "update_notices",
+    "update_replace_delay_p90_seconds": "update_notices",
 }
 
 

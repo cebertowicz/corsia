@@ -108,6 +108,10 @@ def settle(
     workers = workers_to_retire(params, db=db)
     _require_workers_stopped(db, workers)
     reason = (params.get("reason") or "").strip() or CLOSE_REASON
+    # A close removes edges for the node and its children; retain the run's
+    # dependents before any of those writes, for after_close to process.
+    from plans import run_end
+    snapshots = run_end.snapshot_dependents(db, node_id) if operation == "close_node" else None
     below = _open_below(db, node_id)
     for row_id in below:
         _settle_one(db, row_id, operation, reason, (verified_by, evidence), common)
@@ -116,7 +120,7 @@ def settle(
     if operation == "mark_done":
         result = after.after_transition(node_id, "accepted", common)
     else:
-        result = after.after_close(node_id, service.CLOSED, params, common)
+        result = after.after_close(node_id, service.CLOSED, params, common, snapshots=snapshots)
     # Last: a wake the settle sends (``plan_wake``) materializes the owner's
     # pending digest, and this line belongs in the next one it reads. A system
     # settle has no actor; the owner reads it as its own receipt of the

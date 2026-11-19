@@ -14,7 +14,9 @@ def _validate_parent(
     connection: sqlite3.Connection,
     plan_id: str,
     parent_id: str | None,
+    kind: str,
 ) -> None:
+    """Refuse a parent that may not hold a new child of ``kind``."""
     if parent_id is None:
         return
     parent = service._node_row(connection, parent_id)
@@ -33,7 +35,25 @@ def _validate_parent(
             "use add_follow_up on it"
         )
     if parent["kind"] == "task":
-        raise service.PlanInputError("task nodes are leaves and cannot contain children")
+        if parent["workflow_step"] is None:
+            raise service.PlanInputError("task nodes are leaves and cannot contain children unless they are workflow steps")
+        from plans.workflow_fields import creation_payload
+
+        by = creation_payload(connection, parent_id).get("workflow_by")
+        if by == "person":
+            raise service.PlanInputError(
+                "The person does that step, so the agent's work goes in its own step or task."
+            )
+        if by == "reviewer":
+            raise service.PlanInputError(
+                "A reviewer does that step independently, so it cannot contain author subtasks."
+            )
+        if kind != "task":
+            # A step's children settle so the step can do its own check; a phase or
+            # track never settles, so it would hold the step open for good.
+            raise service.PlanInputError(
+                f"A workflow step holds tasks only, not a {kind}: add its smaller pieces as tasks."
+            )
 
 
 def _next_order(
@@ -102,7 +122,7 @@ def _validate_node_input(
         raise service.PlanInputError(
             "watchdog budget seconds must be a positive integer"
         )
-    _validate_parent(connection, plan_id, parent_id)
+    _validate_parent(connection, plan_id, parent_id, kind)
     if (
         follow_up_of is not None
         and service._node_row(connection, follow_up_of)["plan_id"] != plan_id
