@@ -27,5 +27,5 @@ class FileChangedOutside(DocumentSaveError):
     """The file no longer holds the bytes a live write was built on; nothing was replaced."""
 
     def __init__(self) -> None:
-        super().__init__("stale", "This document changed just as it was being saved, so that save didn’t go through."
-                                  " Nothing was lost; try again.")
+        super().__init__("stale", "Couldn’t save because this document changed during the save."
+                                  " Try again.")

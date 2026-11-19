@@ -98,7 +98,7 @@ it('retries a server-store refusal explicitly and keeps the row after a refused 
 it('keeps both held texts and candidate copyable and asks before each choice', async () => {
 	setup(); session.held = { corsia_text: 'kept CORSIA', file_text: 'outside file', candidate_text: 'candidate', choice_pending: false };
 	const choose = vi.spyOn(session, 'choose').mockResolvedValue({ type: 'doc_saved' }); render();
-	expect(host.textContent).toContain('This document changed just as it was being saved, so that save didn’t go through. Nothing was lost; open Details to choose which text to keep.');
+	expect(host.textContent).toContain('Couldn’t save because this document changed during the save. Open Details to choose which text to keep.');
 	button('Details').click(); flushSync();
 	for (const [label, text] of [['Copy CORSIA text', 'kept CORSIA'], ['Copy file text', 'outside file'], ['Copy interrupted text', 'candidate']]) {
 		button(label).click(); await vi.waitFor(() => expect(copy).toHaveBeenCalledWith(text));

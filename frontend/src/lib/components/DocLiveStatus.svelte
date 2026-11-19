@@ -117,7 +117,7 @@
 		<div class="live-block" role="status">Changes aren't saved on this device; keep this tab open. <Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button></div>
 	{/if}
 	{#if settling}<div class="live-block" role="status">Couldn’t confirm this save; the document may have changed. Show latest reads it again.</div>{/if}
-	{#if view.held}<div class="live-block" role="status">This document changed just as it was being saved, so that save didn’t go through. Nothing was lost; open Details to choose which text to keep.</div>{/if}
+	{#if view.held}<div class="live-block" role="status">Couldn’t save because this document changed during the save. Open Details to choose which text to keep.</div>{/if}
 	{#if view.recovery.length}<div class="live-block" role="status">This document was reset on the server. Your unsaved text is on this device.</div>{/if}
 	{#if view.failureLines.length}
 		<div class="live-block" role="status">
