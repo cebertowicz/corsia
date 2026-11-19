@@ -189,6 +189,31 @@ describe('MarkdownEditor edits', () => {
 			});
 		}
 
+		it('a tap whose caret the editor has not read yet still leaves the caret where the tap landed once the card opens, so the first key typed lands there', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				const onAnchorFocus = vi.fn();
+				const view = open({ highlights: [suggestion('red')], onAnchorFocus, cardMode });
+				vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+				// The press and its frame, with no caret reported in between: the editor's caret is still at the start.
+				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+				window.dispatchEvent(new MouseEvent('mouseup'));
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				flushSync();
+				expect(onAnchorFocus, cardMode).toHaveBeenCalledOnce();
+				expect(view.state.selection.main.head, cardMode).toBe(8);
+				unmount(component!); component = null; host.remove();
+			}
+		});
+
+		it('leaves a caret the editor already placed inside the pressed highlight where it is', async () => {
+			const view = open({ highlights: [suggestion('red')], onAnchorFocus: vi.fn(), cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(9);
+			await pressStruck(view, 7);
+			expect(view.state.selection.main.head).toBe(7);
+		});
+
 		it('opens the same card whichever order a comment and a suggestion over the same text are listed in, in every card mode', async () => {
 			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
 				for (const order of ['suggestion first', 'comment first']) {
