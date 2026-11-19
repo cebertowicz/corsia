@@ -7,11 +7,11 @@ import pytest
 from plans import activity_reducer, node_states, operator_nodes
 
 
-def row(node_id, state, parent=None, *, child=False, archived=None):
+def row(node_id, state, parent=None, *, child=False, archived=None, step=None):
     return {
         "id": node_id, "state": state, "parent_id": parent,
-        "spawned_thread_id": None, "has_child_in_work": child,
-        "archived_at": archived,
+        "spawned_thread_id": None, "is_parent": child,
+        "archived_at": archived, "kind": "task", "workflow_step": step,
     }
 
 
@@ -25,6 +25,9 @@ def row(node_id, state, parent=None, *, child=False, archived=None):
     [row("orphan", "active", "missing"), row("leaf", "review_requested")],
     [row("root", "pending"), row("partial", "pending", "root", child=True),
      row("done", "accepted", "root"), row("archived", "active", "root", archived="date")],
+    # A workflow task counts only open children: a settled one leaves it a leaf.
+    [row("step", "active", step="check"), row("settled", "accepted", "step"),
+     row("open_step", "active", step="check"), row("running", "active", "open_step")],
 ])
 def test_shared_traversal_facts_match_canonical_summaries(rows):
     work = node_states.work_ids(rows)

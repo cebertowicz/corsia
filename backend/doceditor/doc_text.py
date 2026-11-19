@@ -31,3 +31,19 @@ def read_doc_text(path: str | None) -> str:
     if b"\x00" in raw[:8192]:
         raise ValueError("binary file cannot be comment-anchored")
     return raw.decode("utf-8", errors="replace")
+
+
+def read_suggestion_text(path: str | None) -> str:
+    """Read a decision's source, reporting a deleted document as a save refusal."""
+    try:
+        return read_doc_text(path)
+    except FileNotFoundError as exc:
+        from doceditor.document_save_errors import DocumentSaveError, MISSING_DOCUMENT_MESSAGE
+
+        raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
+    except ValueError as exc:
+        if path and not Path(path).exists():
+            from doceditor.document_save_errors import DocumentSaveError, MISSING_DOCUMENT_MESSAGE
+
+            raise DocumentSaveError("no_such_file", MISSING_DOCUMENT_MESSAGE) from exc
+        raise

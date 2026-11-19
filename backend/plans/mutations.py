@@ -84,10 +84,9 @@ def reorder_node(
                     connection, "UPDATE plan_nodes SET order_key=? WHERE id=? AND order_key<>?",
                     (position, sibling_id, position),
                 )
-        service._event(
-            connection, node_id, "node_reordered", actor_id=actor_id, provenance=provenance,
-            payload={"from": old_position, "to": order_key},
-        )
+        if target != current:  # sparse keys made dense in place are no move
+            service._event(connection, node_id, "node_reordered", actor_id=actor_id,
+                           provenance=provenance, payload={"from": old_position, "to": order_key})
         return service._node_from_row(connection, service._node_row(connection, node_id))
 
 

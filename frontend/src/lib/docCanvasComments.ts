@@ -1,5 +1,6 @@
 import { hasUnread, rangeFor, type DocComment } from '$lib/stores/docComments';
 import { anchoredQuote } from '$lib/stores/docCommentProjection';
+import { refusalKind, type SuggestionRefusal } from '$lib/stores/suggestionRefusals';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -129,23 +130,24 @@ function acceptedDeletion(comment: DocComment, text: string): boolean {
  * `orphaned` and `textChanged` decide; for unsaved edits the same rule runs locally:
  * - textChanged: an open suggestion whose range still holds text, but not the text it replaces
  *   (someone edited inside it). It stays at its line, its card says so, and Accept is off.
- * - orphaned: a suggestion whose Accept the server refused (`refused`, from `suggestionRefusals`) shows
- *   as orphaned until its refusal is cleared, even where a stale screen still shows its quote. A live row
+ * - orphaned: a suggestion whose Accept the server refused (`refused`, from `suggestionRefusals`)
+ *   shows as orphaned until its refusal is cleared, even where the screen still shows its quote. A live row
  *   not yet placed (4.2) is never orphaned. A decided suggestion is never lost: its text changed because
  *   of the decision.
  * - detached: orphaned, and the original text is gone: the range collapsed (everything in it was
  *   deleted), or the quote is nowhere in the document.
  */
-function commentStatus(comment: DocComment, text: string, refused: Record<string, string>): Pick<DocComment, 'orphaned' | 'textChanged' | 'detached'> {
+function commentStatus(comment: DocComment, text: string, refused: Record<string, SuggestionRefusal>): Pick<DocComment, 'orphaned' | 'textChanged' | 'detached' | 'refusalKind'> {
 	const snapshotMatches = comment.statusText === text;
-	const changed = snapshotMatches ? !!comment.textChanged : comment.replacement != null && !comment.decision && !comment.review
+	const kind = refused[comment.id] ? refusalKind(refused[comment.id]) : undefined;
+	const changed = kind !== 'no_such_file' && (snapshotMatches ? !!comment.textChanged : comment.replacement != null && !comment.decision && !comment.review
 		&& (!!comment.drawn || !!comment.textChanged) && comment.from != null && comment.to != null
-		&& comment.to > comment.from && comment.to <= text.length && text.slice(comment.from, comment.to) !== comment.anchor;
+		&& comment.to > comment.from && comment.to <= text.length && text.slice(comment.from, comment.to) !== comment.anchor);
 	const orphaned = comment.decision ? false : !comment.review && !unplaced(comment) && !changed
-		&& (comment.id in refused || (snapshotMatches ? !!comment.orphaned : rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
+		&& (kind !== undefined || (snapshotMatches ? !!comment.orphaned : rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
 	const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
 	const quote = anchoredQuote(comment);
-	return { orphaned, textChanged: changed, detached: orphaned && (collapsed || !quote || !text.includes(quote)) };
+	return { orphaned, textChanged: changed, detached: orphaned && (collapsed || !quote || !text.includes(quote)), refusalKind: kind };
 }
 
 /**
@@ -153,7 +155,7 @@ function commentStatus(comment: DocComment, text: string, refused: Record<string
  * displayed status (`commentStatus`, the only place a listed comment's `orphaned` is set).
  * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
  */
-export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
+export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, SuggestionRefusal> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
 	return comments.map((listed) => {

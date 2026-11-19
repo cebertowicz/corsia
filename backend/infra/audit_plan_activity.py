@@ -1,11 +1,14 @@
-"""The plan_activity audit metric: plan use per agent-day, conductor adds, stale tasks, owed verdicts.
+"""The plan_activity audit metric: plan use per agent-day, conductor adds, stale tasks, owed verdicts,
+decisions raised and plan text sizes.
 
 Read through ``infra.audit_reads``, which binds the caller's scope and deadline.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from plans.public import automated_mutation_keys, owed_verdict_ages
@@ -32,6 +35,93 @@ _EVENT_WINDOW = (
 )
 
 
+# Plan text sizes: each text is measured where it is read and dropped, so no plan
+# text reaches the caller.
+
+#: Percentiles reported per field, nearest-rank.
+_PERCENTILES = (50, 90, 99)
+
+_EVENTS = _PLAN_SCOPE + "CROSS JOIN plan_node_events e INDEXED BY idx_plan_node_events_node ON e.node_id=n.id "
+_NODE_WINDOW = (
+    "n.created_at>=? AND n.created_at<? "
+    "AND julianday(n.created_at)>=julianday(?) AND julianday(n.created_at)<julianday(?)"
+)
+
+#: One statement per stored text; a watch_armed row carries two (blocked, set-aside).
+_STATEMENTS = {
+    "hold_reason": (
+        "SELECT h.reason" + _EVENTS
+        + "CROSS JOIN plan_node_holds h ON h.id=json_extract(e.payload_json,'$.hold_id') "
+        "WHERE t.user_id=? AND e.event='hold_placed' AND json_valid(e.payload_json) AND "
+        + _EVENT_WINDOW
+    ),
+    "wait_reason": (
+        "SELECT json_extract(e.payload_json,'$.blocked.reason'), "
+        "json_extract(e.payload_json,'$.scheduled.reason')" + _EVENTS
+        + "WHERE t.user_id=? AND e.event='watch_armed' AND json_valid(e.payload_json) AND "
+        + _EVENT_WINDOW
+    ),
+    "review_feedback": (
+        "SELECT json_extract(e.payload_json,'$.feedback')" + _EVENTS
+        + "WHERE t.user_id=? AND e.event='review_rejected' AND json_valid(e.payload_json) AND "
+        + _EVENT_WINDOW
+    ),
+    "review_evidence": (
+        "SELECT json_extract(e.payload_json,'$.evidence')" + _EVENTS
+        + "WHERE t.user_id=? AND e.event='review_evidence_submitted' "
+        "AND json_valid(e.payload_json) AND " + _EVENT_WINDOW
+    ),
+    "intent": (
+        "SELECT n.intent" + _PLAN_SCOPE + "WHERE t.user_id=? AND " + _NODE_WINDOW
+    ),
+    "person_step_description": (
+        "SELECT n.description" + _PLAN_SCOPE
+        + "WHERE t.user_id=? AND n.kind='task' AND n.assignee='user' AND " + _NODE_WINDOW
+    ),
+}
+
+
+def _summary(sizes: list[int]) -> dict[str, int | None]:
+    """Nearest-rank percentiles and the maximum of one list of sizes."""
+    ordered = sorted(sizes)
+    count = len(ordered)
+
+    def rank(percent: int) -> int | None:
+        return ordered[max(0, -(-percent * count // 100) - 1)] if count else None
+
+    return {f"p{percent}": rank(percent) for percent in _PERCENTILES} | {
+        "max": ordered[-1] if count else None,
+    }
+
+
+def _measure(texts: Iterable[object]) -> dict:
+    chars: list[int] = []
+    emitted: list[int] = []
+    for value in texts:
+        if isinstance(value, str) and value:
+            chars.append(len(value))
+            emitted.append(len(json.dumps(value)))
+    return {"n": len(chars), "chars": _summary(chars), "json_bytes": _summary(emitted)}
+
+
+def text_sizes(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...]) -> dict[str, dict]:
+    """Return each plan text field's size distribution inside the window."""
+    sizes = {}
+    for field, statement in _STATEMENTS.items():
+        rows = db.execute(statement, (user_id, *bounds))
+        if field == "wait_reason":
+            blocked: list[object] = []
+            set_aside: list[object] = []
+            for blocked_reason, set_aside_reason in rows:
+                blocked.append(blocked_reason)
+                set_aside.append(set_aside_reason)
+            sizes["blocked_wait_reason"] = _measure(blocked)
+            sizes["set_aside_reason"] = _measure(set_aside)
+        else:
+            sizes[field] = _measure(row[0] for row in rows)
+    return sizes
+
+
 def _activity_daily(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...]) -> tuple[list[dict], list[dict]]:
     days = [dict(row) for row in db.execute(
         f"SELECT substr(a.started_at,1,10) AS day, {_ARCHIVED} AS archived, "
@@ -48,6 +138,18 @@ def _activity_daily(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...
         " GROUP BY day,archived ORDER BY day,archived", (user_id, *bounds)
     )]
     return days, created
+
+
+def _decisions_raised(db: sqlite3.Connection, user_id: str, bounds: tuple[str, ...]) -> list[dict]:
+    return [dict(row) for row in db.execute(
+        f"SELECT CASE WHEN t.spawned_by IS NULL THEN 'root' ELSE 'delegated' END AS origin, "
+        "CASE WHEN e.actor_id IS NULL THEN 'server' ELSE 'agent' END AS raised_by, "
+        f"{_ARCHIVED} AS archived, count(DISTINCT n.id) AS decisions, count(*) AS raises "
+        + _PLAN_SCOPE + "CROSS JOIN plan_node_events e INDEXED BY idx_plan_node_events_node "
+        "ON e.node_id=n.id WHERE t.user_id=? AND e.event='decision_raised' AND " + _EVENT_WINDOW +
+        " GROUP BY origin,raised_by,archived ORDER BY origin,raised_by,archived",
+        (user_id, *bounds),
+    )]
 
 
 def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) -> list[dict]:
@@ -124,6 +226,8 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
         "plan_update_calls_per_active_agent_day": update_calls / active_days if active_days else None,
         "plan_read_calls": None,
         "plan_read_calls_reason": "no_structured_source",
+        "decisions_raised": _decisions_raised(db, user_id, bounds),
+        "text_sizes": text_sizes(db, user_id, bounds),
         "definitions": _PLAN_ACTIVITY_DEFINITIONS,
     }]
 
@@ -143,6 +247,24 @@ _PLAN_ACTIVITY_DEFINITIONS = {
                          "agent's own call that reuses one of those key prefixes is also "
                          "excluded, so this can undercount, never overcount.",
     "plan_read_calls": "Unavailable: no structured source records plan reads.",
+    "decisions_raised": "Decisions put in front of the person in the window, by the plan owner's "
+                        "thread: 'root' was not spawned by another thread (a chat or standing "
+                        "agent), 'delegated' was. raised_by 'server' is a raise CORSIA made "
+                        "itself, recorded with no actor (today only the gate hand-off "
+                        "offer), 'agent' a raise an agent made. decisions "
+                        "counts distinct decisions; raises counts every raise, so a decision "
+                        "edited back to draft and raised again counts twice there.",
+    "text_sizes": ("Size of the text agents wrote into plans inside the window, never the text: n texts, and "
+                   "nearest-rank p50/p90/p99 and max of their length in characters and in bytes as a plan "
+                   "tool emits them (ASCII-escaped JSON, quotes included). Fields: hold_reason (holds of "
+                   "every kind placed), blocked_wait_reason and set_aside_reason (waits armed), "
+                   "review_feedback (rejections), review_evidence (review submissions, as stored: a "
+                   "resubmission carries the earlier evidence), intent (nodes of every kind created) and "
+                   "person_step_description (tasks created and assigned to the person). intent and "
+                   "person_step_description are read as they stand now, so an edit made after the window "
+                   "counts at its current length. No size here is bounded by an input limit: text stored "
+                   "before a limit existed counts as stored, and json_bytes passes a byte limit when the "
+                   "text holds non-ASCII characters (6 bytes each, 12 outside the Basic Multilingual Plane)."),
     "conductor_adds": "Outcome is the node's current state; 'archived' is an unfinished "
                       "add that was later archived. kind_basis 'recorded' was stored at "
                       "creation; 'current_designation' uses today's conductor assignment.",

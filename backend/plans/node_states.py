@@ -4,15 +4,16 @@ Split from ``plans.service`` so the state machine is one small table a reader
 can take in at once, rather than constants buried at the top of the
 transaction core. ``service`` re-exports every name here, so each existing
 ``service._TERMINAL_STATES``-style reader keeps working unchanged. Like
-``plans.errors``, this imports nothing from ``plans``, so it can never be part
-of an import cycle.
+``plans.errors``, this imports from ``plans`` only a leaf that imports nothing
+from it, so it can never be part of an import cycle.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import weakref
 from collections.abc import Iterable, Mapping
+
+from plans.later_probe import later_ready  # noqa: F401  (re-exported: readers ask it here)
 
 _ACCEPTED_STATES = frozenset({"accepted", "accepted_with_followup"})
 
@@ -142,27 +143,6 @@ def listed_open_sql(alias: str) -> str:
     return f"{unarchived_sql(alias)} AND {alias}.folded = 0"
 
 
-#: Per connection, the schema version at which ``plan_nodes.later`` was last seen.
-_LATER_READY: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDictionary()
-
-
-def later_ready(connection: sqlite3.Connection) -> bool:
-    """Whether ``plan_nodes`` carries the Later cut (schema 185); older ladder rungs run plans code first.
-
-    The answer is kept per connection until its schema changes (``PRAGMA schema_version``),
-    exactly as ``plans.aggregates.ready`` keeps it for the aggregate columns. A read that
-    has no Later rows to exclude is what a pre-185 database already means, so a caller
-    without the column reads the pre-cut behaviour, never an error.
-    """
-    version = connection.execute("PRAGMA schema_version").fetchone()[0]
-    if _LATER_READY.get(connection) == version:
-        return True
-    found = any(row[1] == "later" for row in connection.execute("PRAGMA table_info(plan_nodes)").fetchall())
-    if found:
-        _LATER_READY[connection] = version
-    return found
-
-
 def outside_retired_branch_sql(alias: str) -> str:
     """No ancestor of the ``plan_nodes`` row ``alias`` is retired, as SQL.
 
@@ -210,29 +190,53 @@ def work_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     return {node_id for node_id, in_work in answer.items() if in_work}
 
 
-def parent_ids(
-    rows: Iterable[Mapping | sqlite3.Row], *, work: set[str] | None = None,
-) -> set[str]:
-    """The one rule for who is a parent: a node with a child in work.
+def step_task(node: Mapping | sqlite3.Row) -> bool:
+    """A workflow task owns a check after its children settle; a row without both columns raises."""
+    return node["kind"] == "task" and node["workflow_step"] is not None
 
-    Every reader that splits a plan into parents and leaves -- leaves,
-    containers, folds, branch counts, next and open tasks, the status read --
-    asks this, so a closed child hands its parent back as a leaf everywhere
-    at once. ``has_child_in_work_sql`` is the same rule for SQL readers.
-    A passed ``work`` set must be computed from these same rows.
+
+def child_counts(parent: Mapping | sqlite3.Row, child: Mapping | sqlite3.Row) -> bool:
+    """Whether this direct child keeps its parent a parent."""
+    return not retired(child) and (not step_task(parent) or child["state"] not in _TERMINAL_STATES)
+
+
+def parent_ids(rows: Iterable[Mapping | sqlite3.Row], *, work: set[str] | None = None) -> set[str]:
+    """The one rule for who is a parent: a node with a counting child.
+
+    A workflow task counts only open children so it can do its own check after
+    they settle. Other parents count children in work, including settled ones.
+    ``parent_sql`` is the same rule for SQL readers, ``stored_parent`` for a row
+    whose children are not read. A passed ``work`` set must be computed from
+    these same rows.
     """
     rows = list(rows)
     if work is None:
         work = work_ids(rows)
+    by_id = {str(row["id"]): row for row in rows}
     listed = {
         str(row["parent_id"]) for row in rows
         if row["parent_id"] is not None and str(row["id"]) in work
+        and (str(row["parent_id"]) not in by_id or child_counts(by_id[str(row["parent_id"])], row))
     }
     # A row of ``plans.open_rollup`` says so itself when its children are not among ``rows``.
     return listed | {
         str(row["id"]) for row in rows
-        if str(row["id"]) in work and "has_child_in_work" in row.keys() and row["has_child_in_work"]
+        if str(row["id"]) in work and "is_parent" in row.keys() and row["is_parent"]
     }
+
+
+def stored_parent(row: Mapping | sqlite3.Row) -> bool:
+    """``parent_ids`` for one row from its stored aggregates: a workflow task's children are
+    tasks (``node_creation._validate_parent``), so its open ones are those ``sub_open`` counts."""
+    return row["child_in_work"] > 0 and (not step_task(row) or row["sub_open"] > 0)
+
+
+def stored_parent_sql(alias: str) -> str:
+    """``stored_parent`` as a SQL condition on the ``plan_nodes`` row ``alias``."""
+    return (
+        f"({alias}.child_in_work>0 AND ({alias}.kind<>'task'"
+        f" OR {alias}.workflow_step IS NULL OR {alias}.sub_open>0))"
+    )
 
 
 def has_live_parent(node: Mapping | sqlite3.Row, live_ids: Iterable[str] | Mapping) -> bool:
@@ -256,8 +260,10 @@ def live_chain(chain: list[Mapping]) -> list[Mapping]:
     return kept
 
 
-def has_child_in_work_sql(alias: str) -> str:
+def parent_sql(alias: str) -> str:
     """``parent_ids`` as a SQL condition on the ``plan_nodes`` row ``alias``.
+
+    A child in work makes a parent; under a workflow task only an open one does.
 
     Row-level on the child is complete for the open ``alias`` rows its readers
     ask about: an open node has no retired ancestor, so the child's only
@@ -268,14 +274,16 @@ def has_child_in_work_sql(alias: str) -> str:
     return (
         f"EXISTS (SELECT 1 FROM plan_nodes work_child"
         f" WHERE work_child.plan_id={alias}.plan_id"
-        f" AND work_child.parent_id={alias}.id AND {in_work_sql('work_child')})"
+        f" AND work_child.parent_id={alias}.id AND {in_work_sql('work_child')}"
+        f" AND ({alias}.kind <> 'task' OR {alias}.workflow_step IS NULL"
+        f" OR ({open_sql('work_child')})))"
     )
 
 
 def is_container_sql(alias: str) -> str:
     """``is_container`` as a SQL condition on the ``plan_nodes`` row ``alias``."""
     return (
-        f"({has_child_in_work_sql(alias)} AND {alias}.state='pending'"
+        f"({parent_sql(alias)} AND {alias}.state='pending'"
         f" AND {alias}.spawned_thread_id IS NULL)"
     )
 
@@ -319,9 +327,7 @@ def folded_subtrees(
     }
 
 
-def folded_ids(
-    nodes: Iterable[Mapping], *, with_children: set[str] | None = None,
-) -> set[str]:
+def folded_ids(nodes: Iterable[Mapping], *, with_children: set[str] | None = None) -> set[str]:
     """Fold one plan's nodes: the single rule the pane, the reads and progress share.
 
     A folded node heads a branch with no open work left in it, and it folds
@@ -350,9 +356,7 @@ def folded_ids(
     return folded_subtrees(parents, own)
 
 
-def leaves(
-    rows: list, *, work: set[str] | None = None, parents: set[str] | None = None,
-) -> list:
+def leaves(rows: list, *, work: set[str] | None = None, parents: set[str] | None = None) -> list:
     """Return the leaves -- work with no child in work -- of one plan's rows.
 
     The one definition of "the leaves of a plan": progress, liveness, the

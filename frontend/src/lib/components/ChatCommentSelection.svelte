@@ -290,10 +290,14 @@
 				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};
+		let pressedAt: Element | null = null; const press = (event: PointerEvent) => { pressedAt = event.target as Element | null; };
 		const click = (event: MouseEvent) => {
 			const root = messageRoot();
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
+			// A press that began on the transcript away from any highlight or card lets the picked card go, as Escape does. Read where the pointer went down: a click lands on what the press and its release share, the transcript when the card moved under a still pointer between them.
+			const from = event.detail > 0 ? pressedAt ?? target : target; pressedAt = null;
+			if (!hit && marginComments && selectedCommentId && !open && (document.getSelection()?.isCollapsed ?? true) && from && root?.contains(from) && !from.closest('.chat-margin, [data-comment-ids]')) { selectedCommentId = null; returnFocus = null; return; }
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
@@ -318,7 +322,7 @@
 				event.preventDefault(); (event.target as HTMLElement).click();
 			}
 		};
-		document.addEventListener('click', click);
+		document.addEventListener('pointerdown', press, true); document.addEventListener('click', click);
 		document.addEventListener('keydown', keydown);
 		document.addEventListener('chat-comment-reply', replyClick);
 		observer = new MutationObserver(records => {
@@ -326,7 +330,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('pointerdown', press, true); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	function replyInThread(note: string): Promise<void> {
 		// The row this thread opened on may have been replaced or removed while the reply was being typed.

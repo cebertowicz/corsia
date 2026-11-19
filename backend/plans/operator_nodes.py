@@ -29,7 +29,7 @@ def distribution_from_buckets(
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Count compact raw-row leaves bottom-up, independent of input row order.
 
-    A row saying ``has_child_in_work`` (a read of the open work) is a parent though its
+    A row saying ``is_parent`` (a read of the open work) is a parent though its
     children are not among ``rows``: it adds no leaf of its own.
     Passed ``work`` and ``holders`` sets must be computed from these same rows.
     With ``include_branches=False`` the first result is empty; totals are unchanged.

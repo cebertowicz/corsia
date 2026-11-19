@@ -45,6 +45,7 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "parent_id": node["parent_id"],
         "depth": node["depth"],
         "kind": node["kind"],
+        "workflow_step": node["workflow_step"],  # ``node_states.parent_ids`` reads it
         "title": node["title"],
         "description": node["description"],
         # A person step names only this plan's open dependents; cross-plan

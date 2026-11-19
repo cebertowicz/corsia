@@ -92,7 +92,7 @@ def test_the_user_settles_a_track(client, db, action):
     )
     step = _child(db, plan.id, phase.id, "Step")
 
-    assert _row_in_pane(db, phase.id)["user_actions"] == ["mark_done", "close_node"]
+    assert _row_in_pane(db, phase.id)["user_actions"] == ["reorder", "mark_done", "close_node"]
     response = _post(client, plan.id, action, phase)
 
     assert response.status_code == 200, response.text
@@ -254,7 +254,7 @@ def test_the_user_drops_a_question_with_won_t_do(client, db):
     plan_id = decision["plan_id"]
     question = _node(db, decision["node_id"])
 
-    assert _row_in_pane(db, question.id)["user_actions"] == ["pause_node", "close_node"]
+    assert _row_in_pane(db, question.id)["user_actions"] == ["reorder", "pause_node", "close_node"]
     response = _post(client, plan_id, "close_node", question)
 
     assert response.status_code == 200, response.text
@@ -324,5 +324,7 @@ def test_every_action_the_menu_offers_is_one_the_server_accepts(client, db, pick
     assert {"mark_done", "close_node"} <= set(offered)
     if slot >= len(offered):
         return
-    response = _post(client, plan_id, offered[slot], node)
+    # A move names where it goes; the top of its siblings is always a place.
+    extra = {"order_key": 0} if offered[slot] == "reorder" else {}
+    response = _post(client, plan_id, offered[slot], node, **extra)
     assert response.status_code == 200, (offered[slot], response.text)
