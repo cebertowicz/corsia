@@ -61,8 +61,10 @@ _ACCOUNTS = {
                    "to GitHub CLI on this computer, they need to sign in"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
                   "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again"),
+    # Explained unapproved: with no agents' account the next step is approving the script.
     "absent": (AgentAccountView("not_installed", absent=True),
-               "there is no agents' GitHub account"),
+               "this script isn't approved to use GitHub; only if it failed on a GitHub call that needs a "
+               "login, schedule it with authenticated=true so the person can approve it"),
 }
 
 

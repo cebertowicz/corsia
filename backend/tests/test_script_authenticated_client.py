@@ -28,17 +28,51 @@ async def test_authenticated_client_has_only_placeholder_configuration(tmp_path,
         assert (client / "corsia").is_file()
 
 
+def _no_host_login():
+    raise ValueError("the person's GitHub credential is unavailable")
+
+
 @pytest.mark.asyncio
-async def test_unavailable_account_has_no_github_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize("view", [
+    AgentAccountView("needs_auth"),
+    AgentAccountView("needs_auth", "read_failed"),
+    AgentAccountView("not_installed", "github_executable_missing"),  # installed but broken, not absent
+    AgentAccountView("not_installed", absent=True),  # no agents' account and no host gh login
+], ids=["needs_auth", "read_failed", "executable_missing", "absent_without_host_login"])
+async def test_unavailable_account_has_no_github_config(tmp_path, monkeypatch, view):
     @asynccontextmanager
     async def fake_channel(*args, **kwargs):
         yield
 
+    @asynccontextmanager
+    async def no_proxy(*args, **kwargs):
+        raise AssertionError("no forwarder may start without a login")
+        yield  # pragma: no cover
+
     monkeypatch.setattr(script_sandbox, "tool_channel", fake_channel)
+    monkeypatch.setattr(script_sandbox, "github_proxy", no_proxy)
+    monkeypatch.setattr(script_sandbox, "person_forwarder_credential", _no_host_login)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root", lambda: tmp_path)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
-    async with script_sandbox._authenticated_client("owner", AgentAccountView("needs_auth")) as (_, _, config, _):
+    async with script_sandbox._authenticated_client("owner", view) as (_, _, config, _):
         assert config is None
+    assert script_sandbox.github_lock_reason(view, host_login=False).startswith("scripts get no GitHub login: ")
+
+
+@pytest.mark.parametrize("ready, approved, host_login, locked", [
+    (True, True, False, False),  # a ready account never needs the host login
+    (False, True, True, False),  # no account: reads as the host login
+    (False, True, False, True),  # no account and no host login: locked with a reason
+    (True, False, True, True),   # unapproved: locked whatever the account
+    (False, False, True, True),
+])
+def test_lock_reason_by_account_approval_and_host_login(ready, approved, host_login, locked):
+    view = (AgentAccountView("ready", home="/h", login="example") if ready
+            else AgentAccountView("not_installed", absent=True))
+    reason = script_sandbox.github_lock_reason(view, approved=approved, host_login=host_login)
+    assert (reason is not None) == locked
+    if locked and not approved:
+        assert "authenticated=true" in reason
 
 
 @pytest.mark.asyncio
