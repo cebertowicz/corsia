@@ -287,7 +287,6 @@ async def _with_notice_and_marker(
     # The notice classifies the tool the call dispatches to, not its
     # ``tool_call`` wrapper.
     dispatched_name, dispatched_args, _dispatcher = resolve_dispatch(name, arguments)
-    result_text = projected
     notice = await asyncio.to_thread(
         plan_notice,
         thread_id=thread_id,
@@ -308,12 +307,13 @@ async def _with_notice_and_marker(
     projected = with_notice(projected, await asyncio.to_thread(
         pr_event_notice, thread_id=thread_id, tool_name=name, arguments=arguments,
     ))
+    # The attention notice reads the canonical receipt, not a bounded model projection.
     projected = with_notice(projected, await asyncio.to_thread(
         attention_notice,
         thread_id=thread_id,
         tool_name=dispatched_name,
         arguments=dispatched_args,
-        result=result_text,
+        result=delivery.content,
         workspace=workspace,
     ))
     return with_invocation_reference(projected, delivery.invocation_id)

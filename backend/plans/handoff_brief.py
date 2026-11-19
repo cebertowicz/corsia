@@ -8,10 +8,10 @@ still to make.
 
 Both ways a task reaches its executor, the work-selected wake and the result
 of the close that selects it, ask this module the same questions, so they
-cannot answer them differently: whether the task's description is carried, and
-how a carried field is bounded. A handoff field is whole up to a ceiling and
-past it names the read that returns the rest. One writer builds every such
-field, so the cut is made and worded once, wherever the handoff is composed.
+cannot answer them differently: whether the task's description and step hint are
+carried, and how a carried description is bounded. A description is whole up
+to a ceiling and past it names the read that returns the rest. One writer makes
+that cut wherever the handoff is composed.
 
 Every handoff of such a task carries its description, a task set aside and
 taken back included. Nothing records what was carried, so nothing can claim
@@ -74,11 +74,33 @@ def owed(db, node, executor: str) -> bool:
     return bool(description) and written_by_another(db, str(node["id"]), executor)
 
 
-def fact(db, node_id: str, executor: str) -> dict:
-    """Return the description fact one handoff of a task carries.
+def step_hint(db, node) -> dict:
+    """The just-selected agent step's delegation and sub-task affordances."""
+    if node["kind"] != "task" or node["workflow_step"] is None:
+        return {}
+    from plans.workflow_fields import creation_payload
 
-    Empty when the handoff owes no description (``owed``), so a caller adds
-    what this returns and the key is absent rather than null. ``cut`` is the
+    if creation_payload(db, node["id"]).get("workflow_by") in ("person", "reviewer"):
+        return {}
+    node_id = str(node["id"])
+    return {"step_hint": (
+        f"You can hand this step to a worker (delegate_task with plan_node_id {node_id}) "
+        f"and add its smaller tasks under it (add with parent_id {node_id})."
+    )}
+
+
+def started_hint(db, node, reply: dict, *, was_selected: bool) -> dict:
+    """``step_hint`` when a start newly selected the step; empty for a refused or repeated start."""
+    if was_selected or reply["admission"].get("selection") is None:
+        return {}
+    return step_hint(db, node)
+
+
+def fact(db, node_id: str, executor: str) -> dict:
+    """Return the description and step hint owed on a handoff.
+
+    Either fact may be absent; an eligible agent step carries its hint even
+    without a description. ``cut`` is the
     writer's own answer to whether the text was cut at its ceiling: a field
     that differs from the stored description is a cut one. Resolves the
     executor's own thread plan through ``service.ensure_plan``, which creates
@@ -88,12 +110,13 @@ def fact(db, node_id: str, executor: str) -> dict:
     from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap
 
     node = service._node_row(db, node_id)
-    if not owed(db, node, executor):
-        return {}
-    description = str(node["description"])
-    own_plan = service.ensure_plan("thread", executor, db=db)
-    text = bounded_field(db, node, own_plan.id)(description, cap, what="description")
-    return {RESULT_KEY: {"node_id": node_id, "text": text, "cut": text != description}}
+    result = step_hint(db, node)
+    if owed(db, node, executor):
+        description = str(node["description"])
+        own_plan = service.ensure_plan("thread", executor, db=db)
+        text = bounded_field(db, node, own_plan.id)(description, cap, what="description")
+        result[RESULT_KEY] = {"node_id": node_id, "text": text, "cut": text != description}
+    return result
 
 
 def measured(result: dict) -> dict:

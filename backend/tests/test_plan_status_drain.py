@@ -28,20 +28,36 @@ _PENDING = (
     '"detail_read":"plan_read(node_id=\'{first}\')","id":"{first}","reason":"Not started",'
     '"revision":1,"state":"pending","title":"First"}},"no_current_task":true,"plan":{{"id":"{plan}",'
     '"revision":{revision},"state":"active"}},"progress":{{"above_cut":{total},"done":0,"later":0,"liveness":"idle","total":{total}}},'
-    '"severity":"ready","status_read":"plan_read()"}}'
+    '"severity":"ready","status_read":"plan_read()"{top}}}'
 )
 _ACTIVE = (
     'Current plan status: {{"as_of":"{clock}","current_task":null,"next_step":{{"condition":"ready",'
     '"detail_read":"plan_read(node_id=\'{first}\')","id":"{first}","reason":"Set aside",'
     '"revision":2,"state":"active","title":"First"}},"no_current_task":true,"plan":{{"id":"{plan}",'
     '"revision":{revision},"state":"active"}},"progress":{{"above_cut":{total},"done":0,"later":0,"liveness":"idle","total":{total}}},'
-    '"severity":"ready","status_read":"plan_read()"}}'
+    '"severity":"ready","status_read":"plan_read()"{top}}}'
 )
+
+
+#: The top of the scene's plan: its open items in order, all ready.
+_TOP_ORDER = (
+    "Plan order is priority. Each number is order_key: the item's place among "
+    "your plan's top-level items, 0 at the top."
+)
+
+
+def _top(total: int) -> str:
+    if not total:
+        return ""
+    titles = ("First", "Second", "Third")[:total]
+    listed = ",".join(f'"{place} {title} \\u00b7 ready"' for place, title in enumerate(titles))
+    return ',"top_of_plan":{"items":[' + listed + '],"order":"' + _TOP_ORDER + '"}'
 
 
 def _row(scene, template: str, revision: int, total: int = 0) -> tuple[str, str, str]:
     summary = template.format(
         clock=CLOCK, plan=scene.plan, first=scene.first, revision=revision, total=total,
+        top=_top(total),
     )
     details = f'{{"chip": null, "path": "plan.status", "plan_revision": {revision}}}'
     return scene.plan, summary, details

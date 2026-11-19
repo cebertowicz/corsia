@@ -160,16 +160,16 @@ def test_pausing_a_delegated_task_pauses_its_worker_plan_and_places_no_hold(clie
     plan = _plan(db)
     node, worker = _delegated(db, plan.id)
 
-    assert _row_in_pane(db, node.id)["user_actions"] == ["mark_done", "pause_node", "close_node"]
+    assert _row_in_pane(db, node.id)["user_actions"] == ["reorder", "mark_done", "pause_node", "close_node"]
     assert _post(client, plan.id, "pause_node", node).status_code == 200
 
     assert _plan_state(db, worker.id) == "paused"
     assert _holds(db, node.id) == []
-    assert _row_in_pane(db, node.id)["user_actions"] == ["mark_done", "resume_node", "close_node"]
+    assert _row_in_pane(db, node.id)["user_actions"] == ["reorder", "mark_done", "resume_node", "close_node"]
 
     assert _post(client, plan.id, "resume_node", node).status_code == 200
     assert _plan_state(db, worker.id) == "active"
-    assert _row_in_pane(db, node.id)["user_actions"] == ["mark_done", "pause_node", "close_node"]
+    assert _row_in_pane(db, node.id)["user_actions"] == ["reorder", "mark_done", "pause_node", "close_node"]
 
 
 def test_resuming_the_task_keeps_a_worker_plan_the_user_paused_on_its_own(client, db):
@@ -182,7 +182,7 @@ def test_resuming_the_task_keeps_a_worker_plan_the_user_paused_on_its_own(client
     _plan_move(db, worker.id, "pause")
 
     # The task shows that pause: Resume, not a second Pause.
-    assert _row_in_pane(db, node.id)["user_actions"] == ["mark_done", "resume_node", "close_node"]
+    assert _row_in_pane(db, node.id)["user_actions"] == ["reorder", "mark_done", "resume_node", "close_node"]
     assert _post(client, plan.id, "pause_node", node).status_code == 409
     assert _plan_state(db, worker.id) == "paused"
     assert _holds(db, node.id) == []
@@ -198,7 +198,7 @@ def test_a_delegated_task_offers_resume_only_while_its_own_plan_is_active(client
     _plan_move(db, plan.id, "pause")
     assert _plan_state(db, worker.id) == "paused"
 
-    assert _row_in_pane(db, node.id)["user_actions"] == ["mark_done", "close_node"]
+    assert _row_in_pane(db, node.id)["user_actions"] == ["reorder", "mark_done", "close_node"]
     assert _post(client, plan.id, "resume_node", node).status_code == 409
     assert _plan_state(db, worker.id) == "paused"
 
@@ -310,8 +310,8 @@ def test_in_a_paused_plan_the_menu_reads_only_the_task_s_own_pause(client, db):
     assert _post(client, plan.id, "pause_node", mine).status_code == 200
     _plan_move(db, plan.id, "pause")
 
-    assert _row_in_pane(db, mine.id)["user_actions"] == ["mark_done", "resume_node", "close_node"]
-    assert _row_in_pane(db, free.id)["user_actions"] == ["mark_done", "pause_node", "close_node"]
+    assert _row_in_pane(db, mine.id)["user_actions"] == ["reorder", "mark_done", "resume_node", "close_node"]
+    assert _row_in_pane(db, free.id)["user_actions"] == ["reorder", "mark_done", "pause_node", "close_node"]
     assert _post(client, plan.id, "resume_node", mine).status_code == 200
     assert _holds(db, mine.id) == []
 
@@ -418,32 +418,32 @@ _WORKER_PAUSED = {"kind": "paused", "reason_key": "delegated_child_paused",
     ("node", "causes", "plan_state", "worker", "actions"),
     [
         ({"kind": "task", "assignee": None, "state": "pending"}, [], "active", None,
-         ["mark_done", "pause_node", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "active"}, [_USER_PAUSE], "active", None,
-         ["mark_done", "resume_node", "close_node"]),
+         ["reorder", "mark_done", "resume_node", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "active"}, [_AGENT_PAUSE], "active", None,
-         ["mark_done", "resume_node", "close_node"]),
+         ["reorder", "mark_done", "resume_node", "close_node"]),
         ({"kind": "task", "assignee": "user", "state": "pending"}, [], "active", None,
-         ["mark_done", "pause_node", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": "user", "state": "active"}, [_USER_PAUSE], "active",
-         None, ["mark_done", "resume_node", "close_node"]),
+         None, ["reorder", "mark_done", "resume_node", "close_node"]),
         # A paused plan's derived cause comes first; only the placed hold counts.
         ({"kind": "task", "assignee": None, "state": "active"},
-         [_PLAN_PAUSED, _USER_PAUSE], "paused", None, ["mark_done", "resume_node", "close_node"]),
+         [_PLAN_PAUSED, _USER_PAUSE], "paused", None, ["reorder", "mark_done", "resume_node", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "pending"}, [_PLAN_PAUSED], "paused",
-         None, ["mark_done", "pause_node", "close_node"]),
+         None, ["reorder", "mark_done", "pause_node", "close_node"]),
         # A delegated task follows its worker's plan, not the derived cause.
         ({"kind": "task", "assignee": None, "state": "active"}, [], "active", "active",
-         ["mark_done", "pause_node", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "active"}, [_WORKER_PAUSED], "active",
-         "paused", ["mark_done", "resume_node", "close_node"]),
+         "paused", ["reorder", "mark_done", "resume_node", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "active"},
-         [_PLAN_PAUSED, _WORKER_PAUSED], "paused", "paused", ["mark_done", "close_node"]),
+         [_PLAN_PAUSED, _WORKER_PAUSED], "paused", "paused", ["reorder", "mark_done", "close_node"]),
         ({"kind": "task", "assignee": None, "state": "accepted"}, [], "active", None, []),
         ({"kind": "task", "assignee": None, "state": "closed"}, [], "active", None, []),
         # A phase settles like a task but has no pause of its own.
         ({"kind": "phase", "assignee": None, "state": "pending"}, [], "active", None,
-         ["mark_done", "close_node"]),
+         ["reorder", "mark_done", "close_node"]),
     ],
 )
 def test_the_pane_offers_the_actions_the_row_state_allows(
@@ -464,3 +464,45 @@ def test_resume_and_close_stay_agent_operations_and_pause_is_the_users(db):
     assert not {"resume_node", "close_node"} & boundary_fields.HUMAN_OPERATIONS
     assert "pause_node" in boundary_fields.HUMAN_OPERATIONS
     assert not {"pause", "resume"} & boundary_fields.HUMAN_OPERATIONS
+
+
+def _moved_lines(db, plan_id: str) -> list[str]:
+    return [
+        row["summary"] for row in db.execute(
+            """SELECT summary FROM context_change_journal
+               WHERE object_kind='plan' AND object_id=? AND change_kind='plan.moved_by_other'
+               ORDER BY seq""",
+            (plan_id,),
+        ).fetchall()
+    ]
+
+
+def test_the_user_drags_a_row_and_the_owning_agent_is_told(client, db):
+    plan = _plan(db)
+    first = _task(db, plan.id, title="First")
+    moved = _task(db, plan.id, title="Second")
+
+    response = _post(client, plan.id, "reorder", moved, order_key=0)
+
+    assert response.status_code == 200, response.text
+    assert _row(db, moved.id)["order_key"] == 0 and _row(db, first.id)["order_key"] == 1
+    assert _moved_lines(db, plan.id) == [
+        f"The user moved 'Second' ({moved.id}) from 1 to 0 in your plan. "
+        "Plan order is priority: work it in its new place."
+    ]
+
+
+def test_a_drag_against_a_stale_revision_moves_nothing(client, db):
+    plan = _plan(db)
+    _task(db, plan.id, title="First")
+    moved = _task(db, plan.id, title="Second")
+    stale = _row(db, moved.id)["revision"] - 1
+
+    response = client.post(f"/api/plans/{plan.id}/mutations", json={
+        "operation": "reorder", "mutation_id": f"reorder:{moved.id}:stale",
+        "params": {"node_id": moved.id, "expected_revision": stale, "order_key": 0},
+    })
+
+    assert response.status_code == 409, response.text
+    assert _row(db, moved.id)["order_key"] == 1
+    assert _moved_lines(db, plan.id) == []
