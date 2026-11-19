@@ -1,7 +1,6 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
-import { apiFetch } from './request';
 import type { CommentAttention } from './plansTypes';
 
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
@@ -43,8 +42,11 @@ export class ReviewRefusal extends Error {
 	constructor(readonly code: string, message: string) { super(message); }
 }
 
+// Use the comment post budget; a GET is safe to abort.
+export const REVIEW_BAR_READ_TIMEOUT_MS = 12_000;
+
 export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead> {
-	const response = await apiFetch(`/api/attention/${encodeURIComponent(artifactId)}/review`);
+	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/review`, {}, REVIEW_BAR_READ_TIMEOUT_MS);
 	if (!response.ok) throw new Error(`${response.status}`);
 	return response.json();
 }

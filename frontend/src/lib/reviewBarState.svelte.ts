@@ -2,6 +2,7 @@ import {
 	answerReview, fetchReviewBar, ReviewRefusal,
 	type FeedbackCounts, type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
+import { createReviewBarRetry } from '$lib/reviewBarRetry';
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
@@ -20,7 +21,8 @@ export function createReviewBarState() {
 	let artifactId: string | null = null;
 	let generation = 0;
 	let loadSequence = 0;
-	function deactivate() { loadSequence += 1; }
+	const retry = createReviewBarRetry(() => void load(true));
+	function deactivate() { loadSequence += 1; retry.reset(); }
 	/** The raise time of the ask the receipt or the replaced notice belongs to. */
 	let settledAsk: string | null = null;
 	let read = $state<ReviewBarRead | null>(null);
@@ -41,16 +43,19 @@ export function createReviewBarState() {
 
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
+		retry.reset();
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
 		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null; noteDemanded = false;
 		return true;
 	}
-	async function load() {
+	async function load(isRetry = false) {
+		if (isRetry) retry.cancel(); else retry.reset();
 		const id = artifactId, stamp = generation, sequence = ++loadSequence;
 		if (!id) return;
 		try {
 			const next = await fetchReviewBar(id);
 			if (!current(id, stamp) || sequence !== loadSequence) return;
+			retry.reset();
 			read = next;
 			if ((phase === 'answered' || phase === 'stale') && next.ask_raised && next.ask_raised_at !== settledAsk) {
 				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null; noteDemanded = false;
@@ -58,7 +63,8 @@ export function createReviewBarState() {
 				phase = 'ask'; note = '';
 			}
 		} catch {
-			// The next connection, focus, visibility or change event reads again.
+			if (!current(id, stamp) || sequence !== loadSequence) return;
+			retry.schedule();
 		}
 	}
 	function openNote() { if (phase === 'ask') { failure = ''; phase = 'noting'; } }
