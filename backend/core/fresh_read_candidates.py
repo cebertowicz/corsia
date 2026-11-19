@@ -55,12 +55,14 @@ def _output_allowance(model: str) -> int:
 
 def _candidate(row: dict | None, model: str, writer_own: bool) -> Candidate:
     from llm.api_equivalent import long_context_bound
+    from llm.context_window import get_context_window_or_none
     from llm.locality import row_server_id
 
     row = row or {}
-    window = row.get("context_window")
+    # The window a live call counts against, from the one resolution path (memory fit included for the local seat).
+    window = get_context_window_or_none(model)
     return Candidate(
-        model=model, window=int(window) if isinstance(window, int) and window > 0 else None,
+        model=model, window=window if window and window > 0 else None,
         output_allowance=_output_allowance(model), long_context_bound=long_context_bound(model),
         server_id=row_server_id(row) if row else None, is_local=bool(row.get("is_local")), writer_own=writer_own,
     )
