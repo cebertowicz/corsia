@@ -44,7 +44,7 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
-const SETTLING = 'Couldn’t confirm this save; the document may have changed. Show latest reads it again.';
+const SETTLING = 'Couldn’t confirm this save; the document may have changed. Reload to see the latest.';
 // The wait before the notice; real timers elsewhere in this file, so each case turns fake timers on and the afterEach above restores them.
 function passTime(ms: number) { vi.advanceTimersByTime(ms); flushSync(); }
 
@@ -82,7 +82,7 @@ it('opens Details for a held write without the settling guidance until the wait 
 it('shows the approved settling row and offers reading and copying without a second write', async () => {
 	vi.useFakeTimers(); setup(); session.pending = true;
 	const retry = vi.spyOn(session, 'retry'); const flush = vi.spyOn(session, 'flush');
-	render(); passTime(2100); expect(host.textContent).toContain('Couldn’t confirm this save; the document may have changed. Show latest reads it again.');
+	render(); passTime(2100); expect(host.textContent).toContain('Couldn’t confirm this save; the document may have changed. Reload to see the latest.');
 	button('Details').click(); flushSync();
 	expect(document.body.textContent).toContain('Show the latest version before you save again.');
 	vi.useRealTimers();
