@@ -328,12 +328,12 @@ def request_review(
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
     owner_thread_id: str | None = None,
-    db=None,
+    db=None, verdict: str | None = None,
 ) -> PlanNode:
     """Submit evidence and move active work to review through one event owner.
 
     ``owner_thread_id`` is the thread submitting, when one is: the results it
-    owns are linked to the node as part of the submission.
+    owns are linked to the node as part of the submission; ``verdict`` is a reviewer's (``review_settle``).
     """
     from plans import review_evidence
 
@@ -346,7 +346,7 @@ def request_review(
             actor_id=actor_id,
             provenance=provenance,
             owner_thread_id=owner_thread_id,
-            db=connection,
+            db=connection, verdict=verdict,
         )
 
 

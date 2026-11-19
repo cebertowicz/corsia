@@ -20,9 +20,8 @@ NOT_FRESH = (
     "then plan_update replace_spawned_thread on this step."
 )
 AUTHOR_FAIL = (
-    "An agent can't fail a review step: a worker that has not seen the work checks it. "
-    "While the step is open, start that worker on it with delegate_task. Once its review is back, "
-    "accept it, or fix the work first and then reject with feedback, which sends it back to that reviewer."
+    "Only the reviewer's verdict can fail this step: start a worker that has not seen the work on it "
+    "with delegate_task. A fail verdict sends it back to you with the findings."
 )
 
 

@@ -242,11 +242,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":
+        from plans import review_settle
+        review_settle.check_verdict(db, node_id, acting, params.get("verdict"))
         mutations.request_review(
             node_id,
             evidence=fields.text(params, "evidence"),
             artifact_ids=params.get("artifact_ids"),
             owner_thread_id=acting,
+            verdict=params.get("verdict"),
             **fields.expected(params),
             **common,
         )

@@ -171,6 +171,14 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "Concrete evidence against the current requirements."
         ),
     },
+    "verdict": {
+        "type": "string",
+        "enum": ["pass", "fail"],
+        "description": (
+            "\"pass\" or \"fail\". Only for a review step you were handed as its reviewer: pass, "
+            "or fail with each failure in evidence, worst first. Not used on any other step."
+        ),
+    },
     "artifact_ids": {
         "type": "array",
         "uniqueItems": True,
