@@ -9,6 +9,7 @@ from core.skill_workflow_validation import validate_workflow
 from infra.database import get_db
 from plans import boundary, delegation, mutations, service
 from plans.boundary import PlanActor
+from plans.fresh_reviewer import AUTHOR_FAIL
 from plans.workflow_fields import PERSON_GATE_READY, PERSON_GATE_ROUTE
 from prompts.plan_tools import PERSON_GATE_NAMED
 from tests.child_parent_notice_helpers import db
@@ -140,7 +141,7 @@ async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, mo
     result = await run.update("fail", {
         "node_id": reviewer, "expected_revision": run.revision(reviewer), "evidence": "Review failed",
     })
-    assert result["node"]["state"] == "failed"
+    assert result.endswith(AUTHOR_FAIL)
 
 
 @pytest.mark.asyncio

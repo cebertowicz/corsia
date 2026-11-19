@@ -147,6 +147,18 @@ describe('a suggestion card and the text it replaces', () => {
 		expect(canvasCommentRange(card, get(screenText))).toEqual({ from: 26, to: 29 });
 	});
 
+	it('disables accepting a missing document without claiming the quote is gone', async () => {
+		await serverAnswers(serverRow(false));
+		openCard();
+		mocks.flushDraft.mockResolvedValue(true);
+		mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('This file no longer exists, so nothing was changed. You can close it.', 404, 'no_such_file'));
+		accept().click();
+		await vi.waitFor(() => expect(alert()).toBe('This file no longer exists, so nothing was changed. You can close it.'));
+		expect(accept().disabled).toBe(true);
+		expect(document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
+		expect(document.body.querySelector('.ct-orphan')).toBeNull();
+	});
+
 	it('turns orphaned after a refused accept on a stale screen, with the reason and no reload', async () => {
 		await serverAnswers(serverRow(false));
 		openCard();

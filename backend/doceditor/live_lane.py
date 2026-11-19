@@ -352,9 +352,9 @@ class DocumentLane:
     async def restore(self, operation: Operation, expected_sha256: str) -> WriteResult:
         """Run a whole-text replace only while the live text still hashes to ``expected_sha256``, the
         text the person restored from; checked in this lane's turn, so no write lands in between. An
-        edit made outside CORSIA is taken in first, so it counts as a change and is never replaced,
-        including one caught at the rename, whose re-run checks again. Stale, it writes nothing; the
-        next save of the document records that edit."""
+        outside edit seen before the final check counts as a change, and a rejected attempt rechecks.
+        Another writer can still race the final check and rename. A stale attempt writes nothing;
+        the next save of the document records that edit."""
         return await self._submit(lambda: self._execute(operation, expected_sha256))
 
     async def choose(self, kind: Literal["corsia", "file"], *, actor: WriteActor | None = None,

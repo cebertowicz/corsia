@@ -41,14 +41,76 @@ it('a replacement nudge refreshes even the first pending read and rejects its st
 	vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { resolves.push(resolve); })));
 	watchUpdateCardNudges();
 	const stale = loadUpdateCards('replacement-pending', 7);
-	emit('thread_updates_changed', { thread_ids: ['replacement-pending'] });
+	for (let i = 0; i < 20; i++) emit('thread_updates_changed', { thread_ids: ['replacement-pending'] });
+	expect(resolves).toHaveLength(1);
+	resolves[0]({ ok: true, json: async () => ({ cards: [card(1)], divider: null }) });
+	await stale;
+	expect(get(threadUpdateCards)['replacement-pending']).toBeUndefined();
 	expect(resolves).toHaveLength(2);
 	resolves[1]({ ok: true, json: async () => ({ cards: [card(2)], divider: null }) });
 	await vi.waitFor(() => expect(get(threadUpdateCards)['replacement-pending']?.cards.map(item => item.id)).toEqual([2]));
-	resolves[0]({ ok: true, json: async () => ({ cards: [card(1)], divider: null }) });
-	await stale;
-	expect(get(threadUpdateCards)['replacement-pending'].cards.map(item => item.id)).toEqual([2]);
 	endVisit('replacement-pending');
+});
+
+it('coalesces all nudge types and follows a failed read with the latest window', async () => {
+	respond({ cards: [card(1)], divider: null });
+	await loadUpdateCards('burst', 0);
+	const resolves: Array<(response: object) => void> = [];
+	const fetchMock = vi.fn((_url: string) => new Promise(resolve => { resolves.push(resolve); }));
+	vi.stubGlobal('fetch', fetchMock);
+	watchUpdateCardNudges();
+	const pending = loadUpdateCards('burst', 3);
+	for (let i = 0; i < 20; i++) {
+		emit('plans_changed', { type: 'plans_changed', contract_version: 1, plans: [{ plan_id: 'p', revision: i, owner: { kind: 'thread', id: 'burst' }, scope: { workspace_id: 'w', project_id: null } }] });
+		emit('artifacts_changed', { artifact_id: 'a' });
+		emit('thread_updates_changed', { thread_ids: ['burst'] });
+	}
+	expect(fetchMock).toHaveBeenCalledTimes(1);
+	resolves[0]({ ok: false, status: 503 });
+	await pending;
+	expect(fetchMock).toHaveBeenCalledTimes(2);
+	expect(String(fetchMock.mock.calls[1][0])).toContain('from_seq=3');
+	resolves[1]({ ok: true, json: async () => ({ cards: [card(2)], divider: null }) });
+	await vi.waitFor(() => expect(get(threadUpdateCards).burst.cards[0].id).toBe(2));
+	endVisit('burst');
+});
+
+it('reads an explicit new window immediately and refreshes that window after a nudge', async () => {
+	const resolves: Array<(response: object) => void> = [];
+	const fetchMock = vi.fn((_url: string) => new Promise(resolve => { resolves.push(resolve); }));
+	vi.stubGlobal('fetch', fetchMock);
+	watchUpdateCardNudges();
+	const first = loadUpdateCards('window', 10, { divider: true });
+	emit('thread_updates_changed', { thread_ids: ['window'] });
+	const next = loadUpdateCards('window', 3);
+	expect(fetchMock).toHaveBeenCalledTimes(2);
+	expect(String(fetchMock.mock.calls[0][0])).toContain('from_seq=10&divider=true');
+	expect(String(fetchMock.mock.calls[1][0])).toContain('from_seq=3');
+	resolves[1]({ ok: true, json: async () => ({ cards: [card(2)], divider: null }) });
+	await next;
+	resolves[0]({ ok: true, json: async () => ({ cards: [card(1)], divider }) });
+	await first;
+	expect(get(visitDividers).window).toEqual({ divider, failed: false });
+	expect(fetchMock).toHaveBeenCalledTimes(3);
+	expect(String(fetchMock.mock.calls[2][0])).toContain('from_seq=3');
+	resolves[2]({ ok: true, json: async () => ({ cards: [card(3)], divider: null }) });
+	await vi.waitFor(() => expect(get(threadUpdateCards).window.cards[0].id).toBe(3));
+	endVisit('window');
+});
+
+it('does not follow a dirty read after its visit ends', async () => {
+	let resolveResponse!: (response: object) => void;
+	const fetchMock = vi.fn(() => new Promise(resolve => { resolveResponse = resolve; }));
+	vi.stubGlobal('fetch', fetchMock);
+	watchUpdateCardNudges();
+	const pending = loadUpdateCards('closed', 0, { divider: true });
+	emit('thread_updates_changed', { thread_ids: ['closed'] });
+	endVisit('closed');
+	resolveResponse({ ok: true, json: async () => ({ cards: [card(1)], divider }) });
+	await pending;
+	expect(fetchMock).toHaveBeenCalledTimes(1);
+	expect(get(threadUpdateCards).closed).toBeUndefined();
+	expect(get(visitDividers).closed).toBeUndefined();
 });
 
 describe('threadUpdateCards', () => {

@@ -11,10 +11,10 @@
 	import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 	type Comment = CommentThreadData & { review?: boolean };
 	/** A card whose text was deleted draws that text itself (quote and "This text isn’t in the document"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
-	const showsOwnQuote = (comment: Comment) => !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
+	const showsOwnQuote = (comment: Comment) => comment.refusalKind !== 'no_such_file' && !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, docPath = null, documentOrder = false, focusedId = null, focusedIds = null, candidateOrder = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, diagramOf, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, actionsAbove = false, draftScope = '', leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false, flat = false, underTextChanged = false, restCards = false, replyView = 'recent', onOpenThread }: {
+	let { comments, docPath = null, documentOrder = false, focusedId = null, focusedIds = null, candidateOrder = null, hoveredId = null, ringId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, diagramOf, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, actionsAbove = false, draftScope = '', leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false, flat = false, underTextChanged = false, restCards = false, replyView = 'recent', onOpenThread }: {
 		comments: Comment[];
 		docPath?: string | null;
 		documentOrder?: boolean;
@@ -23,6 +23,8 @@
 		candidateOrder?: string[] | null;
 		/** Image comments: the one whose tag is hovered or focused lights its card, and hovering or focusing a card reports it. */
 		hoveredId?: string | null;
+		/** The thread whose text is under the pointer: its card wears the focused ring only. The pick (`focusedId`) alone opens a card. */
+		ringId?: string | null;
 		onHover?: (id: string | null) => void;
 		/** Off where the caller scrolls the list to the focused card itself. */
 		scrollOnFocus?: boolean;
@@ -123,7 +125,7 @@
 	}
 	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
 	// Cards keep the caller's order and one each block: a thread whose section changes only changes its heading, because moving its card would take the person out of the reply box.
-	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.orphaned ? 'Text changed' : 'Open comments';
+	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.refusalKind === 'no_such_file' ? 'File deleted' : comment.orphaned ? 'Text changed' : 'Open comments';
 	const current = $derived(comments.filter((comment) => !comment.resolved || keptIds.has(comment.id)));
 	const resolved = $derived(comments.filter((comment) => comment.resolved && !keptIds.has(comment.id)));
 </script>
@@ -150,12 +152,12 @@
 				{#snippet header()}
 					{#if restCards && row.key !== null && comment === row.comments[0]}{@render groupHead?.(row.comments)}{/if}
 					{#if !region && !showsOwnQuote(comment)}
-						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
-							{#if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
+						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.refusalKind === 'no_such_file' ? 'Show comment: file deleted' : comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
+							{#if comment.refusalKind === 'no_such_file'}File deleted{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
 						</button>
 					{/if}
 				{/snippet}
-				<CommentThread {actionsAbove} selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => draftOf(comment.id)?.body ?? "", (text) => keptCommentDrafts.keepReply(keyOf(comment.id), text, tagsFor(comment.id))} replySelection={draftOf(comment.id)?.selection ?? null} onReplySelection={(selection) => keptCommentDrafts.select(keyOf(comment.id), selection)} replyError={draftOf(comment.id)?.error ?? ''} {comment} {header} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} onReply={onReply ? reply : undefined} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} {replyView} {onOpenThread} drawerCard {flat} autoFocusSelection={!focusedIds} hideReply={restCards && focusedId !== comment.id} inMargin={restCards} hideOrphan={documentOrder && !underTextChanged} />
+				<CommentThread {actionsAbove} selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => draftOf(comment.id)?.body ?? "", (text) => keptCommentDrafts.keepReply(keyOf(comment.id), text, tagsFor(comment.id))} replySelection={draftOf(comment.id)?.selection ?? null} onReplySelection={(selection) => keptCommentDrafts.select(keyOf(comment.id), selection)} replyError={draftOf(comment.id)?.error ?? ''} {comment} {header} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} ringed={ringId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} onReply={onReply ? reply : undefined} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} {replyView} {onOpenThread} drawerCard {flat} autoFocusSelection={!focusedIds} hideReply={restCards && focusedId !== comment.id} inMargin={restCards} hideOrphan={documentOrder && !underTextChanged} />
 			</div>
 			{/each}
 		{/each}

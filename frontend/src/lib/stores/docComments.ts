@@ -51,7 +51,7 @@ export const pickedComments = writable<Set<string>>(new Set());
 /** A chat comment's key in `pickedComments`, kept apart from document comment ids. */
 export const chatPickKey = (commentId: string) => `chat:${commentId}`;
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
-export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
+export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null; goesTo?: { id: string; name: string }[] };
 export const commentLoads = writable<Record<string, CommentLoad>>({});
 const placements = trackPlacements(docComments);
 /** Retry a live row's placement: one new positions request for its document. */
@@ -124,7 +124,7 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 			reloadListeners.forEach((listener) => listener(artifactId, rows.filter((row) => !known.has(row.id))));
 		}
 		placements.show(artifactId, withhold(artifactId, rows, at));
-		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
+		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label, goesTo: feedback.goes_to ?? [] } }));
 		return feedback;
 	} catch (error) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'error', error: error instanceof Error ? error.message : String(error) } }));

@@ -180,3 +180,24 @@ it('typing in one reply re-reads no other card’s reply, on a list of 24 thread
 		expect(reads.mock.calls.filter(([key]) => key !== typed)).toEqual([]);
 	} finally { reads.mockRestore(); }
 });
+
+it('gives a margin card whose text is under the pointer the focused ring only: it stays a preview, reads nothing and holds no New mark', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const onViewed = vi.fn().mockResolvedValue(undefined);
+	const comment = { id: 's', anchor: 'line', author: 'agent', authorKind: 'agent' as const, text: 'A suggested wording.', at: 'now', resolved: false, newReplyIds: ['r2'],
+		replies: [{ id: 'r1', author: 'you', authorKind: 'user' as const, text: 'Why?', at: 'now' }, { id: 'r2', author: 'agent', authorKind: 'agent' as const, text: 'It reads better.', at: 'now' }] };
+	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment], documentOrder: true, restCards: true, scrollOnFocus: false, focusedId: null, ringId: 's', onViewed } });
+	flushSync();
+	const card = host.querySelector('.ct')!;
+	expect(card.classList.contains('ringed')).toBe(true);
+	expect(card.classList.contains('focused')).toBe(false);
+	expect(card.classList.contains('preview')).toBe(true);
+	expect(onViewed).not.toHaveBeenCalled();
+	// The pointer leaves: the ring goes and nothing was read.
+	component.$set({ ringId: null }); flushSync();
+	expect(card.classList.contains('ringed')).toBe(false);
+	expect(onViewed).not.toHaveBeenCalled();
+	// The pick, not the hover, opens the card.
+	component.$set({ focusedId: 's' }); flushSync();
+	expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(false);
+});
