@@ -282,6 +282,28 @@ def model_family_sql(grain: Grain, scope_threads: str) -> str:
     """
 
 
+#: An update its agent replaced this soon after posting it was taken back in answer to what the post
+#: returned (the attention check), not overtaken by later news.
+REPLACED_SOON_MINUTES = 15
+
+
+def update_family_sql(grain: Grain, scope_threads: str) -> str:
+    """Return the scope's posted updates per period and how many were replaced soon after posting.
+
+    Only an unseen update can be replaced (``infra.message_update_state.validate_targets``), so the
+    count is of updates the person never read in their first form.
+    """
+    return f"""
+      SELECT {grain.bucket('s.posted_at')} AS period,COUNT(*) AS n,
+        SUM(CASE WHEN s.replaced_at IS NOT NULL
+                  AND (julianday(s.replaced_at)-julianday(s.posted_at))*1440 <= {REPLACED_SOON_MINUTES}
+                 THEN 1 ELSE 0 END) AS replaced_soon
+      FROM message_update_state s
+      WHERE s.update_kind='post_update' AND s.thread_id IN (SELECT id FROM {scope_threads})
+        AND {range_filter("s.posted_at")} GROUP BY period ORDER BY period
+    """
+
+
 def _in_range(rows) -> list[dict[str, Any]]:
     """The rows whose period lies in the grain's range: a timestamp outside it has no period."""
     return [item for item in map(dict, rows) if item.get("period", "") is not None]
@@ -295,6 +317,8 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
     grouping of one query owner, not a second measurement: a family with no root
     grain is refused rather than answered with scope-wide rows.
     """
+    if family == "updates":  # reads no usage, so it skips the rollup bound usage_params refreshes
+        return _in_range(db.execute(update_family_sql(params["grain"], PREPARED_SCOPE), query_params(params)).fetchall())
     bound = usage_params(db, params)
     grain = bound["grain"]
     scope_threads, outcomes = PREPARED_SCOPE, PREPARED_OUTCOMES

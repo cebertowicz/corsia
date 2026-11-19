@@ -57,6 +57,9 @@ REGISTRY: dict[str, MetricDefinition] = {
     # Workflows section's coverage headline sums over its window, so the two can never disagree.
     "under_workflow_pct": MetricDefinition("workflows", "ratio", 20),
     "limit_hits": MetricDefinition("limits", "count", 0),
+    # The share of the scope's updates that their agent replaced within minutes of posting, while unseen;
+    # its one rule lives in ``api.measurement_queries.update_family_sql``.
+    "updates_replaced_soon_pct": MetricDefinition("updates", "ratio", 20),
     "dollar_trend": MetricDefinition("unavailable", "usd", 0, available=False),
     **{name: MetricDefinition("machinery", "fresh_tokens_per_outcome" if name.endswith("_tokens_per_outcome") else "ratio", 20,
                               proxy=name.endswith(("_token_pct", "_tokens_per_outcome")) or name in {"skill_read_returned_pct", "machinery_returned_pct"})
