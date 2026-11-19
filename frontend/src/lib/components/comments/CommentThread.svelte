@@ -271,7 +271,7 @@
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else if isSuggestion}
 			<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />
-			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
+			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned && comment.refusalKind !== 'no_such_file'}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
 			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} {preview} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
@@ -295,7 +295,7 @@
 			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
-		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />{/if}
+		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} refusalKind={comment.refusalKind} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />{/if}
 	</div>
 {/if}
 {#if onItsOwn}<span hidden data-surface-mark transition:withSurface|global onoutrostart={() => (closedOver = true)} onintrostart={reopened}></span>{/if}

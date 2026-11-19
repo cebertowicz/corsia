@@ -375,21 +375,25 @@ def test_promotion_streams_claim_without_using_the_in_memory_write_path(
     assert not source.exists()
 
 
+@pytest.mark.parametrize("existing", [False, True])
 def test_startup_finishes_undo_after_crash_just_after_target_restore(
     durable_scope,
     monkeypatch,
+    existing,
 ):
     from registry import durable_writes, service
 
     workspace, project_root, thread_id, db = durable_scope
     target = project_root / "shared" / "planning" / "undo-crash.md"
+    if existing:
+        target.write_text("original\n")
     original_restore = durable_writes._restore_target
 
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registration failed")
 
-    def restore_then_crash(path, backup):
-        original_restore(path, backup)
+    def restore_then_crash(path, backup, content_hash):
+        original_restore(path, backup, content_hash)
         raise RuntimeError("simulated crash after restore")
 
     monkeypatch.setattr(service, "register_write_strict", fail_registration)
@@ -405,13 +409,13 @@ def test_startup_finishes_undo_after_crash_just_after_target_restore(
             description="Crash recovery proof",
         )
 
-    assert not target.exists()
+    assert target.read_text() == "original\n" if existing else not target.exists()
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
 
     monkeypatch.setattr(durable_writes, "_restore_target", original_restore)
     durable_writes.recover_write_intents(workspace=workspace)
 
-    assert not target.exists()
+    assert target.read_text() == "original\n" if existing else not target.exists()
     assert list(target.parent.glob(".corsia-write-*")) == []
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
 
