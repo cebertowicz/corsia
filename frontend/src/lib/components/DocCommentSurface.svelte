@@ -312,8 +312,6 @@
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
 	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
 	.canvas-comment-drawer.margin:global(.on-canvas) { display: flex; }
-	/* The resolved drawer's cards share the margin cards' corners. */
-	.resolved-drawer { --ct-radius: var(--radius); }
 	/* The column grows in from nothing; its content keeps the final width so the reply fields measure at it. */
 	.canvas-comment-drawer.margin > :global(*) { min-width: 287px; }
 	/* The column never scrolls on its own: its cards are part of the page and overflow it downward, so the scroller reaches them. */
