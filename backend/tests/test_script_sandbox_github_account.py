@@ -100,7 +100,7 @@ def run(monkeypatch, tmp_path):
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     views = _views(agent_home)
 
-    def go(state: str, verified: str | None = None, *, authenticated: bool = False):
+    def go(state: str, verified: str | None = None, *, authenticated: bool = False, host_login: bool = True):
         reads: list[bool] = []
         waits: list[bool] = []
         view = views[state]
@@ -120,8 +120,10 @@ def run(monkeypatch, tmp_path):
             from contextlib import asynccontextmanager
 
             @asynccontextmanager
-            async def client(*_args):
-                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder", tmp_path
+            async def client(_thread_id, client_view):
+                # As the real client: a forwarder only on a ready account, or with no account and a host login.
+                forwarded = client_view.ready or (client_view.absent and host_login)
+                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder" if forwarded else None, tmp_path
 
             monkeypatch.setattr(script_sandbox, "_authenticated_client", client)
         result = asyncio.run(script_sandbox.run_script(
@@ -157,8 +159,8 @@ def test_unapproved_run_hides_even_a_verified_account(run):
         assert _deny(home) in seen["profile"]
     assert not any(name in env for name in _TOKENS)
     assert seen["result"].github_locked == (
-        "scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
-        "only if it failed on a GitHub call that needs that account, schedule it with "
+        "scripts get no GitHub login: this script isn't approved to use GitHub; "
+        "only if it failed on a GitHub call that needs a login, schedule it with "
         "authenticated=true so the person can approve it")
 
 
@@ -170,6 +172,32 @@ def test_authenticated_run_keeps_ready_account_locked(run):
     assert str(seen["agent_home"]) not in _read_only(seen["argv"])
     assert _deny(seen["agent_home"]) in seen["profile"]
     assert not any(name in seen["env"] for name in _TOKENS)
+
+
+def test_authenticated_run_with_no_agents_account_gets_the_forwarder(run):
+    seen = run("absent", authenticated=True)
+    assert seen["result"].github_locked is None
+    assert seen["env"]["GH_CONFIG_DIR"].endswith("placeholder")  # the run's forwarder configuration
+    assert _git(seen["env"]) == _LOCKED_GIT
+    for home in (seen["person_gh"], seen["home_gh"]):
+        assert _deny(home) in seen["profile"]
+    assert not any(name in seen["env"] for name in _TOKENS)
+
+
+def test_authenticated_run_on_a_broken_account_stays_locked_and_says_so(run, caplog):
+    seen = run("suspended", authenticated=True)
+    assert seen["env"]["GH_CONFIG_DIR"] == LOCKED_HOME
+    assert seen["result"].github_locked.startswith("scripts get no GitHub login: GitHub rejected")
+    assert any("approved script ran with no GitHub login" in record.getMessage() for record in caplog.records)
+
+
+def test_authenticated_run_with_no_account_and_no_host_login_is_locked_and_says_so(run, caplog):
+    seen = run("absent", authenticated=True, host_login=False)
+    assert seen["env"]["GH_CONFIG_DIR"] == LOCKED_HOME
+    assert seen["result"].github_locked == (
+        "scripts get no GitHub login: there is no agents' GitHub account and no GitHub CLI login on this "
+        "computer; the person needs to sign in to GitHub CLI or connect an agents' GitHub account")
+    assert any("approved script ran with no GitHub login" in record.getMessage() for record in caplog.records)
 
 
 def test_only_an_authenticated_run_is_kept_off_python_bytecode_in_its_folder(run, tmp_path):
@@ -202,7 +230,10 @@ def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
                    "person isn't signed in to GitHub CLI on this computer, they need to sign in"),
     ("suspended", "scripts get no GitHub login: GitHub rejected the sign-in for the agents' GitHub account; "
                   "sign it out and in again"),
-    ("absent", "scripts get no GitHub login: there is no agents' GitHub account"),
+    # Unapproved: with no agents' account the next step is approving the script, not an account fix.
+    ("absent", "scripts get no GitHub login: this script isn't approved to use GitHub; only if it failed on "
+               "a GitHub call that needs a login, schedule it with authenticated=true so the person can "
+               "approve it"),
 ])
 def test_every_other_state_runs_the_script_in_the_shells_locked_state(run, state, reason):
     seen = run(state)
