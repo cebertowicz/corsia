@@ -153,11 +153,11 @@ def test_attribution_and_token_changes_move_the_contribution(db, monkeypatch):
 def test_a_node_move_changes_no_stored_row(db, monkeypatch):
     nodes = _mixed(db)
     _node(db, "c")
-    before = db.execute("SELECT * FROM llm_usage_node_groups ORDER BY rowid").fetchall()
+    before = db.execute("SELECT * FROM llm_usage_node_groups ORDER BY plan_node_id,group_key,admission,input_tier,idle_hours").fetchall()
     with raw_plan_seed(db):
         db.execute("UPDATE plan_nodes SET parent_id='c' WHERE id='a'")
     db.commit()
-    assert db.execute("SELECT * FROM llm_usage_node_groups ORDER BY rowid").fetchall() == before
+    assert db.execute("SELECT * FROM llm_usage_node_groups ORDER BY plan_node_id,group_key,admission,input_tier,idle_hours").fetchall() == before
     _assert_exact(db, monkeypatch, [*nodes, "c"])
 
 
@@ -234,7 +234,7 @@ def test_where_to_look_probes_each_chain_node_by_key_on_both_paths(db):
         details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE), coverage)]
         reads = sorted(detail for detail in details if detail.startswith(("SEARCH g ", "SEARCH l ", "SEARCH u ", "SCAN g", "SCAN l", "SCAN u")))
         assert reads == [
-            "SEARCH g USING INDEX idx_llm_usage_node_groups_key (plan_node_id=?)",
-            "SEARCH l USING INDEX idx_llm_usage_node_groups_key (plan_node_id=?)",
+            "SEARCH g USING PRIMARY KEY (plan_node_id=?)",
+            "SEARCH l USING PRIMARY KEY (plan_node_id=?)",
             "SEARCH u USING INDEX idx_llm_usage_plan_node (plan_node_id=?)",
         ], details

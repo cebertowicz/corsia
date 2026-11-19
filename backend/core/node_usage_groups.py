@@ -53,9 +53,17 @@ def _classes(alias: str) -> tuple[str, str, str]:
     return admission_sql(alias), input_tier_sql(alias), idle_hours_sql(alias)
 
 
-def _row_sums(alias: str) -> tuple[str, ...]:
-    """What one ledger row adds to its group's sums, in ``_SUMS`` order."""
-    admission = admission_sql(alias)
+def _group_key(alias: str) -> str:
+    """``group_key`` of the row named ``alias``: its nullable key columns, each ``quote()``d, comma-joined."""
+    return "||','||".join(f"quote({alias}.{name})" for name in _KEY[1:])
+
+
+def _row_sums(alias: str, admission: str | None = None) -> tuple[str, ...]:
+    """What one ledger row adds to its group's sums, in ``_SUMS`` order.
+
+    ``admission`` is an already computed admission to test instead of recomputing it.
+    """
+    admission = admission or admission_sql(alias)
     total = f"{alias}.total_tokens"
     return (
         *(f"(CASE WHEN ({admission})='ok' THEN {alias}.{bucket} ELSE 0 END)" for bucket in TOKEN_BUCKETS),
@@ -65,33 +73,36 @@ def _row_sums(alias: str) -> tuple[str, ...]:
     )
 
 
-def _match(alias: str) -> str:
-    """The group the row named ``alias`` belongs to. ``IS`` so a NULL key matches its own group."""
-    keys = [f"plan_node_id={alias}.plan_node_id"] + [f"{name} IS {alias}.{name}" for name in _KEY[1:]]
-    classes = [f"{name}=({expression})" for name, expression in zip(_CLASSES, _classes(alias))]
-    return " AND ".join(keys + classes)
+_COLUMNS = ("plan_node_id", "group_key", *_CLASSES, *_KEY[1:], "records", *_SUMS, "last_at")
 
 
 def _add(alias: str) -> str:
-    """Statements adding the row named ``alias`` to its group, creating the group when absent."""
-    columns = ",".join((*_KEY, *_CLASSES, "records", *_SUMS, "last_at"))
-    values = ",".join((*(f"{alias}.{name}" for name in _KEY), *_classes(alias), *("0" for _ in range(1 + len(_SUMS))),
+    """One upsert adding the row named ``alias`` to its group, creating the group when absent.
+
+    The classes are computed once, in the inner select; the primary key finds the group.
+    """
+    values = ",".join((f"{alias}.plan_node_id", _group_key(alias), *(f"c.{name}" for name in _CLASSES),
+                       *(f"{alias}.{name}" for name in _KEY[1:]), "1", *_row_sums(alias, "c.admission"),
                        f"{alias}.created_at"))
-    sums = ",".join(f"{name}={name}+{amount}" for name, amount in zip(_SUMS, _row_sums(alias)))
+    classes = ",".join(f"{expression} AS {name}" for name, expression in zip(_CLASSES, _classes(alias)))
+    sums = ",".join(f"{name}={name}+excluded.{name}" for name in _SUMS)
     return f"""
-        INSERT INTO {NODE_GROUPS_TABLE}({columns}) SELECT {values}
-        WHERE {alias}.plan_node_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM {NODE_GROUPS_TABLE} WHERE {_match(alias)});
-        UPDATE {NODE_GROUPS_TABLE} SET records=records+1,{sums},last_at=MAX(last_at,{alias}.created_at)
-        WHERE {_match(alias)};"""
+        INSERT INTO {NODE_GROUPS_TABLE}({','.join(_COLUMNS)}) SELECT {values} FROM (SELECT {classes}) c WHERE true
+        ON CONFLICT(plan_node_id,group_key,{','.join(_CLASSES)}) DO UPDATE SET
+          records=records+1,{sums},last_at=MAX(last_at,excluded.last_at);"""
 
 
 def _remove(alias: str) -> str:
-    """Statements taking the row named ``alias`` out of its group, dropping the group at zero rows."""
-    sums = ",".join(f"{name}={name}-{amount}" for name, amount in zip(_SUMS, _row_sums(alias)))
+    """Statements taking the row named ``alias`` out of its group, dropping the group at zero rows.
+
+    The matched group's own ``admission`` column is the row's admission, so it is not recomputed for the sums.
+    """
+    key = f"plan_node_id={alias}.plan_node_id AND group_key={_group_key(alias)}"
+    classes = " AND ".join(f"{name}=({expression})" for name, expression in zip(_CLASSES, _classes(alias)))
+    sums = ",".join(f"{name}={name}-{amount}" for name, amount in zip(_SUMS, _row_sums(alias, "admission")))
     return f"""
-        UPDATE {NODE_GROUPS_TABLE} SET records=records-1,{sums} WHERE {_match(alias)};
-        DELETE FROM {NODE_GROUPS_TABLE} WHERE records=0 AND {_match(alias)};"""
+        UPDATE {NODE_GROUPS_TABLE} SET records=records-1,{sums} WHERE {key} AND {classes};
+        DELETE FROM {NODE_GROUPS_TABLE} WHERE {key} AND records=0;"""
 
 
 @cache
@@ -112,12 +123,13 @@ def trigger_sql() -> dict[str, str]:
 def _grouped_select(where: str) -> str:
     """The stored rows recomputed from the ledger rows ``where`` picks (alias ``u``)."""
     sums = ",".join(f"SUM({amount}) AS {name}" for name, amount in zip(_SUMS, _row_sums("u")))
-    keys = ",".join(f"u.{name} AS {name}" for name in _KEY)
+    keys = ",".join(f"u.{name} AS {name}" for name in _KEY[1:])
     classes = ",".join(f"{expression} AS {name}" for name, expression in zip(_CLASSES, _classes("u")))
     return f"""
-        SELECT {keys},{classes},COUNT(*) AS records,{sums},MAX(u.created_at) AS last_at
+        SELECT u.plan_node_id AS plan_node_id,{_group_key('u')} AS group_key,{classes},{keys},
+          COUNT(*) AS records,{sums},MAX(u.created_at) AS last_at
         FROM llm_usage u WHERE u.plan_node_id IS NOT NULL AND ({where})
-        GROUP BY {','.join(f'u.{name}' for name in _KEY)},{','.join(_CLASSES)}"""
+        GROUP BY u.plan_node_id,group_key,{','.join(_CLASSES)}"""
 
 
 @cache
@@ -202,7 +214,7 @@ def _next_bound(db, low: str) -> str | None:
 def _rebuild_batch(db, low: str, high: str | None) -> None:
     from infra.database import write_transaction
 
-    columns = ",".join((*_KEY, *_CLASSES, "records", *_SUMS, "last_at"))
+    columns = ",".join(_COLUMNS)
     upper = "" if high is None else " AND plan_node_id<:high"
     with write_transaction(db, scope="node_usage_rebuild"):
         state = db.execute("SELECT definition,rebuilt_below,complete FROM llm_usage_node_state WHERE id=1").fetchone()
