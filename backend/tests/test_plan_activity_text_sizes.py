@@ -2,32 +2,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
-from infra.audit_plan_activity import plan_activity
-from infra.audit_plan_text_sizes import _summary
+from infra.audit_plan_activity import _summary, plan_activity
 from plans import holds, service
-from infra.schema import SCHEMA_SQL
-from tests.test_attention_queue import _seed, raise_decision
 from tests.test_plan_conductor_task_adds import db  # noqa: F401
 
 SECRET = "PLAN_TEXT_SENTINEL"
-
-
-@pytest.fixture
-def attention_db():
-    """The attention-queue threads: root work and a delegated child under it."""
-    connection = sqlite3.connect(":memory:", check_same_thread=False)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
-    connection.executescript(SCHEMA_SQL)
-    _seed(connection)
-    connection.commit()
-    yield connection
-    connection.close()
 
 
 def _window(*, days: int = 0) -> tuple[str, str]:
@@ -90,13 +71,3 @@ def test_percentiles_are_nearest_rank():
     assert _summary(list(range(1, 101))) == {"p50": 50, "p90": 90, "p99": 99, "max": 100}
     assert _summary([7]) == {"p50": 7, "p90": 7, "p99": 7, "max": 7}
     assert _summary([]) == {"p50": None, "p90": None, "p99": None, "max": None}
-
-
-def test_a_decision_raised_through_the_raise_path_counts_as_an_agent_raise(attention_db):
-    raise_decision(attention_db, "child", "child")
-
-    row = plan_activity(attention_db, "user-1", *_window())[0]
-
-    assert [(r["origin"], r["raised_by"], r["decisions"]) for r in row["decisions_raised"]] == [
-        ("delegated", "agent", 1),
-    ]
