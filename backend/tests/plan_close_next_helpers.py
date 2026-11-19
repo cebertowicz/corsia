@@ -39,10 +39,11 @@ NEXT_BLOCK_CAP = 2048
 #: Serialized-byte caps; a helper may count the JSON quotes or not, so the
 #: assertions allow the two quote bytes on top of each cap.
 TITLE_CAP, WAIT_CAP = close_next_bounds.TITLE_MAX_BYTES, close_next_bounds.WAIT_MAX_BYTES
-#: The longest refusal reason: a slot-held action naming a holder whose ASCII
-#: title is at the input limit, which the title cut leaves whole.
+#: The longest refusal reason: a slot-held action naming a holder whose title
+#: is the largest the title cut leaves whole (``TITLE_MAX_BYTES``'s own case:
+#: at the input limit with one escaped ellipsis, as ``trim_title`` produces).
 REASON_CAP = close_next_bounds.json_bytes(
-    plan_tools.slot_held_reason("x" * service.MAX_NODE_TITLE, "pending"),
+    plan_tools.slot_held_reason("x" * (service.MAX_NODE_TITLE - 1) + "…", "pending"),
 ) - 2
 QUOTES = 2
 #: The truncation marker appended after a cut label (title, wait, reason).

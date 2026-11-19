@@ -35,11 +35,12 @@ NEXT_BLOCK_MAX_BYTES = 2048
 #: title input limit (``service.MAX_NODE_TITLE``, the one-line pane row) and the
 #: titles the platform shortens itself (``feedback_titles.trim_title``), which
 #: carry one ellipsis: the emitted size of a title at that limit with one
-#: ellipsis, so a title of plain ASCII plus one escaped character is never cut.
-#: A title with more escaped characters (accents, another script, emoji) near
-#: the limit, or an older one longer than the limit, is cut to those bytes: every
-#: surface that lists titles is budgeted on this one size, whatever script the
-#: titles are in.
+#: ellipsis, so a title of plain ASCII plus one escaped character from the Basic
+#: Multilingual Plane (6 bytes escaped) is never cut. A title near the limit with
+#: more escaped characters (accents, another script) or any character outside
+#: that plane (an emoji escapes to a 12-byte surrogate pair), or an older title
+#: longer than the limit, is cut to those bytes: every surface that lists titles
+#: is budgeted on this one size, whatever script the titles are in.
 TITLE_MAX_BYTES = json_bytes("x" * (MAX_NODE_TITLE - 1) + text.ELLIPSIS)
 WAIT_MAX_BYTES = 72
 FEEDBACK_MAX_BYTES = 480

@@ -1,10 +1,15 @@
 """plan_activity counts decisions raised to the person, by the raising plan's origin."""
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from infra.audit_plan_activity import plan_activity
+from infra.schema import SCHEMA_SQL
 from plans import decisions, service
+from tests.test_attention_queue import _seed, raise_decision
 from tests.test_plan_conductor_task_adds import db  # noqa: F401
 
 
@@ -60,3 +65,28 @@ def test_decisions_raised_outside_the_window_are_not_counted(db):
     row = plan_activity(db, "user", later.isoformat(), (later + timedelta(hours=1)).isoformat())[0]
 
     assert row["decisions_raised"] == []
+
+
+@pytest.fixture
+def attention_db():
+    """The attention-queue threads: root work and a delegated child under it."""
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.executescript(SCHEMA_SQL)
+    _seed(connection)
+    connection.commit()
+    yield connection
+    connection.close()
+
+
+def test_a_decision_raised_through_the_raise_path_counts_as_an_agent_raise(attention_db):
+    raise_decision(attention_db, "child", "child")
+    now = datetime.now(timezone.utc)
+
+    row = plan_activity(attention_db, "user-1", (now - timedelta(hours=1)).isoformat(),
+                        (now + timedelta(hours=1)).isoformat())[0]
+
+    assert [(r["origin"], r["raised_by"], r["decisions"]) for r in row["decisions_raised"]] == [
+        ("delegated", "agent", 1),
+    ]
