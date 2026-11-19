@@ -8,6 +8,7 @@
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
 	import CommentThread from './comments/CommentThread.svelte';
+	import { createThreadHomes } from './comments/threadHomes';
 	import type { CommentThreadData } from './comments/CommentThreadData';
 	import CommentReplyList from './comments/CommentReplyList.svelte';
 	import './comments/comment-link.css';
@@ -35,7 +36,10 @@
 	function answerId(answer: ChatComment['answers'][number]): string {
 		return JSON.stringify([answer.user_message_id, answer.cid, answer.author_kind === 'agent' ? answer.assistant_message_id : null]);
 	}
+	/** The chat each thread is shown in: this component is not rebuilt per chat, so `threadId` moves on when the person switches chats while a card is open. */
+	const homes = createThreadHomes();
 	function thread(comment: ChatComment): CommentThreadData {
+		homes.note([comment.id], threadId);
 		const unsent = new Set(unsentSends(comment).filter(send => !send.root).map(send => send.messageId));
 		return {
 			id: comment.cid, anchor: comment.quote, author: 'user', authorKind: 'user', text: comment.note,
@@ -48,8 +52,9 @@
 	}
 	async function viewed(comment: ChatComment, replyId: string): Promise<void> {
 		const answer = comment.answers.find(item => answerId(item) === replyId);
-		if (!answer || answer.author_kind !== 'agent') return;
-		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(answer.user_message_id)}/comments/${encodeURIComponent(answer.cid)}/viewed`, {
+		const home = homes.of(comment.id);
+		if (!answer || answer.author_kind !== 'agent' || !home) return;
+		const response = await apiFetch(`/api/threads/${encodeURIComponent(home)}/messages/${encodeURIComponent(answer.user_message_id)}/comments/${encodeURIComponent(answer.cid)}/viewed`, {
 			method: 'POST', headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ assistant_message_id: answer.assistant_message_id }),
 		});
@@ -61,7 +66,7 @@
 			...row, chat_comments: (row.chat_comments ?? []).map(item => !owns(item)
 				? item : { ...item, answers: item.answers.map(entry => entry.author_kind === 'agent' && entry.user_message_id === answer.user_message_id && entry.cid === answer.cid && entry.created_at <= answer.created_at ? { ...entry, unread: false } : entry) }),
 		}));
-		await refreshChatReplyAttention(threadId);
+		await refreshChatReplyAttention(home);
 	}
 </script>
 

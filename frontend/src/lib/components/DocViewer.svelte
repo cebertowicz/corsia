@@ -55,6 +55,7 @@
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
+	import { createThreadHomes } from './comments/threadHomes';
 
 	type DocState = 'loading' | 'ready' | 'error';
 
@@ -109,6 +110,9 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
+	// The viewer is not rebuilt per document: a card that closes as another document loads is still read in its own.
+	const homes = createThreadHomes();
+	$effect.pre(() => homes.note((loadedArtifactId ? $docComments[loadedArtifactId] ?? [] : []).map((comment) => comment.id), loadedArtifactId));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
@@ -371,7 +375,7 @@
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
-		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
+		onViewed={(id, replyId) => homes.stamp(id, (home) => markThreadViewed(home, id, replyId))}
 		onResolve={threadActions.resolve}
 		onAgree={threadActions.agree}
 		{target}

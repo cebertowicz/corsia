@@ -145,3 +145,31 @@ it('reads an answer that arrived while a popover thread was open when it closes,
 	expect(String(fetcher.mock.calls[0][0])).toContain('/messages/first/comments/root/viewed');
 	messages.set([]);
 });
+
+it('reads an answer that arrived while its margin card was picked in the chat the card lives in, when the person switches chats', async () => {
+	const fetcher = vi.fn().mockResolvedValue({ ok: true });
+	vi.stubGlobal('fetch', fetcher);
+	host = document.createElement('div'); document.body.appendChild(host);
+	const base = { from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', id: 'root', cid: 'root', user_message_id: 'first', quote: 'quote', note: 'note', created_at: '2026-10-27T00:00:00Z' };
+	const read = { author_kind: 'agent' as const, user_message_id: 'first', cid: 'root', assistant_message_id: 'a1', text: 'first answer', created_at: '2026-10-27T00:01:00Z', unread: false };
+	const arrived = { ...read, assistant_message_id: 'a2', text: 'second answer', created_at: '2026-10-27T00:02:00Z', unread: true };
+	// ChatPanel hands the margin column the active chat and does not rebuild it per chat.
+	const props = $state({ messageId: 'target', threadId: 'home-chat', margin: true, picked: false, comments: [{ ...base, answers: [read] }] });
+	component = mount(ChatCommentThreads, { target: host, props });
+	flushSync();
+	// The person presses the card, and the column picks it.
+	host.querySelector<HTMLElement>('[data-comment-card]')!.click();
+	props.picked = true;
+	flushSync();
+	props.comments = [{ ...base, answers: [read, arrived] }];
+	flushSync();
+	await Promise.resolve();
+	expect(fetcher).not.toHaveBeenCalled();
+	// The person switches chats: the column's chat moves on and the pick is cleared before the old card leaves.
+	props.threadId = 'other-chat';
+	props.picked = false;
+	flushSync();
+	await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+	expect(String(fetcher.mock.calls[0][0])).toContain('/api/threads/home-chat/messages/first/comments/root/viewed');
+	expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ assistant_message_id: 'a2' });
+});

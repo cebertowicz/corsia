@@ -17,14 +17,18 @@ export function notEngaging(event: Event): boolean {
  * follows a selection, which may be a restored tab's landing rather than a pick.
  * `close` (the thread rests again or leaves the page) reads it once more, only if it was engaged, so a reply that arrived
  * while it was open is read when the person lets it go; closing a thread nobody engaged with reads nothing.
+ * Only the caller's pick says whether the thread is open, so `onEngaged` tells the caller of each engagement: one that leaves
+ * the thread at rest (a press on a card the pick does not move to, such as an unplaced or resolved one) reads it and is
+ * then closed at once, rather than held until the thread leaves the page.
  * A chat thread stamps each unread answer; a document thread stamps its latest unread item.
  */
-export function createThreadEngagement(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
+export function createThreadEngagement(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void, onEngaged: () => void = () => {}) {
 	let quiet = false;
 	let engaged = false;
 	function engage() {
 		engaged = true;
 		readUnread();
+		onEngaged();
 	}
 	function close() {
 		if (!engaged) return;
