@@ -54,6 +54,7 @@ def after_transition(
 def after_close(
     node_id: str, reason: str, params: dict[str, Any], common: dict,
     *, executor: str | None = None, bulk: bool = False, closed_below: list[str] | None = None,
+    snapshots: dict[str, set[str]] | None = None,
 ) -> dict:
     """Release a closed task, start the named next task, reconcile, and report next.
 
@@ -69,7 +70,7 @@ def after_close(
     db = common["db"]
     # A required step can't be skipped, so one that closed (the person's Won't do) fails its run like a failure.
     ended_not_done = reason in ("failed", service.CLOSED)
-    run_closed, run_open = run_end.fail_run(node_id, common) if ended_not_done else ([], [])
+    run_closed, run_open = run_end.fail_run(node_id, common, snapshots=snapshots) if ended_not_done else ([], [])
     run_closed = [*(closed_below or ()), *run_closed]
     if bulk:
         for sibling in run_closed:

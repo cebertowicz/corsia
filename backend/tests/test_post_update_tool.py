@@ -63,6 +63,8 @@ async def test_replaced_update_receipt_carries_attention_notice(deleg_db, monkey
     tool = PostUpdateTool()
     original = await tool.execute(_thread_id="sender-self", text="Original update.", _host_access_turn_identity=TURN)
     original_id = original.splitlines()[0].removeprefix("Update saved as message ").removesuffix(".")
+    original_args = {"text": "Original update."}
+    assert attention_notice(thread_id="sender-self", tool_name="post_update", arguments=original_args, result=original)
     args = {"text": "Replacement is ready.", "replace": [original_id], "replace_reason": "updates"}
     receipt = await tool.execute(_thread_id="sender-self", _host_access_turn_identity=TURN, **args)
     assert receipt.startswith("Update saved as message ")
@@ -70,14 +72,17 @@ async def test_replaced_update_receipt_carries_attention_notice(deleg_db, monkey
     assert rendered and "Your update: 3 words" in rendered
     assert rendered.endswith("(replace it while it is unseen)")
     assert events[-1]["properties"]["handover"] == "update"
-    # What the Measurement series updates_replaced_soon_pct reads: the replace path stamps the old row.
-    from api.measurement_queries import REPLACED_SOON_MINUTES
-
+    # What the Measurement updates series read: the notice stamps its time once, and the replace path
+    # stamps the old row after it.
     row = deleg_db.execute(
-        "SELECT update_kind,(julianday(replaced_at)-julianday(posted_at))*1440 AS minutes "
-        "FROM message_update_state WHERE message_id=?", (original_id,)).fetchone()
+        "SELECT update_kind,notice_at,replaced_at FROM message_update_state WHERE message_id=?",
+        (original_id,)).fetchone()
     assert row["update_kind"] == "post_update"
-    assert 0 <= row["minutes"] <= REPLACED_SOON_MINUTES
+    assert row["notice_at"] and row["notice_at"] <= row["replaced_at"]
+    first_notice = row["notice_at"]
+    attention_notice(thread_id="sender-self", tool_name="post_update", arguments=original_args, result=original)
+    assert deleg_db.execute("SELECT notice_at FROM message_update_state WHERE message_id=?",
+                            (original_id,)).fetchone()["notice_at"] == first_notice
 
 
 @pytest.mark.asyncio

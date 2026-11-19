@@ -29,6 +29,7 @@ from api.measurement_breaks import (
 )
 from api.measurement_registry import REGISTRY, data_start, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
+from api.measurement_updates import UPDATE_METRICS, update_value
 from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
@@ -128,7 +129,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         n, answer = int(source.get("answered", 0) or 0), {"took_recommendation_pct": "recommendation", "answered_other_pct": "other"}.get(metric, "neither")
         value = source.get(answer, 0) / n if n else None
     elif metric == "under_workflow_pct": value = source.get("under_workflow", 0) / n if n else None
-    elif metric == "updates_replaced_soon_pct": value = source.get("replaced_soon", 0) / n if n else None
+    elif metric in UPDATE_METRICS: value, n = update_value(metric, source)
     elif metric == "fresh_tokens":
         # The calls behind the period: it is measured when any were recorded. A period whose
         # every call carried no count has no figure, and is never served as zero tokens.

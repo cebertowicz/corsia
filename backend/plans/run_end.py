@@ -1,4 +1,4 @@
-"""How a workflow run ends: a failed required step ends it, and the last close records it.
+"""How a workflow run ends: required failure closes dependent work and the last close records the outcome.
 
 A run is a phase built from a workflow definition; its steps are the phase's
 children and never change the phase's own state (a parent reads as the roll-up
@@ -101,10 +101,53 @@ def close_run(node_id: str, reason: str, common: dict, *, expected_revision: int
     return below
 
 
-def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[str], list[str]]:
-    """After a required step ends not done, close the run's other open work with the reason.
+def _affected_ids(db, node, include_subwork: bool, failed_below: tuple[str, ...] = ()) -> set[str]:
+    """Snapshot dependents of the step, or of a failed step inside it, anywhere in the run while edges exist."""
+    rows = db.execute(
+        "WITH RECURSIVE below(id) AS ("
+        " SELECT id FROM plan_nodes WHERE parent_id=? AND plan_id=?"
+        " UNION ALL SELECT n.id FROM below b CROSS JOIN plan_nodes n ON n.parent_id=b.id AND n.plan_id=?),"
+        " downstream(id) AS ("
+        " SELECT d.node_id FROM plan_node_dependencies d"
+        " WHERE d.depends_on_node_id IN (SELECT value FROM json_each(?))"
+        " UNION SELECT d.node_id FROM plan_node_dependencies d JOIN downstream x ON d.depends_on_node_id=x.id),"
+        " affected(id) AS (SELECT downstream.id FROM downstream JOIN below b ON b.id=downstream.id UNION SELECT ? WHERE ?"
+        " UNION SELECT n.id FROM affected a CROSS JOIN plan_nodes n ON n.parent_id=a.id AND n.plan_id=?)"
+        " SELECT id FROM affected",
+        (node["parent_id"], node["plan_id"], node["plan_id"], json.dumps([*failed_below, node["id"]]),
+         node["id"], include_subwork, node["plan_id"]),
+    )
+    return {str(row["id"]) for row in rows}
+
+
+def snapshot_dependents(db, node_id: str) -> dict[str, set[str]]:
+    """Capture each affected run's dependents, per level, before any close removes dependency edges."""
+    from plans.workflow_fields import creation_payload
+
+    snapshots: dict[str, set[str]] = {}
+    include_subwork = True
+    failed_below: tuple[str, ...] = ()
+    while True:
+        node = service._node_row(db, node_id)
+        if (node["workflow_step"] is None or node["parent_id"] is None
+                or creation_payload(db, node_id).get("workflow_required") is not True
+                or not _run_phase(db, service._node_row(db, node["parent_id"]))):
+            return snapshots
+        snapshots[node_id] = _affected_ids(db, node, include_subwork, failed_below)
+        failed_below = (*failed_below, node_id)
+        node_id, include_subwork = node["parent_id"], False
+
+
+def fail_run(
+    node_id: str, common: dict, how: str | None = None, *, snapshots: dict[str, set[str]] | None = None,
+) -> tuple[list[str], list[str]]:
+    """After a required step ends not done, close its dependent work with the reason.
 
     A run that is itself a required step of an outer run fails that run too, for the same ``how``.
+    Its independent inner work remains open while the outer dependents close: those with an edge
+    on the run's step, or on any failed step inside it, directly or through work the failure closes.
+    Every level's dependents come from ``snapshots``, taken before the first close drops any edge;
+    a caller that closed the step itself passes the snapshot it took before that close.
     Returns the ids closed and the ids whose close was refused. The closes carry
     this module's provenance, which is how the run's record tells a step never
     reached from one an agent chose to skip. Work whose close is refused (a
@@ -113,25 +156,23 @@ def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[s
     releases and tells each closed node.
     """
     from plans import closure
-    from plans.workflow_fields import creation_payload
 
     db = common["db"]
+    if snapshots is None:
+        snapshots = snapshot_dependents(db, node_id)
+    if node_id not in snapshots:
+        return [], []
     node = service._node_row(db, node_id)
-    if node["workflow_step"] is None or node["parent_id"] is None:
-        return [], []
-    if creation_payload(db, node_id).get("workflow_required") is not True:
-        return [], []
-    if not _run_phase(db, service._node_row(db, node["parent_id"])):
-        return [], []
     how = how or _HOW.get(node["state"], _NOT_DONE)
     reason = RUN_FAILED.format(title=node["title"], how=how)
     closed: list[str] = []
     refused: set[str] = set()
+    affected = snapshots[node_id]
     progress = True
     while progress:
         progress = False
         for open_id in open_nodes(db, node["parent_id"]):
-            if open_id in refused or service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
+            if open_id not in affected or open_id in refused or service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
                 continue
             try:
                 closure.close_node(
@@ -144,7 +185,7 @@ def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[s
             closed.append(open_id)
             progress = True
     still_open = [open_id for open_id in refused if service._node_row(db, open_id)["state"] not in service._TERMINAL_STATES]
-    outer_closed, outer_open = fail_run(node["parent_id"], common, how)
+    outer_closed, outer_open = fail_run(node["parent_id"], common, how, snapshots=snapshots)
     return closed + outer_closed, still_open + outer_open
 
 

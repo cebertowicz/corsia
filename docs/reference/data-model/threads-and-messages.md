@@ -269,6 +269,7 @@ Source: `backend/infra/message_update_schema.py`.
 | `replace_reason` | TEXT | No | No | — | — |
 | `result_text` | TEXT | No | No | — | — |
 | `result_chars` | INTEGER | No | No | — | — |
+| `notice_at` | TEXT | No | No | — | — |
 
 Indexes: `idx_message_update_replaced_by` (replaced_by), `idx_message_update_thread` (thread_id, posted_at, message_id), `idx_message_update_unseen` (thread_id, posted_at), `sqlite_autoindex_message_update_state_1` (message_id, unique).
 
