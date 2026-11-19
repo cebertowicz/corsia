@@ -666,14 +666,15 @@ def test_the_cadence_floor_is_the_sweep_interval_and_has_no_ceiling(tmp_path):
     _register(db, tmp_path, cadence=31 * 24 * 60 * 60, thread="owner")
 
 
-def test_the_run_timeout_has_a_floor_and_no_ceiling(tmp_path):
-    """The author sets how long a run may take; a slow machine's real need is never refused."""
+def test_a_timed_out_run_says_how_to_allow_longer_up_to_the_ceiling(tmp_path):
+    """A timeout below the ceiling names the fix and the most allowed; at the ceiling it offers none."""
     db = _db()
-    with pytest.raises(ValueError, match="at least 1"):
-        _register(db, tmp_path, timeout=0)
-    row = _register(db, tmp_path, timeout=24 * 60 * 60)
-    assert row.timeout_seconds == 24 * 60 * 60
-    from automation.script_readings import build_report
-
-    report = build_report(row, _run(timed_out=True), run_id="r")
+    below = _register(db, tmp_path, timeout=30)
+    report = build_report(below, _run(timed_out=True), run_id="r")
     assert "larger timeout_seconds" in report.error
+    assert f"at most {store.MAX_TIMEOUT_SECONDS}" in report.error
+    at_max = _register(db, tmp_path, timeout=store.MAX_TIMEOUT_SECONDS)
+    report = build_report(at_max, _run(timed_out=True), run_id="r")
+    assert "larger" not in report.error
+    with pytest.raises(ValueError, match="between 1 and"):
+        _register(db, tmp_path, timeout=store.MAX_TIMEOUT_SECONDS + 1)

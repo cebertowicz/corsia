@@ -100,11 +100,13 @@ def _script_name(schedule: Schedule) -> str:
 def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str) -> RunReport:
     """Turn one finished run into a status, its readings and its signals. Pure."""
     if run.timed_out:
-        return _failure(
-            schedule, "timeout",
-            f"did not finish within {schedule.timeout_seconds} s and was stopped; "
-            "if it needs longer, cancel it and schedule it again with a larger timeout_seconds",
-        )
+        detail = f"did not finish within {schedule.timeout_seconds} s and was stopped"
+        if schedule.timeout_seconds < store.MAX_TIMEOUT_SECONDS:
+            detail += (
+                "; if it needs longer, cancel it and schedule it again with a larger "
+                f"timeout_seconds (at most {store.MAX_TIMEOUT_SECONDS})"
+            )
+        return _failure(schedule, "timeout", detail)
     if run.over_cap:
         return _failure(
             schedule, "error",

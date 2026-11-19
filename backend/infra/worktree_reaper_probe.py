@@ -36,6 +36,11 @@ from infra.bulletins import PUBLIC_REPOSITORY
 # - LSOF: the worktree is skipped as unknown_process and checked next pass.
 # - GH: the open-PR list is unknown, so every worktree keeps the longer idle
 #   threshold; nothing is removed early.
+# Readings on one Mac, for scale only: the slowest probe call took 0.63 s (worktree
+# list over 968 worktrees, Nov 18); lsof +D up to 2.60 s (Nov 18, a lower bound: the
+# agent sandbox hides other processes); removing a real worktree, dependencies
+# included, took 27-55 s (Nov 12), which is why REMOVE is longer than GIT: at the
+# 30 s default, removals were cut off mid-delete. The open-PR list has no reading.
 GIT_TIMEOUT_SECONDS = 30.0
 WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 LSOF_TIMEOUT_SECONDS = 60.0

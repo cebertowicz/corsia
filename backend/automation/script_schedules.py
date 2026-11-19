@@ -33,10 +33,13 @@ SCRIPT_KIND = "script"
 MIN_CADENCE_SECONDS = CONTINUATION_SWEEP_INTERVAL
 # Hang guard for a script whose author set no timeout. Basis: a requirement, not a speed
 # reading -- a hung run must free its run slot -- and an expiry is reported, never silent:
-# the owner gets a timeout signal naming the seconds and how to allow longer. The author,
-# who knows the script and its machine, sets timeout_seconds; there is no upper limit,
-# since a fixed one would refuse a slow machine's real need.
+# the owner gets a timeout signal naming the seconds and how to allow longer.
 DEFAULT_TIMEOUT_SECONDS = 60
+# The most an author may set. A run holds one of the instance's shared run slots
+# (script_runner.SCRIPT_RUN_CAP) until it ends, so this also bounds how long hung runs
+# can keep every other agent's scripts waiting. No reading yet: run durations are not
+# recorded (running_since is cleared, only last_run_at kept).
+MAX_TIMEOUT_SECONDS = 300
 MAX_PER_AGENT = 10
 MAX_PER_INSTANCE = 100
 MAX_SERIES = 20
@@ -174,8 +177,8 @@ def create_script(
         if isinstance(cadence_seconds, bool) or cadence_seconds < MIN_CADENCE_SECONDS:
             raise ValueError(f"cadence_seconds must be at least {MIN_CADENCE_SECONDS}")
         first_cadence_run(_parse(now), cadence_seconds)  # the slot after the first run must fit the calendar
-    if isinstance(timeout_seconds, bool) or timeout_seconds < 1:
-        raise ValueError("timeout_seconds must be at least 1")
+    if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
+        raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
     payload_data: dict[str, Any] = {"series": [vars(s) for s in series], "workflow": workflow}
     if authentication is not None:
         payload_data["authentication"] = authentication
