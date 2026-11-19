@@ -68,6 +68,58 @@ def _init_messages_fts(conn: sqlite3.Connection) -> None:
     """)
 
 
+def comment_search_words_sql(user_message_id: str, cid: str) -> str:
+    """SQL for the words one chat comment is searched by, or NULL when its input has none.
+
+    A comment lives in its input's ``metadata.reply_context.comments``; ``chat_comments`` holds
+    only its keys. The words are the input's own text, then the comment's quote and note, so a
+    search can match a word from the text and one from the comment together. The two arguments
+    are SQL expressions for the comment's keys (``new.user_message_id``, ``cc.cid``).
+
+    This is the one definition: the insert trigger and ``infra.comment_search_fill`` both use it.
+    Malformed metadata or a non-object comment yields no row rather than an error, because the
+    trigger runs inside the transaction that stores the person's input.
+    """
+    comments = (
+        "json_each(CASE WHEN json_valid(m.metadata) THEN m.metadata ELSE '{}' END, "
+        "'$.reply_context.comments')"
+    )
+    field = "CASE WHEN j.type = 'object' THEN json_extract(j.value, '$.{name}') END"
+    return (
+        f"(SELECT coalesce(m.content, '') || char(10) || coalesce({field.format(name='quote')}, '') "
+        f"|| char(10) || coalesce({field.format(name='note')}, '') "
+        f"FROM messages m, {comments} j "
+        f"WHERE m.id = {user_message_id} AND {field.format(name='cid')} = {cid} LIMIT 1)"
+    )
+
+
+def _init_comment_fts(conn: sqlite3.Connection) -> None:
+    """Index chat-comment words for history search: one row per ``chat_comments`` row, by its rowid.
+
+    Contentless, so no words are stored twice, and ``contentless_delete`` so a row is removed by
+    rowid alone. ``messages_fts`` is left as it is: a search reads both, message hits first.
+    Comments stored before this table existed are filled after startup by
+    ``infra.comment_search_fill``, never here.
+    """
+    conn.execute("""
+        CREATE VIRTUAL TABLE comment_fts USING fts5(
+            words, content='', contentless_delete=1
+        )
+    """)
+    words = comment_search_words_sql("new.user_message_id", "new.cid")
+    conn.execute(f"""
+        CREATE TRIGGER comment_fts_insert AFTER INSERT ON chat_comments BEGIN
+            INSERT OR REPLACE INTO comment_fts(rowid, words)
+                SELECT new.rowid, w FROM (SELECT {words} AS w) WHERE w IS NOT NULL;
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER comment_fts_delete AFTER DELETE ON chat_comments BEGIN
+            DELETE FROM comment_fts WHERE rowid = old.rowid;
+        END
+    """)
+
+
 def _init_checkpoints_fts(conn: sqlite3.Connection) -> None:
     """Index checkpoint narratives for bounded search.
 
@@ -157,5 +209,6 @@ def _init_checkpoint_entry_search_fts_triggers(conn: sqlite3.Connection) -> None
 def _init_fts(conn: sqlite3.Connection) -> None:
     """Create the exact fresh-schema FTS indexes."""
     _init_messages_fts(conn)
+    _init_comment_fts(conn)
     _init_checkpoints_fts(conn)
     _init_checkpoint_entry_search_fts(conn)

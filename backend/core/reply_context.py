@@ -7,6 +7,7 @@ their text, order or caps re-renders stored rows and breaks warm caches.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, TypeGuard
 
 REPLY_CONTEXT_KEY = "reply_context"
@@ -94,3 +95,23 @@ def reply_context_lines(value: Any) -> str:
         + _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )
+
+
+def with_comment_lines(text: str, metadata: Any) -> str:
+    """A history read of one stored row: its text, then its chat comments as the agent got them.
+
+    A comment-only input has no text of its own; its words live in the reply context. Rows
+    without comments read as their text alone. ``metadata`` is the stored JSON or a dict.
+    """
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            return text
+    context = metadata.get(REPLY_CONTEXT_KEY) if isinstance(metadata, dict) else None
+    if not isinstance(context, dict) or not context.get("comments"):
+        return text
+    lines = reply_context_lines(context).removesuffix("\n")
+    if not lines:
+        return text
+    return f"{text}\n{lines}" if text else lines

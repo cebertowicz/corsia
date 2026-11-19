@@ -5,6 +5,7 @@ from __future__ import annotations
 # Re-exported for the query tools that already import it from here. The
 # definition lives with the index definitions in infra so that memory/ can
 # use it without importing back up into the tool layer.
+from core.reply_context import with_comment_lines
 from infra.db_fts import fts5_escape
 from infra.project_fence import HistoryFence
 from infra.message_update_schema import not_replaced_sql
@@ -64,13 +65,17 @@ def search_messages_fts(
     A message of a thread whose current project the reader is fenced from, or at or
     below that thread's cut, is dropped in SQL so it never counts toward ``limit``.
     Pass the call's ``fence`` to read several sources under one computed fence.
+
+    A person's input is also found by the words of its chat comments (``comment_fts``).
+    Message hits come first, in their own bm25 order; a message found both ways ranks by
+    its message score; inputs found only by a comment follow, by their comment score.
     """
     sender_expression = _sender_expression()
     fts_query = fts5_escape(query)
     visible, identity = hidden_clause(reader, "t")
     open_to_caller, fence_params = (fence or HistoryFence.for_reader(reader, db=db)).visible_clause("t", "m.seq")
     filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller} AND {not_replaced_sql('m.id')}"
-    params: list = [fts_query, *identity, *fence_params]
+    params: list = [fts_query, fts_query, *identity, *fence_params]
 
     if thread_id:
         filters += " AND m.thread_id = ?"
@@ -82,17 +87,24 @@ def search_messages_fts(
 
     try:
         sql = (
-            "SELECT m.id, m.thread_id, m.role, m.content, m.created_at, t.title, "
-            f"{sender_expression} AS sender, bm25(messages_fts) as bm25_score "
-            "FROM messages m "
-            "JOIN messages_fts f ON f.rowid = m.rowid "
+            "SELECT m.id, m.thread_id, m.role, m.content, m.metadata, m.created_at, t.title, "
+            f"{sender_expression} AS sender, h.score as bm25_score "
+            "FROM (SELECT r, min(src) AS src, min(score) AS score, "
+            "min(CASE WHEN src = 0 THEN score END) AS message_score FROM ("
+            "SELECT rowid AS r, 0 AS src, bm25(messages_fts) AS score FROM messages_fts "
+            "WHERE messages_fts MATCH ? "
+            "UNION ALL SELECT cm.rowid, 1, bm25(comment_fts) FROM comment_fts "
+            "JOIN chat_comments cc ON cc.rowid = comment_fts.rowid "
+            "JOIN messages cm ON cm.id = cc.user_message_id WHERE comment_fts MATCH ?"
+            ") GROUP BY r) h "
+            "JOIN messages m ON m.rowid = h.r "
             "JOIN threads t ON t.id = m.thread_id "
-            f"WHERE messages_fts MATCH ?{filters} "
-            "ORDER BY bm25(messages_fts) LIMIT ?"
+            f"WHERE 1{filters} "
+            "ORDER BY h.src, coalesce(h.message_score, h.score) LIMIT ?"
         )
         return db.execute(sql, params).fetchall()
     except Exception:
-        like_params: list = [f"%{query}%", *identity, *fence_params]
+        like_params: list = [f"%{query}%", f"%{query}%", *identity, *fence_params]
         like_filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller} AND {not_replaced_sql('m.id')}"
         if thread_id:
             like_filters += " AND m.thread_id = ?"
@@ -102,11 +114,11 @@ def search_messages_fts(
             like_params.append(sender)
         like_params.append(limit)
         sql = (
-            "SELECT m.id, m.thread_id, m.role, m.content, m.created_at, t.title, "
+            "SELECT m.id, m.thread_id, m.role, m.content, m.metadata, m.created_at, t.title, "
             f"{sender_expression} AS sender, NULL as bm25_score "
             "FROM messages m "
             "JOIN threads t ON t.id = m.thread_id "
-            f"WHERE m.content LIKE ?{like_filters} "
+            f"WHERE (m.content LIKE ? OR (m.role = 'user' AND m.metadata LIKE ?)){like_filters} "
             "ORDER BY m.created_at DESC LIMIT ?"
         )
         return db.execute(sql, like_params).fetchall()
@@ -205,7 +217,7 @@ def format_history_results(
     results = []
 
     for r in rows:
-        content_preview = (r["content"] or "")[:500]
+        content_preview = with_comment_lines(r["content"] or "", r["metadata"])[:500]
         thread_title = r["title"] or "Untitled"
         bm25 = r["bm25_score"]
         score_str = f" [score: {bm25:.4f}]" if bm25 is not None else ""
