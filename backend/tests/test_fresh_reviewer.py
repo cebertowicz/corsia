@@ -160,3 +160,60 @@ def test_other_steps_are_untouched(db, operation):
     _return(db, build, "reviewer")
     params = ACCEPT if operation == "accept" else {"evidence": "Did not build"}
     assert not isinstance(_act(db, parent.id, operation, build, **params), str)
+
+
+def test_a_required_review_steps_skip_refusal_offers_no_fail(db):
+    """The skip refusal names the routes that settle a review step, not fail, which is refused there."""
+    parent = service.ensure_plan("thread", "parent", db=db)
+    phase = service.add_node(parent.id, kind="phase", title="Run", acceptance_criteria="Done", intent="Ship it", db=db)
+    build, review = (entry["id"] for entry in workflow_fields.build_run(
+        db, phase, [{**STEPS[0], "required": True}, STEPS[1]], causing_executor="parent"))
+    service.transition_node(review, "active", db=db)
+    refusal = _act(db, parent.id, "close_node", review, reason="Not needed")
+    assert refusal == workflow_fields.REQUIRED_REVIEW_STEP_SKIP.format(step="review", route=AUTHOR_FAIL)
+    assert "or fail it" not in refusal
+    service.transition_node(build, "active", db=db)
+    assert _act(db, parent.id, "close_node", build, reason="Not needed") == workflow_fields.REQUIRED_STEP_SKIP.format(step="build")
+
+
+def test_archiving_a_delegated_review_step_offers_no_fail(db):
+    """An optional review step still with its reviewer is archived after its verdict, never by failing it."""
+    from plans import archival
+
+    parent = service.ensure_plan("thread", "parent", db=db)
+    phase = service.add_node(parent.id, kind="phase", title="Run", acceptance_criteria="Done", intent="Ship it", db=db)
+    review = workflow_fields.build_run(
+        db, phase, [{"id": "review", "by": "reviewer", "difficulty": "routine"}], causing_executor="parent",
+    )[0]["id"]
+    service.transition_node(review, "active", db=db)
+    mutations.attach_spawned_thread(review, "worker", db=db)
+    with pytest.raises(service.PlanError) as live:
+        archival.archive_node(review, actor_id="parent", db=db)
+    assert str(live.value) == archival._REVIEW_DELEGATION_REFUSED
+    db.execute("UPDATE threads SET archived_at='t' WHERE id='worker'")
+    with pytest.raises(service.PlanError) as gone:
+        archival.archive_node(review, actor_id="parent", db=db)
+    assert str(gone.value) == archival._REVIEW_DELEGATION_REFUSED_UNREACHABLE
+    assert "fail" not in str(live.value) + str(gone.value)
+
+
+def test_a_reviewers_failed_step_wakes_the_parent_without_offering_fail(db):
+    """A review step's worker stops with a failed step: the wake routes to a new reviewer, not to fail."""
+    from plans.fresh_reviewer import REVIEW_STEP_CHILD_FAILED_TEMPLATE
+    from tests.child_parent_notice_helpers import begin_worker_turn, end_worker_turn, other_open_step, wakes
+
+    parent, _build, review = _run(db)
+    service.transition_node(review, "active", db=db)
+    mutations.attach_spawned_thread(review, "worker", db=db)
+    plan = service.ensure_plan("thread", "worker", db=db)
+    node = service.add_node(plan.id, kind="task", title="Check", acceptance_criteria="Done", db=db)
+    other_open_step(db, plan)
+    service.transition_node(node.id, "active", actor_id="worker", db=db)
+    begin_worker_turn(db)
+    mutations.fail_node(node.id, actor_id="worker", db=db)
+    end_worker_turn(db)
+
+    content = str(wakes(db)[0]["content"]).splitlines()[0]
+    assert content == REVIEW_STEP_CHILD_FAILED_TEMPLATE.format(
+        title=service._node_row(db, review)["title"])
+    assert "fail the delegated step" not in content

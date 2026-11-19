@@ -89,6 +89,8 @@ REQUIRED_STEP_SKIP = (
     "required workflow step {step} can't be skipped: close it with evidence "
     "(mark_done, request_review, accept) or fail it"
 )
+#: The same refusal on a review step, which no agent fails: its routes instead.
+REQUIRED_REVIEW_STEP_SKIP = "required workflow step {step} can't be skipped. {route}"
 
 
 def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[str, Any]]:
@@ -382,7 +384,15 @@ def refuse_unready_close(db, node_id: str, operation: str, *, by_agent: bool = T
 
 
 def refuse_required_skip(db, node_id: str) -> None:
-    """Refuse closing or archiving an unfinished required step of a workflow run."""
+    """Refuse closing or archiving an unfinished required step of a workflow run; a review step names its routes."""
+    from plans import fresh_reviewer
+
     node, created = _open_step(db, node_id)
     if created.get("workflow_required") is True:
-        raise service.PlanError(REQUIRED_STEP_SKIP.format(step=node["workflow_step"]))
+        refusal = REQUIRED_REVIEW_STEP_SKIP if created.get("workflow_by") == "reviewer" else REQUIRED_STEP_SKIP
+        raise service.PlanError(refusal.format(step=node["workflow_step"], route=fresh_reviewer.AUTHOR_FAIL))
+
+
+def reviewer_step(db, node_id: str) -> bool:
+    """An unfinished step only its reviewer's verdict settles, so no agent is offered fail on it."""
+    return _open_step(db, node_id)[1].get("workflow_by") == "reviewer"

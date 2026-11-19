@@ -24,6 +24,18 @@ AUTHOR_FAIL = (
     "While the step is open, start that worker on it with delegate_task. Once its review is back, "
     "accept it, or fix the work first and then reject with feedback, which sends it back to that reviewer."
 )
+#: The child_step_failed wake when the delegated step is a review step, which no agent
+#: fails: only its reviewer's verdict settles it.
+REVIEW_STEP_CHILD_FAILED_TEMPLATE = (
+    "[CORSIA plan] A step of the review delegated for {title} failed, and the"
+    " reviewer stopped with other work still open, so no verdict is coming yet."
+    " Decide whether to retry it, re-scope it, or hand the step to a new"
+    " reviewer: start one with delegate_task (plan_node_id='none'), then"
+    " plan_update replace_spawned_thread on the step. A review step is settled"
+    " by its reviewer's verdict, never failed. If the reviewer only replaced"
+    " that step, nothing failed: have it archive the failed step, and"
+    " close_node, not fail, any step a new brief replaces."
+)
 
 
 def _work_root(db, step) -> str:
