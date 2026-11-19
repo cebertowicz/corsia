@@ -77,7 +77,7 @@ def gate_runs(db, key: tuple[str, str, str]) -> list[Run]:
             )
         run.nodes.append(row["node"])
     run_of = {node: run for run in runs.values() for node in run.nodes}
-    for node, verdict, stamp in _answers(db, list(run_of), "ASC"):
+    for node, verdict, stamp, _detail in _answers(db, list(run_of), "ASC"):
         if run_of[node].answer is None:
             run_of[node].answer, run_of[node].answered_at = verdict, stamp
     for phase, stamp in _corrections(db, [(run.plan, run.phase) for run in runs.values()]):
@@ -90,34 +90,42 @@ def first_answer(db, node_ids: list[str]) -> tuple[str | None, str | None]:
 
     A run with no answer (not asked, or N/A) returns ``(None, None)``: it neither counts nor breaks a streak.
     """
-    for _node, verdict, stamp in _answers(db, node_ids, "ASC"):
+    for _node, verdict, stamp, _detail in _answers(db, node_ids, "ASC"):
         return verdict, stamp
     return None, None
 
 
 def latest_verdict(db, step) -> str | None:
-    """The person's most recent verdict on a workflow step's node row, across its rounds, or None.
+    """The person's most recent verdict on a workflow step's node row, across its rounds, or None."""
+    answer = latest_answer(db, step)
+    return None if answer is None else answer["verdict"]
 
-    A step's rounds are the nodes under the same parent with the same step id.
+
+def latest_answer(db, step) -> dict | None:
+    """The detail of the person's most recent verdict on a workflow step, across its rounds, or None.
+
+    A step's rounds are the nodes under the same parent with the same step id. A cleared
+    hold with no verdict (dismissed, acknowledged, superseded, retired) is not an answer.
     """
     rounds = [row["id"] for row in db.execute(
         "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?", (step["parent_id"], step["workflow_step"]),
     )]
-    for _node, verdict, _stamp in _answers(db, rounds, "DESC"):
-        return verdict
+    for _node, _verdict, _stamp, detail in _answers(db, rounds, "DESC"):
+        return detail
     return None
 
 
 def _answers(db, node_ids: list[str], order: str):
-    """Each person's verdict on any of ``node_ids``, as (node, verdict, when), in one statement."""
+    """Each person's verdict on any of ``node_ids``, as (node, verdict, when, detail), in one statement."""
     for row in db.execute(
         "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event='hold_cleared' AND provenance=?"
         f" AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at {order},rowid {order}",
         (_ANSWERED_BY_PERSON, _ids(node_ids)),
     ):
-        verdict = (json.loads(row["payload_json"] or "{}").get("detail") or {}).get("verdict")
+        detail = json.loads(row["payload_json"] or "{}").get("detail") or {}
+        verdict = detail.get("verdict")
         if isinstance(verdict, str):
-            yield row["node_id"], verdict, row["created_at"]
+            yield row["node_id"], verdict, row["created_at"], detail
 
 
 def _corrections(db, phases: list[tuple[str, str]]) -> list[tuple[str, str]]:

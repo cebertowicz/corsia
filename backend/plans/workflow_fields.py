@@ -208,7 +208,7 @@ REVIEWER_ROUTE = (
 )
 PERSON_GATE_ROUTE = (
     "This step is the person's review: ask them with block_node on it (owner_kind user, "
-    "ask_artifact_id: the file they review; reason: what in it they are deciding, in their words, "
+    "ask_artifact_id: the file they review; reason: what in it they are deciding, "
     "not the step's name). Close it after they answer that ask, not on a chat reply."
 )
 PERSON_GATE_READY = (

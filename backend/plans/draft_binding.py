@@ -12,7 +12,6 @@ nothing.
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 from plans import service
@@ -26,18 +25,30 @@ DRAFT_CHANGED = (
     "and close this step after they answer."
 )
 _APPROVED = "approved"
-_ANSWERED_BY_PERSON = "user.ask_cleared"
 
 
 def digest(db, artifact_id: str) -> str | None:
-    """The sha256 of an artifact's file as it is now, or None when it has no readable file."""
-    from infra import config
+    """The sha256 of an artifact's file as it is now, or None when it has no readable file.
 
-    row = db.execute("SELECT path FROM artifact_identities WHERE id=?", (artifact_id,)).fetchone()
-    if row is None or not row["path"]:
+    The file is found the way every registered document is: its ``workspace://`` identity
+    first, then its stored path, then its external id.
+    """
+    from infra import config
+    from infra.workspace_paths import resolve_registered_path
+
+    row = db.execute(
+        "SELECT path, external_id FROM artifact_identities WHERE id=?", (artifact_id,),
+    ).fetchone()
+    if row is None:
         return None
     try:
-        return hashlib.sha256((Path(config.WORKSPACE) / row["path"]).read_bytes()).hexdigest()
+        raw = resolve_registered_path(row["external_id"], row["path"]) or row["external_id"]
+    except ValueError:
+        return None
+    if not raw:
+        return None
+    try:
+        return hashlib.sha256((Path(config.WORKSPACE) / raw).read_bytes()).hexdigest()
     except OSError:
         return None
 
@@ -51,18 +62,12 @@ def answered(db, artifact_id: str) -> dict:
 def refuse_changed(db, step) -> None:
     """Refuse closing a step on an ``approved`` answer whose draft has changed since.
 
-    Reads the latest person answer across the step's rounds (same parent, same step id).
+    Reads the same latest answer the gate's other refusals read
+    (``gate_handoff_record.latest_answer``), so they never disagree on what the person said.
     """
-    rounds = [row["id"] for row in db.execute(
-        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
-        (step["parent_id"], step["workflow_step"]),
-    )]
-    row = db.execute(
-        "SELECT payload_json FROM plan_node_events WHERE event='hold_cleared' AND provenance=?"
-        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, rowid DESC LIMIT 1",
-        (_ANSWERED_BY_PERSON, json.dumps(rounds)),
-    ).fetchone()
-    detail = (json.loads(row["payload_json"] or "{}").get("detail") or {}) if row is not None else {}
+    from plans import gate_handoff_record
+
+    detail = gate_handoff_record.latest_answer(db, step) or {}
     draft = detail.get(DRAFT_KEY)
     if detail.get("verdict") != _APPROVED or not isinstance(draft, dict):
         return
