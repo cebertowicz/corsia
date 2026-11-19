@@ -159,12 +159,14 @@ def _apply(
             reasons[node_id] = node_settlement.refusal_message(lane, operation)
             continue
         try:
-            node = one(node_id)
-        except service.PlanError as refusal:
-            # Every domain refusal is one row's fact. Each node's write is its own
+            # Every domain refusal is one row's fact. Each node's write, however many
+            # nodes it closes (a run's close closes its open work first), is its own
             # savepoint inside this call's transaction, so a refusal takes back that
-            # row and nothing else -- which is why a refused id keeps the revision
-            # it had and can be retried on its own.
+            # row's whole write and nothing else -- which is why a refused id keeps
+            # the revision it had and can be retried on its own.
+            with service._write(db):
+                node = one(node_id)
+        except service.PlanError as refusal:
             reasons[node_id] = str(refusal)
         else:
             applied.append({"node_id": str(node.id), "revision": int(node.revision)})

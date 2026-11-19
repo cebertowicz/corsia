@@ -104,6 +104,50 @@ async def test_closing_it_in_a_bulk_close_skips_the_run_too(isolated_db, tmp_pat
     assert {row["state"] for row in _subtree(run, review)} == {"closed"}
 
 
+async def test_a_refused_close_inside_a_bulk_close_takes_back_that_whole_close(isolated_db, tmp_path, monkeypatch):
+    """A refusal partway through a run's close (e.g. a worker still has open work) leaves the run as it was."""
+    import plans.service as service
+    from plans import closure
+
+    run = _run(tmp_path, monkeypatch)
+    review = (await run.start("outer"))["steps"][1]["id"]
+    draft = run.rows("SELECT id FROM plan_nodes WHERE parent_id=? AND workflow_step='draft'", review)[0]["id"]
+    real = closure.close_node
+
+    def refusing(node_id, *args, **kwargs):
+        if node_id == draft:
+            raise service.PlanError("a delegated worker still has open work")
+        return real(node_id, *args, **kwargs)
+
+    monkeypatch.setattr(closure, "close_node", refusing)
+
+    result = await run.update("close_node", {"node_ids": [review], "reason": REASON})
+
+    assert not isinstance(result, str) and [entry["node_id"] for entry in result["refused"]] == [review], result
+    assert "closed" not in {row["state"] for row in _subtree(run, review)}
+
+
+async def test_the_run_record_counts_a_skipped_nested_step_as_skipped(isolated_db, tmp_path, monkeypatch):
+    import json
+
+    from plans.run_end import EVENT
+
+    run = _run(tmp_path, monkeypatch)
+    reply = await run.start("outer")
+    build, review = (step["id"] for step in reply["steps"])
+    await _close(run, review)
+
+    await run.update("mark_done", {
+        "node_id": build, "expected_revision": run.revision(build), "evidence": "built", "verification_result": "passed",
+    })
+
+    rows = run.rows("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event=?", reply["node"]["id"], EVENT)
+    record = json.loads(rows[0]["payload_json"])
+    step = next(item for item in record["steps"] if item["step"] == "review")
+    assert (step["state"], step["skip_reason"]) == ("closed", REASON)
+    assert record["outcome"] == "completed"
+
+
 async def test_abandoning_the_run_closes_its_required_steps_too(isolated_db, tmp_path, monkeypatch):
     run = _run(tmp_path, monkeypatch)
     phase = (await run.start("outer"))["node"]["id"]

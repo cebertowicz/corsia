@@ -246,7 +246,12 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         last = rows[-1]
         created = creation_payload(db, rows[0]["id"])
         inner = _ended(db, last["id"]) if last["kind"] == "phase" else None
-        if inner is not None:
+        if inner is not None and last["state"] == service.CLOSED and last["id"] not in by_failure \
+                and skipped.get(last["id"]):
+            # An agent or the person closed the nested step itself with a reason (``close_run``):
+            # the step was skipped, whatever its abandoned inner run recorded.
+            state = service.CLOSED
+        elif inner is not None:
             if all(item["state"] == _NOT_RUN for item in inner["steps"]):
                 state = _NOT_RUN
             else:
