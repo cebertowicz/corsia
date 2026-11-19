@@ -41,9 +41,11 @@ log = logging.getLogger(__name__)
 _EXPECTED_CAPTURE_FAILURES = (sqlite3.Error, PlanError, PermissionError)
 
 #: At most 20 artifact rows in one frozen snapshot, under its own serialized
-#: byte cap — the same order of magnitude as the live plan status's Current
-#: section (``plans.status.CURRENT_BYTES``), so the frozen prefix stays small
-#: next to the narrative and continuity entries it joins.
+#: byte cap, so the frozen prefix stays small next to the narrative and
+#: continuity entries it joins. The byte cap and the two field cuts below have
+#: no measured basis yet: the cap was set equal to the old plan-status Current
+#: cap (3584), which is gone. Their basis is owed from a measurement of real
+#: snapshots (#3112).
 ARTIFACT_ROWS = 20
 ARTIFACT_BYTES = 3584
 TITLE_MAX_BYTES = 96

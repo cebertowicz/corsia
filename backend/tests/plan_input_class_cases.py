@@ -52,6 +52,43 @@ def _workflow_fields_before_migration(db, scene):
     )
 
 
+def _child_of_non_agent_step(db, scene, *, by):
+    step = service._create_node(
+        db, scene.plan_id, kind="task", title="Other step", acceptance_criteria="Answered",
+        parent_id=None, order_key=None, description=None, workflow_ref=None,
+        workflow_version=None, workflow_step=by, difficulty="routine", size="S",
+        checkpoint_exception=False, assignee="user" if by == "person" else None, spawn_kind=None,
+        watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
+        node_id=service._id(), workflow_by=by,
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "add", {
+            "kind": "task", "title": "Child", "acceptance_criteria": "Done",
+            "size": "S", "intent": "Do the work", "parent_id": step.id,
+        }, _mid(),
+    )
+
+
+def _phase_under_agent_step(db, scene):
+    """An agent step holds tasks only: a phase under it is refused."""
+    step = service._create_node(
+        db, scene.plan_id, kind="task", title="Build step", acceptance_criteria="Built",
+        parent_id=None, order_key=None, description=None, workflow_ref=None,
+        workflow_version=None, workflow_step="build", difficulty="routine", size="S",
+        checkpoint_exception=False, assignee=None, spawn_kind=None,
+        watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
+        node_id=service._id(), workflow_by="agent",
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "add", {
+            "kind": "phase", "title": "Inner", "acceptance_criteria": "Done",
+            "size": "S", "intent": "Do the work", "parent_id": step.id,
+        }, _mid(),
+    )
+
+
 def _negative_order_key(db, scene):
     """`add` and `insert` publish no `order_key`, so `_create_node`'s guard is
     unreachable from the boundary. The public service call is its only caller."""
@@ -777,11 +814,17 @@ _CASES = {
             "watchdog_budget_seconds": 0,
         }),
     ("node_creation.py", '"order key must be non-negative"'): _negative_order_key,
-    ("node_creation.py", '"task nodes are leaves and cannot contain children"'):
+    ("node_creation.py", '"task nodes are leaves and cannot contain children unless they are workflow steps"'):
         _operation("add", {
             "kind": "task", "title": "T", "acceptance_criteria": "DOD",
             "parent_id": NODE,
         }),
+    ("node_creation.py", '"The person does that step, so the agent\'s work goes in its own step or task."'):
+        partial(_child_of_non_agent_step, by="person"),
+    ("node_creation.py", '"A reviewer does that step independently, so it cannot contain author subtasks."'):
+        partial(_child_of_non_agent_step, by="reviewer"),
+    ("node_creation.py", 'f"A workflow step holds tasks only, not a {kind}: add its smaller pieces as tasks."'):
+        _phase_under_agent_step,
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
     ("node_creation.py", '"task intent requires schema version 138"'): _intent_before_migration,

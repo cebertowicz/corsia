@@ -57,6 +57,13 @@ REGISTRY: dict[str, MetricDefinition] = {
     # Workflows section's coverage headline sums over its window, so the two can never disagree.
     "under_workflow_pct": MetricDefinition("workflows", "ratio", 20),
     "limit_hits": MetricDefinition("limits", "count", 0),
+    # The share of updates shown the check notice that their agent replaced after it, while unseen, and
+    # how long after the notice those came; the rule lives in ``api.measurement_updates``. The share keeps
+    # the floor every per-period share here uses. The delays have none: each is served with the count it
+    # stands on, so a reader sees how few replacements a spread rests on.
+    "updates_replaced_after_notice_pct": MetricDefinition("updates", "ratio", 20),
+    "update_replace_delay_median_seconds": MetricDefinition("updates", "seconds", 0),
+    "update_replace_delay_p90_seconds": MetricDefinition("updates", "seconds", 0),
     "dollar_trend": MetricDefinition("unavailable", "usd", 0, available=False),
     **{name: MetricDefinition("machinery", "fresh_tokens_per_outcome" if name.endswith("_tokens_per_outcome") else "ratio", 20,
                               proxy=name.endswith(("_token_pct", "_tokens_per_outcome")) or name in {"skill_read_returned_pct", "machinery_returned_pct"})

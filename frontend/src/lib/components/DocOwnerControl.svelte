@@ -135,7 +135,7 @@
 	@media (any-pointer: coarse) { .item { min-height: var(--touch-target); } }
 	.role-picker { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
 	label { color: var(--text-secondary); font-size: var(--text-footnote); }
-	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-lg); font: inherit; }
+	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; }
 	p { margin: 0; font-size: var(--text-footnote); }
 	p.note { color: var(--text-secondary); }
 	.link { align-self: flex-start; min-height: var(--touch-target); border: 0; padding: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); cursor: pointer; }

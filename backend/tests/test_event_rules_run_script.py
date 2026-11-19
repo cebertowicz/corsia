@@ -321,14 +321,21 @@ def test_a_rule_run_hands_its_chain_to_the_script_and_a_cli_emit_with_it_is_skip
     assert len(runs["calls"]) == 1 and _outcomes(rule["id"]) == [("ran", None), ("skipped", "loop")]
 
 
-@pytest.mark.parametrize("raw", ['{"not": "a list"}', "[1]", json.dumps(["r" * 65]), "not json",
-                                 json.dumps(["r"] * 101)])
+@pytest.mark.parametrize("raw", ['{"not": "a list"}', "[1]", json.dumps([""]), "not json"])
 def test_a_malformed_chain_is_a_usage_error_and_nothing_is_admitted(runs, capsys, monkeypatch, raw):
     rule = _rule(_script(runs, "bad-trace.sh"))
     rc, err = _cli_emit(capsys, monkeypatch, raw)
     assert rc == 2 and err.count("\n") == 1
     assert err.startswith("error: usage: CORSIA_EVENT_TRACE must be a JSON list")
     assert _outcomes(rule["id"]) == []
+
+
+def test_a_long_chain_of_long_rule_ids_parses():
+    """A real chain names each rule once and rule ids have no length limit, so neither is capped."""
+    from events.trace_env import encode, parse
+
+    chain = tuple(f"rule_{index}_" + "x" * 80 for index in range(150))
+    assert parse(encode(chain)) == chain
 
 
 def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(monkeypatch, tmp_path):

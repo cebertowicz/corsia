@@ -163,6 +163,6 @@
 	.setting-detail { font-size: var(--text-caption); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.branch-button { background: none; border: none; padding: 2px 3px; cursor: pointer; color: var(--accent-text); font: inherit; font-size: var(--text-caption); white-space: nowrap; }
 	.branch-button:disabled { opacity: 0.5; cursor: not-allowed; }
-	.branch-select { min-width: 0; max-width: 120px; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg-secondary); color: var(--text-primary); font-size: var(--text-caption); }
+	.branch-select { min-width: 0; max-width: 120px; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-primary); font-size: var(--text-caption); }
 	@media (max-width: 640px) { .repo-summary { flex-wrap: wrap; } .repo-settings { grid-template-columns: 1fr; } }
 </style>

@@ -80,7 +80,7 @@ def _repair_fold_counts(db):
     return sum(state == 'delivered' for _, state in targets)
 
 
-def migrate_200_to_201(db):
+def migrate_201_to_202(db):
     started = time.monotonic()
     db.execute("INSERT OR REPLACE INTO settings(key,value,updated_at) "
                "VALUES ('person_comment_recovery_pending','1',CURRENT_TIMESTAMP)")
@@ -123,6 +123,6 @@ def migrate_200_to_201(db):
              int((time.monotonic() - started) * 1000))
 
 
-def reverse_201_to_200(db):
+def reverse_202_to_201(db):
     """Restore recorded feedback rows only if none changed after this migration."""
     reverse(db)

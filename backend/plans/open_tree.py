@@ -7,7 +7,7 @@ climb through. It never reads a settled row except through those two indexes and
 ancestor walk, so its cost is the open work, the window and the plan's depth.
 
 What the missing settled children would have said comes from the stored aggregates
-(``plans.aggregates``), carried on every row: ``child_in_work`` for who is a parent,
+(``plans.aggregates``), carried on every row: ``node_states.stored_parent`` for who is a parent,
 ``folded`` for who folds, ``sub_done`` / ``sub_failed`` for the leaves beneath. The
 ``Shape`` derives from them the answers ``plans.node_states`` gives from a full row
 list (``parent_ids``, ``leaves``, ``folded_ids``, ``in_play``); the equivalence
@@ -237,7 +237,7 @@ def _order(rows: Mapping[str, sqlite3.Row]) -> list[tuple[sqlite3.Row, tuple[str
 
 def _shape(rows: Mapping[str, sqlite3.Row]) -> Shape:
     work = node_states.work_ids(rows.values())
-    parents = {node_id for node_id in work if rows[node_id]["child_in_work"] > 0}
+    parents = {node_id for node_id in work if node_states.stored_parent(rows[node_id])}
     return Shape(
         work=frozenset(work),
         parents=frozenset(parents),
@@ -316,7 +316,7 @@ def load(
         for row in candidates:
             node_id = str(row["id"])
             # Listed as a leaf: not a parent in the work (``status._facts``), and in no sent-back round.
-            if (node_id in work and row["child_in_work"] > 0) or _under_sent_back_round(row, known):
+            if (node_id in work and node_states.stored_parent(row)) or _under_sent_back_round(row, known):
                 continue
             found[str(row["id"])] = row
             cursor = row["parent_id"]

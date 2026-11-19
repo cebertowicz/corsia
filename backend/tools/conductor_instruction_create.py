@@ -18,7 +18,6 @@ from tools.base import Tool
 from tools.conductor_instruction_files import _actor_user_id, _instruction_paths
 from tools.file_write_completion import GUIDANCE_PARAMETERS
 
-MAX_INSTALL_BYTES = 32_768
 _SUPPORTING_PATH = re.compile(r"corsia\.yaml|(?:scripts|references)/[a-zA-Z0-9_.-]+")
 
 logger = logging.getLogger(__name__)
@@ -95,8 +94,6 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
     for path in writes:
         if not path.resolve().is_relative_to(tray.resolve()) or path.is_symlink():
             raise RosterChangeError("instruction destination escapes the target thread tray")
-    if sum(map(len, writes.values())) > MAX_INSTALL_BYTES:
-        raise RosterChangeError("instruction bundle exceeds 32768 bytes; reduce content")
     return writes
 
 
@@ -201,7 +198,7 @@ class ConductorInstructionFileCreateTool(Tool):
                 "target_thread_id": {"type": "string", "minLength": 1},
                 "kind": {"type": "string", "enum": ["responsibility", "skill"]},
                 "expected_revision": {"type": "string", "pattern": "^(absent|[0-9a-f]{64})$"},
-                "content": {"type": "string", "minLength": 1, "maxLength": MAX_INSTALL_BYTES},
+                "content": {"type": "string", "minLength": 1},
                 "name": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
                 "supporting_files": {"type": "object", "additionalProperties": {"type": "string"}},
                 **GUIDANCE_PARAMETERS,

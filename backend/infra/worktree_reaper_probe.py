@@ -25,12 +25,23 @@ import subprocess
 from infra.backend_git import git_argv
 from infra.bulletins import PUBLIC_REPOSITORY
 
+# Hang guards. Basis: a requirement, not a speed reading -- one hung child (a file
+# on a network mount, a stuck lock, a stalled network call) must not stall the
+# pass -- and on any machine, however slow, an expiry costs only a retry:
+# - GIT: the call raises ReaperGitError and every caller fails closed (the
+#   worktree is skipped as status_error, or counted as unpublished and kept), so
+#   the next pass checks it again. Skips are counted in run_completed.
+# - REMOVE: the tree is already in quarantine with its record, so remove_error is
+#   logged and the next pass's sweep_quarantine finishes it.
+# - LSOF: the worktree is skipped as unknown_process and checked next pass.
+# - GH: the open-PR list is unknown, so every worktree keeps the longer idle
+#   threshold; nothing is removed early.
+# Readings on one Mac, for scale only: the slowest probe call took 0.63 s (worktree
+# list over 968 worktrees, Nov 18); lsof +D up to 2.60 s (Nov 18, a lower bound: the
+# agent sandbox hides other processes); removing a real worktree, dependencies
+# included, took 27-55 s (Nov 12), which is why REMOVE is longer than GIT: at the
+# 30 s default, removals were cut off mid-delete. The open-PR list has no reading.
 GIT_TIMEOUT_SECONDS = 30.0
-# Removing a worktree deletes its whole tree, dependencies and build caches
-# included; the owner measured 27-55 s on this Mac's real worktrees on Nov 12, so
-# the default git timeout cut removals off mid-delete and stranded the entries.
-# It stays bounded -- one hung child must not stall the nightly pass -- and
-# whatever this timeout still cuts off, the next pass finishes: sweep_quarantine.
 WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
