@@ -32,12 +32,15 @@ def json_bytes(value: Any) -> int:
 #: refusal. A slot-held reason cuts the holder's title, never its action.
 NEXT_BLOCK_MAX_BYTES = 2048
 #: Every emitted node title, in every plan read, wake and reply. Derived from the
-#: title input limit (``service.MAX_NODE_TITLE``, the one-line pane row): the
-#: emitted size of an ASCII title at that limit, so a title the plan accepts is
-#: never cut. A title in another script, or one older than the limit, ends in
-#: the ellipsis at the same byte cost, so a list of titles costs the same bytes
-#: whatever script it is in.
-TITLE_MAX_BYTES = json_bytes("x" * MAX_NODE_TITLE)
+#: title input limit (``service.MAX_NODE_TITLE``, the one-line pane row) and the
+#: titles the platform shortens itself (``feedback_titles.trim_title``), which
+#: carry one ellipsis: the emitted size of a title at that limit with one
+#: ellipsis, so a title of plain ASCII plus one escaped character is never cut.
+#: A title with more escaped characters (accents, another script, emoji) near
+#: the limit, or an older one longer than the limit, is cut to those bytes: every
+#: surface that lists titles is budgeted on this one size, whatever script the
+#: titles are in.
+TITLE_MAX_BYTES = json_bytes("x" * (MAX_NODE_TITLE - 1) + text.ELLIPSIS)
 WAIT_MAX_BYTES = 72
 FEEDBACK_MAX_BYTES = 480
 #: A rejection's handoff is its holder's whole brief, sent once per rejection,

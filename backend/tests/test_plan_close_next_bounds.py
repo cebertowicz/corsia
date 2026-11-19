@@ -251,7 +251,26 @@ def test_a_title_the_plan_accepts_is_never_cut_and_a_longer_one_is():
 
     at_limit = "x" * service.MAX_NODE_TITLE
     assert close_next_bounds.title(at_limit) == at_limit
-    longer = at_limit + "y"
+    longer = at_limit + "y" * 10
     cut = close_next_bounds.title(longer)
     assert cut != longer and cut.endswith(MARKER)
+    assert close_next_bounds.json_bytes(cut) <= TITLE_CAP
+
+
+def test_a_title_the_platform_shortens_keeps_its_suffix():
+    from plans import close_next_bounds
+    from plans.feedback_titles import trim_title
+
+    suffix = " left 3 comments on plan.md"
+    shortened = trim_title("A" * 80 + suffix, suffix)
+    assert len(shortened) == service.MAX_NODE_TITLE
+    assert close_next_bounds.title(shortened) == shortened
+
+
+def test_a_title_with_several_escaped_characters_near_the_limit_is_cut_to_the_same_bytes():
+    from plans import close_next_bounds
+
+    accented = "é" * service.MAX_NODE_TITLE
+    cut = close_next_bounds.title(accented)
+    assert cut.endswith(MARKER) and accented.startswith(cut[:-1])
     assert close_next_bounds.json_bytes(cut) <= TITLE_CAP

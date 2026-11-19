@@ -265,7 +265,7 @@ def test_plans_tools_and_threads_without_a_plan_carry_no_notice(db):
 def test_the_notice_cuts_a_title_like_every_plan_title(db):
     plan = owner_plan(db)
     # Titles stop at 60 characters, but four-byte characters still overrun the
-    # title cut, which is sized for an ASCII title at that limit.
+    # title cut, which is sized for an ASCII title at that limit with one ellipsis.
     long_task = task(db, plan.id, "\U0001F4E6" * 60)
     select(db, plan.id, long_task.id)
 
