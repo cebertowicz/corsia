@@ -46,6 +46,14 @@ resolves to.
 
 ## Per-rule fields
 
+### `file-io-in-write-transaction`
+
+This blocking rule checks direct filesystem calls in `write_transaction` bodies
+in backend Python. It does not follow called functions. For ambiguous `open`,
+`rename`, and `replace` methods it recognizes only Paths constructed or annotated
+in the same function; other Path receivers may be missed. Four existing functions
+are explicitly excepted until their ordering fences can be moved.
+
 ### `silent-error-swallow`
 
 ```toml
