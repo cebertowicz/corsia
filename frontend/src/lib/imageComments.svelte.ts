@@ -139,6 +139,11 @@ export function createImageComments(context: {
 		let id: string, failure = '';
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
 		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags);
+		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
+		// a new region, while its tags can be the same object, carried over from the kept draft.
+		const pressing = () => draftRegion === region;
+		// What the field holds now, not the text this press sent: typing while it was out is never lost.
+		const now = () => keptCommentDrafts.get(key());
 		try {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
@@ -148,25 +153,30 @@ export function createImageComments(context: {
 		} catch (error) {
 			if (await refreshAfterStale(error)) {
 				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next.
-				draftBody = text;
-				keptCommentDrafts.keep(key(), text, tags);
+				const held = now();
+				draftBody = held?.body ?? text;
+				keptCommentDrafts.keep(key(), draftBody, held?.mentionSelection ?? tags);
 				draftRegion = null;
 				replacingDraft = true;
 				ui.close();
 				boxMode = true;
 			} else if (failure) {
-				keptCommentDrafts.fail(key(), text, tags, failure, failure === EARLIER_VERSION_POSTED);
-				if (mentionSelection === tags) draftError = failure;
+				const held = now();
+				keptCommentDrafts.fail(key(), held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
+				if (pressing()) draftError = failure;
 			}
 			throw error;
 		}
 		retryToast.dismissAfterSuccess();
-		keptCommentDrafts.forget(key());
+		// Text typed since the press stays kept, with a fresh id for its own post.
+		keptCommentDrafts.posted(key(), text);
+		context.onCreated?.();
+		// Only the composer that pressed closes: a box drawn meanwhile keeps its text and tags.
+		if (!pressing()) return;
 		draftRegion = null;
 		draftBody = '';
 		draftError = undefined;
 		mentionSelection = createMentionSelection();
-		context.onCreated?.();
 		if (anchor) show(id, anchor);
 	}
 	/**

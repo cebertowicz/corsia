@@ -166,13 +166,16 @@ export function createViewerCommentDraft(context: Context) {
 			return addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again);
 		}, (toastId, message) => {
 			// Open or closed, the composer keeps the text with why it did not post, here and in the next composer on this document.
+			// What the field holds now is kept, not the text this press sent: typing while it was out is never lost.
 			// Text changed since an earlier version was stored goes out as a new comment on the next press.
-			keptCommentDrafts.fail(key, text, tags, message, message === EARLIER_VERSION_POSTED);
+			const now = keptCommentDrafts.get(key);
+			keptCommentDrafts.fail(key, now?.body ?? text, now?.mentionSelection ?? tags, message, message === EARLIER_VERSION_POSTED);
 			mine(value => ({ ...value, error: message }));
 			context.onFailure(toastId, message);
 		}, draft.selection ? liveFailureMessage : undefined));
-		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not.
-		keptCommentDrafts.forget(key);
+		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
+		// typed since the press (in this composer, or one opened after it closed) stays, with a fresh id for its own post.
+		keptCommentDrafts.posted(key, text);
 		if (!current()) mine(() => null);
 		// A widget comment's mark is painted by the widget after placement, so only it holds the pending mark that long.
 		if (current() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };

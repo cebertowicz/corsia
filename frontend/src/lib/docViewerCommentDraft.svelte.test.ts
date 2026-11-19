@@ -8,6 +8,7 @@ import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
@@ -65,12 +66,14 @@ function setup(inWidget: boolean, label?: string) {
 			if ('row' in next) row = next.row;
 			flushSync();
 		},
+		/** Escape: the composer closes and its draft stays. */
+		escape() { open = false; flushSync(); },
 		stop() { teardown(); stop(); },
 	};
 }
 
 let current: ReturnType<typeof setup> | undefined;
-afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); });
+afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); keptCommentDrafts.reset(); });
 
 describe('a posted widget comment keeps its pending mark', () => {
 	it('until its placed mark is drawn', async () => {
@@ -190,6 +193,53 @@ describe('a comment refused because the document no longer takes comments', () =
 		expect(show).toHaveBeenCalledTimes(1);
 		expect(show).toHaveBeenCalledWith(SENTENCE, 'error');
 		expect(current!.controller.draft?.body).toBe('Unfinished');
+		log.mockRestore();
+	});
+});
+
+describe('a post that lands or fails after its composer closed and another opened', () => {
+	// Press Comment, Escape, select again and type more, then the first post ends.
+	const begin = async (outcome: 'lands' | 'fails') => {
+		current = setup(false);
+		// The prose path posts under the draft's own id (the live path's capture is mocked to one fixed id).
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; if (outcome === 'fails') throw new Error('500 boom'); return 'posted'; });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.escape();
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse: say who reads it'); flushSync();
+		end();
+		return first;
+	};
+
+	it('lands: the newer text stays, with a fresh id for its own post, and nothing is stored twice', async () => {
+		expect(await begin('lands')).toBeNull();
+		expect(addComment).toHaveBeenCalledTimes(1);
+		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
+		const kept = keptCommentDrafts.get('doc|one');
+		expect(kept?.body).toBe('Too terse: say who reads it');
+		expect(kept?.clientId).toBeUndefined();
+		const firstId = vi.mocked(addComment).mock.calls[0][7];
+		expect(await current!.controller.submit('Too terse: say who reads it')).toBe('posted');
+		expect(addComment).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(addComment).mock.calls[1][7]).not.toBe(firstId);
+		expect(vi.mocked(addComment).mock.calls[1][11]).toBe(false);
+	});
+
+	it('fails: what the field holds now is kept with the reason, not the text that was sent', async () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		await expect(begin('fails')).rejects.toThrow('500');
+		expect(keptCommentDrafts.get('doc|one')).toMatchObject({ body: 'Too terse: say who reads it' });
+		expect(keptCommentDrafts.get('doc|one')?.error).toBeTruthy();
+		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
 		log.mockRestore();
 	});
 });

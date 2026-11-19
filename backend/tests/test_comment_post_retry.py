@@ -5,10 +5,11 @@ import logging
 import httpx
 import pytest
 from fastapi import FastAPI
+from loguru import logger
 
 from api import doc_comments
 from api.doc_comment_models import CommentCreate
-from api.comment_post_timing import COMMENT_TIMING_HEADER, MAX_HEADER_BYTES, parse_comment_timing
+from api.comment_post_timing import COMMENT_TIMING_HEADER, MAX_HEADER_BYTES, log_comment_timing, parse_comment_timing
 from auth_fixtures import OWNER_TOKEN
 from doceditor.live_document import IdentityInUse
 from infra import app_loop
@@ -38,6 +39,31 @@ def test_parse_keeps_allowlisted_numbers_and_outcome():
 ])
 def test_parse_drops_a_malformed_header_whole(raw):
     assert parse_comment_timing(raw) is None
+
+
+# Every key the browser sends at once, each at its longest value: the header the size cap is derived from.
+LONGEST = ("n=999999999,a=999999999,cap=999999999,ens=999999999,pn=999999999,rec=1,out=delivered,"
+           "total=999999999,post=999999999,app=999999999,recms=999999999")
+
+
+def test_the_size_cap_is_the_longest_header_the_browser_builds():
+    assert len(LONGEST) == MAX_HEADER_BYTES == 145
+    assert parse_comment_timing(LONGEST) is not None
+    assert parse_comment_timing(LONGEST + " ") is None
+
+
+@pytest.mark.parametrize(("artifact_id", "logged"), [
+    ("6017b05b-497", "6017b05b-497"),  # str(uuid.uuid4())[:12], the one shape artifact ids are made in
+    ("6017b05b-4970", "-"), ("6017B05B-497", "-"), ("../etc", "-"),
+])
+def test_only_an_artifact_id_in_its_made_shape_is_logged(artifact_id, logged):
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="INFO", format="{message}")
+    try:
+        log_comment_timing(GOOD, "GET", artifact_id)
+    finally:
+        logger.remove(sink)
+    assert [line.strip() for line in lines] == [f"comment_post_timing method=GET artifact={logged} {GOOD.replace(',', ' ')}"]
 
 
 @pytest.mark.asyncio

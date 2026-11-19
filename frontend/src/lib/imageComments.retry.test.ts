@@ -9,7 +9,7 @@ vi.mock('$lib/stores/toast', () => ({ toasts: { show: vi.fn(() => 'toast'), dism
 
 import { PostTimeoutError } from '$lib/api/boundedRequest';
 import { docComments, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { addDocImageComment } from '$lib/stores/imageRegionComments';
 import { resetCommentPostTiming } from '$lib/stores/commentPostTiming';
 import { createImageComments } from './imageComments.svelte';
@@ -17,6 +17,7 @@ import { createImageComments } from './imageComments.svelte';
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 const rect = () => new DOMRect(10, 10, 40, 20);
 const TEXT = '# Notes\n\n![Mock](a.png)\n';
+const imageKey = imageDraftKey('image');
 const store = { rows: new Map<string, Record<string, unknown>>(), unanswered: false, lookupFails: false };
 
 beforeEach(() => {
@@ -81,5 +82,43 @@ for (const [kind, artifact, make] of surfaces) {
 		expect(store.rows.size).toBe(1);
 		expect((get(docComments)[artifact] ?? []).map(comment => comment.text)).toEqual(['Too dark']);
 		expect(new Set(api.postComment.mock.calls.map(([, fields]) => fields.client_id)).size).toBe(1);
+	});
+
+	it(`${kind}: a box drawn while a post is out keeps its text and tags when that post lands, and posts under its own id`, async () => {
+		const comments = make();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		let land!: () => void;
+		const held = new Promise<void>(resolve => { land = resolve; });
+		const post = api.postComment.getMockImplementation()!;
+		api.postComment.mockImplementationOnce(async (...args: [string, Record<string, any>]) => { await held; return post(...args); });
+		const first = comments.submit('Too dark');
+		await comments.draw({ ...BOX, x: 0.5 }, rect);
+		const tags = comments.draft!.mentionSelection;
+		comments.setDraftBody('Too dark, and the sky is flat');
+		land();
+		await first;
+		expect(comments.draft?.body).toBe('Too dark, and the sky is flat');
+		expect(comments.draft?.mentionSelection).toBe(tags);
+		const kept = keptCommentDrafts.get(artifact === 'image' ? imageKey : 'image:doc:a.png');
+		expect(kept?.body).toBe('Too dark, and the sky is flat');
+		expect(kept?.clientId).toBeUndefined();
+		await comments.submit('Too dark, and the sky is flat');
+		expect([...store.rows.values()].map(row => row.body)).toEqual(['Too dark', 'Too dark, and the sky is flat']);
+		expect(new Set(api.postComment.mock.calls.map(([, fields]) => fields.client_id)).size).toBe(2);
+	});
+
+	it(`${kind}: a post that fails keeps what the field holds now, not the text it sent`, async () => {
+		const comments = make();
+		await comments.draw(BOX, rect);
+		let fail!: () => void;
+		const held = new Promise<void>(resolve => { fail = resolve; });
+		api.postComment.mockImplementationOnce(async () => { await held; throw new Error('500 boom'); });
+		const first = comments.submit('Too dark');
+		comments.setDraftBody('Too dark, and the sky is flat');
+		fail();
+		await expect(first).rejects.toThrow('500');
+		expect(comments.draft?.body).toBe('Too dark, and the sky is flat');
+		expect(keptCommentDrafts.get(artifact === 'image' ? imageKey : 'image:doc:a.png')?.body).toBe('Too dark, and the sky is flat');
 	});
 }

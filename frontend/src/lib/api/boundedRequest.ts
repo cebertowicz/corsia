@@ -8,7 +8,11 @@ export class PostTimeoutError extends Error {
 }
 
 export const COMMENT_POST_TIMEOUT_MS = 12_000;
-/** How long the look for a comment an unanswered post may have stored waits before the post ends failed. */
+/**
+ * How long the look for a comment an unanswered post may have stored waits before the post ends failed. Basis: the
+ * slowest comment save measured on a production install (2026-11-18) took 2.2 s on the server, and the network added
+ * at most 47 ms. The look gets about twice that, 4.5 s, rounded up to 5 s.
+ */
 export const COMMENT_LOOKUP_TIMEOUT_MS = 5_000;
 
 /** The answer's headers inside `ms`; reading its body is the caller's, unbounded. */
