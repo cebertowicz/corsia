@@ -52,6 +52,40 @@ async def test_post_update_writes_trimmed_agent_message_and_broadcasts(deleg_db,
 
 
 @pytest.mark.asyncio
+async def test_replaced_update_receipt_carries_attention_notice(deleg_db, monkeypatch):
+    from core.attention_notice import attention_notice
+    from tools.post_update import PostUpdateTool
+
+    monkeypatch.setattr("tools.post_update.broadcast_message_rows", AsyncMock())
+    monkeypatch.setattr("infra.send_broadcast.broadcast_replacement", AsyncMock())
+    events = []
+    monkeypatch.setattr("core.attention_notice.emit_product_event", lambda *a, **k: events.append(k))
+    tool = PostUpdateTool()
+    original = await tool.execute(_thread_id="sender-self", text="Original update.", _host_access_turn_identity=TURN)
+    original_id = original.splitlines()[0].removeprefix("Update saved as message ").removesuffix(".")
+    original_args = {"text": "Original update."}
+    assert attention_notice(thread_id="sender-self", tool_name="post_update", arguments=original_args, result=original)
+    args = {"text": "Replacement is ready.", "replace": [original_id], "replace_reason": "updates"}
+    receipt = await tool.execute(_thread_id="sender-self", _host_access_turn_identity=TURN, **args)
+    assert receipt.startswith("Update saved as message ")
+    rendered = attention_notice(thread_id="sender-self", tool_name="post_update", arguments=args, result=receipt)
+    assert rendered and "Your update: 3 words" in rendered
+    assert rendered.endswith("(replace it while it is unseen)")
+    assert events[-1]["properties"]["handover"] == "update"
+    # What the Measurement updates series read: the notice stamps its time once, and the replace path
+    # stamps the old row after it.
+    row = deleg_db.execute(
+        "SELECT update_kind,notice_at,replaced_at FROM message_update_state WHERE message_id=?",
+        (original_id,)).fetchone()
+    assert row["update_kind"] == "post_update"
+    assert row["notice_at"] and row["notice_at"] <= row["replaced_at"]
+    first_notice = row["notice_at"]
+    attention_notice(thread_id="sender-self", tool_name="post_update", arguments=original_args, result=original)
+    assert deleg_db.execute("SELECT notice_at FROM message_update_state WHERE message_id=?",
+                            (original_id,)).fetchone()["notice_at"] == first_notice
+
+
+@pytest.mark.asyncio
 async def test_post_update_reaches_a_live_thread_without_reload(deleg_db, monkeypatch):
     """The real broadcast path (unmocked) must publish the update, not silently drop it."""
     from infra import state

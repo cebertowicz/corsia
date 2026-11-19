@@ -82,7 +82,7 @@ async def _bridge_result(thread_id: str, monkeypatch, arguments: dict) -> str:
 
     async def persist_delivery(**_kwargs):
         return SimpleNamespace(
-            invocation_id="inv", assistant_step_id="step",
+            invocation_id="inv", assistant_step_id="step", content="created\n",
             render_for_model=lambda **_kw: "created\n",
         )
 

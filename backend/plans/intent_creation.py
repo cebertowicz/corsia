@@ -52,6 +52,14 @@ def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, ope
     from plans import boundary_fields as fields
 
     inherited = inherited_node_id(db, plan_id)
+    parent_id = params.get("parent_id")
+    if params.get("kind", "task") == "task" and isinstance(parent_id, str) and params.get("intent") is None:
+        parent = db.execute(
+            "SELECT id FROM plan_nodes WHERE id=? AND plan_id=? AND kind='task' AND workflow_step IS NOT NULL",
+            (parent_id, plan_id),
+        ).fetchone()
+        if parent is not None:
+            inherited = canonical(db, parent["id"])["id"]
     created = fields.node_fields(
         params, workflow_version=workflow_version, include_before=operation == "insert",
         intent_required=inherited is None, run=run,

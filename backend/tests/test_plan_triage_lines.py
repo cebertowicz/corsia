@@ -1,11 +1,10 @@
 """Triage lines: plan order is the priority, and agents are shown where it disagrees.
 
-`add` returns `rank` when a new top-level task lands below ready top-level work
-(T1). A named start (`activate`, `start`, or a closing operation's
-`next_node_id`) returns `jumped` when it passes ready top-level work (T2), and
-records the passed item on the start's activation event for the KPI (T3).
-Both are guidance in the tool result, never a refusal. The expected strings
-restate the approved copy independently of production.
+A named start (`activate`, `start`, or a closing operation's `next_node_id`)
+returns `jumped` when it passes ready top-level work (T2), and records the
+passed item on the start's activation event for the KPI (T3). It is guidance in
+the tool result, never a refusal. The expected strings restate the approved
+copy independently of production. What an add returns is `test_plan_top.py`'s.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from plans import service
-from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     close,
     next_block,
@@ -31,30 +29,12 @@ from tests.plan_close_next_helpers import (
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
-WORKSPACE_CONDUCTOR = PlanActor("wk-conductor", "user", None)
-
-
-def _rank_line(rank: int, total: int, above: list[tuple[str, str]], key: int) -> str:
-    names = ", ".join(f"'{title}' ({node_id})" for title, node_id in above)
-    return (
-        f"{rank} of {total} open. Ready above it: {names}. Work runs in plan "
-        f"order; reorder it to order_key={key} only if it outranks them."
-    )
-
 
 def _jumped_line(title: str, node_id: str, rank: int, total: int, top_id: str, key: int) -> str:
     return (
         f"Started ahead of ready '{title}' ({node_id}), ranked {rank} of {total}. "
         f"If this outranks it, reorder node_id={top_id} order_key={key} so the plan says so."
     )
-
-
-def _add(db, plan_id: str, title: str, **params) -> dict:
-    body = {
-        "kind": "task", "title": title, "acceptance_criteria": f"{title} is verified",
-        "size": "unknown", **params,
-    }
-    return plan_update(db, plan_id, "add", body)
 
 
 def _activate(db, plan_id: str, node_id: str, operation: str = "activate") -> dict:
@@ -138,133 +118,6 @@ NOT_READY_SCENES = {
 }
 
 
-# --- T1: add ---------------------------------------------------------------
-
-
-def test_add_below_a_ready_task_reports_its_rank_and_the_ready_task_above(db):
-    plan = owner_plan(db)
-    ready = task(db, plan.id, "Fix the P0")
-
-    result = _add(db, plan.id, "New ask from chat")
-
-    assert result["rank"] == _rank_line(2, 2, [("Fix the P0", ready.id)], 0)
-    assert result["node"]["title"] == "New ask from chat"
-    assert result["node"]["state"] == "pending"
-
-
-def test_add_names_at_most_two_ready_tasks_topmost_first(db):
-    plan = owner_plan(db)
-    first = task(db, plan.id, "First ready")
-    second = task(db, plan.id, "Second ready")
-    task(db, plan.id, "Third ready")
-
-    result = _add(db, plan.id, "New ask")
-
-    assert result["rank"] == _rank_line(
-        4, 4, [("First ready", first.id), ("Second ready", second.id)], 0,
-    )
-
-
-def test_add_order_key_is_the_live_position_of_the_topmost_ready_task(db):
-    plan = owner_plan(db)
-    gone = task(db, plan.id, "No longer wanted")
-    service.transition_node(gone.id, "closed", db=db)
-    db.commit()
-    ready = task(db, plan.id, "Ready work")
-
-    result = _add(db, plan.id, "New ask")
-
-    # The closed task takes no rank, so the new task is 2 of 2 open, but it keeps
-    # its position: reorder's order_key names a position among open siblings, so the
-    # settled task takes none.
-    assert result["rank"] == _rank_line(2, 2, [("Ready work", ready.id)], 0)
-
-
-def test_add_with_nothing_above_has_no_rank_line(db):
-    plan = owner_plan(db)
-
-    result = _add(db, plan.id, "First task")
-
-    assert "rank" not in result
-    assert result["node"]["title"] == "First task"
-
-
-@pytest.mark.parametrize("scene", sorted(NOT_READY_SCENES))
-def test_add_has_no_rank_line_when_everything_above_is_not_ready(db, scene):
-    plan = owner_plan(db)
-    NOT_READY_SCENES[scene](db, plan.id)
-
-    result = _add(db, plan.id, "New ask")
-
-    assert "rank" not in result
-
-
-def test_add_counts_a_top_level_phase_ready_when_a_task_under_it_is(db):
-    plan = owner_plan(db)
-    phase = _phase(db, plan.id, "Ship the fix")
-    task(db, plan.id, "Child work", parent_id=phase.id)
-
-    result = _add(db, plan.id, "New ask")
-
-    assert result["rank"] == _rank_line(2, 2, [("Ship the fix", phase.id)], 0)
-
-
-def test_add_does_not_count_a_phase_whose_tasks_are_all_not_ready(db):
-    plan = owner_plan(db)
-    phase = _phase(db, plan.id, "Parked phase")
-    _watch(db, plan.id, task(db, plan.id, "Child work", parent_id=phase.id).id)
-
-    result = _add(db, plan.id, "New ask")
-
-    assert "rank" not in result
-
-
-def test_a_child_add_has_no_rank_line(db):
-    plan = owner_plan(db)
-    task(db, plan.id, "Ready work")
-    phase = _phase(db, plan.id, "A phase")
-
-    result = _add(db, plan.id, "Child of the phase", parent_id=phase.id)
-
-    assert "rank" not in result
-    assert result["node"]["parent_id"] == phase.id
-
-
-def test_insert_has_no_rank_line(db):
-    plan = owner_plan(db)
-    ready = task(db, plan.id, "Ready work")
-
-    result = plan_update(db, plan.id, "insert", {
-        "kind": "task", "title": "Inserted", "acceptance_criteria": "Inserted is verified",
-        "size": "unknown", "before_node_id": ready.id,
-    })
-
-    assert "rank" not in result
-    assert result["node"]["title"] == "Inserted"
-
-
-def test_a_conductors_add_to_another_agents_plan_has_no_rank_line(db):
-    db.execute(
-        "INSERT INTO threads (id,user_id,model,created_at,updated_at) "
-        "VALUES ('wk-conductor','user','test/model','t','t')",
-    )
-    db.execute(
-        "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-        ("corsia_agent_thread_id", json.dumps({"session_id": "wk-conductor"}), "t"),
-    )
-    db.commit()
-    plan = owner_plan(db)
-    task(db, plan.id, "Ready work")
-    body = {
-        "kind": "task", "title": "From the conductor", "acceptance_criteria": "Done", "size": "unknown",
-    }
-
-    result = plan_update(db, plan.id, "add", body, actor=WORKSPACE_CONDUCTOR)
-
-    assert "rank" not in result
-    assert result["node"]["title"] == "From the conductor"
-
-
 # --- T2: named start -------------------------------------------------------
 
 
@@ -342,16 +195,6 @@ def test_a_start_that_does_not_take_the_slot_has_no_jumped_line(db):
     assert "jumped" not in result
     assert result["admission"]["conflict"]["selected_node_id"] == current.id
     assert service._node_row(db, blocked.id)["state"] == "pending"
-
-
-def test_a_task_that_is_running_is_not_counted_as_ready_work_waiting(db):
-    plan = owner_plan(db)
-    current = task(db, plan.id, "Current work")
-    select(db, plan.id, current.id)
-
-    result = _add(db, plan.id, "New ask")
-
-    assert "rank" not in result
 
 
 def test_starting_a_task_that_already_holds_its_slot_has_no_jumped_line(db):

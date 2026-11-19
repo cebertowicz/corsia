@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 # A callback without its exact receipt cannot execute. Bound this prerequisite
 # wait, not ordinary generation or the tool's own execution time.
+# No reading yet: receipt latencies are not recorded.
 TOOL_RECEIPT_TIMEOUT_SECONDS = 30.0
 _DYNAMIC_TOOL_BINDING_REJECTION = (
     "Error: Codex dynamic tool request could not be bound to one live provider call"
