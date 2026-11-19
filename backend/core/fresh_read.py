@@ -7,7 +7,7 @@ effect and records the returned ``fresh_read_id``; on a fail or a hold it refuse
 returned message and delivers nothing. It never fails open: when no reader can run, the
 item is held and the agent is told why.
 
-Design: ``shared/substrate/DRAFT-fresh-reader-before-person.md`` (revision 4.4).
+Design, bounds and proof: PR #3114.
 """
 
 from __future__ import annotations

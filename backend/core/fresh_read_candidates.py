@@ -20,8 +20,9 @@ from dataclasses import dataclass
 
 from infra.database import get_db
 
-#: Order key only, never a cost estimate shown to anyone: the design's typical update
-#: (about 3,000 input and 300 output tokens, shared/substrate/DRAFT-fresh-reader-before-person.md).
+#: Order key only, never a cost estimate shown to anyone. Basis: the design's estimate of a
+#: typical update (about 3,000 input and 300 output tokens; design and proof in PR #3114), not
+#: a measurement.
 _TYPICAL_READ_TOKENS = (3_000, 300)
 
 
