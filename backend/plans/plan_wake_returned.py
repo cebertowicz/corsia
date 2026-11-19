@@ -23,7 +23,7 @@ def notify(
     waits, whole, for a later sweep.
     """
     from plans import delegation_harvest, delegation_reply, plan_wake, review_evidence, service
-    from plans.close_next_bounds import bounded
+    from plans.close_next_bounds import bounded, title as bounded_title
     from prompts import plan_wakes as wakes
 
     node = plan_wake._node(db, node_id)
@@ -41,7 +41,7 @@ def notify(
         said = _close_reason(db, leaf) if evidence is None else evidence["evidence"]
         steps.append({
             "id": leaf["id"],
-            "title": bounded(str(leaf["title"]), plan_wake.RETURNED_TITLE_MAX_BYTES),
+            "title": bounded_title(str(leaf["title"])),
             "state": leaf["state"],
             "evidence": None if said is None else bounded(
                 str(said), plan_wake.RETURNED_EVIDENCE_MAX_BYTES,

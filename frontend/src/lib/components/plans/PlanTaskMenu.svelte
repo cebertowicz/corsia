@@ -9,6 +9,10 @@
 		x,
 		y,
 		onAction,
+		onMove,
+		canReorder,
+		canMoveUp,
+		canMoveDown,
 		onClose,
 	}: {
 		node: OperatorNode;
@@ -16,6 +20,10 @@
 		y: number;
 		/** Resolves to the server's refusal text, or null once the action landed. */
 		onAction: (action: OperatorUserAction) => Promise<string | null> | void;
+		onMove: (direction: 'up' | 'down' | 'top') => Promise<string | null>;
+		canReorder: boolean;
+		canMoveUp: boolean;
+		canMoveDown: boolean;
 		onClose: () => void;
 	} = $props();
 
@@ -33,7 +41,12 @@
 		node.child?.available === true && node.user_actions.some((a) => a === 'close_node' || a === 'mark_done'),
 	);
 	const items = $derived([
-		...(isCommentTask(node) ? [] : node.user_actions.map((action) => ({
+		...(canReorder ? [
+			{ id: 'move_up', label: 'Move up', danger: false, disabled: !canMoveUp },
+			{ id: 'move_down', label: 'Move down', danger: false, disabled: !canMoveDown },
+			{ id: 'move_top', label: 'Move to top', danger: false, disabled: !canMoveUp },
+		] : []),
+		...(isCommentTask(node) ? [] : node.user_actions.filter((action): action is OperatorUserAction => action !== 'reorder').map((action) => ({
 			id: action, label: LABELS[action], danger: action === 'close_node',
 		}))),
 		...(node.comment_attention ? [{ id: 'dismiss_comments', label: DISMISS_ALL, danger: false }] : []),
@@ -44,9 +57,11 @@
 		if (busy) return;
 		busy = true;
 		error = null;
-		const failure = action === 'dismiss_comments' && node.comment_attention
-			? await dismiss(node.comment_attention.artifact_id)
-			: await onAction(action as OperatorUserAction);
+		const failure = action.startsWith('move_')
+			? await onMove(action.slice(5) as 'up' | 'down' | 'top')
+			: action === 'dismiss_comments' && node.comment_attention
+				? await dismiss(node.comment_attention.artifact_id)
+				: await onAction(action as OperatorUserAction);
 		busy = false;
 		if (failure) error = failure;
 		else onClose();

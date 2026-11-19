@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS message_update_state (
     replace_reason TEXT CHECK(replace_reason IN ('corrects','updates')),
     result_text TEXT,
     result_chars INTEGER,
+    notice_at TEXT,
     CHECK ((replaced_by IS NULL) = (replaced_at IS NULL)),
     CHECK ((seen_at IS NULL) = (seen_reason IS NULL))
 );

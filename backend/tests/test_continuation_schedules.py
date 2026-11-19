@@ -230,3 +230,27 @@ async def test_clock_with_an_offset_is_stored_and_fires_at_its_utc_instant(spec,
 
     assert (schedule.spec, schedule.next_run_at) == (spec, instant)
     await _assert_fires_only_from(db, schedule, instant)
+
+
+def test_a_monthly_cadence_is_accepted():
+    """No upper cadence bound: next_slot handles any length."""
+    db = _db()
+    month = 31 * 24 * 60 * 60
+    schedule = schedules.create(
+        "thread", "__workspace__", "thread", kind="cadence", spec=str(month),
+        max_runs=3, now="2026-01-01T00:00:00+00:00", db=db,
+    )
+    assert schedule.next_run_at == "2026-02-01T00:00:00+00:00"
+
+
+def test_a_cadence_past_the_calendar_is_refused_and_a_slot_past_it_waits_at_its_end():
+    db = _db()
+    with pytest.raises(ValueError, match="calendar"):
+        schedules.create(
+            "thread", "__workspace__", "thread", kind="cadence", spec=str(10**12),
+            max_runs=3, now="2026-01-01T00:00:00+00:00", db=db,
+        )
+    eight_thousand_years = 8000 * 365 * 24 * 60 * 60
+    assert schedules.next_slot(
+        "9000-01-01T00:00:00+00:00", eight_thousand_years, "9000-01-01T00:00:00+00:00",
+    ) == "9999-12-31T23:59:59.999999+00:00"
