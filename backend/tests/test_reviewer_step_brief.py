@@ -49,11 +49,14 @@ async def test_a_reviewer_step_brief_comes_from_the_plan_and_the_author_text_is_
     head, note = text.split(AUTHOR_NOTE.split("{")[0])
     assert 'reviewer for the workflow step "Review the notes"' in head
     assert f"What was asked: {INTENT}" in head
-    assert "The step's check: Every step in the notes works as written" in head
+    assert "The step's check, as of hand-over: Every step in the notes works as written" in head
     assert "How to review: Read each section as a customer." in head
     assert "do the work" not in head
+    # The system's pointer to the live read sits outside the author's text.
+    assert f"Your plan task: \"Review the notes\" ({node_id})" in head
+    assert head.index("How to review") < head.index("Your plan task")
     assert note.startswith("do the work")
-    assert f"Your plan task: \"Review the notes\" ({node_id})" in note
+    assert "Your plan task" not in note
 
 
 async def test_a_reviewer_step_without_an_instruction_has_no_how_line(deleg_db, spawned):
@@ -82,4 +85,4 @@ async def test_a_further_send_to_the_same_reviewer_is_not_reframed(deleg_db, spa
     step = choose_for_send(_PARENT, worker, node_id, db=deleg_db)
 
     assert step is not None and step.already_attached and step.brief is None
-    assert step.lead("one more file") == "one more file"
+    assert step.lead("one more file", "Your plan task: x") == "one more file\n\nYour plan task: x"

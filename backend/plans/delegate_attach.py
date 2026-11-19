@@ -59,7 +59,7 @@ NOT_ATTACHED = (
 REVIEWER_BRIEF = (
     'You are the reviewer for the workflow step "{title}". Judge the work against this step and '
     "what was asked, not against how its author describes it.\n\nWhat was asked: {intent}\n\n"
-    "The step's check: {check}"
+    "The step's check, as of hand-over: {check}"
 )
 REVIEWER_HOW = "\n\nHow to review: {instruction}"
 #: The author's own message, kept as help in finding the work.
@@ -82,11 +82,15 @@ class Step:
     already_attached: bool = False
     brief: str | None = None
 
-    def lead(self, message: str) -> str:
-        """The worker's message: a reviewer step's brief first, the author's text as a note."""
+    def lead(self, message: str, task_line: str) -> str:
+        """The worker's message with the system's ``task_line`` outside the author's text.
+
+        A reviewer step reads its brief, then the task line, then the author's text as a
+        note, so the pointer to the live plan read is never part of what the author wrote.
+        """
         if self.brief is None:
-            return message
-        return f"{self.brief}\n\n{AUTHOR_NOTE.format(message=message)}"
+            return f"{message}\n\n{task_line}"
+        return f"{self.brief}\n\n{task_line}\n\n{AUTHOR_NOTE.format(message=message)}"
 
 
 def kept(requested: Any) -> bool:
