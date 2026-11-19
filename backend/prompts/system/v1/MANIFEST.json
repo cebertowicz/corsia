@@ -130,10 +130,16 @@
       "sha256": "312c94365e7236730e095411b26c7b1ead15bcc9afb91b7b55884c4233c8fd36"
     },
     {
-      "bytes": 3370,
+      "bytes": 4531,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
-      "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
+      "sha256": "9f78449fdf03464c2632f0e425bf8074b488fee551830d10abd47bedfba41e84"
+    },
+    {
+      "bytes": 1817,
+      "kind": "skill",
+      "path": "skills/apply-feedback/corsia.yaml",
+      "sha256": "4eeae76bcabd61d565e9ec0e4280af3123290b66380369e02584d321e01db40f"
     },
     {
       "bytes": 3294,
@@ -298,10 +304,22 @@
       "sha256": "7a1068821ed8a08205ba9b719999976a747af06300b4648a679a537a1377c02b"
     },
     {
-      "bytes": 7594,
+      "bytes": 7587,
       "kind": "skill",
       "path": "skills/experiment-design/references/instrument-measures.md",
-      "sha256": "418200bccb46229f934cfe6e72eed1a0e4696fb12f871b336e259c5b10e90f12"
+      "sha256": "72b185d4bf50d03d4d1248c8c3cdca4477d5a4c4979fc6f6304a12c3ab0813de"
+    },
+    {
+      "bytes": 8290,
+      "kind": "skill",
+      "path": "skills/general-work/SKILL.md",
+      "sha256": "12161fe0588584412eb6d82ee1c6f7e9b2c07367197d0ba1ed8f8280825f0a3d"
+    },
+    {
+      "bytes": 2352,
+      "kind": "skill",
+      "path": "skills/general-work/corsia.yaml",
+      "sha256": "345a71bd096752a5b84023f570a58c382e1fb24b0cf03de34882b0dff4b4f0bb"
     },
     {
       "bytes": 3823,
@@ -430,6 +448,18 @@
       "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
     },
     {
+      "bytes": 2223,
+      "kind": "skill",
+      "path": "skills/review-work/SKILL.md",
+      "sha256": "9b289e2702ef60b36bd9de780f2983b3238af7ba28f88d63ac7fb735ae60c537"
+    },
+    {
+      "bytes": 1407,
+      "kind": "skill",
+      "path": "skills/review-work/corsia.yaml",
+      "sha256": "9e9d48f712d3f8b364d3798712080e7e40f5e5b3e3963e94529d9ae5ddb5690a"
+    },
+    {
       "bytes": 4997,
       "kind": "skill",
       "path": "skills/run-the-project/SKILL.md",
@@ -454,10 +484,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7473,
+      "bytes": 7478,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "f2c3ccf9a25e4dba95ae7938361346e51b07f3e6283c0cd2904f70c5666c6061"
+      "sha256": "ff1cb3f3b34fec847afd8efbb2356b04f3ecc1b98d87c22232b0fb1b473e6870"
     },
     {
       "bytes": 11071,
@@ -466,10 +496,10 @@
       "sha256": "e4d87199e693df821fe3e68e08b4fea751f2bd6ee4a29a2103f2a61358806937"
     },
     {
-      "bytes": 5471,
+      "bytes": 5585,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "bdff5dbba57c49a7b33e591396d8a8e35845c5267dc199b041ecc069b27e5f7a"
+      "sha256": "02de89a7ba35f226a4193af629f4d9db35b69df98df86eed6b10194d2cdda830"
     }
   ],
   "version": "v1"

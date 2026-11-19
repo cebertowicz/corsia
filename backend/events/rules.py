@@ -51,6 +51,7 @@ THREAD_PREFIX = "thread:"
 OPERATORS = ("eq", "not_eq", "in", "prefix", "present")
 NAMING = ("eq", "in")  # the operators whose values name what an event must be
 MAX_TESTS = 4
+# No reading yet: needs the lengths of rule notes written so far.
 NOTE_LIMIT = 500
 
 # Reasons a guard gives.
