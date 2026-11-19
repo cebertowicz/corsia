@@ -8,7 +8,7 @@ metadata:
 
 # Apply feedback to the whole
 
-**Applying these steps:** when a review fails or several findings arrive at once from someone else (a reviewer, the person, another agent), start one run (skill `task-discipline`, Declared workflows). When another workflow's step already built this run for you, work in that one and start none. For your own tests or checks failing while you work, one small comment, or a step or skill that tells you to apply this skill, follow the sections without a run.
+**Applying these steps:** when a review fails or several findings arrive at once from someone else (a reviewer, the person, another agent), start one run (skill `task-discipline`, Declared workflows), whichever skill sent you here. The one exception is a workflow step that already covers this feedback: another workflow's step built this run for you, or the step you are in says to settle it there, as review-work's Weigh does. Then work inside that step and start none. For your own tests or checks failing while you work, or one small comment, follow the sections without a run.
 
 A comment points at one spot; the change it asks for nearly always reaches others. Patch only the spot and the person finds every gap themselves.
 

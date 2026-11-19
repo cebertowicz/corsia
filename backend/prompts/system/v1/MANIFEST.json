@@ -130,10 +130,10 @@
       "sha256": "312c94365e7236730e095411b26c7b1ead15bcc9afb91b7b55884c4233c8fd36"
     },
     {
-      "bytes": 4406,
+      "bytes": 4531,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
-      "sha256": "2432549d67c9bab478cd28de3365e3155039d0f63c2f5df31ac6666b62355f42"
+      "sha256": "9f78449fdf03464c2632f0e425bf8074b488fee551830d10abd47bedfba41e84"
     },
     {
       "bytes": 1817,
