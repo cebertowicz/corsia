@@ -204,6 +204,25 @@ for (const [width, height, project] of layouts) {
 			await expect(row(loose)).toContainText('Tighten the first line.');
 		});
 
+		// The comment precedent (docViewerKeyboard.ts): a sheet a tap in the text opened is a glance, so the first key typed closes it and lands in the document at the tap.
+		test(`@flow:document-suggestions the first key typed after a tap in a struck quote closes its sheet and lands at the caret at ${width}`, async ({ page, request }) => {
+			test.skip(!phone, 'Only the phone opens a sheet; desktop widths focus the card beside the quote.');
+			const { editor, ids: [loose, fine] } = await openSuggestionDocument(page, request, PROSE, [
+				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
+				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
+			]);
+			await expect(strike(page, loose)).toHaveText('is loose');
+			await strike(page, loose).tap();
+			await expect(page.getByRole('dialog')).toBeVisible();
+			// No Escape: the key itself closes the sheet.
+			await page.keyboard.type('x');
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await expect(editor).toContainText('x');
+			await expect(editor).not.toContainText('The first line is loose.');
+			await expect(strike(page, loose)).toHaveCount(0);
+			await expect(strike(page, fine)).toHaveText('is fine');
+		});
+
 		test(`@flow:document-suggestions deleting the first character of a quote drops that suggestion's inline marks and keeps its card at ${width}`, async ({ page, request }) => {
 			const { drawer, editor, ids: [loose, fine], row } = await openSuggestionDocument(page, request, PROSE, [
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
