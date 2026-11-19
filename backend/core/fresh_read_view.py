@@ -3,7 +3,8 @@
 An agent can write a document after its pass by any path, the shell included, so the check
 sits where the person reads it. When the file's bytes differ from the passed version:
 
-- a newer version the person saved themselves moves the pass (``person_edit``, no read);
+- a newer version the person wrote themselves has already moved the pass where it was written
+  (``core.fresh_read_person_save``: ``person_edit``, no read), so it never differs here;
 - otherwise both opens serve the passed bytes, read-only for text (comments, replies and
   suggestion decisions stay open), and one background read of the current bytes starts,
   once per document and version. On a pass the view moves; on a fail or no reader the
@@ -22,36 +23,12 @@ from loguru import logger
 
 from core import fresh_read
 from core.fresh_read import Document, Item, Verdict
-from core.fresh_read_store import PERSON_EDIT, ReadRecord, note_recheck, record, sha256_bytes, view
+from core.fresh_read_store import note_recheck, sha256_bytes, view
 from infra.db_async import run_in_db
 
 NOTICE_WAITING = "A newer version is waiting on its check; this is the last checked version."
 NOTICE_FAILED = "A newer version did not pass its check; this is the last checked version."
 _running: set[tuple[str, str]] = set()
-
-
-def _person_wrote(path: Path, data: bytes) -> bool:
-    """Whether the newest recorded version of ``path`` holds ``data`` and is a person's own edit."""
-    from infra import config
-    from infra.document_history import repository
-    from infra.guidance_git import _git_bytes
-    from infra.guidance_messages import accepted_suggestions
-    from infra.guidance_states import GitFault
-
-    try:
-        repo = repository(Path(config.WORKSPACE))
-        if repo is None:
-            return False
-        relative = path.resolve().relative_to(repo.resolve()).as_posix()
-        oid = _git_bytes(repo, "rev-parse", "--verify", "--quiet", f"HEAD:{relative}", ok=(0, 1)).strip()
-        if not oid or _git_bytes(repo, "cat-file", "blob", oid.decode()) != data:
-            return False
-        raw = _git_bytes(repo, "log", "-1", "--format=%ae%x00%B", "--", f":(literal){relative}").decode(errors="replace")
-    except (GitFault, ValueError) as exc:  # unreadable or outside history: it proves nothing, so the version is read
-        logger.info("fresh read: history of {} unreadable ({})", path.name, exc)
-        return False
-    email, _, message = raw.partition("\x00")
-    return email.strip().endswith("@users.corsia.local") and not accepted_suggestions(message)
 
 
 def document_pass(artifact_id: str, data: bytes) -> str | None:
@@ -85,8 +62,8 @@ async def _recheck(artifact_id: str, path: Path, data: bytes, holder: str | None
         _running.discard((artifact_id, sha))
 
 
-def _start_recheck(artifact_id: str, path: Path, data: bytes, holder: str | None, node_id: str | None) -> None:
-    """One background read per document and version, started from an open."""
+def start_recheck(artifact_id: str, path: Path, data: bytes, holder: str | None, node_id: str | None) -> None:
+    """One background read per document and version, started from an open or an accepted suggestion."""
     from infra import app_loop
 
     key = (artifact_id, sha256_bytes(data))
@@ -107,13 +84,9 @@ def served(artifact: dict[str, Any] | None, path: Path, raw: bytes, writable: bo
     current = sha256_bytes(raw)
     if row is None or row["sha256"] == current or row["body"] is None:
         return None
-    if _person_wrote(path, raw):
-        record(ReadRecord(kind="document", item_ref=str(artifact["id"]), sha256=current, verdict=PERSON_EDIT,
-                          documents=((str(artifact["id"]), current, raw),)))
-        return None
     failed = row["recheck_sha256"] == current and row["recheck_verdict"] in ("failed", "held")
     if not failed:
-        _start_recheck(str(artifact["id"]), path, raw, row["holder_thread_id"], row["node_id"])
+        start_recheck(str(artifact["id"]), path, raw, row["holder_thread_id"], row["node_id"])
     return {
         "text": bytes(row["body"]).decode("utf-8", errors="replace"),
         "writable": writable and failed,

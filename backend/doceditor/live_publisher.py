@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 import logging
 
+from core.fresh_read_person_save import person_published
 from doceditor import comments, comment_anchoring
 from doceditor.feedback_edit_discard import discard_new_edit_item
 from doceditor.live_publication_record import OwedPublication, Publication
@@ -90,6 +91,8 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
                                    thread_id=publication.actor, db=db, prepared=payload)
             if publication.suggestion_accept:
                 discard_new_edit_item(db, artifact["id"], text)
+            if publication.direct_user:
+                person_published(artifact["id"], before, after, db=db)
     notification = service.find_file_identity(prepared.identity, db=db)
     if notification is not None:
         service.notify_changed(notification)

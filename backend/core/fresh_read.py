@@ -27,13 +27,12 @@ from core.fresh_read_store import FAILED, HELD, PASSED, ReadRecord, record, sha2
 from host_access.review_limits import HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
 from infra.db_async import run_in_db
 
-#: Per-candidate timeout. Basis: the only precedent in the code, the host-access reviewer's
-#: isolated call (``host_access/review_limits.py``), until the disposable-instance proof measures
-#: each candidate's p95 and its results file replaces this.
-READ_TIMEOUT_SECONDS = HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
-#: How many delegating threads up the reader looks for the person's messages; a delegation
-#: chain deeper than this is not a shape the roster makes.
-_PERSON_CHAT_DEPTH = 8
+#: The longest one check holds a door call, across every candidate; each candidate gets what is
+#: left. PLACEHOLDER. Basis: the only precedent in the code for holding an agent's call on an
+#: isolated reviewer call, the host-access reviewer's (``host_access/review_limits.py``). The
+#: disposable-instance proof (design step 3) measures each candidate's p95, and its results file
+#: replaces this before merge.
+CHECK_BOUND_SECONDS = HOST_ACCESS_REVIEW_TIMEOUT_SECONDS
 
 _CHECK_NAMES = {
     1: "the person can't act on it from what it shows",
@@ -78,13 +77,13 @@ class Verdict:
 
 
 def _person_messages(db, thread_id: str | None) -> tuple[tuple[str, str], ...]:
-    """The person's own messages in the writer's chat and the chats that delegated to it, newest first."""
+    """The person's own messages in the writer's chat and every chat up its delegating chain, newest first."""
     from api.thread_message_rows import metadata_dict
     from core.message_history import NON_HUMAN_MARKERS
 
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
-    while thread_id and thread_id not in seen and len(seen) < _PERSON_CHAT_DEPTH:
+    while thread_id and thread_id not in seen:  # to the chain's root; a cycle stops at the first repeat
         seen.add(thread_id)
         for row in db.execute(
             "SELECT content, metadata, created_at FROM messages WHERE thread_id=? AND role='user'", (thread_id,),
@@ -142,19 +141,23 @@ def _resolve(candidate: Candidate, writer_thread_id: str | None):
         db.close()
 
 
-async def _read_once(candidate: Candidate, item: Item, prompt: str) -> tuple[ReaderAnswer, Any]:
+async def _read_once(candidate: Candidate, item: Item, prompt: str, seconds: float) -> tuple[ReaderAnswer, Any]:
+    """One candidate's read, given ``seconds``: what is left of the check's bound."""
     from llm.isolated_structured import invoke_isolated_structured
 
-    target, binary = await run_in_db(_resolve, candidate, item.writer_thread_id)
-    seen: list[Any] = []
-    answer = await asyncio.wait_for(invoke_isolated_structured(
-        target, system_prompt=SYSTEM_PROMPT, user_prompt=prompt, output_schema=OUTPUT_SCHEMA,
-        validator=validator(item.shown), max_output_tokens=candidate.output_allowance,
-        timeout_seconds=READ_TIMEOUT_SECONDS, binary=binary, telemetry_sink=seen.append,
-        thread_id=item.writer_thread_id, account_id=target.account_id,
-        account_bound=target.account_id is not None,
-    ), timeout=READ_TIMEOUT_SECONDS)
-    return answer, (seen[-1] if seen else None)
+    async def read() -> tuple[ReaderAnswer, Any]:
+        target, binary = await run_in_db(_resolve, candidate, item.writer_thread_id)
+        seen: list[Any] = []
+        answer = await invoke_isolated_structured(
+            target, system_prompt=SYSTEM_PROMPT, user_prompt=prompt, output_schema=OUTPUT_SCHEMA,
+            validator=validator(item.shown), max_output_tokens=candidate.output_allowance,
+            timeout_seconds=seconds, binary=binary, telemetry_sink=seen.append,
+            thread_id=item.writer_thread_id, account_id=target.account_id,
+            account_bound=target.account_id is not None,
+        )
+        return answer, (seen[-1] if seen else None)
+
+    return await asyncio.wait_for(read(), timeout=seconds)
 
 
 def _reason(exc: BaseException) -> str:
@@ -199,8 +202,9 @@ def _documents(item: Item) -> tuple[tuple[str, str, bytes], ...]:
 
 
 async def check(item: Item) -> Verdict:
-    """Read ``item`` fresh and record the outcome; never raises for a reader's failure."""
+    """Read ``item`` fresh and record the outcome within ``CHECK_BOUND_SECONDS``; never raises for a reader's failure."""
     started = time.monotonic()
+    deadline = started + CHECK_BOUND_SECONDS
     found = await run_in_db(candidates, item.writer_thread_id)
     cap = install_cap(found)
     context = await run_in_db(_context, item)
@@ -220,8 +224,11 @@ async def check(item: Item) -> Verdict:
         if not candidate.writer_own and await seat_waiting(candidate):
             attempts.append({"model": candidate.model, "reason": "local seat has waiting requests"})
             continue
+        if (left := deadline - time.monotonic()) <= 0:
+            attempts.append({"model": candidate.model, "reason": "the check's time ran out before its turn"})
+            continue
         try:
-            answer, telemetry = await _read_once(candidate, item, prompt)
+            answer, telemetry = await _read_once(candidate, item, prompt, left)
         except Exception as exc:  # noqa: BLE001  # any failure makes this candidate unavailable; the gate moves on
             logger.info("fresh read: {} could not read {} ({})", candidate.model, item.kind, type(exc).__name__)
             attempts.append({"model": candidate.model, "reason": _reason(exc)})

@@ -50,11 +50,14 @@ class ReadRecord:
     documents: tuple[tuple[str, str, bytes], ...] = ()
 
 
-def record(read: ReadRecord) -> str:
-    """Store one read; on a pass, move each document it passed to the passed version. Returns its id."""
+def record(read: ReadRecord, db=None) -> str:
+    """Store one read; on a pass, move each document it passed to the passed version. Returns its id.
+
+    With ``db`` in a transaction, the record lands inside it (a person's live edit, with its registration).
+    """
     read_id = uuid.uuid4().hex
     now = utc_now_iso()
-    with write_transaction(None, scope="fresh_read_record") as db:
+    with write_transaction(db, scope="fresh_read_record") as db:
         db.execute(
             """INSERT INTO fresh_reads (id, kind, item_ref, sha256, verdict, findings, attempts,
                    writer_thread_id, node_id, reader_model, input_cap, messages_cut_from, elapsed_ms,

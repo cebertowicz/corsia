@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.fresh_read_person_save import person_save
 from core.skill_validation import is_skill_file
 from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
@@ -369,16 +370,16 @@ async def _save_legacy_document(
 ) -> dict:
     """Keep the validated legacy writer intact under the admission boundary."""
     thread_id = body.thread_id if by_agent else None
-    result = await _save_validated(
-        resolved,
-        body.text,
-        lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
-        reason,
-        lambda path, expected, reports=None: _write_document(
-            body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
-        ),
-        expected_sha256=expected_sha256, history_required=history_required, accepted=accepted,
-    )
+    async def save(expected: str | None) -> dict:  # noqa: E306
+        return await _save_validated(
+            resolved, body.text,
+            lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
+            reason,
+            lambda path, expect, reports=None: _write_document(body, path, direct_user=not by_agent, expected_sha256=expect, reports=reports),
+            expected_sha256=expected, history_required=history_required, accepted=accepted,
+        )
+    result = await (save(expected_sha256) if by_agent else person_save(  # the person's write moves a fresh-read pass
+        str(resolved), body.text.encode("utf-8"), lambda replaced: save(expected_sha256 or replaced), patch=bool(accepted)))
     notification = result.pop("_notification")
     if notification is not None:
         registry_service.notify_changed(notification)

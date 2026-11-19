@@ -37,6 +37,8 @@ class Publication:
     decision: dict
     ranges: dict[str, tuple[int, int]] | None = None
     suggestion_accept: bool = False
+    #: The person wrote it themselves (``WriteActor.direct_user``); a row stored before this field reads False.
+    direct_user: bool = False
 
     @staticmethod
     def decision_for(path: Path, shared: SharedTarget | None, authority: WriteAuthority | None = None) -> dict:

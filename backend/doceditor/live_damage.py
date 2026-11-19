@@ -99,7 +99,7 @@ class DamageSave:
         publication = policy.decision(actor, text, prior) if policy is not None else None
         if publication is None:
             publication = Publication(actor.thread_id, actor.origin, actor.description, prior.state,
-                                      Publication.decision_for(path, None))
+                                      Publication.decision_for(path, None), direct_user=actor.direct_user)
         return replace(publication, ranges=dict(self.entry.live.ranges))
 
     @staticmethod

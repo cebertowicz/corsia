@@ -38,7 +38,7 @@ class Reader:
                             lambda _writer: [_candidate(model, own=i == len(models) - 1) for i, model in enumerate(models)])
         monkeypatch.setattr(fresh_read, "_read_once", self._read)
 
-    async def _read(self, candidate, item, prompt):
+    async def _read(self, candidate, item, prompt, _seconds):
         self.items.append((candidate.model, item, prompt))
         if self.passes:
             return ReaderAnswer(True, ()), None
@@ -76,12 +76,17 @@ async def test_update_refused_and_nothing_written_when_the_reader_fails(deleg_db
 
 @pytest.mark.asyncio
 async def test_no_reader_holds_the_item_with_each_reason_within_the_bound(deleg_db, monkeypatch, quiet_broadcast):
-    """Every candidate unavailable: the update is refused naming why, after at most one timeout each."""
+    """Every candidate unavailable: the update is refused naming why, within one bound for the whole check.
+
+    Two candidates hang; the first spends the whole bound, so the second never starts and the call
+    returns after one bound, not one per candidate.
+    """
     from tools.post_update import PostUpdateTool
 
-    monkeypatch.setattr(fresh_read, "READ_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(fresh_read, "candidates",
-                        lambda _writer: [_candidate("reader/gone"), _candidate("reader/slow", own=True)])
+    bound = 1.0  # one bound per candidate would take at least 2 s here
+    monkeypatch.setattr(fresh_read, "CHECK_BOUND_SECONDS", bound)
+    monkeypatch.setattr(fresh_read, "candidates", lambda _writer: [
+        _candidate("reader/gone"), _candidate("reader/hangs"), _candidate("reader/slow", own=True)])
 
     def resolve(candidate, _writer):
         if candidate.model == "reader/gone":
@@ -96,9 +101,10 @@ async def test_no_reader_holds_the_item_with_each_reason_within_the_bound(deleg_
     started = time.monotonic()
     result = await PostUpdateTool().execute(_thread_id="sender-self", text="Done.", _host_access_turn_identity=TURN)
 
-    assert time.monotonic() - started < 2
+    assert bound <= time.monotonic() - started < 2 * bound
     assert "could not run" in result
-    assert "reader/gone: not available (model_unavailable)" in result and "reader/slow: timed out" in result
+    assert "reader/gone: not available (model_unavailable)" in result and "reader/hangs: timed out" in result
+    assert "reader/slow: the check's time ran out before its turn" in result
     assert _updates(deleg_db) == []
     assert [row["verdict"] for row in _reads(deleg_db)] == ["held"]
 
@@ -193,7 +199,7 @@ async def test_a_shell_edit_after_a_pass_serves_the_passed_version(deleg_db, mon
 
     path.write_text("# Brief\nVersion two, written from a shell.\n")
     rechecks = []
-    monkeypatch.setattr(fresh_read_view, "_start_recheck", lambda *args: rechecks.append(args))
+    monkeypatch.setattr(fresh_read_view, "start_recheck", lambda *args: rechecks.append(args))
     shown = await asyncio.to_thread(fresh_read_view.served, artifact, path, path.read_bytes(), True)
 
     assert shown["text"] == "# Brief\nVersion one.\n"
@@ -261,7 +267,7 @@ async def test_the_persons_save_over_a_failed_version_keeps_it_aside_and_wakes_t
         path.write_text("The person's edit.\n")
         return {"ok": True}
 
-    assert await fresh_read_person_save.person_save(str(path), save) == {"ok": True}
+    assert await fresh_read_person_save.person_save(str(path), b"The person's edit.\n", save) == {"ok": True}
 
     # The save is checked against the agent bytes it replaces, so a newer write in between is not lost.
     assert expected == [sha256_bytes(b"Failed agent text.\n")]
@@ -383,7 +389,7 @@ async def test_the_document_read_serves_the_passed_text_read_only(deleg_db, monk
     Reader(monkeypatch, passes=True)
     await fresh_read_view.read_document(artifact["id"], path.name, path.read_bytes(), kind="document_open",
                                         writer_thread_id="sender-self", user_id="u-test")
-    monkeypatch.setattr(fresh_read_view, "_start_recheck", lambda *args: None)
+    monkeypatch.setattr(fresh_read_view, "start_recheck", lambda *args: None)
     fresh = await asyncio.to_thread(read_document, str(path), "u-test", None, None)
     assert fresh["text"] == "Checked.\n" and fresh["passed_version"] is None
 
