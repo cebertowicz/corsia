@@ -1,7 +1,8 @@
 import { untrack } from 'svelte';
 import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
-import { commentDraft, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { commentDraft, commentDraftScope, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
+import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import { postLive } from '$lib/stores/liveCommentPost';
 import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';
@@ -16,8 +17,8 @@ import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 export type ViewerSelection = SelectionOffer | null;
 type Context = {
 	scope: () => string;
-	/** The document the draft is kept for, whichever viewer shows it (`documentDraftKey`). */
-	keepKey: () => string;
+	/** The document shown; its draft is kept under `documentDraftKey`, whichever viewer shows it. */
+	target: () => DocViewerTarget | null;
 	draft: () => CommentDraft | null;
 	session: () => LiveDocumentSession | undefined;
 	generation: () => number;
@@ -82,6 +83,7 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 /** Selection/composer controller. The existing scoped draft remains the sole body/request owner. */
 export function createViewerCommentDraft(context: Context) {
 	let pending = $state<ViewerSelection>(null);
+	const keepKey = () => documentDraftKey(context.target());
 	let selected: CommentSelection | undefined;
 	// The pending mark of a posted widget comment, held (the draft is gone by then) until its placed mark is drawn.
 	let posted = $state.raw<{ id: string; selection: CommentSelection } | null>(null);
@@ -115,6 +117,8 @@ export function createViewerCommentDraft(context: Context) {
 	}
 	// This document's draft, kept across a close (its body survives); the pending highlight shows only while its composer is open.
 	const scoped = $derived.by(() => { const draft = context.draft(); return draft?.scope === context.scope() ? draft : null; });
+	// A comment the user has typed but not posted: the review bar never answers over it.
+	const hasText = $derived(Boolean(scoped?.body?.trim()));
 	// A live tap in a widget shows its pending mark before Comment is pressed; selecting elsewhere clears it, and prose has none.
 	// While the composer is open the scoped draft owns the mark: a new selection does not take it.
 	// A held mark is never resolved against another session's Y doc.
@@ -124,23 +128,29 @@ export function createViewerCommentDraft(context: Context) {
 		return selection?.session === context.session() ? selection : null;
 	});
 	$effect(() => { if (posted && !context.awaitsMark(posted.id)) posted = null; });
+	/** The viewer loads a file: the selection pending in the last one goes. */
+	function leave(previous: DocViewerTarget | null, key: string): void {
+		select(null);
+		// Another file lets go of the last one's draft (its text stays kept); a reload of this one keeps its own.
+		if (previous && commentDraftScope(previous) !== key) dropCommentDraft(commentDraftScope(previous));
+	}
 	/** Cancel, the one way to drop typed text. */
 	function cancel(): void {
 		posted = null;
-		forgetDraft(keptCommentDrafts.get(context.keepKey())?.clientId);
-		keptCommentDrafts.forget(context.keepKey()); discardCommentDraft(context.scope()); context.onClose();
+		forgetDraft(keptCommentDrafts.get(keepKey())?.clientId);
+		keptCommentDrafts.forget(keepKey()); discardCommentDraft(context.scope()); context.onClose();
 	}
 	/** What the composer holds, kept for this document until it posts or is cancelled. */
 	function setBody(body: string): void {
 		setCommentBody(body, context.scope());
 		const draft = scoped;
-		if (draft?.mentionSelection) keptCommentDrafts.keep(context.keepKey(), body, draft.mentionSelection);
+		if (draft?.mentionSelection) keptCommentDrafts.keep(keepKey(), body, draft.mentionSelection);
 	}
 	function start(): void {
 		if (!pending) return;
 		cancelCommentCapture(context.scope());
 		// The next composer on this document starts from what the last one held, its tags and why it did not post.
-		const old = context.draft(), same = old?.scope === context.scope() ? old : null, kept = keptCommentDrafts.get(context.keepKey());
+		const old = context.draft(), same = old?.scope === context.scope() ? old : null, kept = keptCommentDrafts.get(keepKey());
 		const body = same?.body ?? kept?.body ?? '';
 		const mentionSelection = same?.mentionSelection ?? kept?.mentionSelection ?? createMentionSelection(body);
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
@@ -152,7 +162,7 @@ export function createViewerCommentDraft(context: Context) {
 	async function submit(text: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: MentionOccurrence[] = []): Promise<string | null> {
 		const draft = context.draft();
 		if (!draft || draft.scope !== context.scope()) return null;
-		const key = context.keepKey(), tags = draft.mentionSelection ?? createMentionSelection(text);
+		const key = keepKey(), tags = draft.mentionSelection ?? createMentionSelection(text);
 		const current = () => context.draft()?.identity === draft.identity && context.scope() === draft.scope && context.isOpen();
 		const mine = (update: (value: CommentDraft) => CommentDraft | null) => commentDraft.update(value => value && value.identity === draft.identity ? update(value) : value);
 		keptCommentDrafts.clearError(key);
@@ -181,6 +191,6 @@ export function createViewerCommentDraft(context: Context) {
 		if (current() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
 		return current() ? id : null;
 	}
-	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; },
-		get pendingComment() { return pendingComment; }, select, start, cancel, setBody, submit };
+	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; }, get hasText() { return hasText; },
+		get pendingComment() { return pendingComment; }, get keepKey() { return keepKey(); }, select, leave, start, cancel, setBody, submit };
 }

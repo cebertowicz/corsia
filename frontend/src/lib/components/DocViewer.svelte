@@ -10,8 +10,7 @@
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
-	import { commentDraft, commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
-	import { documentDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+	import { commentDraft, commentDraftScope } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createPressReveal } from '$lib/docPressReveal.svelte';
@@ -165,7 +164,7 @@
 	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
-		scope: () => targetKey, keepKey: () => documentDraftKey(target), draft: () => $commentDraft, session: () => liveSession,
+		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
 		ensureArtifactId: ensureEditorArtifactId, onFailure: commentRetryToast.remember,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
@@ -187,8 +186,6 @@
 	// unrelated re-render that recreates the `target` prop object (e.g. a
 	// sibling tab's status update) never re-triggers a reload.
 	const targetKey = $derived(commentDraftScope(target));
-	// A comment the user has typed but not posted: the review bar never answers over it.
-	const composerHasText = $derived(Boolean($commentDraft && $commentDraft.scope === targetKey && $commentDraft.body?.trim()));
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
@@ -229,13 +226,11 @@
 			const seq = ++loadSeq;
 			const signal = loadSignal(onSignal, d);
 
-			const previous = prevTarget;
+			draftController.leave(prevTarget, key);
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
-			draftController.select(null);
 			commentUI.closeAll();
-			// Another file lets go of the last one's draft (its text stays kept); a reload of this one keeps its own.
-			focusedDocComment.set(null); if (previous && commentDraftScope(previous) !== key) dropCommentDraft(commentDraftScope(previous));
+			focusedDocComment.set(null);
 			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
 			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
@@ -383,7 +378,7 @@
 		onAgree={threadActions.agree}
 		{target}
 		artifactId={loadedArtifactId}
-		draftScope={documentDraftKey(target)}
+		draftScope={draftController.keepKey}
 		readOnly={readonly || confirming}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
@@ -399,6 +394,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

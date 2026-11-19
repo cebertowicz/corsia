@@ -1,14 +1,16 @@
 import { flushSync } from 'svelte';
+import { get } from 'svelte/store';
 import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { commentDraft, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
+import { commentDraft, commentDraftScope, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
 import { captureComment, SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
 import { addComment } from '$lib/stores/docComments';
 import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
@@ -36,6 +38,9 @@ const session = () => {
 	return { artifactId: 'a', doc, text, releaseReservation: vi.fn() } as never;
 };
 type Row = Pick<DocComment, 'placement' | 'orphaned'> | undefined;
+/** One open file, as the viewer holds it; `keyOf` is where its typed comment is kept. */
+const targetOf = (path: string): DocViewerTarget => ({ instanceId: 'tab', path, name: path, projectId: 'p', threadId: null, artifactId: null });
+const keyOf = (path: string) => documentDraftKey(targetOf(path));
 
 function setup(inWidget: boolean, label?: string) {
 	let scope = $state('one'), live = $state.raw(session()), open = $state(false), drawn = $state(false);
@@ -44,7 +49,7 @@ function setup(inWidget: boolean, label?: string) {
 	let controller!: ReturnType<typeof createViewerCommentDraft>;
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
-			scope: () => scope, keepKey: () => `doc|${scope}`, draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
+			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
 			isOpen: () => open, ensureArtifactId: async () => 'a', onFailure: () => {}, onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});
@@ -224,7 +229,7 @@ describe('a post that lands or fails after its composer closed and another opene
 		expect(await begin('lands')).toBeNull();
 		expect(addComment).toHaveBeenCalledTimes(1);
 		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
-		const kept = keptCommentDrafts.get('doc|one');
+		const kept = keptCommentDrafts.get(keyOf('one'));
 		expect(kept?.body).toBe('Too terse: say who reads it');
 		expect(kept?.clientId).toBeUndefined();
 		const firstId = vi.mocked(addComment).mock.calls[0][7];
@@ -237,8 +242,8 @@ describe('a post that lands or fails after its composer closed and another opene
 	it('fails: what the field holds now is kept with the reason, not the text that was sent', async () => {
 		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		await expect(begin('fails')).rejects.toThrow('500');
-		expect(keptCommentDrafts.get('doc|one')).toMatchObject({ body: 'Too terse: say who reads it' });
-		expect(keptCommentDrafts.get('doc|one')?.error).toBeTruthy();
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ body: 'Too terse: say who reads it' });
+		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBeTruthy();
 		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
 		log.mockRestore();
 	});
@@ -273,5 +278,58 @@ describe('a save the server refuses because the document changed', () => {
 		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
 		await expect(current!.controller.submit('body')).rejects.toThrow('500');
 		expect(captureComment).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the viewer asks whether a typed comment is waiting', () => {
+	const typed = (body: string) => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody(body); flushSync();
+	};
+
+	it('only for this file\'s draft with text in it', () => {
+		typed('Say who reads it');
+		expect(current!.controller.hasText).toBe(true);
+	});
+
+	it('not for a body of only spaces', () => {
+		typed('  \n ');
+		expect(current!.controller.hasText).toBe(false);
+	});
+
+	it('not for another file\'s draft', () => {
+		typed('Say who reads it');
+		const other = get(commentDraft);
+		current!.set({ scope: 'two' });
+		// Another viewer's draft, with text, is what the store holds while this one shows file two.
+		commentDraft.set(other); flushSync();
+		expect(get(commentDraft)?.body).toBe('Say who reads it');
+		expect(current!.controller.draft).toBeNull();
+		expect(current!.controller.hasText).toBe(false);
+	});
+});
+
+describe('the viewer moves to another file', () => {
+	it('lets go of the last file\'s open draft and keeps its typed text', () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody('Say who reads it'); flushSync();
+		current.controller.leave(targetOf('one'), commentDraftScope(targetOf('two')));
+		flushSync();
+		expect(get(commentDraft)).toBeNull();
+		expect(keptCommentDrafts.get(keyOf('one'))?.body).toBe('Say who reads it');
+	});
+
+	it('keeps the open draft when the same file loads again', () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody('Say who reads it'); flushSync();
+		current.controller.leave(targetOf('one'), commentDraftScope(targetOf('one')));
+		flushSync();
+		expect(get(commentDraft)?.body).toBe('Say who reads it');
 	});
 });
