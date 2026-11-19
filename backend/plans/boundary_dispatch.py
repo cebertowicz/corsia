@@ -11,6 +11,7 @@ import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
 import plans.bulk_fields as bulk_fields
 import plans.bulk_nodes as bulk_nodes
+import plans.handoff_brief as handoff_brief
 import plans.later_fields as later_fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
@@ -79,10 +80,7 @@ def _dispatch_admission(operation: str, params: dict[str, Any], actor, common: d
         params["node_id"], **fields.expected(params), **common,
         payload=None if jump is None else jump.payload,
     )
-    if not was_selected and reply["admission"].get("selection") is not None:
-        from plans.handoff_brief import step_hint
-
-        reply.update(step_hint(common["db"], node))
+    reply.update(handoff_brief.started_hint(common["db"], node, reply, was_selected=was_selected))
     if jump is not None and reply["admission"].get("selection") is not None:
         reply["jumped"] = jump.line
     conflict = reply["admission"].get("conflict") or {}

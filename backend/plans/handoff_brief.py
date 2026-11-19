@@ -89,6 +89,13 @@ def step_hint(db, node) -> dict:
     )}
 
 
+def started_hint(db, node, reply: dict, *, was_selected: bool) -> dict:
+    """``step_hint`` when a start newly selected the step; empty for a refused or repeated start."""
+    if was_selected or reply["admission"].get("selection") is None:
+        return {}
+    return step_hint(db, node)
+
+
 def fact(db, node_id: str, executor: str) -> dict:
     """Return the description and step hint owed on a handoff.
 

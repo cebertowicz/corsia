@@ -10,6 +10,8 @@ pytestmark = pytest.mark.asyncio
 
 ONE = "    - {id: draft, required: true, check: Draft exists, difficulty: {default: routine}}\n"
 TWO = ONE + "    - {id: review, required: true, check: Review exists, difficulty: {default: routine}}\n"
+#: A failure closes only dependent steps (#3084), so the second step depends on the first.
+DEPENDENT = ONE + "    - {id: review, required: true, check: Review exists, after: [draft], difficulty: {default: routine}}\n"
 PERSON = "    - {id: person, by: person, check: Answer exists, difficulty: {default: routine}}\n"
 
 
@@ -79,7 +81,7 @@ async def test_step_cannot_finish_with_open_child_and_run_waits_for_step(isolate
 
 
 async def test_failure_closes_subtask_before_its_step(isolated_db, tmp_path, monkeypatch):
-    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, TWO)})
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, DEPENDENT)})
     reply = await run.start("ship")
     failed, step = (entry["id"] for entry in reply["steps"])
     child_reply = await add(run, step)
