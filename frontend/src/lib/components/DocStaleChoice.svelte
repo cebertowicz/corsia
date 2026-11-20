@@ -50,6 +50,7 @@
 		try { await navigator.clipboard.writeText(text); }
 		catch { actionError = 'Couldn’t copy the text. Select it and copy it instead.'; }
 	}
+	const readAgain = (): boolean => read.state === 'ready';
 	async function accept(): Promise<void> {
 		const choice = confirmation, target = draft?.target;
 		confirmation = null;
@@ -68,8 +69,10 @@
 			const after = $docSaveDrafts[tabKey], failure = after?.failure;
 			await load();
 			if (failure?.code === EDITOR_STALE_CODE) notice = 'This document changed again. Choose which text to keep.';
-			// A failure that says something specific (a deleted file, a server line) keeps its own words; one with nothing to say gets this chooser's sentence, which says who acts next.
-			else actionError = failure && !failure.generic ? after!.error : 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
+			// A failure that says something specific (a deleted file, a server line) keeps its own words; one with nothing to say gets this chooser's sentence, which says who acts next:
+			// Keep your text when the file read again, and when it did not Details offers only Retry, so the sentence names nothing that is not on screen.
+			else actionError = failure && !failure.generic ? after!.error : readAgain()
+				? 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.' : 'Couldn’t save the document. Your text stays here.';
 		} finally { busy = false; }
 	}
 	const CONFIRMS = {

@@ -129,4 +129,26 @@ describe('the stale-save chooser inside the viewer', () => {
 		expect(host.querySelector('.cm-content')?.textContent).toBe('base text typed');
 		expect(existingDraft(target)).toMatchObject({ editText: 'base text typed', status: 'error', stale: true });
 	});
+
+	it('names no hidden button when Keep your text fails on the network and the file then cannot be read', async () => {
+		const details = await openRefused();
+		details.click();
+		await vi.waitFor(() => expect(document.body.textContent).toContain('file changed outside'));
+		// The write fails on the network, and the re-read that follows fails too: Details is left with Retry only.
+		api.writeContent.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		api.fetchContent.mockRejectedValue(new TypeError('Failed to fetch'));
+		buttons('Keep your text')[0].click(); flushSync();
+		confirm('Keep your text');
+		await vi.waitFor(() => expect(api.writeContent).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(alerts()).toContain('Couldn’t load the file’s text. Your text stays here.'));
+		await flush();
+		expect(buttons('Retry')).toHaveLength(1);
+		// The failed-save line points to nothing that is not on screen, and nothing in Details names the hidden choice.
+		const inDetails = document.querySelector('[aria-label="Choose which text to keep"]')!;
+		expect(inDetails).not.toBeNull();
+		expect(alerts()).toContain('Couldn’t save the document. Your text stays here.');
+		expect(inDetails.textContent).not.toContain('Keep your text');
+		expect(inDetails.textContent).not.toContain('Choose Keep your text');
+		expect(existingDraft(target)).toMatchObject({ editText: 'base text typed', status: 'error' });
+	});
 });
