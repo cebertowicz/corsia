@@ -19,7 +19,9 @@ import uuid
 
 import pytest
 
+import plans.close_next_bounds as bounds
 from plans import service
+from prompts.plan_tools import start_out_of_order_compact
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     CRITERIA_MARKER,
@@ -140,6 +142,22 @@ def test_the_worst_case_block_keeps_every_row_and_cuts_text_by_serialized_bytes(
     assert (named["started"], named["refusal"]) == (False, "not_ready")
     assert_truncated(named["reason"], "paused: " + reason, WAIT_CAP)
     _assert_criteria_fill_the_block(block, "z" * 5000)
+
+
+def test_an_out_of_order_named_start_stays_inside_the_worst_case_block(db, monkeypatch):
+    actor, plan, task_a, queued, _others, titles, _reason = _worst_case_scene(db, monkeypatch)
+    named = task(db, plan.id, "Named below ready work")
+
+    block = next_block(close(
+        db, plan.id, "request_review", task_a.id, next_node_id=named.id, actor=actor,
+    ))
+
+    assert size(block) <= NEXT_BLOCK_CAP
+    assert (block["named"]["started"], block["named"]["refusal"]) == (False, "out_of_order")
+    assert block["named"]["reason"] == start_out_of_order_compact(
+        bounds.title(titles[queued.id]),
+    )
+    assert block["selected"]["id"] == queued.id
 
 
 def _assert_criteria_fill_the_block(block: dict, stored: str) -> None:

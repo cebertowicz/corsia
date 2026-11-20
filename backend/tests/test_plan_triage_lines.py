@@ -1,23 +1,25 @@
-"""Triage lines: plan order is the priority, and agents are shown where it disagrees.
+"""Plan order is priority: an owner's start that passes ready work above it is refused.
 
-A named start (`activate`, `start`, or a closing operation's `next_node_id`)
-returns `jumped` when it passes ready top-level work (T2), and records the
-passed item on the start's activation event for the KPI (T3). It is guidance in
-the tool result, never a refusal. The expected strings restate the approved
-copy independently of production. What an add returns is `test_plan_top.py`'s.
+A named start (`activate`, `start`, or a closing operation's `next_node_id`) by
+the plan's owner is refused while a top-level item ranked above it is ready:
+neither started nor waiting. The person's own start is never refused. The
+expected strings restate the approved copy independently of production. What an
+add returns is `test_plan_top.py`'s.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from plans import service
 from tests.plan_close_next_helpers import (
+    HUMAN,
+    OWNER,
     close,
     next_block,
+    open_attempt,
     owner_plan,
     pause,
     plan_update,
@@ -30,17 +32,26 @@ from tests.plan_close_next_helpers import (
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
 
-def _jumped_line(title: str, node_id: str, rank: int, total: int, top_id: str, key: int) -> str:
+def _refusal(title: str, node_id: str, top_id: str, key: int) -> str:
     return (
-        f"Started ahead of ready '{title}' ({node_id}), ranked {rank} of {total}. "
-        f"If this outranks it, reorder node_id={top_id} order_key={key} so the plan says so."
+        f"Not started: '{title}' ({node_id}) is above this in plan order and ready. Start it "
+        f"first, or if this outranks it, reorder node_id={top_id} order_key={key}, then start "
+        "this with the revision the reorder returns."
     )
 
 
-def _activate(db, plan_id: str, node_id: str, operation: str = "activate") -> dict:
+def _refused(db, plan_id: str, node_id: str, operation: str = "activate", **kwargs) -> str:
+    with pytest.raises(service.PlanError) as refused:
+        _activate(db, plan_id, node_id, operation, **kwargs)
+    return str(refused.value)
+
+
+def _activate(
+    db, plan_id: str, node_id: str, operation: str = "activate", *, actor=OWNER,
+) -> dict:
     return plan_update(
         db, plan_id, operation,
-        {"node_id": node_id, "expected_revision": revision(db, node_id)},
+        {"node_id": node_id, "expected_revision": revision(db, node_id)}, actor=actor,
     )
 
 
@@ -63,14 +74,12 @@ def _watch(db, plan_id: str, node_id: str) -> None:
     })
 
 
-def _activation_payload(db, node_id: str) -> dict | None:
-    row = db.execute(
-        "SELECT payload_json FROM plan_node_events "
+def _activations(db, node_id: str) -> int:
+    return int(db.execute(
+        "SELECT COUNT(*) FROM plan_node_events "
         "WHERE node_id=? AND event='state_transition' AND new_state='active'",
         (node_id,),
-    ).fetchone()
-    assert row is not None
-    return None if row["payload_json"] is None else json.loads(row["payload_json"])
+    ).fetchone()[0])
 
 
 def _waiting(db, plan_id: str) -> None:
@@ -104,8 +113,17 @@ def _in_review(db, plan_id: str) -> None:
 
 
 def _later(db, plan_id: str) -> None:
-    """A task set aside in Later: startable, but never picked, so never passed over."""
+    """A task below the cut: not approved for now, so never passed over."""
     task(db, plan_id, "Someday work", later=True)
+
+
+def _delegated(db, plan_id: str) -> None:
+    """A task handed to a worker is started, even before the worker selects it."""
+    handed = task(db, plan_id, "Handed to a worker")
+    plan_update(db, plan_id, "attach_spawned_thread", {
+        "node_id": handed.id, "expected_revision": revision(db, handed.id),
+        "spawned_thread_id": "worker",
+    })
 
 
 NOT_READY_SCENES = {
@@ -115,27 +133,31 @@ NOT_READY_SCENES = {
     "behind_a_prerequisite": _behind_a_prerequisite,
     "user_assigned": _user_assigned,
     "in_review": _in_review,
+    "delegated": _delegated,
 }
 
 
-# --- T2: named start -------------------------------------------------------
+# --- Named start by the plan's owner ----------------------------------------
 
 
 @pytest.mark.parametrize("operation", ["activate", "start"])
-def test_a_named_start_ahead_of_a_ready_task_reports_what_it_jumped(db, operation):
+def test_a_named_start_ahead_of_a_ready_task_is_refused(db, operation):
     plan = owner_plan(db)
     passed = task(db, plan.id, "Waiting P0 fix")
     chosen = task(db, plan.id, "New ask from chat")
     if operation == "start":
         queue_active(db, chosen.id)
+    state_before = service._node_row(db, chosen.id)["state"]
 
-    result = _activate(db, plan.id, chosen.id, operation)
+    message = _refused(db, plan.id, chosen.id, operation)
 
-    assert result["jumped"] == _jumped_line("Waiting P0 fix", passed.id, 1, 2, chosen.id, 0)
-    assert result["admission"]["condition"] == "running"
+    assert message == _refusal("Waiting P0 fix", passed.id, chosen.id, 0)
+    assert service._node_row(db, chosen.id)["state"] == state_before
+    assert open_attempt(db, chosen.id) is None
+    assert _activations(db, chosen.id) == (1 if operation == "start" else 0)
 
 
-def test_a_start_names_the_topmost_ready_task_and_ranks_among_open_tasks(db):
+def test_a_refusal_names_the_topmost_ready_task_and_counts_only_open_tasks(db):
     plan = owner_plan(db)
     gone = task(db, plan.id, "No longer wanted")
     service.transition_node(gone.id, "closed", db=db)
@@ -144,72 +166,104 @@ def test_a_start_names_the_topmost_ready_task_and_ranks_among_open_tasks(db):
     task(db, plan.id, "Second ready")
     chosen = task(db, plan.id, "New ask")
 
-    result = _activate(db, plan.id, chosen.id)
-
-    assert result["jumped"] == _jumped_line("Topmost ready", top.id, 1, 3, chosen.id, 0)
+    assert _refused(db, plan.id, chosen.id) == _refusal("Topmost ready", top.id, chosen.id, 0)
 
 
-def test_a_start_names_the_top_level_task_a_nested_start_belongs_to(db):
+def test_a_nested_start_is_judged_by_the_top_level_item_it_belongs_to(db):
     plan = owner_plan(db)
     passed = task(db, plan.id, "Waiting P0 fix")
     phase = _phase(db, plan.id, "New initiative")
     child = task(db, plan.id, "First step", parent_id=phase.id)
 
-    result = _activate(db, plan.id, child.id)
+    assert _refused(db, plan.id, child.id) == _refusal(
+        "Waiting P0 fix", passed.id, phase.id, 0,
+    )
 
-    assert result["jumped"] == _jumped_line("Waiting P0 fix", passed.id, 1, 2, phase.id, 0)
+
+def test_order_inside_one_top_level_item_is_the_agents(db):
+    plan = owner_plan(db)
+    phase = _phase(db, plan.id, "Initiative")
+    task(db, plan.id, "First step", parent_id=phase.id)
+    second = task(db, plan.id, "Second step", parent_id=phase.id)
+
+    result = _activate(db, plan.id, second.id)
+
+    assert result["admission"]["condition"] == "running"
 
 
-def test_a_start_with_nothing_ready_above_has_no_jumped_line(db):
+def test_a_start_with_nothing_ready_above_runs(db):
     plan = owner_plan(db)
     chosen = task(db, plan.id, "Topmost task")
     task(db, plan.id, "Below it")
 
     result = _activate(db, plan.id, chosen.id)
 
-    assert "jumped" not in result
     assert result["admission"]["condition"] == "running"
 
 
 @pytest.mark.parametrize("scene", sorted(NOT_READY_SCENES))
-def test_a_start_has_no_jumped_line_when_everything_above_is_not_ready(db, scene):
+def test_a_start_runs_when_everything_above_is_started_or_waiting(db, scene):
     plan = owner_plan(db)
     NOT_READY_SCENES[scene](db, plan.id)
     chosen = task(db, plan.id, "New ask")
 
     result = _activate(db, plan.id, chosen.id)
 
-    assert "jumped" not in result
     assert result["admission"]["condition"] == "running"
 
 
-def test_a_start_that_does_not_take_the_slot_has_no_jumped_line(db):
+def test_a_start_after_reordering_above_the_ready_task_runs(db):
+    plan = owner_plan(db)
+    passed = task(db, plan.id, "Waiting P0 fix")
+    chosen = task(db, plan.id, "New ask")
+    _refused(db, plan.id, chosen.id)
+    plan_update(db, plan.id, "reorder", {
+        "node_id": chosen.id, "expected_revision": revision(db, chosen.id), "order_key": 0,
+    })
+
+    result = _activate(db, plan.id, chosen.id)
+
+    assert result["admission"]["condition"] == "running"
+    assert service._node_row(db, passed.id)["state"] == "pending"
+
+
+def test_the_persons_own_start_is_never_refused(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "Waiting P0 fix")
+    chosen = task(db, plan.id, "The person's pick")
+
+    result = _activate(db, plan.id, chosen.id, actor=HUMAN)
+
+    assert result["admission"]["condition"] == "running"
+
+
+def test_a_start_behind_a_held_slot_with_nothing_ready_above_reports_the_conflict(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
     select(db, plan.id, current.id)
-    task(db, plan.id, "Ready work")
     blocked = task(db, plan.id, "New ask")
 
     result = _activate(db, plan.id, blocked.id)
 
-    assert "jumped" not in result
     assert result["admission"]["conflict"]["selected_node_id"] == current.id
     assert service._node_row(db, blocked.id)["state"] == "pending"
 
 
-def test_starting_a_task_that_already_holds_its_slot_has_no_jumped_line(db):
+def test_restarting_a_task_that_holds_its_slot_is_not_refused(db):
     plan = owner_plan(db)
-    task(db, plan.id, "Waiting P0 fix")
-    chosen = task(db, plan.id, "New ask")
-    first = _activate(db, plan.id, chosen.id)
-    assert "jumped" in first
+    chosen = task(db, plan.id, "Current work")
+    _activate(db, plan.id, chosen.id)
+    newer = task(db, plan.id, "Newer ready work")
+    plan_update(db, plan.id, "reorder", {
+        "node_id": newer.id, "expected_revision": revision(db, newer.id), "order_key": 0,
+    })
 
     again = _activate(db, plan.id, chosen.id, "start")
 
-    assert "jumped" not in again
+    assert again["admission"]["condition"] == "running"
 
 
-def test_an_auto_selected_start_has_no_jumped_line(db):
+def test_an_auto_selected_start_is_not_refused(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
     queued = task(db, plan.id, "Queued work")
@@ -222,11 +276,10 @@ def test_an_auto_selected_start_has_no_jumped_line(db):
     block = next_block(result)
     assert block["selected"]["id"] == queued.id
     assert block["selected"]["how"] == "auto_selected"
-    assert "jumped" not in result
     assert "named" not in block
 
 
-def test_a_next_node_id_start_ahead_of_a_ready_task_reports_what_it_jumped(db):
+def test_a_next_node_id_start_ahead_of_a_ready_task_is_refused(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
     passed = task(db, plan.id, "Waiting P0 fix")
@@ -235,13 +288,17 @@ def test_a_next_node_id_start_ahead_of_a_ready_task_reports_what_it_jumped(db):
 
     block = next_block(close(db, plan.id, "fail", current.id, next_node_id=chosen.id))
 
-    assert block["named"]["started"] is True
-    assert block["named"]["jumped"] == _jumped_line(
-        "Waiting P0 fix", passed.id, 1, 2, chosen.id, 0,
-    )
+    assert passed.id
+    assert block["named"] == {
+        "reason": "start Waiting P0 fix first (ready, above this task) or reorder this task above it",
+        "refusal": "out_of_order",
+        "started": False,
+    }
+    assert service._node_row(db, chosen.id)["state"] == "pending"
+    assert _activations(db, chosen.id) == 0
 
 
-def test_a_next_node_id_start_with_nothing_ready_above_has_no_jumped_line(db):
+def test_a_next_node_id_start_with_nothing_ready_above_runs(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
     chosen = task(db, plan.id, "Next work")
@@ -250,39 +307,16 @@ def test_a_next_node_id_start_with_nothing_ready_above_has_no_jumped_line(db):
     block = next_block(close(db, plan.id, "fail", current.id, next_node_id=chosen.id))
 
     assert block["named"]["started"] is True
-    assert "jumped" not in block["named"]
 
 
-# --- T3: the start event carries the jump -----------------------------------
-
-
-def test_a_jumping_activation_records_the_passed_task_on_its_event(db):
+def test_a_start_of_work_that_could_not_run_anyway_reports_its_own_blocker(db):
     plan = owner_plan(db)
-    passed = task(db, plan.id, "Waiting P0 fix")
-    chosen = task(db, plan.id, "New ask")
+    task(db, plan.id, "Waiting P0 fix")
+    chosen = task(db, plan.id, "Paused ask")
+    queue_active(db, chosen.id)
+    pause(db, plan.id, chosen.id)
 
-    _activate(db, plan.id, chosen.id)
+    with pytest.raises(service.PlanError) as refused:
+        _activate(db, plan.id, chosen.id, "start")
 
-    assert _activation_payload(db, chosen.id) == {"jumped_ready_node_id": passed.id}
-
-
-def test_a_jumping_next_node_id_activation_records_the_passed_task_on_its_event(db):
-    plan = owner_plan(db)
-    current = task(db, plan.id, "Current work")
-    passed = task(db, plan.id, "Waiting P0 fix")
-    chosen = task(db, plan.id, "New ask")
-    select(db, plan.id, current.id)
-
-    close(db, plan.id, "fail", current.id, next_node_id=chosen.id)
-
-    assert _activation_payload(db, chosen.id) == {"jumped_ready_node_id": passed.id}
-
-
-def test_an_activation_that_jumps_nothing_records_no_payload(db):
-    plan = owner_plan(db)
-    chosen = task(db, plan.id, "Topmost task")
-    task(db, plan.id, "Below it")
-
-    _activate(db, plan.id, chosen.id)
-
-    assert _activation_payload(db, chosen.id) is None
+    assert "not ready to start" in str(refused.value)

@@ -44,7 +44,7 @@ def test_one_event_is_emitted_after_commit_with_only_content_free_properties(db,
     capture = EventCapture(db).install(monkeypatch)
     receipts_before = receipt_count(db)
 
-    close(db, plan.id, "request_review", task_a.id, next_node_id=task_b.id)
+    close(db, plan.id, "request_review", task_a.id, next_node_id=queued.id)
 
     [event] = capture.close_events()
     assert event["in_transaction"] is False
