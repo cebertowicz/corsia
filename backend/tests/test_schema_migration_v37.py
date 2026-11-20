@@ -34,19 +34,20 @@ def _strand(db, node_id: str, on: str) -> None:
 
 
 def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch):
-    assert SCHEMA_VERSION == 204
+    assert SCHEMA_VERSION == 205
     db = _db(monkeypatch)
     try:
         plan, step = _plain_step(db)
+        # Rejected twice: the step, then its first revision.
+        _reject(db, plan.id, step.id)
+        first = _revision_of(db, step.id)["id"]
+        _start(db, plan.id, first)
+        # Added once the revision is current, so they rank below the work it does.
         waiting, settled, doubled = (
             service.add_node(plan.id, kind="task", title=title, acceptance_criteria="Done", db=db)
             for title in ("Ship it", "Old follow-on", "Worked around")
         )
         db.commit()
-        # Rejected twice: the step, then its first revision.
-        _reject(db, plan.id, step.id)
-        first = _revision_of(db, step.id)["id"]
-        _start(db, plan.id, first)
         submit_review_evidence(first, db=db, actor_id="parent")
         _reject(db, plan.id, first)
         newest = _revision_of(db, first)["id"]

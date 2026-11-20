@@ -116,8 +116,8 @@
 	{#if view.connection === 'connected' && view.deviceError}
 		<div class="live-block" role="status">Changes aren't saved on this device; keep this tab open. <Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button></div>
 	{/if}
-	{#if settling}<div class="live-block" role="status">This write is still settling. The file may already have changed; saving on the server is not confirmed.</div>{/if}
-	{#if view.held}<div class="live-block" role="status">This file changed outside CORSIA while a write was being saved.</div>{/if}
+	{#if settling}<div class="live-block" role="status">Still saving. If it doesn’t finish, open Details to reload the latest version.</div>{/if}
+	{#if view.held}<div class="live-block" role="status">Couldn’t save because this document changed during the save. Open Details to choose which text to keep.</div>{/if}
 	{#if view.recovery.length}<div class="live-block" role="status">This document was reset on the server. Your unsaved text is on this device.</div>{/if}
 	{#if view.failureLines.length}
 		<div class="live-block" role="status">
@@ -133,7 +133,7 @@
 
 {#snippet details()}
 	{#if settling}
-		<p>Read the document before writing again.</p>
+		<p>Show the latest version before you save again.</p>
 		<Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button>
 		<Button size="sm" variant="ghost" onclick={onRead}>Reload</Button>
 	{/if}

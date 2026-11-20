@@ -427,7 +427,7 @@ def test_success_that_settled_its_own_task_still_clears_the_reset(isolated_db):
     assert _wake(thread_id)["provider_reset_at"] is None
 
 
-def test_new_unknown_error_replaces_an_older_known_reset_with_generic_liveness(isolated_db):
+def test_new_unknown_error_ends_an_older_known_reset_and_the_retries(isolated_db):
     thread_id = mk_session("provider-reset-new-unknown")
     _start_selected_turn(thread_id, "first-turn")
     _terminal_error(thread_id, "first-turn", error=_PROVIDER_ERROR, clears_at=_RESET)
@@ -451,7 +451,7 @@ def test_new_unknown_error_replaces_an_older_known_reset_with_generic_liveness(i
     )
     wake = _wake(thread_id)
     assert wake["provider_reset_at"] is None
-    assert wake["deadline"] != _RESET
+    assert wake["status"] == "cancelled"
     current = dict(wake)
     plan_liveness_terminal.on_thread_turn_complete(
         thread_id, outcome="error", error=_PROVIDER_ERROR,
@@ -462,19 +462,15 @@ def test_new_unknown_error_replaces_an_older_known_reset_with_generic_liveness(i
 
 
 @pytest.mark.asyncio
-async def test_unknown_provider_refusal_keeps_waking_on_the_generic_backoff(isolated_db):
+async def test_unknown_provider_refusal_is_not_retried_on_a_backoff(isolated_db):
+    """No reset time and no limit: the thread stays idle until a message wakes it."""
     thread_id = mk_session("provider-reset-unknown")
     _start_selected_turn(thread_id, "unknown-turn")
 
     _terminal_error(thread_id, "unknown-turn", error="Provider unavailable")
     db = get_db()
     wake = _wake(thread_id)
-    assert wake["provider_reset_at"] is None
-    db.execute(
-        "UPDATE plan_liveness_wakes SET deadline=?,cycle=? WHERE thread_id=?",
-        ("2000-01-01T00:00:00+00:00", 6, thread_id),
-    )
-    db.commit()
+    assert wake is None or wake["status"] == "cancelled"
 
     delivered: list[tuple] = []
 
@@ -487,9 +483,8 @@ async def test_unknown_provider_refusal_keeps_waking_on_the_generic_backoff(isol
         db=db,
         deliver=deliver,
     )
-    assert result["woken"] == [thread_id]
-    assert len(delivered) == 1
-    assert _wake(thread_id)["cycle"] == 7
+    assert result["woken"] == []
+    assert delivered == []
 
 
 def test_stale_terminal_without_current_selection_cannot_install_reset(isolated_db):

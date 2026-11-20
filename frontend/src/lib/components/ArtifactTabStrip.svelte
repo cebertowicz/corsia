@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { documentBar } from '$lib/stores/documentBar';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
 		tabs: ArtifactTab[];
@@ -77,7 +78,7 @@
 	}
 </script>
 
-<div class="strip">
+<div class="strip" data-document-bar-row>
 	<div
 		class="tabs"
 		class:start-hidden={startHidden}
@@ -134,6 +135,8 @@
 			</div>
 		{/each}
 	</div>
+	<!-- The open document's Comments and Details sit after the tabs, before Collapse. -->
+	{#if $documentBar}<span class="doc-tools">{@render $documentBar.tools()}</span>{/if}
 	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
 	</button>
@@ -146,6 +149,9 @@
 		padding: 0 6px 0 10px;
 		border-bottom: 1px solid var(--border-subtle);
 		background: var(--glass-thin);
+		/* The row's own room, not the window's, is what the published document's bar competes with, so the row is the
+		 * container the bar's and the tab's narrow forms are keyed to. */
+		container-type: inline-size; container-name: strip;
 	}
 	.tabs {
 		display: flex; align-items: stretch; flex: 1; min-width: 0;
@@ -194,6 +200,18 @@
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }
 
+	.doc-tools { display: inline-flex; flex: none; padding-inline: var(--space-2); }
+	/* The thresholds are in rem, not px: what this row needs is set by its text, so it has to move with the reader's
+	 * font size. 35.5rem = 568px, 27rem = 432px at the default 16px root. */
+	@container strip (max-width: 35.5rem) {
+		/* 1. The bar gives way first: its side padding, then its gaps (DocViewerStatus), to the tight rung. */
+		.doc-tools { padding-inline: var(--space-1); }
+	}
+	@container strip (max-width: 27rem) {
+		/* 3. Only when the bar has nothing left to give does the tab shorten, by its own truncation, and it keeps a whole
+		 * close inside the row: a tab drawn past the row's clip is painted but not clickable, and no inset gives that back. */
+		.tab-wrap { flex-shrink: 1; min-width: 6rem; }
+	}
 	.collapse-btn {
 		display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 		width: 28px; height: 28px; margin-left: 4px; border-radius: var(--radius-xs);

@@ -118,15 +118,17 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			if (!taken) settle(started, (current) => { current.errors = { ...current.errors, [id]: 'Couldn’t resolve this. Try again.' }; });
 			return taken;
 		}
-		async function acceptAllFrom(author: string, id: string) {
-			if (acceptAllBusy !== null) return;
+		async function acceptAllFrom(author: string, id: string): Promise<boolean> {
+			if (acceptAllBusy !== null) return false;
 			const started = outcome;
 			acceptAllBusy = author; started.acceptAllShownBusy = author; started.acceptAllError = '';
 			try {
 				await submitSuggestionDecision(id, 'accept', true);
+				return true;
 			} catch (error) {
 				const text = reason(error, 'Couldn’t accept the suggestions. Try again.', { id, decision: 'accept', allFromAuthor: true });
 				settle(started, (current) => { current.acceptAllError = text; });
+				return false;
 			} finally {
 				acceptAllBusy = null;
 				settle(started, (current) => { current.acceptAllShownBusy = null; });

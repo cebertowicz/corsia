@@ -2,18 +2,18 @@
 import sqlite3
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_203_to_204_suggestion_history import migrate_203_to_204
+from infra.migration_204_to_205_suggestion_history import migrate_204_to_205
 from infra.schema import SCHEMA_VERSION
 
 
 def test_suggestion_history_migration_is_registered_and_preserves_existing_rows():
-    assert SCHEMA_VERSION == 204
-    assert MIGRATIONS[203] is migrate_203_to_204
+    assert SCHEMA_VERSION == 205
+    assert MIGRATIONS[204] is migrate_204_to_205
     db = sqlite3.connect(':memory:')
     try:
         db.execute('CREATE TABLE existing (value TEXT NOT NULL)')
         db.execute("INSERT INTO existing VALUES ('kept')")
-        migrate_203_to_204(db)
+        migrate_204_to_205(db)
         db.execute(
             "INSERT INTO doc_suggestion_history VALUES (?, ?, ?, ?, ?, ?, ?)",
             ('event', 'artifact', '[]', '{}', 'before', 'after', 'accepted'),

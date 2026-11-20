@@ -94,10 +94,7 @@ def record_terminal_harness_limit(
 
 def _record(connection: sqlite3.Connection, turn_id: str, message: str, account: list[str]) -> bool:
     """Write the limited verdict; False when no harness account can be named."""
-    from automation.provider_reset_liveness import deadline
-    from connections.harness_usage import record_limited
     from llm.model_status import harness_connection_for_model
-    from subagents.provider_usage_limits import model_scope_from_limit
 
     # The refusal belongs to the model that ran this Turn, not a later switch.
     row = connection.execute("SELECT model FROM active_turns WHERE id=?", (turn_id,)).fetchone()
@@ -113,13 +110,22 @@ def _record(connection: sqlite3.Connection, turn_id: str, message: str, account:
         log.warning('%s refusal on turn %s not recorded: the Turn has no login receipt', provider, turn_id)
         return False
     account.append(provider)
+    record_limit_text(provider, message, receipt, connection)
+    return True
+
+
+def record_limit_text(provider: str, message: str, receipt, connection: sqlite3.Connection) -> None:
+    """Record a refusal named only by its text on the login ``receipt`` names."""
+    from automation.provider_reset_liveness import deadline
+    from connections.harness_usage import record_limited
+    from subagents.provider_usage_limits import model_scope_from_limit
+
     reset = deadline(message)
     record_limited(
         provider=provider, reason=message[:_REASON_LIMIT],
         resets_at=reset.isoformat() if reset else None,
         scope_model=model_scope_from_limit(message), source="turn_error", receipt=receipt, db=connection,
     )
-    return True
 
 
 def settle_terminal_limits(

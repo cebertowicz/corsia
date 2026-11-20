@@ -345,16 +345,17 @@ async def test_cc_terminal_surfaces_plan_completion_failure(isolated_db):
 
 
 @pytest.mark.parametrize(
-    ("step_type", "payload", "expected_calls"),
+    ("step_type", "payload", "expected_calls", "liveness_call"),
     [
-        ("turn_complete", {}, 1),
-        ("error", {"message": "failed"}, 1),
-        ("turn_cancelled", {"_replacement_requested": True}, 0),
+        ("turn_complete", {}, 1, "on_turn_complete"),
+        # A plain error ends the thread's retries: its wake is cancelled, not re-armed.
+        ("error", {"message": "failed"}, 1, "cancel_plan_wake"),
+        ("turn_cancelled", {"_replacement_requested": True}, 0, "on_turn_complete"),
     ],
 )
 @pytest.mark.asyncio
 async def test_native_terminal_calls_the_shared_hook_unless_cancelled(
-    isolated_db, monkeypatch, step_type, payload, expected_calls, caplog,
+    isolated_db, monkeypatch, step_type, payload, expected_calls, liveness_call, caplog,
 ):
     """F1: a native/local Turn that errors still reaches plan liveness, via
     ``_handle_error``'s own call rather than the turn-complete handler's --
@@ -377,7 +378,7 @@ async def test_native_terminal_calls_the_shared_hook_unless_cancelled(
     completion = MagicMock()
     sink = logger.add(caplog.handler, level="INFO", format="{message}")
     try:
-        with patch("automation.plan_liveness.on_turn_complete", completion):
+        with patch(f"automation.plan_liveness.{liveness_call}", completion):
             await handler.handle(step_type, payload)
     finally:
         logger.remove(sink)

@@ -37,7 +37,7 @@ function compact(overrides: Record<string, unknown> = {}) {
 }
 
 describe('syncCanvasHeader — compact artifact', () => {
-	it('takes over with Back to chat, the tab title, and a tab-count action', () => {
+	it('takes over with Back to chat and the tab title, which opens the open-files list', () => {
 		const onBack = vi.fn();
 		const onTabs = vi.fn();
 		syncCanvasHeader(makeInput({
@@ -48,19 +48,20 @@ describe('syncCanvasHeader — compact artifact', () => {
 		const h = get(canvasHeader);
 		expect(h?.title).toBe('Design.md');
 		expect(h?.backLabel).toBe('Chat');
-		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Files (2)', title: 'Show open files', active: false });
+		expect(h?.actions).toBeUndefined();
+		expect(h?.titleAction).toMatchObject({ label: 'Open files, 2', title: 'Show open files', changed: false });
 		h?.onBack?.();
 		expect(onBack).toHaveBeenCalledOnce();
-		h?.actions?.[0].onClick();
+		h?.titleAction?.onClick();
 		expect(onTabs).toHaveBeenCalledOnce();
 	});
 
-	it('marks the tabs action when any tab has changed', () => {
+	it('marks the title action when any tab has changed', () => {
 		syncCanvasHeader(makeInput({
 			compactArtifact: compact({ anyChanged: true }),
 			activeView: 'chat',
 		}));
-		expect(get(canvasHeader)?.actions?.[0]).toMatchObject({ active: true });
+		expect(get(canvasHeader)?.titleAction).toMatchObject({ changed: true });
 	});
 
 	it('yields to true modal takeovers', () => {

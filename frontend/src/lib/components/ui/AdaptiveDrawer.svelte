@@ -279,7 +279,7 @@
 	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(calc(46dvh + var(--drawer-pull)), 82dvh, calc(100dvh - max(16px, var(--safe-top)))); }
-	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull)), calc(var(--drawer-h) * 0.82)); }
+	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull) + var(--drawer-half-extra, 0px)), calc(var(--drawer-h) * 0.82)); }
 	.drawer-panel:focus {
 		outline: none;
 	}

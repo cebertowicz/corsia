@@ -1,4 +1,4 @@
-"""Schema 203 -> 204: bind non-live suggestion decisions to their document states."""
+"""Schema 204 -> 205: bind non-live suggestion decisions to their document states."""
 
 import logging
 import sqlite3
@@ -9,7 +9,7 @@ from infra.suggestion_history_schema import SUGGESTION_HISTORY_SCHEMA_SQL
 log = logging.getLogger(__name__)
 
 
-def migrate_203_to_204(db: sqlite3.Connection) -> None:
+def migrate_204_to_205(db: sqlite3.Connection) -> None:
     """Create the receipt table in the migration runner's transaction."""
     started = time.monotonic()
     db.execute(SUGGESTION_HISTORY_SCHEMA_SQL)

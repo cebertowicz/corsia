@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { get } from 'svelte/store';
 	import { onDestroy } from 'svelte';
-	import AvatarStack from './ui/AvatarStack.svelte';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import {
@@ -21,14 +20,14 @@
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import type { DocComment } from '$lib/stores/docComments';
 
-	type DocState = 'loading' | 'ready' | 'error';
-	type PresenceParticipant = {
+	export type PresenceParticipant = {
 		id: string;
 		name: string;
 		color: string;
 		detail?: string;
 		active?: boolean;
 	};
+	export type PresenceView = { artifactId: string | null; instanceId: string; participants: PresenceParticipant[] };
 	type CleanReload = () => void | Promise<void>;
 	type PresencePayload =
 		| { kind: 'edit'; reveal: CleanReload }
@@ -38,7 +37,6 @@
 	let {
 		target,
 		artifactId = null,
-		docState = 'loading',
 		root = null,
 		ranges = $bindable<PresenceRange[]>([]),
 		onPrepareCleanReload,
@@ -46,10 +44,10 @@
 		onArrival,
 		projectComment = (comment: DocComment) => comment,
 		textCurrent = true,
+		presenceView = $bindable<PresenceView | null>(null),
 	}: {
 		target: DocViewerTarget;
 		artifactId?: string | null;
-		docState?: DocState;
 		/** The document canvas this status sits beside; its editor, when mounted, runs a comment's select. */
 		root?: HTMLElement | null;
 		ranges?: PresenceRange[];
@@ -59,6 +57,7 @@
 		projectComment?: (comment: DocComment) => DocComment;
 		/** False while the canvas's live text is away (opening or reconnecting), when an arrival cannot type in it. */
 		textCurrent?: boolean;
+		presenceView?: PresenceView | null;
 	} = $props();
 
 	let clock = $state(Date.now());
@@ -79,6 +78,8 @@
 			active: agent.arrivalActive,
 		}));
 	});
+
+	$effect(() => { presenceView = { artifactId, instanceId: target.instanceId, participants }; });
 
 	$effect(() => {
 		ranges = recentAgents
@@ -194,15 +195,5 @@
 		notifyDocPresenceViewingChanged(artifactId);
 	});
 
-	onDestroy(() => { ranges = []; });
+	onDestroy(() => { ranges = []; presenceView = null; });
 </script>
-
-{#if docState === 'ready' && participants.length}
-	<div class="presence-row" aria-label="Recent document activity">
-		<AvatarStack people={participants} max={3} />
-	</div>
-{/if}
-
-<style>
-	.presence-row { align-self: center; display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-tertiary); font-size: var(--text-caption); }
-</style>

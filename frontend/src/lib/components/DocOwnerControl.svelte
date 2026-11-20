@@ -19,8 +19,19 @@
 	let pending = $state<{ role: Role; id: string; name: string } | null>(null);
 	let failed = $state<{ role: Role; message: string } | null>(null);
 	let group = $state<HTMLElement>();
-	// The picker opens below both items, so it never covers the other one when they wrap onto two lines.
+	let rowWidth = $state(0);
+	// The picker spans the Details content row, and opens below both items even when they wrap.
+	const rowRect = () => group?.parentElement?.getBoundingClientRect() ?? null;
 	const bothItems = () => group?.getBoundingClientRect() ?? null;
+	$effect(() => {
+		const row = group?.parentElement;
+		if (!row) return;
+		const measure = () => { rowWidth = row.getBoundingClientRect().width; };
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(row);
+		return () => observer.disconnect();
+	});
 
 	const ownerName = $derived(pending?.role === 'owner' ? pending.name : ownership.owner.label);
 	const ownerId = $derived(pending?.role === 'owner' ? pending.id : ownership.owner.kind === 'person' ? 'user' : ownership.owner.id);
@@ -99,7 +110,7 @@
 	{/if}
 </span>
 
-<Popover {anchor} avoidRect={bothItems} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width="min(320px, calc(100vw - 16px))" onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
+<Popover anchor={rowRect} avoidRect={bothItems} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width={`${rowWidth}px`} onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>

@@ -6,7 +6,7 @@ import { captureComment, selectComment, selectionRange, RESERVE_BUDGET_MS, SELEC
 import { encodeUpdate, type DocumentFrame } from './documentWire';
 
 const documents: Y.Doc[] = [], sessions: LiveDocumentSession[] = [];
-afterEach(() => { sessions.splice(0).forEach(session => session.destroy()); documents.splice(0).forEach(doc => doc.destroy()); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); sessions.splice(0).forEach(session => session.destroy()); documents.splice(0).forEach(doc => doc.destroy()); vi.useRealTimers(); vi.restoreAllMocks(); });
 function opened() {
 	const server = new Y.Doc(); server.clientID = 1; server.getText('text').insert(0, 'alpha beta gamma');
 	const doc = new Y.Doc(), sent: Record<string, unknown>[] = [];
@@ -38,6 +38,15 @@ it('asks for the selection under a fresh client id with the browser\'s state, an
 	value.answer(); await request;
 	expect(received).toHaveBeenCalledWith(expect.objectContaining({ from: 6, to: 10, quote: 'beta', clientId: value.reserve().client_id }));
 	expect(value.released()).toEqual([]);
+});
+it('hashes the selection’s document by software when the browser has no WebCrypto, to the same wire digest', async () => {
+	const value = opened();
+	const real = globalThis.crypto;
+	vi.stubGlobal('crypto', { randomUUID: () => real.randomUUID() });
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	await value.asked(1);
+	expect(value.reserve().digest).toBe(createHash('sha256').update('alpha beta gamma').digest('hex').slice(0, 16));
+	value.answer(); await request;
 });
 it('asks again after a refusal and succeeds once the server holds the state it hashed, under the same id', async () => {
 	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);

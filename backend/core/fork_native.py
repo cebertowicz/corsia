@@ -222,7 +222,7 @@ def _provider_failure(response, kind: ForkKind) -> None:
     detail = response.content or f"Native {kind.name} provider call failed"
     if response.endpoint_failure == "auth":
         raise ForkCredentialsUnavailable(detail)
-    kind.provider_failure("native", detail)
+    kind.provider_failure("native", detail, None)
 
 
 async def _measured_after(

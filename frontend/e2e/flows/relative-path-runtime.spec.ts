@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,7 +110,7 @@ for (const theme of ['light', 'dark'] as const) {
 		const opened = await revision();
 		expect(opened.artifact_id).toBeTruthy();
 		await page.screenshot({ path: path.join(out, `${theme}-${mobile ? '393' : '1440'}-opened.png`), animations: 'disabled' });
-		if (mobile) await page.getByRole('button', { name: 'Chat', exact: true }).tap();
+		if (mobile) await backToChat(page).tap();
 		await expect(target).toBeVisible();
 		const chatVisible = await target.isVisible();
 		fs.writeFileSync(path.join(out, `${theme}-${mobile ? '393' : '1440'}-receipt.json`), JSON.stringify({

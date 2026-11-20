@@ -6,7 +6,8 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
-import { resolvedList } from '../support/commentDrawer';
+import { openResolved, resolvedList } from '../support/commentDrawer';
+import { openDetails } from '../support/documentBar';
 import { editorText } from '../support/liveDocument';
 
 /**
@@ -18,6 +19,43 @@ import { editorText } from '../support/liveDocument';
 
 // A skill file must load as a skill, so the history document opens with its front matter.
 const SKILL_TEXT = `---\nname: demo\ndescription: A test skill.\n---\n\n${TEXT}`;
+
+async function expectFirstCardAtColumnOrLine(page: Page, ids: string[]) {
+	const [first] = await geometry(page, ids);
+	const { top, aboveBottom } = await page.locator('.drawer-comments.in-margin').evaluate((column) => ({
+		top: column.getBoundingClientRect().top,
+		aboveBottom: column.previousElementSibling!.getBoundingClientRect().bottom,
+	}));
+	expect(Math.abs(first.card!.top - Math.max(first.line!, top)), 'first card is at its line or column top').toBeLessThanOrEqual(1);
+	expect(first.card!.top, 'first card does not overlap the preceding control').toBeGreaterThanOrEqual(aboveBottom);
+	const conflicts = await page.locator('.canvas-comment-drawer.margin').evaluate((drawer) => {
+		const column = drawer.querySelector('.drawer-comments.in-margin')!;
+		const heads = [...drawer.children].filter((el) => el !== column).flatMap((el) => [el, ...el.querySelectorAll('*')]);
+		const cards = [...column.querySelectorAll('[data-margin-card]')];
+		const overlaps: string[] = [];
+		for (const card of cards) {
+			const c = card.getBoundingClientRect();
+			for (const head of heads) {
+				const h = head.getBoundingClientRect();
+				if (h.width && h.height && c.left < h.right && c.right > h.left && c.top < h.bottom && c.bottom > h.top) overlaps.push(`${card.getAttribute('data-margin-card')} / ${head.tagName}.${head.className}`);
+			}
+			const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+			while (walker.nextNode()) {
+				const text = walker.currentNode;
+				if (!text.textContent?.trim()) continue;
+				const range = document.createRange(); range.selectNodeContents(text);
+				for (const rect of range.getClientRects()) {
+					const x = (rect.left + rect.right) / 2, y = (rect.top + rect.bottom) / 2;
+					if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) continue;
+					const hit = document.elementFromPoint(x, y);
+					if (hit && heads.some((head) => head === hit || head.contains(hit))) overlaps.push(`${card.getAttribute('data-margin-card')} text covered by ${hit.tagName}.${hit.className}`);
+				}
+			}
+		}
+		return overlaps;
+	});
+	expect(conflicts, 'column head does not cover any card or its visible text').toEqual([]);
+}
 
 test.beforeEach(async ({ page }, info) => {
 	if (info.project.name === 'chromium-desktop') await page.setViewportSize({ width: 1440, height: 900 });
@@ -35,21 +73,18 @@ test('@flow:doc-margin-cards every open thread is a card beside its text, a clus
 	const rects = (await geometry(page, doc.ids)).filter((row) => row.card).map((row) => row.card!);
 	const sorted = [...rects].sort((a, b) => a.top - b.top);
 	for (let i = 1; i < sorted.length; i++) expect(sorted[i].top, 'cards do not overlap').toBeGreaterThanOrEqual(sorted[i - 1].bottom - 0.5);
-	// The first comment is alone on its line: its card sits level with the text.
-	const [first] = await geometry(page, doc.ids);
-	expect(Math.abs(first.card!.top - first.line!), 'a lone card sits beside its line').toBeLessThanOrEqual(12);
+	// The first card sits at its line unless the controls above the column block it.
+	await expectFirstCardAtColumnOrLine(page, doc.ids);
 	// Alpha and bravo share a line: bravo stacks below alpha instead of covering it.
 	const [, alpha, bravo] = await geometry(page, doc.ids);
 	expect(bravo.card!.top).toBeGreaterThanOrEqual(alpha.card!.bottom - 0.5);
 	expect(alpha.card!.left).toBeCloseTo(bravo.card!.left, 0);
-	// The stack rule, for every card at rest taken in order down the column: it sits level with its line (the lone first card shows the offset between a card's top and its line),
-	// or, where the card above reaches that line, directly under it with the 8 px gap (placeCards' GAP).
-	const offset = first.card!.top - first.line!;
+	// Each later card sits at its line or directly under the card above it with the 8 px gap (placeCards' GAP).
 	// The column places cards as the text lays out, so the rule is read once they have settled.
 	await expect.poll(async () => {
 		const rows = (await geometry(page, doc.ids)).filter((row) => row.card && row.line != null).sort((a, b) => a.card!.top - b.card!.top);
 		if (rows.length !== doc.ids.length) return Infinity;
-		return Math.max(...rows.map((row, i) => Math.abs(row.card!.top - Math.max(row.line! + offset, i ? rows[i - 1].card!.bottom + 8 : -Infinity))));
+		return Math.max(...rows.slice(1).map((row, i) => Math.abs(row.card!.top - Math.max(row.line!, rows[i].card!.bottom + 8))));
 	}, { message: 'every card level with its line, or directly under the card above it' }).toBeLessThan(0.5);
 	// At rest a card is the comment, its replies and a suggestion's diff and buttons: no reply field and no quote line until it is picked.
 	for (const id of doc.ids) {
@@ -106,8 +141,13 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 		return column.scrollTop;
 	});
 	expect(columnScroll, 'the column itself did not scroll').toBe(0);
-	const [first] = await geometry(page, doc.ids);
-	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
+	await expectFirstCardAtColumnOrLine(page, doc.ids);
+	const rows = (await geometry(page, doc.ids)).sort((a, b) => a.card!.top - b.card!.top);
+	for (let i = 1; i < rows.length; i++) {
+		if (rows[i].line! >= rows[i - 1].card!.bottom + 8) {
+			expect(Math.abs(rows[i].card!.top - rows[i].line!), 'unblocked card stays beside its line').toBeLessThanOrEqual(12);
+		}
+	}
 });
 
 test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in document order with a focus ring, and Escape goes back', async ({ page, request }, info) => {
@@ -261,7 +301,7 @@ test('@flow:doc-margin-cards the drawer lists only resolved threads, newest reso
 	// Resolved threads have left the column; the rest stay.
 	await expect(card(page, doc, ALPHA)).toHaveCount(0);
 	await expect(card(page, doc, BRAVO)).toHaveCount(1);
-	await page.locator('[data-resolved-entry]').click();
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const order = () => resolvedList(page).locator('[data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
 	await expect.poll(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
 });
@@ -312,7 +352,8 @@ test('@flow:doc-margin-cards the column comes back when version history closes, 
 	await expect(page.locator('.cm-scroller')).toBeVisible();
 	await widen(page, doc);
 	await expect(card(page, doc, FIRST)).toBeVisible();
-	const history = page.getByRole('button', { name: 'History', exact: true });
+	// History sits in the Details panel and toggles the history drawer: open Details, as a person does, then press it.
+	const history = { click: async () => (await openDetails(page)).getByRole('button', { name: 'History', exact: true }).click() };
 	for (const close of ['the History button', 'the history drawer Close button'] as const) {
 		await history.click();
 		await expect(page.locator('[data-doc-history-drawer]')).toBeVisible();

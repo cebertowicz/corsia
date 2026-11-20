@@ -3,13 +3,16 @@
 // and the next box opened on the same document or image starts from it. A post that failed keeps the reason it gave.
 // A reply being typed on a document's or an image's thread is kept here the same way (`replyDraftKey`), with its caret, until
 // it posts or the person empties its field, so leaving the viewer (another conversation, tab or pane) and coming back finds it.
-// It lives as long as the page, as a chat comment's draft does (`chatCommentDrafts`). From the first press of Comment
+// It is also kept on this device under the signed-in person (`keptCommentDraftsStorage`), so a reload, a quit or an
+// update restart finds it; the person's own Sign out clears it, an expired session does not. From the first press of Comment
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { clippedWindow } from '$lib/cm/visible-region';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { onSignOut, user } from './auth';
 import { newClientId } from './documentWire';
+import { createDraftStorage, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
 import { toasts } from './toast';
 
 export type MentionSelection = ReturnType<typeof createMentionSelection>;
@@ -27,23 +30,96 @@ const sameTags = (tags: MentionSelection, body: string, sent: string[]) => tagsO
  * reads (a map-wide version would re-run every card without a draft on each keystroke). Raw, so the tags object is
  * kept as it is, not proxied.
  */
-class Cell { draft = $state.raw<KeptCommentDraft | undefined>(); }
+class Cell {
+	draft = $state.raw<KeptCommentDraft | undefined>();
+	/** Why this device does not keep the draft, while it does not; its box says so under the text. */
+	notKept = $state<NotKept | null>(null);
+	/** The toast saying so, shown because no box of the draft was on screen when it stopped being kept. */
+	notKeptToast: string | undefined;
+}
 const cells = new Map<string, Cell>();
 const cell = (key: string): Cell => {
 	let found = cells.get(key);
 	if (!found) cells.set(key, found = new Cell());
 	return found;
 };
+/** The draft as this device keeps it: text, tags and id; an empty box keeps nothing. */
+const stored = (draft: KeptCommentDraft | undefined): StoredDraft | null => draft?.body
+	? { body: draft.body, tags: draft.mentionSelection.occurrences(draft.body), ...(draft.clientId ? { clientId: draft.clientId } : {}) }
+	: null;
+function restored({ body, tags, clientId }: StoredDraft): KeptCommentDraft {
+	const mentionSelection = createMentionSelection(body);
+	for (const tag of tags) mentionSelection.select(tag.agent_id, tag.start, body.slice(tag.start, tag.end));
+	return { body, mentionSelection, ...(clientId ? { clientId } : {}) };
+}
+/** Memory without storage: the draft goes from this page, and the toasts telling its failure or that it was not kept with it. */
+function drop(key: string): void {
+	const found = cells.get(key);
+	if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
+	if (found) { found.draft = undefined; notKept(key, null); }
+}
+/** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
+export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
+	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
+	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
+	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
+};
+/**
+ * Whether this device keeps the draft changed. Said in one place: the line under its box (which reads `notKept`), or, when
+ * no box of it is on screen at that moment, a toast, which goes once the draft is kept again, leaves, or its box comes on screen.
+ */
+function notKept(key: string, why: NotKept | null): void {
+	const found = why ? cell(key) : cells.get(key);
+	if (!found || found.notKept === why) return;
+	found.notKept = why;
+	if (found.notKeptToast) { toasts.dismiss(found.notKeptToast); found.notKeptToast = undefined; }
+	if (why && !keptCommentDrafts.onScreen(key)) found.notKeptToast = toasts.show(NOT_KEPT_MESSAGE[why], 'error');
+}
+/** `id`'s drafts leave memory and nothing more is kept for them: their Sign out, here or in another window. */
+function forget(id: string): void {
+	if (owner !== id) return;
+	for (const key of cells.keys()) drop(key);
+	owner = null;
+}
+const device = createDraftStorage({
+	read: (key) => stored(cells.get(key)?.draft),
+	// Another window changed it: this one follows, unless the person is typing in its box here.
+	changed: (key, draft) => {
+		if (focused(key)) return;
+		if (draft) cell(key).draft = restored(draft); else drop(key);
+	},
+	kept: notKept,
+	// Even a box the person is typing in: what they typed is theirs, and they signed out.
+	signedOut: forget,
+});
 const kept = {
 	get: (key: string) => cell(key).draft,
-	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; },
-	/** The draft goes, and the toast telling its failure with it: what it told of is posted, cancelled or cleared. */
-	delete: (key: string) => {
-		const found = cells.get(key);
-		if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
-		if (found) found.draft = undefined;
-	},
+	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; device.save(key); },
+	/** The draft goes, from this page and this device: what it held is posted, cancelled or cleared. */
+	delete: (key: string) => { drop(key); device.remove(key); },
 };
+
+/** Whose drafts memory holds: they are kept on this device under that id. */
+let owner: string | null = null;
+/**
+ * Someone is signed in. The same person again (a reconnect, or a sign-in after their session expired) changes nothing.
+ * Another person's drafts leave memory (they stay on the device under their id), and this person's come back. Drafts
+ * typed before anyone was signed in are this person's.
+ */
+function signedIn(id: string | null): void {
+	if (!id || id === owner) return;
+	// What the last person typed is on the device under their id already: every change is written as it happens.
+	if (owner) for (const key of cells.keys()) drop(key);
+	owner = id;
+	for (const [key, draft] of device.signIn(id)) if (!cells.get(key)?.draft) cell(key).draft = restored(draft);
+	for (const [key, found] of cells) if (found.draft) device.save(key);
+}
+user.subscribe((signed) => signedIn(signed?.id ?? null));
+/** The person's own Sign out: their drafts go from this page and from this device; another person's stay. */
+onSignOut((id) => {
+	device.signOut(id);
+	forget(id);
+});
 
 /**
  * The boxes on the page that show a draft's text and its reason (a new comment's composer, a reply's field, an image's box),
@@ -65,12 +141,18 @@ function register(key: string, box: Element): () => void {
  */
 function told(key: string, box: Element): boolean {
 	if (!onScreen(box)) return false;
-	const draft = kept.get(key);
+	const draft = kept.get(key), found = cells.get(key);
 	if (draft?.error && draft.toast) {
 		toasts.dismiss(draft.toast);
 		kept.set(key, { ...draft, toast: undefined });
 	}
+	if (found?.notKeptToast) { toasts.dismiss(found.notKeptToast); found.notKeptToast = undefined; }
 	return true;
+}
+/** The person is typing in a box showing this draft. */
+function focused(key: string): boolean {
+	const active = typeof document === 'undefined' ? null : document.activeElement;
+	return Boolean(active) && [...(boxes.get(key) ?? [])].some((box) => box.contains(active));
 }
 /**
  * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
@@ -112,6 +194,11 @@ export function replyDraftKey(scope: string, commentId: string): string {
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/** What the line under the draft's box says while this device does not keep it (`NOT_KEPT_MESSAGE`), else ''. */
+	notKept(key: string): string {
+		const why = key ? cell(key).notKept : null;
+		return why ? NOT_KEPT_MESSAGE[why] : '';
+	},
 	/**
 	 * A box showing this draft is mounted at `box` until the returned function is called (`showsDraft` calls it on unmount).
 	 * Coming on screen with a failure toast up for the draft, it takes the toast's place (`toast`).
@@ -202,5 +289,5 @@ export const keptCommentDrafts = {
 		return false;
 	},
 	/** Tests only: a fresh page. */
-	reset(): void { for (const found of cells.values()) found.draft = undefined; boxes.clear(); },
+	reset(): void { for (const found of cells.values()) { found.draft = undefined; found.notKept = null; found.notKeptToast = undefined; } boxes.clear(); device.reset(); owner = null; },
 };
