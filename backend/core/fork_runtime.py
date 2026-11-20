@@ -12,7 +12,8 @@ from typing import Any
 ForkHandler = Callable[..., Awaitable[Any]]
 ForkToolExecutor = Callable[..., Awaitable[str]]
 ForkUsageBinder = Callable[[Any], Awaitable[Any]]
-ForkProviderFailure = Callable[[str, str], None]
+#: (harness, error detail, structured cause or None) -> None, or raise to reject the fork.
+ForkProviderFailure = Callable[[str, str, str | None], None]
 ForkStepLimit = int | None | Callable[[Any], int | None]
 FORK_HARNESSES = frozenset({"native", "claude-code", "codex"})
 logger = logging.getLogger(__name__)
