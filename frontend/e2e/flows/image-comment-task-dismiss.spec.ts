@@ -5,7 +5,7 @@ import { test } from '../support/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { openThread, pill, seedImage, viewer } from '../support/imageRegionComments';
 
-for (const width of [393, 1440]) test(`image comment task is dismissed from the list at ${width}px`, async ({ page, request }, testInfo) => {
+for (const width of [393, 320, 1440]) test(`image comment task is dismissed from the list at ${width}px`, async ({ page, request }, testInfo) => {
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width, height: 900 });
 	const state = process.env.CORSIA_E2E_STATE_DIR;
@@ -24,6 +24,7 @@ for (const width of [393, 1440]) test(`image comment task is dismissed from the 
 	await expect(pill(page)).toHaveAccessibleName('4 comments');
 	await expect(viewer(page).locator('[data-ask-card]')).toHaveCount(0);
 	await page.screenshot({ path: testInfo.outputPath(`image-${width}-rest.png`) });
+	await expect(page.getByRole('button', { name: 'Dismiss all', exact: true }), 'no floating Dismiss all over the image').toHaveCount(0);
 	await pill(page).click();
 	await expect(page.locator('[data-doc-comments-drawer]:visible')).toBeVisible();
 	await page.screenshot({ path: testInfo.outputPath(`image-${width}-comments.png`) });

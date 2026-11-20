@@ -6,7 +6,7 @@ import { createSession, TEST_TOKEN } from '../support/corsia';
 import { installWorkspace, openThread } from '../support/heldComments';
 import { openDetails } from '../support/documentBar';
 
-for (const width of [393, 1440]) test(`document comment task is dismissed from Details at ${width}px`, async ({ page, request }, testInfo) => {
+for (const width of [393, 320, 1440]) test(`document comment task is dismissed from Details at ${width}px`, async ({ page, request }, testInfo) => {
 	const workspace = process.env.CORSIA_E2E_WORKSPACE;
 	const state = process.env.CORSIA_E2E_STATE_DIR;
 	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
@@ -31,6 +31,7 @@ for (const width of [393, 1440]) test(`document comment task is dismissed from D
 	const detailsButton = page.locator('[data-document-details]:visible');
 	await expect(detailsButton.locator('.bar-needs')).toHaveText('1');
 	await page.screenshot({ path: testInfo.outputPath(`task-${width}-rest.png`) });
+	await expect(page.getByRole('button', { name: 'Dismiss all', exact: true }), 'no floating Dismiss all over the document').toHaveCount(0);
 	const details = await openDetails(page);
 	await page.screenshot({ path: testInfo.outputPath(`task-${width}-details.png`) });
 	await expect(details.getByText(/comments, .*suggestions to review/)).toBeVisible();
