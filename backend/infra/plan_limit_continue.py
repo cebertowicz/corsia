@@ -292,10 +292,17 @@ def queue_terminal_continue(
     db: sqlite3.Connection, turn_id: str, thread_id: str, *,
     outcome: str, error: object, limit_recorded: bool,
 ) -> None:
-    """Queue the continue input a Turn's terminal cause leaves behind, if it leaves one."""
+    """Queue the continue input a Turn's terminal cause leaves behind, if it leaves one.
+
+    Any other error leaves none, and withdraws the plan reminder it never read.
+    """
     if outcome == "cancelled" and isinstance(error, PlanLimitStop):
         queue_plan_limit_continue(db, turn_id, thread_id)
     elif outcome == "error" and limit_recorded:
         queue_limit_refusal_continue(db, turn_id, thread_id)
     elif outcome == "error" and isinstance(error, (ContextOverflowEnd, ClaudeLoginRaceEnd)):
         queue_rerun(db, turn_id, thread_id, error.cause)
+    elif outcome == "error":
+        from automation.plan_liveness_terminal import withdraw_unread_wake
+
+        withdraw_unread_wake(db, thread_id, error=error)

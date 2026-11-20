@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from automation import plan_liveness as liveness
+from automation.continuation.progress import ADVANCED
 from automation.turn_end_effects import PendingTurnEndEffects
 from infra.database import write_transaction
 
@@ -30,6 +31,36 @@ def _stopped_below_cut(connection, thread_id: str, after) -> bool:
 
     return (after is None or after["status"] != liveness.ARMED) and bool(
         public.later_leaves(connection, thread_id)
+    )
+
+
+def withdraw_unread_wake(connection, thread_id: str, *, error) -> None:
+    """After an error, withdraw the reminder the Turn never read and back off.
+
+    A reminder delivered into a running Turn steers it at the flat in-Turn
+    interval with the cycle held. A Turn blocked in one provider call never
+    reads it, so left queued it would start the successor at once, with no
+    backoff, on every error. Called inside the terminal write before the
+    successor claim; a person's input queued behind it still starts a Turn.
+    A restart and a provider reset keep their own resumption paths.
+    """
+    from automation import provider_reset_liveness
+    from infra.queued_input_settlement import cancel_queued_liveness_wakes
+    from infra.thread_recovery import RESTART_TURN_ERROR
+    from plans.public import liveness_signal
+
+    text = str(error or "")
+    if text == RESTART_TURN_ERROR or provider_reset_liveness.deadline(text) is not None:
+        return
+    if not cancel_queued_liveness_wakes(connection, thread_id):
+        return
+    current = liveness.wake_for(thread_id, connection)
+    if current is None or not _stopped_open(current):
+        return
+    signal = liveness_signal(thread_id, db=connection)
+    advanced = signal.count > 0 and liveness._progress(signal, current) == ADVANCED
+    liveness.arm_plan_wake(
+        thread_id, signal, cycle=0 if advanced else current["cycle"] + 1, db=connection,
     )
 
 
