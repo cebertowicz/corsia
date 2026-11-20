@@ -39,11 +39,14 @@ test('@flow:editor-stale-choice Use the file’s text asks first, then shows the
 	await expect(page.getByText('The sentence an outside edit wrote.').first()).toBeVisible();
 	await page.screenshot({ path: info.outputPath('stale-details.png') });
 	// The quiet labels (Copy, and Close on the popover) are readable in both themes, over their composited background.
-	const quiet: Record<string, { target: Locator; min: number }> = {
-		copyYours: { target: page.getByRole('button', { name: 'Copy your text', exact: true }), min: TEXT },
-		copyFiles: { target: page.getByRole('button', { name: 'Copy the file’s text', exact: true }), min: TEXT },
+	// The phone sheet is frosted glass, so there its labels are measured over the worst backdrop the glass can have.
+	const sheet = (page.viewportSize()?.width ?? 0) <= 1024;
+	await page.mouse.move(2, 2);
+	const quiet: Record<string, { target: Locator; min: number; glass?: boolean }> = {
+		copyYours: { target: page.getByRole('button', { name: 'Copy your text', exact: true }), min: TEXT, glass: sheet },
+		copyFiles: { target: page.getByRole('button', { name: 'Copy the file’s text', exact: true }), min: TEXT, glass: sheet },
 	};
-	if ((page.viewportSize()?.width ?? 0) > 1024) quiet.close = { target: page.getByRole('button', { name: 'Close', exact: true }), min: TEXT };
+	if (!sheet) quiet.close = { target: page.getByRole('button', { name: 'Close', exact: true }), min: TEXT };
 	await expectContrast(page, info, 'stale-choice-details', quiet);
 	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	await page.getByRole('button', { name: 'Use the file’s text', exact: true }).click();
