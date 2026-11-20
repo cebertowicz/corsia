@@ -65,7 +65,7 @@ def phases_waited_on(connection, parent_id: str | None, *, skip=()) -> tuple[dic
                     SELECT ? UNION ALL
                     SELECT a.parent_id FROM up CROSS JOIN plan_nodes a ON a.id=up.id WHERE a.parent_id IS NOT NULL
                 )
-                SELECT p.id,{node_waits.prerequisite_state_sql('p')} AS state
+                SELECT p.id,{node_waits.prerequisite_state_sql(connection, 'p')} AS state
                 FROM up CROSS JOIN plan_nodes p ON p.id=up.id
                 WHERE p.kind='phase' AND p.state='pending' AND {node_states.in_work_sql('p')}
                   AND EXISTS (SELECT 1 FROM plan_node_dependencies d WHERE d.depends_on_node_id=p.id)""",
@@ -99,7 +99,7 @@ def settle_phases_waited_on(
     )
     for phase_id, prior in states.items():
         state = connection.execute(
-            f"SELECT {node_waits.prerequisite_state_sql('p')} AS state FROM plan_nodes p WHERE p.id=?", (phase_id,),
+            f"SELECT {node_waits.prerequisite_state_sql(connection, 'p')} AS state FROM plan_nodes p WHERE p.id=?", (phase_id,),
         ).fetchone()["state"]
         if state != prior and state in service._TERMINAL_STATES:
             prerequisite_settled(connection, phase_id, actor_id=actor_id, provenance=provenance)
