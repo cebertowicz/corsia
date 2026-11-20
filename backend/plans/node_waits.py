@@ -41,7 +41,7 @@ def inherited_sql(prerequisite: str, ancestor: str) -> str:
     )
 
 
-def prerequisite_state_sql(alias: str) -> str:
+def prerequisite_state_sql(connection: sqlite3.Connection, alias: str) -> str:
     """The state the ``plan_nodes`` row ``alias`` reads as to work waiting on it, as SQL (#3145).
 
     A phase's stored state never moves when its work ends (it reads as its
@@ -55,9 +55,14 @@ def prerequisite_state_sql(alias: str) -> str:
 
     Every other row reads as its stored state. Written by nobody: waits, the
     writer-side deltas and the cross-plan notice all read it here.
+    Older rungs of the migration ladder run plans code before the aggregate
+    (and workflow) columns exist; there every row reads as its stored state.
     """
+    from plans import aggregates
     from plans.run_end import EVENT
 
+    if not aggregates.ready(connection):
+        return f"{alias}.state"
     run = (
         f"{alias}.workflow_ref IS NOT NULL AND EXISTS (SELECT 1 FROM plan_nodes step WHERE"
         f" step.plan_id={alias}.plan_id AND step.parent_id={alias}.id AND step.workflow_step IS NOT NULL)"
@@ -75,9 +80,9 @@ def prerequisite_state_sql(alias: str) -> str:
     )
 
 
-def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
+def _prerequisite_columns(node_id: str, owner: str, compact: bool, state_sql: str) -> str:
     """The prerequisite row's columns; ``owner`` is the alias of the waiting node."""
-    state = f"{prerequisite_state_sql('p')} AS state"
+    state = f"{state_sql} AS state"
     if compact:
         return f"{node_id},p.id,{state},p.plan_id,p.archived_at"
     return f"""{node_id},p.id,p.title,{state},
@@ -107,7 +112,8 @@ def unmet_prerequisites(
     found: dict[str, list] = defaultdict(list)
     if not ids:
         return {}
-    unmet = f"AND {prerequisite_state_sql('p')} NOT IN ('accepted','accepted_with_followup')"
+    state_sql = prerequisite_state_sql(connection, "p")
+    unmet = f"AND {state_sql} NOT IN ('accepted','accepted_with_followup')"
     # A node's own edges (depth 0), then those of its open ancestors: an
     # ancestor's dependency on work outside it holds its descendants too.
     # Nearest first, so a prerequisite reached at several levels keeps the
@@ -115,7 +121,7 @@ def unmet_prerequisites(
     # already exists, so the walk up always ends at a root.
     touched = set()
     inherited = f"""UNION ALL
-            SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
+            SELECT {_prerequisite_columns('up.root', 'r', compact, state_sql)},up.id,p.order_key,up.depth
             FROM up JOIN plan_node_dependencies d ON d.node_id=up.id
             JOIN plan_nodes n ON n.id=up.id
             {"" if compact else "JOIN plan_nodes r ON r.id=up.root"}
@@ -132,7 +138,7 @@ def unmet_prerequisites(
                 SELECT up.root,a.parent_id,up.depth+1 FROM up JOIN plan_nodes a ON a.id=up.id
                 WHERE a.parent_id IS NOT NULL
             )
-            SELECT {_prerequisite_columns('d.node_id', 'n', compact)},NULL AS via,p.order_key AS order_key,0 AS depth
+            SELECT {_prerequisite_columns('d.node_id', 'n', compact, state_sql)},NULL AS via,p.order_key AS order_key,0 AS depth
             FROM plan_node_dependencies d
             JOIN plan_nodes p ON p.id=d.depends_on_node_id
             JOIN plan_nodes n ON n.id=d.node_id

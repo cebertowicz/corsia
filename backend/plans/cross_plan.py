@@ -151,7 +151,7 @@ def _prerequisite(connection, node_id: str):
     from plans.node_waits import prerequisite_state_sql
 
     return connection.execute(
-        f"""SELECT n.id,n.title,{prerequisite_state_sql('n')} AS state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
+        f"""SELECT n.id,n.title,{prerequisite_state_sql(connection, 'n')} AS state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
            FROM plan_nodes n JOIN plans pl ON pl.id=n.plan_id WHERE n.id=?""",
         (node_id,),
     ).fetchone()
