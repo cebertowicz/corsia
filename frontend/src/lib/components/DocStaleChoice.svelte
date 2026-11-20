@@ -97,7 +97,9 @@
 	{#if isPaneDrawer()}
 		<AdaptiveDrawer ariaLabel="Choose which text to keep" heading="Choose which text to keep" onClose={closeDetails} covered={confirmation !== null} initialFocusSelector="button">{@render details()}</AdaptiveDrawer>
 	{:else}
-		<Popover anchor={opener} open={detailsOpen} onClose={closeDetails} restoreFocus={() => opener?.focus()} covered={confirmation !== null} placement="bottom" ariaLabel="Choose which text to keep">{@render details()}</Popover>
+		<!-- Details sits inside the bar at the foot of the pane: the card clears the whole bar (its text stays readable) and stays inside the document pane. -->
+		<Popover anchor={opener} avoidRect={() => opener?.closest('[role="alert"]')?.getBoundingClientRect() ?? null} bounds={() => opener?.closest('.doc')?.getBoundingClientRect() ?? null}
+			open={detailsOpen} onClose={closeDetails} restoreFocus={() => opener?.focus()} covered={confirmation !== null} placement="bottom" ariaLabel="Choose which text to keep">{@render details()}</Popover>
 	{/if}
 {/if}
 <ConfirmDialog open={confirmation !== null} title={confirmation ? CONFIRMS[confirmation].title : ''} description={confirmation ? CONFIRMS[confirmation].description : ''}

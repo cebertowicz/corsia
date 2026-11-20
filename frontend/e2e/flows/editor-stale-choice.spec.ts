@@ -124,3 +124,45 @@ for (const choice of ['Use the file’s text', 'Keep your text']) {
 		await expect(reload).toHaveCount(0);
 	});
 }
+
+// 1440 is the usual desktop; 1025 is the narrowest width that still opens the card (the phone sheet takes over at 1024), so the narrowest column.
+for (const size of [{ width: 1440, height: 900 }, { width: 1025, height: 900 }]) {
+	test(`@flow:editor-stale-choice the Details card sits above the bar, inside the document pane, at ${size.width}px`, async ({ page, request }, info) => {
+		test.skip(info.project.name === 'chromium-mobile', 'the phone opens a sheet, not a card');
+		const { details } = await refused(page, request, info);
+		await page.setViewportSize(size);
+		await details.click();
+		await expect(page.getByRole('dialog', { name: 'Choose which text to keep' })).toBeVisible();
+		await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
+		await page.mouse.move(2, 2);
+		const gap = 8; // the Popover's own gap to what it clears
+		const reading = () => page.evaluate((gap) => {
+			const card = document.querySelector('[role="dialog"][aria-label="Choose which text to keep"]')!;
+			const box = card.getBoundingClientRect();
+			const bar = document.querySelector('.save-error[role="alert"]')!;
+			const barBox = bar.getBoundingClientRect();
+			const pane = bar.closest('.doc')!.getBoundingClientRect();
+			// Every line the bar's own sentence is drawn on: the topmost element at its middle must belong to the bar, not the card.
+			const lines: DOMRect[] = [];
+			for (const node of bar.childNodes) {
+				if (node.nodeType !== Node.TEXT_NODE) continue;
+				const range = document.createRange();
+				range.selectNodeContents(node);
+				lines.push(...range.getClientRects());
+			}
+			const top = (x: number, y: number) => document.elementFromPoint(x, y);
+			return {
+				lines: lines.length,
+				textUncovered: lines.length > 0 && lines.every((line) => { const hit = top(line.left + line.width / 2, line.top + line.height / 2); return !!hit && bar.contains(hit) && !card.contains(hit); }),
+				// The card lands above the bar, a gap clear of its top edge, not merely clear of the text lines.
+				aboveBar: box.bottom <= barBox.top - gap + 0.5,
+				insidePane: box.left >= pane.left - 0.5 && box.right <= pane.right + 0.5,
+				// Just past the pane's edge, level with the card: the card must not be what is drawn there.
+				edgeClear: !card.contains(top(pane.right + 4, box.top + box.height / 2)),
+			};
+		}, gap);
+		await expect.poll(reading).toMatchObject({ textUncovered: true, aboveBar: true, insidePane: true, edgeClear: true });
+		expect((await reading()).lines).toBeGreaterThan(0);
+		await page.screenshot({ path: info.outputPath(`stale-card-above-bar-${size.width}.png`) });
+	});
+}
