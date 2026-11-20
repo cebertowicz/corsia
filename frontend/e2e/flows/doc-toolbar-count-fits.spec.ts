@@ -78,7 +78,7 @@ async function expectCountsWhole(page: Page, measured: BarMeasured, label: strin
 	expect.soft(measured.commentsName, `${label}: the Comments button names the total and the unread`).toMatch(countName(threads, unread));
 	expect.soft(measured.needsText, `${label}: the amber count beside Details`).toBe(needs ? `${needs}` : null);
 	expect.soft(measured.detailsName, `${label}: Details names what waits, not how many`).toBe(`Document details${needsWords.length ? ` · ${needsWords.join(' · ')}` : ''}`);
-	expect.soft(measured.needsText ? measured.needsText.trim().length : 0, `${label}: the amber count and the named needs are the same number`).toBe(needsWords.length);
+	expect.soft(measured.needsText ? Number(measured.needsText.trim()) : 0, `${label}: the amber count and the named needs are the same number`).toBe(needsWords.length);
 	expect.soft(measured.clipped, `${label}: no count is cut`).toEqual([]);
 	for (const [name, control] of [['Comments', measured.comments], ['Details', measured.details], ...(measured.needs ? [['amber count', measured.needs] as const] : [])] as const) {
 		expect.soft(control.left, `${label}: ${name} starts inside the bar`).toBeGreaterThanOrEqual(measured.bar.left - 0.5);
@@ -396,13 +396,13 @@ const NEEDS_CASES = [
  * A document in a skill's evals folder that the thread owns, with one comment: guidance, so it opens without live editing and another
  * writer's save shows File changed; a document, so an ask can name it (a SKILL.md registers as a skill, which an ask cannot).
  */
-async function seedSkillDocument(page: Page, threadId: string, title: string) {
+async function seedSkillDocument(page: Page, threadId: string, title: string, fileName = 'review-notes.md') {
 	const params = { token: TEST_TOKEN };
 	const tree = await page.request.get('/api/files/tree', { params });
 	const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
 	const folder = path.join(workspace, '.threads', threadId, 'skills', title, 'evals');
 	mkdirSync(folder, { recursive: true });
-	const docPath = path.join(folder, 'review-notes.md');
+	const docPath = path.join(folder, fileName);
 	const text = TEXT;
 	const seeded = await page.request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
@@ -411,7 +411,7 @@ async function seedSkillDocument(page: Page, threadId: string, title: string) {
 	const quoted = 'ordinary prose', from = text.indexOf(quoted);
 	const comment = await page.request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 	expect(comment.ok(), await comment.text()).toBeTruthy();
-	return { artifactId, path: docPath, fileName: 'review-notes.md', text };
+	return { artifactId, path: docPath, fileName, text };
 }
 
 /** The canvas's measured mode, as the bar reads it: compact puts File changed in the bar. */
@@ -610,3 +610,130 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 	}
 	await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
+
+/**
+ * The one row the tab strip draws with the document's bar in it. The open document's tab keeps its whole pill: the row
+ * clips its own overflow, so a pill drawn past its edge is painted but not clickable there, and no inset of the bar gives
+ * those pixels back. The bar gives way first (its side padding and gaps, then File changed to the ↻ mark the approved
+ * phone header uses); the tab shortens only when the bar has nothing left to give. 'minimum' means the divider taken to
+ * its minimum with Home, which is ARTIFACT_MIN, 360 px (artifactSplitLayout.ts:4, CanvasSplitDivider.svelte:47).
+ */
+const TAB_CLOSE_TYPICAL = 'launch-review.md';
+const TAB_CLOSE_LONG = 'launch-review-and-verification-walkthrough-notes.md';
+const TAB_CLOSE_CASES = [
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: false, scheme: 'dark' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: true, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: true, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: true, scheme: 'light' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: true, scheme: 'dark' as const, name: TAB_CLOSE_LONG },
+	{ width: 1920, split: 900, wide: true, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ width: 1920, split: 900, wide: true, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL, width: 1280 },
+];
+for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLOSE_CASES) {
+	const longName = name.length > 30;
+	const stemPart = atMin ? 'min' : wide ? 'wide' : 'split';
+	test(`@flow:doc-toolbar-count-fits @surface:documents at ${width} ${scheme} ${stemPart}, ${longName ? 'a long name' : 'a typical name'}: the bar leaves the document tab its own space`, async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		await setDebugVersionOverlay(request, false);
+		const title = `tab-close-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const doc = await seedSkillDocument(page, threadId, title, name);
+		await page.setViewportSize({ width, height: 900 });
+		await installWorkspace(page, threadId, [doc], 0, { splitWidth: split });
+		await openThread(page, threadId, title);
+		await expect(page.locator('.cm-content')).toContainText('A paragraph of ordinary prose');
+		await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
+		const divider = page.getByRole('separator', { name: 'Resize Files panel' });
+		if (atMin) {
+			// The narrowest composition a person can reach: the divider's own minimum, ARTIFACT_MIN.
+			await divider.focus();
+			await page.keyboard.press('Home');
+			await expect.poll(() => divider.getAttribute('aria-valuenow'), { message: 'the panel is at its minimum' }).toBe('360');
+		}
+		// A second writer saves the file, so the bar carries File changed beside Comments and Details in the tab's own row.
+		const saved = await request.put('/api/files/content', {
+			params: { token: TEST_TOKEN }, data: { path: doc.path, text: `${doc.text}\nA line another writer saved.\n` },
+		});
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		await expect(documentBarHost(page).locator('[data-file-changed]')).toBeVisible();
+		// Below a certain width the document view draws no tab strip at all, so the row this guards does not exist there.
+		if (!(await page.locator('.strip .tab-wrap.active').count())) {
+			if (FRAMES) {
+				mkdirSync(FRAMES, { recursive: true });
+				await page.screenshot({ path: path.join(FRAMES, `tab-close-${width}-${stemPart}-${scheme}-${longName ? 'long' : 'typical'}-no-strip.png`), animations: 'disabled' });
+			}
+			test.skip(true, `at ${width} the document view draws no tab strip`);
+		}
+		const close = page.locator('.tab-wrap.active .tab-close');
+		await expect(close).toBeVisible();
+		const geometry = await close.evaluate((node) => {
+			const strip = node.closest<HTMLElement>('.strip')!;
+			const row = node.closest<HTMLElement>('.tabs')!;
+			const pill = node.closest<HTMLElement>('.tab-wrap')!;
+			const label = pill.querySelector<HTMLElement>('.tab-title')!;
+			const box = node.getBoundingClientRect();
+			const at = (x: number, y: number) => document.elementFromPoint(x, y) as HTMLElement | null;
+			const reaches = (el: HTMLElement | null, selector: string) => !!el?.closest(selector);
+			const reload = document.querySelector<HTMLElement>('.strip [data-file-changed]')!;
+			const reloadBox = reload.getBoundingClientRect();
+			return {
+				stripWidth: strip.getBoundingClientRect().width,
+				row: { left: row.getBoundingClientRect().left, right: row.getBoundingClientRect().right, clientWidth: row.clientWidth },
+				pill: { left: pill.getBoundingClientRect().left, right: pill.getBoundingClientRect().right, width: pill.getBoundingClientRect().width },
+				name: { text: label.textContent ?? '', scrollWidth: label.scrollWidth, clientWidth: label.clientWidth },
+				close: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+				closeCentre: reaches(at(box.left + box.width / 2, box.top + box.height / 2), '.tab-close'),
+				closeEdge: reaches(at(box.right - 1, box.top + box.height / 2), '.tab-close'),
+				// The narrow File changed mark is the phone header's ↻: a small box that answers a tap on its own centre.
+				reloadCompact: reloadBox.width <= 40,
+				reloadCentre: reaches(at(reloadBox.left + reloadBox.width / 2, reloadBox.top + reloadBox.height / 2), '[data-file-changed]'),
+				controls: [...document.querySelectorAll<HTMLElement>('.strip .doc-tools button, .strip .collapse-btn')].map((el) => {
+					const rect = el.getBoundingClientRect();
+					return {
+						name: (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 42),
+						left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+						inWindow: rect.left >= -0.5 && rect.right <= window.innerWidth + 0.5,
+					};
+				}),
+			};
+		});
+		if (FRAMES) {
+			mkdirSync(FRAMES, { recursive: true });
+			const stem = path.join(FRAMES, `tab-close-${width}-${stemPart}-${scheme}-${longName ? 'long' : 'typical'}`);
+			writeFileSync(`${stem}.json`, JSON.stringify(geometry, null, 2));
+			await page.screenshot({ path: `${stem}.png`, animations: 'disabled' });
+		}
+		// The row clips its own overflow, so the whole pill, close included, has to sit inside it.
+		expect(geometry.pill.right, `the active tab's pill sits inside the tab row: ${JSON.stringify([geometry.row, geometry.pill])}`).toBeLessThanOrEqual(geometry.row.right + 0.5);
+		expect(geometry.close.right, `the close sits inside the tab row: ${JSON.stringify([geometry.row, geometry.close])}`).toBeLessThanOrEqual(geometry.row.right + 0.5);
+		expect(geometry.closeCentre, 'a tap at the close\'s centre reaches the close').toBe(true);
+		expect(geometry.closeEdge, 'a tap at the close\'s right edge reaches the close').toBe(true);
+		// Nothing in the bar covers the tab, and nothing is pushed out of the window.
+		for (const control of geometry.controls) {
+			const overlapsX = control.left < geometry.pill.right - 0.5 && geometry.pill.left < control.right - 0.5;
+			const overlapsY = control.top < geometry.close.bottom - 0.5 && geometry.close.top < control.bottom - 0.5;
+			expect(overlapsX && overlapsY, `${control.name} covers the document tab: ${JSON.stringify([geometry.pill, control])}`).toBeFalsy();
+			expect(control.inWindow, `${control.name} stays inside the window`).toBeTruthy();
+		}
+		// The pill's floor is its close plus a few characters of name, never less.
+		expect(geometry.pill.width, `the pill keeps its floor: ${JSON.stringify(geometry.pill)}`).toBeGreaterThanOrEqual(96);
+		const wholeName = geometry.name.scrollWidth <= geometry.name.clientWidth + 0.5;
+		if (longName) {
+			// A name past the pill's cap is shortened, and the close stays whole inside the row (asserted above).
+			expect(wholeName, `a name past the pill's cap is shortened: ${JSON.stringify(geometry.name)}`).toBe(false);
+		}
+		// The bar's form follows the strip's own room, whatever the width: words only where the strip can hold them.
+		expect(geometry.reloadCompact, `File changed goes compact only where the strip is short: ${JSON.stringify([geometry.stripWidth, geometry.reloadCompact])}`).toBe(geometry.stripWidth <= 544);
+		if (wide) {
+			// With room the row is today's row: a typical name keeps all of itself.
+			expect(wholeName, `a typical name stays whole where the row has room: ${JSON.stringify([geometry.name, geometry.pill, geometry.stripWidth])}`).toBe(true);
+		}
+		if (geometry.reloadCompact) expect(geometry.reloadCentre, 'the compact File changed mark answers a tap on its centre').toBe(true);
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
+	});
+}

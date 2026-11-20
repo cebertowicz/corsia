@@ -8,7 +8,7 @@
 	import { Button } from '$lib/components/ui';
 	import Spinner from './ui/Spinner.svelte';
 	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
-	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
+	import { detailsNeedsUp } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -72,12 +72,14 @@
 	const changeInBar = $derived($canvasCompact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
-	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
-	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard }));
-	/** The same things, named in the words the panel itself uses for each entry, so the control says what is waiting rather than how many. An ask with no reason text is named by its asker rather than leaving an empty leg. */
-	const needsWords = $derived([freshnessPresentation?.overdue ? 'Overdue' : null,
-		ask && !ask.onCard ? (ask.text.trim() || `${ask.who} asks`) : null]
-		.filter((word): word is string => !!word));
+	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
+	 * entry, so the control says what is waiting rather than how many: Overdue, and an ask whose card is hidden, an ask
+	 * with no reason text named by its asker rather than leaving an empty leg. The amber count is this list's length, so
+	 * the number and the name can't drift apart. */
+	const needsUp = $derived(detailsNeedsUp(
+		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard },
+		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '' }));
+	const needsCount = $derived(needsUp.length);
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
@@ -218,7 +220,11 @@
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
 	{#if presence}{@render presence()}{/if}
-	{#if urgent && !changeInBar}<button type="button" class="bar-stale stale-control" data-file-changed onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
+		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+		<!-- The strip's own room decides whether the words show; the ↻ mark is the phone header's compact form. -->
+		<span class="bar-stale-word">File changed · Reload</span>
+	</button>{/if}
 	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
 	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
@@ -236,7 +242,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsWords.length ? ` · ${needsWords.join(' · ')}` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>
@@ -312,6 +318,22 @@
 	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
 	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	/* The tab strip's own room decides, not the window's: the row gives way in the order the phone header gives way in,
+	 * and the document tab is never what is shortened first. The svg rides in the control so the narrow form is the
+	 * approved phone header's ↻ mark, with the same accessible name and tooltip. */
+	.bar-reload.bar-stale svg { display: none; }
+	/* rem, not px: the room this bar needs is set by its text, so the rungs move with the reader's font size.
+	 * 35.5rem = 568px, 34rem = 544px at the default 16px root. */
+	@container strip (max-width: 35.5rem) {
+		/* 1. The tight rung: the row's own gaps and side padding, as the phone row wears them. */
+		.bar-tools { gap: var(--space-1); }
+	}
+	@container strip (max-width: 34rem) {
+		/* 2. File changed takes the ↻ mark, so its words stop costing the tab its room. */
+		.bar-reload.bar-stale { width: var(--bar-row); height: var(--bar-row); padding: 0; }
+		.bar-reload.bar-stale svg { display: block; width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+		.bar-stale-word { display: none; }
+	}
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }

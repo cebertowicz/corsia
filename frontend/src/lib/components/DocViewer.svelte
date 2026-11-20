@@ -120,7 +120,7 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
-	/** The comments drawer's selected view and resolved count. */
+	/** The comments drawer's selected view: resolved threads shown or hidden. The count is the surface's own. */
 	let resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 

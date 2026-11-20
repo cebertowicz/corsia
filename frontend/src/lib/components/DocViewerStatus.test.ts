@@ -7,7 +7,7 @@ import type { DocFeedback } from '$lib/docFeedback.svelte';
 import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { detailsNeedsCount, type DetailsNeeds } from '$lib/docDetailsNeeds';
+import { detailsNeedsCount, detailsNeedsUp, type DetailsNeeds, type DetailsNeedsWords } from '$lib/docDetailsNeeds';
 import type { CommentFeedback } from '$lib/api/docs';
 import { deliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 import { get } from 'svelte/store';
@@ -408,11 +408,17 @@ describe('DocViewerStatus toolbar', () => {
 		expect(host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label')).not.toMatch(/\d/);
 	});
 
-	it('counts beside Details exactly the two things behind it that need the reader, one each', () => {
-		// Every combination of the two sources; a third source is a new required field of DetailsNeeds, so this list stops compiling.
+	it('counts beside Details exactly what waits there, and names the same things', () => {
+		// Every combination of the sources; a third source is a new required field of DetailsNeeds, so these lines stop
+		// compiling until it names both the flag and the words the panel calls it by.
 		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>
 			[false, true].map((hiddenAsk) => ({ overdue, hiddenAsk })));
-		expect(all.map((needs) => detailsNeedsCount(needs))).toEqual(all.map(({ overdue, hiddenAsk }) => Number(overdue) + Number(hiddenAsk)));
+		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?' };
+		for (const needs of all) {
+			const up = detailsNeedsUp(needs, words);
+			expect(detailsNeedsCount(needs, words), JSON.stringify(needs)).toBe(up.length);
+			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null].filter((word): word is string => !!word));
+		}
 	});
 });
 
