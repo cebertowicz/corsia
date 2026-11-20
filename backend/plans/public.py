@@ -345,3 +345,7 @@ from plans.workflow_fields import reader_titles
 # Measurement's Workflows section: each ended run's record, and the plan-node cost rollup it reads.
 from plans.run_end import records as run_end_records
 from plans.node_cost_scoped import working_seconds as node_working_seconds
+# A review step's settle script reports its verdict (Agent Substrate's step-script runner).
+from plans.review_settle_script import (
+    bind_settle_run, record_pending_settle, settle_step_from_script, step_settle_script,
+)

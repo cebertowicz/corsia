@@ -1,13 +1,16 @@
 import { flushSync } from 'svelte';
+import { get } from 'svelte/store';
 import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { commentDraft, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
+import { commentDraft, commentDraftScope, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
 import { captureComment, SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
 import { addComment } from '$lib/stores/docComments';
 import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
+import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
@@ -35,6 +38,9 @@ const session = () => {
 	return { artifactId: 'a', doc, text, releaseReservation: vi.fn() } as never;
 };
 type Row = Pick<DocComment, 'placement' | 'orphaned'> | undefined;
+/** One open file, as the viewer holds it; `keyOf` is where its typed comment is kept. */
+const targetOf = (path: string): DocViewerTarget => ({ instanceId: 'tab', path, name: path, projectId: 'p', threadId: null, artifactId: null });
+const keyOf = (path: string) => documentDraftKey(targetOf(path));
 
 function setup(inWidget: boolean, label?: string) {
 	let scope = $state('one'), live = $state.raw(session()), open = $state(false), drawn = $state(false);
@@ -43,7 +49,7 @@ function setup(inWidget: boolean, label?: string) {
 	let controller!: ReturnType<typeof createViewerCommentDraft>;
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
-			scope: () => scope, draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
+			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
 			isOpen: () => open, ensureArtifactId: async () => 'a', onFailure: () => {}, onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});
@@ -65,12 +71,14 @@ function setup(inWidget: boolean, label?: string) {
 			if ('row' in next) row = next.row;
 			flushSync();
 		},
+		/** Escape: the composer closes and its draft stays. */
+		escape() { open = false; flushSync(); },
 		stop() { teardown(); stop(); },
 	};
 }
 
 let current: ReturnType<typeof setup> | undefined;
-afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); });
+afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); keptCommentDrafts.reset(); });
 
 describe('a posted widget comment keeps its pending mark', () => {
 	it('until its placed mark is drawn', async () => {
@@ -194,6 +202,139 @@ describe('a comment refused because the document no longer takes comments', () =
 	});
 });
 
+describe('a post that lands or fails after its composer closed and another opened', () => {
+	// Press Comment, Escape, select again and type more, then the first post ends.
+	const begin = async (outcome: 'lands' | 'fails', edit = true) => {
+		current = setup(false);
+		// The prose path posts under the draft's own id (the live path's capture is mocked to one fixed id).
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; if (outcome === 'fails') throw new Error('500 boom'); return 'posted'; });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.escape();
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		if (edit) { current.controller.setBody('Too terse: say who reads it'); flushSync(); }
+		end();
+		return first;
+	};
+
+	it('lands: the newer text stays, with a fresh id for its own post, and nothing is stored twice', async () => {
+		expect(await begin('lands')).toBeNull();
+		expect(addComment).toHaveBeenCalledTimes(1);
+		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
+		const kept = keptCommentDrafts.get(keyOf('one'));
+		expect(kept?.body).toBe('Too terse: say who reads it');
+		expect(kept?.clientId).toBeUndefined();
+		const firstId = vi.mocked(addComment).mock.calls[0][7];
+		expect(await current!.controller.submit('Too terse: say who reads it')).toBe('posted');
+		expect(addComment).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(addComment).mock.calls[1][7]).not.toBe(firstId);
+		expect(vi.mocked(addComment).mock.calls[1][11]).toBe(false);
+	});
+
+	it('lands unedited: the reopened composer is that draft and closes on the stored comment, so nothing is stored twice', async () => {
+		const first = await begin('lands', false);
+		expect(addComment).toHaveBeenCalledTimes(1);
+		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
+		// The press hands the stored id back while the reopened, unedited composer is the one open (the edited case above
+		// gets null and stays open). That id is what the viewer closes the open composer on (DocViewer submitComment); the
+		// close itself is the viewer's, so this unit test stops at the id.
+		expect(current!.controller.draft?.body).toBe('Too terse');
+		expect(first).toBe('posted');
+	});
+
+	it('lands after its viewer closed: the composer reopened in a new viewer posts unedited under the same id, so the server answers with the stored comment', async () => {
+		current = setup(false);
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; return 'posted'; });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.stop();
+		current = setup(false);
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		expect(current.controller.draft?.body).toBe('Too terse');
+		end(); await first;
+		expect(await current.controller.submit('Too terse')).toBe('posted');
+		const [earlier, again] = vi.mocked(addComment).mock.calls;
+		expect(again[7]).toBe(earlier[7]);
+		expect(again[11]).toBe(true);
+	});
+
+	it('lands after its viewer closed, and the reopened press fails: the next press reuses the same id, so the server holds one comment', async () => {
+		// The server stores one comment per client id, as its dedupe does.
+		const stored = new Map<string, string>();
+		const store = (clientId: string) => { if (!stored.has(clientId)) stored.set(clientId, `c${stored.size + 1}`); return stored.get(clientId)!; };
+		current = setup(false);
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async (...args) => { await held; return store(args[7] as string); });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.stop();
+		current = setup(false);
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		end(); await first;
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
+		await expect(current.controller.submit('Too terse')).rejects.toThrow('500');
+		vi.mocked(addComment).mockImplementationOnce(async (...args) => store(args[7] as string));
+		expect(await current.controller.submit('Too terse')).toBe('c1');
+		const [earlier, failed, again] = vi.mocked(addComment).mock.calls;
+		expect(failed[7]).toBe(earlier[7]);
+		expect(again[7]).toBe(earlier[7]);
+		expect(stored.size).toBe(1);
+		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
+	});
+
+	it('lands while its text and tags were edited: the kept edit keeps both, whatever the composer that pressed clears', async () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		current.controller.setBody('Ask'); flushSync();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await held; return 'posted'; });
+		const first = current.controller.submit('Ask');
+		const tags = current.controller.draft!.mentionSelection!;
+		tags.update('Ask @Ada'); tags.select('agent-ada', 4, '@Ada');
+		current.controller.setBody('Ask @Ada'); flushSync();
+		end(); await first;
+		// The composer that pressed empties its own tags once its post is stored (CommentComposer).
+		tags.clear();
+		const kept = keptCommentDrafts.get(keyOf('one'))!;
+		expect(kept.body).toBe('Ask @Ada');
+		expect(kept.mentionSelection.occurrences(kept.body).map((item) => item.agent_id)).toEqual(['agent-ada']);
+	});
+
+	it('fails: what the field holds now is kept with the reason, not the text that was sent', async () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		await expect(begin('fails')).rejects.toThrow('500');
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ body: 'Too terse: say who reads it' });
+		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBeTruthy();
+		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
+		log.mockRestore();
+	});
+});
+
 describe('a save the server refuses because the document changed', () => {
 	const begin = () => {
 		current = setup(false);
@@ -223,5 +364,58 @@ describe('a save the server refuses because the document changed', () => {
 		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
 		await expect(current!.controller.submit('body')).rejects.toThrow('500');
 		expect(captureComment).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the viewer asks whether a typed comment is waiting', () => {
+	const typed = (body: string) => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody(body); flushSync();
+	};
+
+	it('only for this file\'s draft with text in it', () => {
+		typed('Say who reads it');
+		expect(current!.controller.hasText).toBe(true);
+	});
+
+	it('not for a body of only spaces', () => {
+		typed('  \n ');
+		expect(current!.controller.hasText).toBe(false);
+	});
+
+	it('not for another file\'s draft', () => {
+		typed('Say who reads it');
+		const other = get(commentDraft);
+		current!.set({ scope: 'two' });
+		// Another viewer's draft, with text, is what the store holds while this one shows file two.
+		commentDraft.set(other); flushSync();
+		expect(get(commentDraft)?.body).toBe('Say who reads it');
+		expect(current!.controller.draft).toBeNull();
+		expect(current!.controller.hasText).toBe(false);
+	});
+});
+
+describe('the viewer moves to another file', () => {
+	it('lets go of the last file\'s open draft and keeps its typed text', () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody('Say who reads it'); flushSync();
+		current.controller.leave(targetOf('one'), commentDraftScope(targetOf('two')));
+		flushSync();
+		expect(get(commentDraft)).toBeNull();
+		expect(keptCommentDrafts.get(keyOf('one'))?.body).toBe('Say who reads it');
+	});
+
+	it('keeps the open draft when the same file loads again', () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		current.controller.setBody('Say who reads it'); flushSync();
+		current.controller.leave(targetOf('one'), commentDraftScope(targetOf('one')));
+		flushSync();
+		expect(get(commentDraft)?.body).toBe('Say who reads it');
 	});
 });

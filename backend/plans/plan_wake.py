@@ -38,6 +38,9 @@ ASK_RELEASED = "ask_released"
 CHILD_RETURNED = "child_returned"
 #: A submission this thread made or returned was rejected; it now holds the revision.
 REVISION_REQUESTED = "revision_requested"
+#: A reviewer's verdict settled a review step this thread authored (``plans.review_settle``).
+REVIEW_PASSED = "review_passed"
+REVIEW_FAILED = "review_failed"
 #: A canonical task's requirements changed while this thread has live work under it.
 INTENT_REVISED = "intent_revised"
 #: The person's new words may bear on a running task this thread owns (``plans.person_input``).

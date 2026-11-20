@@ -239,16 +239,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     acting = actor.thread_id if actor.kind == "thread" else None
     from plans import workflow_fields
     workflow_fields.refuse_unready_close(db, node_id, operation, by_agent=actor.kind == "thread")
+    from plans import review_settle
+    review_settle.check_verdict(db, node_id, acting, params.get("verdict"), operation=operation)
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":
         mutations.request_review(
-            node_id,
-            evidence=fields.text(params, "evidence"),
-            artifact_ids=params.get("artifact_ids"),
-            owner_thread_id=acting,
-            **fields.expected(params),
-            **common,
+            node_id, evidence=fields.text(params, "evidence"), artifact_ids=params.get("artifact_ids"),
+            owner_thread_id=acting, verdict=params.get("verdict"), **fields.expected(params), **common,
         )
         return after.after_close(
             node_id, "review_requested", params, common, executor=acting,

@@ -34,6 +34,13 @@ export const CATCH_UP_MS = 50;
 const CHANGED = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
 const OFFLINE = 'You’re offline. Your comment draft is kept. Try again when connected.';
 const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try again.';
+/** The server already holds a comment, or another person's capture, under the id asked with (`identity_in_use`). */
+export class IdentityInUseError extends Error {
+	constructor() {
+		super(UNANSWERED);
+		this.name = 'IdentityInUseError';
+	}
+}
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
@@ -41,10 +48,11 @@ const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try agai
  * and the selection still holds the quote sent with it. A hash a
  * remote update interrupts is simply redone. After a refusal it waits for the next applied remote update (or
  * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort, refusal, or
- * an unanswered reservation gives the range back; abort also releases an in-progress hash.
+ * an unanswered reservation gives the range back; abort also releases an in-progress hash. `clientId` is the comment
+ * draft's own id, the same for every press of Comment on it.
  */
-export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal): Promise<CapturedComment> {
-	const { session } = selection, clientId = newClientId();
+export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal, clientId = newClientId()): Promise<CapturedComment> {
+	const { session } = selection;
 	return new Promise((resolve, reject) => {
 		const started = performance.now();
 		let done = false, requestId: string | null = null, sent: CapturedComment | null = null;
@@ -65,6 +73,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 			// No ask is out yet while hashing: a refusal without an id (an earlier capture's release) is not ours.
 			if (requestId === null || frame.request_id !== requestId) return;
 			if (frame.type === 'doc_error') {
+				if (frame.kind === 'identity_in_use') { finish(undefined, new IdentityInUseError()); return; }
 				finish(undefined, new Error((frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
 				return;
 			}
