@@ -24,6 +24,7 @@
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 	import DocStaleChoice from './DocStaleChoice.svelte';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
+	import { EDITOR_STALE_STATUS } from '$lib/stores/docSaveBase';
 	import { showsSaveBar } from '$lib/stores/docSaveBars';
 	import type { ViewerContent } from '$lib/docViewerLoading';
 
@@ -158,6 +159,7 @@
 		const { top, above } = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
 		return { top, above, below: !above };
 	});
+	const refusedStale = $derived(!!tabInstanceId && !!$docSaveDrafts[tabInstanceId]?.stale);
 	const EDGE = 8;
 	let column: HTMLDivElement | undefined = $state();
 	let buttonWidth = $state(0);
@@ -173,8 +175,9 @@
 {#snippet editorBlock()}
 	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
 		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
-		{#if saveError}
-			<div class="save-error" role="alert">{saveError}{#if tabInstanceId && $docSaveDrafts[tabInstanceId]?.stale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
+		<!-- A refusal stays on screen while a choice's write runs (the draft is 'saving' then, with no error), so Details is not closed and rebuilt. -->
+		{#if saveError || refusedStale}
+			<div class="save-error" role="alert">{saveError || EDITOR_STALE_STATUS}{#if tabInstanceId && refusedStale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
 		{/if}
 	</div>
 {/snippet}

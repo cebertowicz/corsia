@@ -83,6 +83,31 @@ describe('the choice after a stale refusal', () => {
 		clearDraft(doc);
 	});
 
+	it('keeps the refusal on screen while Keep my text writes, so the bar and Details are not closed and rebuilt', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const doc = await refused('base', 'mine');
+		let finish: (value: unknown) => void = () => {};
+		mocks.writeContent.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+
+		const kept = keepMyText(doc, 'file now');
+		await Promise.resolve();
+		expect(existingDraft(doc)).toMatchObject({ stale: true, error: EDITOR_STALE_STATUS });
+
+		finish({ saved: true, revision: 'r2' });
+		expect(await kept).toBe(true);
+		expect(existingDraft(doc)).toMatchObject({ status: 'saved', stale: false, error: '' });
+		clearDraft(doc);
+	});
+
+	it('ends the refusal at once when the file already reads as his text', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const doc = await refused('base', 'mine');
+		expect(await keepMyText(doc, 'mine')).toBe(true);
+		expect(existingDraft(doc)).toMatchObject({ status: 'idle', stale: false, error: '' });
+		expect(mocks.writeContent).toHaveBeenCalledTimes(1);
+		clearDraft(doc);
+	});
+
 	it('keeps his text and says why when the save fails for another reason', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const doc = await refused('base', 'mine');

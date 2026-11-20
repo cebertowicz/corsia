@@ -14,6 +14,7 @@
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
+	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
 
 	let {
 		title = 'Document',
@@ -111,7 +112,9 @@
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	// Delivery controls mount in the identity row so Send holds the compact header line.
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
-	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
+	// While a typing save is refused for a changed file, the Details beside the refusal is the way on, so Reload is not offered beside it.
+	const staleControl = $derived(stale && ready && !$docSaveDrafts[targetInstanceId ?? '']?.stale);
+	const staleAnnouncement = $derived(staleControl ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
 	const showOwnership = $derived(!!(ownership && artifactId));
 	// The live-status row renders the stable connection description for unavailable actions.
@@ -208,7 +211,7 @@
 				<!-- Send belongs to this tool cluster with the comment count, delivery preference, and review action. -->
 				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
 			{/if}
-			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+			{#if staleControl}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 			<CommentsPill class="doc-tool comment-status" data-comments-entry count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />

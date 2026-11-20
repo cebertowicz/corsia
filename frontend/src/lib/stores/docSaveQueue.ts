@@ -205,7 +205,10 @@ export async function keepMyText(target: TargetIdentity, fileText: string): Prom
 	if (!cur) return false;
 	// The new base is the file's own text, which the old refusal must not catch if the file went back to the refused text.
 	refusedBases.delete(key);
-	patchDraft(key, { savedText: fileText, status: cur.editText === fileText ? 'idle' : 'dirty', error: '', stale: false });
+	// The refusal stays up while the write runs, so its bar and its Details do not close and reopen; the save's own result clears or renews it.
+	// Nothing to write when the file already reads as his text: that ends the refusal here.
+	const same = cur.editText === fileText;
+	patchDraft(key, { savedText: fileText, status: same ? 'idle' : 'dirty', ...(same ? { error: '', stale: false } : {}) });
 	return flushDraft(target);
 }
 

@@ -10,6 +10,8 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
+import { patchDraft, seedDraft } from '$lib/stores/docSaveDrafts';
+import { clearDraft } from '$lib/stores/docSaveQueue';
 
 let host: HTMLElement;
 let component: ({ commentCreated: () => void; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
@@ -399,5 +401,30 @@ describe('DocViewerStatus held comments', () => {
 		component!.$destroy(); host.remove();
 		render(value(), undefined, { historyAvailable: false, onOpenHistory });
 		expect(host.querySelector('.history-tool')).toBeNull();
+	});
+});
+
+describe('File changed · Reload beside a refused typing save', () => {
+	const tab = { instanceId: 'tab-1', path: '/project/note.md', name: 'note.md', projectId: 'p', threadId: 't', artifactId: 'artifact-1' };
+	afterEach(() => clearDraft(tab));
+
+	it('is absent while the save is refused for a changed file, and back once the refusal clears', () => {
+		seedDraft(tab, 'base');
+		render(value(), undefined, { stale: true });
+		expect(host.querySelector('.stale-control')).not.toBeNull();
+		patchDraft('tab-1', { status: 'error', error: 'refused', stale: true });
+		flushSync();
+		expect(host.querySelector('.stale-control')).toBeNull();
+		expect(host.textContent).not.toContain('Reload to see the latest');
+		patchDraft('tab-1', { status: 'idle', error: '', stale: false });
+		flushSync();
+		expect(host.querySelector('.stale-control')).not.toBeNull();
+	});
+
+	it('stays when the save failed for any other reason', () => {
+		seedDraft(tab, 'base');
+		patchDraft('tab-1', { status: 'error', error: 'network', stale: false });
+		render(value(), undefined, { stale: true });
+		expect(host.querySelector('.stale-control')).not.toBeNull();
 	});
 });

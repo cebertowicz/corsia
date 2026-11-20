@@ -94,9 +94,9 @@
 {/snippet}
 {#if detailsOpen}
 	{#if isPaneDrawer()}
-		<AdaptiveDrawer ariaLabel="Choose which text to keep" heading="Choose which text to keep" onClose={closeDetails} initialFocusSelector="button">{@render details()}</AdaptiveDrawer>
+		<AdaptiveDrawer ariaLabel="Choose which text to keep" heading="Choose which text to keep" onClose={closeDetails} covered={confirmation !== null} initialFocusSelector="button">{@render details()}</AdaptiveDrawer>
 	{:else}
-		<Popover anchor={opener} open={detailsOpen} onClose={closeDetails} restoreFocus={() => opener?.focus()} placement="bottom" ariaLabel="Choose which text to keep">{@render details()}</Popover>
+		<Popover anchor={opener} open={detailsOpen} onClose={closeDetails} restoreFocus={() => opener?.focus()} covered={confirmation !== null} placement="bottom" ariaLabel="Choose which text to keep">{@render details()}</Popover>
 	{/if}
 {/if}
 <ConfirmDialog open={confirmation !== null} title={confirmation ? CONFIRMS[confirmation].title : ''} description={confirmation ? CONFIRMS[confirmation].description : ''}
