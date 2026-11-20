@@ -15,6 +15,8 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { canvasCompact } from '$lib/stores/artifactCanvas';
+import { patchDraft, seedDraft } from '$lib/stores/docSaveDrafts';
+import { clearDraft } from '$lib/stores/docSaveQueue';
 
 let host: HTMLElement;
 let bar: ReturnType<typeof mount> | null = null;
@@ -506,5 +508,31 @@ describe('DocViewerStatus held comments', () => {
 		component!.$destroy(); host.remove();
 		render(value(), undefined, { historyAvailable: false, onOpenHistory });
 		expect(host.querySelector('.history-tool')).toBeNull();
+	});
+});
+
+describe('File changed · Reload beside a refused typing save', () => {
+	const tab = { instanceId: 'tab-1', path: '/project/note.md', name: 'note.md', projectId: 'p', threadId: 't', artifactId: 'artifact-1' };
+	afterEach(() => { clearDraft(tab); canvasCompact.set(false); });
+
+	it.each([false, true])('is absent from the bar while the save is refused for a changed file, and back once the refusal clears (compact canvas: %s)', compact => {
+		canvasCompact.set(compact);
+		seedDraft(tab, 'base');
+		render(value(), undefined, { stale: true });
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
+		patchDraft('tab-1', { status: 'error', error: 'refused', stale: true });
+		flushSync();
+		expect(host.querySelector('[data-file-changed]')).toBeNull();
+		expect(host.textContent).not.toContain('Reload to see the latest');
+		patchDraft('tab-1', { status: 'idle', error: '', stale: false });
+		flushSync();
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
+	});
+
+	it('stays when the save failed for any other reason', () => {
+		seedDraft(tab, 'base');
+		patchDraft('tab-1', { status: 'error', error: 'network', stale: false });
+		render(value(), undefined, { stale: true });
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
 	});
 });

@@ -114,7 +114,7 @@ for (const [width, height, project] of layouts) {
 			test.setTimeout(120_000);
 			await page.setViewportSize({ width, height });
 			await open(page, request, width);
-			const notice = page.getByRole('status').filter({ hasText: 'This write is still settling' });
+			const notice = page.getByRole('status').filter({ hasText: 'Still saving. If it doesn’t finish' });
 			await expect(notice).toHaveCount(0);
 			await frame(page, `${width}-1-at-rest`);
 			const sampling = sample(page, WATCH_MS);

@@ -40,7 +40,7 @@ async def test_outside_edit_between_hash_check_and_publication_survives(durable_
         await save_document_text(body, user_id, expected_sha256=expected)
     assert exc.value.kind == ('no_such_file' if outside_content is None else 'stale')
     if outside_content is None:
-        assert exc.value.message == 'This file no longer exists, so nothing was changed. You can close it.'
+        assert exc.value.message == 'This document is deleted, so nothing changed.'
         assert not target.exists()
     else:
         assert target.read_text(encoding='utf-8') == outside_content

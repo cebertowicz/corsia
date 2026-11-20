@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { get } from 'svelte/store';
+
+const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+const expectedOf = (call: unknown[]) => (call[2] as { expectedSha256?: string | null }).expectedSha256;
+const staleRefusal = () => new Error(`409 ${JSON.stringify({ detail: { code: 'stale_base', message: 'This file changed after you started editing.' } })}`);
 
 const mocks = vi.hoisted(() => ({
 	writeContent: vi.fn(),
@@ -15,6 +20,7 @@ import {
 	clearDraft, closeTabWithSaveGate, docSaveActivities, docSaveDrafts, draftKey, withDraftArtifactId,
 	enrichDraftTarget, existingDraft, flushDraft, relocateDraftTarget, seedDraft, setDraftText,
 } from './docSaveQueue';
+import { EDITOR_STALE_STATUS } from './docSaveBase';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 let instanceSeq = 0;
@@ -250,6 +256,167 @@ describe('docSaveQueue', () => {
 		});
 		expect(mocks.toastShow).toHaveBeenLastCalledWith(moved, 'error');
 		clearDraft(doc);
+	});
+
+	it('sends the digest of the text the tab started from, not of the text it writes', async () => {
+		const doc = target({ path: '/project/base.md' });
+		mocks.writeContent.mockResolvedValue({ saved: true });
+		seedDraft(doc, 'Über 漢字 🙂\r\n');
+		setDraftText(doc, 'typed');
+		await flushDraft(doc);
+		expect(expectedOf(mocks.writeContent.mock.calls[0])).toBe(sha('Über 漢字 🙂\r\n'));
+		clearDraft(doc);
+	});
+
+	it('builds each queued edit on the text the one before it wrote', async () => {
+		const doc = target({ path: '/project/queued.md' });
+		const first = deferred();
+		mocks.writeContent.mockImplementationOnce(() => first.promise).mockResolvedValue({ saved: true });
+		seedDraft(doc, 'base');
+		setDraftText(doc, 'older');
+		const saving = flushDraft(doc);
+		await vi.waitFor(() => expect(mocks.writeContent).toHaveBeenCalledTimes(1));
+		setDraftText(doc, 'newer');
+		first.resolve({ saved: true });
+		await saving;
+		expect(mocks.writeContent.mock.calls.map(expectedOf)).toEqual([sha('base'), sha('older')]);
+		expect(existingDraft(doc)).toMatchObject({ savedText: 'newer', status: 'saved' });
+		clearDraft(doc);
+	});
+
+	it('hashes the base once while typing goes on, not once per save', async () => {
+		const doc = target({ path: '/project/hash-once.md' });
+		mocks.writeContent.mockRejectedValue(new Error('network failed'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const digest = vi.spyOn(crypto.subtle, 'digest');
+		seedDraft(doc, 'base');
+		for (const text of ['one', 'two', 'three']) {
+			setDraftText(doc, text);
+			await flushDraft(doc);
+		}
+		expect(mocks.writeContent).toHaveBeenCalledTimes(3);
+		expect(digest).toHaveBeenCalledTimes(1);
+		clearDraft(doc);
+	});
+
+	it('still saves, with the digest by software, when the browser has no WebCrypto', async () => {
+		const doc = target({ path: '/project/no-subtle.md' });
+		mocks.writeContent.mockResolvedValue({ saved: true });
+		vi.stubGlobal('crypto', {});
+		try {
+			seedDraft(doc, 'Über 🙂');
+			setDraftText(doc, 'typed');
+			expect(await flushDraft(doc)).toBe(true);
+			expect(expectedOf(mocks.writeContent.mock.calls[0])).toBe(sha('Über 🙂'));
+		} finally {
+			vi.unstubAllGlobals();
+			clearDraft(doc);
+		}
+	});
+
+	it('saves without a digest when hashing fails, instead of holding the save', async () => {
+		const doc = target({ path: '/project/hash-fails.md' });
+		mocks.writeContent.mockResolvedValue({ saved: true });
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.spyOn(crypto.subtle, 'digest').mockRejectedValue(new Error('no digest'));
+		seedDraft(doc, 'base');
+		setDraftText(doc, 'typed');
+		expect(await flushDraft(doc)).toBe(true);
+		expect(expectedOf(mocks.writeContent.mock.calls[0])).toBeNull();
+		expect(existingDraft(doc)).toMatchObject({ savedText: 'typed', status: 'saved' });
+		clearDraft(doc);
+	});
+
+	it('sends no digest for a base that may have been decoded lossily from non-UTF-8 bytes', async () => {
+		const doc = target({ path: '/project/lossy.md' });
+		mocks.writeContent.mockResolvedValue({ saved: true });
+		seedDraft(doc, 'caf�');
+		setDraftText(doc, 'cafe');
+		await flushDraft(doc);
+		expect(expectedOf(mocks.writeContent.mock.calls[0])).toBeNull();
+		clearDraft(doc);
+	});
+
+	it('refuses a stale base once, keeps the draft and its error, and never sends that base again while typing goes on', async () => {
+		const doc = target({ path: '/project/stale.md' });
+		mocks.writeContent.mockRejectedValue(staleRefusal());
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		seedDraft(doc, 'server text');
+
+		setDraftText(doc, 'first edit');
+		expect(await flushDraft(doc)).toBe(false);
+		for (const more of ['first edit, more', 'first edit, more again']) {
+			setDraftText(doc, more);
+			expect(await flushDraft(doc)).toBe(false);
+		}
+
+		expect(mocks.writeContent).toHaveBeenCalledTimes(1);
+		expect(mocks.toastShow).toHaveBeenCalledTimes(1);
+		expect(existingDraft(doc)).toMatchObject({
+			editText: 'first edit, more again', savedText: 'server text', status: 'error', stale: true,
+			error: EDITOR_STALE_STATUS,
+		});
+		clearDraft(doc);
+	});
+
+	it('does not resend the refused base when typing arrives during the refused write', async () => {
+		const doc = target({ path: '/project/stale-inflight.md' });
+		const slow = deferred();
+		mocks.writeContent.mockImplementationOnce(() => slow.promise);
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		seedDraft(doc, 'server text');
+		setDraftText(doc, 'one');
+		const saving = flushDraft(doc);
+		await vi.waitFor(() => expect(mocks.writeContent).toHaveBeenCalledTimes(1));
+		setDraftText(doc, 'one, and typed during the write');
+		slow.reject(staleRefusal());
+		expect(await saving).toBe(false);
+		expect(mocks.writeContent).toHaveBeenCalledTimes(1);
+		expect(existingDraft(doc)).toMatchObject({ editText: 'one, and typed during the write', savedText: 'server text', status: 'error' });
+		clearDraft(doc);
+	});
+
+	it('refuses a failed close after a stale refusal so the typed text stays in the tab', async () => {
+		const doc = target({ path: '/project/stale-close.md' });
+		mocks.writeContent.mockRejectedValue(staleRefusal());
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		seedDraft(doc, 'server text');
+		setDraftText(doc, 'typed');
+		const onClose = vi.fn();
+		const onBringIntoView = vi.fn();
+		expect(await closeTabWithSaveGate(doc, { onClose, onBringIntoView })).toEqual({ closed: false });
+		expect(await closeTabWithSaveGate(doc, { onClose, onBringIntoView })).toEqual({ closed: false });
+		expect(mocks.writeContent).toHaveBeenCalledTimes(1);
+		expect(onClose).not.toHaveBeenCalled();
+		expect(existingDraft(doc)).toMatchObject({ editText: 'typed', status: 'error' });
+		clearDraft(doc);
+	});
+
+	it('lets a different base save, and an ordinary failure still retries', async () => {
+		const stale = target({ path: '/project/other-base.md' });
+		mocks.writeContent.mockRejectedValueOnce(staleRefusal()).mockResolvedValue({ saved: true });
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		seedDraft(stale, 'server text');
+		setDraftText(stale, 'typed');
+		expect(await flushDraft(stale)).toBe(false);
+		// The text goes back to the base: the draft is clean, so a reload may seed the file's new text.
+		setDraftText(stale, 'server text');
+		expect(existingDraft(stale)).toMatchObject({ status: 'idle', error: '' });
+		seedDraft(stale, 'what the file holds now');
+		setDraftText(stale, 'typed on the new base');
+		expect(await flushDraft(stale)).toBe(true);
+		expect(mocks.writeContent.mock.calls.map(expectedOf)).toEqual([sha('server text'), sha('what the file holds now')]);
+		clearDraft(stale);
+
+		const flaky = target({ path: '/project/flaky.md' });
+		mocks.writeContent.mockReset();
+		mocks.writeContent.mockRejectedValueOnce(new Error('network failed')).mockResolvedValue({ saved: true });
+		seedDraft(flaky, 'base');
+		setDraftText(flaky, 'typed');
+		expect(await flushDraft(flaky)).toBe(false);
+		expect(await flushDraft(flaky)).toBe(true);
+		expect(mocks.writeContent).toHaveBeenCalledTimes(2);
+		clearDraft(flaky);
 	});
 
 	it('frees the saved text a returning tab paints from once the tab closes', async () => {
