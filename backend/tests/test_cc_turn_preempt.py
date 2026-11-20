@@ -33,7 +33,7 @@ from cc_runtime_fixtures import (  # noqa: F401
 )
 
 
-def _admit_active_turn(db, thread_id: str, turn_id: str):
+def _admit_active_turn(db, thread_id: str, turn_id: str, *, metadata=None):
     from core.turn_core import BOOT_EPOCH
     from infra.input_writes import begin_batch_write, settle_batch_write
     from infra.thread_driver import admit_input
@@ -52,6 +52,7 @@ def _admit_active_turn(db, thread_id: str, turn_id: str):
         turn_id=turn_id,
         boot_epoch=BOOT_EPOCH,
         admitted_at="t",
+        metadata=metadata,
         db=db,
     )
     assert admission.batch is not None
