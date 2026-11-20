@@ -378,6 +378,19 @@ describe('DocViewerStatus toolbar', () => {
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
 
+	it('carries a comment task in Details: named on the entry while closed, Dismiss all in the panel once open', () => {
+		const step = { node_id: 'task-1', node_title: 'Launch plan.md', node_revision: 1, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Docs agent', comment_attention: { artifact_id: 'doc-1', comments: 2, suggestions: 0, system_task: true } };
+		const commentTaskBar = { read: { person_step: step }, artifactId: 'doc-1', load: vi.fn() };
+		render(value(), vi.fn().mockResolvedValue(undefined), { commentTaskBar });
+		const entry = host.querySelector<HTMLButtonElement>('[data-document-details]')!;
+		expect(entry.getAttribute('aria-label')).toBe('Document details · 2 comments to review');
+		expect(host.querySelector('[data-comments-entry]')?.parentElement?.textContent).not.toContain('Dismiss all');
+		entry.click(); flushSync();
+		expect(entry.getAttribute('aria-label')).toBe('Document details');
+		const panel = host.querySelector('.doc-panel')!;
+		expect([...panel.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Dismiss all')).toHaveLength(1);
+	});
+
 	it('names behind Details what waits there, in the words the panel uses, and never a count', () => {
 		const detailsName = () => host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label');
 		const ask = { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false };
