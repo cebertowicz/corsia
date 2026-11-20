@@ -1,7 +1,7 @@
 """One pass over a Turn is enough to project its Assistant Step batches.
 
 A differential test of :func:`history.turns.assistant_step_batches` against the
-pre-change implementation, vendored verbatim below, over shapes whose durable
+batch rule as stated, computed the slow obvious way, over shapes whose durable
 ``seq`` order deliberately disagrees with group order (a late-written tool
 result, a trailing initiating user row).
 """
@@ -28,18 +28,18 @@ TURN = "step-batch-turn"
 EPOCH = 0
 
 
-# Verbatim copy of `assistant_step_batches` as it was before the single-pass change:
-# `git show cdd5514364476442995b2b7e1ececd817c31c17f:backend/history/turns.py`
-# (base of this change). Only the function name differs; it calls the unchanged
-# `group_assistant_steps` imported above. It is the oracle for the byte-identity claim.
-def _pre_3151_assistant_step_batches(
+def _reference_batches(
     turn: PortableTurn,
 ) -> tuple[AssistantStepBatch, ...]:
-    """Project complete Assistant Step batches and their legal resume anchors.
+    """The batch rule, computed the slow obvious way.
 
     A resume anchor is the final initiating user row immediately before the
     Assistant output. It exists only when durable sequence order cleanly
-    partitions checkpoint-covered input from exact assistant/tool replay.
+    partitions checkpoint-covered input from exact assistant/tool replay. A
+    group's end is legal only when every later row has a higher ``seq``.
+
+    It re-reads every later row for every group, which is the shape the shipped
+    function must not need. When the rule changes, change it here first.
     """
     groups = group_assistant_steps(turn.messages)
     batches: list[AssistantStepBatch] = []
@@ -186,7 +186,7 @@ def test_shuffled_shapes_are_not_all_trivial() -> None:
             message.seq for message in turn.messages
         ):
             out_of_order += 1
-        batches = _pre_3151_assistant_step_batches(turn)
+        batches = _reference_batches(turn)
         anchors += sum(1 for batch in batches if batch.resume_anchor is not None)
         illegal_ends += sum(
             1 for batch in batches[:-1] if batch.end_boundary is None
@@ -203,6 +203,6 @@ def test_shuffled_shapes_are_not_all_trivial() -> None:
 
 
 @pytest.mark.parametrize("seed", range(200))
-def test_batches_match_the_pre_change_code_on_shuffled_shapes(seed: int) -> None:
+def test_batches_match_the_stated_rule_on_shuffled_shapes(seed: int) -> None:
     turn = _shuffled_turn(random.Random(seed))
-    assert assistant_step_batches(turn) == _pre_3151_assistant_step_batches(turn)
+    assert assistant_step_batches(turn) == _reference_batches(turn)
