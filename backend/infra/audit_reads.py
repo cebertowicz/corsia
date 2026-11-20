@@ -197,6 +197,8 @@ def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
            since: str | None, until: str | None, deadline: float) -> list[dict]:
     scope = (user_id, project_id)
     if metric == "checkpoint_health":
+        # _window requires both bounds for this metric.
+        assert since is not None and until is not None
         cursor = db.execute(
             _CHECKPOINT_HEALTH_SQL,
             (*scope, LIMIT_REFUSAL_MAX_CHARS, _first_order_in_window(db, since), since, until,
