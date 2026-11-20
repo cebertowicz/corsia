@@ -160,10 +160,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 9845,
+      "bytes": 9862,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "4b36c4534732670414abc2d614327e6c8c0a3564672c8d462ebda0370dbfe17c"
+      "sha256": "37c40b6001679beaa4fcb035716fc63a26511a349d8bed6ddc9d0955f1ea6c5c"
     },
     {
       "bytes": 6186,
