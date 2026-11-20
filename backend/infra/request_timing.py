@@ -35,6 +35,8 @@ _UNMATCHED_ROUTE = "<unmatched>"
 #: Recorded for a request whose caller gave up first (the handler was cancelled): the client-closed status.
 CLIENT_CLOSED = 499
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+#: Every method label a route entry can carry (``_normalized_method``); the browser capture accepts exactly these.
+METHOD_LABELS = _HTTP_METHODS | {"OTHER"}
 
 
 @dataclass

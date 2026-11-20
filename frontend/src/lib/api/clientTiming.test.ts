@@ -130,7 +130,7 @@ describe('createClientTiming', () => {
 		expect(sent[0].keepalive).toBe(false);
 		expect(sent[0].batch.engine).toBe('webkit');
 		const wait = sent[0].batch.rows.find((row) => row.measure === 'wait')!;
-		expect(wait).toMatchObject({ count: 25, sum_ms: 750, max_ms: 30, engine: 'webkit', method: 'GET' });
+		expect(wait).toMatchObject({ count: 25, sum_ms: 750, max_ms: 30, method: 'GET' });
 		expect(wait.buckets).toHaveLength(BUCKET_UPPERS.length);
 		expect(wait.buckets.reduce((a, b) => a + b, 0)).toBe(25);
 		expect(wait.buckets[BUCKET_UPPERS.indexOf(32)]).toBe(25);
@@ -182,7 +182,7 @@ describe('createClientTiming', () => {
 				serverTiming: [{ name: 'route', duration: 0, description: `DELETE ${route}` }, { name: 'app', duration: 9876.54321 }] };
 		}
 
-		it('keeps one row of the worst shape near 270 bytes, so a batch fits the keepalive limit', async () => {
+		it('keeps one row of the worst shape near 250 bytes, so a batch fits the keepalive limit', async () => {
 			const { sent, timing, settle } = setup();
 			for (let i = 0; i < 12_345; i += 1) timing.record(worstRow(), 0);
 			timing.flush(true);

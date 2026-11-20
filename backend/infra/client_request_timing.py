@@ -29,20 +29,32 @@ from __future__ import annotations
 import re
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
-from typing import Final
+from typing import Annotated, Final, Literal
 
 from loguru import logger
 
 from infra.product_events import analytics_disabled
-from infra.request_timing import BUCKET_UPPERS, CLIENT_TIMING_RETENTION_DAYS, window_start
+from pydantic import AfterValidator
 
-MEASURES = ("total", "wait", "connect", "server", "network")
-ENGINES = ("chromium", "webkit", "gecko", "other")
-METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "OTHER")
+from infra.request_timing import BUCKET_UPPERS, CLIENT_TIMING_RETENTION_DAYS, METHOD_LABELS, window_start
+
+#: The allowed engine and measure values, defined once; the API models use these types.
+Engine = Literal["chromium", "webkit", "gecko", "other"]
+Measure = Literal["total", "wait", "connect", "server", "network"]
+
+
+def _known_method(method: str) -> str:
+    """Accept exactly the labels the route entry can carry, so a method added there is accepted here."""
+    if method not in METHOD_LABELS:
+        raise ValueError(f"unknown method {method!r}")
+    return method
+
+
+Method = Annotated[str, AfterValidator(_known_method)]
 BUCKET_COUNT = len(BUCKET_UPPERS)
 #: Rows per POST. The page's hide-time flush must fit the browser's 64 KiB limit on bodies sent with
-#: keepalive; the largest row measured is 270 bytes (a 77-character route, the longest registered, and
-#: five-digit counts), so 100 rows is under 28 KiB. The page chunks to this and the server enforces it.
+#: keepalive; the largest row measured is 250 bytes (a 77-character route, the longest registered, and
+#: five-digit counts), so 100 rows is under 25 KiB. The page chunks to this and the server enforces it.
 BATCH_ROWS = 100
 #: The longest registered /api route template is 77 characters; the room above that only lets the
 #: request parse, since a route is stored only if it equals a registered template.
@@ -64,7 +76,8 @@ ISSUE_COUNT_CAP = 1_000
 MAX_WINDOW_DAYS = CLIENT_TIMING_RETENTION_DAYS
 
 Row = tuple[date, str, str, str, str, int, float, float, list[int]]
-Item = tuple[str, str, str, str, str, int, float, float, list[int]]
+#: One row as the page sends it: the batch's engine is stored on each row, so the page sends it once.
+Item = tuple[str, str, str, str, int, float, float, list[int]]
 
 _posts_by_engine: Counter[str] = Counter()
 
@@ -93,9 +106,9 @@ def _paths(routes) -> set[str]:
     return found
 
 
-def validate_row(item: Item, today: date, templates: frozenset[str]) -> Row | None:
-    """Return one storable row, or None when it is outside what the page can truthfully send."""
-    day, engine, method, route, measure, count, sum_ms, max_ms, buckets = item
+def validate_row(engine: str, item: Item, today: date, templates: frozenset[str]) -> Row | None:
+    """Return one storable row of this batch's engine, or None when it is outside what the page can truthfully send."""
+    day, method, route, measure, count, sum_ms, max_ms, buckets = item
     try:
         parsed = date.fromisoformat(day)
     except ValueError:
@@ -153,7 +166,7 @@ def ingest(engine: str, batch: list[Item], issues: dict[str, int], templates: fr
     today = datetime.now(UTC).date()
     if analytics_disabled():
         return 0, 0  # rows never meant to be stored are not dropped, and a disabled install has nothing to warn about
-    rows = [row for item in batch if (row := validate_row(item, today, templates)) is not None]
+    rows = [row for item in batch if (row := validate_row(engine, item, today, templates)) is not None]
     kept = len(rows)
     if rows:
         try:

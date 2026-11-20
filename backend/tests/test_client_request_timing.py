@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import typing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,7 +42,7 @@ def warnings():
 
 
 def _item(measure="wait", route=_ROUTE, count=2, **over):
-    item = {"day": _TODAY, "engine": "webkit", "method": "GET", "route": route, "measure": measure,
+    item = {"day": _TODAY, "method": "GET", "route": route, "measure": measure,
             "count": count, "sum_ms": 7.5, "max_ms": 5.0, "buckets": _BUCKETS}
     return {**item, **over}
 
@@ -101,8 +102,23 @@ def test_real_app_route_templates_fit_the_route_limit():
     templates = crt.registered_route_templates(app)
     assert "/api/system/perf/client-timing" in templates
     assert len(templates) > 100
-    assert max(map(len, templates)) <= 77  # the length the route limit's comment states
-    assert 77 <= crt.ROUTE_MAX_LENGTH
+    assert max(map(len, templates)) <= crt.ROUTE_MAX_LENGTH  # every registered template can be stored
+
+
+def test_every_method_label_the_route_entry_can_carry_is_accepted():
+    """The page returns the method it was told; a label added to the route timing must not make every batch a 422."""
+    assert request_timing.METHOD_LABELS == request_timing._HTTP_METHODS | {"OTHER"}
+    assert request_timing._normalized_method("brew") in request_timing.METHOD_LABELS
+    client = _client()
+    for method in sorted(request_timing.METHOD_LABELS):
+        assert _post(client, [_item(method=method)]).status_code == 202
+
+
+def test_engine_is_sent_once_and_stored_on_every_row(analytics):
+    rows = [_item(), _item(measure="total")]
+    assert all("engine" not in row for row in rows)
+    assert _post(_client(), rows, engine="gecko").json() == {"kept": 2, "dropped": 0}
+    assert analytics.execute("SELECT DISTINCT engine FROM client_request_timing_daily").fetchall() == [("gecko",)]
 
 
 def test_post_stores_and_merges_rows(analytics):
@@ -130,9 +146,10 @@ def test_rows_outside_what_the_page_sends_are_dropped_or_refused(analytics):
     client = _client()
     out_of_range = [_item(day="2001-01-01"), _item(count=3)]  # an old day; buckets that do not sum to count
     assert _post(client, out_of_range).json() == {"kept": 0, "dropped": 2}
-    for bad in (_item(measure="bogus"), _item(engine="x"), _item(buckets=[1]), _item(day="not-a-day"),
+    for bad in (_item(measure="bogus"), _item(method="get"), _item(buckets=[1]), _item(day="not-a-day"),
                 _item(route="/" + "a" * (crt.ROUTE_MAX_LENGTH + 1)), _item(buckets=[-1, 3] + [0] * 15)):
         assert _post(client, [bad]).status_code == 422
+    assert _post(client, [_item()], engine="x").status_code == 422
     assert analytics.execute("SELECT COUNT(*) FROM client_request_timing_daily").fetchone()[0] == 0
 
 
@@ -208,6 +225,11 @@ def test_the_page_names_the_same_unknown_route_and_buckets_as_the_server():
     assert f"UNKNOWN_ROUTE = '{crt.UNKNOWN_ROUTE}'" in source
     assert "BUCKET_UPPERS = STATS_BUCKET_UPPERS" in source  # the list itself is tied to the server's by vitest
     assert f"BATCH_ROWS = {crt.BATCH_ROWS};" in source
+    assert f"FLUSH_MS = {request_timing._FLUSH_SECONDS * 1000:_};" in source  # the server's own flush interval
+    for label in ("chromium", "webkit", "gecko", "other"):
+        assert f"'{label}'" in source and label in typing.get_args(crt.Engine)
+    for measure in typing.get_args(crt.Measure):
+        assert f"'{measure}'" in source
     assert f"ISSUE_COUNT_CAP = {crt.ISSUE_COUNT_CAP:_};" in source
     assert f"MAX_ISSUE_KEYS = {crt.MAX_ISSUE_KEYS};" in source
     for kind in crt.ISSUE_KINDS:

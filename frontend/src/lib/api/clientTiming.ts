@@ -4,7 +4,7 @@
  * For each /api request the page reads its resource timing entry and splits the time into the wait
  * inside the browser (queued behind the per-host connection limit, stalled), connection setup, the
  * server's own duration (from the response's `Server-Timing` header) and the network remainder. The
- * split is aggregated in memory per day, engine, method and route template, and sent in small batches
+ * split is aggregated in memory per day, method and route template, and sent in small batches
  * at most once a minute, so a day of use says whether waiting in the browser or server work is most of
  * a slow chat switch.
  *
@@ -28,12 +28,13 @@ export const CLIENT_TIMING_PATH = '/api/system/perf/client-timing';
 /** The key for a request whose response named no route (an engine that hides Server-Timing). The server accepts this one non-template route. */
 export const UNKNOWN_ROUTE = '/<unknown>';
 
+/** The server's own request-timing flush interval (`_FLUSH_SECONDS`, 60 s, checked on dev and tied to it by a test). A failed POST loses at most a minute of samples, and one POST per open page per minute is small next to the /api traffic the page already makes. */
 const FLUSH_MS = 60_000;
-/** Rows per POST: the server's limit. The largest row measured is 270 bytes (the longest registered route, five-digit counts), so a batch is under 28 KiB. */
+/** Rows per POST: the server's limit. The largest row measured is 250 bytes (the longest registered route, five-digit counts), so a batch is under 25 KiB. */
 export const BATCH_ROWS = 100;
 /** The browser refuses keepalive bodies past 64 KiB in flight across the page; 48 KiB leaves room for other keepalive sends. */
 export const KEEPALIVE_BODY_BYTES = 48 * 1024;
-/** What a body carries besides its rows: the engine and up to MAX_ISSUE_KEYS issues, counted against the budget for each body. */
+/** What a body carries besides its rows: the engine, sent once per body, and up to MAX_ISSUE_KEYS issues, counted against the budget for each body. */
 const KEEPALIVE_BODY_OVERHEAD = 512;
 /** Matches the server's caps: a count past this is plainly broken; the server refuses more keys. */
 const ISSUE_COUNT_CAP = 1_000;
@@ -43,7 +44,6 @@ const TIMER_ROUNDING_MS = 1;
 
 export interface ClientTimingRow {
 	day: string;
-	engine: Engine;
 	method: string;
 	route: string;
 	measure: Measure;
@@ -227,7 +227,7 @@ export function createClientTiming(options: {
 		const key = `${day}\u0000${method}\u0000${route}\u0000${measure}`;
 		let row = cells.get(key);
 		if (!row) {
-			row = { day, engine: options.engine, method, route, measure, count: 0, sum_ms: 0, max_ms: 0, buckets: BUCKET_UPPERS.map(() => 0) };
+			row = { day, method, route, measure, count: 0, sum_ms: 0, max_ms: 0, buckets: BUCKET_UPPERS.map(() => 0) };
 			cells.set(key, row);
 		}
 		row.count += 1;
