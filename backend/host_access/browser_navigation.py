@@ -4,6 +4,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Sequence
 
+from host_access.browser_own_address import REFUSAL as OWN_ADDRESS_REFUSAL, is_own_address
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import normalize_browser_url
 
@@ -15,6 +16,8 @@ def normalize_url(value: str) -> str:
     normalized = normalize_browser_url(value)
     if normalized is None:
         raise BrowserSessionError(URL_REFUSAL)
+    if is_own_address(normalized):
+        raise BrowserSessionError(OWN_ADDRESS_REFUSAL)
     return normalized
 
 

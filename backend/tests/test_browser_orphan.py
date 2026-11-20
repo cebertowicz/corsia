@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import psutil
 import pytest
 
-from host_access import browser_chrome, browser_download, browser_orphan, browser_owner_lock, browser_session_launch, group_probe, processes
+from host_access import browser_chrome, browser_download, browser_own_address, browser_orphan, browser_owner_lock, browser_session_launch, group_probe, processes
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionRecord, BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -50,13 +50,14 @@ async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monke
     monkeypatch.setattr(processes, 'stop_orphan_group', stop)
     monkeypatch.setattr(browser_session_launch.sys, 'platform', 'darwin')
     monkeypatch.setattr(browser_download, 'is_private_download', lambda _: True)
-    chrome = SimpleNamespace(process=SimpleNamespace(pid=99), closed=False, release_stream=Mock())
+    chrome = SimpleNamespace(process=SimpleNamespace(pid=99), closed=False, release_stream=Mock(), endpoint='')
     async def launch(*args, **kwargs):
         events.append(('launched', kwargs['profile'], kwargs['record']))
         return chrome
     monkeypatch.setattr(browser_chrome.ChromeProcess, 'launch', launch)
     monkeypatch.setattr(browser_session_launch, 'apply_kept_signins', AsyncMock())
     monkeypatch.setattr(browser_session_launch, 'verify_stream', AsyncMock())
+    monkeypatch.setattr(browser_own_address, 'clear_serving_storage', AsyncMock())
     record = Mock()
     monkeypatch.setattr(browser_owner_lock, 'record_launched_chrome', record)
     runtime = BrowserRuntime(BrowserSessionRecord('new', 'session', profile=profile))
