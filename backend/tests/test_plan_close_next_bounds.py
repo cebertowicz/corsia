@@ -21,7 +21,7 @@ import pytest
 
 import plans.close_next_bounds as bounds
 from plans import service
-from prompts.plan_tools import start_out_of_order_compact
+from prompts.plan_start_order import start_out_of_order_compact
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     CRITERIA_MARKER,

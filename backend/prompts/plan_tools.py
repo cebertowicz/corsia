@@ -275,28 +275,6 @@ def mark_done_slot_held(holder_title: str, holder_id: str, node_id: str) -> str:
     )
 
 
-#: Refusal of an owner's named start that passes ready top-level work.
-START_OUT_OF_ORDER = (
-    "Not started: '{title}' ({node}) is above this in plan order and ready. Start it "
-    "first, or if this outranks it, reorder node_id={top} order_key={key}, then start "
-    "this with the revision the reorder returns."
-)
-
-
-#: The same refusal in a ``next`` block, no longer than ``_SLOT_HELD``'s fixed text.
-_START_OUT_OF_ORDER_COMPACT = "start {title} first (ready, above this task) or reorder this task above it"
-
-
-def start_out_of_order_compact(title: str) -> str:
-    """Return the ``next`` block's short refusal naming the ready item by title."""
-    return _START_OUT_OF_ORDER_COMPACT.format(title=title)
-
-
-def start_out_of_order(title: str, node_id: str, top_id: str, key: int) -> str:
-    """Return the refusal for a start that passes the ready item ``node_id``."""
-    return START_OUT_OF_ORDER.format(title=title, node=node_id, top=top_id, key=key)
-
-
 def listed_text(shown: int, total: int, *, later: int = 0) -> str:
     """Return how many of the executor's other open tasks a block lists, then the Later count."""
     return _LISTED.format(shown=shown, total=total) + in_later(later)

@@ -27,7 +27,7 @@ import plans.close_next_bounds as bounds
 import plans.node_order as node_order
 import plans.selection_validity as validity
 import plans.service as service
-from prompts import plan_tools as text
+from prompts import plan_start_order as order_text
 
 #: Top-level states that take a rank: work still to settle or to review.
 RANKED_STATES = frozenset({"pending", "active", "review_requested"})
@@ -131,18 +131,20 @@ def out_of_order(
     plan = service._plan_row(db, node["plan_id"])
     if not _owns(plan, actor_id) or attempts.open_attempt(db, str(node["id"])) is not None:
         return None
-    if validity.slot_blocker(db, node, plan) is not None:
-        return None
     where = standing(db, plan)
     root_id = where.root_of.get(str(node["id"]))
     above = [] if root_id is None else where.ready_above(root_id)
-    if not above:
+    # The node's own blocker is read only once ready work ranks above it, so a
+    # start that passes nothing adds no read beyond ``standing``.
+    if not above or validity.slot_blocker(db, node, plan) is not None:
         return None
     top = above[0]
     top_title = bounds.title(str(top["title"]))
+    nested = str(root_id) != str(node["id"])
+    root_kind = str(service._node_row(db, str(root_id))["kind"]) if nested else None
     if compact:
-        return text.start_out_of_order_compact(top_title)
-    return text.start_out_of_order(
+        return order_text.start_out_of_order_compact(top_title, root_kind=root_kind)
+    return order_text.start_out_of_order(
         top_title, str(top["id"]), str(root_id),
-        position(db, str(plan["id"]), str(top["id"])),
+        position(db, str(plan["id"]), str(top["id"])), root_kind=root_kind,
     )

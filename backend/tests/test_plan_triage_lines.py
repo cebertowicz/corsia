@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import plans.selection_validity as validity
+import plans.triage_lines as triage_lines
 from plans import service
 from tests.plan_close_next_helpers import (
     HUMAN,
@@ -32,11 +34,16 @@ from tests.plan_close_next_helpers import (
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
 
-def _refusal(title: str, node_id: str, top_id: str, key: int) -> str:
+def _refusal(title: str, node_id: str, top_id: str, key: int, *, nested: bool = False) -> str:
+    revision_text = (
+        "its own expected_revision, unchanged by the reorder" if nested
+        else "the expected_revision the reorder returns"
+    )
+    mover = "its phase " if nested else ""
     return (
         f"Not started: '{title}' ({node_id}) is above this in plan order and ready. Start it "
-        f"first, or if this outranks it, reorder node_id={top_id} order_key={key}, then start "
-        "this with the revision the reorder returns."
+        f"first, or if this outranks it, reorder {mover}node_id={top_id} order_key={key}, "
+        f"then start this with {revision_text}."
     )
 
 
@@ -176,8 +183,43 @@ def test_a_nested_start_is_judged_by_the_top_level_item_it_belongs_to(db):
     child = task(db, plan.id, "First step", parent_id=phase.id)
 
     assert _refused(db, plan.id, child.id) == _refusal(
-        "Waiting P0 fix", passed.id, phase.id, 0,
+        "Waiting P0 fix", passed.id, phase.id, 0, nested=True,
     )
+
+
+def test_a_nested_start_runs_after_the_reorder_its_refusal_names(db):
+    plan = owner_plan(db)
+    passed = task(db, plan.id, "Waiting P0 fix")
+    phase = _phase(db, plan.id, "New initiative")
+    child = task(db, plan.id, "First step", parent_id=phase.id)
+    child_revision = revision(db, child.id)
+    _refused(db, plan.id, child.id)
+    plan_update(db, plan.id, "reorder", {
+        "node_id": phase.id, "expected_revision": revision(db, phase.id), "order_key": 0,
+    })
+
+    result = plan_update(db, plan.id, "activate", {
+        "node_id": child.id, "expected_revision": child_revision,
+    }, actor=OWNER)
+
+    assert result["admission"]["condition"] == "running"
+    assert service._node_row(db, passed.id)["state"] == "pending"
+
+
+def test_a_start_with_nothing_ready_above_reads_no_blocker_of_its_own(db, monkeypatch):
+    plan = owner_plan(db)
+    chosen = task(db, plan.id, "Topmost task")
+    task(db, plan.id, "Below it")
+    calls = []
+    real = validity.slot_blocker
+    monkeypatch.setattr(
+        validity, "slot_blocker", lambda *a, **k: calls.append(a) or real(*a, **k),
+    )
+
+    node = service._node_row(db, chosen.id)
+
+    assert triage_lines.out_of_order(db, node, actor_id=OWNER.thread_id) is None
+    assert calls == []
 
 
 def test_order_inside_one_top_level_item_is_the_agents(db):
@@ -282,13 +324,12 @@ def test_an_auto_selected_start_is_not_refused(db):
 def test_a_next_node_id_start_ahead_of_a_ready_task_is_refused(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
-    passed = task(db, plan.id, "Waiting P0 fix")
+    task(db, plan.id, "Waiting P0 fix")
     chosen = task(db, plan.id, "New ask")
     select(db, plan.id, current.id)
 
     block = next_block(close(db, plan.id, "fail", current.id, next_node_id=chosen.id))
 
-    assert passed.id
     assert block["named"] == {
         "reason": "start Waiting P0 fix first (ready, above this task) or reorder this task above it",
         "refusal": "out_of_order",
@@ -296,6 +337,22 @@ def test_a_next_node_id_start_ahead_of_a_ready_task_is_refused(db):
     }
     assert service._node_row(db, chosen.id)["state"] == "pending"
     assert _activations(db, chosen.id) == 0
+
+
+def test_a_nested_next_node_id_refusal_names_the_phase_to_reorder(db):
+    plan = owner_plan(db)
+    current = task(db, plan.id, "Current work")
+    task(db, plan.id, "Waiting P0 fix")
+    phase = _phase(db, plan.id, "New initiative")
+    child = task(db, plan.id, "First step", parent_id=phase.id)
+    select(db, plan.id, current.id)
+
+    block = next_block(close(db, plan.id, "fail", current.id, next_node_id=child.id))
+
+    assert block["named"]["reason"] == (
+        "start Waiting P0 fix first (ready, above this task) or reorder its phase above it"
+    )
+    assert block["named"]["started"] is False
 
 
 def test_a_next_node_id_start_with_nothing_ready_above_runs(db):
