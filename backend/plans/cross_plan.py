@@ -34,7 +34,7 @@ from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES, CLOSED, in_wor
 def prerequisite_settled(connection, node_id: str, *, actor_id: str | None, provenance: str) -> None:
     """Tell each foreign dependent's owner that ``node_id`` was accepted or failed."""
     prerequisite = _prerequisite(connection, node_id)
-    if prerequisite["state"] == CLOSED:
+    if prerequisite["state"] == CLOSED or prerequisite["state"] not in _TERMINAL_STATES:
         return
     outcome = "done" if prerequisite["state"] in _ACCEPTED_STATES else "failed"
     _tell(
@@ -147,8 +147,11 @@ def prerequisite_removed(
 
 
 def _prerequisite(connection, node_id: str):
+    """The prerequisite as its dependents read it: a phase whose work ended reads as that end (#3145)."""
+    from plans.node_waits import prerequisite_state_sql
+
     return connection.execute(
-        """SELECT n.id,n.title,n.state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
+        f"""SELECT n.id,n.title,{prerequisite_state_sql('n')} AS state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
            FROM plan_nodes n JOIN plans pl ON pl.id=n.plan_id WHERE n.id=?""",
         (node_id,),
     ).fetchone()

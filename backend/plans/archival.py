@@ -119,6 +119,10 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
         user_ask.withdraw_node_asks(
             connection, node_id, actor_id=actor_id, provenance=provenance,
         )
+        from plans import material_events
+
+        # Archiving a phase's last open work ends the phase for what waits on it (#3145).
+        phases = material_events.phases_waited_on(connection, node["parent_id"], skip=(node_id,))
         dependencies.drop_edges_for_node(
             connection, node_id, actor_id=actor_id, provenance=provenance,
             plan_id=node["plan_id"],
@@ -148,6 +152,9 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
 
         # Archiving an open optional step skips it (a required one is refused above).
         run_end.record_if_ended(connection, node_id, "archived")
+        material_events.settle_phases_waited_on(
+            connection, phases, actor_id=actor_id, provenance=provenance, causal_event_id=event_id,
+        )
         return service._node_from_row(
             connection, service._node_row(connection, node_id),
         )
