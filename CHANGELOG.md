@@ -34,12 +34,14 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A document promoted to a new place keeps its comments, and the task that held them for you follows it; before, it opened with no comments and the task closed saying they couldn't be shown.
-- A document's owner and supervisor pickers list the agents of the document's own workspace or project and tell agents with the same name apart by their responsibility. A document no one owns says so before you pick and suggests asking CORSIA to give it an owner; on an install used by more than one person, its shared owner label says Not set instead of Everyone; and a change that fails says Couldn’t change.
+- A document's owner and supervisor pickers list the agents of its own workspace or project and tell agents with the same name apart by their responsibility. You can take ownership even when others use CORSIA or no one currently owns the document. A project's instruction documents show its conductor as their owner, and your comments on them go to it. A change that fails says Couldn’t change.
 - A document's owner and supervisor stay visible when you return to its tab while it loads; their controls become available once loading finishes.
 - When a document is waiting for your review, its Approve and Send back buttons now show up even when the first try to load them fails or stalls, including after a lost connection or when you come back to the app.
 - A document's status line stays on one line while a reply is unread, on a standard-size phone such as a current iPhone and when the document area is narrow: the comment count shortens to "N unread", and the text below no longer jumps down. On smaller phones it can still take two lines.
 - A document's text, its table cells and a code file are now large enough on a phone that tapping into them no longer zooms the page; before, an iPhone zoomed in slightly and cut off the right edge until you pinched back out.
 - A document's owner in the Documents list now shows in full on a phone, and the description is shortened first; before, the end of the line, the owner, was cut off. When the owner's name alone fills the line, the description is left out and the name is shortened.
+- A document with no owner shows Owner: None.
+- On an install with several people, a document someone owns shows their name; before, it showed Not set.
 - A document you are reading stays still when a status banner such as Reconnecting appears or goes above it; before, the text slid down by the banner's height and back.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
 - A document you have open keeps your latest typing when an agent promotes it into a shared folder or moves it elsewhere: the typing is saved first and you reopen it at its new place. If it can’t be saved yet, the move is refused and the agent is told to try again shortly; before, the typing could be lost.
@@ -48,6 +50,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A failed workflow step now closes only work that depends on it; independent work stays open.
 - A folded working line in chat now counts the same steps as the list it opens; before, a step that only answered comments was counted but showed nothing.
+- A file you own stays yours even if its Owner line names an agent.
 - A folder you choose in oMLX for its SSD cache is kept across CORSIA's restarts, crash recovery and updates; before, CORSIA replaced it with its own folder at the next launch.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A lesson an agent saves is no longer lost in a workspace with a long history of guidance changes; before, the save could time out after 30 seconds and drop the lesson.
@@ -84,6 +87,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
 - A comment stays on its text when the words it highlights are edited, including in a file changed outside the editor, and says its text changed; it says the text is gone only when most of those words were replaced or removed. Selecting exactly its words and typing over them keeps the comment on what you type, and text typed right before or after a highlight stays outside it.
 - After you replace a connected app's refused key and the app reconnects, a chat that already hit the old error now loads that app's tools; you no longer have to start a new chat. A chat that was already running also picks up an app connected after it started.
+- An agent can give you a document it owns, so you can approve its changes; a project's documents are not handed over, since its conductor edits them directly. Once you own a document, agents suggest changes for you to review.
 - An agent can now end a workflow run it no longer needs, or skip an optional step that runs another workflow, with one close and a reason; before, the run's required steps left it stuck open on the plan.
 - An agent can now replace an update of its own that you haven't seen yet: the old update disappears from the chat and the new one appears at the bottom. If the old update answered one of your comments, that answer stays in its comment thread. An update you've seen, or commented on, can't be replaced.
 - An agent can now tag you in a document comment: the comment shows your name, and its thread stays marked as needing you until you open it, even in a thread you never took part in.

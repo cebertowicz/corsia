@@ -33,7 +33,7 @@ def _row(db, row_id, event, external_id, reason, payload="{}"):
 
 
 def test_step_is_registered_at_198():
-    assert SCHEMA_VERSION == 202
+    assert SCHEMA_VERSION == 203
     assert MIGRATIONS[198] is migrate_198_to_199
 
 

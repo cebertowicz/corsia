@@ -180,6 +180,40 @@ def list_for_node(node_id: str, *, db=None) -> list[dict]:
         return [_projection(row) for row in rows]
 
 
+def require_ask_owner(db, artifact_id, thread_id):
+    """Resolve an ask's identity and require ownership or document supervision."""
+    known, owner = identity_owner(artifact_id, db=db)
+    if not known:
+        raise service.PlanInputError(f"ask_artifact_id {artifact_id!r} names no registered artifact")
+    identity = db.execute(
+        "SELECT type,state FROM artifact_identities WHERE id=?", (artifact_id.strip(),),
+    ).fetchone()
+    if owner != thread_id and not may_ask_for_document(db, artifact_id.strip(), owner, identity, thread_id):
+        raise service.PlanInputError(
+            "ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises, "
+            "or a project-owned document whose conductor is this thread"
+        )
+    return identity
+
+
+def may_ask_for_document(db, artifact_id, owner, identity, thread_id) -> bool:
+    """Whether this thread can ask for review of a shared-owned document."""
+    from infra import config
+    from registry import models
+    from registry.document_supervisor import effective_supervisor, owner_kind
+    from registry.shared_principals import scope_conductor
+
+    if identity["type"] == "document" and owner and owner.startswith("project:"):
+        return scope_conductor(owner.removeprefix("project:"), db=db) == thread_id
+    if identity["type"] != "document" or owner_kind(owner) != "person":
+        return False
+    artifact = models.get_artifact(artifact_id, db=db)
+    if artifact is None:
+        return False
+    supervisor, _ = effective_supervisor(db, artifact, owner=owner, workspace=config.WORKSPACE)
+    return supervisor is not None and supervisor["id"] == thread_id
+
+
 def linked_node_for_artifact(integration: str, type: str, external_id: str, *, db) -> dict:
     """The one open plan node a registered artifact (a PR) is attached to.
 
