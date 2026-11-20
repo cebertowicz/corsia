@@ -126,7 +126,9 @@ class ArtifactRehomeTool(Tool):
         if status == "forbidden":
             return f"Error: Re-home authority denied: {result}"
         if status == "person_forbidden":
-            return "Error: Ask the document's owner or their worker to give it to the person; for an unowned project document, ask its conductor."
+            return "Error: Ask the document's owner or their worker to give it to the person."
+        if status == "person_refused":
+            return f"Error: {result}"
         if status == "person_invalid_document":
             return "Error: Only documents with a path can be given to the person."
         if status == "error":
