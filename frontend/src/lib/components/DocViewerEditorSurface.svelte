@@ -100,9 +100,9 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
 		artifactId?: string | null;
-		/** The viewer's one content writer after the first load (also a clean reload's): the file's text the person chose after a stale refusal goes into the editor through it. */
 		onSuggestionHistory?: (entry: SuggestionHistoryEntry, before: string, after: string) => Promise<boolean>;
 		onSuggestionHistoryRecovery?: () => void;
+		/** The viewer's one content writer after the first load (also a clean reload's): the file's text the person chose after a stale refusal goes into the editor through it. */
 		onUseFile: (content: ViewerContent) => void;
 	} = $props();
 
