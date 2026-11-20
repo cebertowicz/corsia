@@ -37,7 +37,7 @@ for (const [label, width, height] of [['wide', 1440, 900], ['phone', 393, 852]] 
   await page.locator('.palette').getByRole('button', { name, exact: true }).click();
   if (width < 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await page.getByRole('navigation', { name: 'Agents' }).getByRole('button', { name: 'Garden planner' }).click();
-  await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
+  await expect(ownerItem(page)).toHaveAccessibleName('Owner and supervisor: Garden planner');
   await ownerItem(page).click();
   await rolePicker(page).getByRole('option', { name: /^You/ }).click();
   await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
