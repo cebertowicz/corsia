@@ -67,6 +67,31 @@ describe('DocStaleChoice', () => {
 		await vi.waitFor(() => expect(copy.mock.calls).toEqual([['my typed text'], ['what the file holds']]));
 	});
 
+	it('closes the phone sheet with its heading’s Done and keeps Close only on the popover', async () => {
+		mocks.fetchContent.mockResolvedValue(file('what the file holds'));
+		const width = window.innerWidth;
+		try {
+			window.innerWidth = 600;
+			await openDetails();
+			expect(buttons('Done')).toHaveLength(1);
+			expect(buttons('Close')).toHaveLength(0);
+			button('Done').click();
+			flushSync();
+			expect(document.body.textContent).not.toContain('The file’s text');
+			window.innerWidth = 1440;
+			await openDetails();
+			expect(buttons('Done')).toHaveLength(0);
+			expect(buttons('Close')).toHaveLength(1);
+		} finally { window.innerWidth = width; }
+	});
+
+	it('draws the choices as the bordered secondary button, not as quiet text', async () => {
+		mocks.fetchContent.mockResolvedValue(file('what the file holds'));
+		await openDetails();
+		for (const label of ['Keep your text', 'Use the file’s text']) expect(button(label).classList.contains('secondary')).toBe(true);
+		for (const label of ['Copy your text', 'Copy the file’s text']) expect(button(label).classList.contains('ghost')).toBe(true);
+	});
+
 	it('offers Retry when the file cannot be read, keeps his text, and shows both texts once it can', async () => {
 		mocks.fetchContent.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(file('the file, read on retry'));
 		button('Details').click();

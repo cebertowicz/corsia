@@ -81,16 +81,17 @@
 		<p role="status">Loading the file’s text…</p>
 	{:else if read.state === 'failed'}
 		<p role="alert">Couldn’t load the file’s text. Your text stays here.</p>
-		<Button size="sm" variant="ghost" onclick={load}>Retry</Button>
+		<Button size="sm" onclick={load}>Retry</Button>
 	{:else}
 		{#each [{ label: 'Your text', text: draft?.editText ?? '', copyLabel: 'Copy your text' }, { label: 'The file’s text', text: read.file.text, copyLabel: 'Copy the file’s text' }] as item (item.label)}
 			<section><h3>{item.label}</h3><pre>{item.text}</pre><Button size="sm" variant="ghost" onclick={() => copy(item.text)}>{item.copyLabel}</Button></section>
 		{/each}
-		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'mine'}>Keep your text</Button>
-		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'file'}>Use the file’s text</Button>
+		<Button size="sm" disabled={busy} onclick={() => confirmation = 'mine'}>Keep your text</Button>
+		<Button size="sm" disabled={busy} onclick={() => confirmation = 'file'}>Use the file’s text</Button>
 	{/if}
 	{#if actionError}<p role="alert">{actionError}</p>{/if}
-	<Button size="sm" variant="ghost" onclick={closeDetails}>Close</Button>
+	<!-- The phone sheet closes with the Done in its heading, as every drawer does; the popover has no heading, so it keeps Close. -->
+	{#if !isPaneDrawer()}<Button size="sm" variant="ghost" onclick={closeDetails}>Close</Button>{/if}
 {/snippet}
 {#if detailsOpen}
 	{#if isPaneDrawer()}
