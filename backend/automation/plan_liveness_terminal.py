@@ -34,6 +34,77 @@ def _stopped_below_cut(connection, thread_id: str, after) -> bool:
     )
 
 
+def _ends_retries(connection, thread_id: str, error: str) -> bool:
+    """Whether an error with no provider reset ends the thread's automatic retries.
+
+    A restart keeps its recovery; a provider limit and a head held for its
+    model, account or locality keep the wait that owns their resumption. Any
+    other error is not retried on a backoff: the thread stays idle until a
+    message wakes it, and whoever can act is told at once.
+    """
+    from infra.thread_recovery import RESTART_TURN_ERROR
+    from plans.public import stalled_why
+    from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
+
+    if error == RESTART_TURN_ERROR or is_provider_usage_or_quota_limit(error):
+        return False
+    return stalled_why(connection, thread_id) not in ("model", "account", "locality")
+
+
+def _tell_coordinator(connection, thread_id: str, *, turn_id: str | None, error: str) -> None:
+    """Tell who answers for a standing agent that its Turn failed and it will not retry.
+
+    A project agent's conductor; the CORSIA agent for a workspace agent or a
+    conductor. The CORSIA agent's own failure reaches the person as the error
+    row in its chat, which Focus shows. A worker's parent is told by the plan's
+    own wake (``notify_turn_error``), and a Turn that left its one re-run is
+    answered by that run.
+    """
+    import uuid
+
+    from events.delivery import enqueue_event_wake, start_idle_after_commit
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
+    from infra.plan_limit_continue import rerun_queued
+
+    row = connection.execute(
+        "SELECT title, project_id, spawned_by, COALESCE(agent_enabled, 0) AS standing "
+        "FROM threads WHERE id=?", (thread_id,),
+    ).fetchone()
+    if row is None or not row["standing"]:
+        return
+    if turn_id is not None and rerun_queued(turn_id, db=connection):
+        return
+    told = row["project_id"] and get_scope_coordinator(str(row["project_id"]), db=connection)
+    if not told or told == thread_id:
+        told = get_scope_coordinator(WORKSPACE_SCOPE, db=connection)
+    if not told or told == thread_id:
+        return
+    task = connection.execute(
+        "SELECT n.title FROM plan_nodes n JOIN plans p ON p.id=n.plan_id "
+        "WHERE p.owner_kind='thread' AND p.owner_id=? AND n.state='active' "
+        "AND n.kind='task' AND n.archived_at IS NULL ORDER BY n.updated_at DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    doing = task["title"] if task is not None else "no active task"
+    name = row["title"] or thread_id
+    key = turn_id or uuid.uuid4().hex
+    try:
+        enqueue_event_wake(
+            told, "agent.turn_errored",
+            f"{name} ({thread_id}) stopped on an error and will not retry on its own.",
+            {"thread_id": thread_id, "error": error, "working_on": doing,
+             "next": "Read it with delegate_status. A delegate_send wakes it."},
+            message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:turn-errored:{thread_id}:{key}")),
+            db=connection,
+        )
+    except ValueError:
+        from loguru import logger
+
+        logger.error("turn error of {} not told to {}: recipient unavailable", thread_id, told)
+        return
+    start_idle_after_commit(connection, told)
+
+
 def withdraw_unread_wake(connection, thread_id: str, *, error) -> None:
     """After an error, withdraw the reminder the Turn never read and back off.
 
@@ -63,6 +134,33 @@ def withdraw_unread_wake(connection, thread_id: str, *, error) -> None:
     advanced = signal.count > 0 and liveness._progress(signal, current) == ADVANCED
     liveness.arm_plan_wake(
         thread_id, signal, cycle=0 if advanced else current["cycle"] + 1, db=connection,
+    )
+
+
+def _error_without_reset(connection, thread_id: str, turn_id: str | None, error: str):
+    """An error with no provider reset: end the retries, or keep the wait that owns them."""
+    from automation import provider_reset_liveness
+
+    cleared_reset = False
+    if turn_id is not None and provider_reset_liveness.selection(
+        thread_id, turn_id, "error", connection,
+    ) is not None:
+        current = liveness.wake_for(thread_id, connection)
+        if current is not None and current["provider_reset_turn_id"] != turn_id:
+            cleared_reset = liveness.clear_provider_reset(thread_id, db=connection)
+    # A replayed callback for a Turn a later one has ended changes nothing.
+    if turn_id is not None and connection.execute(
+        "SELECT 1 FROM active_turns WHERE id=? AND thread_id=?", (turn_id, thread_id),
+    ).fetchone() is not None and provider_reset_liveness.latest_turn(
+        thread_id, turn_id, "error", connection,
+    ) is None:
+        return None
+    if _ends_retries(connection, thread_id, error):
+        liveness.cancel_plan_wake(thread_id, db=connection)
+        _tell_coordinator(connection, thread_id, turn_id=turn_id, error=error)
+        return None
+    return liveness.on_turn_complete(
+        thread_id, cycle=0 if cleared_reset else None, db=connection,
     )
 
 
@@ -105,16 +203,7 @@ def on_thread_turn_complete(
                 else None
             )
             if wake is None:
-                cleared_reset = False
-                if turn_id is not None and provider_reset_liveness.selection(
-                    thread_id, turn_id, "error", connection,
-                ) is not None:
-                    current = liveness.wake_for(thread_id, connection)
-                    if current is not None and current["provider_reset_turn_id"] != turn_id:
-                        cleared_reset = liveness.clear_provider_reset(thread_id, db=connection)
-                wake = liveness.on_turn_complete(
-                    thread_id, cycle=0 if cleared_reset else None, db=connection,
-                )
+                wake = _error_without_reset(connection, thread_id, turn_id, error or "")
             if turn_id is not None:
                 public.notify_turn_error(
                     connection, thread_id, turn_id=turn_id, error=error or "",

@@ -134,11 +134,13 @@ def test_reminder_queued_during_an_erroring_turn_does_not_restart_it(main_db):
     assert spacing - 5 < _seconds_until(row["deadline"]) <= spacing
 
 
-def test_the_backoff_keeps_doubling_across_repeated_errors(main_db):
+def test_a_plain_error_ends_the_retries(main_db):
+    """No growing silent backoff: the wake is cancelled and nothing is due again."""
+    from automation.continuation.sources.liveness import LivenessSource
     from automation.plan_liveness_terminal import on_thread_turn_complete
     from automation.turn_end_effects import PendingTurnEndEffects
 
-    turn_id = _running_turn(main_db, "turn-error-1")
+    turn_id = _running_turn(main_db, "turn-error-end")
     _deliver_reminder_into_running_turn(main_db)
     _error_terminal(main_db, turn_id)
     on_thread_turn_complete(
@@ -146,33 +148,9 @@ def test_the_backoff_keeps_doubling_across_repeated_errors(main_db):
         db=main_db, effects=PendingTurnEndEffects(),
     )
     main_db.commit()
-    assert _wake_row(main_db)["cycle"] == 1
 
-    # The next reminder comes due and starts its own Turn, which errors too.
-    from automation.continuation.execution import event_for
-    from automation.continuation.sources.liveness import LivenessSource
-    from automation.continuation.validity import condition_for_event
-
-    main_db.execute("UPDATE plan_liveness_wakes SET deadline=? WHERE thread_id=?", (_iso(-1), THREAD))
-    main_db.commit()
-    source = LivenessSource()
-    _event, _summary, details = event_for(source.due(_iso(), db=main_db)[0])
-    _queue(
-        main_db, "Actionable structured plan work remains.", role="system",
-        continuation=condition_for_event("plan.liveness_wake", details),
-    )
-    wake = plan_liveness.row_to_wake(dict(plan_liveness.wake_for(THREAD, main_db)))
-    source._settle_delivery(wake, _iso(), main_db)  # idle: started its own Turn
-    main_db.commit()
-    row = _wake_row(main_db)
-    assert row["cycle"] == 2
-    spacing = plan_liveness.PLAN_WAKE_IDLE_SECONDS * plan_liveness.PLAN_WAKE_BACKOFF ** 2
-    assert spacing - 5 < _seconds_until(row["deadline"]) <= spacing
-    second = main_db.execute(
-        "SELECT id FROM active_turns WHERE thread_id=? AND status='running'", (THREAD,),
-    ).fetchone()["id"]
-    _error_terminal(main_db, second)
-    assert _wake_row(main_db)["cycle"] == 2
+    assert _wake_row(main_db)["status"] == "cancelled"
+    assert LivenessSource().due(_iso(10**7), db=main_db) == []
 
 
 def test_a_persons_message_behind_the_reminder_still_starts_a_turn(main_db):

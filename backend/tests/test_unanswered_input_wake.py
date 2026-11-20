@@ -181,8 +181,10 @@ async def test_an_answered_input_queues_nothing(db) -> None:
 
 @pytest.mark.asyncio
 async def test_a_provider_reset_wake_replaces_ours(db, monkeypatch) -> None:
-    from automation import plan_liveness
+    from automation import plan_liveness, plan_liveness_terminal
 
+    # The stub stands in for a reset wait, which only an error that keeps its wait arms.
+    monkeypatch.setattr(plan_liveness_terminal, "_ends_retries", lambda *a, **k: False)
     monkeypatch.setattr(plan_liveness, "on_turn_complete",
                         lambda *a, **k: SimpleNamespace(provider_reset_at="2026-11-01T17:00:00Z"))
     _take_in(db)
