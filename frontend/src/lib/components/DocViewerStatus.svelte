@@ -9,8 +9,9 @@
 	import { isCommentTask, personStepAsk } from './comments/commentTask';
 	import { Button } from '$lib/components/ui';
 	import Spinner from './ui/Spinner.svelte';
-	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { formatFreshness, freshnessStatusText, shouldOfferVerification } from '$lib/docFreshness';
 	import { detailsNeedsUp } from '$lib/docDetailsNeeds';
+	import { observeFit } from '$lib/observeFit';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -97,22 +98,12 @@
 	let receiptTextFits = $state(false);
 	$effect(() => {
 		const box = receiptBox, measure = receiptMeasure;
-		if (!box || !measure) return;
-		const update = () => { receiptTextFits = measure.getBoundingClientRect().width <= box.getBoundingClientRect().width; };
-		update();
-		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-		observer?.observe(box); observer?.observe(measure);
-		return () => observer?.disconnect();
+		return box && measure ? observeFit(box, measure, (fits) => { receiptTextFits = fits; }) : undefined;
 	});
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
 		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} unread` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
 	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
-	const statusText = $derived(freshnessPresentation
-		? freshnessPresentation.overdue
-			// Overdue names the last verification's date: it fits beside Mark verified at phone width, where an age cuts mid-word.
-			? `Overdue · ${freshnessPresentation.dateText ? `verified ${freshnessPresentation.dateText}` : freshnessPresentation.phrase}`
-			: freshnessPresentation.phrase
-		: '');
+	const statusText = $derived(freshnessStatusText(freshnessPresentation));
 
 	let headerEl = $state<HTMLElement | null>(null);
 	let panelEl = $state<HTMLElement | null>(null);
