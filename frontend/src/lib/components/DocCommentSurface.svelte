@@ -88,7 +88,7 @@
 		readOnly?: boolean;
 		/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 		onSuggestionBusy?: (busy: boolean, id?: string) => void;
-		onSuggestionAccepted?: (text: string) => void;
+		onSuggestionAccepted?: (text: string, history?: { eventId: string; ids: string[] }) => void;
 		/** The server applied an accepted edit but could not record the decision: read the shown document again. */
 		onDocumentChanged?: () => void;
 		load?: CommentLoad;
@@ -308,7 +308,7 @@
 	}
 	const decisions = createSuggestionDecisions({
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
-		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
+		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text, history) => history ? onSuggestionAccepted?.(text, history) : onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
 	// Stale and missing-file accept refusals go to `suggestionRefusals`, which also shows the card as orphaned.
 	const cardErrors = $derived({

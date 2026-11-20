@@ -41,6 +41,7 @@
 	import type { DocViewerProps } from '$lib/docViewerProps';
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
 	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
+	import { createViewerSuggestionHistory } from '$lib/docViewerSuggestionHistory.svelte';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
@@ -116,8 +117,10 @@
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
-	let docRoot = $state<HTMLElement>();
-	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	let docRoot = $state<HTMLElement>(), editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	const suggestionHistory = createViewerSuggestionHistory({ target: () => target, artifact: () => loadedArtifactId, unavailable: () => !!liveSession || suggestionBusyId !== null, isLive: () => !!liveSession,
+		accept: (text, eventId, ids) => editorSurface?.acceptSuggestion(text, eventId, ids) ?? false,
+		setText: (text) => editText = text, setBusy: (busy) => suggestionBusyId = busy ? '' : null, reload: () => reload() });
 	/** The resolved drawer over the document at every width: its count and whether it is open, shared by the header's control and the surface. */
 	let resolvedCount = $state(0), resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
@@ -314,6 +317,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
+		onSuggestionHistory={suggestionHistory.change} onSuggestionHistoryRecovery={reload}
 		artifactId={loadedArtifactId}
 		{docState}
 		documentName={target?.name ?? 'this document'}
@@ -376,9 +380,9 @@
 		{target}
 		artifactId={loadedArtifactId}
 		draftScope={draftController.keepKey}
-		readOnly={readonly || confirming}
+		readOnly={readonly || confirming || suggestionHistory.busy}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
-		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
+		onSuggestionAccepted={suggestionHistory.showAccepted}
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetUp = open}
 		onRevealDraft={revealDraft} onRevealCard={revealCard}
@@ -391,6 +395,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

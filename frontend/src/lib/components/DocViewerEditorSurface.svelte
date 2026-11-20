@@ -2,6 +2,7 @@
 	import { mount, unmount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import type { ChangeDesc } from '@codemirror/state';
+	import type { SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
 	import type { CommentRange, ScrollOrigin } from '$lib/cm/comment-marks';
 	import type { CommentSelection } from '$lib/stores/commentSelection';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
@@ -57,6 +58,8 @@
 		tabInstanceId = null,
 		onDocumentPlace,
 		artifactId = null,
+		onSuggestionHistory,
+		onSuggestionHistoryRecovery,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -91,6 +94,8 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
 		artifactId?: string | null;
+		onSuggestionHistory?: (entry: SuggestionHistoryEntry, before: string, after: string) => Promise<boolean>;
+		onSuggestionHistoryRecovery?: () => void;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
@@ -140,6 +145,7 @@
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function coveredBySheet(from: number, opening: boolean) { return editor?.coveredBySheet(from, opening); }
 	export function editorView() { return editor?.editorView(); }
+	export function acceptSuggestion(text: string, eventId: string, ids: string[]) { return editor?.acceptSuggestion(text, eventId, ids) ?? false; }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
@@ -165,7 +171,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap">
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		{#if saveError}
 			<div class="save-error" role="alert">{saveError}</div>
 		{/if}

@@ -21,6 +21,64 @@ afterEach(() => {
 });
 
 describe('MarkdownEditor edits', () => {
+	it('records acceptance and routes undo and redo through the suggestion writer', async () => {
+		Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
+		const text = writable('old');
+		const live = fromStore(text);
+		const onSuggestionHistory = vi.fn().mockResolvedValue(true);
+		const onEdit = vi.fn();
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(MarkdownEditor, { target: host, props: Object.defineProperties({ onSuggestionHistory, onEdit }, Object.getOwnPropertyDescriptors({
+			get value() { return live.current; }, set value(next: string) { text.set(next); },
+		})) });
+		flushSync();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		(component.acceptSuggestion as (text: string, eventId: string, ids: string[]) => boolean)('new', 'event', ['s1']);
+		flushSync();
+		// CodeMirror binds redo to Mod-Shift-z on a Mac and to Mod-y elsewhere (jsdom reports no platform, so it takes the second).
+		const mac = /Mac/.test(navigator.platform);
+		const mod = mac ? 'metaKey' : 'ctrlKey';
+		const press = (redo = false) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', redo && !mac
+			? { key: 'y', [mod]: true, bubbles: true, cancelable: true }
+			: { key: 'z', [mod]: true, shiftKey: redo, bubbles: true, cancelable: true }));
+		press();
+		await vi.waitFor(() => expect(view.state.doc.toString()).toBe('old'));
+		flushSync();
+		press(true);
+		await vi.waitFor(() => expect(view.state.doc.toString()).toBe('new'));
+		expect(onSuggestionHistory.mock.calls.map(call => [call[0].direction, call[1], call[2]])).toEqual([['undo', 'new', 'old'], ['redo', 'old', 'new']]);
+		expect(onEdit).not.toHaveBeenCalled();
+	});
+
+	it('does not undo an external reload or reuse a prior acceptance after it', async () => {
+		const text = writable('old');
+		const live = fromStore(text);
+		const onSuggestionHistory = vi.fn().mockResolvedValue(true);
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(MarkdownEditor, { target: host, props: Object.defineProperties({ onSuggestionHistory }, Object.getOwnPropertyDescriptors({
+			get value() { return live.current; }, set value(next: string) { text.set(next); },
+		})) });
+		flushSync();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		(component.acceptSuggestion as (text: string, eventId: string, ids: string[]) => boolean)('new', 'event', ['s1']);
+		flushSync();
+		text.set('external change'); flushSync();
+		const mod = /Mac/.test(navigator.platform) ? 'metaKey' : 'ctrlKey';
+		view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', [mod]: true, bubbles: true, cancelable: true }));
+		await Promise.resolve();
+		expect(view.state.doc.toString()).toBe('external change');
+		expect(onSuggestionHistory).not.toHaveBeenCalled();
+	});
+
+	it('keeps an untouched comment mark in place through an acceptance', () => {
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(MarkdownEditor, { target: host, props: { value: 'old and kept', highlights: [{ from: 8, to: 12, id: 'kept' }] } });
+		flushSync();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		(component.acceptSuggestion as (text: string, eventId: string, ids: string[]) => boolean)('new and kept', 'event', ['s1']);
+		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'kept', from: 8, to: 12 }]);
+	});
+
 	it("reports the user's typing as an edit but not a text sync", () => {
 		docComments.set({ artifact: [{
 			id: 'comment', from: 4, to: 9, anchor: 'quick', author: 'agent-1', text: 'note', at: 'now', resolved: false, replies: [],

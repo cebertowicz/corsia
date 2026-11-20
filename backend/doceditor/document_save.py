@@ -242,7 +242,7 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
 
 def _write_document(
     body: DocumentSave, resolved: Path, direct_user: bool, expected_sha256: str | None = None,
-    reports: list[Callable[[], None]] | None = None,
+    reports: list[Callable[[], None]] | None = None, suppress_feedback: bool = False,
 ) -> dict:
     """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
     owner report is left there for the caller to run once it holds no lock."""
@@ -264,6 +264,7 @@ def _write_document(
             direct_user=direct_user,
             notify=False,
             expected_sha256=expected_sha256,
+            suppress_feedback=suppress_feedback,
         )
     except DurableWritePolicyError as exc:
         raise DocumentSaveError("durable_write_policy", str(exc)) from exc
@@ -298,9 +299,9 @@ def _write_document(
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )
         if reports is None:
-            _report(decision, resolved, before, actor, db)
+            _report(decision, resolved, before, actor, db, suppress_feedback=suppress_feedback)
         else:
-            reports.append(lambda: _report(decision, resolved, before, actor))
+            reports.append(lambda: _report(decision, resolved, before, actor, suppress_feedback=suppress_feedback))
     finally:
         db.close()
     notification = artifact or {
@@ -311,12 +312,12 @@ def _write_document(
     return _saved_payload(resolved, actor, {"artifact": artifact, "_notification": notification})
 
 
-def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None) -> None:
+def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None, *, suppress_feedback: bool = False) -> None:
     """Report a saved write to its owner; the bytes are saved, so a failure never fails the save."""
     own = db is None
     db = db or get_db()
     try:
-        report_plain_write(decision, resolved, before, thread_id=actor, db=db)
+        report_plain_write(decision, resolved, before, thread_id=actor, db=db, suppress_feedback=suppress_feedback)
     except Exception as exc:
         _log.warning("owner report failed for saved artifact %s: %s", decision.artifact_id, type(exc).__name__)
     finally:
@@ -327,7 +328,7 @@ def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None)
 async def save_document_text(
     body: DocumentSave, user_id: str, *, by_agent: bool = False, reason: str | None = None,
     expected_sha256: str | None = None, author: str | None = None, history_required: bool = False,
-    accepted: tuple[str, ...] = (),
+    accepted: tuple[str, ...] = (), suppress_feedback: bool = False,
 ) -> dict:
     """Shared validated document writer for editor saves and accepted suggestions (``accepted``: their ids).
 
@@ -340,7 +341,7 @@ async def save_document_text(
     from doceditor.live_tools import find_live
     manager = get_documents()
     if manager is None or await run_off_db(guidance_target, resolved, config.WORKSPACE) is not None:
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted, suppress_feedback)
     async with manager.admission_lock(resolved):
         if (entry := find_live(resolved)) is not None:
             from doceditor import live_events
@@ -351,13 +352,13 @@ async def save_document_text(
         if refused is not None and not falls_back_to_plain(refused["code"]):
             # The file must not move away from acknowledged text the store still holds.
             raise DocumentSaveError(refused["code"], refused["message"], dict(refused))
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted, suppress_feedback)
 
 
 async def _save_legacy_document(
     body: DocumentSave, resolved: Path, user_id: str, by_agent: bool,
     reason: str | None, expected_sha256: str | None, author: str | None = None,
-    history_required: bool = False, accepted: tuple[str, ...] = (),
+    history_required: bool = False, accepted: tuple[str, ...] = (), suppress_feedback: bool = False,
 ) -> dict:
     """Keep the validated legacy writer intact under the admission boundary."""
     thread_id = body.thread_id if by_agent else None
@@ -368,6 +369,7 @@ async def _save_legacy_document(
         reason,
         lambda path, expected, reports=None: _write_document(
             body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
+            suppress_feedback=suppress_feedback,
         ),
         expected_sha256=expected_sha256, history_required=history_required, accepted=accepted,
     )

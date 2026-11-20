@@ -13,7 +13,7 @@ export type SuggestionDecisionInputs = {
 	target: () => DocViewerTarget | null;
 	open: () => boolean;
 	onSuggestionBusy?: (busy: boolean, id?: string) => void;
-	onSuggestionAccepted?: (text: string) => void;
+	onSuggestionAccepted?: (text: string, history?: { eventId: string; ids: string[] }) => void;
 	onDocumentChanged?: () => void;
 };
 
@@ -62,7 +62,8 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 				const result: SuggestionDecision = allFromAuthor
 					? await decideSuggestion(id, decision, true)
 					: await decideSuggestion(id, decision);
-				settle(started, (current) => { current.skipped = result.skipped ?? []; });
+				const batch = allFromAuthor ? result.comment as unknown as SuggestionDecision | undefined : undefined;
+				settle(started, (current) => { current.skipped = batch?.skipped ?? result.skipped ?? []; });
 				// The server has applied the decision. A failure from here on is this side's follow-up, never "try again": the card
 				// would offer to repeat what is already done. It is logged and the document and comments are read again.
 				try {
@@ -70,7 +71,12 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 						// The accepted text goes on screen only while that document's tab is still the one shown; closing the surface does not change that.
 						const current = inputs.target(), shown = current?.instanceId === doc.instanceId ? current : null;
 						seedDraft(shown ?? doc, result.text, result.revision);
-						if (shown) inputs.onSuggestionAccepted?.(result.text);
+						if (shown) {
+								const eventId = batch?.decision_event_id ?? result.decision_event_id ?? result.comment?.decision_event_id;
+								const ids = batch?.accepted ?? result.accepted ?? (result.comment ? [result.comment.id] : []);
+								if (eventId && ids.length) inputs.onSuggestionAccepted?.(result.text, { eventId, ids });
+								else inputs.onSuggestionAccepted?.(result.text);
+							}
 					}
 					if (artifact) await loadComments(artifact);
 				} catch (followUpError) {
