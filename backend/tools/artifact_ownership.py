@@ -125,12 +125,8 @@ class ArtifactRehomeTool(Tool):
             return "Error: Artifact or thread not found"
         if status == "forbidden":
             return f"Error: Re-home authority denied: {result}"
-        if status == "person_forbidden":
-            return "Error: Ask the document's owner or their worker to give it to the person."
-        if status == "person_refused":
+        if status == "person_error":
             return f"Error: {result}"
-        if status == "person_invalid_document":
-            return "Error: Only documents with a path can be given to the person."
         if status == "error":
             return f"Error rehoming artifact: {result}"
         event = result.get("removal_event")

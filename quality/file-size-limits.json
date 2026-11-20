@@ -74,7 +74,6 @@
     "backend/registry/durable_writes.py::_validated_intent_paths": 94,
     "backend/registry/ownership.py::rehome_artifact": 94,
     "backend/subagents/child_thread.py::persist_assistant_step": 89,
-    "backend/tools/artifact_ownership.py::ArtifactRehomeTool.execute": 80,
     "backend/tools/artifact_ownership.py::ArtifactReleaseTool.execute": 90,
     "backend/tools/grep.py::GrepTool._search_reviewed": 93,
     "backend/tools/grep.py::GrepTool.execute": 90,
