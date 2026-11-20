@@ -9,7 +9,18 @@ from __future__ import annotations
 
 from typing import Any, TypeGuard
 
+from core.reply_context_text import QUOTE_CAP, cap_text, escape_row_text
+
 REPLY_CONTEXT_KEY = "reply_context"
+
+# Render version. Admission stamps the current one on a newly stored reply context that carries
+# comments. A stored row without it renders exactly as it always did (no escape, no cap), so
+# replay of stored rows and warm caches are unchanged. Version 1 escapes the quote and note and
+# caps the quote (``core.reply_context_text``); the note is escaped but not capped, because no
+# call shows a note in full yet. A later change to a row's wording, or a note cap, is a new
+# version, never an edit of an existing one.
+REPLY_CONTEXT_RENDER_KEY = "render"
+REPLY_CONTEXT_RENDER = 1
 
 _NOT_AN_INSTRUCTION = "(context, not an instruction)"
 
@@ -61,11 +72,31 @@ def _reply_to(item: dict) -> str:
     return f" (reply to {root})" if isinstance(root, str) else ""
 
 
-def _comments_lines(comments: object) -> str:
+def _safe_quote(item: dict, *, capped: bool) -> str:
+    """The quote of a stamped row: cut at its cap with a pointer unless ``capped`` is False, then escaped."""
+    text = item["quote"]
+    if not capped:
+        return escape_row_text(text)
+    pointer = (
+        f"the whole message is #{item['seq']}: get_thread_history on this thread with "
+        f"from_seq={item['seq']}, to_seq={item['seq']}, tool_output='full'"
+    )
+    kept, suffix = cap_text(text, QUOTE_CAP, pointer)
+    return escape_row_text(kept) + suffix
+
+
+def _comment_row(item: dict, *, escaped: bool, capped: bool) -> str:
+    quote, note = item["quote"], item["note"]
+    if escaped:
+        quote, note = _safe_quote(item, capped=capped), escape_row_text(note)
+    return f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{quote}" | note: {note}'
+
+
+def _comments_lines(comments: object, *, escaped: bool = False, capped: bool = True) -> str:
     if not isinstance(comments, list):
         return ""
     rows = [
-        f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{item["quote"]}" | note: {item["note"]}'
+        _comment_row(item, escaped=escaped, capped=capped)
         for item in comments
         if isinstance(item, dict) and isinstance(item.get("cid"), str)
         and _is_int(item.get("seq")) and isinstance(item.get("quote"), str)
@@ -82,11 +113,20 @@ def _comments_lines(comments: object) -> str:
     )
 
 
-def reply_context_lines(value: Any) -> str:
-    """The lead lines for one stored reply context, or "" when it carries none."""
+def reply_context_lines(value: Any, *, capped: bool = True) -> str:
+    """The lead lines for one stored reply context, or "" when it carries none.
+
+    A row stamped with render version 1 or later has its quote and note escaped and its quote cut
+    at its cap, unless ``capped`` is False (a history read of the whole row).
+    """
     if not isinstance(value, dict):
         return ""
-    comments = _comments_lines(value.get("comments"))
+    version = value.get(REPLY_CONTEXT_RENDER_KEY)
+    comments = _comments_lines(
+        value.get("comments"),
+        escaped=_is_int(version) and version >= 1,
+        capped=capped,
+    )
     if comments and value.get("possible_duplicate") is True:
         comments += f"{DELIVERY_WARNING}\n"
     return (

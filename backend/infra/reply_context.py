@@ -16,6 +16,7 @@ import sqlite3
 from collections import Counter
 from typing import Any, TypeGuard
 
+from core.reply_context import REPLY_CONTEXT_RENDER, REPLY_CONTEXT_RENDER_KEY
 from infra.chat_comment_ids import format_cid, parse_cid
 from infra.failure_reference import new_error_reference
 from infra.message_update_schema import not_replaced_sql
@@ -281,6 +282,10 @@ def validate_reply_context(
                 continue
             if result:
                 stored[field] = result
+        if "comments" in stored:
+            # Only a stored row carrying comments has a quote and note to render; a row stored
+            # before this stamp renders as it always did (core.reply_context).
+            stored[REPLY_CONTEXT_RENDER_KEY] = REPLY_CONTEXT_RENDER
     if dropped:
         counts = Counter(f'{item["field"]}:{item["reason"]}' for item in dropped)
         logger.info("reply context: thread=%s dropped=%s", thread_id, dict(sorted(counts.items())))
