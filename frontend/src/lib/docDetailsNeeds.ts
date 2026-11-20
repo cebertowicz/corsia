@@ -3,13 +3,11 @@
 export type DetailsNeeds = {
 	/** The document is past its verification date. */
 	overdue: boolean;
-	/** File changed, where the app bar does not show it (the canvas is wide enough to split). */
-	fileChangedOffBar: boolean;
 	/** An ask whose card is hidden (under the comment sheet). */
 	hiddenAsk: boolean;
 };
 
 /** The amber count beside Details: one per flag that is set. */
 export function detailsNeedsCount(needs: DetailsNeeds): number {
-	return (needs.overdue ? 1 : 0) + (needs.fileChangedOffBar ? 1 : 0) + (needs.hiddenAsk ? 1 : 0);
+	return (needs.overdue ? 1 : 0) + (needs.hiddenAsk ? 1 : 0);
 }

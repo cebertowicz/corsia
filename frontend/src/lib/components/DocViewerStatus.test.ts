@@ -85,7 +85,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
 		expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('0 comments');
-		const delivery = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
+		const delivery = host.querySelector<HTMLButtonElement>('.delivery button');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
 		flushSync();
@@ -177,7 +177,7 @@ describe('DocViewerStatus freshness metadata', () => {
 			render(value(), undefined, { commentCount: 5, imageOpen: true });
 			component!.sync('artifact-1', { open_count: 5, document_held_count: 2, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 			flushSync();
-			const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!;
+			const toggle = host.querySelector<HTMLButtonElement>('.delivery button')!;
 			expect(toggle.getAttribute('aria-pressed')).toBe('false');
 			toggle.click(); flushSync();
 			await vi.waitFor(() => expect(sends()).toHaveLength(1));
@@ -209,7 +209,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		try {
 			render(value(), undefined, { commentCount: 0 });
 			flushSync();
-			host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!.click(); flushSync();
+			host.querySelector<HTMLButtonElement>('.delivery button')!.click(); flushSync();
 			await vi.waitFor(() => expect(sends()).toHaveLength(1));
 			expect(JSON.parse(sends()[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'document-held' });
 			expect(get(deliveryConfirmation)).toBeNull();
@@ -376,11 +376,11 @@ describe('DocViewerStatus toolbar', () => {
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
 
-	it('counts beside Details exactly the three things behind it that need the reader, one each', () => {
-		// Every combination of the three sources; a fourth source is a new required field of DetailsNeeds, so this list stops compiling.
-		const all: DetailsNeeds[] = [false, true].flatMap((overdue) => [false, true].flatMap((fileChangedOffBar) =>
-			[false, true].map((hiddenAsk) => ({ overdue, fileChangedOffBar, hiddenAsk }))));
-		expect(all.map((needs) => detailsNeedsCount(needs))).toEqual(all.map(({ overdue, fileChangedOffBar, hiddenAsk }) => Number(overdue) + Number(fileChangedOffBar) + Number(hiddenAsk)));
+	it('counts beside Details exactly the two things behind it that need the reader, one each', () => {
+		// Every combination of the two sources; a third source is a new required field of DetailsNeeds, so this list stops compiling.
+		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>
+			[false, true].map((hiddenAsk) => ({ overdue, hiddenAsk })));
+		expect(all.map((needs) => detailsNeedsCount(needs))).toEqual(all.map(({ overdue, hiddenAsk }) => Number(overdue) + Number(hiddenAsk)));
 	});
 });
 

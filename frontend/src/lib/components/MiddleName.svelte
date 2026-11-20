@@ -21,8 +21,6 @@
 		const full = name;
 		void refit;
 		if (!fitted || !keep || !node || !box || typeof ResizeObserver === 'undefined') return;
-		// An extension alone after the ellipsis reads as four dots ("rev….md"): the cut keeps the name's last character before it.
-		void end;
 		const context = document.createElement('canvas').getContext('2d');
 		const fit = () => {
 			box.style.maxWidth = '';
@@ -31,6 +29,7 @@
 			context.font = getComputedStyle(node).font;
 			const wide = (text: string) => context.measureText(text).width;
 			if (wide(full) <= width + 0.05) { shown = full; return; }
+			// An extension alone after the ellipsis reads as four dots ("rev….md"): the cut keeps the name's last character before it.
 			const cut = (count: number) => `${full.slice(0, count).trimEnd()}…${end}`;
 			let low = 1;
 			let high = full.length - end.length - 1;

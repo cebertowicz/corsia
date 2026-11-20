@@ -597,7 +597,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 			await closeDetails(page);
 			await openComments(page);
 			await expect(page.locator('[data-resolved-entry]')).toHaveText('Resolved · 3');
-			await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Deliver immediately', exact: true })).toBeVisible();
 			await closeComments(page);
 		}
 	}

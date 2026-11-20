@@ -73,7 +73,7 @@
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
-	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: false, hiddenAsk: !!ask && !ask.onCard }));
+	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard }));
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
