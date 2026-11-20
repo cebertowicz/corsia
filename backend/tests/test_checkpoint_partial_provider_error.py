@@ -98,6 +98,21 @@ async def test_a_partial_echoing_the_marker_is_still_replaced_whole(isolated_db,
 
 
 @pytest.mark.asyncio
+async def test_a_partial_ending_on_an_echoed_marker_line_is_still_replaced_whole(isolated_db, monkeypatch):
+    # The likeliest echo: the fold model copies the marker line, then the error cuts the next line,
+    # so the copy is the partial's last complete line and has lost its line break.
+    _install_prior("echo-end", through=1)
+    await _fold(monkeypatch, "echo-end", "first",
+                "First line.\n" + INCOMPLETE_UPDATE + "Cut sec", "prior", through=2)
+
+    record = await _fold(monkeypatch, "echo-end", "second", "Second partial line.\n", "first")
+
+    assert record.raw_result == (
+        PRIOR + "\n\n" + INCOMPLETE_UPDATE + "Second partial line.\n" + PARTIAL_UPDATE_END
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("body", ["Started the migr", "\n"])
 async def test_no_complete_line_fails_the_attempt_and_keeps_the_prior_checkpoint(
     isolated_db, monkeypatch, body,
