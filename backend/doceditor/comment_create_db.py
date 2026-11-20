@@ -125,6 +125,24 @@ def _refuse_retired_target(request: CommentInput, connection) -> None:
         raise CommentTargetMoved(not_active_message(request.artifact_id))  # the reason an agent's tool shows
 
 
+def _merge_fork_feedback(connection, request: CommentInput, artifact_id: str | None, feedback: dict) -> None:
+    """Fold a submitted review fork's feedback into this comment's receipt.
+
+    A comment that submits the fork is what wakes its owners, so the wake-ups and the
+    still-undelivered batches it caused are reported once, on this receipt.
+    """
+    if request.review_request_id is None or not request.submit:
+        return
+    _pending, woken, undelivered = review_feedback.submit_fork_feedback(
+        connection, request.review_request_id, request.author_thread_id, artifact_id,
+    )
+    feedback["woken"].extend(woken)
+    known = {batch["id"] for batch in feedback["undelivered_batches"]}
+    feedback["undelivered_batches"].extend(
+        batch for batch in undelivered if batch["id"] not in known
+    )
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -165,8 +183,11 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 review=request.review, replacement=request.replacement, insert_after=request.insert_after,
                 tagged_user_id=request.user_id if request.tag_person else None, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
-                source_text=source_text, source_reason=invalid)
+            )
             if created:
+                # The anchor and the text it was measured against are written in this one
+                # transaction; this is the path that knows both.
+                comment_snapshots.attach_on_create(connection, str(row["id"]), source_text, invalid)
                 _record_tags(connection, request, row)
             if row["parent_id"]:
                 # An agent reply made holding the thread's writer turn settles its saved row in this write.
@@ -190,15 +211,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 delivery_policy=delivery_policy,
             )
             feedback["delivery_policy"] = delivery_policy
-            if request.review_request_id is not None and request.submit:
-                _pending, woken, undelivered = review_feedback.submit_fork_feedback(
-                    connection, request.review_request_id, request.author_thread_id, artifact_id,
-                )
-                feedback["woken"].extend(woken)
-                known = {batch["id"] for batch in feedback["undelivered_batches"]}
-                feedback["undelivered_batches"].extend(
-                    batch for batch in undelivered if batch["id"] not in known
-                )
+            _merge_fork_feedback(connection, request, artifact_id, feedback)
         return row, registered, feedback, created
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)
