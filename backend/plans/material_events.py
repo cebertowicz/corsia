@@ -32,7 +32,7 @@ def transition_affected_nodes(connection, node_id: str) -> tuple[str, ...]:
 
 def transition_before(connection, node, *, ends: bool):
     """A transition's snapshot: its own and its dependents' blocked truth, and, when it
-    ends ``node``'s work, the phases above it that work waits on (``phases_waited_on``)."""
+    ends ``node``'s work, the workflow runs above it that work waits on (``phases_waited_on``)."""
     affected = transition_affected_nodes(connection, node["id"])
     phases = phases_waited_on(connection, node["parent_id"], skip=affected) if ends else ({}, {})
     return blocked_snapshot(connection, affected), phases
@@ -50,12 +50,12 @@ def settle_transition(connection, before, *, actor_id: str | None, provenance: s
 
 
 def phases_waited_on(connection, parent_id: str | None, *, skip=()) -> tuple[dict[str, str], dict[str, bool]]:
-    """Each pending phase at or above ``parent_id`` that work waits on, with the state its waiters
-    read (``node_waits.prerequisite_state_sql``), and those waiters' blocked truth, before a write (#3145).
+    """Each pending workflow run at or above ``parent_id`` that work waits on, with the state its
+    waiters read (``node_waits.prerequisite_state_sql``), and those waiters' blocked truth, before a write (#3145).
 
-    A phase's own state never moves when its work ends, so the write that ends it --
-    its last open work settling or leaving -- takes this snapshot and hands it to
-    ``settle_phases_waited_on``. ``skip`` holds dependents the caller already snapshots.
+    A run's phase keeps its stored state when the run ends, so the write that ends it --
+    its last open step settling or leaving, which records the end -- takes this snapshot and
+    hands it to ``settle_phases_waited_on``. ``skip`` holds dependents the caller already snapshots.
     """
     if parent_id is None:
         return {}, {}
@@ -67,7 +67,7 @@ def phases_waited_on(connection, parent_id: str | None, *, skip=()) -> tuple[dic
                 )
                 SELECT p.id,{node_waits.prerequisite_state_sql(connection, 'p')} AS state
                 FROM up CROSS JOIN plan_nodes p ON p.id=up.id
-                WHERE p.kind='phase' AND p.state='pending' AND {node_states.in_work_sql('p')}
+                WHERE p.kind='phase' AND p.workflow_ref IS NOT NULL AND p.state='pending' AND {node_states.in_work_sql('p')}
                   AND EXISTS (SELECT 1 FROM plan_node_dependencies d WHERE d.depends_on_node_id=p.id)""",
             (parent_id,),
         )
@@ -86,7 +86,7 @@ def settle_phases_waited_on(
     connection, before: tuple[dict[str, str], dict[str, bool]], *,
     actor_id: str | None, provenance: str, causal_event_id: str,
 ) -> None:
-    """After the write, release and tell what waits on each phase whose work just ended.
+    """After the write, release and tell what waits on each workflow run that just ended.
 
     The same two effects a prerequisite's own transition has: the blocked deltas on its
     dependents, then ``cross_plan.prerequisite_settled`` for work in other plans.

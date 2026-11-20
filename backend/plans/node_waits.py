@@ -45,15 +45,12 @@ def prerequisite_state_sql(connection: sqlite3.Connection, alias: str) -> str:
     """The state the ``plan_nodes`` row ``alias`` reads as to work waiting on it, as SQL (#3145).
 
     A phase's stored state never moves when its work ends (it reads as its
-    children), so for a pending phase the end comes from elsewhere:
-
-    - a workflow run (``run_end._run_phase``) from its one recorded end, the
-      first ``workflow_run_ended`` row as ``run_end.records`` reads it:
-      completed reads as accepted, failed as failed;
-    - any other phase from its stored fold: accepted once something beneath it
-      is done and nothing is open or failed. An empty phase is not done.
-
-    Every other row reads as its stored state. Written by nobody: waits, the
+    children), so a pending workflow run (``run_end._run_phase``) reads as its
+    one recorded end, the first ``workflow_run_ended`` row as
+    ``run_end.records`` reads it: completed reads as accepted, failed as
+    failed. That record is written once and never undone, so a waiter freed by
+    it stays free. Every other row, a plain phase included, reads as its
+    stored state. Written by nobody: waits, the
     writer-side deltas and the cross-plan notice all read it here.
     Older rungs of the migration ladder run plans code before the aggregate
     (and workflow) columns exist; there every row reads as its stored state.
@@ -75,7 +72,6 @@ def prerequisite_state_sql(connection: sqlite3.Connection, alias: str) -> str:
         f"(CASE WHEN {alias}.kind<>'phase' OR {alias}.state<>'pending' THEN {alias}.state"
         f" WHEN {run} THEN COALESCE((CASE {outcome}"
         f" WHEN 'completed' THEN 'accepted' WHEN 'failed' THEN 'failed' END),{alias}.state)"
-        f" WHEN {alias}.folded=1 AND {alias}.sub_failed=0 AND {alias}.sub_done>0 THEN 'accepted'"
         f" ELSE {alias}.state END)"
     )
 
@@ -97,7 +93,7 @@ def unmet_prerequisites(
     """Each node's prerequisites that are not accepted yet, in plan order.
 
     A dependency is met only by a prerequisite that reads as accepted
-    (``prerequisite_state_sql``: a phase whose work ended done reads so). A
+    (``prerequisite_state_sql``: a workflow run that completed reads so). A
     failed one is unmet and never will be met; the caller names that as its
     own cause.
     An open ancestor's edges hold its descendants too (``via`` names that

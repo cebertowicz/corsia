@@ -392,47 +392,12 @@ def _accept(db, plan_id: str, node_id: str) -> None:
     }, actor=INFRA)
 
 
-def test_a_phase_whose_work_is_done_frees_its_dependent_and_tells_it_once(db):
-    """#3145: a phase's state never moves, so its last task settling is what ends it for its waiters."""
+def test_a_plain_phase_reads_as_its_stored_state_when_its_work_is_done(db):
+    """#3145 settles workflow runs only: a run's end is recorded once, a plain phase's fold can be undone."""
     infra, phase, (unit, e2e), merge = _phase_with_work(db)
     _accept(db, infra.id, unit.id)
-    assert _cause(db, merge.id)["reason"] == "Waiting for Fix the dev tests (Infrastructure's plan)"
-    assert _wakes(db) == []
-
     _accept(db, infra.id, e2e.id)
 
     assert service._node_row(db, phase.id)["state"] == "pending"
-    assert _ready(db, merge.id)
-    wakes = _wakes(db)
-    assert [row["id"] for row in wakes] == [
-        f"plan-wake:prerequisite_settled:{merge.id}:{_revision(db, phase.id)}:{phase.id}:done",
-    ]
-    assert [row["event"] for row in db.execute(
-        "SELECT event FROM plan_node_events WHERE node_id=? AND event LIKE 'blocked_%' ORDER BY rowid", (merge.id,),
-    )] == ["blocked_raised", "blocked_cleared"]
-
-
-def test_a_phase_with_a_failed_task_keeps_its_dependent_waiting(db):
-    infra, _phase, (unit, e2e), merge = _phase_with_work(db)
-    _accept(db, infra.id, unit.id)
-    admission.activate(e2e.id, expected_revision=_revision(db, e2e.id), actor_id="infra",
-                       provenance="test.cross_plan", db=db)
-    db.commit()
-    _update(db, infra.id, "fail", {"node_id": e2e.id, "expected_revision": _revision(db, e2e.id)}, actor=INFRA)
-
-    assert not _ready(db, merge.id)
-    assert _cause(db, merge.id)["reason_key"] == "dependency"
-
-
-def test_an_empty_phase_is_not_done(db):
-    infra = service.ensure_plan("thread", "infra", db=db)
-    phase = service.add_node(
-        infra.id, kind="phase", title="Later work", acceptance_criteria="Done", provenance="test.cross_plan", db=db,
-    )
-    lane = service.ensure_plan("thread", "lane", db=db)
-    merge = _task(db, lane.id, "Merge my PR")
-    _update(db, lane.id, "add_dependency", {
-        "node_id": merge.id, "depends_on_node_id": phase.id, "expected_revision": _revision(db, merge.id),
-    }, actor=LANE)
-
-    assert not _ready(db, merge.id)
+    assert _cause(db, merge.id)["reason"] == "Waiting for Fix the dev tests (Infrastructure's plan)"
+    assert _wakes(db) == []

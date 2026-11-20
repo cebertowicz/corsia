@@ -11,11 +11,12 @@ one place that closes that gap, inside the prerequisite's write:
 - the dependent's owner gets one wake per dependent, prerequisite and outcome,
   through ``plan_wake.append``, the one writer of plan wakes.
 
-It is called from exactly two places: ``service._transition`` when a
+It is called from exactly three places: ``service._transition`` when a
 prerequisite is accepted or fails for good (a rejection hands its dependents
 to the revision instead, ``dependencies.move_dependents``, and they keep
-waiting), and ``dependencies.drop_edges_for_node`` when a prerequisite is
-closed or archived. A close drops the node's edges in the same write
+waiting), ``material_events.settle_phases_waited_on`` when a workflow run's
+recorded end settles its phase (#3145), and ``dependencies.drop_edges_for_node``
+when a prerequisite is closed or archived. A close drops the node's edges in the same write
 (``archival.release_closed``), so its news is the edge going, told once there.
 
 A dependent in the prerequisite's *own* plan hears only a failure or a close,
@@ -34,7 +35,7 @@ from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES, CLOSED, in_wor
 def prerequisite_settled(connection, node_id: str, *, actor_id: str | None, provenance: str) -> None:
     """Tell each foreign dependent's owner that ``node_id`` was accepted or failed."""
     prerequisite = _prerequisite(connection, node_id)
-    if prerequisite["state"] == CLOSED or prerequisite["state"] not in _TERMINAL_STATES:
+    if prerequisite["state"] == CLOSED:
         return
     outcome = "done" if prerequisite["state"] in _ACCEPTED_STATES else "failed"
     _tell(
@@ -147,7 +148,7 @@ def prerequisite_removed(
 
 
 def _prerequisite(connection, node_id: str):
-    """The prerequisite as its dependents read it: a phase whose work ended reads as that end (#3145)."""
+    """The prerequisite as its dependents read it: a workflow run that ended reads as that end (#3145)."""
     from plans.node_waits import prerequisite_state_sql
 
     return connection.execute(
