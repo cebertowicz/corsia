@@ -19,6 +19,7 @@ const KIND_BY_NAME: Record<string, ToolKind> = {
 	delegate_send: 'agent',
 	delegate_status: 'agent',
 	delegate_set_model: 'agent',
+	delegate_stop: 'agent',
 	delegate_task: 'agent',
 	doc_comments_list: 'read',
 	doc_comment_create: 'write',

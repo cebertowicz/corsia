@@ -8,7 +8,7 @@ import { seedLiveDocument, openLiveDocument, typeAtDocumentEnd } from '../suppor
 import { beginComment, outsideClose, submitButton } from '../support/liveCommentProof';
 import { closeComments, openComments } from '../support/commentDrawer';
 
-// The "Deliver comments immediately" choice belongs to the person: the server keeps it, every open client follows it, and
+// The "Deliver immediately" choice belongs to the person: the server keeps it, every open client follows it, and
 // the document save path reads it where no client frame can carry the lane.
 
 const mockOnly = (testInfo: TestInfo) => {
@@ -19,7 +19,7 @@ const mockOnly = (testInfo: TestInfo) => {
 /** Opens the comments drawer, then returns its delivery toggle. */
 const toggle = async (page: Page) => {
 	await openComments(page);
-	return page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+	return page.getByRole('button', { name: 'Deliver immediately', exact: true });
 };
 
 test('@surface:doc-delivery-preference a toggle on one client sets the lane of a comment posted from another', async ({ browser, request }, testInfo) => {

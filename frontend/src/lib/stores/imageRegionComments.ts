@@ -1,14 +1,16 @@
 import { patchComment, type ImageRegion } from '$lib/api/docs';
-import { docComments, postReconciled, regionFromServer, upsertTop } from './docComments';
+import { docComments, postTop, regionFromServer } from './docComments';
 import { newClientId } from './documentWire';
-import { captureComment, selectComment } from './commentSelection';
+import { selectComment } from './commentSelection';
+import { postLive } from './liveCommentPost';
 import type { LiveDocumentSession } from './liveDocumentSession';
 
+/** A press of Comment on an image's draft: its one id, and whether an earlier press used it (`keptCommentDrafts.claim`). */
+export type ImagePress = { clientId: string; again: boolean };
+
 /** Comment on part of an image artifact: a box, or a point when its width and height are 0. */
-export async function addRegionComment(artifactId: string, region: ImageRegion, text: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
-	const row = await postReconciled(artifactId, newClientId(), { body: text, region, author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId });
-	upsertTop(artifactId, row);
-	return row.id;
+export async function addRegionComment(artifactId: string, region: ImageRegion, text: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], press?: ImagePress): Promise<string> {
+	return postTop(artifactId, press?.clientId ?? newClientId(), { body: text, region, author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId }, press?.again);
 }
 
 /** An image inside a document, by its markdown range in the text on screen. */
@@ -29,28 +31,16 @@ let captures = 0;
  * Comment on part of an image inside a document (DCOL-FR13.3): a text comment anchored on the image's markdown,
  * captured like a selection so it follows the image through edits, plus the region. The server finds the file.
  */
-export async function addDocImageComment(image: DocImageAnchor, region: ImageRegion, body: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
+export async function addDocImageComment(image: DocImageAnchor, region: ImageRegion, body: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], press: ImagePress = { clientId: newClientId(), again: false }): Promise<string> {
 	const { session } = image;
+	const fields = { body, region, diagram_source: image.diagramSource, author: 'you', author_kind: 'user' as const, tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId };
 	if (!session) {
-		const row = await postReconciled(image.artifactId, newClientId(), {
-			body, region, diagram_source: image.diagramSource, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to,
-			author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId,
-		});
-		upsertTop(image.artifactId, row);
-		return row.id;
+		return postTop(image.artifactId, press.clientId, { ...fields, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to }, press.again);
 	}
-	const captured = await captureComment(selectComment(session, image.from, image.to), ++captures, new AbortController().signal);
-	try {
-		const row = await postReconciled(session.artifactId, captured.clientId, {
-			body, region, diagram_source: image.diagramSource, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
-			author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId,
-		});
-		upsertTop(session.artifactId, row);
-		return row.id;
-	} catch (error) {
-		session.releaseReservation(captured.clientId);
-		throw error;
-	}
+	const live = { selection: selectComment(session, image.from, image.to), ...press, seq: ++captures, signal: new AbortController().signal, version: { body, tagged_agent_ids: taggedAgentIds } };
+	return postLive(live, (captured) => postTop(session.artifactId, captured.clientId, {
+		...fields, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
+	}, press.again));
 }
 
 /** Move a pin. The server places it on the image as it is now, so it is no longer stale. */

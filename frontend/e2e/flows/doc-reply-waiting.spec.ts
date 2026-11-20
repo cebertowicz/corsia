@@ -454,17 +454,17 @@ for (const theme of ['light', 'dark'] as const) {
 			if (width === 393) {
 				// The artifact row remains mounted in the hidden pane while the document is active.
 				await expect(replyMark).toHaveCount(1);
-				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
 				// With the document open on a phone, Toggle panel is Show panel in Details until the panel is open.
 				await togglePanel(page);
 				await expect(replyMark).toBeVisible();
 				await togglePanel(page);
 			} else {
 				await expect(replyMark).toBeVisible();
-				await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
 			}
 			// Opening the document alone keeps the passive unread marks intact.
-			await expect(pillUnread).toHaveAttribute('aria-label', /1 new/);
+			await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
 			// Opening the thread from its highlight shows its replies; showing the reply is what stamps it viewed.
 			await page.locator('.cm-comment-anchor').first().click();
 			await expect(page.getByText('Reviewed.', { exact: true })).toBeVisible();
@@ -504,7 +504,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
 				// Landing reads nothing: marker and pill still agree on one unread reply.
-				await expect(page.getByRole('button', { name: '3 comments, 1 new' })).toBeVisible();
+				await expect(page.getByRole('button', { name: '3 comments, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
@@ -537,10 +537,10 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.waitForTimeout(1100);
 			LATER_REPLIES.forEach((body, index) => addAgentReply(scenario.artifactId, scenario.roots[index], threadId, body));
 			await reloadComments(page, scenario.artifactId);
-			const commentsPill = page.getByRole('button', { name: '3 comments, 3 new' });
+			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
 			await expect(commentsPill).toBeVisible();
 			// The phone shows the icon and count; desktop also shows "new". The accessible name carries both counts.
-			await expect(commentsPill).toHaveText(width <= 768 ? /^\s*3$/ : /^\s*3 new$/, { useInnerText: true });
+			await expect(commentsPill).toHaveText(width <= 768 ? /^\s*3$/ : /^\s*3 unread$/, { useInnerText: true });
 			await expect(commentsPill.locator('svg')).toBeVisible();
 			const unread = commentsPill.locator('.bar-new');
 			await expect(unread).toBeVisible();
@@ -557,7 +557,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opening the comments shows the three threads the pill counted. Hold the
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
-			await page.getByRole('button', { name: '3 comments, 3 new' }).click();
+			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
 			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			await shot(page, `03-three-replies-${theme}-${width}`);

@@ -30,6 +30,7 @@ Pack: `plans`
 | Tool | Description |
 |---|---|
 | `bulletin_disposition` | Record a CORSIA agent disposition for a System bulletin |
+| `delegate_stop` | Stop a worker you spawned, and the workers beneath it |
 | `plan_decision` | Draft, review and raise a plan decision for the user |
 | `plan_ensure` | Create this thread's plan if missing, then read it |
 
@@ -59,7 +60,7 @@ Pack: `artifacts`
 | `artifact_list` | List accessible shared documents by ownership and freshness |
 | `artifact_reconcile` | Preview or apply artifact pane repairs |
 | `artifact_register` | Register a file or external object as an artifact |
-| `artifact_rehome` | Transfer an artifact's ownership to another thread |
+| `artifact_rehome` | Transfer an artifact's ownership to the person or another thread |
 | `artifact_release` | Release an artifact's ownership |
 | `artifact_relocate` | Move an artifact's file, keeping its identity |
 | `artifact_resolve` | Look up an artifact by id, path or external id |

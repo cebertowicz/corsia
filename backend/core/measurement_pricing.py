@@ -15,6 +15,7 @@ from typing import Any
 
 from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
 from core.measurement_token_contract import TOKEN_BUCKETS, buckets_reported_sql, contract_proven_sql, total_agrees_sql
+from infra.node_usage_schema import NODE_GROUPS_TABLE
 from llm.api_equivalent import (
     api_equivalent, has_unpublished_cache_rate, is_not_api_priced, long_context_bound, price_identity,
 )
@@ -27,9 +28,16 @@ from llm.network_endpoints import is_cloud_server
 # every identity's own bound. A row within an identity's bound is safe even if it
 # combines usage records; above it, opaque receipts cannot prove the tier.
 _TIER_PREFIX = "over_"
-_CALL_INPUT = "u.prompt_tokens+u.cache_creation_tokens+u.cache_read_tokens"
-_TIER_CASES = " ".join(f"WHEN {_CALL_INPUT}>{bound} THEN '{_TIER_PREFIX}{bound}'" for bound in LONG_CONTEXT_BOUNDS)
-INPUT_TIER_SQL = f"CASE {_TIER_CASES} ELSE 'short_bound' END" if _TIER_CASES else "'short_bound'"
+
+
+def input_tier_sql(alias: str) -> str:
+    """The input tier of the ``llm_usage`` row named ``alias`` (``u`` in reads, ``NEW``/``OLD`` in triggers)."""
+    call_input = f"{alias}.prompt_tokens+{alias}.cache_creation_tokens+{alias}.cache_read_tokens"
+    cases = " ".join(f"WHEN {call_input}>{bound} THEN '{_TIER_PREFIX}{bound}'" for bound in LONG_CONTEXT_BOUNDS)
+    return f"CASE {cases} ELSE 'short_bound' END" if cases else "'short_bound'"
+
+
+INPUT_TIER_SQL = input_tier_sql("u")
 
 
 def _above_long_context_bound(input_tier: str, model: str, listing: str | None) -> bool:
@@ -43,16 +51,23 @@ def _above_long_context_bound(input_tier: str, model: str, listing: str | None) 
 # the hour is read per row, in UTC, before aggregation, against the window of
 # the price entries for the External identity the row served. The row's list is
 # resolved later, so every list carrying an identity must share its window.
-_UTC_HOUR = "CAST(substr(u.created_at,12,2) AS INTEGER)"
 _IDLE_WINDOWS = {price.model: price.idle_utc_hours for price in LIST_PRICES if price.idle_utc_hours is not None}
 if any(price.idle_utc_hours not in (None, _IDLE_WINDOWS.get(price.model)) for price in LIST_PRICES):
     raise ValueError("one identity has different idle-hours windows on different lists")
-_IDLE_CASES = " ".join(
-    f"WHEN COALESCE(u.model,'') LIKE 'external@%' AND substr(u.model,instr(u.model,'/')+1)='{model}' "
-    f"AND {_UTC_HOUR}>={start} AND {_UTC_HOUR}<{end} THEN 1"
-    for model, (start, end) in _IDLE_WINDOWS.items()
-)
-IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
+
+
+def idle_hours_sql(alias: str) -> str:
+    """1 when the ``llm_usage`` row named ``alias`` falls in its identity's idle-hours window, else 0."""
+    hour = f"CAST(substr({alias}.created_at,12,2) AS INTEGER)"
+    cases = " ".join(
+        f"WHEN COALESCE({alias}.model,'') LIKE 'external@%' AND substr({alias}.model,instr({alias}.model,'/')+1)='{model}' "
+        f"AND {hour}>={start} AND {hour}<{end} THEN 1"
+        for model, (start, end) in _IDLE_WINDOWS.items()
+    )
+    return f"CASE {cases} ELSE 0 END" if cases else "0"
+
+
+IDLE_HOURS_SQL = idle_hours_sql("u")
 
 # Which rows may be priced. A row is priceable only when every disjoint bucket was
 # reported (typeof proves non-NULL, whole and not a blob) and any recorded total
@@ -87,14 +102,16 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # Evaluated as an explicit 0/1 so a NULL source or model can never reach
 # ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'. These are
 # the same alias-aware clauses the partial source-start index uses.
-_BUCKETS_REPORTED = buckets_reported_sql("u")
-_TOTAL_AGREES = total_agrees_sql("u")
-_CONTRACT_PROVEN = contract_proven_sql("u")
-ADMISSION_SQL = (
-    f"CASE WHEN NOT ({_BUCKETS_REPORTED}) THEN 'tokens_unreported' "
-    f"WHEN NOT {_TOTAL_AGREES} THEN 'tokens_inconsistent' "
-    f"WHEN NOT {_CONTRACT_PROVEN} THEN 'contract_unproven' ELSE 'ok' END"
-)
+def admission_sql(alias: str) -> str:
+    """Whether the ``llm_usage`` row named ``alias`` may be priced ('ok'), or why not."""
+    return (
+        f"CASE WHEN NOT ({buckets_reported_sql(alias)}) THEN 'tokens_unreported' "
+        f"WHEN NOT {total_agrees_sql(alias)} THEN 'tokens_inconsistent' "
+        f"WHEN NOT {contract_proven_sql(alias)} THEN 'contract_unproven' ELSE 'ok' END"
+    )
+
+
+ADMISSION_SQL = admission_sql("u")
 
 
 _ADMITTED = ",".join(f"SUM(CASE WHEN admission='ok' THEN {bucket} ELSE 0 END) AS {bucket}" for bucket in TOKEN_BUCKETS)
@@ -148,7 +165,33 @@ def grouped_usage_sql(keys: Mapping[str, str], source: str) -> str:
     return _classified_sql(list(keys), _shapes_sql(source, keys))
 
 
-def grouped_usage_per_row_sql(keys: Mapping[str, str], rows: str, calls: str) -> str:
+def _stored_shapes_sql(source: str, leading: Mapping[str, str]) -> str:
+    """``_shapes_sql``'s columns read from stored node groups (``infra.node_usage_schema``, alias ``g``).
+
+    The stored groups were classified at write by the same admission, tier and idle-hours SQL, and
+    hold admitted sums only, which is all ``_classified_sql`` keeps.
+    """
+    selected = "".join(f"{expression} AS {name}," for name, expression in leading.items())
+    grouped = "".join(f"{expression}," for expression in leading.values())
+    sums = ",".join(f"SUM(g.{bucket}) AS {bucket}" for bucket in TOKEN_BUCKETS)
+    return f"""
+        SELECT {selected}g.model AS model,g.context_manifest_id AS context_manifest_id,
+          g.admission AS admission,g.input_tier AS input_tier,g.idle_hours AS idle_hours,
+          SUM(g.records) AS records,{sums}
+        FROM {source}
+        GROUP BY {grouped}g.model,g.context_manifest_id,g.admission,g.input_tier,g.idle_hours
+    """
+
+
+def grouped_stored_sql(keys: Mapping[str, str], source: str) -> str:
+    """``grouped_usage_sql`` over stored node groups: ``source`` is a FROM clause whose
+    ``llm_usage_node_groups`` alias is ``g``, and ``keys`` read its columns. Same rows, same order."""
+    return _classified_sql(list(keys), _stored_shapes_sql(source, keys))
+
+
+def grouped_usage_per_row_sql(
+    keys: Mapping[str, str], rows: str, calls: str, stored: tuple[str, str] | None = None,
+) -> str:
     """The rows of ``grouped_usage_sql(keys, f"{rows} JOIN llm_usage u ON {calls}")``, grouped one row at a time.
 
     ``rows`` is a FROM clause the ``keys`` expressions read; ``calls`` picks each of its rows' calls from
@@ -161,11 +204,18 @@ def grouped_usage_per_row_sql(keys: Mapping[str, str], rows: str, calls: str) ->
     packed = ",".join(_SHAPE)
     unpacked = ",".join(f"json_extract(j.value,'$[{index}]') AS {name}" for index, name in enumerate(_SHAPE))
     selected = ",".join(f"{expression} AS {name}" for name, expression in keys.items())
+    groups = f"""
+          SELECT json_group_array(json_array({packed})) FROM ({_shapes_sql(f"llm_usage u WHERE {calls}", {})})
+        """
+    if stored is not None:
+        # ``stored``: the stored groups' WHERE for one row (alias ``g``), and when they hold exactly its calls.
+        picks, exact = stored
+        from_groups = _stored_shapes_sql(f"{NODE_GROUPS_TABLE} g WHERE {picks}", {})
+        groups = (f"CASE WHEN {exact} THEN (SELECT json_group_array(json_array({packed})) FROM ({from_groups})) "
+                  f"ELSE ({groups}) END")
     return _classified_sql(list(keys), f"""
         SELECT {selected},{unpacked}
-        FROM {rows}, json_each((
-          SELECT json_group_array(json_array({packed})) FROM ({_shapes_sql(f"llm_usage u WHERE {calls}", {})})
-        )) j
+        FROM {rows}, json_each(({groups})) j
     """)
 
 

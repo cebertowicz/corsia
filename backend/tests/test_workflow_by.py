@@ -31,6 +31,12 @@ def test_by_validation():
     assert errors({"by": "agent", "workflow": "other"}) == []
 
 
+def test_settle_is_not_a_definition_key_until_a_runner_runs_it():
+    """settle: enters definitions with the script runner that reads it; until then a definition can't set it."""
+    errors = validate_workflow({"workflow": {"steps": [{"id": "one", "by": "reviewer", "settle": "check-totals"}]}})
+    assert any(".settle is an unknown key" in error for error in errors)
+
+
 @pytest.mark.asyncio
 async def test_person_step_and_reviewer_refusals(isolated_db, tmp_path, monkeypatch):
     steps = (

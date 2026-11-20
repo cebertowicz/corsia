@@ -156,7 +156,7 @@
 			<span class="h-title">{@render titleInner()}</span>
 		</div>
 
-		<div use:inlineReach={{ shell: headerEl, report: onRightControlsWidth }} class="h-zone h-right">
+		<div use:inlineReach={{ shell: headerEl, report: onRightControlsWidth }} class="h-zone h-right" data-document-bar-tools>
 			{#if isTakeover && h?.actions?.length}
 				{#each h.actions as a (a.id)}
 					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>

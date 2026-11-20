@@ -17,7 +17,7 @@ export const DELIVER_IMMEDIATELY_KEY = 'corsia.document-comments.deliver-immedia
 
 const DELIVERY_PREFERENCE_ROUTE = '/api/doc-feedback/delivery-preference';
 
-/** Writes the signed-in person's "Deliver comments immediately" preference on the server, as the header toggle does. */
+/** Writes the signed-in person's "Deliver immediately" preference on the server, as the header toggle does. */
 export async function setDeliveryPreference(request: APIRequestContext, immediate: boolean): Promise<void> {
 	const saved = await request.put(DELIVERY_PREFERENCE_ROUTE, { headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { immediate } });
 	expect(saved.ok(), await saved.text()).toBeTruthy();
@@ -79,7 +79,7 @@ export async function setDebugVersionOverlay(request: APIRequestContext, enabled
 	expect(updated.ok(), await updated.text()).toBeTruthy();
 }
 
-/** Turns the "Deliver comments immediately" preference off on the server before the app loads, so the page's own comments are held. */
+/** Turns the "Deliver immediately" preference off on the server before the app loads, so the page's own comments are held. */
 export async function holdDocumentComments(request: APIRequestContext): Promise<void> {
 	await setDeliveryPreference(request, false);
 }
@@ -87,7 +87,7 @@ export async function holdDocumentComments(request: APIRequestContext): Promise<
 /** Set the preference through the comments drawer, then close it again. */
 export async function turnOffDocumentComments(page: Page): Promise<void> {
 	await openComments(page);
-	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+	const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
 	await expect(toggle).toBeVisible();
 	if (await toggle.getAttribute('aria-pressed') === 'true') await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-pressed', 'false');

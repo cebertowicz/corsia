@@ -10,7 +10,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { regionColor, type ImageRegion } from '$lib/imageRegions';
 import { token } from '$lib/stores/auth';
 import type { DocComment } from '$lib/stores/docComments';
-import { addDocImageComment } from '$lib/stores/imageRegionComments';
+import { addDocImageComment, type ImagePress } from '$lib/stores/imageRegionComments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { remapTabDocumentImage } from '$lib/stores/tabViewState';
 
@@ -26,7 +26,7 @@ export interface DocumentImageComments {
 	projectId: string | null;
 	readOnly: boolean;
 	/** Post a region comment anchored on the image's markdown, where it is now. */
-	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], diagramSource?: string) => Promise<string>;
+	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: ImagePress, diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
 	/** Snapshot the current diagram using the editor's existing render. */
@@ -69,7 +69,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		const artifactId = options.artifactId();
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
-			post: (from, to, region, body, taggedAgentIds, mentions, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions),
+			post: (from, to, region, body, taggedAgentIds, mentions, press, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions, press),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
 			refreshDiagram: async (from, to) => {
 				const root = options.root();

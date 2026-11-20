@@ -86,7 +86,7 @@ async def list_threads(token: str, archived: int = 0):
         sql = f"""SELECT s.*,
                CASE WHEN {visible} THEN {LAST_MESSAGE_PREVIEW} END as last_message
                FROM threads s WHERE s.user_id = ?
-               AND {thread_available_sql('s', include_user_archived=bool(archived))}
+               AND {thread_available_sql('s', include_explicit_archives=bool(archived))}
                AND s.spawned_by IS NULL"""
         params: list = [*identity, user["id"]]
         if conductor_ids:

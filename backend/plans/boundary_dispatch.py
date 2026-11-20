@@ -64,25 +64,24 @@ def _dispatch_admission(operation: str, params: dict[str, Any], actor, common: d
     ``activate`` and ``start`` are interchangeable here: admission picks the
     move the node's own state needs. A task assigned to the user is the user's
     to complete: an agent's activate or start leaves it untouched and reports
-    ``USER_ASSIGNED_CONFLICT``. When another task holds the slot the reply
-    carries a notice saying the task did not start and how to start it.
+    ``USER_ASSIGNED_CONFLICT``. The plan owner's start that passes ready
+    work ranked above it is refused (``triage_lines.out_of_order``). When
+    another task holds the slot the reply carries a notice saying the task did
+    not start and how to start it.
     """
 
     node = service._node_row(common["db"], params["node_id"])
     if actor.kind == "thread" and node["assignee"] == "user":
         conflict = dict(USER_ASSIGNED_CONFLICT)
         return admission.result(node["id"], db=common["db"], conflict=conflict)
-    jump = triage_lines.jump_for_start(
+    out_of_order = triage_lines.out_of_order(
         common["db"], node, actor_id=actor.thread_id if actor.kind == "thread" else None,
     )
+    if out_of_order is not None:
+        raise service.PlanError(out_of_order)
     was_selected = admission.attempts.open_attempt(common["db"], node["id"]) is not None
-    reply = admission.make_current(
-        params["node_id"], **fields.expected(params), **common,
-        payload=None if jump is None else jump.payload,
-    )
+    reply = admission.make_current(params["node_id"], **fields.expected(params), **common)
     reply.update(handoff_brief.started_hint(common["db"], node, reply, was_selected=was_selected))
-    if jump is not None and reply["admission"].get("selection") is not None:
-        reply["jumped"] = jump.line
     conflict = reply["admission"].get("conflict") or {}
     holder = conflict.get("selected_node_id")
     if holder and holder != node["id"]:
@@ -239,16 +238,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     acting = actor.thread_id if actor.kind == "thread" else None
     from plans import workflow_fields
     workflow_fields.refuse_unready_close(db, node_id, operation, by_agent=actor.kind == "thread")
+    from plans import review_settle
+    review_settle.check_verdict(db, node_id, acting, params.get("verdict"), operation=operation)
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":
         mutations.request_review(
-            node_id,
-            evidence=fields.text(params, "evidence"),
-            artifact_ids=params.get("artifact_ids"),
-            owner_thread_id=acting,
-            **fields.expected(params),
-            **common,
+            node_id, evidence=fields.text(params, "evidence"), artifact_ids=params.get("artifact_ids"),
+            owner_thread_id=acting, verdict=params.get("verdict"), **fields.expected(params), **common,
         )
         return after.after_close(
             node_id, "review_requested", params, common, executor=acting,

@@ -84,7 +84,7 @@ function look(page: Page, touch: boolean): Promise<Look> {
 			// A control whose ::before is its larger hit area (an image comment's number) counts that area.
 			const before = getComputedStyle(el, '::before');
 			if (before.content !== 'none' && before.position === 'absolute') {
-				const inset = (side: string) => -(parseFloat(before.getPropertyValue(side)) || 0);
+				const inset = (side: string) => Math.max(0, -(parseFloat(before.getPropertyValue(side)) || 0));
 				width += inset('left') + inset('right'); height += inset('top') + inset('bottom');
 			}
 			return Math.min(width, height);
@@ -204,7 +204,7 @@ for (const { label, view } of CASES) {
 			for (const control of top.acceptSuggestions) if (!control.reachable) fail(`list top: "${control.name}" can't be reached`);
 			if (top.acceptSuggestions.length === 1 && top.acceptSuggestions[0].reachable) {
 				await page.locator(DRAWER).getByRole('button', { name: 'Accept suggestions', exact: true }).click();
-				const choices = page.getByRole('group', { name: 'Suggesters' });
+				const choices = page.getByRole('group', { name: 'Choose whose suggestions to accept' });
 				const suggesters = choices.getByRole('checkbox');
 				if (await suggesters.count() !== 2) fail('list: expected both suggesters in the checklist');
 				for (const direction of ['North', 'South']) if (!(await choices.getByRole('checkbox', { name: new RegExp(`Review Agent ${direction}`) }).count())) fail(`list: missing ${direction} suggester`);

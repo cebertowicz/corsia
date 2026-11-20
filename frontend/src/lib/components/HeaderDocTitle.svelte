@@ -16,7 +16,7 @@
 </script>
 
 <!-- The name and its ⌄ never leave the bar; a long name cuts in the middle and keeps its extension. -->
-<button type="button" class="h-doc-title" class:changed={action.changed} data-testid="header-document-title" {onclick} aria-label={`${title} · ${action.label}`} title={action.title}>
+<button type="button" class="h-doc-title" class:changed={action.changed} data-testid="header-document-title" data-document-title {onclick} aria-label={`${title} · ${action.label}`} title={action.title}>
 	<span class="h-scope"><MiddleName name={title} tail={extensionOf(title)} refit={titleEnd} /></span>
 	<svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l4 4 4-4" /></svg>
 </button>

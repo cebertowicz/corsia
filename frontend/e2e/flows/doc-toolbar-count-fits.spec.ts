@@ -3,14 +3,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '../support/test';
 import { expect, type Page, type Route } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails } from '../support/documentBar';
+import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails, paintedBoxes, type Box } from '../support/documentBar';
 import { raiseAsk } from '../support/reviewAsk';
 import { closeComments, openComments } from '../support/commentDrawer';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
  * Every count the document's bar shows reads whole, inside the bar and clear of its neighbours, on one row: the Comments button
- * (the unread number on the phone header, "N new" on desktop, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
+ * (the unread number on the phone header, "N unread" on desktop, the total otherwise; its name says both) and the amber count beside Details (what behind it needs
  * you). At 320, 360 and 393 px phones, 700, 900 and 1440, with one-, two- and three-digit comment counts. What used to share the
  * toolbar (Send, Resolved, Deliver immediately, reviewers, Request review, History) is in Details; its switch keeps a whole hit area there.
  */
@@ -28,9 +28,9 @@ const CASES = [
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
 /** What the Comments button shows in the compact phone header or desktop bar. */
-const countText = (threads: number, unread: number, phoneHeader: boolean) => unread ? `${unread}${phoneHeader ? '' : ' new'}` : `${threads}`;
+const countText = (threads: number, unread: number, phoneHeader: boolean) => unread ? `${unread}${phoneHeader ? '' : ' unread'}` : `${threads}`;
 /** Its accessible name carries both, and what waits for Send. */
-const countName = (threads: number, unread: number) => new RegExp(`^${threads} ${threads === 1 ? 'comment' : 'comments'}${unread ? `, ${unread} new` : ''}(?:, \\d+ waiting for Send)?$`);
+const countName = (threads: number, unread: number) => new RegExp(`^${threads} ${threads === 1 ? 'comment' : 'comments'}${unread ? `, ${unread} unread` : ''}(?:, \\d+ waiting for Send)?$`);
 /** The bar's controls are 44 px touch targets in a window up to 768 px and 36 px with a pointer (DocViewerStatus.svelte, `--bar-row`). */
 const barMin = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768 ? 44 : 36;
 
@@ -68,12 +68,17 @@ async function measureBar(page: Page) {
 }
 type BarMeasured = Awaited<ReturnType<typeof measureBar>>;
 
+/** The ask this spec raises, in its own words: the Details name repeats them when its card is hidden. */
+const ASK_TEXT = 'Is this skill ready?';
+const OVERDUE_WORD = 'Overdue';
+
 /** Each count is whole, inside the bar and the window; no control in the bar overlaps another; the page does not scroll sideways. */
-async function expectCountsWhole(page: Page, measured: BarMeasured, label: string, { threads, unread, needs }: { threads: number; unread: number; needs: number }) {
+async function expectCountsWhole(page: Page, measured: BarMeasured, label: string, { threads, unread, needs, needsWords }: { threads: number; unread: number; needs: number; needsWords: string[] }) {
 	expect.soft(measured.commentsText, `${label}: the Comments count reads whole`).toBe(countText(threads, unread, measured.phoneHeader));
 	expect.soft(measured.commentsName, `${label}: the Comments button names the total and the unread`).toMatch(countName(threads, unread));
 	expect.soft(measured.needsText, `${label}: the amber count beside Details`).toBe(needs ? `${needs}` : null);
-	expect.soft(measured.detailsName, `${label}: Details names what needs you`).toBe(`Document details${needs ? ` · ${needs} needs you` : ''}`);
+	expect.soft(measured.detailsName, `${label}: Details names what waits, not how many`).toBe(`Document details${needsWords.length ? ` · ${needsWords.join(' · ')}` : ''}`);
+	expect.soft(measured.needsText ? Number(measured.needsText.trim()) : 0, `${label}: the amber count and the named needs are the same number`).toBe(needsWords.length);
 	expect.soft(measured.clipped, `${label}: no count is cut`).toEqual([]);
 	for (const [name, control] of [['Comments', measured.comments], ['Details', measured.details], ...(measured.needs ? [['amber count', measured.needs] as const] : [])] as const) {
 		expect.soft(control.left, `${label}: ${name} starts inside the bar`).toBeGreaterThanOrEqual(measured.bar.left - 0.5);
@@ -145,7 +150,7 @@ for (const { width, scheme, resolved } of CASES) {
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
 		await expect(page.getByRole('button', { name: /^1 comment\b/ })).toBeEnabled();
-		await expect(page.locator('[data-document-details]')).toHaveAccessibleName('Document details · 1 needs you');
+		await expect(page.locator('[data-document-details]')).toHaveAccessibleName('Document details · Overdue');
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		if (resolved) {
@@ -172,7 +177,7 @@ for (const { width, scheme, resolved } of CASES) {
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), fullPage: false });
 			await closeComments(page);
 			// The Comments button counts open threads, and all three are resolved.
-			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1 });
+			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1, needsWords: [OVERDUE_WORD] });
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			return;
 		}
@@ -196,7 +201,7 @@ for (const { width, scheme, resolved } of CASES) {
 			const measured = await measureBar(page);
 			const label = `${threads}/${unread} at ${width} ${scheme}`;
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-${threads}-${unread}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, measured.bar.bottom + 60) } });
-			await expectCountsWhole(page, measured, label, { threads, unread, needs: 1 });
+			await expectCountsWhole(page, measured, label, { threads, unread, needs: 1, needsWords: [OVERDUE_WORD] });
 			expect.soft(measured.bar.bottom - measured.bar.top, `${label}: the bar keeps its height when the count changes`).toBeCloseTo(idleHeight, 0);
 			await info.attach(`count-${threads}-${unread}`, { body: JSON.stringify(measured), contentType: 'application/json' });
 		}
@@ -206,7 +211,7 @@ for (const { width, scheme, resolved } of CASES) {
 }
 
 /**
- * The worst content at once: Send 99+, a reviewer group that overflows into "+2", "120 comments, 45 new", four readers and
+ * The worst content at once: Send 99+, a reviewer group that overflows into "+2", "120 comments, 45 unread", four readers and
  * Overdue. The bar's counts stay whole on one row at every width from 320 to 1440 px (a fresh load at each phone and tablet width,
  * one desktop load resized across the rest; the Workspace panel closed so the document has the room), in a narrow desktop split
  * at 1440 and 1024, a wide pane (1000 px), and the pane open and closed. At each, Details opens with Send, the reviewers and the
@@ -217,7 +222,7 @@ const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index *
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
 const FRAME_SIZES = [320, 360, 375, 393, 560, 700, 900];
 
-/** Details' delivery switch: its button is the track; its hit area is the track or the 44 px touch size, and a tap on each corner and the centre lands on it. */
+/** The delivery switch's whole row takes taps, while its visible track keeps the standard size. */
 async function measureSwitch(page: Page, width: number) {
 	const panel = await openDetails(page);
 	const reviewerMore = await panel.locator('.reviewer-group .more').textContent();
@@ -228,10 +233,12 @@ async function measureSwitch(page: Page, width: number) {
 	const measured = await drawer.evaluate((root) => {
 		const toggle = root.querySelector<HTMLElement>('.delivery .tg')!;
 		toggle.scrollIntoView({ block: 'nearest' });
-		const button = toggle.getBoundingClientRect();
-		const area = (toggle.querySelector<HTMLElement>('.hit') ?? toggle).getBoundingClientRect();
+		const area = toggle.getBoundingClientRect();
 		const panelBox = root.getBoundingClientRect();
-		const probes: Array<[number, number]> = [[area.left + 1, area.top + 1], [area.right - 1, area.top + 1], [area.left + 1, area.bottom - 1], [area.right - 1, area.bottom - 1], [area.left + area.width / 2, area.top + area.height / 2]];
+		const radius = Math.min(parseFloat(getComputedStyle(toggle).borderTopLeftRadius) || 0, area.width / 2, area.height / 2);
+		const x = area.left + area.width / 2, y = area.top + area.height / 2, inset = radius + 1;
+		const probes: Array<[number, number]> = [[x, y], [area.left + 1, y], [area.right - 1, y], [x, area.top + 1], [x, area.bottom - 1], [area.left + inset, area.top + inset], [area.right - inset, area.top + inset], [area.left + inset, area.bottom - inset], [area.right - inset, area.bottom - inset]];
+		const track = getComputedStyle(toggle, '::before');
 		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggle).map((el) => `${el?.tagName}.${el?.className}`);
 		const overlapOf = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
 		const hitOverlaps = [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => {
@@ -248,12 +255,12 @@ async function measureSwitch(page: Page, width: number) {
 		return {
 			panel: { left: panelBox.left, right: panelBox.right, top: panelBox.top, bottom: panelBox.bottom },
 			controls: [...root.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((el) => el.getBoundingClientRect().width > 0).map((el) => { const r = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? el.className, box: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }; }),
-			button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 },
+			track: { width: parseFloat(track.width), height: parseFloat(track.height) },
 			area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 },
 			tapMisses, hitOverlaps,
-			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right) },
+			hitOutside: { left: Math.max(0, panelBox.left - area.left), right: Math.max(0, area.right - panelBox.right), top: Math.max(0, -area.top), bottom: Math.max(0, area.bottom - window.innerHeight) },
 			sendText: sendShown?.innerText.trim() ?? null, sendName: send?.getAttribute('aria-label') ?? null,
-			deliverLabel: root.querySelector<HTMLElement>('.delivery > span')?.textContent?.trim() ?? null,
+			deliverLabel: toggle.querySelector<HTMLElement>('.row-label')?.textContent?.trim() ?? null,
 			sideways: root.scrollWidth - root.clientWidth,
 			panelInWindow: panelBox.left >= -0.5 && panelBox.right <= window.innerWidth + 0.5,
 		};
@@ -262,12 +269,12 @@ async function measureSwitch(page: Page, width: number) {
 }
 
 function expectSwitchWhole(measured: Awaited<ReturnType<typeof measureSwitch>>, label: string) {
-	const { button, area, tapMisses } = measured;
-	expect.soft(Math.abs(button.width - 30) <= 0.5 && Math.abs(button.height - 17) <= 0.5, `${label}: the switch button is its 30 x 17 track, measured ${button.width} x ${button.height}`).toBe(true);
+	const { track, area, tapMisses } = measured;
+	expect.soft(Math.abs(track.width - 30) <= 0.5 && Math.abs(track.height - 17) <= 0.5, `${label}: the switch track is 30 x 17, measured ${track.width} x ${track.height}`).toBe(true);
 	expect.soft(area.width >= 43.5 && area.height >= 43.5, `${label}: the hit area is at least 44 x 44, measured ${area.width} x ${area.height}`).toBe(true);
 	expect.soft(measured.hitOverlaps, `${label}: the switch's hit area overlaps no other control in Details`).toEqual([]);
-	expect.soft(measured.hitOutside, `${label}: the switch's hit area stays inside Details`).toEqual({ left: 0, right: 0 });
-	expect.soft(tapMisses, `${label}: taps on the four corners and the centre of the switch's hit area land on the switch`).toEqual([]);
+	expect.soft(measured.hitOutside, `${label}: the switch's hit area stays inside the drawer and window`).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+	expect.soft(tapMisses, `${label}: taps across the switch row land on the switch`).toEqual([]);
 	expect.soft(measured.deliverLabel, `${label}: the delivery label is the full wording`).toBe('Deliver immediately');
 	expect.soft(measured.sendText, `${label}: Send's visible label is whole`).toMatch(/^Send(?: ·)? (?:10\d comments?|99\+)$/);
 	expect.soft(measured.sendName, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
@@ -320,7 +327,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			await expect(page.locator('.cm-content')).toContainText('A commentable document.');
 			if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
 			await turnOffDocumentComments(page);
-			await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 new\b/);
+			await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 unread\b/);
 			await readers();
 			const panel = await openDetails(page);
 			await expect(panel.locator('.reviewer-group .more')).toHaveText('+2');
@@ -333,7 +340,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			await settled(page, viewport);
 			const label = (split ? `${viewport}px window, pane ${split}px` : `${viewport}px window`) + variant;
 			const measured = await measureBar(page);
-			await expectCountsWhole(page, measured, label, { threads: 120, unread: 45, needs: 1 });
+			await expectCountsWhole(page, measured, label, { threads: 120, unread: 45, needs: 1, needsWords: [OVERDUE_WORD] });
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), clip: { x: 0, y: 0, width: viewport, height: Math.max(240, Math.ceil(measured.bar.bottom + 40)) } });
 			const details = await measureSwitch(page, viewport);
 			expectSwitchWhole(details, label);
@@ -389,13 +396,13 @@ const NEEDS_CASES = [
  * A document in a skill's evals folder that the thread owns, with one comment: guidance, so it opens without live editing and another
  * writer's save shows File changed; a document, so an ask can name it (a SKILL.md registers as a skill, which an ask cannot).
  */
-async function seedSkillDocument(page: Page, threadId: string, title: string) {
+async function seedSkillDocument(page: Page, threadId: string, title: string, fileName = 'review-notes.md') {
 	const params = { token: TEST_TOKEN };
 	const tree = await page.request.get('/api/files/tree', { params });
 	const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
 	const folder = path.join(workspace, '.threads', threadId, 'skills', title, 'evals');
 	mkdirSync(folder, { recursive: true });
-	const docPath = path.join(folder, 'review-notes.md');
+	const docPath = path.join(folder, fileName);
 	const text = TEXT;
 	const seeded = await page.request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
@@ -404,7 +411,7 @@ async function seedSkillDocument(page: Page, threadId: string, title: string) {
 	const quoted = 'ordinary prose', from = text.indexOf(quoted);
 	const comment = await page.request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 	expect(comment.ok(), await comment.text()).toBeTruthy();
-	return { artifactId, path: docPath, fileName: 'review-notes.md', text };
+	return { artifactId, path: docPath, fileName, text };
 }
 
 /** The canvas's measured mode, as the bar reads it: compact puts File changed in the bar. */
@@ -431,7 +438,7 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		const title = `needs-${width}-${Date.now()}`;
 		const threadId = await createSession(page.request, title);
 		const doc = await seedSkillDocument(page, threadId, title);
-		raiseAsk(threadId, doc.artifactId, 'Is this skill ready?');
+		raiseAsk(threadId, doc.artifactId, ASK_TEXT);
 		await answerOverdue(page);
 		await installWorkspace(page, threadId, [doc], 0);
 		await openThread(page, threadId, title);
@@ -444,9 +451,11 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		const card = page.locator('[data-ask-card]');
 		const frame = async (state: string) => { if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `needs-${width}x${height}-${state}.png`), fullPage: false }); } };
 		const expectNeeds = async (needs: number, state: string) => {
-			await expect(details, `${name}, ${state}`).toHaveAccessibleName(`Document details · ${needs} needs you`);
+			// Overdue is always one; the ask joins by its own words when its card is hidden (needs reaches the case's max).
+			const needsWords = needs >= 2 ? [OVERDUE_WORD, ASK_TEXT] : [OVERDUE_WORD];
+			await expect(details, `${name}, ${state}`).toHaveAccessibleName(`Document details · ${needsWords.join(' · ')}`);
 			await page.waitForTimeout(400);
-			await expectCountsWhole(page, await measureBar(page), `${name}, ${state}`, { threads: 1, unread: 0, needs });
+			await expectCountsWhole(page, await measureBar(page), `${name}, ${state}`, { threads: 1, unread: 0, needs, needsWords });
 			await frame(state);
 		};
 
@@ -579,13 +588,13 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 	await page.setViewportSize({ width: 430, height: 900 });
 	await installWorkspace(page, threadId, [doc], 0);
 	await openThread(page, threadId, title);
-	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 new\b/);
+	await expect(page.locator('[data-comments-entry]')).toHaveAccessibleName(/^120 comments, 45 unread\b/);
 	if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 	for (let width = 430; width >= 360; width--) {
 		await page.setViewportSize({ width, height: 900 });
 		await settled(page, width);
 		const label = `History at ${width} px`;
-		await expectCountsWhole(page, await measureBar(page), label, { threads: 120, unread: 45, needs: 0 });
+		await expectCountsWhole(page, await measureBar(page), label, { threads: 120, unread: 45, needs: 0, needsWords: [] });
 		if ([360, 393, 430].includes(width)) {
 			const panel = await openDetails(page);
 			await expect(panel.locator('.history-tool')).toBeVisible();
@@ -595,9 +604,157 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 			await closeDetails(page);
 			await openComments(page);
 			await expect(page.locator('[data-resolved-entry]')).toHaveText('Resolved · 3');
-			await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Deliver immediately', exact: true })).toBeVisible();
 			await closeComments(page);
 		}
 	}
 	await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
+
+/**
+ * The one row the tab strip draws with the document's bar in it. The open document's tab keeps its whole pill: the row
+ * clips its own overflow, so a pill drawn past its edge is painted but not clickable there, and no inset of the bar gives
+ * those pixels back. The bar gives way first (its side padding and gaps, then File changed to the ↻ mark the approved
+ * phone header uses); the tab shortens only when the bar has nothing left to give. 'minimum' means the divider taken to
+ * its minimum with Home, which is ARTIFACT_MIN, 360 px (artifactSplitLayout.ts:4, CanvasSplitDivider.svelte:47).
+ */
+const TAB_CLOSE_TYPICAL = 'launch-review.md';
+const TAB_CLOSE_LONG = 'launch-review-and-verification-walkthrough-notes.md';
+const TAB_CLOSE_CASES = [
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: false, scheme: 'dark' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: true, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: true, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: true, scheme: 'light' as const, name: TAB_CLOSE_LONG },
+	{ split: 420, atMin: true, scheme: 'dark' as const, name: TAB_CLOSE_LONG },
+	{ width: 1920, split: 900, wide: true, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL },
+	{ width: 1920, split: 900, wide: true, scheme: 'dark' as const, name: TAB_CLOSE_TYPICAL },
+	{ split: 420, atMin: false, scheme: 'light' as const, name: TAB_CLOSE_TYPICAL, width: 1280 },
+];
+for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLOSE_CASES) {
+	const longName = name.length > 30;
+	const stemPart = atMin ? 'min' : wide ? 'wide' : 'split';
+	test(`@flow:doc-toolbar-count-fits @surface:documents at ${width} ${scheme} ${stemPart}, ${longName ? 'a long name' : 'a typical name'}: the bar leaves the document tab its own space`, async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		await setDebugVersionOverlay(request, false);
+		const title = `tab-close-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const doc = await seedSkillDocument(page, threadId, title, name);
+		await page.setViewportSize({ width, height: 900 });
+		await installWorkspace(page, threadId, [doc], 0, { splitWidth: split });
+		await openThread(page, threadId, title);
+		await expect(page.locator('.cm-content')).toContainText('A paragraph of ordinary prose');
+		await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
+		const divider = page.getByRole('separator', { name: 'Resize Files panel' });
+		if (atMin) {
+			// The narrowest composition a person can reach: the divider's own minimum, ARTIFACT_MIN.
+			await divider.focus();
+			await page.keyboard.press('Home');
+			await expect.poll(() => divider.getAttribute('aria-valuenow'), { message: 'the panel is at its minimum' }).toBe('360');
+		}
+		// A second writer saves the file, so the bar carries File changed beside Comments and Details in the tab's own row.
+		const saved = await request.put('/api/files/content', {
+			params: { token: TEST_TOKEN }, data: { path: doc.path, text: `${doc.text}\nA line another writer saved.\n` },
+		});
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		await expect(documentBarHost(page).locator('[data-file-changed]')).toBeVisible();
+		// Below a certain width the document view draws no tab strip at all, so the row this guards does not exist there.
+		if (!(await page.locator('.strip .tab-wrap.active').count())) {
+			if (FRAMES) {
+				mkdirSync(FRAMES, { recursive: true });
+				await page.screenshot({ path: path.join(FRAMES, `tab-close-${width}-${stemPart}-${scheme}-${longName ? 'long' : 'typical'}-no-strip.png`), animations: 'disabled' });
+			}
+			test.skip(true, `at ${width} the document view draws no tab strip`);
+		}
+		const close = page.locator('.tab-wrap.active .tab-close');
+		await expect(close).toBeVisible();
+		const measured = await close.evaluate((node) => {
+			const strip = node.closest<HTMLElement>('.strip')!;
+			const row = node.closest<HTMLElement>('.tabs')!;
+			const pill = node.closest<HTMLElement>('.tab-wrap')!;
+			const label = pill.querySelector<HTMLElement>('.tab-title')!;
+			const box = node.getBoundingClientRect();
+			const at = (x: number, y: number) => document.elementFromPoint(x, y) as HTMLElement | null;
+			const reaches = (el: HTMLElement | null, selector: string) => !!el?.closest(selector);
+			const reload = document.querySelector<HTMLElement>('.strip [data-file-changed]')!;
+			const reloadBox = reload.getBoundingClientRect();
+			return {
+				stripWidth: strip.getBoundingClientRect().width,
+				row: { left: row.getBoundingClientRect().left, right: row.getBoundingClientRect().right, clientWidth: row.clientWidth },
+				pill: { left: pill.getBoundingClientRect().left, right: pill.getBoundingClientRect().right, width: pill.getBoundingClientRect().width },
+				name: { text: label.textContent ?? '', scrollWidth: label.scrollWidth, clientWidth: label.clientWidth },
+				close: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+				closeCentre: reaches(at(box.left + box.width / 2, box.top + box.height / 2), '.tab-close'),
+				closeEdge: reaches(at(box.right - 1, box.top + box.height / 2), '.tab-close'),
+				// The narrow File changed mark is the phone header's ↻: a small box that answers a tap on its own centre.
+				reloadCompact: reloadBox.width <= 40,
+				// The words form wears dev's look: the amber fill and the medium weight, read from the same tokens dev drew them with.
+				reloadLook: (() => {
+					const own = getComputedStyle(reload);
+					const probe = document.createElement('span');
+					probe.style.cssText = 'background: var(--amber-bg); font-weight: var(--fw-medium);';
+					document.body.append(probe);
+					const token = getComputedStyle(probe);
+					const look = { background: own.backgroundColor, weight: own.fontWeight, tokenBackground: token.backgroundColor, tokenWeight: token.fontWeight };
+					probe.remove();
+					return look;
+				})(),
+				reloadCentre: reaches(at(reloadBox.left + reloadBox.width / 2, reloadBox.top + reloadBox.height / 2), '[data-file-changed]'),
+			};
+		});
+		// Clearance is measured on what each control paints, never on its border box alone: a button sized narrower than its
+		// label still paints the label past that box, and those pixels are what a neighbour runs into (see paintedBoxes).
+		const geometry = {
+			...measured,
+			controls: await paintedBoxes(documentBarHost(page), '.doc-tools button, .collapse-btn'),
+			pillInk: (await paintedBoxes(page.locator('.strip'), '.tab-wrap.active'))[0]?.ink ?? null,
+		};
+		if (FRAMES) {
+			mkdirSync(FRAMES, { recursive: true });
+			const stem = path.join(FRAMES, `tab-close-${width}-${stemPart}-${scheme}-${longName ? 'long' : 'typical'}`);
+			writeFileSync(`${stem}.json`, JSON.stringify(geometry, null, 2));
+			await page.screenshot({ path: `${stem}.png`, animations: 'disabled' });
+		}
+		// The row clips its own overflow, so the whole pill, close included, has to sit inside it.
+		expect(geometry.pill.right, `the active tab's pill sits inside the tab row: ${JSON.stringify([geometry.row, geometry.pill])}`).toBeLessThanOrEqual(geometry.row.right + 0.5);
+		expect(geometry.close.right, `the close sits inside the tab row: ${JSON.stringify([geometry.row, geometry.close])}`).toBeLessThanOrEqual(geometry.row.right + 0.5);
+		expect(geometry.closeCentre, 'a tap at the close\'s centre reaches the close').toBe(true);
+		expect(geometry.closeEdge, 'a tap at the close\'s right edge reaches the close').toBe(true);
+		// Nothing the bar paints covers the document tab or another of its controls, and nothing is pushed out of the window.
+		const windowWidth = await page.evaluate(() => window.innerWidth);
+		for (const [index, control] of geometry.controls.entries()) {
+			expect(control.ink.left, `${control.name} stays inside the window: ${JSON.stringify(control.ink)}`).toBeGreaterThanOrEqual(-0.5);
+			expect(control.ink.right, `${control.name} stays inside the window: ${JSON.stringify(control.ink)}`).toBeLessThanOrEqual(windowWidth + 0.5);
+			const clearOf = (painted: Box | null, label: string) => {
+				if (!painted) return;
+				// The space between what two controls paint: positive when apart on either axis, negative when they overlap on both.
+				const apart = Math.max(painted.left - control.ink.right, control.ink.left - painted.right, painted.top - control.ink.bottom, control.ink.top - painted.bottom);
+				expect(apart, `${control.name} paints clear of ${label}: ${JSON.stringify([painted, control.ink])}`).toBeGreaterThanOrEqual(-0.5);
+			};
+			clearOf(geometry.pillInk, 'the document tab');
+			for (const other of geometry.controls.slice(index + 1)) clearOf(other.ink, other.name);
+		}
+		// The pill's floor is its close plus a few characters of name, never less.
+		expect(geometry.pill.width, `the pill keeps its floor: ${JSON.stringify(geometry.pill)}`).toBeGreaterThanOrEqual(96);
+		const wholeName = geometry.name.scrollWidth <= geometry.name.clientWidth + 0.5;
+		if (longName) {
+			// A name past the pill's cap is shortened, and the close stays whole inside the row (asserted above).
+			expect(wholeName, `a name past the pill's cap is shortened: ${JSON.stringify(geometry.name)}`).toBe(false);
+		}
+		// The bar's form follows the strip's own room, whatever the width: words only where the strip can hold them.
+		expect(geometry.reloadCompact, `File changed goes compact only where the strip is short: ${JSON.stringify([geometry.stripWidth, geometry.reloadCompact])}`).toBe(geometry.stripWidth <= 544);
+		if (wide) {
+			// With room the row is today's row: a typical name keeps all of itself.
+			expect(wholeName, `a typical name stays whole where the row has room: ${JSON.stringify([geometry.name, geometry.pill, geometry.stripWidth])}`).toBe(true);
+		}
+		if (!geometry.reloadCompact) {
+			expect(geometry.reloadLook.background, `the words form is filled with --amber-bg: ${JSON.stringify(geometry.reloadLook)}`).toBe(geometry.reloadLook.tokenBackground);
+			expect(geometry.reloadLook.weight, `the words form is set in --fw-medium: ${JSON.stringify(geometry.reloadLook)}`).toBe(geometry.reloadLook.tokenWeight);
+		}
+		if (geometry.reloadCompact) expect(geometry.reloadCentre, 'the compact File changed mark answers a tap on its centre').toBe(true);
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
+	});
+}

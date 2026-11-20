@@ -12,7 +12,7 @@ import pytest
 
 from delegation_fixtures import deleg_db  # noqa: F401
 from plans import node_creation, service
-from plans.delegate_attach import AUTHOR_NOTE, choose_for_send
+from plans.delegate_attach import AUTHOR_NOTE, REVIEWER_VERDICT, choose_for_send
 from tests.test_delegate_task_plan_step import (  # noqa: F401
     _PARENT, _first_input, _receipt, _seed_parent, spawned,
 )
@@ -22,7 +22,10 @@ pytestmark = pytest.mark.asyncio
 INTENT = "Release notes a customer can follow without help."
 
 
-def _step(db, plan_id: str, *, by: str, description: str | None = "Read each section as a customer.") -> str:
+def _step(
+    db, plan_id: str, *, by: str, description: str | None = "Read each section as a customer.",
+    settle: str | None = None,
+) -> str:
     phase = service.add_node(
         plan_id, kind="phase", title="Ship the notes", acceptance_criteria="Shipped", intent=INTENT, db=db,
     )
@@ -32,7 +35,7 @@ def _step(db, plan_id: str, *, by: str, description: str | None = "Read each sec
         workflow_version="v1", workflow_step="review", difficulty="routine", size="unknown",
         checkpoint_exception=False, assignee=None, spawn_kind=None, watchdog_budget_seconds=None,
         follow_up_of=None, actor_id=None, provenance="plans.workflow_run", node_id=service._id(),
-        intent_node_id=phase.id, workflow_by=by,
+        intent_node_id=phase.id, workflow_by=by, workflow_settle=settle,
     )
     service.transition_node(node.id, "active", db=db)
     db.commit()
@@ -55,6 +58,9 @@ async def test_a_reviewer_step_brief_comes_from_the_plan_and_the_author_text_is_
     # The system's pointer to the live read sits outside the author's text.
     assert f"Your plan task: \"Review the notes\" ({node_id})" in head
     assert head.index("How to review") < head.index("Your plan task")
+    # The reviewer's verdict settles the step, so the reviewer is told how to give it here,
+    # not in every agent's tool schema.
+    assert REVIEWER_VERDICT.strip() in head
     assert note.startswith("do the work")
     assert "Your plan task" not in note
 
@@ -66,6 +72,17 @@ async def test_a_reviewer_step_without_an_instruction_has_no_how_line(deleg_db, 
     worker = (await _receipt(plan_node_id=node_id))["thread_id"]
 
     assert "How to review" not in _first_input(deleg_db, worker)
+
+
+async def test_a_reviewer_step_settled_by_a_script_is_not_asked_for_a_verdict(deleg_db, spawned):
+    plan_id = _seed_parent(deleg_db)
+    node_id = _step(deleg_db, plan_id, by="reviewer", settle="check-totals")
+
+    worker = (await _receipt(plan_node_id=node_id))["thread_id"]
+
+    text = _first_input(deleg_db, worker)
+    assert 'reviewer for the workflow step "Review the notes"' in text
+    assert "verdict" not in text
 
 
 async def test_an_ordinary_step_keeps_the_authors_message_as_is(deleg_db, spawned):

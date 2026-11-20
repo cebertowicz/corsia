@@ -27,7 +27,7 @@ const framesOut = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
 async function captureFrame(page: Page, state: string, viewport: '1440' | '393') {
 	if (state !== 'toggle-on-sent') {
 		expect((await readDeliveryPreference(page.request)).immediate, `${state}: held journeys have immediate delivery OFF`).toBe(false);
-		const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+		const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
 		if (await toggle.isVisible()) await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 	}
 	if (!framesOut) return;
@@ -59,7 +59,7 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 			const headerTools = tools && headerBox && headerStyle ? {
 				contentLeft: headerBox.left + parseFloat(headerStyle.paddingLeft),
 				contentRight: headerBox.right - parseFloat(headerStyle.paddingRight),
-				controls: [...tools.querySelectorAll<HTMLElement>('.sending-now .btn, [aria-label="Deliver comments immediately"]')]
+				controls: [...tools.querySelectorAll<HTMLElement>('.sending-now .btn, .delivery button')]
 					.map((control) => {
 						const controlBox = control.getBoundingClientRect();
 						return { label: control.getAttribute('aria-label') ?? control.textContent?.trim(), left: controlBox.left, right: controlBox.right };
@@ -67,7 +67,7 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 			} : null;
 			return {
 				preference,
-				toggle: document.querySelector('[aria-label="Deliver comments immediately"]')?.getAttribute('aria-pressed'),
+				toggle: document.querySelector('.delivery button')?.getAttribute('aria-pressed'),
 				toast: document.querySelector('.toast')?.textContent,
 				headerTools,
 				anchor: box ? { text: anchor?.textContent, left: box.left, right: box.right, ancestors } : null,
@@ -166,11 +166,11 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await closeComments(page);
 		await post('Please check this revision too.');
 		await openComments(page);
-		await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).click();
+		await page.getByRole('button', { name: 'Deliver immediately', exact: true }).click();
 		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
 		await expect(headerSend(page)).toHaveCount(0);
-		await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByRole('button', { name: 'Deliver immediately', exact: true })).toHaveAttribute('aria-pressed', 'true');
 		expect(sends.document.map((body) => JSON.parse(body).delivery_policy)).toEqual(['document-held', 'document-held']);
 		expect(heldIn(doc.artifactId, 'document-held')).toBe(0);
 		expect(deliveredBatches(doc.artifactId, 'document-held')).toBe(2);
@@ -704,12 +704,12 @@ async function expectDetailsControlsFit(page: Page, width: number) {
 	await closeComments(page);
 	const details = await openDetails(page);
 	await expect(details.locator('.review-request')).toBeVisible();
-	await expect(details.locator('.sending-now, [aria-label="Deliver comments immediately"]')).toHaveCount(0);
+	await expect(details.locator('.sending-now, .delivery button')).toHaveCount(0);
 	await closeDetails(page);
 	await openComments(page);
 	const panel = page.locator('[data-doc-comments-drawer]');
 	const send = headerSend(page);
-	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+	const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
 	const comments = page.locator('[data-comments-entry]');
 	await expect(send).toBeVisible();
 	await expect(toggle).toBeVisible();
@@ -747,7 +747,7 @@ async function expectDetailsControlsFit(page: Page, width: number) {
 			sideways: element.scrollWidth - element.clientWidth,
 			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
 		};
-	}, { send: '.drawer-foot .sending-now .btn', toggle: '.drawer-foot [aria-label="Deliver comments immediately"]', comments: '[data-comments-entry]', details: '[data-document-details]' });
+	}, { send: '.drawer-foot .sending-now .btn', toggle: '.drawer-foot .delivery button', comments: '[data-comments-entry]', details: '[data-document-details]' });
 	expect(result.containsSend, 'Send is inside the comments drawer').toBe(true);
 	expect(result.barCenters, 'Comments and Details are both in the bar').toHaveLength(2);
 	expect(Math.abs(result.barCenters[0] - result.barCenters[1]), `Comments and Details share one row at ${width}px`).toBeLessThanOrEqual(2);

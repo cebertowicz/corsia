@@ -1,5 +1,4 @@
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { discardCommentDraft, commentDraftScope } from '$lib/stores/commentDraft';
 import { existingDraft, withDraftArtifactId } from '$lib/stores/docSaveQueue';
 import { handleViewerFailure } from '$lib/docViewerFailure';
 import { loadSignal, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
@@ -10,7 +9,6 @@ import type { DocOpenRefusal } from '$lib/docOpenRefusal';
 /** Starts the existing viewer load, keeping tab drafts authoritative over an older server snapshot. */
 export function loadCurrentViewer(context: {
 	target: DocViewerTarget;
-	previous: DocViewerTarget | null;
 	isCurrent: () => boolean;
 	onSignal: DocViewerProps['onSignal'];
 	begin: (artifactId: string | null, opened: ReturnType<typeof openFromDraft>) => void;
@@ -22,7 +20,6 @@ export function loadCurrentViewer(context: {
 	const { target } = context;
 	const signal = loadSignal(context.onSignal, target);
 	focusedDocComment.set(null);
-	discardCommentDraft(commentDraftScope(context.previous));
 	const artifactId = withDraftArtifactId(target).artifactId;
 	const opened = openFromDraft(existingDraft(target), artifactId);
 	context.begin(artifactId, opened);

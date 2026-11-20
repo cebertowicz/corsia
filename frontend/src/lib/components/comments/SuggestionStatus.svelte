@@ -30,7 +30,7 @@
 	{#if authors.length}
 		<button type="button" aria-busy={submitting || shownBusy !== null} disabled={busy !== null || submitting} onclick={open}>{submitting || shownBusy !== null ? 'Accepting…' : 'Accept suggestions'}</button>
 		{#if choosing}
-			<div class="suggestion-choices" role="group" aria-label="Suggesters">
+			<div class="suggestion-choices" role="group" aria-label="Choose whose suggestions to accept">
 				{#each authors as [author, suggestions] (author)}
 					<label><input type="checkbox" value={author} bind:group={selected} disabled={submitting} /> {author} · {suggestions.length}</label>
 				{/each}

@@ -338,10 +338,13 @@ def test_operator_projection_1000_nodes_has_bounded_query_count():
         # (one plan: one read). The pane reads open work (#731 S2-2), so each fact
         # is read for the listed nodes alone, by id, where it once read the whole
         # plan: twenty reads repeat per chunk of ids (41 fixed, 20 per chunk).
+        # Each of the three usage readers (node dollars, node tokens, commitment
+        # tokens) reads once whether the stored per-node groups cover every node
+        # (``core.node_usage_groups.ready``): three more fixed reads (44 fixed).
         from plans import node_cost
 
         chunks = -(-1000 // node_cost._ID_CHUNK)
-        assert len(statements) <= 41 + 20 * chunks + 1
+        assert len(statements) <= 44 + 20 * chunks + 1
     finally:
         db.set_trace_callback(None)
         db.close()

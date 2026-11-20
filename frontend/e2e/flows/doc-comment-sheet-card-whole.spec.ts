@@ -65,6 +65,7 @@ test('@flow:doc-comment-sheet keeps reply controls visible and the card top reac
 	await expect(card.getByPlaceholder('Reply…')).toBeVisible();
 	await settled(page);
 	const opened = await geometry(page);
+	expect(opened.card.height + 6, 'the card and its focus ring fit the sheet scroller').toBeLessThanOrEqual(opened.scroller.clientHeight);
 	for (const [name, box] of Object.entries({ field: opened.field, line: opened.line })) {
 		expect(box.top, `${name} starts inside the scroller`).toBeGreaterThanOrEqual(opened.scroller.top - 1);
 		expect(box.bottom, `${name} ends inside the scroller`).toBeLessThanOrEqual(opened.scroller.bottom + 1);
@@ -72,6 +73,11 @@ test('@flow:doc-comment-sheet keeps reply controls visible and the card top reac
 
 	// The reply remains reachable when focused; the card's top can also be reached by scrolling.
 	await card.getByPlaceholder('Reply…').tap();
+	await settled(page);
+	const focused = await geometry(page);
+	expect(focused.card.height + 6, 'the card and its focus ring still fit after focus').toBeLessThanOrEqual(focused.scroller.clientHeight);
+	expect(focused.card.top - 3, 'the focus ring stays below the scroller top').toBeGreaterThanOrEqual(focused.scroller.top - 1);
+	expect(focused.card.bottom + 3, 'the focus ring stays above the scroller bottom').toBeLessThanOrEqual(focused.scroller.bottom + 1);
 	await card.getByPlaceholder('Reply…').fill('A reply');
 	await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA');
 	await settled(page);

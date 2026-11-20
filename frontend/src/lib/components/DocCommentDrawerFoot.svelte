@@ -15,7 +15,7 @@
 
 <div class="drawer-foot">
 	{#if feedback}<div class="send"><DocFeedbackControls {feedback} lane="document-held" countSep=" · " announce={false} /></div>{/if}
-	<div class="delivery" title="When off, comments send when you close the document or pause for two minutes."><Toggle size="sm" label="Deliver immediately" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" /></div>
+	<div class="delivery" title="When off, comments send when you close the document or pause for two minutes."><Toggle size="sm" label="Deliver immediately" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} /></div>
 </div>
 
 <style>

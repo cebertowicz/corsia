@@ -630,6 +630,49 @@ describe('reply stamping through the document canvas', () => {
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 	});
+
+	// The document is covered only while the restore holds it, and while covered its Comments control is absent. Each test
+	// below drives one way the restorer settles and fails if that uncover path is removed: the control would stay absent.
+	it('unhides the document and its bar when placement fires while the restore keeps holding', async () => {
+		const held = deferred<void>();
+		mocks.restoreDocumentPlace.mockImplementation((_root, _place, options) => {
+			options.onPlaced?.();
+			return held.promise;
+		});
+		const tab = seedReply();
+		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce(), { timeout: 6000 });
+		// The hold is still running: its promise has not settled, yet the place is laid, so the bar is usable again.
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[data-comments-entry]')?.disabled).toBe(false), { timeout: 6000 });
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+		held.resolve();
+	});
+
+	it('unhides the document and its bar when the restore returns early with no editor view', async () => {
+		// What the real restorer does when there is no root or no CodeMirror view: it resolves without placing anything.
+		mocks.restoreDocumentPlace.mockImplementation((root: HTMLElement | undefined) => Promise.resolve(root));
+		const tab = seedReply();
+		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce(), { timeout: 6000 });
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[data-comments-entry]')?.disabled).toBe(false), { timeout: 6000 });
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+	});
+
+	it('unhides the document and its bar when the restore throws', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		mocks.restoreDocumentPlace.mockRejectedValue(new Error('placement failed'));
+		const tab = seedReply();
+		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce(), { timeout: 6000 });
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[data-comments-entry]')?.disabled).toBe(false), { timeout: 6000 });
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+		// The failure is still reported, not swallowed by uncovering.
+		expect(logged.mock.calls.some((call) => String(call[0]).includes('Document place restore failed'))).toBe(true);
+		logged.mockRestore();
+	});
 });
 
 describe('ArtifactLeaf load-status ownership', () => {

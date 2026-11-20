@@ -6,7 +6,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 
-/** What DocCommentSurface takes; `resolvedCount` and `resolvedOpen` are bindable. */
+/** What DocCommentSurface takes; `resolvedOpen` is bindable. */
 export interface DocCommentSurfaceProps {
 	state: CommentSurfaceState;
 	onThreadMissing?: (remaining: string[]) => void;
@@ -28,8 +28,10 @@ export interface DocCommentSurfaceProps {
 	widgetLabel?: WidgetLabelReader;
 	focusedId: string | null;
 	focusedIds?: string[] | null;
+	/** The thread whose text is under the pointer: its card wears the focused ring and nothing more; only the pick (`focusedId`) opens, places or reads a card. */
+	ringId?: string | null;
 	/** `label` names what a non-text comment is on, in place of the quote. */
-	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
+	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string } | null;
 	draftReason?: string;
 	onDraftBody?: (text: string) => void;
 	onCancelDraft?: () => void;
@@ -37,7 +39,8 @@ export interface DocCommentSurfaceProps {
 	restoreFocus: () => void;
 	onFocus: (id: string, placement?: 'top') => void;
 	onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
-	onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+	/** `draftKey` keys the reply in `keptCommentDrafts` (CommentList). */
+	onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[], draftKey: string) => Promise<void>;
 	/** With `wait` the comment changes only once the request is answered; the promise says whether it was taken. */
 	onResolve: (id: string, resolved: boolean, wait?: boolean) => void | Promise<boolean>;
 	onAgree: (id: string, agreed: boolean) => void;
@@ -46,6 +49,8 @@ export interface DocCommentSurfaceProps {
 	/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */
 	docPath?: string | null;
 	artifactId: string | null;
+	/** The document or image its replies are kept under (`documentDraftKey`, `imageDraftKey`): a reply being typed outlives this surface. */
+	draftScope?: string;
 	/** The document's long-lived feedback controller, shared with the drawer's delivery controls. */
 	feedback?: DocFeedback;
 	readOnly?: boolean;
@@ -68,16 +73,12 @@ export interface DocCommentSurfaceProps {
 	onSheetModalChange?: (open: boolean) => void;
 	/** Asks the editor to keep the draft's text, or the text a thread sheet was opened from, clear of the sheet, now and whenever it moves. */
 	onRevealDraft?: (opening: boolean) => void; onRevealCard?: (opening: boolean, panel: HTMLElement | null) => void;
-	/** Resolved threads at every width (zero on an image's drawer), for the header control that opens their drawer. */
-	resolvedCount?: number;
 	/** A new comment is being written over the margin column: the column stays, its cards where they were, with the composer beside the text. */
 	draftOverColumn?: boolean;
 	/** Changes each time the reader opens something (the surface state's count of picks, drafts and lists). */
 	opened?: number;
-	/** The resolved drawer is open: set by that control only. */
+	/** The drawer shows the resolved list rather than the open one: set by its Open | Resolved switch and by the viewer's jump to a resolved reply. */
 	resolvedOpen?: boolean;
 	/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
 	commentsEntry?: HTMLElement | null;
-	/** The visible control the Resolved list opened from (Details); its row sits in a panel that closes as the list opens. */
-	resolvedAnchor?: HTMLElement | null;
 }

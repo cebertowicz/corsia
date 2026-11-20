@@ -1,8 +1,12 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import DocCommentSurface from './DocCommentSurface.svelte';
 import type { CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import { createMentionSelection } from './comments/mentionSelection';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: vi.fn(), seedDraft: vi.fn() }));
 vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: vi.fn() }));

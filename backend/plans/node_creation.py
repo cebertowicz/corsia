@@ -319,11 +319,13 @@ def create_node(
     workflow_by: str = "agent",
     workflow_gate: str | None = None,
     workflow_gate_mode: str | None = None,
+    workflow_settle: str | None = None,
 ) -> PlanNode:
     """Validate and insert a node without opening another transaction.
 
     ``required_step`` marks a workflow run's required step in its creation
     event, the one record ``plans.workflow_fields.refuse_required_skip`` reads.
+    ``workflow_settle`` is a review step's settle script name (``plans.review_settle_script``).
     """
     (
         base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
@@ -360,6 +362,7 @@ def create_node(
             **({"workflow_by": workflow_by} if workflow_by != "agent" else {}),
             **({"workflow_gate": workflow_gate} if workflow_gate else {}),
             **({"workflow_gate_mode": workflow_gate_mode} if workflow_gate_mode else {}),
+            **({"workflow_settle": workflow_settle} if workflow_settle else {}),
         },
     )
     return service._node_from_row(connection, service._node_row(connection, node_id))

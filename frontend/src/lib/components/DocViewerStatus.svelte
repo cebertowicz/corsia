@@ -8,7 +8,7 @@
 	import { Button } from '$lib/components/ui';
 	import Spinner from './ui/Spinner.svelte';
 	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
-	import { detailsNeedsCount } from '$lib/docDetailsNeeds';
+	import { detailsNeedsUp } from '$lib/docDetailsNeeds';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -19,11 +19,7 @@
 
 	let {
 		presence,
-		touchReading = false,
-		editing = false,
-		canEdit = false,
-		onEnterEdit,
-		onDone,
+		touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
 		reviewBar,
 		ask = null,
 		commentsOpen = false,
@@ -58,10 +54,6 @@
 		historyAvailable = false,
 		historyOpen = false,
 		onOpenHistory,
-		resolvedCount = 0,
-		resolvedOpen = false,
-		resolvedInColumn = false,
-		onOpenResolved,
 		commentsEntry = $bindable(null),
 		detailsEntry = $bindable(null),
 	}: DocViewerStatusProps = $props();
@@ -81,8 +73,14 @@
 	const changeInBar = $derived($canvasCompact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
-	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
-	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, fileChangedOffBar: false, hiddenAsk: !!ask && !ask.onCard }));
+	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
+	 * entry, so the control says what is waiting rather than how many: Overdue, and an ask whose card is hidden, an ask
+	 * with no reason text named by its asker rather than leaving an empty leg. The amber count is this list's length, so
+	 * the number and the name can't drift apart. */
+	const needsUp = $derived(detailsNeedsUp(
+		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard },
+		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '' }));
+	const needsCount = $derived(needsUp.length);
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
@@ -98,7 +96,7 @@
 		return () => observer?.disconnect();
 	});
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
-		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} new` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
+		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} unread` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
 	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
 	const statusText = $derived(freshnessPresentation
 		? freshnessPresentation.overdue
@@ -216,13 +214,19 @@
 		feedbackStatus?.sync(id, feedback);
 	}
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
+	/** The bar's Comments button, which the comments drawer opens from and returns focus to. */
+	export function commentsButton(): HTMLButtonElement | null { return commentsEntry; }
 </script>
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
 	{#if touchReading && editing}<button type="button" class="bar-done" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={onDone}>Done</button>{/if}
 	<span class="bar-presence" hidden={touchReading && editing}>{#if presence}{@render presence()}{/if}</span>
-	{#if urgent && !changeInBar}<button type="button" class="bar-stale stale-control" data-file-changed onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
+		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+		<!-- The strip's own room decides whether the words show; the ↻ mark is the phone header's compact form. -->
+		<span class="bar-stale-word">File changed · Reload</span>
+	</button>{/if}
 	<!-- The transient save cue yields to File changed's reload mark so the name keeps its room. -->
 	{#if saveStatus !== 'idle'}<span class="bar-save" class:saving={saveStatus === 'saving'} class:yields={urgent && changeInBar}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 	<button type="button" class="bar-comments" data-comments-entry bind:this={commentsEntry} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
@@ -230,7 +234,7 @@
 		<span class="bar-comments-content" class:receipt-hidden={sent && !commentsOpen}>
 			<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
 			<!-- Unread is text; the separate dot marks comments waiting for Send. -->
-			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' new'}</span></span>{:else}<span>{commentCount}</span>{/if}
+			{#if !ready || commentsLoading}<Spinner size={14} />{:else if unreadCount}<span class="bar-new">{unreadCount}<span class="bar-new-word">{' unread'}</span></span>{:else}<span>{commentCount}</span>{/if}
 			{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 		</span>
 		{#if sent && !commentsOpen}<span class="bar-sent-container" data-comments-sent aria-hidden="true" bind:this={receiptBox}>
@@ -240,7 +244,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsCount ? ` · ${needsCount} needs you` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>
@@ -293,12 +297,12 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	/* The bar's controls: 36px with a pointer, 44px at phone width (IconButton lg's sizes), 16px apart (the hosts' gap). */
-	.bar-stale { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--amber-bg); color: var(--amber-text); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
-	.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-	.bar-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
 	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
+	/* File changed is one control with two forms: the words, which size the button (dev's 135x32 text button), and the ↻ mark,
+	 * which is the square below. Its width is never fixed, or the label paints past the box and over its neighbour. */
+	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); background: var(--amber-bg); font-weight: var(--fw-medium); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
 	@media (max-width: 768px) {
@@ -317,13 +321,29 @@
 	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
 	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible, .bar-done:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	/* The tab strip's own room decides, not the window's: the row gives way in the order the phone header gives way in,
+	 * and the document tab is never what is shortened first. The svg rides in the control so the narrow form is the
+	 * approved phone header's ↻ mark, with the same accessible name and tooltip. */
+	.bar-reload.bar-stale svg { display: none; }
+	/* rem, not px: the room this bar needs is set by its text, so the rungs move with the reader's font size.
+	 * 35.5rem = 568px, 34rem = 544px at the default 16px root. */
+	@container strip (max-width: 35.5rem) {
+		/* 1. The tight rung: the row's own gaps and side padding, as the phone row wears them. */
+		.bar-tools { gap: var(--space-1); }
+	}
+	@container strip (max-width: 34rem) {
+		/* 2. File changed takes the ↻ mark, so its words stop costing the tab its room. */
+		.bar-reload.bar-stale { width: var(--bar-row); height: var(--bar-row); padding: 0; background: none; font-weight: var(--fw-regular); }
+		.bar-reload.bar-stale svg { display: block; width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+		.bar-stale-word { display: none; }
+	}
+	/* Both forms tint on hover, as dev's File changed did; written after the narrow rung so its fill reset cannot take it away. */
+	.bar-reload.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
 	.bar-done { width: var(--touch-target); min-width: var(--touch-target); min-height: var(--touch-target); color: var(--accent-text); font-weight: var(--fw-semibold); }
-	.bar-presence { display: contents; }
-	.bar-presence[hidden] { display: none; }
-	.p-edit { min-height: var(--touch-target); }
+	.bar-presence { display: contents; } .bar-presence[hidden] { display: none; } .p-edit { min-height: var(--touch-target); }
 	.bar-details { padding: 0 var(--space-2); }
 	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }
@@ -331,7 +351,9 @@
 	.bar-tools .bar-save:not(.saving) { color: var(--green); }
 	.bar-tools .bar-save.yields { display: none; }
 	.bar-needs { color: var(--amber-text); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
-	.bar-reload { width: var(--touch-target); height: var(--touch-target); padding: 0; color: var(--amber-text); }
+	.bar-reload { color: var(--amber-text); }
+	/* The app bar's mark after the document's name is the square; the strip's words form keeps its label's width. */
+	.bar-reload:not(.bar-stale) { width: var(--touch-target); height: var(--touch-target); padding: 0; }
 	.bar-reload svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 	/* The panel drops over the document (it never moves the text), on the Popover primitive's solid surface: the document would read through a translucent one. */

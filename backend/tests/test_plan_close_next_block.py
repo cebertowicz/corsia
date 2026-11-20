@@ -156,6 +156,8 @@ def test_open_tasks_follow_depth_first_order_with_an_id_tie_break(db):
         plan.id, kind="phase", title="Retired phase", acceptance_criteria="Retired is verified", db=db,
     )
     stranded = task(db, plan.id, "Unreachable task", parent_id=retired.id)
+    # Task A is current before the reorder ranks it last.
+    select(db, plan.id, task_a.id)
     _set_order(db, {
         tie_x.id: 5, tie_y.id: 5, phase.id: 6, first.id: 0, second.id: 1,
         last.id: 7, retired.id: 8, task_a.id: 9,
@@ -165,7 +167,6 @@ def test_open_tasks_follow_depth_first_order_with_an_id_tie_break(db):
     with raw_plan_seed(db):
         db.execute("UPDATE plan_nodes SET archived_at=? WHERE id=?", (service._now(), retired.id))
     db.commit()
-    select(db, plan.id, task_a.id)
     low, high = sorted([tie_x.id, tie_y.id])
 
     after_a = next_block(close(db, plan.id, "request_review", task_a.id))

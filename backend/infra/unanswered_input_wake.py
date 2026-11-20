@@ -100,6 +100,23 @@ def _restart_resumes(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bo
     ).fetchone() is not None
 
 
+def will_retry_once(db: sqlite3.Connection, thread_id: str, turn_id: str, error: str) -> bool:
+    """Whether this errored Turn gets its one re-run for a person's unanswered message.
+
+    The rule's one home: ``queue_unanswered_input_wake`` queues by it, and the
+    turn-end notices wait on it, since the re-run answers for this Turn and a
+    failure of that re-run (which took in the wake) is the one that is told.
+    A provider-reset wait replaces the re-run; the caller checks that.
+    """
+    return not (
+        not _unanswered_input(db, thread_id, turn_id)
+        or _excluded(db, thread_id, turn_id, error)
+        or _took_in_wake(db, turn_id)
+        or _restart_resumes(db, thread_id, turn_id)
+        or _person_input_queued(db, thread_id)
+    )
+
+
 def queue_unanswered_input_wake(
     db: sqlite3.Connection, thread_id: str, outcome: dict, liveness_wake, pending,
 ) -> None:
@@ -118,13 +135,7 @@ def queue_unanswered_input_wake(
         return
     if liveness_wake is not None and liveness_wake.provider_reset_at is not None:
         return
-    if (
-        not _unanswered_input(db, thread_id, turn_id)
-        or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
-        or _took_in_wake(db, turn_id)
-        or _restart_resumes(db, thread_id, turn_id)
-        or _person_input_queued(db, thread_id)
-    ):
+    if not will_retry_once(db, thread_id, turn_id, str(outcome.get("error") or "")):
         return
     from events.delivery import enqueue_event_wake
     from infra.send_types import SendRejected

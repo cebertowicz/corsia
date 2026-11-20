@@ -256,30 +256,22 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		// The drawer's delivery Toggle keeps its track and touch target at phone widths.
+		// The drawer's delivery Toggle is one labelled row control at every width: the label and the track share the button,
+		// so the row is the touch target and the painted track keeps its size.
 		await openComments(page);
-		if (width <= 768) {
-			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
-			// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
-			const hit = toggle.locator('.hit');
-			const targetBox = (await hit.boundingBox())!;
-			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
-			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
-			console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
-			expect(track).toEqual({ width: 30, height: 17 });
-			const button = (await toggle.boundingBox())!;
-			expect({ width: button.width, height: button.height }, 'the switch button stays its track; only its hit area grows').toEqual({ width: 30, height: 17 });
-			expect(targetBox.height, 'actual delivery hit area').toBe(44);
-			expect(targetBox.width).toBe(44);
-			// The hit area outside the painted track activates the same single control.
-			const pressPadding = () => info.project.name === 'chromium-mobile' ? hit.tap({ position: { x: 4, y: 22 } }) : hit.click({ position: { x: 4, y: 22 } });
-			await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-		} else {
-			const box = (await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).boundingBox())!;
-			expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
-		}
+		const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
+		await expect(toggle, 'the row is named by its visible label').toHaveAccessibleName('Deliver immediately');
+		const row = (await toggle.boundingBox())!;
+		const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
+		await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox: row, track }), contentType: 'application/json' });
+		console.info('Delivery button bounds:', JSON.stringify({ targetBox: row, track }));
+		expect(track).toEqual({ width: 30, height: 17 });
+		expect(Math.min(row.width, row.height), 'the whole row is a touch target').toBeGreaterThanOrEqual(44);
+		// A press on the label half of the row, far from the painted track, activates the same single control.
+		const pressLabel = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 8, y: row.height / 2 } }) : toggle.click({ position: { x: 8, y: row.height / 2 } });
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 		await closeComments(page);
 		// Keep the overlaid Workspace case at 1280; close it at 1440 to exercise the wide document popover.
 		if (viewport === 'desktop-1440' && !(await page.locator('.pane').evaluate(element => element.classList.contains('collapsed')))) {

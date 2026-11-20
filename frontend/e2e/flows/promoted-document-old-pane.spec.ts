@@ -48,7 +48,7 @@ test('a reply sent from a pane open before a promote lands on the promoted docum
 	const steps = page.getByRole('list', { name: 'Plan steps' });
 	await expect(steps).toBeVisible({ timeout: 30_000 });
 	await steps.getByRole('listitem').filter({ hasText: name }).first().getByRole('button').first().click();
-	await page.getByRole('button', { name: /\d+ comments?, \d+ new/ }).first().click();
+	await page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first().click();
 	const threads = page.getByRole('region', { name: /^Comment by / });
 	await expect(threads).toHaveCount(4);
 	const placedBefore = (await listOn(artifactId)).map((thread) => [thread.anchor_text, thread.from_off, thread.to_off]);

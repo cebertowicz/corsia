@@ -111,7 +111,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await frame('1-open');
 
 	// The list of threads shows them all as New; showing them is not opening them, so the count holds.
-	const pill = page.getByRole('button', { name: /\d+ comments?, \d+ new/ }).first();
+	const pill = page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first();
 	await press(pill);
 	const cards = page.getByRole('region', { name: /^Comment by / });
 	await expect(cards.first()).toBeVisible();

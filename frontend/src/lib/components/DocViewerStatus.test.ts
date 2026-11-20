@@ -7,7 +7,7 @@ import type { DocFeedback } from '$lib/docFeedback.svelte';
 import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { detailsNeedsCount, type DetailsNeeds } from '$lib/docDetailsNeeds';
+import { detailsNeedsUp, type DetailsNeeds, type DetailsNeedsWords } from '$lib/docDetailsNeeds';
 import type { CommentFeedback } from '$lib/api/docs';
 import { deliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 import { get } from 'svelte/store';
@@ -22,7 +22,7 @@ let component: ({ commentCreated: () => void; feedback: () => DocFeedback | unde
 let foot: { $destroy: () => void; $set: (props: Record<string, unknown>) => void } | null = null;
 
 function renderFoot(overrides: Record<string, unknown> = {}) {
-	foot = createClassComponent({ target: host, component: DocCommentDrawerFoot, props: { feedback: component?.feedback(), resolvedCount: 0, resolvedOpen: false, resolvedInColumn: false, onOpenResolved: vi.fn(), ...overrides } });
+	foot = createClassComponent({ target: host, component: DocCommentDrawerFoot, props: { feedback: component?.feedback(), ...overrides } });
 	flushSync();
 }
 
@@ -85,7 +85,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
 		expect(host.querySelector('[data-comments-entry]')?.getAttribute('aria-label')).toBe('0 comments');
-		const delivery = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
+		const delivery = host.querySelector<HTMLButtonElement>('.delivery button');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
 		flushSync();
@@ -177,7 +177,7 @@ describe('DocViewerStatus freshness metadata', () => {
 			render(value(), undefined, { commentCount: 5, imageOpen: true });
 			component!.sync('artifact-1', { open_count: 5, document_held_count: 2, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 			flushSync();
-			const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!;
+			const toggle = host.querySelector<HTMLButtonElement>('.delivery button')!;
 			expect(toggle.getAttribute('aria-pressed')).toBe('false');
 			toggle.click(); flushSync();
 			await vi.waitFor(() => expect(sends()).toHaveLength(1));
@@ -209,7 +209,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		try {
 			render(value(), undefined, { commentCount: 0 });
 			flushSync();
-			host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!.click(); flushSync();
+			host.querySelector<HTMLButtonElement>('.delivery button')!.click(); flushSync();
 			await vi.waitFor(() => expect(sends()).toHaveLength(1));
 			expect(JSON.parse(sends()[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'document-held' });
 			expect(get(deliveryConfirmation)).toBeNull();
@@ -233,8 +233,8 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill.getAttribute('aria-label')).toBe('1 comment');
 		// Unread shows as text, never a dot.
 		component!.$set({ unreadCount: 25 }); flushSync();
-		expect(pill.textContent?.trim()).toBe('25 new');
-		expect(pill.getAttribute('aria-label')).toBe('1 comment, 25 new');
+		expect(pill.textContent?.trim()).toBe('25 unread');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment, 25 unread');
 	});
 
 	it('closes Details on scoped Escape, restores its toggle, and leaves Escape elsewhere to its own control', () => {
@@ -376,11 +376,49 @@ describe('DocViewerStatus toolbar', () => {
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
 
-	it('counts beside Details exactly the three things behind it that need the reader, one each', () => {
-		// Every combination of the three sources; a fourth source is a new required field of DetailsNeeds, so this list stops compiling.
-		const all: DetailsNeeds[] = [false, true].flatMap((overdue) => [false, true].flatMap((fileChangedOffBar) =>
-			[false, true].map((hiddenAsk) => ({ overdue, fileChangedOffBar, hiddenAsk }))));
-		expect(all.map((needs) => detailsNeedsCount(needs))).toEqual(all.map(({ overdue, fileChangedOffBar, hiddenAsk }) => Number(overdue) + Number(fileChangedOffBar) + Number(hiddenAsk)));
+	it('names behind Details what waits there, in the words the panel uses, and never a count', () => {
+		const detailsName = () => host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label');
+		const ask = { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false };
+		// One need, Overdue: its card is up, so the ask adds nothing.
+		render(value({ state: 'overdue' }), vi.fn().mockResolvedValue(undefined), { ask: { ...ask, onCard: true } });
+		expect(detailsName()).toBe('Document details · Overdue');
+		// One need, a hidden ask: the ask's own words.
+		component!.$set({ ask, freshness: value() });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Is this skill ready?');
+		// Two needs: each in its own words, joined with ' · '.
+		component!.$set({ freshness: value({ state: 'overdue' }) });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Overdue · Is this skill ready?');
+		// An ask with no reason text is named by its asker, never left as an empty leg.
+		component!.$set({ ask: { ...ask, text: '   ' } });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Overdue · Structured Plans asks');
+		// Nothing waiting: the plain name, and the amber number stays a visual mark only.
+		component!.$set({ ask: null, freshness: value() });
+		flushSync();
+		expect(detailsName()).toBe('Document details');
+		expect(host.querySelector('.bar-needs')).toBeNull();
+	});
+
+	it('keeps the amber number out of the accessible name while two needs are up', () => {
+		render(value({ state: 'overdue' }), vi.fn().mockResolvedValue(undefined), { ask: { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false } });
+		const needsMark = host.querySelector('.bar-needs');
+		expect(needsMark?.getAttribute('aria-hidden')).toBe('true');
+		expect(host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label')).not.toMatch(/\d/);
+	});
+
+	it('counts beside Details exactly what waits there, and names the same things', () => {
+		// Every combination of the sources; a third source is a new required field of DetailsNeeds, so these lines stop
+		// compiling until it names both the flag and the words the panel calls it by.
+		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>
+			[false, true].map((hiddenAsk) => ({ overdue, hiddenAsk })));
+		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?' };
+		for (const needs of all) {
+			const up = detailsNeedsUp(needs, words);
+			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk].filter(Boolean).length);
+			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null].filter((word): word is string => !!word));
+		}
 	});
 });
 

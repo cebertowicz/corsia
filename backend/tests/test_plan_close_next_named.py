@@ -37,11 +37,16 @@ from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
 
 def _queued_scene(db):
-    """Select Task A, queue earlier active work behind it, and leave Task B pending."""
+    """Select Task A, leave Task B pending next in plan order, and queue active work below it.
+
+    Auto-selection takes the queued active task; naming Task B, which plan order
+    puts first, beats it. Naming work below ready work is refused
+    (``test_plan_triage_lines``).
+    """
     plan = owner_plan(db)
     task_a = task(db, plan.id, "Task A")
-    earlier = task(db, plan.id, "Earlier queued work")
     task_b = task(db, plan.id, "Task B")
+    earlier = task(db, plan.id, "Queued work below")
     select(db, plan.id, task_a.id)
     queue_active(db, earlier.id)
     return plan, task_a, earlier, task_b
@@ -83,7 +88,7 @@ def test_a_padded_next_node_id_names_the_same_task(db):
     _assert_started(block, task_b.id, "Task B is verified")
 
 
-def test_a_named_active_task_is_selected_over_earlier_queued_work(db):
+def test_a_named_active_task_is_selected_over_queued_work_ranked_below_it(db):
     plan, task_a, earlier, task_b = _queued_scene(db)
     queue_active(db, task_b.id)
 

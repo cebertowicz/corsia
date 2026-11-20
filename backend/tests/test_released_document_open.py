@@ -140,8 +140,6 @@ def test_a_released_document_reads_as_active_and_unowned(released):
 
 
 def test_its_open_tab_finds_it_and_the_page_shows_no_owner(integration_client, released):
-    from registry.document_supervisor import RELEASED_REFUSAL
-
     _owner, path, artifact = released
     probe = _revision(integration_client, path, artifact["id"])
     assert (probe["exists"], probe["artifact_id"]) == (True, artifact["id"])
@@ -151,31 +149,29 @@ def test_its_open_tab_finds_it_and_the_page_shows_no_owner(integration_client, r
     assert page["text"] == _BODY
     assert page["artifact"]["id"] == artifact["id"]
     ownership = page["ownership"]
-    assert (ownership["owner"]["kind"], ownership["can_change"], ownership["refusal"]) == (
-        "none", False, RELEASED_REFUSAL,
-    )
+    assert ownership["owner"]["kind"] == "none"
 
 
-def test_the_owner_pick_stays_a_clear_refusal(integration_client, released):
+def test_the_person_can_take_the_released_document(integration_client, released):
     from infra.auth import require_human_user
-    from registry.document_supervisor import RELEASED_REFUSAL
 
     owner, _path, artifact = released
     person = {"id": _user_id(owner), "token_kind": "session"}
     overrides = integration_client.app.dependency_overrides
     overrides[require_human_user] = lambda: person
     try:
-        refused = integration_client.put(
-            f"/api/artifacts/{artifact['id']}/ownership", json={"owner": owner},
+        taken = integration_client.put(
+            f"/api/artifacts/{artifact['id']}/ownership", json={"owner": "user"},
         )
     finally:
         overrides.pop(require_human_user, None)
-    assert (refused.status_code, refused.json()["detail"]) == (409, RELEASED_REFUSAL)
+    assert taken.status_code == 200, taken.text
+    assert taken.json()["ownership"]["owner"]["label"] == "You"
 
 
 @pytest.mark.asyncio
 async def test_corsia_gives_it_an_owner_and_the_page_shows_that_owner(integration_client, released):
-    """The refusal says to ask CORSIA; the CORSIA agent's rehome is the route that answers it."""
+    """The CORSIA agent can also rehome a released document."""
     from infra.corsia_agent import set_corsia_agent
     from registry import models
     from tools.artifact_ownership import ArtifactRehomeTool

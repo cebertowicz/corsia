@@ -13,20 +13,20 @@
 		const element = row;
 		const participants = view?.participants;
 		if (!element || !participants?.length || typeof ResizeObserver === 'undefined') return;
-		const bar = element.closest<HTMLElement>('.shell-header');
-		const title = bar?.querySelector<HTMLElement>('[data-testid="header-document-title"]');
+		const bar = element.closest<HTMLElement>('[data-document-bar-row]');
+		const title = bar?.querySelector<HTMLElement>('[data-document-title]');
 		const titleCell = title?.parentElement;
-		const tools = element.closest<HTMLElement>('.h-right');
-		if (!bar || !title || !titleCell || !tools) { maximum = 3; return; }
-		const canvas = document.createElement('canvas').getContext('2d');
+		const tools = element.closest<HTMLElement>('[data-document-bar-tools]');
+		const full = title?.querySelector<HTMLElement>('[data-name-full]');
+		const minimum = title?.querySelector<HTMLElement>('[data-name-minimum]');
+		const chevron = title?.querySelector<SVGElement>('svg');
+		if (!bar || !title || !titleCell || !tools || !full || !minimum || !chevron) { maximum = 3; return; }
 		const fit = () => {
-			const name = title.querySelector('.name')?.getAttribute('title') ?? '';
-			if (!canvas || !name) return;
-			const nameCell = title.querySelector<HTMLElement>('.name-size, .name') ?? title;
-			canvas.font = getComputedStyle(nameCell).font;
-			const shortened = name.length > 6 ? `${name.slice(0, 1)}…${name.slice(-5)}` : name;
-			const needed = canvas.measureText(name).width + 18; // whole name plus the title's chevron and gap
-			const floor = canvas.measureText(shortened).width + 18;
+			const fullName = full.getBoundingClientRect().width;
+			const minimumName = Math.min(fullName, minimum.getBoundingClientRect().width);
+			const spacing = chevron.getBoundingClientRect().width + (parseFloat(getComputedStyle(title).columnGap) || 0);
+			const needed = fullName + spacing;
+			const floor = minimumName + spacing;
 			const titleBox = title.getBoundingClientRect();
 			const cellBox = titleCell.getBoundingClientRect();
 			const toolsBox = tools.getBoundingClientRect();
@@ -40,7 +40,7 @@
 			maximum = presenceMaximum({ budget, fullStackWidth: width(3), singleWidth: width(1), countWidth: width(0), fullTitleWidth: needed, floorTitleWidth: floor, singleOverlaps });
 		};
 		const observer = new ResizeObserver(fit);
-		observer.observe(bar); observer.observe(titleCell); observer.observe(tools);
+		observer.observe(bar); observer.observe(titleCell); observer.observe(tools); observer.observe(full); observer.observe(minimum);
 		fit();
 		void document.fonts?.ready.then(fit);
 		return () => observer.disconnect();

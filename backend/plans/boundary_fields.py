@@ -106,7 +106,7 @@ OPERATION_FIELDS = {
     } | _NEXT,
     "resolve_blocker": {"node_id", "hold_id", "expected_revision"},
     "request_review": {
-        "node_id", "evidence", "artifact_ids", "expected_revision",
+        "node_id", "evidence", "artifact_ids", "verdict", "expected_revision",
     } | _NEXT,
     "reject": {"node_id", "feedback", "expected_revision"},
     "fail": {"node_id", "evidence", "expected_revision"} | _NEXT,

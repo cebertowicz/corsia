@@ -52,12 +52,6 @@ export interface DocViewerStatusProps {
 	historyAvailable?: boolean;
 	historyOpen?: boolean;
 	onOpenHistory?: () => void;
-	/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
-	resolvedCount?: number;
-	resolvedOpen?: boolean;
-	/** The resolved list opens in the margin column's place, a plain region rather than a dialog. */
-	resolvedInColumn?: boolean;
-	onOpenResolved?: () => void;
 	/** The Comments button wherever the bar draws it: the list the canvas opens on its own hangs from it. */
 	commentsEntry?: HTMLButtonElement | null;
 	/** The Details button: what a list or picker opened from inside the closed panel returns to. */

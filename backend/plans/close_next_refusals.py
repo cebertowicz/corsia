@@ -26,6 +26,8 @@ USER_ASSIGNED = "user_assigned"
 OTHER_EXECUTOR = "other_executor"
 NOT_READY = "not_ready"
 SLOT_HELD = "slot_held"
+#: Ready work ranked above it comes first (``plans.triage_lines``).
+OUT_OF_ORDER = "out_of_order"
 
 _HELD_CONDITIONS = close_next_idle.HELD_CONDITIONS
 _LANE_REASONS = {node_settlement.DECISION: text.DECISION_OWNED}
@@ -38,8 +40,6 @@ class NamedStart:
     node_id: str | None
     refusal: str | None = None
     reason: str | None = None
-    #: The triage line for a start that passed ready work (``plans.triage_lines``).
-    jumped: str | None = None
 
 
 def refused_before_write(db, node, plan, executor: str) -> NamedStart | None:

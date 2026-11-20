@@ -6,7 +6,9 @@ cancel or reconstruct:
 
 - ``drive_limit_releases(now)`` is the continuation sweep's system phase. It
   reads each connection's usage once and drives every due scope, which is also
-  what recovers a release across a restart.
+  what recovers a release across a restart. A limit with no reset time is
+  never due, so the sweep starts that login's usage read instead, at its
+  five-minute throttle (``harness_usage_check.schedule_no_reset_rechecks``).
 - ``schedule_scope_release(subject)`` drives every held head in a scope after
   an allowed or sign-in verdict commits, through ``infra.app_loop``.
 - ``schedule_limited_heads(thread_ids)`` drives the heads a committed rollover
@@ -287,6 +289,12 @@ async def drive_limit_releases(now: datetime) -> int:
             await drive_scope_release(item)
         except Exception:
             log.exception("connection-limit release phase failed for %s", item.subject)
+    try:
+        from connections.harness_usage_check import schedule_no_reset_rechecks
+
+        await schedule_no_reset_rechecks()  # a limit with no reset time is never due
+    except Exception:
+        log.exception("connection-limit usage recheck for limits with no reset time failed")
     return len(due)
 
 
