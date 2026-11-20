@@ -26,10 +26,23 @@ from infra.settings import get_setting, set_setting
 
 #: Progress, then completion: ``{"ceiling", "through", "filled"}``, plus ``completed_at``.
 MARKER = "comment_search_fill"
-#: Rows per write transaction. Sized so one batch holds the write lock well under 100 ms on a
-#: 1M-message database (measured figure in the PR that added this).
+#: Rows per write transaction. Sized so a first-pass batch, over rows not yet indexed, holds the
+#: write lock well under 100 ms on a 1M-message database. Measured 2026-11-20, one first pass over
+#: 53,942 comments, 50 ms pause, a second writer every 10 ms: 36 batches, hold p50 / p95 / max 27.9 /
+#: 39.2 / 47.8 ms (from BEGIN IMMEDIATE to COMMIT), writer wait p95 / max 19.5 / 63.0 ms, no write
+#: gave up, 7.1 s in all. Re-filling rows already indexed holds far longer (p95 ~340 ms below). Real
+#: use re-fills only rows the insert trigger indexed before the fill recorded its ceiling, which
+#: commits with the first batch: normally the comments placed between the startup schema step and
+#: that batch. A restart mid-pass re-fills nothing, since ``through`` commits with each batch.
 BATCH_ROWS = 1500
-#: Pause between batches, so other writers get the lock between them.
+#: Pause between batches, so other writers get the lock between them. Measured 2026-11-20 on a
+#: 1M-message database with a second writer every 10 ms (60 s per setting, one run each; hold
+#: measured from BEGIN IMMEDIATE to COMMIT). To fill 60 s the fill started over each time it reached
+#: the end, so most of these batches re-filled rows already indexed, which is why their hold is far
+#: above a first pass. Writer lock wait p95 / max against batch hold p95:
+#: no pause 6,519 / 9,279 ms against 353 ms, 1 write gave up at busy_timeout; 10 ms 754 / 1,348 ms
+#: against 352 ms; 50 ms 322 / 730 ms against 339 ms, none gave up. 50 ms is the smallest pause
+#: whose writer p95 stays under one batch's hold p95 with no write giving up.
 PAUSE_SECONDS = 0.05
 
 _FILL_SQL = (

@@ -67,8 +67,9 @@ def search_messages_fts(
     Pass the call's ``fence`` to read several sources under one computed fence.
 
     A person's input is also found by the words of its chat comments (``comment_fts``).
-    Message hits come first, in their own bm25 order; a message found both ways ranks by
-    its message score; inputs found only by a comment follow, by their comment score.
+    Message hits come first, in their own bm25 order; a message found both ways ranks by,
+    and shows, its message score; inputs found only by a comment follow, by their comment
+    score. The two indexes' scores don't compare, so a row shows the one that ordered it.
     """
     sender_expression = _sender_expression()
     fts_query = fts5_escape(query)
@@ -88,7 +89,7 @@ def search_messages_fts(
     try:
         sql = (
             "SELECT m.id, m.thread_id, m.role, m.content, m.metadata, m.created_at, t.title, "
-            f"{sender_expression} AS sender, h.score as bm25_score "
+            f"{sender_expression} AS sender, coalesce(h.message_score, h.score) as bm25_score "
             "FROM (SELECT r, min(src) AS src, min(score) AS score, "
             "min(CASE WHEN src = 0 THEN score END) AS message_score FROM ("
             "SELECT rowid AS r, 0 AS src, bm25(messages_fts) AS score FROM messages_fts "

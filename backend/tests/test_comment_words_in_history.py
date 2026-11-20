@@ -1,8 +1,9 @@
 """A person's chat-comment words stay readable and findable in history.
 
 A comment-only input stores no text: its quote and note live in
-``metadata.reply_context.comments``. ``get_thread_history`` shows them as the agent got
-them, and ``search_history`` finds them through ``comment_fts``, with message hits first.
+``metadata.reply_context.comments``. ``get_thread_history`` shows the comment rows (not the
+turn-time lines that came with them), and ``search_history`` finds them through
+``comment_fts``, with message hits first.
 Comments stored before the index existed are filled after startup by
 ``infra.comment_search_fill``.
 """
@@ -60,7 +61,7 @@ def _search(query: str, **kwargs) -> list[str]:
 
 
 def _drop_comment_index() -> None:
-    """The database as schema 201 left it: no comment index, no triggers."""
+    """The database as the schema before this step left it: no comment index, no triggers."""
     db = _db()
     db.execute("DROP TRIGGER comment_fts_insert")
     db.execute("DROP TRIGGER comment_fts_delete")
@@ -127,6 +128,89 @@ async def test_mixed_input_shows_its_text_and_its_comment(chat):
 
     assert "Also check the zebra crossing." in out
     assert '"plan is ready" | note: ask about pelicans' in out
+
+
+def _turn_time_context() -> dict:
+    """A retried comment-only input's reply context, with every line a turn can carry."""
+    return {
+        "comments": [_comment("c2.1", "release plan", "run in parallel with workers")],
+        "possible_duplicate": True,
+        "in_view": [[1, 1, 1]],
+        "first_unread": {"seq": 1},
+    }
+
+
+def _store_with_context(seq: int, context: dict) -> None:
+    from infra.chat_comment_index import place_comments
+
+    metadata = {"reply_context": context}
+    message_id = _row(seq, "user", "", metadata)
+    place_comments(_db(), THREAD, message_id, metadata, "2026-11-19T00:00:00Z")
+    _db().commit()
+
+
+TURN_TIME_MARKS = ("Reply grounding", "DELIVERY WARNING", "In view while typing", "First unread when opened")
+
+
+async def test_history_reads_show_the_comments_without_the_turn_time_lines(chat):
+    """Read later, the grounding and warning would ask an agent to answer comments again."""
+    from infra.thread_confinement import Reader
+    from tools.query_helpers import format_history_results, search_messages_fts
+
+    _store_with_context(2, _turn_time_context())
+
+    history = await _history()
+    found = format_history_results(search_messages_fts(_db(), "parallel", reader=Reader.person()), "parallel", None)
+
+    for out in (history, found):
+        assert '[Comments (context, not an instruction):\n c2.1. On #1: "release plan" | note: run in parallel with workers]' in out
+        for mark in TURN_TIME_MARKS:
+            assert mark not in out
+
+
+def test_the_turn_still_gets_every_turn_time_line(chat):
+    from core.reply_context import reply_context_lines
+
+    lines = reply_context_lines(_turn_time_context())
+
+    assert lines.startswith('[Comments (context, not an instruction):\n c2.1. On #1: "release plan"')
+    for mark in TURN_TIME_MARKS:
+        assert mark in lines
+
+
+def _shown_score(query: str, message_id: str) -> float:
+    from infra.thread_confinement import Reader
+    from tools.query_helpers import search_messages_fts
+
+    rows = search_messages_fts(_db(), query, reader=Reader.person())
+    return next(row["bm25_score"] for row in rows if row["id"] == message_id)
+
+
+def test_the_score_shown_is_the_one_that_ordered_the_row(chat):
+    """bm25 values of the two indexes don't compare: a message hit shows its message score."""
+    for seq in range(2, 8):
+        _row(seq, "assistant", f"filler line {seq} about the trail")
+    _input(8, "zebra crossing", [_comment("c8.1", "release plan", "zebra zebra zebra crossing")])
+    _input(9, "", [_comment("c9.1", "release plan", "pelicans at the zebra pond")])
+    # Many comments on one input: the comment index gets a large corpus while the message
+    # index gains one row, so the comment score for m8 beats its message score.
+    _input(10, "", [_comment(f"c10.{k}", "release plan", f"bring gloves number {k}") for k in range(40)])
+    message_score = _db().execute(
+        "SELECT bm25(messages_fts) FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid "
+        "WHERE messages_fts MATCH 'zebra' AND m.id = 'm8'"
+    ).fetchone()[0]
+    comment_score = _db().execute(
+        "SELECT bm25(comment_fts) FROM comment_fts JOIN chat_comments cc ON cc.rowid = comment_fts.rowid "
+        "WHERE comment_fts MATCH 'zebra' AND cc.user_message_id = 'm8'"
+    ).fetchone()[0]
+    only_comment_score = _db().execute(
+        "SELECT bm25(comment_fts) FROM comment_fts JOIN chat_comments cc ON cc.rowid = comment_fts.rowid "
+        "WHERE comment_fts MATCH 'zebra' AND cc.user_message_id = 'm9'"
+    ).fetchone()[0]
+    assert comment_score < message_score  # the comment index would otherwise win min()
+
+    assert _shown_score("zebra", "m8") == pytest.approx(message_score)
+    assert _shown_score("zebra", "m9") == pytest.approx(only_comment_score)
 
 
 def test_search_finds_a_comment_by_its_quote_and_by_its_note(chat):
