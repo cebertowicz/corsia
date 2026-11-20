@@ -158,15 +158,16 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	const failed = await readerPosition();
 	expect(Math.abs(failed.line! - before.line!), `failed save moved the target line from y=${before.line} to y=${failed.line}`).toBeLessThanOrEqual(1);
 	await expect(page.getByPlaceholder('Comment, or @ to tag an agent'), 'a failed save must keep the draft').toHaveValue('Preserve this viewport.');
+	// The box that says why offers Retry in place of Comment.
+	const retry = page.getByRole('button', { name: 'Retry', exact: true }).last();
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		const retry = page.getByRole('button', { name: 'Comment', exact: true }).last();
 		await expect(retry).toBeVisible();
 		expect(await retry.evaluate((button) => {
 			const rect = button.getBoundingClientRect();
 			return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button;
-		}), 'nothing covers Comment').toBe(true);
+		}), 'nothing covers Retry').toBe(true);
 	}
-	await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
+	await retry.click();
 	const submitted = await readerPosition();
 	await expect(page.getByText('Preserve this viewport.')).toBeVisible();
 	await expect(targetLine.locator('.cm-comment-anchor'), 'the saved comment must anchor on the selected line').toHaveCount(1);

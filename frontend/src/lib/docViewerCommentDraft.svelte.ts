@@ -160,7 +160,7 @@ export function createViewerCommentDraft(context: Context) {
 		const identity = {};
 		opened.add(identity);
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
+			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), key: keepKey(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -185,8 +185,9 @@ export function createViewerCommentDraft(context: Context) {
 			// Text changed since an earlier version was stored goes out as a new comment on the next press.
 			const now = keptCommentDrafts.get(key);
 			keptCommentDrafts.fail(key, now?.body ?? text, now?.mentionSelection ?? tags, message, message === EARLIER_VERSION_POSTED);
-			// The box open on this document now says why, the one that pressed or one opened from the kept draft since it closed.
-			commentDraft.update(value => value && value.scope === draft.scope ? { ...value, error: message } : value);
+			// The box showing this draft says why: the one that pressed, or one opened from the kept draft since it closed.
+			// Never a box showing another draft: its reason would tell of the wrong post.
+			commentDraft.update(value => value && value.key === key ? { ...value, error: message } : value);
 			context.onFailure(toastId, message);
 		}, draft.selection ? liveFailureMessage : undefined, () => keptCommentDrafts.onScreen(key)));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text

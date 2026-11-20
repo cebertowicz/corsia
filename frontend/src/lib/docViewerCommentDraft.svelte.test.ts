@@ -402,6 +402,35 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		expect(show).not.toHaveBeenCalled();
 		expect(current!.controller.draft).toMatchObject({ body: 'Too terse', error: REASON });
 	});
+
+	/** The press goes out, its composer closes, and `next` is the composer open on the page when the post fails. */
+	const failWhileOpen = async (next: { scope: string; key: string }) => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		const end = held();
+		const posting = current!.controller.submit('Too terse');
+		await Promise.resolve();
+		current!.escape(); drop();
+		commentDraft.set({ from: 0, to: 1, text: 'x', top: 0, body: 'Shown there', identity: {}, ...next }); flushSync();
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		drop = keptCommentDrafts.shown(next.key, node);
+		end();
+		await expect(posting).rejects.toThrow('500');
+	};
+
+	it('in the composer showing this draft in another viewer of the same document, matched by the draft\'s key', async () => {
+		await failWhileOpen({ scope: 'another viewer of one', key: keyOf('one') });
+		expect(show).not.toHaveBeenCalled();
+		expect(get(commentDraft)?.error).toBe(REASON);
+	});
+
+	it('never in a composer showing another document\'s draft: that one is not on screen for this post, so a toast says why', async () => {
+		await failWhileOpen({ scope: 'two', key: keyOf('two') });
+		expect(show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(get(commentDraft)?.error).toBeUndefined();
+		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBe(REASON);
+	});
 });
 
 describe('a save the server refuses because the document changed', () => {

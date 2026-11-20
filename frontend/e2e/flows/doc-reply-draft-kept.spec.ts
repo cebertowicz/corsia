@@ -28,10 +28,13 @@ const BACK = 6;
 
 type Seeded = { title: string; other: string; id: string };
 
-/** Paragraphs after the comment's line, so the document scrolls the comment's card out of the window (`long`). */
-const TAIL = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of the route notes, long enough to fill a line of the page.`).join('\n\n');
+/** A comment taller than the thread's popover at 1440 and its sheet at 393, so either scrolls its own reply field out of view (`long`). */
+const LONG_COMMENT = ['Should we say where to park?', ...Array.from({ length: 30 }, (_, i) => `Point ${i + 1}: the lot by the north gate fills early, so say which street to use.`)].join('\n\n');
 
-/** A document with one comment on QUOTE in its own conversation, a second conversation, and the document open in the first. */
+/**
+ * A document with one comment on QUOTE in its own conversation, a second conversation, and the document open in the first.
+ * `long` makes the comment taller than the popover or sheet its thread opens in.
+ */
 async function seed(page: Page, long = false): Promise<Seeded> {
 	const request = page.request, params = { token: TEST_TOKEN };
 	const title = `reply-kept-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -41,13 +44,13 @@ async function seed(page: Page, long = false): Promise<Seeded> {
 	const roots: Array<{ kind: string; path: string }> = (await (await request.get('/api/files/tree', { params })).json()).roots;
 	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
 	expect(workspace).toEqual(expect.any(String));
-	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName), text = long ? `${DOC}\n${TAIL}\n` : DOC;
-	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
+	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName);
+	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text: DOC, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId: string = (await seeded.json()).artifact.id;
 	const from = DOC.indexOf(QUOTE);
 	const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-		params, data: { delivery_policy: 'immediate', body: 'Should we say where to park?', anchor_text: QUOTE, from_off: from, to_off: from + QUOTE.length },
+		params, data: { delivery_policy: 'immediate', body: long ? LONG_COMMENT : 'Should we say where to park?', anchor_text: QUOTE, from_off: from, to_off: from + QUOTE.length },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const id: string = (await created.json()).comment.id;
@@ -231,33 +234,52 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await expect(docText(page), 'the field is gone with its conversation').toHaveCount(0);
 			wire.fail();
 			await expect(failToast(page), 'no field is on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
+			await frame(page, 'reply-away-toast');
 			await goTo(page, title);
 			const back = await openThread(page, id);
 			await expect(back, 'the text is kept').toHaveValue(DRAFT);
 			await expect(card(page, id).getByRole('alert'), 'the field says why on return').toBeVisible();
+			await frame(page, 'reply-returned-reason');
 		});
 
-		test('a reply whose field is scrolled out of the window when its post fails says why in a toast', async ({ page }) => {
-			test.skip(phone(page), 'The phone sheet holds the field on screen; the margin at 1440 scrolls with the document');
+		test('a reply whose field is scrolled out of view when its post fails says why in a toast', async ({ page }) => {
+			// The thread opens in a popover at 1440 (the chat beside the document leaves no room for the margin) and in a sheet at
+			// 393. Either one scrolls as a whole, so with the long comment shown in full, reading back up to its start takes the field
+			// out of view.
 			const { title, id } = await seed(page, true);
 			const wire = await holdReply(page, id);
 			await loginByUrl(page, { waitForComposer: false });
 			await goTo(page, title);
 			const reply = await openThread(page, id);
+			// The person wrote the comment, so it is read and a long one folds; showing it all is what makes the thread scroll.
+			await card(page, id).getByRole('button', { name: 'Show more' }).click();
 			await reply.click();
 			await reply.pressSequentially(DRAFT);
 			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
 			await wire.arrived;
-			const text = (await docText(page).boundingBox())!;
-			await page.mouse.move(text.x + text.width / 2, Math.min(text.y + 200, 800));
-			const outside = async () => {
-				const box = await reply.boundingBox(), view = page.viewportSize()!;
-				return !box || box.y + box.height <= 0 || box.y >= view.height;
-			};
-			for (let i = 0; i < 20 && !(await outside()); i += 1) { await page.mouse.wheel(0, 600); await painted(page); }
-			expect(await outside(), 'the reply field is out of the window before the post fails').toBe(true);
+			// The wheel goes over the middle of what shows of the field's own scroller (the popover or sheet), so it scrolls that.
+			const over = await reply.evaluate((element) => {
+				let scroller = element.parentElement;
+				while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+				if (!scroller) throw new Error('no scroller above the reply field');
+				const box = scroller.getBoundingClientRect(), top = Math.max(box.top, 0), bottom = Math.min(box.bottom, window.innerHeight);
+				return { x: box.left + box.width / 2, y: (top + bottom) / 2 };
+			});
+			await page.mouse.move(over.x, over.y);
+			// Out of view: no part of the field inside both the window and the part of its own scroller that shows.
+			const outside = () => reply.evaluate((element) => {
+				const box = element.getBoundingClientRect();
+				let scroller = element.parentElement;
+				while (scroller && !/(auto|scroll)/.test(`${getComputedStyle(scroller).overflowX} ${getComputedStyle(scroller).overflowY}`)) scroller = scroller.parentElement;
+				const clip = scroller?.getBoundingClientRect();
+				const top = Math.max(box.top, 0, clip?.top ?? 0), bottom = Math.min(box.bottom, window.innerHeight, clip?.bottom ?? Infinity);
+				return bottom <= top;
+			}).catch(() => true);
+			for (let i = 0; i < 20 && !(await outside()); i += 1) { await page.mouse.wheel(0, -600); await painted(page); }
+			expect(await outside(), 'the reply field is out of view before the post fails').toBe(true);
 			wire.fail();
 			await expect(failToast(page), 'the field is not on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
+			await frame(page, 'reply-scrolled-out-toast');
 			await expect(reply, 'the text is kept').toHaveValue(DRAFT);
 		});
 	});

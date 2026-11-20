@@ -49,11 +49,25 @@ function register(key: string, box: Element): () => void {
 	found.add(box);
 	return () => { found.delete(box); if (!found.size && boxes.get(key) === found) boxes.delete(key); };
 }
-/** Whether `box` takes room inside what the person sees now (the visual viewport: a phone's keyboard and pinch zoom shrink it). */
+/** The nearest ancestor that scrolls its content, which hides what it has scrolled out of its own box. */
+function scroller(box: Element): Element | null {
+	for (let node = box.parentElement; node; node = node.parentElement) {
+		const style = getComputedStyle(node);
+		if (/(auto|scroll)/.test(`${style.overflowX} ${style.overflowY}`)) return node;
+	}
+	return null;
+}
+/**
+ * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
+ * shrink it) and the part of its scroller that shows. A box its scroller has scrolled away is not on screen.
+ */
 function onScreen(box: Element): boolean {
-	const rect = box.getBoundingClientRect(), view = window.visualViewport;
-	const left = view?.offsetLeft ?? 0, top = view?.offsetTop ?? 0, width = view?.width ?? window.innerWidth, height = view?.height ?? window.innerHeight;
-	return rect.width > 0 && rect.height > 0 && rect.right > left && rect.left < left + width && rect.bottom > top && rect.top < top + height;
+	const rect = box.getBoundingClientRect(), view = window.visualViewport, clip = scroller(box)?.getBoundingClientRect();
+	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip?.left ?? -Infinity);
+	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip?.top ?? -Infinity);
+	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip?.right ?? Infinity);
+	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip?.bottom ?? Infinity);
+	return right > left && bottom > top;
 }
 
 /** `use:showsDraft={key}` on a box's root: registered under the draft's key while mounted (`keptCommentDrafts.shown`). */

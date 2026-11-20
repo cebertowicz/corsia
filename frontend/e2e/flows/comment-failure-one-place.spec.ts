@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
@@ -11,6 +13,18 @@ import { at, composer, drag, openThread, seedImage } from '../support/imageRegio
 const REASON = "Couldn't post the comment — try again";
 const toast = (page: Page) => page.locator('.toast').filter({ hasText: REASON });
 const reason = (page: Page) => page.locator('.composer [role="alert"]').filter({ hasText: REASON });
+/** Frames for the review of where the reason shows, in both themes, when set (as doc-reply-draft-kept takes them). */
+const FRAMES = process.env.CORSIA_REPLY_FRAMES;
+async function frame(page: Page, name: string) {
+	if (!FRAMES) return;
+	fs.mkdirSync(FRAMES, { recursive: true });
+	for (const scheme of ['light', 'dark'] as const) {
+		await page.emulateMedia({ colorScheme: scheme });
+		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+		await page.screenshot({ path: path.join(FRAMES, `${name}-${page.viewportSize()!.width}-${scheme}.png`), animations: 'disabled' });
+	}
+	await page.emulateMedia({ colorScheme: 'light' });
+}
 
 /** The first comment POST is held until `fail()`, which then fails it as a dropped connection; later ones go through. */
 async function holdFirstPost(page: Page, artifactId: string) {
@@ -49,9 +63,11 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await expect(composer(page), 'the box is closed while the post is out').toHaveCount(0);
 		wire.fail();
 		await expect(toast(page), 'with no box on screen, the toast says why').toBeVisible({ timeout: 30_000 });
+		await frame(page, 'document-closed-toast');
 		await beginComment(page, QUOTE);
 		await expect(composer(page), 'the text is kept').toHaveValue('Name the fallback route');
 		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
+		await frame(page, 'document-reopened-reason');
 	});
 
 	test('image: closed while posting, a toast; the box drawn again says why', async ({ page, request }) => {
@@ -67,8 +83,10 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await expect(composer(page), 'the box is closed while the post is out').toHaveCount(0);
 		wire.fail();
 		await expect(toast(page), 'with no box on screen, the toast says why').toBeVisible({ timeout: 30_000 });
+		await frame(page, 'image-closed-toast');
 		await drag(page, await at(page, 0.5, 0.55), await at(page, 0.7, 0.75));
 		await expect(composer(page), 'the text is kept').toHaveValue('The header is too tall');
 		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
+		await frame(page, 'image-reopened-reason');
 	});
 });

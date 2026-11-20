@@ -21,6 +21,8 @@ export interface CommentDraft {
 	/** Why the last press of Comment did not post; the composer shows it until the next press. */
 	error?: string;
 	scope?: string;
+	/** The kept draft this composer shows (`documentDraftKey`): a failed post's reason goes on the composer showing its own draft. */
+	key?: string;
 	selection?: CommentSelection;
 	identity?: object;
 	/** The kept draft this composer opened from, if Comment was pressed on it (`keptCommentDrafts.origin`). */

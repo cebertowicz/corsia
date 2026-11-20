@@ -63,6 +63,8 @@ export function createImageComments(context: {
 	let mentionSelection = createMentionSelection();
 	/** The kept draft the open box was drawn from, if Comment was pressed on it (`keptCommentDrafts.origin`). */
 	let draftOrigin: DraftOrigin | undefined;
+	/** The kept draft the open box shows (`imageDraftKey`): the image it was drawn on. */
+	let boxKey = '';
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -124,6 +126,7 @@ export function createImageComments(context: {
 			return;
 		}
 		draftRegion = region;
+		boxKey = key();
 		// The composer starts from what the last one on this image held: its text, its tags and why it did not post.
 		const kept = keptCommentDrafts.get(key());
 		draftBody = kept?.body ?? '';
@@ -138,50 +141,60 @@ export function createImageComments(context: {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
-		const post = context.post?.(), tags = mentionSelection;
-		keptCommentDrafts.clearError(key());
+		// The draft this press posts, kept under its own image's key even if another image is shown before it ends.
+		const post = context.post?.(), tags = mentionSelection, draftKey = key();
+		keptCommentDrafts.clearError(draftKey);
 		draftError = undefined;
 		let id: string, failure = '';
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags, draftOrigin);
+		const press: ImagePress = keptCommentDrafts.claim(draftKey, text, tags, draftOrigin);
 		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
 		// a new region, while its tags can be the same object, carried over from the kept draft.
 		const pressing = () => draftRegion === region;
+		// The open box shows this draft: the one that pressed, or one drawn from the kept draft since. Never a box on another image.
+		const showsThis = () => !!draftRegion && boxKey === draftKey;
+		// A failure says why in that box when it is on screen, and nowhere else.
+		const inBox = () => showsThis() && keptCommentDrafts.onScreen(draftKey);
 		// What the field holds now, not the text this press sent: typing while it was out is never lost.
-		const now = () => keptCommentDrafts.get(key());
+		const now = () => keptCommentDrafts.get(draftKey);
 		try {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
-				(toastId, message) => { retryToast.remember(toastId); failure = message; },
+				(toastId, message) => { retryToast.remember(toastId, draftKey); failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
-				// A changed diagram closes the box and carries its text to the next one, so no box is left to say why.
-				(error) => !isDiagramChanged(error) && keptCommentDrafts.onScreen(key()),
+				// A changed diagram is told once its refresh ends (below): whether a box is left to say why depends on it.
+				(error) => isDiagramChanged(error) || inBox(),
 			));
 		} catch (error) {
+			const changed = isDiagramChanged(error);
 			if (await refreshAfterStale(error)) {
-				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next.
+				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next, and the toast says why.
 				const held = now();
 				draftBody = held?.body ?? text;
+				// Kept for the redrawn diagram (its key names the new snapshot), which the next box is drawn on.
 				keptCommentDrafts.keep(key(), draftBody, held?.mentionSelection ?? tags);
 				draftRegion = null;
 				replacingDraft = true;
 				ui.close();
 				boxMode = true;
+				retryToast.remember(toasts.show(failure, 'error'), draftKey);
 			} else if (failure) {
 				const held = now();
-				keptCommentDrafts.fail(key(), held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
-				// The open box says why: the one that pressed, or one drawn from the kept draft since (it shows that draft).
-				if (draftRegion) draftError = failure;
+				keptCommentDrafts.fail(draftKey, held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
+				// A changed diagram that could not be redrawn leaves the box open: told in it when it is on screen, else in a toast.
+				if (changed && !inBox()) retryToast.remember(toasts.show(failure, 'error'), draftKey);
+				// The box showing this draft says why, never a box on another image.
+				if (showsThis()) draftError = failure;
 			}
 			throw error;
 		}
-		retryToast.dismissAfterSuccess();
+		retryToast.dismissAfterSuccess(draftKey);
 		// Text or tags changed since the press stay kept, with a fresh id for their own post.
-		const stored = keptCommentDrafts.posted(key(), text, taggedAgentIds);
+		const stored = keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
 		context.onCreated?.();
 		// The box that pressed closes. A box drawn meanwhile is that draft too once what it shows is stored, and closes the
 		// same way; one whose text or tags changed keeps them.
-		if (!pressing() && !(stored && draftRegion)) return;
+		if (!pressing() && !(stored && showsThis())) return;
 		draftRegion = null;
 		draftOrigin = undefined;
 		draftBody = '';

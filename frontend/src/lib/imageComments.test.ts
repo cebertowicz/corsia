@@ -405,6 +405,70 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
 	});
 
+	it('never in a box on another image: the failing draft keeps its reason and a toast says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		// One viewer showing the images of a document: the box on the first image presses, then the second image is shown.
+		const first = imageDraftKey('doc', 'one.png'), second = imageDraftKey('doc', 'two.png');
+		let shown = first;
+		const comments = createImageComments({ artifactId: () => 'doc', draftKey: () => shown, readOnly: () => false, restoreFocus: () => {} });
+		const onScreen = (key: string) => {
+			const node = document.createElement('div');
+			node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+			return keptCommentDrafts.shown(key, node);
+		};
+		let drop = onScreen(first);
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		shown = second;
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Crop it');
+		drop = onScreen(second);
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(comments.draft).toMatchObject({ body: 'Crop it', error: undefined });
+		expect(keptCommentDrafts.get(first)).toMatchObject({ body: 'Too dark', error: REASON });
+		expect(keptCommentDrafts.get(second)?.error).toBeUndefined();
+	});
+
+	it('once, in the box, for a changed diagram that could not be redrawn while its box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen('doc');
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => false });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Keep this', error: 'Place the pin on the current diagram; your draft is kept.' });
+	});
+
+	it('once, in a toast, for a changed diagram that could not be redrawn after its box closed', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let end!: () => void;
+		const wait = new Promise<void>((resolve) => { end = resolve; });
+		const post = vi.fn(async () => { await wait; throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const drop = boxOnScreen('doc');
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => false });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		const posting = comments.submit('Keep this');
+		await Promise.resolve();
+		comments.close(); drop();
+		end();
+		await expect(posting).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
+		expect(keptCommentDrafts.get(imageDraftKey('doc'))?.error).toBe('Place the pin on the current diagram; your draft is kept.');
+	});
+
 	it('always in a toast for a pin that did not move: no box says why', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const drop = boxOnScreen();

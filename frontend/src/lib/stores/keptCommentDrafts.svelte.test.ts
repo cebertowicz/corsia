@@ -163,6 +163,29 @@ describe('a box that shows a draft, read once when a post fails', () => {
 		}
 	});
 
+	it('reads the box\'s own scroller, so a box it has scrolled out of its view is not on screen', () => {
+		// A sheet or column that scrolls, showing 0-300 of the window; the box sits inside the window but below what it shows.
+		const sheet = box(new DOMRect(0, 0, 393, 300));
+		sheet.style.overflowY = 'auto';
+		const inner = document.createElement('div');
+		sheet.append(inner);
+		document.body.append(sheet);
+		try {
+			const hidden = box(new DOMRect(10, 400, 300, 80));
+			inner.append(hidden);
+			const drop = keptCommentDrafts.shown(key, hidden);
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+			drop();
+			// Partly in the part it shows still counts: the person sees the box.
+			const showing = box(new DOMRect(10, 260, 300, 80));
+			inner.append(showing);
+			keptCommentDrafts.shown(key, showing);
+			expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		} finally {
+			sheet.remove();
+		}
+	});
+
 	it('is registered by `use:showsDraft` while mounted, moves with its key, and is gone on unmount', () => {
 		const node = box(inView());
 		const action = showsDraft(node, key);
