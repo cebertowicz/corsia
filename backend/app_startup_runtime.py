@@ -186,6 +186,14 @@ def _schedule_pinned_harness_install() -> None:
     app_loop.submit(install_used_harnesses())
 
 
+def _schedule_comment_search_fill() -> None:
+    """Index chat comments stored before their search index existed, off the startup path, in short batches."""
+    import infra.app_loop as app_loop
+    from infra.comment_search_fill import run_fill
+
+    app_loop.submit(run_fill())
+
+
 def _schedule_current_corrections_classifier() -> None:
     """Reconcile off the startup path: verifying the installed asset hashes its files, and nothing waits on the result."""
     import infra.app_loop as app_loop
@@ -234,6 +242,7 @@ async def _start_runtime_services() -> None:
     recover_interrupted_install()
     _schedule_current_corrections_classifier()
     _schedule_pinned_harness_install()
+    _schedule_comment_search_fill()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 
