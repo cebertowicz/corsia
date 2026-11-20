@@ -17,7 +17,7 @@ from infra.guidance_git import GitFault
 # Each restore refusal's status and detail; the client words its line from ``kind``. Every refusal that
 # retrying cannot change carries its own kind, so the surface never offers a Retry that only repeats it.
 _REFUSED = {
-    "stale": (409, "The document changed after this version was opened. Nothing was restored."),
+    "stale": (409, "Couldn’t restore this version because this document has newer changes. Check the current document, then try again."),
     "history_off": (409, "This document has no recorded history. Nothing was restored."),
     "version_unavailable": (404, "This version is not in the document's history. Nothing was restored."),
     "failed": (503, "History could not be recorded. Nothing was restored."),

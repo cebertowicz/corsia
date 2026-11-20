@@ -1,43 +1,23 @@
-import { writable, get } from 'svelte/store';
+import { get } from 'svelte/store';
 import { writeContent } from '$lib/api/docs';
 import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
-import { saveErrorMessage } from './docSaveError';
+import { saveErrorCode, saveErrorIsGeneric, saveErrorMessage } from './docSaveError';
+import { createBaseDigests, EDITOR_STALE_CODE, EDITOR_STALE_STATUS, staleToast } from './docSaveBase';
+import { docSaveBars } from './docSaveBars';
 import { createDocSaveActivityProjection } from './docSaveActivity';
 export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
-import type { DocViewerTarget } from '$lib/docViewerTarget';
-
-export type DocSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
-
-export interface DocSaveDraft {
-	target: DocViewerTarget;
-	editText: string;
-	savedText: string;
-	status: DocSaveStatus;
-	error: string;
-	/** Revision the server reported for this draft's last successful write. */
-	savedRevision: string | null;
-}
-
-type TargetIdentity = Pick<DocViewerTarget, 'instanceId'>;
+import {
+	docSaveDrafts as drafts, draftKey, getDraft, patchDraft, type TargetIdentity,
+} from './docSaveDrafts';
+export {
+	docSaveDrafts, draftKey, enrichDraftTarget, existingDraft, relocateDraftTarget, seedDraft, withDraftArtifactId,
+	type DocSaveDraft, type DocSaveStatus,
+} from './docSaveDrafts';
 
 const SAVE_DEBOUNCE_MS = 700;
-
-/**
- * The owning tab instance — never a global per-user or per-artifact key.
- *
- * The same document open in another thread is a different tab instance and so
- * a fully independent draft; and because the key never changes, resolving an
- * artifact id or relocating the file cannot strand an unsaved edit.
- */
-export function draftKey(target: TargetIdentity): string {
-	return target.instanceId;
-}
-
-const drafts = writable<Record<string, DocSaveDraft>>({});
-export const docSaveDrafts = drafts;
 
 // Per-key bookkeeping kept outside the reactive store — never exposed directly.
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -45,24 +25,14 @@ const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
 const confirmationsOwed = new Map<string, true>();
+// The base text a save was refused on because the file changed after it. That base is never sent
+// again: typing on keeps the draft and its error, and only a new base can save: the person's choice of
+// which text to keep (`keepMyText` when it starts, `useFileText`), the only things besides closing that delete it.
+const refusedBases = new Map<string, string>();
+const baseDigests = createBaseDigests();
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;
 const publishActivity = activity.publish;
-
-function getDraft(key: string): DocSaveDraft | undefined {
-	return get(drafts)[key];
-}
-function patchDraft(key: string, patch: Partial<DocSaveDraft>): void {
-	drafts.update((all) => {
-		const cur = all[key];
-		if (!cur) return all;
-		return { ...all, [key]: { ...cur, ...patch } };
-	});
-}
-
-export function existingDraft(target: TargetIdentity): DocSaveDraft | undefined {
-	return getDraft(draftKey(target));
-}
 
 /** The cue calls this only after it displays a confirmation owed by a reconnect. */
 export function confirmReconnectSave(key: string): void {
@@ -70,56 +40,18 @@ export function confirmReconnectSave(key: string): void {
 	publishActivity(key);
 }
 
-/**
- * The tab's target, carrying the artifact identity its draft resolved since it
- * was seeded. The path is always the tab's: it is what the viewer opens.
- */
-export function withDraftArtifactId(target: DocViewerTarget): DocViewerTarget {
-	const artifactId = existingDraft(target)?.target.artifactId ?? target.artifactId;
-	return artifactId === target.artifactId ? target : { ...target, artifactId };
-}
-
-/** Establishes a fresh draft from server content. Never overwrites an
- * existing unsaved (dirty/saving/error) draft — the whole point is that a
- * background re-load can never silently discard local edits. */
-export function seedDraft(target: DocViewerTarget, serverText: string, revision: string | null = null): void {
-	const key = draftKey(target);
-	const cur = getDraft(key);
-	if (cur && cur.editText !== cur.savedText) return;
-	drafts.update((all) => ({
-		...all,
-		[key]: {
-			target, editText: serverText, savedText: serverText,
-			status: 'idle', error: '', savedRevision: revision,
-		},
-	}));
-}
-
-/** Records a server-resolved artifactId against an already-seeded draft. */
-export function enrichDraftTarget(target: TargetIdentity, artifactId: string): void {
-	const key = draftKey(target);
-	const cur = getDraft(key);
-	if (!cur || cur.target.artifactId) return;
-	patchDraft(key, { target: { ...cur.target, artifactId } });
-}
-
-/** Follows a document that moved on disk, keeping this draft's unsaved text. */
-export function relocateDraftTarget(target: TargetIdentity, path: string): void {
-	const key = draftKey(target);
-	const cur = getDraft(key);
-	if (!cur || cur.target.path === path) return;
-	patchDraft(key, { target: { ...cur.target, path } });
-}
-
 export function setDraftText(target: TargetIdentity, text: string): void {
 	const key = draftKey(target);
 	const cur = getDraft(key);
 	if (!cur || cur.editText === text) return;
 	const matchesSaved = text === cur.savedText;
+	// A refused base stays an error while typing goes on, so its bar and its Details do not come and go with each key.
+	const refused = !matchesSaved && refusedBases.get(key) === cur.savedText;
 	patchDraft(key, {
 		editText: text,
-		status: matchesSaved ? 'idle' : 'dirty',
+		status: matchesSaved ? 'idle' : refused ? 'error' : 'dirty',
 		error: matchesSaved ? '' : cur.error,
+		stale: matchesSaved ? false : cur.stale,
 	});
 	// A live document re-saves only for its own unacknowledged transactions, read when the flush returns.
 	if (inflight.has(key) && !get(liveDocumentBindings)[key]) needsResave.set(key, true);
@@ -173,12 +105,20 @@ async function runSave(key: string): Promise<boolean> {
 		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
 		return true;
 	}
+	// The same stale base is refused once, then kept: the draft and its error stay as they are.
+	if (!live && refusedBases.get(key) === draft.savedText) {
+		patchDraft(key, { status: 'error', error: EDITOR_STALE_STATUS, stale: true, failure: { code: EDITOR_STALE_CODE, generic: false } });
+		return false;
+	}
 	const textAtStart = draft.editText;
+	// The file's text when this write was built on it; taken with the text it writes so the two cannot drift.
+	const baseAtStart = draft.savedText;
 	patchDraft(key, { status: 'saving' });
 	const p = (async () => {
 		try {
 			const result = live ? await live.flush() : await writeContent(draft.target.path, textAtStart, {
 				projectId: draft.target.projectId, threadId: draft.target.threadId,
+				expectedSha256: await baseDigests.for(key, baseAtStart),
 			});
 			// A live flush is settled by this tab's own transactions, never by the file's digest: the remaining
 			// difference is remote edits the server owns. Local work that is unacked, or was typed after this
@@ -192,6 +132,8 @@ async function runSave(key: string): Promise<boolean> {
 				patchDraft(key, {
 					savedText,
 					error: '',
+					stale: false,
+					failure: undefined,
 					status: saved && cur.editText === savedText ? 'saved' : 'dirty',
 					// The tab that wrote this revision rebaselines on it, so only the
 					// same document open elsewhere shows a changed dot.
@@ -211,9 +153,14 @@ async function runSave(key: string): Promise<boolean> {
 				return false;
 			}
 			console.error('doc save failed', e);
-			const message = saveErrorMessage(e);
-			if (getDraft(key)) patchDraft(key, { status: 'error', error: message });
-			toasts.show(message, 'error');
+			const stale = !live && saveErrorCode(e) === EDITOR_STALE_CODE;
+			if (stale) refusedBases.set(key, baseAtStart);
+			const message = stale ? EDITOR_STALE_STATUS : saveErrorMessage(e);
+			// `stale` is only ever set by the file-changed refusal: a failure for another reason (the network) leaves it as it was,
+			// so a person mid-choice keeps the chooser, and a save or a choice is what ends it.
+			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, failure: { code: saveErrorCode(e), generic: saveErrorIsGeneric(e) }, ...(stale ? { stale: true } : {}) });
+			// The tab's save bar says it when that bar is on screen; a document closed or hidden behind another tab says it here.
+			if (!docSaveBars.onScreen(key)) toasts.show(stale ? staleToast(draft.target.name) : message, 'error');
 			return false;
 		}
 		return true;
@@ -250,6 +197,40 @@ export async function flushDraft(target: TargetIdentity): Promise<boolean> {
 	}
 }
 
+/**
+ * The person's choice to keep their text after a stale refusal. The file text just read becomes the tab's base and the text
+ * saves against its digest: the guarded writer, so a file that changed again is refused again (the refusal and the text stay).
+ * Resolves true when the text is saved.
+ */
+export async function keepMyText(target: TargetIdentity, fileText: string): Promise<boolean> {
+	const key = draftKey(target);
+	const cur = getDraft(key);
+	if (!cur) return false;
+	// The new base is the file's own text, which the old refusal must not catch if the file went back to the refused text.
+	refusedBases.delete(key);
+	// The refusal stays up while the write runs, so its bar and its Details do not close and reopen; the save's own result clears or renews it.
+	// Nothing to write when the file already reads as his text: that ends the refusal here.
+	const same = cur.editText === fileText;
+	patchDraft(key, { savedText: fileText, status: same ? 'idle' : 'dirty', ...(same ? { error: '', stale: false } : {}) });
+	return flushDraft(target);
+}
+
+/**
+ * The person's choice to use the file's text after a stale refusal: the tab's base and text become the file's and the
+ * refusal ends. The viewer shows that text through its one content writer, right after this returns.
+ */
+export function useFileText(target: TargetIdentity, file: { text: string; revision: string | null }): void {
+	const key = draftKey(target);
+	const cur = getDraft(key);
+	if (!cur) return;
+	const timer = timers.get(key);
+	if (timer) { clearTimeout(timer); timers.delete(key); }
+	needsResave.delete(key);
+	refusedBases.delete(key);
+	patchDraft(key, { editText: file.text, savedText: file.text, status: 'idle', error: '', stale: false, failure: undefined, savedRevision: file.revision ?? cur.savedRevision });
+	publishActivity(key);
+}
+
 /** Removes a key's draft once its tab has actually closed. Close callers
  * drain the target queue first, so this only removes fully settled state. */
 export function clearDraft(target: TargetIdentity): void {
@@ -258,6 +239,8 @@ export function clearDraft(target: TargetIdentity): void {
 	if (timer) clearTimeout(timer);
 	timers.delete(key);
 	needsResave.delete(key);
+	refusedBases.delete(key);
+	baseDigests.clear(key);
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
 	confirmationsOwed.delete(key);

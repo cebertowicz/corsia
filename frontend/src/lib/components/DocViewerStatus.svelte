@@ -16,6 +16,7 @@
 	import { canvasCompact } from '$lib/stores/artifactCanvas';
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
+	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
 
 	let {
 		presence,
@@ -61,13 +62,15 @@
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
+	// While a typing save is refused for a changed file, the Details beside the refusal is the way on, so Reload is not offered beside it.
+	const staleControl = $derived(stale && ready && !$docSaveDrafts[targetInstanceId ?? '']?.stale);
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
-	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
+	const staleAnnouncement = $derived(staleControl ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
 	// The live-status row renders the stable connection description for unavailable actions.
 	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
-	/** File changed, until Reload clears it. */
-	const urgent = $derived(stale && ready);
+	/** File changed, until Reload clears it (and not offered beside a refused typing save). */
+	const urgent = $derived(staleControl);
 	/** In the compact canvas, File changed sits after the name; the desktop tab strip draws the text control. */
 	const changeInBar = $derived($canvasCompact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */

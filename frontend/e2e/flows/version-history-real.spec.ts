@@ -87,7 +87,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	// An edit made outside CORSIA after History opened: the restore is refused, and the document and list reload first.
 	fs.writeFileSync(file, skill('Outside edit after opening history.'));
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
-	await expect(page.getByText('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.')).toBeVisible();
+	await expect(page.getByText('Couldn’t restore this version because this document has newer changes. Check the current document, then try again.')).toBeVisible();
 	await expect(page.locator('.cm-content')).toContainText('Outside edit after opening history.');
 	await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	if (out) await page.screenshot({ path: path.join(out, `history-changed-since-${width}.png`), animations: 'disabled' });
@@ -114,18 +114,20 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await other.locator('.cm-content').click();
 	await other.keyboard.press('ControlOrMeta+End');
 	await other.keyboard.type(' Typed while restoring.');
-	await expect.poll(count, { timeout: 15_000 }).toBe(before + 3);
+	// The restore already changed the document, so this window's save is refused and its text stays on screen.
+	await expect(other.locator('.save-error[role="alert"]')).toContainText('Couldn’t save because this document changed after you started editing. Open Details to choose which text to keep.');
+	await expect(other.locator('.cm-content')).toContainText('Typed while restoring.');
+	if (out) await other.screenshot({ path: path.join(out, `editor-changed-since-${width}.png`), animations: 'disabled' });
 	release();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toHaveCount(0, { timeout: 30_000 });
-	// Typing just after a restore may show within the restore's version, so look for it in either of the newest two.
 	await expect(rows.first()).toContainText('Current');
 	await expect(drawer.locator('.vrow', { hasText: 'Restored' })).toHaveCount(1);
 	await expect(rows.nth(1)).toBeVisible();
 	if (out) await page.screenshot({ path: path.join(out, `history-restored-${width}.png`), animations: 'disabled' });
-	// Both writes are versions: the restore, then the typing that landed after it.
-	const log = execFileSync('git', ['-C', root, 'log', '--format=%B%x00', '-n', '2', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\0');
-	expect(log[1]).toContain('Restored');
+	// The restore is the newest version; the refused typing wrote nothing.
+	const log = execFileSync('git', ['-C', root, 'log', '--format=%B%x00', '-n', '1', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\0');
+	expect(log[0]).toContain('Restored');
 	await page.waitForTimeout(2500);
-	expect(count()).toBe(before + 3);
-	expect(fs.readFileSync(file, 'utf8')).toContain('Typed while restoring.');
+	expect(count()).toBe(before + 2);
+	expect(fs.readFileSync(file, 'utf8')).not.toContain('Typed while restoring.');
 });

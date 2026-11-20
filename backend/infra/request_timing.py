@@ -362,7 +362,7 @@ def window_start(days: int) -> date:
 def query_route_timing(conn, days: int) -> list[tuple]:
     """Return route timing rows for the inclusive UTC day window."""
     return conn.execute(
-        "SELECT day, method, route, status_class, count, max_ms, buckets, sum_bytes, max_bytes "
+        "SELECT day, method, route, status_class, count, max_ms, buckets, sum_bytes, max_bytes, sum_ms "
         "FROM request_timing_daily WHERE day >= ?", (window_start(days),),
     ).fetchall()
 

@@ -35,7 +35,7 @@ from registry.shared_document_events import report_plain_write
 from tools.file_write_completion import record_context_source_change
 
 _log = logging.getLogger(__name__)
-STALE_MESSAGE = "The document changed while these suggestions were being applied. Nothing was changed; try again."
+STALE_MESSAGE = "Couldn’t accept these suggestions because this document changed while they were being accepted. Try again."
 
 
 @dataclass(frozen=True)

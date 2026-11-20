@@ -1,4 +1,5 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, tick } from 'svelte';
 import { createViewerHistory } from './docViewerHistory.svelte';
 import { restoreVersion } from '$lib/docHistory';
@@ -26,6 +27,8 @@ beforeEach(() => {
 	vi.mocked(flushDraft).mockResolvedValue(true);
 	vi.mocked(existingDraft).mockReturnValue({ savedRevision: 'after-flush' } as ReturnType<typeof existingDraft>);
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 it('reports History opened once per opening', () => {
 	const { history, dispose } = create();
@@ -65,6 +68,15 @@ it('saves pending typing first and asks the server to restore against what was s
 	await history.restore(version);
 	expect(order).toEqual(['flush', 'restore']);
 	expect(restoreVersion).toHaveBeenCalledExactlyOnceWith(target, version.id, 'after-flush');
+	dispose();
+});
+
+it('restores a live document against the same SHA-256 by software when the browser has no WebCrypto', async () => {
+	const shown = 'Live téxt 🙂.\r\n';
+	vi.stubGlobal('crypto', {});
+	const { history, dispose } = create(() => shown);
+	await history.restore(version);
+	expect(restoreVersion).toHaveBeenCalledExactlyOnceWith(target, version.id, createHash('sha256').update(shown, 'utf8').digest('hex'));
 	dispose();
 });
 

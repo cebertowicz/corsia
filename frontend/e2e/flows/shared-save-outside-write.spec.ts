@@ -36,7 +36,7 @@ test('@flow:shared-save-outside-write a restore refuses an outside edit made dur
 		expect(release.ok(), await release.text()).toBeTruthy();
 		released = true;
 		expect((await response).status()).toBe(409);
-		await expect(page.getByText('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.')).toBeVisible();
+		await expect(page.getByText('Couldn’t restore this version because this document has newer changes. Check the current document, then try again.')).toBeVisible();
 		expect(fs.readFileSync(doc.docPath, 'utf8')).toBe(outside);
 		await expect(page.locator('.cm-content')).toContainText('Outside edit survives.');
 	} finally {
