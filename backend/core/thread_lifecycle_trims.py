@@ -18,7 +18,7 @@ from loguru import logger
 from core.thread_lifecycle import (
     LifecycleConfig,
     RetentionReport,
-    SETTLED_WORKER_REASON,
+    RETIRED_WORKER_REASONS,
     _iso,
     _row_get,
     _thread_dir,
@@ -38,7 +38,7 @@ TOOL_TRIM_BATCH_SECONDS = 0.25
 _clock = time.monotonic
 _SETTLED_WORKER = (
     "COALESCE(lifecycle_state, 'active') = 'archived' "
-    "AND archived_reason = ? AND spawned_by IS NOT NULL "
+    f"AND archived_reason IN ({', '.join(repr(r) for r in RETIRED_WORKER_REASONS)}) AND spawned_by IS NOT NULL "
     "AND COALESCE(agent_enabled, 0) = 0"
 )
 
@@ -292,7 +292,6 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         f"CASE WHEN {_SETTLED_WORKER} THEN 1 ELSE 0 END AS settled_worker "
         "FROM threads WHERE COALESCE(lifecycle_state, 'active') IN ('active', 'dormant') "
         f"OR ({_SETTLED_WORKER})",
-        (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
     active_identity_dirs, always_protected_dirs = _protected_working_dirs(db)
     cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()

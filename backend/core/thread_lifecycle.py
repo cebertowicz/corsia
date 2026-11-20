@@ -215,9 +215,14 @@ def set_user_archive_state(
 
 
 SETTLED_WORKER_REASON = "assignment_settled"
+#: A delegator stopped its own worker (``delegate_stop``); retired like a settled worker.
+STOPPED_BY_DELEGATOR_REASON = "stopped_by_delegator"
+RETIRED_WORKER_REASONS = (SETTLED_WORKER_REASON, STOPPED_BY_DELEGATOR_REASON)
 
 
-def archive_settled_worker(db, sid: str, *, now: datetime | str | None = None) -> bool:
+def archive_settled_worker(
+    db, sid: str, *, now: datetime | str | None = None, reason: str = SETTLED_WORKER_REASON,
+) -> bool:
     """Archive a temporary worker whose assignment settled; the sweep owns cleanup.
 
     The third synchronous archive reason after the user's and the engine's:
@@ -234,7 +239,7 @@ def archive_settled_worker(db, sid: str, *, now: datetime | str | None = None) -
         "archived_reason = ?, updated_at = ? "
         "WHERE id = ? AND spawned_by IS NOT NULL AND COALESCE(agent_enabled, 0) = 0 "
         "AND COALESCE(lifecycle_state, 'active') IN ('active', 'dormant')",
-        (timestamp, SETTLED_WORKER_REASON, timestamp, sid),
+        (timestamp, reason, timestamp, sid),
     )
     if not cursor.rowcount:
         return False
@@ -249,8 +254,8 @@ def reactivate_settled_worker(db, sid: str, *, now: datetime | str | None = None
     cursor = db.execute(
         "UPDATE threads SET lifecycle_state = 'active', dormant_at = NULL, "
         "archived_at = NULL, archived_reason = NULL, updated_at = ? "
-        "WHERE id = ? AND lifecycle_state = 'archived' AND archived_reason = ?",
-        (timestamp, sid, SETTLED_WORKER_REASON),
+        "WHERE id = ? AND lifecycle_state = 'archived' AND archived_reason IN (?, ?)",
+        (timestamp, sid, *RETIRED_WORKER_REASONS),
     )
     return bool(cursor.rowcount)
 
@@ -329,7 +334,7 @@ def _evaluate_thread(
     # user's unarchive does) nor a settled worker's (only a new assignment does).
     resumed = (
         state in ("dormant", "archived")
-        and archived_reason not in ("user", SETTLED_WORKER_REASON)
+        and archived_reason not in ("user", *RETIRED_WORKER_REASONS)
         and idle_days < cfg.dormant_after_days
     )
     if resumed:

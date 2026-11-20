@@ -233,7 +233,7 @@ STRANDED_ORPHANED = "{thread} still exists with no parent; stop it if it is runn
 REPLACE_OLD_WORKER = (
     "{thread} was replaced: its open steps were closed as replaced and it can no"
     " longer report on this step, but it may still be running. Stop it with"
-    " delegate tools if it is."
+    " delegate_stop if it is."
 )
 REPLACE_STRANDED = (
     " It had delegated to {threads}, whose steps were closed the same way. To"

@@ -224,6 +224,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Change a running thread's model or harness in place",
         activity="Switching model",
     ),
+    "delegate_stop": _Entry(
+        "delegation", status="substrate",
+        summary="Stop a worker you spawned, and the workers beneath it",
+        activity="Stopping worker",
+    ),
     "delegate_task": _Entry(
         "delegation", status="substrate",
         summary="Delegate a self-contained task to a new subagent",

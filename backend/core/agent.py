@@ -250,6 +250,7 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     from tools.delegate_task import DelegateTaskTool
     from tools.delegation import DelegateCreateThreadTool, DelegateStatusTool
     from tools.delegation_model import DelegateSetModelTool
+    from tools.delegation_stop import DelegateStopTool
     from tools.model_catalog import ModelCatalogTool
     from tools.github_agent_account import GitHubAgentAccountTool
     from tools.model_sources import ModelSourcesTool
@@ -258,7 +259,7 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
 
     for tool_type in (
         DelegateCreateThreadTool, DelegateSendTool, DelegateStatusTool,
-        DelegateSetModelTool, DelegateTaskTool, ModelCatalogTool, ModelSourcesTool, GitHubAgentAccountTool,
+        DelegateSetModelTool, DelegateStopTool, DelegateTaskTool, ModelCatalogTool, ModelSourcesTool, GitHubAgentAccountTool,
     ):
         agent.tools.register(tool_type())
     _register_google_tools(agent)
