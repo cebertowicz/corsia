@@ -14,11 +14,6 @@ export const DRAFT_STORAGE_PREFIX = 'corsia:commentDraft:v1:';
  */
 export const DRAFTS_MAX_CHARS = 2_000_000;
 export const DRAFT_MAX_CHARS = 200_000;
-/**
- * A draft is written on every change, with no wait, so nothing typed is lost to a quit or a crash. Each draft is its own
- * entry, so a keystroke writes one draft: at the 200,000-unit cap one write (JSON.stringify and setItem) measured a median
- * of 0.2 ms, p95 0.3 to 0.4 ms and max 0.4 to 0.5 ms (Chromium, two runs of 60 writes per size, 2026-11-20).
- */
 /** Why a draft is not kept on this device: longer than one draft may be, the drafts' share is full, or storage refused it. */
 export type NotKept = 'too-long' | 'full' | 'refused';
 /** Written and removed in one go by a Sign out, so every other window of this origin hears whose drafts went. */
@@ -64,6 +59,11 @@ export function createDraftStorage({ read, changed, kept, signedOut }: Options) 
 	};
 	const entry = (key: string) => `${DRAFT_STORAGE_PREFIX}${owner}:${key}`;
 	const total = () => { let sum = 0; for (const size of sizes.values()) sum += size; return sum; };
+	/**
+	 * A draft is written on every change, with no wait, so nothing typed is lost to a quit or a crash. Each draft is its own
+	 * entry, so a keystroke writes one draft: at the 200,000-unit cap one write (JSON.stringify and setItem) measured a median
+	 * of 0.2 ms, p95 0.3 to 0.4 ms and max 0.4 to 0.5 ms (Chromium, two runs of 60 writes per size, 2026-11-20).
+	 */
 	function write(key: string): void {
 		const store = storage();
 		if (!store || !owner) return;

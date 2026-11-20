@@ -30,6 +30,7 @@
 	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 	import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+	import { failedLine } from '$lib/stores/draftKept';
 
 	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
@@ -114,7 +115,7 @@
 	/** The number chip's fill: the viewer disc's, so a pin's digit reads the same in the drawer. */
 	const chipFill = $derived(tagColor ? badgeFill(tagColor) : null);
 	// Why the reply didn't post, and that this device does not keep it while it does not: one line under its field.
-	const replyLine = $derived([replyError, keptCommentDrafts.notKept(replyKey)].filter(Boolean).join(' '));
+	const replyLine = $derived(failedLine(replyError, keptCommentDrafts.notKept(replyKey)));
 	const me = $derived($userParticipant);
 	const who = (id: string, kind?: 'user' | 'agent') => resolveParticipant(id, me, kind);
 	// CommentMeta draws the author's avatar in this colour.

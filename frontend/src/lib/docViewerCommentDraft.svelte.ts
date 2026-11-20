@@ -3,7 +3,7 @@ import { createMentionSelection, type MentionOccurrence } from '$lib/components/
 import { commentDraft, commentDraftScope, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
 import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import { selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
+import { CAPTURE_FAILURE, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import { postLive } from '$lib/stores/liveCommentPost';
 import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
@@ -12,6 +12,7 @@ import { addComment } from '$lib/stores/docComments';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 import { plainErrorText } from '$lib/plainError';
 import { isNotCommentable, POST_FAILED, submitDocumentComment } from '$lib/docViewerOperations';
+import { DRAFT_KEPT } from '$lib/stores/draftKept';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
 export type ViewerSelection = SelectionOffer | null;
@@ -33,11 +34,11 @@ type Context = {
 const aborted = () => new DOMException('Comment draft closed', 'AbortError');
 /** What a failed post of a comment anchored in a live document says; an image's region comment there says the same. */
 export function liveFailureMessage(error: unknown): string {
-	if (!(error instanceof Error)) return 'Could not post the comment; your draft is kept.';
-	if (error.message === SELECTION_LOST) return 'The selected text changed or was removed. Your comment draft is kept.';
-	if (error.message.startsWith('409 ')) return 'The document changed before your comment could be attached. Your draft is kept. Try again.';
+	if (!(error instanceof Error)) return `Couldn’t post the comment. ${DRAFT_KEPT}`;
+	if (error.message === SELECTION_LOST) return `The selected text changed or was removed. ${DRAFT_KEPT}`;
+	if (error.message.startsWith('409 ')) return CAPTURE_FAILURE.changed;
 	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
-	if (error.name === 'PostTimeoutError') return "We couldn't confirm your comment was posted. Check the comments before posting again. Your draft is kept.";
+	if (error.name === 'PostTimeoutError') return `We couldn’t confirm your comment was posted. Check the comments before posting again. ${DRAFT_KEPT}`;
 	// A lost connection (fetch's own TypeError text) and a server error ("500 <body>") carry wire text, not words for the reader.
 	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
 	if (/^\d{3}\b/.test(error.message)) return refusalMessage(error.message);
@@ -51,7 +52,7 @@ function refusalMessage(wire: string): string {
 	try { detail = JSON.parse(body)?.detail; } catch { /* A body that is not JSON has no reason to show. */ }
 	if (detail !== undefined) console.error('[api] request rejected', Number(status), detail);
 	const reason = plainErrorText(detail, '').replace(/\.+$/, '');
-	return reason ? `Couldn't post the comment: ${reason}. Your draft is kept.` : "Couldn't post the comment. Your draft is kept.";
+	return reason ? `Couldn’t post the comment: ${reason}. ${DRAFT_KEPT}` : `Couldn’t post the comment. ${DRAFT_KEPT}`;
 }
 
 // Once Comment is pressed the post goes on whether or not its composer is still open: closing it, another card, another

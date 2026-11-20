@@ -132,7 +132,7 @@ describe('CommentComposer', () => {
 			keptCommentDrafts.keep('draft-key', huge, createMentionSelection(huge));
 			flushSync();
 			const line = host.querySelector('[role="alert"]');
-			expect(line?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again. Too long to keep on this device. Post it or copy it before you close CORSIA.');
+			expect(line?.textContent).toBe('Couldn’t post the comment. Try again. Too long to keep on this device. Post it or copy it before you close CORSIA.');
 			expect(line?.classList.contains('failed')).toBe(true);
 			keptCommentDrafts.keep('draft-key', 'Kept', createMentionSelection('Kept'));
 			flushSync();

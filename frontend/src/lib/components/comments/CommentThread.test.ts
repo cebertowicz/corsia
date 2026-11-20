@@ -10,6 +10,7 @@ import { user } from '$lib/stores/auth';
 import { createMentionSelection } from './mentionSelection';
 import { toasts } from '$lib/stores/toast';
 import { get } from 'svelte/store';
+import { POST_FAILED } from '$lib/docViewerOperations';
 
 const hexToRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 let host: HTMLElement;
@@ -619,6 +620,23 @@ describe('CommentThread', () => {
 			keptCommentDrafts.keepReply('reply-key', 'short', createMentionSelection('short'));
 			flushSync();
 			expect(host.querySelector('[role="alert"]')).toBeNull();
+		} finally {
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+			keptCommentDrafts.reset(); user.set(null); localStorage.clear();
+		}
+	});
+
+	it('never says a reply is kept beside the line saying this device does not keep it', () => {
+		user.set({ id: 'person-1', name: 'person-1' });
+		try {
+			render(thread(), false, { replyKey: 'reply-key', replyError: POST_FAILED });
+			const huge = 'x'.repeat(200_001);
+			keptCommentDrafts.keepReply('reply-key', huge, createMentionSelection(huge));
+			flushSync();
+			expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t post the comment. Try again. Too long to keep on this device. Post it or copy it before you close CORSIA.');
+			keptCommentDrafts.keepReply('reply-key', 'short', createMentionSelection('short'));
+			flushSync();
+			expect(host.querySelector('[role="alert"]')?.textContent).toBe(POST_FAILED);
 		} finally {
 			for (const toast of get(toasts)) toasts.dismiss(toast.id);
 			keptCommentDrafts.reset(); user.set(null); localStorage.clear();

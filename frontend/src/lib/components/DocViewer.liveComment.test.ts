@@ -378,11 +378,11 @@ const postFailure = (name: string) => Object.assign(new Error('request timed out
 it.each([
 	['a server error', new Error('500 synthetic comment failure'), TRY_AGAIN],
 	['a gateway error', new Error('502 <html>Bad gateway</html>'), TRY_AGAIN],
-	['a timeout', postFailure('PostTimeoutError'), "We couldn't confirm your comment was posted. Check the comments before posting again. Your draft is kept."],
-	['a refusal with a reason', new Error('404 {"detail":"This document is no longer shared."}'), "Couldn't post the comment: This document is no longer shared. Your draft is kept."],
-	['a refusal whose reason is a machine code', new Error('400 {"detail":"live_capture_refused"}'), "Couldn't post the comment. Your draft is kept."],
-	['a refusal with a non-JSON body', new Error('400 <html>Bad request</html>'), "Couldn't post the comment. Your draft is kept."],
-	['a refusal whose body has no reason', new Error('422 {"detail":[{"msg":"bad"}]}'), "Couldn't post the comment. Your draft is kept."],
+	['a timeout', postFailure('PostTimeoutError'), 'We couldn’t confirm your comment was posted. Check the comments before posting again. Your draft is kept.'],
+	['a refusal with a reason', new Error('404 {"detail":"This document is no longer shared."}'), 'Couldn’t post the comment: This document is no longer shared. Your draft is kept.'],
+	['a refusal whose reason is a machine code', new Error('400 {"detail":"live_capture_refused"}'), 'Couldn’t post the comment. Your draft is kept.'],
+	['a refusal with a non-JSON body', new Error('400 <html>Bad request</html>'), 'Couldn’t post the comment. Your draft is kept.'],
+	['a refusal whose body has no reason', new Error('422 {"detail":[{"msg":"bad"}]}'), 'Couldn’t post the comment. Your draft is kept.'],
 ])('tells the user a live comment failed in plain words after %s, and keeps the draft', async (_name, failure, message) => {
 	await open(); await select(); await compose();
 	api.postComment.mockRejectedValueOnce(failure);
