@@ -82,17 +82,10 @@ for (const width of [1440, 393]) test(`outside interaction keeps the ${width} th
 				previous = next;
 			}
 		});
-		const before = await scroll.evaluate(el => el.scrollTop);
 		const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
 		const box = await backdrop.boundingBox();
 		if (!box) throw new Error('sheet backdrop missing');
-		const cdp = await page.context().newCDPSession(page);
-		const x = box.x + box.width / 2, y = box.y + Math.min(box.height / 2, 100);
-		await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-		await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + 80 }] });
-		await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-		console.log('BACKDROP_SWIPE', JSON.stringify({ before, after: await scroll.evaluate(el => el.scrollTop) }));
-		if (await thread.isVisible()) await backdrop.tap({ position: { x: box.width / 2, y: Math.min(box.height / 2, 100) } });
+		await backdrop.tap({ position: { x: box.width / 2, y: Math.min(box.height / 2, 100) } });
 	} else {
 		await page.keyboard.press('Escape');
 	}
