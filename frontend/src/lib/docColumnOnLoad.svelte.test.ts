@@ -10,7 +10,7 @@ function create(initiallyFits: boolean) {
 	const room = $state({ fits: initiallyFits });
 	let ui!: ReturnType<typeof createCommentSurfaceState>;
 	dispose = $effect.root(() => {
-		ui = createCommentSurfaceState(() => {}, undefined, () => room.fits);
+		ui = createCommentSurfaceState(() => {}, () => room.fits);
 		openColumnOnLoad({ artifactId: () => 'doc', ready: () => true, paneDrawer: () => false, fits: () => room.fits, hasComments: () => true,
 			shown: () => !!ui.state, open: ui.openOnLoad, quietList: () => ui.state?.kind === 'list' && ui.quiet, close: ui.closeAll });
 	});

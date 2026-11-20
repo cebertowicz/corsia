@@ -113,15 +113,15 @@ def test_archive_removes_the_users_task(db):
     ("node", "review", "actions"),
     [
         ({"kind": "task", "assignee": "user", "state": "pending"}, None,
-         ["mark_done", "pause_node", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": "user", "state": "review_requested"}, {"kind": "human_review"},
-         ["mark_done", "pause_node", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": "user", "state": "review_requested"}, {"kind": "human_decision"},
-         ["pause_node", "close_node"]),
+         ["reorder", "pause_node", "close_node"]),
         ({"kind": "task", "assignee": "user", "state": "accepted"}, None, []),
         ({"kind": "task", "assignee": None, "state": "pending"}, None,
-         ["mark_done", "pause_node", "close_node"]),
-        ({"kind": "phase", "assignee": "user", "state": "pending"}, None, ["mark_done", "close_node"]),
+         ["reorder", "mark_done", "pause_node", "close_node"]),
+        ({"kind": "phase", "assignee": "user", "state": "pending"}, None, ["reorder", "mark_done", "close_node"]),
     ],
 )
 def test_the_plan_pane_offers_mark_done_and_won_t_do_on_any_open_row(node, review, actions):
@@ -136,7 +136,7 @@ def test_a_paused_question_offers_resume_and_never_mark_done():
     assert user_steering.offered(
         {"kind": "task", "assignee": "user", "state": "review_requested"},
         {"kind": "human_decision"}, paused, plan_state="active", worker_plan_state=None,
-    ) == ["resume_node", "close_node"]
+    ) == ["reorder", "resume_node", "close_node"]
 
 
 def test_mark_done_never_settles_a_decision_the_user_has_not_answered(db):

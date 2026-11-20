@@ -6,13 +6,13 @@ import pytest
 from fastapi import WebSocketDisconnect
 from loguru import logger
 
-from infra.request_timing import _BUCKET_UPPERS, bucket_percentile
+from infra.request_timing import BUCKET_UPPERS, bucket_percentile
 from tests.test_browser_pane import FakePane, screencast  # noqa: F401 - autouse fixture: no real page screencast
 from ws import browser_pane_input, browser_pane_stats as stats_module, browser_stream
 from ws.browser_frames import PaneFrames
 from ws.browser_pane_stats import Histogram, PaneStats, input_kind, parse_report, viewer_kind
 
-BUCKETS = len(_BUCKET_UPPERS)
+BUCKETS = len(BUCKET_UPPERS)
 FRAME = '{"type":"frame","data":"jpeg","metadata":{"deviceWidth":400,"deviceHeight":600}}'
 
 

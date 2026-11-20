@@ -88,6 +88,15 @@ def strip_answer_tags(text: str | None) -> str | None:
     return _TAGGED.sub(lambda match: match.group(0)[:match.start(1) - match.start(0)], text)
 
 
+def words_for_the_person(text: str | None) -> str:
+    """All a message tells the person, in chat and in the comment threads its answers move to, untagged.
+
+    An update that only answers comments keeps no chat text (``VISIBLE_CONTENT`` is empty), yet the
+    person reads every word of it; measure and list it by these words, never by its chat text.
+    """
+    return (strip_answer_tags(text) or "").strip()
+
+
 # A message's chat text: what place_answers saved for it, else its content as written.
 # Readers alias the message row ``m``.
 VISIBLE_CONTENT_JOIN = "LEFT JOIN chat_visible_content cv ON cv.message_id=m.id"

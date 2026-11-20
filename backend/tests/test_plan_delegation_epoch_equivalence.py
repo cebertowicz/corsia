@@ -54,7 +54,7 @@ def old_waiting_on_answer(db, plan_id: str) -> bool:
         f"""SELECT 1 FROM plan_nodes w
            WHERE w.plan_id=? AND w.archived_at IS NULL AND w.assignee='user'
              AND w.state IN ('pending','active','review_requested')
-             AND NOT {node_states.has_child_in_work_sql('w')}
+             AND NOT {node_states.parent_sql('w')}
            LIMIT 1""",
         (plan_id,),
     ).fetchone() is not None

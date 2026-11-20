@@ -11,6 +11,7 @@ from pathlib import Path
 
 from core.scaffold_layouts import _project_layout, _workspace_layout
 from core.workspace_layout import resolve_project_root
+from infra.auth import is_owner_sentinel
 from infra.conductor import WORKSPACE_SCOPE
 from infra.database import get_db, write_transaction
 from infra.settings import set_setting
@@ -72,17 +73,13 @@ def _directory_owners(shared_root: Path, project_id: str | None, db) -> dict[str
 
 
 def _registry_rule(registered: str | None, db) -> tuple[str | None, str]:
-    """Keep a persistent registry owner, or lift a temporary one to its acting owner.
-
-    A temporary owner with no persistent ancestor matches neither rule, so the
-    caller falls through to the directory and conductor rules.
-    """
+    """Keep a persistent owner, lift a temporary one, or fall through if it has no persistent ancestor."""
     if registered is None:
         return None, ""
     thread = db.execute(
         "SELECT agent_enabled FROM threads WHERE id=?", (registered,),
     ).fetchone()
-    if registered == "ui" or (thread and thread["agent_enabled"]):
+    if is_owner_sentinel(registered) or (thread and thread["agent_enabled"]):
         return registered, "registry"
     return acting_owner(registered, False, db=db), "acting_owner"
 
@@ -105,7 +102,9 @@ def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -
         header = resolve_header_owner(header_value, project_id, db) if header_value else None
         conflict = bool(header and registered and header != registered)
         trigger = fields.get("review")
-        owner, rule = (header, "header") if header else _registry_rule(registered, db)
+        owner, rule = _registry_rule(registered, db) if registered is not None and is_owner_sentinel(registered) else (
+            (header, "header") if header else _registry_rule(registered, db)
+        )
         if owner is None:
             category = path.relative_to(shared_root).parts[0]
             if category in directory_owners:
@@ -158,7 +157,7 @@ def _claim_tasks(
 ) -> None:
     grouped: dict[str, list[Assignment]] = {}
     for row in rows:
-        if row.owner and row.owner != "ui":
+        if row.owner and not is_owner_sentinel(row.owner):
             grouped.setdefault(row.owner, []).append(row)
     for owner, owned in grouped.items():
         plan = plans.ensure_plan("thread", owner, db=db)
@@ -275,13 +274,15 @@ def apply_shared_ownership(
                     connection, artifact_id=str(artifact["id"]),
                     thread_id=str(initial_owner), trigger="ownership_assignment",
                 )
-            rehome_artifact(
-                integration=str(artifact["integration"]), type=str(artifact["type"]),
-                external_id=str(artifact["external_id"]),
-                new_owner_thread_id=str(row.owner), actor_thread_id=None,
-                authority="system", reason="ownership_assignment",
-                source_path=str(path), db=connection, show_to_new_owner=False,
-            )
+            current_owner = artifact_owner(str(artifact["id"]), db=connection)
+            if current_owner is None or not is_owner_sentinel(current_owner):
+                rehome_artifact(
+                    integration=str(artifact["integration"]), type=str(artifact["type"]),
+                    external_id=str(artifact["external_id"]),
+                    new_owner_thread_id=str(row.owner), actor_thread_id=None,
+                    authority="system", reason="ownership_assignment",
+                    source_path=str(path), db=connection, show_to_new_owner=False,
+                )
             if row.trigger:
                 merge_identity_metadata(
                     connection, str(artifact["id"]), {"update_trigger": row.trigger},

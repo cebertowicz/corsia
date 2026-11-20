@@ -55,6 +55,7 @@ Event names are `<category>.<action>`. Lowercase, dot-separated, no spaces.
 | `session.ended` | Conversation closed / archived | backend |
 | `session.renamed` | Title updated (user or auto) | backend |
 | `session.deleted` | Conversation hard-deleted | backend |
+| `delegate_stop.stopped` | An agent stopped a worker with `delegate_stop`. `workers` is how many workers the call covered (the worker and those beneath it), `mid_turn` how many had a running turn, `not_stopped` how many of those turns didn't end as `stopped`, `standing_skipped` how many standing agents beneath it were left running, and `by_spawner` whether the caller spawned the worker itself | backend |
 
 ### Turn lifecycle
 

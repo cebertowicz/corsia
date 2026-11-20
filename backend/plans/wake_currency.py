@@ -25,7 +25,7 @@ in the plan waits on it to be selected again.
 
 from __future__ import annotations
 
-from plans.plan_wake import CONDUCTOR_TASK_SETTLED, LATER_REVIEW, TASK_CLOSED
+from plans.plan_wake import CONDUCTOR_TASK_SETTLED, LATER_REVIEW, REVIEW_PASSED, TASK_CLOSED
 
 #: The continuation kind a result-bearing plan wake carries.
 PLAN_WAKE = "plan_wake"
@@ -34,10 +34,11 @@ PAUSE_STEER = "plan_pause_steer"
 #: Every kind whose currency Plans answers.
 KINDS = frozenset({PLAN_WAKE, PAUSE_STEER})
 #: Wakes that report an outcome the recipient asked to hear about another
-#: plan's task (#488), or ask it to review its own pile of set-aside work. They
+#: plan's task (#488), ask it to review its own pile of set-aside work, or
+#: report that a review it handed out passed (its run may have just ended). They
 #: are the recipient's reason to act, so they stay current while its plan is
 #: active even when it holds no open work a leaf projection would list.
-_NEWS_WAKES = frozenset({CONDUCTOR_TASK_SETTLED, LATER_REVIEW})
+_NEWS_WAKES = frozenset({CONDUCTOR_TASK_SETTLED, LATER_REVIEW, REVIEW_PASSED})
 
 
 def condition(

@@ -14,7 +14,9 @@ def _validate_parent(
     connection: sqlite3.Connection,
     plan_id: str,
     parent_id: str | None,
+    kind: str,
 ) -> None:
+    """Refuse a parent that may not hold a new child of ``kind``."""
     if parent_id is None:
         return
     parent = service._node_row(connection, parent_id)
@@ -33,7 +35,25 @@ def _validate_parent(
             "use add_follow_up on it"
         )
     if parent["kind"] == "task":
-        raise service.PlanInputError("task nodes are leaves and cannot contain children")
+        if parent["workflow_step"] is None:
+            raise service.PlanInputError("task nodes are leaves and cannot contain children unless they are workflow steps")
+        from plans.workflow_fields import creation_payload
+
+        by = creation_payload(connection, parent_id).get("workflow_by")
+        if by == "person":
+            raise service.PlanInputError(
+                "The person does that step, so the agent's work goes in its own step or task."
+            )
+        if by == "reviewer":
+            raise service.PlanInputError(
+                "A reviewer does that step independently, so it cannot contain author subtasks."
+            )
+        if kind != "task":
+            # A step's children settle so the step can do its own check; a phase or
+            # track never settles, so it would hold the step open for good.
+            raise service.PlanInputError(
+                f"A workflow step holds tasks only, not a {kind}: add its smaller pieces as tasks."
+            )
 
 
 def _next_order(
@@ -102,7 +122,7 @@ def _validate_node_input(
         raise service.PlanInputError(
             "watchdog budget seconds must be a positive integer"
         )
-    _validate_parent(connection, plan_id, parent_id)
+    _validate_parent(connection, plan_id, parent_id, kind)
     if (
         follow_up_of is not None
         and service._node_row(connection, follow_up_of)["plan_id"] != plan_id
@@ -299,11 +319,13 @@ def create_node(
     workflow_by: str = "agent",
     workflow_gate: str | None = None,
     workflow_gate_mode: str | None = None,
+    workflow_settle: str | None = None,
 ) -> PlanNode:
     """Validate and insert a node without opening another transaction.
 
     ``required_step`` marks a workflow run's required step in its creation
     event, the one record ``plans.workflow_fields.refuse_required_skip`` reads.
+    ``workflow_settle`` is a review step's settle script name (``plans.review_settle_script``).
     """
     (
         base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
@@ -340,6 +362,7 @@ def create_node(
             **({"workflow_by": workflow_by} if workflow_by != "agent" else {}),
             **({"workflow_gate": workflow_gate} if workflow_gate else {}),
             **({"workflow_gate_mode": workflow_gate_mode} if workflow_gate_mode else {}),
+            **({"workflow_settle": workflow_settle} if workflow_settle else {}),
         },
     )
     return service._node_from_row(connection, service._node_row(connection, node_id))

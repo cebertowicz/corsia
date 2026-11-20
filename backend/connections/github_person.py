@@ -21,6 +21,12 @@ from connections.models import get_connection
 log = logging.getLogger(__name__)
 
 _RETRY_SECONDS = 60.0
+# Hang guard on reading the host gh login, which is a local read. Basis: a requirement,
+# not a speed reading: a read that waits forever (a locked keychain waiting for an unlock
+# prompt) must not hold up a script run, whose own timeout starts only after this.
+# On expiry the run gets no GitHub login and the next run reads again. Known cost: the
+# run reports the no-login wording (script_sandbox._NO_HOST_LOGIN), not a timeout.
+_TOKEN_READ_TIMEOUT_SECONDS = 15
 _probe_lock = threading.Lock()
 _last_probe = float("-inf")
 
@@ -84,7 +90,7 @@ def person_forwarder_credential() -> str:
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--hostname", GH_HOST], capture_output=True, text=True,
-            timeout=15, check=False, env={**os.environ, "GH_HOST": GH_HOST, "GH_PROMPT_DISABLED": "1"},
+            timeout=_TOKEN_READ_TIMEOUT_SECONDS, check=False, env={**os.environ, "GH_HOST": GH_HOST, "GH_PROMPT_DISABLED": "1"},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError("the person's GitHub credential is unavailable") from exc

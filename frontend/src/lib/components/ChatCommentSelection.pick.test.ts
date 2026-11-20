@@ -243,3 +243,53 @@ it('returns focus to the pressed highlight when a thread opened from the list cl
 	document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click();
 	await vi.waitFor(() => expect(document.activeElement).toBe(highlight));
 });
+
+it('lets the picked card go on a press that began on the transcript, never on one that began in the card and was released beside it', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	// The column sits inside the transcript, as it does in the app.
+	host.querySelector('.messages')!.insertAdjacentHTML('beforeend', '<div class="chat-margin"><div class="chat-margin-card"><div data-comment-uuid="one" tabindex="-1"><textarea></textarea></div></div></div>');
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="one"]')!.click();
+	flushSync();
+	await tick();
+	expect(picked()).toBe('one');
+	const transcript = host.querySelector<HTMLElement>('.messages')!;
+	const press = (down: Element, clicked: Element) => {
+		down.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+		clicked.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+		flushSync();
+	};
+	// The card moved under a still pointer between press and release, so the click lands on what both share: the transcript.
+	press(host.querySelector('.chat-margin textarea')!, transcript);
+	await tick();
+	expect(picked()).toBe('one');
+	// A press that began on the transcript, away from any highlight or card, lets it go.
+	press(host.querySelector('.long-message-body')!, host.querySelector('.long-message-body')!);
+	await tick();
+	expect(picked()).toBe('');
+});
+
+it('lets the picked card go on a drag that began on the transcript and was released on the card: where the press went down decides', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	host.querySelector('.messages')!.insertAdjacentHTML('beforeend', '<div class="chat-margin"><div class="chat-margin-card"><div data-comment-uuid="one" tabindex="-1"><textarea></textarea></div></div></div>');
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="one"]')!.click();
+	flushSync();
+	await tick();
+	expect(picked()).toBe('one');
+	// Down on the transcript's text, up on the card's field: the click lands on what both share, the transcript.
+	host.querySelector('.long-message-body')!.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+	host.querySelector('.chat-margin textarea')!.dispatchEvent(new Event('pointerup', { bubbles: true, composed: true }));
+	host.querySelector('.messages')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+	flushSync();
+	await tick();
+	expect(picked()).toBe('');
+});

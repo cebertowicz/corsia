@@ -828,6 +828,8 @@ async def test_startup_replay_failure_is_visible_without_holding_other_threads(m
 @pytest.mark.asyncio
 async def test_drive_phase_failure_is_not_reported_as_completion(monkeypatch) -> None:
     """A failed drive must fail its task, not look like finished recovery."""
+    from plans import public as plans
+
     events: list[str] = []
     startup = _startup_recovery_probe(
         monkeypatch,
@@ -841,6 +843,12 @@ async def test_drive_phase_failure_is_not_reported_as_completion(monkeypatch) ->
         error=lambda *args: errors.append(args),
         exception=lambda *_a: None,
     )
+
+    async def no_recovery() -> None:
+        return None
+
+    # The drive also starts the marker-gated comment-recovery pass; not this test's subject.
+    monkeypatch.setattr(plans, "recover_person_comments", no_recovery)
 
     recovered, wakes, _rolled_back = await startup.reconcile_startup_continuity(logger)
     with pytest.raises(ExceptionGroup) as caught:

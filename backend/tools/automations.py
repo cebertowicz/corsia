@@ -274,8 +274,8 @@ class AutomationScheduleTool(Tool):
                 "cadence_seconds": {
                     "type": "integer",
                     "minimum": script_schedules.MIN_CADENCE_SECONDS,
-                    "maximum": schedules.MAX_CADENCE_SECONDS,
-                    "description": "script kind: seconds between runs, at least 300; leave it "
+                    "description": f"script kind: seconds between runs, at least "
+                                   f"{script_schedules.MIN_CADENCE_SECONDS}; leave it "
                                    "out for a script only event_rules run_script rules start.",
                 },
                 "series": {
