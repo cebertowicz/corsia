@@ -15,12 +15,17 @@ export function highlightAtPress(view: EditorView, press: { clientX: number; cli
 /**
  * A touch tap puts the caret in the page's selection a moment before the editor reads it, and a card that opens in between takes the focus
  * first, so the editor keeps the caret it had (the document's start) and the first key typed lands there. Where the editor's caret is not in
- * the highlight the press opened, put it where the press landed; a caret the editor already placed in the highlight stands.
+ * the highlight the press opened, put it where the press landed, held inside that highlight; a caret the editor already placed in it stands.
+ * The highlight is looked up by `id` in `ranges`, the list the card reads, so its range is where the text is now, not where it was when the
+ * press landed: text can move in between, and the position under the old coordinates may then be outside it. Gone from the list: leave the caret.
  */
-export function caretAtPress(view: EditorView, press: { clientX: number; clientY: number }, opened: CommentRange): void {
+export function caretAtPress(view: EditorView, press: { clientX: number; clientY: number }, id: string, ranges: CommentRange[]): void {
+	const now = ranges.find((r) => r.id === id);
+	if (!now) return;
 	const head = view.state.selection.main.head;
-	if (head >= opened.from && head <= opened.to) return;
-	view.dispatch({ selection: { anchor: view.posAtCoords({ x: press.clientX, y: press.clientY }, false) }, userEvent: 'select.pointer' });
+	if (head >= now.from && head <= now.to) return;
+	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
+	view.dispatch({ selection: { anchor: Math.min(Math.max(at, now.from), now.to, view.state.doc.length) }, userEvent: 'select.pointer' });
 }
 
 /** Every highlight under a press by the same rule, in range order: two threads on overlapping text are both there. */
