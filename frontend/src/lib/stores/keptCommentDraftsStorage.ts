@@ -17,7 +17,7 @@ export const DRAFT_MAX_CHARS = 200_000;
 /**
  * A draft is written on every change, with no wait, so nothing typed is lost to a quit or a crash. Each draft is its own
  * entry, so a keystroke writes one draft: at the 200,000-unit cap one write (JSON.stringify and setItem) measured a median
- * of 0.2 ms, p95 0.3 ms and max 0.4 ms (Chromium, 60 writes per size, 2026-11-20).
+ * of 0.2 ms, p95 0.3 to 0.4 ms and max 0.4 to 0.5 ms (Chromium, two runs of 60 writes per size, 2026-11-20).
  */
 /** Why a draft is not kept on this device: longer than one draft may be, the drafts' share is full, or storage refused it. */
 export type NotKept = 'too-long' | 'full' | 'refused';
