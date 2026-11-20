@@ -35,9 +35,14 @@ const textKey = (text: string) => `${text.length}:${hashSeed(text)}`;
 
 /** The text and its selected identities share a lifetime. Offsets are UTF-16 code units. */
 export function createMentionSelection(initial = '') {
+	return build(initial, [], []);
+}
+
+type Snapshot = { key: string; selections: Selection[] };
+function build(initial: string, fromSelections: Selection[], fromSnapshots: Snapshot[]) {
 	let previous = initial;
-	let selections: Selection[] = [];
-	let snapshots: { key: string; selections: Selection[] }[] = [];
+	let selections: Selection[] = fromSelections;
+	let snapshots: Snapshot[] = fromSnapshots;
 	function remember() { snapshots.push({ key: textKey(previous), selections: selections.map(item => ({ ...item })) }); }
 	let pending: { start: number; end: number; direction?: 'backward' | 'forward' } | null = null;
 	let historyEdit = false;
@@ -85,6 +90,8 @@ export function createMentionSelection(initial = '') {
 	return {
 		begin, update,
 		clear() { previous = ''; selections = []; snapshots = []; pending = null; historyEdit = false; },
+		/** The same text and tags as a separate selection: clearing or editing one never changes the other. */
+		copy() { return build(previous, selections.map(item => ({ ...item })), snapshots.map(item => ({ key: item.key, selections: item.selections.map(each => ({ ...each })) }))); },
 		select(id: string, start: number, text: string) { selections.push({ id, start, text }); if (snapshots.at(-1)?.key === textKey(previous)) snapshots.pop(); remember(); },
 		occurrences(text: string): MentionOccurrence[] {
 			update(text);

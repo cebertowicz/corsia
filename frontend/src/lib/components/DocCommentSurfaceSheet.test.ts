@@ -9,6 +9,10 @@ vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (val
 
 import { MARGIN_MIN } from '$lib/docCommentSurfaceState.svelte';
 import DocCommentSurface from './DocCommentSurface.svelte';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 let host: HTMLElement;
 let bounds: HTMLElement;

@@ -16,8 +16,8 @@ from __future__ import annotations
 from functools import partial
 
 from plans import (
-    boundary_dispatch, delegate_attach, dependencies, holds, intent_creation, service, status_cursor,
-    system_user_steps,
+    boundary_dispatch, delegate_attach, dependencies, holds, intent_creation, review_settle_script, service,
+    status_cursor, system_user_steps,
 )
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
@@ -1121,5 +1121,13 @@ _CASES = {
     ),
     ("system_user_steps.py", '"close_user_step needs a reason"'): lambda db, scene: partial(
         system_user_steps.close_user_step, db, scene.own, reason=" ", provenance="test",
+    ),
+    # --- plans/review_settle.py and review_settle_script.py (a review's verdict) ---
+    ("review_settle.py", '"verdict must be \'pass\' or \'fail\'"'): _operation(
+        "request_review", {"node_id": OWN, "expected_revision": REV, "evidence": "E", "verdict": "maybe"},
+    ),
+    ("review_settle_script.py", '"verdict must be \'pass\', \'fail\' or None"'): lambda db, scene: partial(
+        review_settle_script.settle_step_from_script, db, node_id=scene.own, attempt_id="a1",
+        run_id="r1", verdict="maybe", findings=None, version="v1",
     ),
 }

@@ -5,7 +5,7 @@ import type { EmailDraftInfo } from '$lib/emailDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { DocOpenError, docOpenRefusal, liveUnavailable, SNAPSHOT_REFUSAL_MESSAGE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
 import { withDraftArtifactId, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
-import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
+import { commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
 import { openLiveDocument } from '$lib/stores/liveDocuments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -75,7 +75,7 @@ export function leavePreviousTarget(previous: DocViewerTarget | null, next: DocV
 	// the background rather than awaiting it here.
 	if (previous && previous.instanceId !== next.instanceId) {
 		void flushDraft(previous);
-		discardCommentDraft(commentDraftScope(previous));
+		dropCommentDraft(commentDraftScope(previous));
 	}
 	return next;
 }
