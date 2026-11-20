@@ -203,8 +203,6 @@ class RequestTimingMiddleware:
                 status = message["status"]
                 headers = list(message.get("headers", ()))
                 headers.append((b"server-timing", _server_timing(started_at, timing, scope)))
-                # Lets a page on another origin read the timing fields of its own request.
-                headers.append((b"timing-allow-origin", b"*"))
                 message = {**message, "headers": headers}
                 response_started = True
             elif message_type == "http.response.body":
