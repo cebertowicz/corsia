@@ -25,7 +25,7 @@
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
 	import { handleViewerFailure } from '$lib/docViewerFailure';
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
-	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
+	import { bindViewerSession, reloadAfterLegacySave, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
@@ -58,7 +58,6 @@
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
 	import { createThreadHomes } from './comments/threadHomes';
 
-
 	let {
 		target,
 		onClose = () => {},
@@ -86,8 +85,6 @@
 	let editText = $state('');
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
-	let commentsEntry = $state<HTMLButtonElement | null>(null);
-	let detailsEntry = $state<HTMLButtonElement | null>(null);
 
 	const save = createDocSaveState(() => target);
 	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.closeAll(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && columnFits(), showColumn: () => { if (listedComments.length > 0 && columnFits()) commentUI.openOnLoad(); }, root: () => docRoot, liveText: () => liveSession?.text.toString() ?? null });
@@ -212,11 +209,7 @@
 			},
 		});
 	}
-	$effect(() => {
-		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
-		legacyAwaitingSave = false;
-		reloadNonce += 1;
-	});
+	reloadAfterLegacySave(() => legacyAwaitingSave, () => save.draft?.status === 'saved', () => { legacyAwaitingSave = false; }, () => { reloadNonce += 1; });
 	reopenOnReconnect(() => $connectionState === 'connected', () => openRefusal?.code === 'not_connected', () => { reloadNonce += 1; });
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
 		const d = target;
@@ -291,7 +284,6 @@
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		saveStatus={history.restoring ? 'saving' : save.status}
 		bind:this={feedbackStatus}
-		bind:commentsEntry bind:detailsEntry
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !confirming && !openRefusal}
@@ -359,7 +351,7 @@
 		anchor={commentUI.anchor}
 		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
-		{commentsEntry}
+		commentsEntry={feedbackStatus?.commentsButton()}
 		feedback={feedbackStatus?.feedback()}
 		narrow={isPaneDrawer()}
 		phone={$isMobile || $isShortTouch}

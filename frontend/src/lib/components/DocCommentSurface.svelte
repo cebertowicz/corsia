@@ -323,8 +323,8 @@
 	.stacked-title { margin: 0; padding: var(--space-1) var(--space-3) var(--space-1); color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
 	/* A short sheet (a phone held sideways under its keyboard) puts Back on the heading's row, fixed and 44px tall, so a reply field, its "Goes to" line and Send fit the one scroller (documentThreadChromeRoom). */
-	.canvas-comment-drawer.sheet:global([data-short-chrome]) { position: relative; }
-	.canvas-comment-drawer.sheet:global([data-short-chrome]) > :global(.drawer-heading) { min-height: var(--touch-target); padding-left: calc(var(--space-1) + var(--back-room, 0px)); }
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) { position: relative; --back-room: 0px; }
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) > :global(.drawer-heading) { min-height: var(--touch-target); padding-left: calc(var(--space-1) + var(--back-room)); }
 	.canvas-comment-drawer.sheet:global([data-short-chrome]) > :global(.thread-back) { position: absolute; top: 0; left: 0; display: flex; height: var(--touch-target); }
 	.canvas-comment-drawer.sheet:global([data-short-chrome]) :global(.drawer-back) { min-height: var(--touch-target); }
 	/* The single-thread sheet shows every reply in full, so its card's reply count gives its room to the author's name. */

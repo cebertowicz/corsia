@@ -207,6 +207,8 @@
 		feedbackStatus?.sync(id, feedback);
 	}
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
+	/** The bar's Comments button, which the comments drawer opens from and returns focus to. */
+	export function commentsButton(): HTMLButtonElement | null { return commentsEntry; }
 </script>
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
