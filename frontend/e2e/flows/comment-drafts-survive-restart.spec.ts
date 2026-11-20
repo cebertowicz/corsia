@@ -1,0 +1,145 @@
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { TEST_TOKEN } from '../support/corsia';
+import { openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
+import { beginComment, submitButton } from '../support/liveCommentProof';
+import { openComments } from '../support/commentDrawer';
+import { at, commentButton, composer, drag, openThread, restoreImageTab, seedImage } from '../support/imageRegionComments';
+
+// An unsent comment or reply is kept on this device: it is still there after a reload, and after the app is quit and opened
+// again (a new page over the same storage stands in for that, and for an update restart), until it posts or is cancelled.
+// Taken at 1440 (chromium-desktop) and at 393 (chromium-mobile, by touch). The rules behind it (tags, the one client id, sign
+// out, the cap, two windows) are proven by the store's unit tests.
+
+const SIZES = { 'chromium-desktop': { width: 1440, height: 900 }, 'chromium-mobile': { width: 393, height: 852 } } as const;
+type Project = keyof typeof SIZES;
+const phone = (page: Page) => page.viewportSize()!.width <= 768;
+
+const QUOTE = 'Volunteers meet at the north gate';
+const DOC = `# Trail day\n\nThe crew walks the loop on Saturday.\n\n${QUOTE} at eight and bring gloves.\n\nLunch is by the creek.\n`;
+const PREFIX = 'corsia:commentDraft:v1:';
+
+/** The kept drafts' bodies on this device, as the page wrote them. */
+const stored = (page: Page) => page.evaluate((prefix) => Object.keys(localStorage).filter((name) => name.startsWith(prefix))
+	.map((name) => (JSON.parse(localStorage.getItem(name)!) as { body: string }).body), PREFIX);
+
+type WayOut = 'reload' | 'relaunch';
+/**
+ * The page is left and the app opened again. `reload` reloads at once, with no wait for the draft to be written. `relaunch`
+ * closes the page, once the draft is on the device, and opens a new one over the same storage, with nothing of the old page.
+ */
+async function leave(page: Page, way: WayOut, open: (page: Page) => Promise<void>): Promise<Page> {
+	if (way === 'reload') {
+		await page.reload();
+		await open(page);
+		return page;
+	}
+	await expect.poll(() => stored(page), { message: 'the draft is written to the device' }).not.toEqual([]);
+	const next = await page.context().newPage();
+	await next.setViewportSize(page.viewportSize()!);
+	await page.close();
+	await open(next);
+	return next;
+}
+
+/** The highlight on QUOTE, tapped on a phone; the comment's card pressed in the margin at 1440. */
+async function openReply(page: Page, id: string): Promise<Locator> {
+	const mark = page.locator('.cm-comment-anchor', { hasText: 'Volunteers meet' }).first();
+	await expect(mark).toBeVisible({ timeout: 15_000 });
+	if (phone(page)) {
+		const line = await mark.evaluate((el) => { const r = el.getClientRects()[0]; return { x: r.left + Math.min(24, r.width / 2), y: r.top + r.height / 2 }; });
+		await page.touchscreen.tap(line.x, line.y);
+	} else {
+		await openComments(page);
+		await page.locator(`[data-thread-id="${id}"]`).first().locator('[data-discussion-original]').click();
+	}
+	const field = page.locator(`[data-thread-id="${id}"]`).first().getByPlaceholder('Reply…');
+	await expect(field).toBeVisible();
+	return field;
+}
+
+/** An image's comment box from (0.2, 0.25) to (0.45, 0.5): a drag with the mouse, or Comment then a tap on a phone. */
+async function drawBox(page: Page) {
+	if (phone(page)) {
+		await commentButton(page).tap();
+		const spot = await at(page, 0.2, 0.25);
+		await page.touchscreen.tap(spot.x, spot.y);
+	} else {
+		await drag(page, await at(page, 0.2, 0.25), await at(page, 0.45, 0.5));
+	}
+	await expect(composer(page)).toBeVisible();
+}
+
+async function seedComment(page: Page, document: LiveDocument): Promise<string> {
+	const from = document.body.indexOf(QUOTE);
+	const created = await page.request.post(`/api/artifacts/${document.artifactId}/comments`, {
+		params: { token: TEST_TOKEN }, data: { body: 'Should we say where to park?', anchor_text: QUOTE, from_off: from, to_off: from + QUOTE.length, delivery_policy: 'immediate' },
+	});
+	expect(created.ok(), await created.text()).toBeTruthy();
+	return (await created.json()).comment.id as string;
+}
+
+test.describe('@flow:document-comments an unsent comment outlives the page', () => {
+	test.beforeEach(async ({ page }, testInfo) => {
+		test.skip(!(testInfo.project.name in SIZES), 'Taken at 1440 and 393 only');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(150_000);
+		await page.setViewportSize(SIZES[testInfo.project.name as Project]);
+	});
+
+	for (const way of ['reload', 'relaunch'] as const) {
+		test(`document: a new comment being typed is there again after a ${way}`, async ({ page, request }) => {
+			const document = await seedLiveDocument(request, `drafts-${way}-doc`, DOC);
+			await openLiveDocument(page, document);
+			await beginComment(page, QUOTE, 'Say which gate has parking');
+			await composer(page).press('Escape');
+			await expect(composer(page)).toHaveCount(0);
+			page = await leave(page, way, (next) => openLiveDocument(next, document).then(() => undefined));
+			await beginComment(page, QUOTE);
+			await expect(composer(page), 'the text typed before is there').toHaveValue('Say which gate has parking');
+		});
+
+		test(`image: a new comment being typed is there again after a ${way}`, async ({ page, request }) => {
+			const seeded = await seedImage(page, request, `drafts-${way}-image`);
+			await openThread(page, seeded.sessionTitle, page.viewportSize()!.width);
+			await drawBox(page);
+			await composer(page).fill('The header is too tall');
+			await composer(page).press('Escape');
+			await expect(composer(page)).toHaveCount(0);
+			page = await leave(page, way, async (next) => {
+				if (next !== page) await restoreImageTab(next, seeded);
+				await openThread(next, seeded.sessionTitle, next.viewportSize()!.width);
+			});
+			await drawBox(page);
+			await expect(composer(page), 'the text typed before is there').toHaveValue('The header is too tall');
+		});
+
+		test(`document: a reply being typed is there again after a ${way}`, async ({ page, request }) => {
+			const document = await seedLiveDocument(request, `drafts-${way}-reply`, DOC);
+			const id = await seedComment(page, document);
+			await openLiveDocument(page, document);
+			const field = await openReply(page, id);
+			await field.click();
+			await field.pressSequentially('Park on Elm Street');
+			page = await leave(page, way, (next) => openLiveDocument(next, document).then(() => undefined));
+			await expect(await openReply(page, id), 'the reply typed before is there').toHaveValue('Park on Elm Street');
+		});
+	}
+
+	test('document: a comment that posted does not come back after a relaunch', async ({ page, request }) => {
+		const document = await seedLiveDocument(request, 'drafts-posted-doc', DOC);
+		await openLiveDocument(page, document);
+		await beginComment(page, QUOTE, 'Bring a spare pair of gloves');
+		const posted = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes(`/api/artifacts/${document.artifactId}/comments`) && response.ok());
+		await submitButton(page).click();
+		await posted;
+		await expect(composer(page)).toHaveCount(0);
+		await expect.poll(() => stored(page), { message: 'nothing is kept once it posted' }).toEqual([]);
+		const next = await page.context().newPage();
+		await next.setViewportSize(page.viewportSize()!);
+		await page.close();
+		await openLiveDocument(next, document);
+		await beginComment(next, QUOTE);
+		await expect(composer(next), 'the box starts empty').toHaveValue('');
+	});
+});

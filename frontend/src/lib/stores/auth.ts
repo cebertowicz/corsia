@@ -13,6 +13,13 @@ export { token };
 export const user = writable<User | null>(null);
 export const isAuthenticated = derived(user, $u => $u !== null);
 
+/** What a person's own Sign out clears besides the session, by their id; an expired or server-ended session clears none of it. */
+const signOutHooks = new Set<(userId: string) => void>();
+export function onSignOut(hook: (userId: string) => void): () => void {
+	signOutHooks.add(hook);
+	return () => signOutHooks.delete(hook);
+}
+
 /** Clear the browser identity after its session is no longer valid. */
 export function clearExpiredSession(): void {
 	token.set(null);
@@ -38,6 +45,7 @@ function warnSessionNotRevoked() {
 
 export async function logout() {
 	const currentToken = get(token);
+	const signedOut = get(user)?.id;
 	if (currentToken) {
 		try {
 			const response = await apiFetch('/api/auth/logout', {
@@ -53,6 +61,7 @@ export async function logout() {
 			warnSessionNotRevoked();
 		}
 	}
+	if (signedOut) for (const hook of signOutHooks) hook(signedOut);
 	token.set(null);
 	user.set(null);
 }
