@@ -242,8 +242,8 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await drag(page, await at(page, .2, .25), await at(page, .45, .5));
 			await composer(page).fill('The header is too tall here');
 			await page.keyboard.press('ControlOrMeta+Enter');
-			await expect(page.locator('.composer [role="alert"]').filter({ hasText: "Couldn't post the comment" })).toBeVisible();
-			await expect(toast(page, "Couldn't post the comment")).toHaveCount(0);
+			await expect(page.locator('.composer [role="alert"]').filter({ hasText: 'Couldn’t post the comment. Your draft is kept. Try again.' })).toBeVisible();
+			await expect(page.locator('.toast').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
 			await expect(composer(page)).toHaveValue('The header is too tall here');
 			await shoot(page, testInfo, '1440-40-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);
@@ -388,8 +388,8 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await touchDrag(page, await at(page, .15, .75), await at(page, .45, .95));
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
 			await sheet(page).getByRole('button', { name: 'Comment', exact: true }).tap();
-			await expect(sheet(page).locator('[role="alert"]').filter({ hasText: "Couldn't post the comment" })).toBeVisible();
-			await expect(toast(page, "Couldn't post the comment")).toHaveCount(0);
+			await expect(sheet(page).locator('[role="alert"]').filter({ hasText: 'Couldn’t post the comment. Your draft is kept. Try again.' })).toBeVisible();
+			await expect(page.locator('.toast').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
 			await expect(sheet(page).locator('textarea')).toHaveValue('Too much padding on phones');
 			await shoot(page, testInfo, '393-12-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);

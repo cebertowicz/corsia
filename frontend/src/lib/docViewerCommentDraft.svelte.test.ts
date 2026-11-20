@@ -47,19 +47,16 @@ function setup(inWidget: boolean, label?: string) {
 	let row = $state<Row>({ placement: 'placing' }), draft = $state.raw<CommentDraft | null>(null);
 	const stop = commentDraft.subscribe((value) => { draft = value; });
 	let controller!: ReturnType<typeof createViewerCommentDraft>;
-	const failures: [string | null, string][] = [];
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
 			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
-			isOpen: () => open, ensureArtifactId: async () => 'a', onFailure: (id, message) => { failures.push([id, message]); }, onStart: () => { open = true; },
+			isOpen: () => open, ensureArtifactId: async () => 'a', onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});
 	});
 	flushSync();
 	return {
 		controller,
-		/** What the viewer was told of each failure: its toast id (null when the box said why), and the reason. */
-		failures,
 		async post() {
 			controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0, label, inWidget });
 			controller.start(); flushSync();
@@ -339,7 +336,7 @@ describe('a post that lands or fails after its composer closed and another opene
 });
 
 describe('a failed post says why in one place, decided as it fails', () => {
-	const REASON = "Couldn't post the comment — try again";
+	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
 	const show = vi.spyOn(toasts, 'show');
 	let drop = () => {};
 	/** The composer's root, mounted on screen for this document's draft (CommentComposer `use:showsDraft`). */
@@ -368,7 +365,7 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
 		await expect(current!.controller.submit('Too terse')).rejects.toThrow('500');
 		expect(show).not.toHaveBeenCalled();
-		expect(current!.failures).toEqual([[null, REASON]]);
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ error: REASON, toast: undefined });
 		expect(current!.controller.draft?.error).toBe(REASON);
 	});
 
@@ -382,9 +379,19 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		end();
 		await expect(posting).rejects.toThrow('500');
 		expect(show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
-		expect(current!.failures).toEqual([['toast', REASON]]);
-		open();
-		expect(current!.controller.draft).toMatchObject({ body: 'Too terse', error: REASON });
+		// The kept draft holds the toast that told it.
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ error: REASON, toast: 'toast' });
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			open();
+			expect(current!.controller.draft).toMatchObject({ body: 'Too terse', error: REASON });
+			// Its box on screen again says why, so the toast goes: the reason is told in one place.
+			composerOnScreen();
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+			expect(keptCommentDrafts.get(keyOf('one'))?.toast).toBeUndefined();
+		} finally {
+			dismiss.mockRestore();
+		}
 	});
 
 	it('in the composer opened again from the kept draft while it posted, when that one is on screen', async () => {

@@ -106,7 +106,7 @@ describe('image comments', () => {
 		const { comments } = controller();
 		await comments.draw(BOX, rect);
 		await expect(comments.submit('Too dark')).rejects.toThrow('Offline');
-		expect(mocks.show).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+		expect(mocks.show).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
 		expect(comments.draftRegion).toEqual(BOX);
 	});
@@ -330,7 +330,7 @@ describe('a typed image comment is never lost', () => {
 });
 
 describe('a failed image comment says why in one place, decided as it fails', () => {
-	const REASON = "Couldn't post the comment — try again";
+	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
 	/** The image's comment box, mounted on screen (CommentComposer `use:showsDraft`, keyed by `imageDraftKey`). */
 	const boxOnScreen = (artifact = 'image') => {
 		const node = document.createElement('div');
@@ -370,8 +370,14 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		end();
 		await expect(posting).rejects.toThrow('Offline');
 		expect(mocks.show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(keptCommentDrafts.get(imageDraftKey('image'))?.toast).toBe('toast');
+		mocks.dismiss.mockClear();
 		await comments.draw(BOX, rect);
 		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+		// The box drawn again comes on screen, saying why: the toast goes.
+		const again = boxOnScreen();
+		expect(mocks.dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		again();
 	});
 
 	it('in the box drawn again while it posted, when that box is on screen', async () => {

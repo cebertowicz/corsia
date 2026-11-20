@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
+import { get } from 'svelte/store';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { documentDraftKey, keptCommentDrafts, replyDraftKey, showsDraft } from './keptCommentDrafts.svelte';
+import { toasts } from './toast';
 
 afterEach(() => keptCommentDrafts.reset());
 
@@ -40,8 +42,8 @@ describe('a reply kept while it is typed', () => {
 		keptCommentDrafts.select(key, [4, 4]);
 		const first = keptCommentDrafts.claim(key, 'half a reply', tags);
 		expect(first.again).toBe(false);
-		keptCommentDrafts.fail(key, 'half a reply', tags, 'Couldn’t post the comment — try again');
-		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'half a reply', error: 'Couldn’t post the comment — try again', clientId: first.clientId, selection: [4, 4] });
+		keptCommentDrafts.fail(key, 'half a reply', tags, 'Couldn’t post the comment. Your draft is kept. Try again.');
+		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'half a reply', error: 'Couldn’t post the comment. Your draft is kept. Try again.', clientId: first.clientId, selection: [4, 4] });
 		keptCommentDrafts.clearError(key);
 		expect(keptCommentDrafts.claim(key, 'half a reply', tags)).toEqual({ clientId: first.clientId, again: true });
 		// Its earlier version was stored under that id: the changes post as a new reply, under a fresh id.
@@ -201,5 +203,110 @@ describe('a box that shows a draft, read once when a post fails', () => {
 	it('registers nothing for a box with no key', () => {
 		showsDraft(box(inView()), '');
 		expect(keptCommentDrafts.onScreen('')).toBe(false);
+	});
+});
+
+describe('the toast that told a failure while the draft’s box was not on screen', () => {
+	const box = (rect: () => DOMRect) => {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = rect;
+		return node;
+	};
+	const inView = () => new DOMRect(20, 100, 300, 80);
+	const below = () => new DOMRect(20, window.innerHeight + 10, 300, 80);
+	const key = replyDraftKey(scope, 'comment-1');
+	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
+	const up = (id: string) => get(toasts).some((toast) => toast.id === id);
+	/** A draft whose post failed with no box on screen, so a toast told it. */
+	function failedAway(): string {
+		const tags = createMentionSelection();
+		keptCommentDrafts.keepReply(key, 'half a reply', tags);
+		keptCommentDrafts.claim(key, 'half a reply', tags);
+		keptCommentDrafts.fail(key, 'half a reply', tags, REASON);
+		const id = toasts.show(REASON, 'error');
+		keptCommentDrafts.toast(key, id);
+		return id;
+	}
+	afterEach(() => { for (const toast of get(toasts)) toasts.dismiss(toast.id); vi.unstubAllGlobals(); });
+
+	it('goes once the draft’s own box comes on screen, which says why instead; the reason stays with the draft', () => {
+		const id = failedAway();
+		expect(up(id)).toBe(true);
+		// Another draft's box coming on screen leaves it.
+		keptCommentDrafts.shown(replyDraftKey(scope, 'comment-2'), box(inView));
+		expect(up(id)).toBe(true);
+		showsDraft(box(inView), key);
+		expect(up(id)).toBe(false);
+		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'half a reply', error: REASON });
+		expect(keptCommentDrafts.get(key)?.toast).toBeUndefined();
+	});
+
+	it('stays while the box mounts off screen, and goes if the box is on screen a frame later (one that slides in)', () => {
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run));
+		const id = failedAway();
+		let rect = below;
+		keptCommentDrafts.shown(key, box(() => rect()));
+		expect(up(id)).toBe(true);
+		rect = inView;
+		for (const run of frames.splice(0)) run(0);
+		expect(up(id)).toBe(false);
+	});
+
+	it('stays for a box still off screen a frame later, or unmounted by then', () => {
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run));
+		const id = failedAway();
+		keptCommentDrafts.shown(key, box(below));
+		let rect = below;
+		const drop = keptCommentDrafts.shown(key, box(() => rect()));
+		drop();
+		rect = inView;
+		for (const run of frames.splice(0)) run(0);
+		expect(up(id)).toBe(true);
+		expect(keptCommentDrafts.get(key)?.toast).toBe(id);
+	});
+
+	it('stays for carried text with no failure of its own, whose box does not say why', () => {
+		keptCommentDrafts.keepReply(key, 'carried over', createMentionSelection());
+		const id = toasts.show('The diagram changed. Draw the box again.', 'error');
+		keptCommentDrafts.toast(key, id);
+		keptCommentDrafts.shown(key, box(inView));
+		expect(up(id)).toBe(true);
+	});
+
+	it('is replaced by a later failure’s toast, goes when a later failure is told in the box, and goes when the draft does', () => {
+		const first = failedAway();
+		// A new press keeps it up until that press ends.
+		keptCommentDrafts.clearError(key);
+		expect(keptCommentDrafts.get(key)?.toast).toBe(first);
+		keptCommentDrafts.fail(key, 'half a reply', createMentionSelection(), REASON);
+		// The store shows one ordinary toast at a time, so whether the draft let go of the first is read from its dismissals.
+		const dismiss = vi.spyOn(toasts, 'dismiss');
+		try {
+			const second = 'a toast the store no longer shows';
+			keptCommentDrafts.toast(key, second);
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith(first);
+			expect(keptCommentDrafts.get(key)?.toast).toBe(second);
+			keptCommentDrafts.toast(key, null);
+			expect(dismiss).toHaveBeenLastCalledWith(second);
+			expect(keptCommentDrafts.get(key)?.toast).toBeUndefined();
+		} finally {
+			dismiss.mockRestore();
+		}
+
+		const posted = failedAway();
+		keptCommentDrafts.posted(key, 'half a reply', []);
+		expect(up(posted)).toBe(false);
+		const edited = failedAway();
+		keptCommentDrafts.keepReply(key, 'half a reply, and more', createMentionSelection());
+		expect(keptCommentDrafts.posted(key, 'half a reply', [])).toBe(false);
+		expect(up(edited)).toBe(false);
+		const emptied = failedAway();
+		keptCommentDrafts.keepReply(key, '', createMentionSelection());
+		expect(up(emptied)).toBe(false);
+		const cancelled = failedAway();
+		keptCommentDrafts.forget(key);
+		expect(up(cancelled)).toBe(false);
 	});
 });

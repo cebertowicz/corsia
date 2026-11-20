@@ -145,7 +145,7 @@ export function createImageComments(context: {
 		const post = context.post?.(), tags = mentionSelection, draftKey = key();
 		keptCommentDrafts.clearError(draftKey);
 		draftError = undefined;
-		let id: string, failure = '';
+		let id: string, failure = '', toastId: string | null = null;
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
 		const press: ImagePress = keptCommentDrafts.claim(draftKey, text, tags, draftOrigin);
 		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
@@ -160,7 +160,7 @@ export function createImageComments(context: {
 		try {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
-				(toastId, message) => { retryToast.remember(toastId, draftKey); failure = message; },
+				(shown, message) => { toastId = shown; failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
 				// A changed diagram is told once its refresh ends (below): whether a box is left to say why depends on it.
 				(error) => isDiagramChanged(error) || inBox(),
@@ -177,19 +177,22 @@ export function createImageComments(context: {
 				replacingDraft = true;
 				ui.close();
 				boxMode = true;
-				retryToast.remember(toasts.show(failure, 'error'), draftKey);
+				// The carried text holds the toast: the box drawn next on the new diagram does not say why, so it stays up.
+				keptCommentDrafts.toast(draftKey, null);
+				keptCommentDrafts.toast(key(), toasts.show(failure, 'error'));
 			} else if (failure) {
 				const held = now();
 				keptCommentDrafts.fail(draftKey, held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
 				// A changed diagram that could not be redrawn leaves the box open: told in it when it is on screen, else in a toast.
-				if (changed && !inBox()) retryToast.remember(toasts.show(failure, 'error'), draftKey);
+				// The draft holds its toast until its box comes on screen to say why, or it is posted.
+				keptCommentDrafts.toast(draftKey, changed && !inBox() ? toasts.show(failure, 'error') : toastId);
 				// The box showing this draft says why, never a box on another image.
 				if (showsThis()) draftError = failure;
 			}
 			throw error;
 		}
-		retryToast.dismissAfterSuccess(draftKey);
-		// Text or tags changed since the press stay kept, with a fresh id for their own post.
+		// Text or tags changed since the press stay kept, with a fresh id for their own post. Either way a toast that told an
+		// earlier press failed goes.
 		const stored = keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
 		context.onCreated?.();
 		// The box that pressed closes. A box drawn meanwhile is that draft too once what it shows is stored, and closes the

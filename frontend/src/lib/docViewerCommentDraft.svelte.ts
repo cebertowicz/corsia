@@ -11,7 +11,7 @@ import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 import { plainErrorText } from '$lib/plainError';
-import { isNotCommentable, submitDocumentComment } from '$lib/docViewerOperations';
+import { isNotCommentable, POST_FAILED, submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
 export type ViewerSelection = SelectionOffer | null;
@@ -25,8 +25,6 @@ type Context = {
 	text: () => string;
 	isOpen: () => boolean;
 	ensureArtifactId: () => Promise<string | null>;
-	/** A post failed; `id` is its toast, or null when the open box says why instead. */
-	onFailure: (id: string | null, message: string) => void;
 	onStart: (anchor: CommentAnchor) => void;
 	onClose: () => void;
 	/** True while a posted comment may still get its first drawn mark; false once it is drawn, cannot be placed (not_placed, orphaned) or is gone. */
@@ -41,7 +39,7 @@ export function liveFailureMessage(error: unknown): string {
 	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
 	if (error.name === 'PostTimeoutError') return "We couldn't confirm your comment was posted. Check the comments before posting again. Your draft is kept.";
 	// A lost connection (fetch's own TypeError text) and a server error ("500 <body>") carry wire text, not words for the reader.
-	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return "Couldn't post the comment — try again";
+	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
 	if (/^\d{3}\b/.test(error.message)) return refusalMessage(error.message);
 	return error.message;
 }
@@ -188,7 +186,8 @@ export function createViewerCommentDraft(context: Context) {
 			// The box showing this draft says why: the one that pressed, or one opened from the kept draft since it closed.
 			// Never a box showing another draft: its reason would tell of the wrong post.
 			commentDraft.update(value => value && value.key === key ? { ...value, error: message } : value);
-			context.onFailure(toastId, message);
+			// The draft holds the toast, if one was shown, until its box comes on screen to say why or the draft is posted.
+			keptCommentDrafts.toast(key, toastId);
 		}, draft.selection ? liveFailureMessage : undefined, () => keptCommentDrafts.onScreen(key)));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
 		// or tags changed since the press (in this composer, or one opened after it closed) stay, with a fresh id for their own post.

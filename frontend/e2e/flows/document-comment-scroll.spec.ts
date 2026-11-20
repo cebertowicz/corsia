@@ -152,8 +152,8 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		: route.fallback());
 	await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 	// The composer is on screen as the save fails, so it says why there, and no toast says it again.
-	await expect(page.locator('.composer [role="alert"]').filter({ hasText: "Couldn't post the comment — try again" })).toBeVisible();
-	await expect(page.locator('.toast').filter({ hasText: "Couldn't post the comment" })).toHaveCount(0);
+	await expect(page.locator('.composer [role="alert"]').filter({ hasText: 'Couldn’t post the comment. Your draft is kept. Try again.' })).toBeVisible();
+	await expect(page.locator('.toast').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
 	await page.unroute(commentsUrl);
 	const failed = await readerPosition();
 	expect(Math.abs(failed.line! - before.line!), `failed save moved the target line from y=${before.line} to y=${failed.line}`).toBeLessThanOrEqual(1);
@@ -171,7 +171,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	const submitted = await readerPosition();
 	await expect(page.getByText('Preserve this viewport.')).toBeVisible();
 	await expect(targetLine.locator('.cm-comment-anchor'), 'the saved comment must anchor on the selected line').toHaveCount(1);
-	await expect(page.getByText("Couldn't post the comment — try again"), 'a successful retry must leave no stale failure line or toast').toHaveCount(0);
+	await expect(page.getByText('Couldn’t post the comment. Your draft is kept. Try again.'), 'a successful retry must leave no stale failure line or toast').toHaveCount(0);
 	const after = await readerPosition();
 	await testInfo.attach(`comment-save-stages-${testInfo.project.name}`, { body: JSON.stringify({ before, composerOpen, failed, submitted, after }, null, 2), contentType: 'application/json' });
 	await testInfo.attach(`comment-save-${testInfo.project.name}`, { body: await page.screenshot(), contentType: 'image/png' });

@@ -234,11 +234,14 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await expect(docText(page), 'the field is gone with its conversation').toHaveCount(0);
 			wire.fail();
 			await expect(failToast(page), 'no field is on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
+			// Held up, as a pointer resting on it holds it, however long the way back takes: only the field coming back takes it away.
+			await failToast(page).dispatchEvent('mouseenter');
 			await frame(page, 'reply-away-toast');
 			await goTo(page, title);
 			const back = await openThread(page, id);
 			await expect(back, 'the text is kept').toHaveValue(DRAFT);
 			await expect(card(page, id).getByRole('alert'), 'the field says why on return').toBeVisible();
+			await expect(failToast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
 			await frame(page, 'reply-returned-reason');
 		});
 

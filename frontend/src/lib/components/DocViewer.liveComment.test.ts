@@ -373,7 +373,7 @@ it('a sibling viewer loading and unmounting cannot discard another viewer’s dr
 	}
 	expect(get(commentDraft)?.identity).toBe(draft!.identity);
 });
-const TRY_AGAIN = "Couldn't post the comment — try again";
+const TRY_AGAIN = 'Couldn’t post the comment. Your draft is kept. Try again.';
 const postFailure = (name: string) => Object.assign(new Error('request timed out after 12000ms (may have committed server-side)'), { name });
 it.each([
 	['a server error', new Error('500 synthetic comment failure'), TRY_AGAIN],

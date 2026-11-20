@@ -592,12 +592,12 @@ describe('CommentThread', () => {
 	});
 
 	it.each([false, true])('shows a reply’s failure under its field in the card’s error style (resolved: %s)', (resolved) => {
-		render(thread({ resolved }), false, { replyError: 'Couldn’t post the comment — try again' });
+		render(thread({ resolved }), false, { replyError: 'Couldn’t post the comment. Your draft is kept. Try again.' });
 		if (resolved) (host.querySelector('.ct-res-head') as HTMLElement).click();
 		flushSync();
 		const line = host.querySelector('[role="alert"]');
 		expect(line?.previousElementSibling?.querySelector('textarea'), 'the line sits right under the reply field').not.toBeNull();
-		expect(line?.textContent).toBe('Couldn’t post the comment — try again');
+		expect(line?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
 		expect(line?.classList.contains('ct-reply-error')).toBe(true);
 	});
 

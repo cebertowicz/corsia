@@ -1077,10 +1077,10 @@ describe('DocCommentSurface: a reply being typed', () => {
 	});
 
 	it('shows why it did not post under its field, and keeps the text', () => {
-		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment — try again');
+		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment. Your draft is kept. Try again.');
 		open();
 		expect(field().value).toBe('half a reply');
-		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment — try again');
+		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
 	});
 
 	it('posts under its own key, and text typed while it posted stays in the field', async () => {

@@ -9,9 +9,11 @@
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { newClientId } from './documentWire';
+import { toasts } from './toast';
 
 export type MentionSelection = ReturnType<typeof createMentionSelection>;
-export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number] };
+/** `toast`: the toast up now telling why the draft's post failed (`keptCommentDrafts.toast`), while its box is not on screen. */
+export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number]; toast?: string };
 /** The kept draft a box opened from, once Comment was pressed on it: its id, and the text and tags it held then. */
 export type DraftOrigin = { clientId: string; body: string; tags: string };
 
@@ -34,7 +36,12 @@ const cell = (key: string): Cell => {
 const kept = {
 	get: (key: string) => cell(key).draft,
 	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; },
-	delete: (key: string) => { const found = cells.get(key); if (found) found.draft = undefined; },
+	/** The draft goes, and the toast telling its failure with it: what it told of is posted, cancelled or cleared. */
+	delete: (key: string) => {
+		const found = cells.get(key);
+		if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
+		if (found) found.draft = undefined;
+	},
 };
 
 /**
@@ -47,7 +54,22 @@ function register(key: string, box: Element): () => void {
 	let found = boxes.get(key);
 	if (!found) boxes.set(key, found = new Set());
 	found.add(box);
+	// A box that slides in is laid out off screen as it mounts, so it is asked once more on the next frame.
+	if (!told(key, box) && typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { if (found.has(box)) told(key, box); });
 	return () => { found.delete(box); if (!found.size && boxes.get(key) === found) boxes.delete(key); };
+}
+/**
+ * The draft's own box is on screen: if a toast is up telling why its post failed, the box says it now (it shows the kept
+ * reason), so the toast goes and the reason is told in one place. True once the box was found on screen.
+ */
+function told(key: string, box: Element): boolean {
+	if (!onScreen(box)) return false;
+	const draft = kept.get(key);
+	if (draft?.error && draft.toast) {
+		toasts.dismiss(draft.toast);
+		kept.set(key, { ...draft, toast: undefined });
+	}
+	return true;
 }
 /** The nearest ancestor that scrolls its content, which hides what it has scrolled out of its own box. */
 function scroller(box: Element): Element | null {
@@ -94,7 +116,10 @@ export function replyDraftKey(scope: string, commentId: string): string {
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
-	/** A box showing this draft is mounted at `box` until the returned function is called (`showsDraft` calls it on unmount). */
+	/**
+	 * A box showing this draft is mounted at `box` until the returned function is called (`showsDraft` calls it on unmount).
+	 * Coming on screen with a failure toast up for the draft, it takes the toast's place (`toast`).
+	 */
 	shown(key: string, box: Element): () => void { return register(key, box); },
 	/** A box showing this draft is on the page and on screen now: one read at the moment of asking, nothing observed. */
 	onScreen(key: string): boolean {
@@ -125,11 +150,22 @@ export const keptCommentDrafts = {
 	 */
 	fail(key: string, body: string, mentionSelection: MentionSelection, error: string, freshId = false): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection });
+		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast });
 	},
+	/**
+	 * The toast telling why the draft's post failed (`id`), or none because its box says why (null). The draft holds it
+	 * until the post succeeds, the draft goes, a later failure replaces it, or the draft's box comes on screen (`shown`):
+	 * an earlier one is dismissed, so a failure is never told twice. With no draft kept, there is nothing to hold it.
+	 */
+	toast(key: string, id: string | null): void {
+		const prior = key ? kept.get(key) : undefined;
+		if (prior?.toast && prior.toast !== id) toasts.dismiss(prior.toast);
+		if (prior) kept.set(key, { ...prior, toast: id ?? undefined });
+	},
+	/** A new press: the reason goes from the box, and its toast stays until that press ends one way or the other. */
 	clearError(key: string): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection });
+		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast });
 	},
 	/** What a box opening from this draft carries with it: the draft's id once Comment was pressed, with the text and tags it held. */
 	origin(key: string): DraftOrigin | undefined {
@@ -165,6 +201,7 @@ export const keptCommentDrafts = {
 		const prior = key ? kept.get(key) : undefined;
 		if (!prior) return false;
 		if (prior.body.trim() === sent.trim() && sameTags(prior.mentionSelection, prior.body, sentTags)) { kept.delete(key); return true; }
+		if (prior.toast) toasts.dismiss(prior.toast);
 		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection });
 		return false;
 	},

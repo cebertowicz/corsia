@@ -54,9 +54,9 @@ describe('comment submission failure delivery', () => {
 		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		try {
 			await expect(submitDocumentComment(async () => { throw error; }, rememberFailureToast)).rejects.toBe(error);
-			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 			// The composer gets the toast to dismiss on a later success, and the reason to show beside its text.
-			expect(rememberFailureToast).toHaveBeenCalledWith('toast', "Couldn't post the comment — try again");
+			expect(rememberFailureToast).toHaveBeenCalledWith('toast', 'Couldn’t post the comment. Your draft is kept. Try again.');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -69,7 +69,7 @@ describe('comment submission failure delivery', () => {
 		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		try {
 			await expect(submitDocumentComment(async () => { throw error; })).rejects.toBe(error);
-			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -131,7 +131,7 @@ describe('comment submission failure delivery', () => {
 			const other = new RequestRefused('409 {"detail":"changed"}', null);
 			vi.mocked(addReply).mockRejectedValueOnce(other);
 			await expect(createThreadActions(() => 'artifact', commentCreated).reply('root', 'My reply')).rejects.toBe(other);
-			expect(report).toHaveBeenLastCalledWith("Couldn't post the comment — try again", 'error');
+			expect(report).toHaveBeenLastCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -169,7 +169,7 @@ describe('comment submission failure delivery', () => {
 			await expect(submitDocumentComment(async () => { throw error; }, failed, undefined, inBox)).rejects.toBe(error);
 			expect(inBox).toHaveBeenCalledWith(error);
 			expect(report).not.toHaveBeenCalled();
-			expect(failed).toHaveBeenCalledWith(null, "Couldn't post the comment — try again");
+			expect(failed).toHaveBeenCalledWith(null, 'Couldn’t post the comment. Your draft is kept. Try again.');
 		} finally { report.mockRestore(); }
 	});
 
@@ -178,8 +178,8 @@ describe('comment submission failure delivery', () => {
 		const failed = vi.fn();
 		try {
 			await expect(submitDocumentComment(async () => { throw new Error('offline'); }, failed, undefined, () => false)).rejects.toThrow('offline');
-			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
-			expect(failed).toHaveBeenCalledWith('toast', "Couldn't post the comment — try again");
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+			expect(failed).toHaveBeenCalledWith('toast', 'Couldn’t post the comment. Your draft is kept. Try again.');
 		} finally { report.mockRestore(); }
 	});
 
@@ -248,7 +248,7 @@ describe('a reply kept until it posts', () => {
 			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
 			const first = vi.mocked(addReply).mock.calls[0];
 			expect(first[8]).toBe(false);
-			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: "Couldn't post the comment — try again", clientId: first[7] });
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: 'Couldn’t post the comment. Your draft is kept. Try again.', clientId: first[7] });
 			await actions.reply('root', 'My reply', [], [], key);
 			const retry = vi.mocked(addReply).mock.calls[1];
 			expect(retry[7]).toBe(first[7]);
@@ -309,24 +309,31 @@ describe('a reply kept until it posts', () => {
 			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
 			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
 			expect(toasts.show).not.toHaveBeenCalled();
-			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: "Couldn't post the comment — try again" });
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: 'Couldn’t post the comment. Your draft is kept. Try again.' });
 		} finally { drop(); restore(); }
 	});
 
 	it.each([
 		['its card was closed while it posted', null],
 		['its field was scrolled out of the window', new DOMRect(20, -400, 300, 80)],
-	])('shows the toast when %s, and keeps the reason for the field that shows it next', async (_name, rect) => {
+	])('shows the toast when %s, keeps the reason for the field that shows it next, and the toast goes once that field is on screen', async (_name, rect) => {
 		const restore = quiet();
 		const drop = rect ? mountBox(key, rect) : () => {};
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
 		try {
 			const actions = createThreadActions(() => 'artifact', vi.fn());
 			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
 			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
 			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
-			expect(toasts.show).toHaveBeenCalledExactlyOnceWith("Couldn't post the comment — try again", 'error');
-			expect(keptCommentDrafts.get(key)?.error).toBe("Couldn't post the comment — try again");
-		} finally { drop(); restore(); }
+			expect(toasts.show).toHaveBeenCalledExactlyOnceWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+			expect(keptCommentDrafts.get(key)).toMatchObject({ error: 'Couldn’t post the comment. Your draft is kept. Try again.', toast: 'toast' });
+			expect(dismiss).not.toHaveBeenCalled();
+			// The field comes back on screen, saying why: the toast goes.
+			const back = mountBox(key);
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+			expect(keptCommentDrafts.get(key)?.toast).toBeUndefined();
+			back();
+		} finally { drop(); dismiss.mockRestore(); restore(); }
 	});
 
 	it('dismisses its failure toast when a later press posts, as a new comment’s does', async () => {

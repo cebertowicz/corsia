@@ -51,7 +51,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this draft');
 			expect(addComment).not.toHaveBeenCalled();
 		} finally {
@@ -71,7 +71,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this refused draft');
 			expect(post).toHaveBeenCalledOnce();
 		} finally {

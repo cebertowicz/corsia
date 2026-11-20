@@ -35,7 +35,13 @@ function tagRefusal(error: unknown): string | undefined {
 	return error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined;
 }
 
-// The viewer retains retry state; the composer needs the rejection to keep its draft, and `message` to say why in it.
+/**
+ * What a comment or reply on a document or an image says when its post fails for no reason it can name. Its box keeps the
+ * text, and once the box is off screen this toast is the only word of it, so it says the draft is kept.
+ */
+export const POST_FAILED = 'Couldn’t post the comment. Your draft is kept. Try again.';
+
+// The kept draft holds the failure's toast (`keptCommentDrafts.toast`); the composer needs the rejection to keep its draft, and `message` to say why in it.
 // A failure says why in one place, decided as it fails: `inBox` answers whether a box that shows the reason is on screen
 // (`keptCommentDrafts.onScreen`), and then no toast is shown (`toastId` null). Without one (a pin move) it is always a toast.
 export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string | null, message: string) => void, failureMessage?: (error: unknown) => string | undefined, inBox?: (error: unknown) => boolean): Promise<T> {
@@ -47,7 +53,7 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 		// A refusal with a named reason has the same cause on every surface, so its message comes before the surface's own.
 		// The not-commentable sentence is the server's, shown as given: it is never the surface's "try again".
 		// An earlier version stored under the draft's id is shown, so its sentence says the changes are kept, on every surface.
-		const message = (error instanceof EarlierVersionPosted ? error.message : undefined) ?? notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again";
+		const message = (error instanceof EarlierVersionPosted ? error.message : undefined) ?? notCommentableMessage(error) ?? tagRefusal(error) ?? failureMessage?.(error) ?? POST_FAILED;
 		const toastId = inBox?.(error) ? null : toasts.show(message, 'error');
 		onFailure?.(toastId, message);
 		throw error;
@@ -62,9 +68,9 @@ export async function postDocumentComment<T>(ensureArtifactId: () => Promise<str
 }
 
 /**
- * Each viewer owns its failed-comment toasts so one retry cannot dismiss another viewer's error; `key` keeps one per draft
- * (a reply's `replyDraftKey`). A later failure replaces the draft's toast, or dismisses it when its box says why instead
- * (`id` null), so a failure is never told twice; a success dismisses it.
+ * Failure toasts for an action with no kept draft (an image's pin move), owned by its viewer so one retry cannot dismiss
+ * another viewer's error; `key` keeps one per action. A later failure replaces its toast; a success dismisses it. A draft's
+ * failure toast is held by the draft itself (`keptCommentDrafts.toast`).
  */
 export function createCommentRetryToast(toastStore: { dismiss: (id: string) => void }) {
 	const shown = new Map<string, string>();
@@ -152,7 +158,6 @@ export function reloadDocumentFeedback(
 
 /** Reply, resolve and agree on the open document's threads; a reply also tells the feedback status a comment arrived. */
 export function createThreadActions(artifactId: () => string | null, commentCreated: () => void, threadId: () => string | null = () => null) {
-	const retryToast = createCommentRetryToast(toasts);
 	return {
 		/**
 		 * Post a reply kept under `draftKey` (`replyDraftKey`): every press posts under the draft's one id, a failure keeps
@@ -164,19 +169,20 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 			keptCommentDrafts.clearError(draftKey);
 			const kept = keptCommentDrafts.get(draftKey);
 			const press = keptCommentDrafts.claim(draftKey, kept?.body ?? text, kept?.mentionSelection ?? createMentionSelection(text));
-			let failure = '';
+			let failure = '', toastId: string | null = null;
 			try {
 				await submitDocumentComment(
 					() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions, press.clientId, press.again),
-					(toastId, message) => { retryToast.remember(toastId, draftKey); failure = message; },
+					(shown, message) => { toastId = shown; failure = message; },
 					undefined, () => keptCommentDrafts.onScreen(draftKey),
 				);
 			} catch (error) {
 				const now = keptCommentDrafts.get(draftKey);
 				if (now && failure) keptCommentDrafts.fail(draftKey, now.body, now.mentionSelection, failure, error instanceof EarlierVersionPosted);
+				if (failure) keptCommentDrafts.toast(draftKey, toastId);
 				throw error;
 			}
-			retryToast.dismissAfterSuccess(draftKey);
+			// Posted: the draft goes with any toast that told an earlier press failed.
 			keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
 			commentCreated();
 		},
