@@ -414,12 +414,12 @@ describe('DocViewerStatus toolbar', () => {
 		// Every combination of the sources; a third source is a new required field of DetailsNeeds, so these lines stop
 		// compiling until it names both the flag and the words the panel calls it by.
 		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>
-			[false, true].map((hiddenAsk) => ({ overdue, hiddenAsk })));
-		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?' };
+			[false, true].flatMap((hiddenAsk) => [false, true].map((hiddenTask) => ({ overdue, hiddenAsk, hiddenTask }))));
+		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?', hiddenTask: '2 comments, 2 suggestions to review' };
 		for (const needs of all) {
 			const up = detailsNeedsUp(needs, words);
-			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk].filter(Boolean).length);
-			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null].filter((word): word is string => !!word));
+			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk, needs.hiddenTask].filter(Boolean).length);
+			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null, needs.hiddenTask ? words.hiddenTask : null].filter((word): word is string => !!word));
 		}
 	});
 });

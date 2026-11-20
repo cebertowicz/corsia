@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { IconButton } from './ui';
+	import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
+	import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { menuPop } from '$lib/popoverMotion';
 	import { COMMENT_FILTERS as FILTERS } from '$lib/docCommentDrawer';
 	/** The comment list's heading in the sheet, the popover and the image drawer, and the resolved list's: its count, an image's Filter, and its close. */
-	let { title = 'Comments', closeLabel = 'Close comments', count, filtered, filter = $bindable('all'), filterOpen = $bindable(false), onClose }: {
+	let { commentTaskBar, title = 'Comments', closeLabel = 'Close comments', count, filtered, filter = $bindable('all'), filterOpen = $bindable(false), onClose }: {
+		commentTaskBar?: ReviewBarState;
 		title?: string;
 		closeLabel?: string;
 		count: string;
@@ -21,10 +24,11 @@
 	<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
 	{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 </div>{/if}<IconButton ariaLabel={closeLabel} variant="ghost" size="sm" onclick={onClose}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
+{#if commentTaskBar}<CommentTaskDismiss bar={commentTaskBar} />{/if}
 
 <style>
 	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 0 var(--space-1) var(--space-1); }
-	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+	.drawer-heading h2 { margin: 0; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
 	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 	/* The compact menu keeps the filter choices out of the thread list. */
 	.drawer-tools { display: inline-flex; align-items: center; gap: var(--space-1); }

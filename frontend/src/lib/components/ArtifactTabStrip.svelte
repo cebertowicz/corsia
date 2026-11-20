@@ -3,6 +3,7 @@
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 	import { documentBar } from '$lib/stores/documentBar';
+	import MiddleName from './MiddleName.svelte';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
 		tabs: ArtifactTab[];
@@ -16,6 +17,27 @@
 	} = $props();
 
 	let stripEl = $state<HTMLElement | undefined>(undefined);
+	let tabFloor = $state(0);
+	const extensionOf = (name: string) => {
+		const extension = /\.[A-Za-z0-9]{1,5}$/.exec(name)?.[0] ?? '';
+		return name.slice(-Math.max(4, extension.length));
+	};
+	$effect(() => {
+		const name = tabs.find((tab) => tab.instanceId === activeKey)?.title;
+		const el = stripEl;
+		if (!name || !el) { tabFloor = 0; return; }
+		const measure = () => {
+			const title = el.querySelector<HTMLElement>('.tab-wrap.active .tab-title');
+			const tab = title?.closest<HTMLElement>('.tab-wrap');
+			const context = document.createElement('canvas').getContext('2d');
+			if (!title || !tab || !context) return;
+			context.font = getComputedStyle(title).font;
+			const floor = name.length > 6 ? `${name[0]}…${name.slice(-5)}` : name;
+			tabFloor = Math.ceil(context.measureText(floor).width + tab.getBoundingClientRect().width - title.getBoundingClientRect().width);
+		};
+		void tick().then(measure);
+		void document.fonts?.ready.then(measure);
+	});
 	let startHidden = $state(false);
 	let endHidden = $state(false);
 
@@ -79,7 +101,7 @@
 	}
 </script>
 
-<div class="strip" data-document-bar-row>
+<div class="strip" data-document-bar-row style:--tab-floor={`${tabFloor}px`}>
 	<div
 		class="tabs"
 		class:start-hidden={startHidden}
@@ -117,7 +139,7 @@
 						{:else}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 						{/if}
-					<span class="tab-title" title={t.title}>{t.title}</span>
+					<span class="tab-title" title={t.title}><MiddleName name={t.title} tail={extensionOf(t.title)} /></span>
 					{#if t.status === 'error'}
 						<span class="tab-err" title="Couldn't load this document">!</span>
 					{:else if t.status === 'unavailable'}
@@ -137,12 +159,14 @@
 		{/each}
 	</div>
 	<!-- The open document's Comments and Details sit after the tabs, before Collapse. -->
-	{#if $documentBar}<span class="doc-tools">{@render $documentBar.tools()}</span>{/if}
-	{#if onCollapse}
-		<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-		</button>
-	{/if}
+	<div class="end-controls">
+		{#if $documentBar}<span class="doc-tools">{@render $documentBar.tools()}</span>{/if}
+		{#if onCollapse}
+			<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+			</button>
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -157,7 +181,7 @@
 		container-type: inline-size; container-name: strip;
 	}
 	.tabs {
-		display: flex; align-items: stretch; flex: 1; min-width: 0;
+		display: flex; align-items: stretch; flex: 1; min-width: min(var(--tab-floor), 100%);
 		overflow-x: auto; scrollbar-width: none;
 		gap: 2px;
 	}
@@ -172,7 +196,7 @@
 	/* A tab is a pill in the transcript's pill geometry (32 px, fully round); wide enough for a typical file name. */
 	.tab-wrap {
 		display: flex; align-items: center; flex-shrink: 0;
-		max-width: 260px; height: 32px; margin: auto 0; border-radius: var(--radius-pill);
+		max-width: min(260px, 100%); height: 32px; margin: auto 0; border-radius: var(--radius-pill);
 		color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-medium);
 	}
 	/* Hover eases in; the active mark moves in the same frame as the content it labels, never fading behind it. */
@@ -203,6 +227,7 @@
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }
 
+	.end-controls { display: flex; align-items: center; flex: none; }
 	.doc-tools { display: inline-flex; flex: none; padding-inline: var(--space-2); }
 	/* The thresholds are in rem, not px: what this row needs is set by its text, so it has to move with the reader's
 	 * font size. 35.5rem = 568px, 27rem = 432px at the default 16px root. */

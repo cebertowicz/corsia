@@ -5,6 +5,8 @@
 	import MiddleName from './MiddleName.svelte';
 	import type { DocViewerStatusProps } from './docViewerStatusProps';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
+	import { isCommentTask, personStepAsk } from './comments/commentTask';
 	import { Button } from '$lib/components/ui';
 	import Spinner from './ui/Spinner.svelte';
 	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
@@ -22,6 +24,7 @@
 	let {
 		presence, touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
 		reviewBar,
+		commentTaskBar,
 		ask = null,
 		commentsOpen = false,
 		commentsLoading = false,
@@ -77,12 +80,15 @@
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
-	 * entry, so the control says what is waiting rather than how many: Overdue, and an ask whose card is hidden, an ask
-	 * with no reason text named by its asker rather than leaving an empty leg. The amber count is this list's length, so
-	 * the number and the name can't drift apart. */
+	 * entry, so the control says what is waiting rather than how many: Overdue, an ask whose card is hidden, an ask
+	 * with no reason text named by its asker rather than leaving an empty leg, and comments waiting for your decision
+	 * while Details is closed, where its Dismiss all row is not yet on screen. The amber count is this list's length,
+	 * so the number and the name can't drift apart. */
+	let panelOpen = $state(false);
+	const taskStep = $derived(commentTaskBar && isCommentTask(commentTaskBar.read?.person_step) ? commentTaskBar.read?.person_step : null);
 	const needsUp = $derived(detailsNeedsUp(
-		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard },
-		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '' }));
+		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard, hiddenTask: !!taskStep && !panelOpen },
+		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '', hiddenTask: taskStep ? personStepAsk(taskStep) : '' }));
 	const needsCount = $derived(needsUp.length);
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
@@ -110,7 +116,6 @@
 
 	let headerEl = $state<HTMLElement | null>(null);
 	let panelEl = $state<HTMLElement | null>(null);
-	let panelOpen = $state(false);
 	let panelMax = $state<number | null>(null);
 	/** The open panel would reach down over the ask (its card on a phone, its row in the header), so the ask steps aside until it closes; Details then carries it. */
 	let askCovered = $state(false);
@@ -285,6 +290,7 @@
 		{#if artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
 			<span class="p-label-row">Review</span>
 			{#if artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
+			{#if commentTaskBar && isCommentTask(commentTaskBar.read?.person_step)}<div class="p-row"><CommentTaskDismiss bar={commentTaskBar} menu /></div>{/if}
 			{#if historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
 		</div>{/if}
 		{#if paneHere}<div class="p-section"><button type="button" class="p-row" onclick={() => closeThen(() => paneOpen.set(true))}>Show panel</button></div>{/if}
@@ -308,6 +314,7 @@
 	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); background: var(--amber-bg); font-weight: var(--fw-medium); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
+	:global(.strip[data-document-bar-row]) .bar-tools { gap: var(--space-1); }
 	@media (max-width: 768px) {
 		:global(.shell-header) .bar-tools { gap: var(--space-1); }
 		:global(.shell-header) .bar-new-word { display: none; }

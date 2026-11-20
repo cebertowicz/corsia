@@ -1,4 +1,4 @@
-import { backToChat } from '../support/documentBar';
+import { backToChat, openDetails, closeDetails, detailsPanel } from '../support/documentBar';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { shoot, useScheme } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
 
-/** The task's review bar (with Dismiss all) is tucked away while a comment sheet is up: a touch at the centre of `target` lands on it, never on the bar over it. */
+/** A touch at the centre of a comment control lands on it, never on a review card over it. */
 async function expectTouchLands(target: Locator, what: string) {
 	await target.scrollIntoViewIfNeeded();
 	const box = await target.boundingBox();
@@ -80,13 +80,15 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 		await press(row.getByRole('button').first());
 		if (narrow) await press(page.getByRole('button', { name: 'Done', exact: true }));
 	};
-	const bar = page.locator('.review-bar.ask[aria-label="Task for you"]');
+	const panel = detailsPanel(page);
+	const taskAction = panel.getByRole('button', { name: 'Dismiss all', exact: true });
+	const taskGroup = panel.locator('.task-dismiss .task-summary');
 	const frame = (name: string) => shoot(page, testInfo, `${width}-press-${name}`, true);
-	const log = async (label: string) => console.log(`PRESS ${width} ${label}: bar=${JSON.stringify(await bar.first().innerText({ timeout: 1000 }).catch(() => 'gone'))} row=${JSON.stringify(width > 1024 ? await row.innerText({ timeout: 1000 }).catch(() => 'gone') : 'n/a')}`);
-	// The count the person sees falls: the bar in the document always, and the plan row where it shows beside it.
+	const log = async (label: string) => console.log(`PRESS ${width} ${label}: task=${JSON.stringify(await taskAction.textContent({ timeout: 1000 }).catch(() => 'gone'))} row=${JSON.stringify(width > 1024 ? await row.innerText({ timeout: 1000 }).catch(() => 'gone') : 'n/a')}`);
+	// Details stays mounted while the comment sheet is open; its count and the plan row follow each gesture.
 	const expectCount = async (gesture: string, text: string | null, name: string) => {
-		if (text) await expect(bar).toContainText(`${text} to review`);
-		else await expect(bar).toHaveCount(0);
+		if (text) await expect(taskGroup).toHaveText(`${text} to review`);
+		else await expect(taskAction).toHaveCount(0);
 		if (width > 1024) {
 			if (text) await expect(row.locator('.count-text')).toHaveText(text);
 			else await expect(row).toHaveCount(0);
@@ -98,15 +100,17 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await openPlan();
 	await expect(row).toContainText('2 comments, 2 suggestions');
 	await openFromRow();
-	// The document opens with the task's bar: what waits, and only Dismiss all. No Done, no Won't do.
-	await expect(bar).toContainText('2 comments, 2 suggestions to review');
+	// Details shows what waits and Dismiss all. No Done, no Won't do.
+	await openDetails(page);
+	await expect(taskGroup).toHaveText('2 comments, 2 suggestions to review');
 	if (narrow) {
 		await expect(backToChat(page)).toHaveAccessibleName('Chat · Needs you');
 		await expect(page.getByTestId('back-needs-you-dot')).toBeVisible();
 	}
-	await expect(bar.getByRole('button', { name: 'Done', exact: true })).toHaveCount(0);
-	await expect(bar.getByRole('button', { name: 'Won’t do' })).toHaveCount(0);
-	await expect(bar.getByRole('button', { name: 'Dismiss all' })).toBeVisible();
+	await expect(panel.getByRole('button', { name: 'Done', exact: true })).toHaveCount(0);
+	await expect(panel.getByRole('button', { name: 'Won’t do' })).toHaveCount(0);
+	await expect(taskAction).toBeVisible();
+	await closeDetails(page);
 	await log('opened from the row');
 	await frame('1-open');
 
@@ -118,7 +122,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	console.log(`PRESS ${width} cards: ${JSON.stringify(await cards.evaluateAll((all) => all.map((card) => [card.getAttribute('aria-label'), (card as HTMLElement).innerText.slice(0, 80)])))}`);
 	console.log(`PRESS ${width} sheet buttons: ${JSON.stringify(await page.getByRole('button').evaluateAll((all) => all.map((b) => (b.getAttribute('aria-label') ?? (b as HTMLElement).innerText).slice(0, 40)).filter(Boolean)))}`);
 	await page.waitForTimeout(3000);
-	await expect(bar).toContainText('2 comments, 2 suggestions to review');
+	await expect(taskGroup).toHaveText('2 comments, 2 suggestions to review');
 	await log('list shown 3 s');
 	await frame('2-list');
 
@@ -177,11 +181,13 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await carrier('resurfaced after read');
 	await frame('8-resurfaced-after-read');
 	if (!narrow) {
-		// The document comes from its tab; Dismiss all is in its bar.
+		// The document comes from its tab; Dismiss all is in Details.
 		await press(page.getByRole('tab', { name: 'Launch plan.md' }));
-		await expect(bar).toContainText('1 comment to review');
-		await press(bar.getByRole('button', { name: 'Dismiss all' }));
-		await expect(bar).toHaveCount(0);
+		await openDetails(page);
+		await expect(taskGroup).toHaveText('1 comment to review');
+		await press(taskAction);
+		await expect(taskAction).toHaveCount(0);
+		await closeDetails(page);
 	} else {
 		// A phone's chat has no tab to the document, so Dismiss all comes from the counted row's menu (long-press or right-click).
 		const target = counted.first();
@@ -250,8 +256,11 @@ test.describe('comment task highlight taps', () => {
 		await expect(row.locator('.count-text')).toHaveText('3 comments');
 		await row.getByRole('button').first().tap();
 		await page.getByRole('button', { name: 'Done', exact: true }).tap();
-		const bar = page.locator('.review-bar.ask[aria-label="Task for you"]');
-		await expect(bar).toContainText('3 comments to review');
+		const taskAction = detailsPanel(page).getByRole('button', { name: 'Dismiss all', exact: true });
+		const taskGroup = detailsPanel(page).locator('.task-dismiss .task-summary');
+		await openDetails(page);
+		await expect(taskGroup).toHaveText('3 comments to review');
+		await closeDetails(page);
 
 		const sheet = page.locator('.drawer-panel');
 		const light = async (name: string) => {
@@ -269,8 +278,8 @@ test.describe('comment task highlight taps', () => {
 			await expect(sheet.getByText(body), `the tap on "${quote}" opens its card`).toBeVisible();
 			await expectTouchLands(sheet.getByText(body).first(), `the card text "${body}" of a thread opened from a highlight`);
 			await expectTouchLands(sheet.getByPlaceholder('Reply…').first(), `the reply box of the thread opened from "${quote}"`);
-			await expect(bar).toContainText(`${after} to review`);
-			console.log(`TAP "${quote}": bar=${JSON.stringify(await bar.first().innerText())}`);
+			await expect(taskGroup).toHaveText(`${after} to review`);
+			console.log(`TAP "${quote}": task=${JSON.stringify(await taskAction.textContent())}`);
 			await light(`${name}-after`);
 			await sheet.getByRole('button', { name: /^Close( comments)?$/ }).tap();
 			await expect(sheet).toHaveCount(0);
