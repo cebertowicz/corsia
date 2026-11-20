@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { encodeUpdate, newClientId, textDigest } from './documentWire';
 import type { LiveDocumentSession } from './liveDocumentSession';
+import { DRAFT_KEPT } from './draftKept';
 
 export const SELECTION_LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
 export const SELECTION_RECONNECTED = 'The document reconnected, so this comment lost its place. Select the text again; your draft will carry over.';
@@ -31,9 +32,14 @@ export function selectionRange(selection: CommentSelection): { from: number; to:
 export const RESERVE_BUDGET_MS = 3000;
 /** After a refusal, how long a capture waits for the remote update the server already holds before it asks again. */
 export const CATCH_UP_MS = 50;
-const CHANGED = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
-const OFFLINE = 'You’re offline. Your comment draft is kept. Try again when connected.';
-const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try again.';
+/** Why a capture ended without a place for its comment; each is a reason the comment's box shows. */
+export const CAPTURE_FAILURE = {
+	changed: `The document changed before your comment could be attached. ${DRAFT_KEPT} Try again.`,
+	offline: `You’re offline. ${DRAFT_KEPT} Try again when connected.`,
+	unanswered: `Couldn’t attach your comment. ${DRAFT_KEPT} Try again.`,
+	settling: `Live updates are still settling. ${DRAFT_KEPT} Try again.`,
+} as const;
+const { changed: CHANGED, offline: OFFLINE, unanswered: UNANSWERED } = CAPTURE_FAILURE;
 /** The server already holds a comment, or another person's capture, under the id asked with (`identity_in_use`). */
 export class IdentityInUseError extends Error {
 	constructor() {
@@ -106,7 +112,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 				if (done) return;
 				if (generation !== session.textGeneration || before.localGeneration !== after.localGeneration
 					|| before.ackGeneration !== after.ackGeneration) { again(false); return; }
-				if (!session.durability.clean) { finish(undefined, new Error('Live updates are still settling. Your comment draft is kept. Try again.')); return; }
+				if (!session.durability.clean) { finish(undefined, new Error(CAPTURE_FAILURE.settling)); return; }
 				const range = selectionRange(selection);
 				if (!range) { finish(undefined, new Error(SELECTION_LOST)); return; }
 				const vector = encodeUpdate(Y.encodeStateVector(session.doc));
