@@ -168,6 +168,42 @@ test.describe('@flow:document-comments an unsent comment outlives the page', () 
 		});
 	}
 
+	test('document: a reply that fails to post on a device with no room left says both in one line under its field', async ({ page, request }, testInfo) => {
+		const document = await seedLiveDocument(request, 'drafts-full-reply', DOC);
+		const id = await seedComment(page, document);
+		await openLiveDocument(page, document);
+		// Another person's drafts fill this device's share for drafts (2,000,000 UTF-16 units) to within a few units; read at sign-in.
+		await page.evaluate((prefix) => {
+			let left = 2_000_000 - 40;
+			for (let index = 0; left > 0; index += 1) {
+				const name = `${prefix}another-person:doc-${index}`, empty = JSON.stringify({ body: '', tags: [] });
+				const body = 'x'.repeat(Math.max(0, Math.min(190_000, left - name.length - empty.length)));
+				localStorage.setItem(name, JSON.stringify({ body, tags: [] }));
+				left -= name.length + empty.length + body.length;
+			}
+		}, PREFIX);
+		await page.reload();
+		await openLiveDocument(page, document);
+		await page.route('**/api/artifacts/*/comments*', (route) => {
+			const sent = route.request();
+			if (sent.method() === 'POST' && (sent.postDataJSON() as { parent_id?: string } | null)?.parent_id === id) return route.abort('failed');
+			return route.continue();
+		});
+		const field = await openReply(page, id);
+		await field.click();
+		await field.pressSequentially('Park on Elm Street');
+		await page.locator(`[data-thread-id="${id}"]`).first().getByRole('button', { name: 'Send reply' }).click();
+		const full = 'Couldn’t post the comment. Try again. This device has no room left to keep this draft. Post it or copy it before you close CORSIA.';
+		const line = page.locator(`[data-thread-id="${id}"]`).first().locator('[role="alert"]');
+		await line.filter({ hasText: full }).waitFor({ timeout: 30_000 }).catch(() => {});
+		await frame(page, 'not-kept-reply-failed');
+		await expect(line, 'one line says why it did not post and that the device does not keep it').toHaveText(full);
+		const fits = await line.evaluate((el) => { const box = el.getBoundingClientRect(); return box.left >= 0 && box.right <= window.innerWidth && el.scrollWidth <= el.clientWidth; });
+		expect(fits, 'the line wraps inside the screen').toBe(true);
+		await expectFailureLook(page, testInfo, line, 'reply not-kept line');
+		await expect(field, 'the text stays in the field').toHaveValue('Park on Elm Street');
+	});
+
 	test('document: a comment that posted does not come back after a relaunch', async ({ page, request }) => {
 		const document = await seedLiveDocument(request, 'drafts-posted-doc', DOC);
 		await openLiveDocument(page, document);
