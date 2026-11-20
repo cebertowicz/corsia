@@ -95,6 +95,41 @@ def test_the_real_delivery_queues_one_message_for_a_repeated_turn(isolated_db, m
     assert len(rows) == 1
 
 
+def test_a_repeated_turn_with_a_new_payload_is_not_parked_or_passed_on(isolated_db, monkeypatch):
+    import events.delivery as delivery
+    import infra.conductor as conductor
+
+    mk_session("conductor", project_id="proj-1")
+    mk_session("corsia", project_id=None)
+    _agent("lane")
+    monkeypatch.setattr(
+        conductor, "get_scope_coordinator",
+        lambda scope, db=None: "corsia" if scope == WORKSPACE_SCOPE else "conductor",
+    )
+    monkeypatch.setattr(delivery, "start_idle_after_commit", lambda db, thread_id: None)
+
+    # The second call for the same Turn carries a different payload (the agent was renamed
+    # in between), which the message id alone would refuse as a different input.
+    for title in ("first name", "second name"):
+        db = get_db()
+        db.execute("UPDATE threads SET title=? WHERE id='lane'", (title,))
+        plan_liveness_terminal._tell_coordinator(db, "lane", turn_id="turn-1", error=_ERROR)
+        db.commit()
+        db.close()
+
+    db = get_db()
+    to_conductor = db.execute(
+        "SELECT content FROM messages WHERE thread_id='conductor' AND content LIKE '%will not retry%'",
+    ).fetchall()
+    to_lead = db.execute(
+        "SELECT 1 FROM messages WHERE thread_id='corsia' AND content LIKE '%will not retry%'",
+    ).fetchall()
+    parked = db.execute("SELECT reason FROM dead_letter_events").fetchall()
+    db.close()
+    assert len(to_conductor) == 1 and "first name" in to_conductor[0]["content"]
+    assert to_lead == [] and parked == []
+
+
 def test_a_project_with_no_conductor_tells_the_corsia_agent(isolated_db, told):
     told["coordinators"] = {WORKSPACE_SCOPE: "corsia"}
     _agent("lane")

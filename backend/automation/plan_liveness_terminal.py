@@ -111,6 +111,14 @@ def _tell_coordinator(connection, thread_id: str, *, turn_id: str | None, error:
     name = row["title"] or thread_id
     key = turn_id or uuid.uuid4().hex
     message_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:turn-errored:{thread_id}:{key}"))
+    # This Turn was already reported, delivered or parked: a repeat sends nothing new,
+    # even if what the agent is working on has changed since.
+    if connection.execute(
+        "SELECT 1 FROM messages WHERE id=? UNION ALL SELECT 1 FROM dead_letter_events "
+        "WHERE internal_event='agent.turn_errored' AND external_id=? LIMIT 1",
+        (message_id, message_id),
+    ).fetchone() is not None:
+        return
     summary = f"{name} ({thread_id}) stopped on an error and will not retry on its own."
     details = {"thread_id": thread_id, "error": error, "working_on": doing,
                "next": "Read it with delegate_status. A delegate_send wakes it."}
