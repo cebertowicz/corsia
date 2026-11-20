@@ -179,11 +179,92 @@ async def test_no_agent_hands_a_released_project_document_to_person(assignment_s
 
 
 @pytest.mark.asyncio
-async def test_no_agent_hands_a_project_owned_document_to_person(assignment_scope, monkeypatch):
+async def test_only_the_project_conductor_hands_a_project_owned_document_to_person(assignment_scope, monkeypatch):
+    """The project's conductor and its worker may; any other agent, here and in another project, is refused."""
+    from infra import product_events
+    from registry.shared_principals import artifact_owner
+
     scope = assignment_scope
     _one_person_account()
     path, artifact_id = _project_document(scope, owner="project:project-alpha")
-    await _assert_refused_for_everyone(scope, artifact_id, path, "project:project-alpha", monkeypatch)
+    conductor, worker, other = _with_workers(scope)
+    outsider = scope["outsider"]
+    emitted = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *a, **kw: emitted.append((a, kw)))
+    body_before, events_before = path.read_text(encoding="utf-8"), _events(scope["db"], artifact_id)
+    for actor in (other, outsider, scope["owner"]):
+        assert await _handover(artifact_id, actor) == PROJECT_REFUSAL
+    assert artifact_owner(artifact_id, db=scope["db"]) == "project:project-alpha"
+    assert _events(scope["db"], artifact_id) == events_before
+    assert emitted == []
+    result = json.loads(await _handover(artifact_id, worker))
+    assert result["new_owner_thread_id"] == "ui"
+    assert result["old_owner_thread_id"] == "project:project-alpha"
+    assert artifact_owner(artifact_id, db=scope["db"]) == "ui"
+    assert _events(scope["db"], artifact_id) > events_before
+    assert ("documents", "owner_changed") in [call[0][:2] for call in emitted]
+    assert path.read_text(encoding="utf-8") == body_before
+
+
+@pytest.mark.asyncio
+async def test_project_conductor_hands_project_document_and_events_fire(assignment_scope, monkeypatch):
+    from infra import product_events
+    from registry.shared_principals import artifact_owner
+
+    scope = assignment_scope
+    _one_person_account()
+    _path, artifact_id = _project_document(scope, owner="project:project-alpha")
+    emitted = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda c, a, **kw: emitted.append((c, a, kw["properties"])))
+    result = json.loads(await _handover(artifact_id, scope["conductor"]))
+    assert result["artifact"]
+    assert artifact_owner(artifact_id, db=scope["db"]) == "ui"
+    assert emitted == [("documents", "owner_changed", {"from": "none", "to": "person"})]
+    assert _view(artifact_id)["owner"]["label"] == "You"
+
+
+@pytest.mark.asyncio
+async def test_after_handover_agents_suggest_and_comments_follow_the_person_owned_rule(assignment_scope):
+    from registry.shared_principals import may_edit_document
+
+    scope = assignment_scope
+    _one_person_account()
+    _path, artifact_id = _project_document(scope, owner="project:project-alpha")
+    assert may_edit_document(scope["conductor"], False, owner="project:project-alpha", conductor=scope["conductor"],
+                             path_rel="context/instruction.md", db=scope["db"]).allowed
+    assert json.loads(await _handover(artifact_id, scope["conductor"]))["artifact"]
+    for actor in (scope["conductor"], scope["owner"]):
+        assert not may_edit_document(actor, False, owner="ui", conductor=scope["conductor"],
+                                     path_rel="context/instruction.md", db=scope["db"]).allowed
+    assert may_edit_document("x", True, owner="ui", conductor=scope["conductor"],
+                             path_rel="context/instruction.md", db=scope["db"]).allowed
+    # A person-owned document sends the person's comments to its supervisor, the project's conductor here,
+    # and never to the project sentinel it was handed over from.
+    from tests.test_document_owner_supervisor import _comment_recipients
+    assert _comment_recipients(artifact_id) == (scope["conductor"],)
+
+
+def test_person_hands_a_handed_over_project_document_back(assignment_scope):
+    """The person's ownership route returns it to the project's conductor."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.registry_ownership import router
+    from infra.auth import require_human_user
+    from registry.shared_principals import artifact_owner
+    from tests.test_document_owner_supervisor import PERSON
+
+    scope = assignment_scope
+    _one_person_account()
+    _path, artifact_id = _project_document(scope, owner="project:project-alpha")
+    import asyncio
+    assert json.loads(asyncio.run(_handover(artifact_id, scope["conductor"])))["artifact"]
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_human_user] = lambda: PERSON
+    back = TestClient(app).put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": scope["conductor"]})
+    assert back.status_code == 200, back.text
+    assert artifact_owner(artifact_id, db=scope["db"]) == scope["conductor"]
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 from infra import config, write_effects
 from registry import models
 from registry.document_ownership_change import OwnershipBody, apply_change, emit_ownership_events
-from registry.shared_principals import UI_PRINCIPAL, acting_owner, artifact_owner, document_project
+from registry.shared_principals import UI_PRINCIPAL, acting_owner, artifact_owner, document_project, scope_conductor
 
 
 PROJECT_DOCUMENT_REFUSAL = "Project documents stay with the project's conductor; it edits them directly."
@@ -22,13 +22,15 @@ def handover_to_person(db, routing, actor_thread_id: str, *, reason: str, causal
         return "person_error", NO_PATH
     current = artifact_owner(identity["id"], db=db)
     if current is None or current.startswith("project:"):
-        # A project's own document, or an unowned one: refused in a project, and unowned outside one nobody hands over.
+        # A project's own document, or an unowned one. Only the project's conductor, or a worker acting for it,
+        # hands a project-owned document over; nobody hands over an unowned one.
         _, project_id = document_project(artifact["path"], workspace=config.WORKSPACE, db=db)
-        return "person_error", PROJECT_DOCUMENT_REFUSAL if project_id is not None or current is not None else NOT_THE_OWNER
-    allowed = current != UI_PRINCIPAL and (
+        conductor = scope_conductor(project_id, db=db) if project_id is not None and current is not None else None
+        if conductor is None or current != f"project:{project_id}" or acting_owner(actor_thread_id, False, db=db) != conductor:
+            return "person_error", PROJECT_DOCUMENT_REFUSAL if project_id is not None or current is not None else NOT_THE_OWNER
+    elif current == UI_PRINCIPAL or not (
         actor_thread_id == current or acting_owner(actor_thread_id, False, db=db) == current
-    )
-    if not allowed:
+    ):
         return "person_error", NOT_THE_OWNER
     body = OwnershipBody(owner="user")
     actor = db.execute("SELECT user_id FROM threads WHERE id=?", (actor_thread_id,)).fetchone()
