@@ -16,7 +16,8 @@ A call hands a document to the person when it:
   ``assignee: user`` and ``instructions_artifact_id``);
 - shows the person a document (``document_open``);
 - saves an update (``post_update``), including its linked document cards;
-- drafts or updates a decision (``plan_decision``), before it is raised.
+- drafts or updates a decision (``plan_decision``), before it is raised;
+- writes or edits a comment or reply in a document (``core.attention_comment``).
 
 A refused plan call can leave matching state from an earlier call. Refusal is
 therefore read from the dispatcher's result; the handover itself is read from
@@ -35,8 +36,8 @@ was shown (``message_update_state.notice_at``), for Measurement. It reads the da
 file, so it must run off the event loop.
 
 Cost: a saved update reads its own message row; linked documents additionally
-read the open asks and linked files. A decision reads its public projection.
-No model is called.
+read the open asks and linked files. A decision reads its public projection;
+a comment reads nothing. No model is called.
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from core.attention_comment import COMMENT_HANDOVERS, measure_comment
+from core.attention_decision import measure_decision
 from core.attention_measure import Measure, describe, measure_file, measure_text, total_of
 from infra.database import get_db
 from infra.product_events import emit_product_event
@@ -122,7 +125,9 @@ def _attention_notice(
     if tool_name == "post_update":
         return _update_notice(thread_id, arguments, result)
     if tool_name == "plan_decision":
-        return _decision_notice(thread_id, arguments, result)
+        return _text_notice(thread_id, "decision", measure_decision(thread_id, arguments, result, get_db))
+    if tool_name in COMMENT_HANDOVERS:
+        return _text_notice(thread_id, *measure_comment(tool_name, arguments, result))
     if tool_name == "plan_update":
         params = arguments.get("params")
         target = _plan_target(arguments.get("operation"), params) if isinstance(params, dict) else None
@@ -211,15 +216,13 @@ def _mark_notice_shown(thread_id: str, message_id: str) -> None:
         log.warning("attention notice: could not record notice time for %s", message_id, exc_info=True)
 
 
-def _decision_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
-    """Read and measure a successful decision through Plans' public boundary."""
-    from core.attention_decision import measure_decision
-
-    measure = measure_decision(thread_id, arguments, result, get_db)
+def _text_notice(thread_id: str, handover: str, measure: Measure | None) -> str | None:
+    """Record and state the words of a saved decision draft or document comment."""
     if measure is None:
         return None
-    _record(thread_id, "decision", [], None, text_measure=measure)
-    return f"{LABEL} Your decision: {describe(measure)}.\n{_CHECK}"
+    _record(thread_id, handover, [], None, text_measure=measure)
+    noun = "decision" if handover == "decision" else "comment"
+    return f"{LABEL} Your {noun}: {describe(measure)}.\n{_CHECK}"
 
 
 def _linked_documents(db, text: str, user_id: str, project_id: str | None) -> list[Path]:
