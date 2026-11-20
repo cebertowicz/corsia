@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from core.fork_types import (
@@ -10,14 +11,71 @@ from core.fork_types import (
     ProviderForkRejected,
     ProviderForkResult,
 )
-from core.fork_types import FORK_CONTEXT_TRUNCATED
+from core.fork_types import FORK_CONTEXT_TRUNCATED, partial_provider_error
 from core.fork_runtime import ForkKind, ForkStepLimitReached
 from infra.provider_usage import TokenUsage, fork_receipt, from_anthropic
 from subagents.provider_context_limits import is_provider_context_limit
 
+#: The model Claude Code names on an assistant record it wrote itself to carry an error.
+SYNTHETIC_MODEL = "<synthetic>"
+#: The structured cause a Claude Code usage-limit refusal carries to ``provider_failure``.
+USAGE_LIMIT_CAUSE = "provider_usage_limit"
+
+
+@dataclass(frozen=True, slots=True)
+class ForkLimit:
+    """A usage-limit refusal read from structured fork output, never from narrative text.
+
+    ``refusals`` are the ``rate_limit_info`` of every refusing ``rate_limit_event``;
+    ``text`` is an ``is_error`` result's text when that text is a usage limit.
+    """
+
+    refusals: tuple[dict[str, Any], ...]
+    text: str | None
+
+    @property
+    def detail(self) -> str:
+        if self.text:
+            return self.text
+        kinds = ", ".join(str(info.get("rateLimitType") or "unnamed") for info in self.refusals)
+        return f"Claude Code refused the call at its usage limit ({kinds})"
+
+
+def _records(stdout: bytes):
+    for line in stdout.splitlines():
+        try:
+            record = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
+def fork_limit(stdout: bytes) -> ForkLimit | None:
+    """The usage-limit refusal in a fork's whole stdout, read after every record.
+
+    A refusing ``rate_limit_event`` may come before or after the result, so this
+    is decided only once all of stdout is read.
+    """
+    from connections.claude_usage import refuses
+    from llm.error_cause import harness_cause_kind
+
+    refusals: list[dict[str, Any]] = []
+    text = None
+    for record in _records(stdout):
+        if record.get("type") == "rate_limit_event" and refuses(record.get("rate_limit_info")):
+            refusals.append(record["rate_limit_info"])
+        elif record.get("type") == "result" and record.get("is_error") is True:
+            terminal = record.get("result")
+            if isinstance(terminal, str) and harness_cause_kind("claude-code", None, terminal) == "usage_limit":
+                text = terminal
+    return ForkLimit(tuple(refusals), text) if refusals or text else None
+
 
 def _assistant_text(record: dict[str, Any]) -> str:
     message = record.get("message")
+    if isinstance(message, dict) and message.get("model") == SYNTHETIC_MODEL:
+        return ""  # Claude Code's own error text, never the model's output.
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
         return content
@@ -34,8 +92,8 @@ def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
         return _assistant_text(record)
     if record.get("type") != "result":
         return ""
-    if record.get("is_error") is True and is_provider_context_limit(record):
-        return ""  # Context errors are never fork output.
+    if record.get("is_error") is True:
+        return ""  # An error result's text is never fork output.
     terminal = record.get("result")
     return terminal if not has_body and isinstance(terminal, str) else ""
 
@@ -91,14 +149,9 @@ def result(
     """Parse fork stdout into its body; a missing body names what stdout and ``process`` held."""
     bodies: list[str] = []
     usage, diagnostic = None, None
+    failed, terminal_seen = False, False
     calls: dict[str, TokenUsage] = {}
-    for line in stdout.splitlines():
-        try:
-            record = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if not isinstance(record, dict):
-            continue
+    for record in _records(stdout):
         part = _result_body(record, has_body=bool(bodies))
         if part.strip():
             bodies.append(part)
@@ -108,6 +161,7 @@ def result(
             if measured is not None:
                 calls[str(message.get("id") or f"unidentified-{len(calls)}")] = measured
         if record.get("type") == "result":
+            terminal_seen = True
             if record.get("subtype") == "error_max_turns":
                 raise ForkStepLimitReached(f"{kind.name} reached its Claude Code turn limit")
             usage = record.get("usage") if isinstance(record.get("usage"), dict) else usage
@@ -115,8 +169,14 @@ def result(
                 terminal = record.get("result")
                 diagnostic = str(terminal) if terminal is not None else "result error"
                 truncated = truncated or is_provider_context_limit(record)
-                if not truncated:
-                    kind.provider_failure("claude-code", diagnostic)
+                failed = True
+    # Decided once every record is read: a refusal may follow the result.
+    limit = fork_limit(stdout)
+    if not truncated and (failed or (limit is not None and not terminal_seen)):
+        kind.provider_failure(
+            "claude-code", diagnostic or (limit.detail if limit else "result error"),
+            USAGE_LIMIT_CAUSE if limit is not None else None,
+        )
     if not (body := "\n".join(bodies)).strip():
         if truncated:
             raise ForkInputExhausted(f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}")
@@ -125,7 +185,17 @@ def result(
     measured = from_anthropic(usage)
     if measured is None and calls:
         measured = sum(calls.values(), TokenUsage())
-    return ProviderForkResult(body, fork_receipt(measured), FORK_CONTEXT_TRUNCATED if truncated else diagnostic)
+    if truncated:
+        diagnostic = FORK_CONTEXT_TRUNCATED
+    elif failed and diagnostic:
+        diagnostic = partial_provider_error(diagnostic)  # assistant output cut short by the error
+        body = _whole_messages(body)
+    return ProviderForkResult(body, fork_receipt(measured), diagnostic)
+
+
+def _whole_messages(body: str) -> str:
+    """End a body of finished assistant records on a line break: its last line is complete."""
+    return body if body.endswith("\n") else body + "\n"
 
 
 def process_diagnostic(stderr: bytes | str, returncode: int | None, *, kind: ForkKind) -> str | None:
@@ -148,4 +218,7 @@ def result_after_process(
     if parsed.diagnostic == FORK_CONTEXT_TRUNCATED or not diagnostic or diagnostic == parsed.diagnostic:
         return parsed
     combined = f"{parsed.diagnostic}; {diagnostic}" if parsed.diagnostic else diagnostic
+    if returncode not in {None, 0}:
+        combined = partial_provider_error(combined)  # the process failed after this output
+        return ProviderForkResult(_whole_messages(parsed.raw_body), parsed.usage, combined)
     return ProviderForkResult(parsed.raw_body, parsed.usage, combined)
