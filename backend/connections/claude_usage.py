@@ -153,6 +153,19 @@ def apply_usage_response(response: object, *, receipt: ReceiptFence | None, db=N
     return verdict
 
 
+def refuses(info: object) -> bool:
+    """Whether a ``rate_limit_event`` refuses the call: rejected, with no overage to spend."""
+    return (
+        isinstance(info, dict) and info.get("status") == "rejected"
+        and info.get("overageStatus") not in _ALLOWED
+    )
+
+
+def names_plan_window(info: object) -> bool:
+    """Whether a refusing event names a plan window, so ``apply_rate_limit_event`` records it limited."""
+    return isinstance(info, dict) and refuses(info) and window_scope(info.get("rateLimitType")) is not None
+
+
 def apply_rate_limit_event(info: object, *, receipt: ReceiptFence | None, db=None) -> bool:
     """Persist a live Claude verdict on ``receipt``'s login; it wins an equal-time control-read tie."""
     if not isinstance(info, dict):

@@ -98,7 +98,7 @@ def _registrations(db):
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 202
+    assert SCHEMA_VERSION == 203
 
 
 def test_migration_restores_recorded_surfacing_only_for_wrongly_retired_workspace_rows(tmp_path):

@@ -1,5 +1,6 @@
 import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, TEST_TOKEN } from './corsia';
+import { openFilesButton } from './documentBar';
 import { markTexts } from './liveConcurrency';
 import { type LiveDocument } from './liveDocument';
 
@@ -233,7 +234,7 @@ export async function openTwoDocuments(page: Page, first: LiveDocument, second: 
 }
 export async function switchDocument(page: Page, document: LiveDocument, waitForText = true): Promise<void> {
 	if (page.viewportSize()!.width <= 768) {
-		await page.getByRole('button', { name: /^Files \(/ }).click();
+		await openFilesButton(page).click();
 		await page.getByRole('dialog', { name: 'Open side panel items' }).getByRole('button', { name: document.fileName, exact: true }).click();
 	} else await page.getByRole('tab', { name: document.fileName }).click();
 	if (waitForText) await expect(page.locator('.cm-content')).toContainText(document.body.trim());

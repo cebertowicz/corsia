@@ -77,7 +77,7 @@ beforeEach(() => {
 		target: document.body,
 		props: {
 			target: { instanceId: 'tab', path: 'p.md', name: 'p.md', projectId: null, threadId: 'owner', artifactId: ART },
-			artifactId: ART, docState: 'ready', root, onPrepareCleanReload: async () => null, onFeedback: () => {},
+			artifactId: ART, root, onPrepareCleanReload: async () => null, onFeedback: () => {},
 		},
 	});
 	flushSync();

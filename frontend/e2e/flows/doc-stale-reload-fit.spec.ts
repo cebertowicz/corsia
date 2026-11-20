@@ -1,11 +1,12 @@
 import { test, expect } from '../support/test';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
+import { detailsEntry, documentBarHost, expectOneRow } from '../support/documentBar';
 
-// Reload shows only on a snapshot document (a live session never offers it), beside the full tool row: comments,
-// delivery, review and History. Its container queries need browser layout, so the status component is mounted
+// Reload shows only on a snapshot document (a live session never offers it). In a compact canvas it is the reload mark
+// after the name; in an expanded canvas it is a text button in the tab strip. Its container queries need browser layout, so the status component is mounted
 // inside the real canvas, as quiet-save-cue.spec.ts does, with the controls a recorded document carries.
-for (const width of [320, 375, 393, 480, 600]) {
-	test(`@surface:doc-header File changed · Reload stays inside the header at ${width}`, async ({ page, request }, info) => {
+for (const width of [320, 375, 393, 480, 600, 1440]) {
+	test(`@surface:doc-header File changed · Reload stays inside the bar at ${width}`, async ({ page, request }, info) => {
 		test.skip(info.project.name.endsWith('-mobile'), 'The widths are set here; one project is enough.');
 		await page.setViewportSize({ width, height: 852 });
 		const fixture = await seedLiveDocument(request, `stale-fit-${width}`, '# Changed outside\n\nA document whose file changed.\n');
@@ -22,13 +23,26 @@ for (const width of [320, 375, 393, 480, 600]) {
 				orphanedCount: 0, artifactId, targetInstanceId: 'tab-stale', freshness: null, onOpenComments: () => {},
 				historyAvailable: true, onOpenHistory: () => {}, onReload: () => {} } });
 		}, fixture.artifactId);
-		const reload = page.getByRole('button', { name: 'File changed · Reload' });
+		const host = documentBarHost(page);
+		const reload = host.getByRole('button', { name: 'File changed · Reload' });
 		await expect(reload).toBeVisible();
-		const header = page.locator('.document-header').last();
-		const [inside, chip] = [await header.boundingBox(), await reload.boundingBox()];
+		await expect(page.getByRole('button', { name: 'File changed · Reload' })).toHaveCount(1);
+		// One File changed only: the bar's control, not a second row in Details.
+		await expect(page.getByRole('button', { name: 'File changed · Reload', includeHidden: true })).toHaveCount(1);
+		const [inside, chip] = [await host.boundingBox(), await reload.boundingBox()];
 		expect(chip!.x).toBeGreaterThanOrEqual(Math.max(0, inside!.x) - 0.5);
 		expect(chip!.x + chip!.width).toBeLessThanOrEqual(Math.min(width, inside!.x + inside!.width) + 0.5);
-		await expect(page.getByRole('button', { name: 'History', exact: true })).toBeVisible();
+		await expectOneRow(page);
+		// The mounted header is the last one (the real one is hidden beside it), so its panel is read from it.
+		await detailsEntry(page).click();
+		await expect(detailsEntry(page)).toHaveAttribute('aria-expanded', 'true');
+		const panel = page.locator('.document-header').last().locator('.doc-panel');
+		await expect(panel).toBeVisible();
+		const history = panel.getByRole('button', { name: 'History', exact: true });
+		await expect(history).toBeVisible();
+		const [bounds, entry] = [await panel.boundingBox(), await history.boundingBox()];
+		expect(entry!.x).toBeGreaterThanOrEqual(Math.max(0, bounds!.x) - 0.5);
+		expect(entry!.x + entry!.width).toBeLessThanOrEqual(Math.min(width, bounds!.x + bounds!.width) + 0.5);
 		if (process.env.VH_OUT) await page.screenshot({ path: `${process.env.VH_OUT}/stale-reload-${width}.png`, animations: 'disabled' });
 	});
 }

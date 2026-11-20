@@ -10,7 +10,7 @@ from core.fork_types import (
     ProviderForkRejected,
     ProviderForkResult,
 )
-from core.fork_types import FORK_CONTEXT_TRUNCATED
+from core.fork_types import FORK_CONTEXT_TRUNCATED, partial_provider_error
 from core.fork_runtime import ForkKind
 from infra.provider_usage import TokenUsage, fork_receipt
 from subagents.provider_context_limits import is_provider_context_limit
@@ -48,17 +48,17 @@ class CodexForkCapture:
         """Retain one measured call from the session's single usage observer."""
         self.calls[(turn_id, ordinal)] = dict(usage)
 
-    def _failure(self, detail: str, *, truncated: bool) -> None:
+    def _failure(self, detail: str, *, truncated: bool, cause: str | None = None) -> None:
         if self.terminal.done():
             return
         if not truncated:
             try:
-                self.kind.provider_failure("codex", detail)
+                self.kind.provider_failure("codex", detail, cause)
             except ProviderForkRejected as error:
                 self.terminal.set_exception(error)
                 return
         if self.bodies or self.partial.strip():
-            self.diagnostic = FORK_CONTEXT_TRUNCATED if truncated else detail
+            self.diagnostic = FORK_CONTEXT_TRUNCATED if truncated else partial_provider_error(detail)
             self.terminal.set_result(None)
         else:  # No narrative: fail named, never as an empty success.
             self.terminal.set_exception(
@@ -90,6 +90,7 @@ class CodexForkCapture:
             self._failure(
                 str(event.get("message") or event.get("cause") or f"Codex {self.kind.name} failed"),
                 truncated=is_provider_context_limit(event),
+                cause=event.get("cause") if isinstance(event.get("cause"), str) else None,
             )
 
     async def on_exit(self, code: int | None, stderr: str | BaseException) -> None:
@@ -111,8 +112,11 @@ class CodexForkCapture:
         if self.diagnostic == FORK_CONTEXT_TRUNCATED:
             body = "\n".join(part for part in (*self.bodies, self.partial) if part.strip())
         else:
+            # Streamed deltas may stop mid-line (capture trims them); a completed item's last line is whole.
             body = self.partial or (self.bodies[-1] if self.bodies else "")
             if not body.strip():
                 raise ProviderForkRejected(f"Codex {self.kind.name} produced no body")
+            if self.diagnostic and not self.partial and not body.endswith("\n"):
+                body += "\n"
         usage = {"calls": list(self.calls.values())} if self.calls else self.usage
         return ProviderForkResult(body, usage, self.diagnostic)

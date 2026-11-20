@@ -3,13 +3,13 @@ import { mkdirSync } from 'node:fs';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeComments, expectCommentsShown } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, replacePreviousFixtureThread, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
-import { headerSend, holdDocumentComments, seedHeldComments } from '../support/heldComments';
+import { headerSend, headerSentStatus, holdDocumentComments, seedHeldComments, shownHeaderSend } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
 
@@ -399,12 +399,27 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			// Opened at the top: both replies are below the fold, so the bottom band offers the jump once.
 			await expectControl(page, '2 new');
-			await expect(headerSend(page)).toBeVisible();
+			// On a phone the modal comments sheet hides the jump; on desktop both controls remain visible.
+			const beforeSheet = await controlFace(page);
+			await expect(await shownHeaderSend(page)).toBeVisible();
 			const sendBox = await hitBox(headerSend(page));
+			if (width <= 768) {
+				await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+				await expect(controlButton(page)).toHaveCount(0);
+				await closeComments(page);
+				await expect(controlButton(page)).toBeVisible();
+				const restored = await controlFace(page);
+				for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(restored[key] - beforeSheet[key]), `jump ${key} after closing the sheet`).toBeLessThanOrEqual(1);
+			} else {
+				const controlBounds = await controlFace(page);
+				expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
+				expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
+				expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
+				await closeComments(page);
+			}
 			const controlBounds = await controlFace(page);
 			expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
 			expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
-			expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
 
 			// The label is the count alone; the thread it points at is named in the accessible name, and it is the first reply below the fold.
 			await expect(controlButton(page)).toHaveText(/^[↑↓]\d+ new$/);
@@ -865,8 +880,16 @@ for (const theme of ['light', 'dark'] as const) {
 			await expectControlPoints(page, 2, 'above');
 			await holdTimers(page, false);
 			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
-			await expect(page.locator('.document-header .feedback-controls [role="status"]')).toHaveText(/^2 comments sent/);
+			await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
+			await holdTimers(page, true);
+			const entry = page.locator('[data-comments-entry]');
+			await expect(entry.locator('[data-comments-sent] .bar-sent .sent-check')).toBeVisible();
+			await expect(entry.locator('.bar-sent > span')).toHaveCount(width === 393 ? 0 : 1);
+			const sentWidth = (await entry.boundingBox())!.width;
 			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
+			await holdTimers(page, false);
+			await expect(entry.locator('[data-comments-sent]')).toHaveCount(0);
+			expect((await entry.boundingBox())!.width, 'the receipt does not change the control width').toBe(sentWidth);
 
 			await holdTimers(page, true);
 			if (width === 1440) await page.evaluate(() => {
@@ -1181,7 +1204,7 @@ test.describe('the jump control and held Send controls', () => {
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
-			const send = headerSend(page);
+			const send = await shownHeaderSend(page);
 			await expect(send).toBeVisible();
 			await page.waitForTimeout(500); // Let the sender's entrance slot finish before measuring.
 			const geometry = await send.evaluate(node => {
@@ -1196,7 +1219,7 @@ test.describe('the jump control and held Send controls', () => {
 			const cdp = await page.context().newCDPSession(page);
 			await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
 			const { root } = await cdp.send('DOM.getDocument');
-			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button' });
+			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '[data-doc-comments-drawer] .sending-now button' });
 			expect(nodeId).toBeGreaterThan(0);
 			const beforeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
 
@@ -1267,7 +1290,8 @@ test.describe('the jump control and the document toolbar', () => {
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
-			await expect(page.locator('.document-header .sending-now')).toHaveCount(0);
+			await openComments(page);
+			await expect(headerSend(page)).toHaveCount(0);
 
 		});
 	}
@@ -1286,9 +1310,10 @@ test.describe('the jump control and the document toolbar', () => {
 		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		await page.waitForTimeout(600);
+		await openComments(page);
 		const geometry = await headerSend(page).evaluate(node => {
 			const rect = node.getBoundingClientRect();
-			const canvas = node.closest('.document-canvas')!.getBoundingClientRect();
+			const canvas = document.querySelector('.document-canvas')!.getBoundingClientRect();
 			const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, canvasX: canvas.x, canvasWidth: canvas.width, whole: rect.x >= canvas.x && rect.right <= canvas.right && rect.y >= canvas.y && rect.bottom <= canvas.bottom, hit: !!hit && (hit === node || node.contains(hit)) };
 		});

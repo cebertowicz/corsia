@@ -163,13 +163,13 @@ WAKE_CHILD_FRICTION_THRESHOLD = (
     " stop it."
 )
 #: A child's Turn itself failed (no A-row event says so) for a reason other
-#: than a provider limit, and work is still open. A model switch would not
-#: help, so the wake does not suggest one.
+#: than a provider limit, and work is still open. It does not retry on its own
+#: and a model switch would not help, so the parent decides with no such hint.
 WAKE_CHILD_TURN_ERRORED = (
     "[CORSIA plan] The child delegated for {title} ended its Turn in error:"
-    " {error} Its work is still open. Read what it last did with"
-    " delegate_status, then tell it how to continue with delegate_send,"
-    " re-brief it, or stop it."
+    " {error} It has stopped and will not retry on its own; its work is"
+    " still open. Read what it last did with delegate_status, then re-run it"
+    " with delegate_send, re-brief it, or stop it."
 )
 #: The child cannot run on its model: the provider refused it (usage, session,
 #: quota or credit limit, #2148) or the model is unavailable and its input is

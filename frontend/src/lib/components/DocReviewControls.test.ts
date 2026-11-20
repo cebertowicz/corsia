@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import DocViewerStatus from './DocViewerStatus.svelte';
+import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 
 const events = vi.hoisted(() => new Map<string, Set<(frame: unknown) => void>>());
 const toastShow = vi.hoisted(() => vi.fn());
@@ -12,6 +13,7 @@ vi.mock('$lib/ws/events', () => ({ on: (name: string, handler: (frame: unknown) 
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: toastShow } }));
 let host: HTMLElement;
 let component: { $destroy(): void; $set(props: Record<string, unknown>): void } | undefined;
+let bar: ReturnType<typeof mount> | null = null;
 let width = 900;
 let rows: Record<string, unknown>[];
 let reviewers: Record<string, unknown>[];
@@ -30,6 +32,8 @@ function render(extra: Record<string, unknown> = {}) {
 		artifactId: 'doc-a', targetInstanceId: 'tab-a', viewingThreadId: 'thread-a', reviewTargetKey: 'target-a',
 		onOpenComments: vi.fn(), freshness: null, ...extra,
 	} });
+	// Comments and Details are drawn by the bar that holds the canvas; a stand-in draws them here.
+	bar = mount(DocumentBarTestHost, { target: host });
 	flushSync();
 }
 const nameOf = (item: HTMLElement) => (item.getAttribute('aria-label') ?? item.textContent ?? '').trim();
@@ -62,21 +66,21 @@ beforeEach(() => {
 	});
 	vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(() => { component?.$destroy(); host?.remove(); events.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { if (bar) { unmount(bar); bar = null; } component?.$destroy(); host?.remove(); events.clear(); vi.unstubAllGlobals(); });
 
 describe('document review toolbar and popover', () => {
 	it('requires artifactId without hiding the comment control', async () => {
 		render({ commentCount: 2 }); await settle(); expect(button('Request review')).toBeTruthy();
-		component.$set({ artifactId: null }); flushSync();
+		component!.$set({ artifactId: null }); flushSync();
 		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 comments')).toBeTruthy();
 	});
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
-		const names = [...document.body.querySelectorAll<HTMLElement>('.document-tools button')].map(nameOf);
-		expect(names).toEqual(['File changed · Reload', '1 comment', 'Deliver comments immediately', 'Request review']);
-		// The delivery switch is a Toggle, not a text tool: every other control shares the one style.
-		expect([...document.body.querySelectorAll('.document-tools button:not(.tg)')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
+		expect([...document.body.querySelectorAll<HTMLElement>('[data-test-document-bar] button')].map(nameOf)).toEqual(['File changed · Reload', '1 comment', 'Document details']);
+		expect([...document.body.querySelectorAll<HTMLElement>('.doc-panel button')].map(nameOf)).toEqual(['Request review']);
+		// Request review is a text action in Details, in the tool style it keeps wherever it is drawn.
+		expect(button('Request review').classList.contains('doc-tool')).toBe(true);
 	});
 	it('lists the chosen agents as chips, removes the last on Backspace, and keeps Send disabled with its reason until one is chosen', async () => {
 		render(); const search = await picker(); expect(document.activeElement).toBe(search);
@@ -200,14 +204,14 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('.status')?.textContent).toBe('Ended without comments');
 		expect(maybeButton('Cancel request to Quality Gate')).toBeUndefined();
 	});
-	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {
+	it('returns focus to Details when cancelling the last request removed its trigger', async () => {
 		rows = [row('review-1')];
 		render({ viewingThreadId: null, commentCount: 1 }); await settle();
 		(document.body.querySelector<HTMLButtonElement>('.reviewer-group')!).click(); await settle();
 		button('Cancel request to Quality Gate').click(); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		key(document.activeElement as HTMLElement ?? document.body, 'Escape'); await settle();
-		expect(document.activeElement).toBe(button('1 comment'));
+		expect(document.activeElement).toBe(button('Document details'));
 	});
 	it('collapses a long group to three avatars and a +N', async () => {
 		rows = Array.from({ length: 5 }, (_, index) => row(`review-${index}`, { reviewer_thread_id: `r${index}`, reviewer_name: `Reviewer ${index}` }));
@@ -222,7 +226,7 @@ describe('document review toolbar and popover', () => {
 			expect(trigger.getAttribute('aria-expanded')).toBe('true'); expect(document.body.querySelector('[data-popover]')).toBeTruthy();
 			if (close === 'Escape') key(search, 'Escape'); else document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
 			await settle(); expect(document.body.querySelector('[role="combobox"]')).toBeNull(); expect(document.activeElement).toBe(trigger);
-			if (close === 'Escape') { component.$destroy(); host.remove(); }
+			if (close === 'Escape') { component!.$destroy(); host.remove(); }
 		}
 	});
 	it('uses a titled drawer for a narrow canvas and an icon-only trigger', async () => {
@@ -270,14 +274,14 @@ describe('document review toolbar and popover', () => {
 	it('removes its narrow review drawer synchronously when its caller is destroyed', async () => {
 		width = 393; render(); await picker();
 		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(1);
-		component.$destroy();
+		component!.$destroy();
 		component = undefined;
 		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 	});
 	it('says plainly when nobody can review, and offers Retry rather than an empty claim on a roster failure', async () => {
 		reviewers = []; render(); await picker();
 		expect(document.body.textContent).toContain('No agents in this project can review right now.');
-		component.$destroy(); host.remove();
+		component!.$destroy(); host.remove();
 		rosterError = true; render(); await picker();
 		expect(document.body.textContent).toContain("Couldn't load reviewers"); expect(document.body.textContent).not.toContain('No agents in this project');
 		expect(maybeButton('Retry')).toBeTruthy();
@@ -295,7 +299,7 @@ describe('document review toolbar and popover', () => {
 	it('drops a late load when the same document and thread have a new target generation', async () => {
 		let finish!: (response: Response) => void;
 		fetchMock.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
-		render(); component.$set({ reviewTargetKey: 'target-b' }); flushSync(); await settle();
+		render(); component!.$set({ reviewTargetKey: 'target-b' }); flushSync(); await settle();
 		finish(json({ reviews: [row()], reviewers })); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 	});
@@ -305,7 +309,7 @@ describe('document review toolbar and popover', () => {
 		let finish!: (response: Response) => void;
 		fetchMock.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
 		button('Send').click(); flushSync();
-		component.$set({ artifactId: 'doc-b', reviewTargetKey: 'target-b' }); flushSync(); await settle();
+		component!.$set({ artifactId: 'doc-b', reviewTargetKey: 'target-b' }); flushSync(); await settle();
 		const newSearch = await picker(); choose(newSearch, 'product'); await settle();
 		type(document.body.querySelector('textarea')!, 'New note');
 		const calls = fetchMock.mock.calls.length;
@@ -344,7 +348,7 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (Ended without comments)');
 		rows = []; emit('doc-a'); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
-		component.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);
+		component!.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);
 		host.remove(); render(); await settle(); expect(events.get('plans_changed')?.size).toBe(1);
 	});
 });

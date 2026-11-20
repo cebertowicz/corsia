@@ -54,6 +54,10 @@ def test_either_verb_makes_pending_work_current(db, scene, operation):
 
 @pytest.mark.parametrize("operation", ["start", "activate"])
 def test_either_verb_selects_an_active_task(db, scene, operation):
+    # The scene's pending task ranks above; plan order says which goes first.
+    _mutate(db, scene.plan_id, "reorder", {
+        "node_id": scene.own, "expected_revision": _revision(db, scene.own), "order_key": 0,
+    })
     result = _mutate(db, scene.plan_id, operation, {
         "node_id": scene.own, "expected_revision": _revision(db, scene.own),
     })

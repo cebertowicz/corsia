@@ -84,7 +84,7 @@ const sheetNow = (page: Page) => sheet(page).evaluate((panel) => {
 
 /** Opens the list from the comments control; it opens full. */
 async function openList(page: Page) {
-	await page.locator('.comment-status').tap();
+	await page.locator('[data-comments-entry]').tap();
 	await expect(sheet(page)).toHaveCount(1);
 	await expect(head(page)).toBeVisible();
 	await sheetSettled(page);

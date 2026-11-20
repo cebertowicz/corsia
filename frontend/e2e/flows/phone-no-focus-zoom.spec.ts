@@ -99,7 +99,7 @@ const sheet = (page: Page) => page.locator('[data-adaptive-drawer].drawer-backdr
 
 /** The person opens the comments from the document header: the sheet covers the view. */
 async function openCommentSheet(page: Page) {
-	await page.locator('.document-header .comment-status').tap();
+	await page.locator('[data-comments-entry]').tap();
 	await expect(sheet(page)).toBeVisible();
 	await settled(page);
 }
@@ -144,7 +144,7 @@ test('@flow:phone-no-focus-zoom a document with a wide table and code fits the s
 	await page.keyboard.press('Escape');
 
 	// They open the comments and tap into a reply.
-	await page.locator('.comment-status').tap();
+	await page.locator('[data-comments-entry]').tap();
 	const card = page.locator('[data-comment-id]').first();
 	await expect(card).toBeVisible();
 	await settled(page);

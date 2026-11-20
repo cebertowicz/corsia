@@ -51,6 +51,43 @@ it('gives the caller the comment its highlight picked, and the first Escape drop
 	expect(picked()).toBe('');
 });
 
+it('releases a picked margin card on plain transcript text or empty transcript, and preserves the draft', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	chatCommentDrafts.set('one', 'unsent reply');
+	const mark = host.querySelector<HTMLElement>('[data-comment-ids="one"]')!;
+	for (const target of [host.querySelector<HTMLElement>('.long-message-body')!, host.querySelector<HTMLElement>('.messages')!]) {
+		mark.click(); flushSync();
+		expect(picked()).toBe('one');
+		target.click(); flushSync();
+		expect(picked()).toBe('');
+		expect(chatCommentDrafts.get('one')).toBe('unsent reply');
+	}
+	mark.click(); flushSync();
+	expect(picked()).toBe('one');
+	expect(chatCommentDrafts.get('one')).toBe('unsent reply');
+	// The margin lives inside the transcript scroller; clicking a card is not a click off it.
+	host.querySelector('.messages')!.insertAdjacentHTML('beforeend', '<div class="chat-margin"><div class="chat-margin-card">Card text</div></div>');
+	const card = host.querySelector<HTMLElement>('.chat-margin-card')!;
+	card.click(); flushSync();
+	expect(picked()).toBe('one');
+	// A card can move on pointerdown, leaving the click on the scroller instead of the pressed field.
+	card.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+	host.querySelector('.messages')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+	flushSync();
+	expect(picked()).toBe('one');
+	// The next independent press on the transcript still releases it.
+	host.querySelector('.messages')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+	host.querySelector('.messages')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+	flushSync();
+	expect(picked()).toBe('');
+	chatCommentDrafts.set('one', '');
+});
+
 it('gives focus in the released card back to its highlight on Escape, as a document margin gives it back to the text, keeping the unsent reply', async () => {
 	setupSurface();
 	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
@@ -94,6 +131,29 @@ it('leaves focus outside the column where it is when Escape releases the picked 
 	await tick();
 	expect(picked()).toBe('');
 	expect(document.activeElement).toBe(composer);
+});
+
+it('reopens a thread with its reply after switching while its close is pending', async () => {
+	setupSurface();
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [
+		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
+	] }] as never);
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	host.querySelector<HTMLButtonElement>('[data-toggle-margin]')!.click();
+	flushSync();
+	await vi.waitFor(() => expect(host.querySelector('[data-comment-ids="one"]')).not.toBeNull());
+	const mark = host.querySelector<HTMLElement>('[data-comment-ids="one"]')!;
+	mark.click(); flushSync(); await tick(); flushSync();
+	const field = document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
+	field.value = 'unsent reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	host.querySelector<HTMLButtonElement>('[data-toggle-thread]')!.click(); flushSync(); await tick();
+	host.querySelector<HTMLButtonElement>('[data-toggle-thread]')!.click(); flushSync(); await tick();
+	messages.update(items => [...items]);
+	await vi.waitFor(() => expect(host.querySelector('[data-comment-ids="one"]')).not.toBeNull());
+	host.querySelector<HTMLElement>('[data-comment-ids="one"]')!.click(); flushSync(); await tick(); flushSync();
+	await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('unsent reply'));
+	chatCommentDrafts.set('one', '');
 });
 
 it('hands a thread open in its popover to its card when the column comes up, keeping the unsent reply', async () => {

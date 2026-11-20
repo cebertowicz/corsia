@@ -206,7 +206,7 @@ async def _await_installed(
     *,
     allow_newer_fold: bool = True,
 ) -> ProviderContinuation:
-    from core.checkpoint_runtime import await_checkpoint
+    from core.checkpoint_runtime import await_checkpoint, failed_fold_hold
 
     # An attempt this Turn started and is blocked on is part of its work, so
     # Stop ends it; an attempt from anywhere else stays independent (#1921).
@@ -218,9 +218,9 @@ async def _await_installed(
         on_stop=cancel_waiting_checkpoint if owned else None,
     )
     if completed.status != "installed":
-        raise boundary.unavailable(
-            completed.error or f"checkpoint ended {completed.status}"
-        )
+        held = await failed_fold_hold(completed)  # a recorded usage limit holds, as the fold gate would
+        raise boundary.unavailable(completed.error or f"checkpoint ended {completed.status}",
+                                   limited_target=held and held.model, limited_connection=held and held.connection)
     boundary = replace(boundary, installed_checkpoint=completed)
     installed = await boundary.render_installed(completed)
     if installed.input_tokens > boundary.context_window:

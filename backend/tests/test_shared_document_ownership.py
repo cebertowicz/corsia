@@ -233,7 +233,7 @@ def test_non_owner_is_refused_and_conductor_and_user_edits_are_recorded(ownershi
     assert all(field in refusal for field in ("`doc_path`", "`quote`", "`replacement`"))
     assert f"`{scope['category'] / 'gate.md'}`" in refusal
     assert "owned by Documents" in refusal
-    assert "Only its owner, the conductor, or the user edits it directly." in refusal
+    assert "Only its owner, the conductor, or the person edits it directly." in refusal
     assert "the owner applies it. To raise a point without a text change, comment instead." in refusal
 
     conductor_edit = _write(

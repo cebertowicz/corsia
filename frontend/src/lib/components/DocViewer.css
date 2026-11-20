@@ -1,6 +1,10 @@
 @import './commentAnchors.css';
+.presence-row { align-self: center; display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-tertiary); font-size: var(--text-caption); }
 :root { --doc-visual-viewport-height: 100dvh; --doc-visual-viewport-offset: 0px; }
 .doc { --doc-canvas-top: 0px; position: relative; box-sizing: border-box; width: 100%; height: 100%; max-height: calc(var(--doc-visual-viewport-height, 100dvh) + var(--doc-visual-viewport-offset, 0px) - var(--doc-canvas-top, 0px) - var(--space-2)); min-height: 0; display: grid; grid-template-areas: 'header' 'editor'; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--space-2); padding: var(--space-1) 0 var(--space-2); text-align: left; }
+/* While nothing waits, the header row holds only the Details panel (drawn over the text, out of flow) and screen-reader status:
+   it has no height, so no gap is left above the text. Any in-flow content (the ask's card, a live notice, an error) brings it back. */
+.doc:not(:has(> .document-header > :not(.doc-panel, .metadata-status.sr-only))):not(:has(.canvas-comment-drawer:not(.margin), .canvas-history-drawer)) { row-gap: 0; }
 /* The list keeps its capped height below the editor. */
 .doc:has(.canvas-comment-drawer:not(.margin)), .doc:has(.canvas-history-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 /* The comment margin column (`--margin-column`: 280px of cards plus gutter), at any desktop width, is drawn on the canvas inside the editor's
@@ -49,8 +53,6 @@
 .load-error p { margin: 0; font-size: var(--text-subhead); color: var(--red); font-weight: var(--fw-medium); }
 .load-error code { font-size: var(--text-caption); color: var(--text-tertiary); word-break: break-all; }
 /* The selection pill is shared in commentAnchors.css. */
-.save-ghost { flex: none; display: inline-flex; align-items: center; min-height: 28px; box-sizing: border-box; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); background: var(--green-bg); border: 1px solid var(--green-border); border-radius: var(--radius-pill); padding: 2px 10px; animation: fadein var(--dur-tight) ease-out; }
-.save-ghost.saving { color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 6%, transparent); border-color: var(--border-subtle); }
 .save-error { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 6; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--red) 35%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--bg-elevated)); color: var(--red); font-size: var(--text-footnote); font-weight: var(--fw-medium); box-shadow: var(--shadow-chip); }
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
 .loadbar { height: 3px; border-radius: var(--radius-2xs); background: var(--bg-tertiary); overflow: hidden; margin-bottom: 14px; }

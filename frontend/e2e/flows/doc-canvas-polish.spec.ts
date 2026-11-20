@@ -5,6 +5,7 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TES
 import { deleteRenderedLine, openLiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { expectCommentsShown, openComments } from '../support/commentDrawer';
+import { expectBarHitAreas } from '../support/documentBar';
 
 async function chooseThread(page: Page, title: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -17,12 +18,8 @@ async function measurements(page: Page, testInfo: TestInfo, label: string) {
 			return rect ? { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
 		};
 		return {
-			header: box('.document-header'), identity: box('.document-identity'), actions: box('.document-status-row'),
+			header: box('.document-header'),
 			editor: box('.doc-main'), drawer: box('[data-doc-comments-drawer]'), text: box('.cm-comment-focused'),
-			avatarPositions: [...root.querySelectorAll('.presence-row .avatar')].map((element) => {
-				const rect = element.getBoundingClientRect(); return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-			}),
-			gap: Number.parseFloat(getComputedStyle(root.querySelector('.document-header')!).rowGap),
 			viewportHeight: window.visualViewport?.height ?? window.innerHeight,
 			visibleLines: [...root.querySelectorAll('.cm-line')].filter((line) => {
 				const rect = line.getBoundingClientRect(), editor = root.querySelector('.doc-main')!.getBoundingClientRect();
@@ -77,10 +74,11 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		}
 		await expect(page.locator('.pane:not(.collapsed)')).toBeVisible();
 	}
-	const header = page.locator('.document-header'), scroller = page.locator('.doc-main .cm-scroller');
-	const pinnedTop = (await header.boundingBox())!.y;
+	// The document's controls stay put while its text scrolls: they sit in the bar that holds the canvas, above the scroller.
+	const comments = page.locator('[data-comments-entry]'), scroller = page.locator('.doc-main .cm-scroller');
+	const pinnedTop = (await comments.boundingBox())!.y;
 	await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-	await expect.poll(async () => (await header.boundingBox())!.y).toBeCloseTo(pinnedTop, 0);
+	await expect.poll(async () => (await comments.boundingBox())!.y).toBeCloseTo(pinnedTop, 0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
 
@@ -112,7 +110,21 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	// below shows its arrival pill. Chat replies sit in Focus-mode groups whose
 	// labels vary by viewport, so they are not asserted here.
 	await reader.close();
-	await expect(page.getByRole('group', { name: '3 participants', exact: true })).toBeVisible();
+	// The document bar shows three readers, evenly spaced.
+	const presence = page.locator('[data-document-bar-row] .bar-tools').getByRole('group', { name: '3 participants', exact: true });
+	await expect(presence).toBeVisible();
+	const avatars = await presence.locator('.avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
+	await testInfo.attach('presence-avatar-lefts', { body: JSON.stringify(avatars), contentType: 'application/json' });
+	if (mobile) {
+		expect(avatars).toHaveLength(1);
+		await expect(presence.locator('.more')).toContainText('+2');
+		const names = await presence.evaluate((el) => `${el.textContent} ${[...el.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')).join(' ')}`);
+		for (const title of [agentTitle, secondAgentTitle, thirdAgentTitle]) expect(names).toContain(title);
+	} else {
+		expect(avatars).toHaveLength(3);
+		expect(Math.abs((avatars[1] - avatars[0]) - (avatars[2] - avatars[1]))).toBeLessThanOrEqual(1);
+	}
+	await saveEvidenceScreenshot(page, testInfo, 'canvas-bar-presence', { fullPage: false });
 	const pill = page.getByRole('button', { name: '1 new below, go to nearest', exact: true });
 	await expect(pill).toBeVisible();
 	await pill.focus();
@@ -168,17 +180,13 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		expect(measured.text!.bottom).toBeLessThanOrEqual(measured.editor!.bottom);
 		expect(measured.editor!.height).toBeGreaterThan(measured.text!.height * 3);
 		if (mobile) {
-			// The status tools are inside the identity row, so their height is already included.
-			expect(measured.identity!.top).toBeGreaterThanOrEqual(measured.header!.top);
-			expect(measured.identity!.bottom).toBeLessThanOrEqual(measured.header!.bottom);
-			expect(measured.actions!.top).toBeGreaterThanOrEqual(measured.identity!.top);
-			expect(measured.actions!.bottom).toBeLessThanOrEqual(measured.identity!.bottom);
+			// The document adds no row of its own above the text: its controls are in the app bar, so the header holds nothing
+			// while no ask is waiting and the text starts right below it.
+			expect(measured.header!.height).toBeLessThanOrEqual(1);
+			expect(Math.abs(measured.editor!.top - measured.header!.bottom)).toBeLessThanOrEqual(1);
 			expect(measured.visibleLines.length).toBeGreaterThanOrEqual(3);
 			// A commented line also carries its "Comment" marker button.
 			expect(measured.visibleLines.some((line) => line?.includes(quote))).toBe(true);
-			expect(measured.avatarPositions).toHaveLength(3);
-			const [a, b, c] = measured.avatarPositions;
-			expect(Math.abs((b.left - a.left) - (c.left - b.left))).toBeLessThanOrEqual(1);
 		}
 	}
 	if (mobile) {
@@ -189,8 +197,35 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await expect(drawer).toBeVisible();
 		await expect(reply).toBeFocused();
 		await expect.poll(async () => (await drawer.boundingBox())!.y + (await drawer.boundingBox())!.height).toBeLessThanOrEqual(520);
-		await expect(reply).toBeInViewport();
+		await expect.configure({ soft: true }).poll(async () => (await drawer.locator('.drawer-comments').boundingBox())!.height, { message: 'the list keeps at least dev’s 114.75px at 393×520', timeout: 5000 }).toBeGreaterThanOrEqual(114.75);
+		await expect.soft(reply).toBeInViewport({ timeout: 5000 });
 		await saveEvidenceScreenshot(page, testInfo, 'canvas-reply-short-viewport', { fullPage: false });
+		for (const size of [{ width: 393, height: 520 }, { width: 393, height: 852 }, { width: 320, height: 520 }, { width: 320, height: 852 }]) {
+			await page.setViewportSize(size);
+			await page.evaluate(async () => {
+				for (let i = 0; i < 4; i++) await new Promise(requestAnimationFrame);
+				await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined)));
+				for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame);
+			});
+			for (const theme of ['light', 'dark'] as const) {
+				await page.emulateMedia({ colorScheme: theme });
+				await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+				const text = await page.locator('.cm-comment-focused').filter({ hasText: quote }).boundingBox();
+				const sheet = await drawer.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " drawer-panel ")]').boundingBox();
+				const editor = await page.locator('.doc-main').boundingBox();
+				const list = await drawer.locator('.drawer-comments').boundingBox();
+				await saveEvidenceScreenshot(page, testInfo, `canvas-jump-${size.width}x${size.height}-${theme}`, { fullPage: false });
+				expect(text && sheet && editor).toBeTruthy();
+				const visible = Math.max(0, Math.min(text!.y + text!.height, sheet!.y, editor!.y + editor!.height) - Math.max(text!.y, editor!.y));
+				if (size.height === 520) {
+					expect.soft(visible, 'at least dev’s visible highlight height').toBeGreaterThanOrEqual(0);
+					expect.soft(list!.height, 'the list keeps dev’s height').toBeGreaterThanOrEqual(114.75);
+				} else {
+					expect.soft(visible).toBeGreaterThanOrEqual(text!.height - 0.5);
+					expect.soft(list!.height, 'the list keeps dev’s height').toBeGreaterThanOrEqual(191);
+				}
+			}
+		}
 		await page.setViewportSize({ width: 393, height: 852 });
 	}
 	// This canvas is under 900 px, so the list is a modal sheet over the document column (RSR-7): Escape inside its controls
@@ -228,7 +263,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await deleteRenderedLine(page, quote);
 	}
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
-	if (mobile) expect(await page.locator('.comment-status').evaluate((button) => getComputedStyle(button).paddingLeft)).toBe('8px');
+	if (mobile) await expectBarHitAreas(page);
 	await openComments(page);
 	await expectCommentsShown(drawer);
 	await drawer.getByRole('button', { name: 'Show comment: text unavailable', exact: true }).click();
@@ -237,7 +272,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await page.emulateMedia({ colorScheme: theme });
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await measurements(page, testInfo, `canvas-${theme}-recovery`);
-		// The tools sit in the identity row; at phone width each is 44px tall (DocViewerStatus.svelte, `.doc-tool` min-height).
-		if (mobile) expect((await page.locator('.comment-status').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+		// At phone width the bar's Comments is a 44px touch target (DocViewerStatus.svelte, `--bar-row`).
+		if (mobile) expect((await page.locator('[data-comments-entry]').boundingBox())!.height).toBeGreaterThanOrEqual(44);
 	}
 });

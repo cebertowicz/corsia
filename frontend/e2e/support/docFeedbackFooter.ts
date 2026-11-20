@@ -62,18 +62,18 @@ export async function leaveUserCommentsUnsent(request: APIRequestContext, artifa
 /** Open the comments drawer from the header pill ("N comments, …") and return its unsent-messages footer. */
 export async function openUnsentFooter(page: Page): Promise<Locator> {
 	await openComments(page, /^\d+ comments?\b/);
-	return page.getByRole('region', { name: 'Document comments' }).locator('[data-drawer-unsent]');
+	return page.getByRole('region', { name: 'Document comments' }).locator('.drawer-foot');
 }
 
 /**
- * The feedback Send controls and sending countdowns in the document header that a person could see: text with a box
+ * The feedback Send controls and sending countdowns in the comments drawer that a person could see: text with a box
  * larger than 1 px under no hidden, clipped or collapsed ancestor. Playwright's `toBeVisible` ignores `clip`, so a
- * clipped Send once passed as visible; Send now lives in the comments drawer's footer instead.
+ * clipped Send once passed as visible.
  */
-export function visibleHeaderSends(page: Page): Promise<string[]> {
+export function visibleDrawerSends(page: Page): Promise<string[]> {
 	return page.evaluate(() => {
-		const header = document.querySelector('.document-header');
-		if (!header) return [];
+		const drawer = document.querySelector('[data-doc-comments-drawer]');
+		if (!drawer) return [];
 		const hidden = (element: Element) => {
 			for (let node: Element | null = element; node; node = node.parentElement) {
 				const style = getComputedStyle(node);
@@ -85,7 +85,7 @@ export function visibleHeaderSends(page: Page): Promise<string[]> {
 			return false;
 		};
 		const found: string[] = [];
-		const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
+		const walker = document.createTreeWalker(drawer, NodeFilter.SHOW_TEXT);
 		for (let text = walker.nextNode(); text; text = walker.nextNode()) {
 			if (!/\bSend \d+ comments?\b|\bSend now\b|\bSending to\b/.test(text.textContent ?? '')) continue;
 			const range = document.createRange();

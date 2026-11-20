@@ -75,7 +75,7 @@ for (const editedOnDisk of [false, true]) test(`comment task after promote, edit
 	expect(node.state).toBe('pending');
 	await expect(row.first()).toContainText('2 comments, 2 suggestions');
 	await row.first().getByRole('button').first().click();
-	await expect(page.locator('.review-bar').first()).toContainText('2 comments, 2 suggestions to review');
+	await expect(page.locator('.review-bar.ask[aria-label="Task for you"]').first()).toContainText('2 comments, 2 suggestions to review');
 	await page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first().click();
 	await expect(page.getByRole('region', { name: /^Comment by / })).toHaveCount(4);
 	await page.screenshot({ path: testInfo.outputPath('moved-document.png') });
