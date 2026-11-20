@@ -83,7 +83,7 @@
 		<p role="alert">Couldn’t load the file’s text. Your text stays here.</p>
 		<Button size="sm" variant="ghost" onclick={load}>Retry</Button>
 	{:else}
-		{#each [{ label: 'Your text', text: draft?.editText ?? '', copyLabel: 'Copy your text' }, { label: 'The file’s text', text: read.file.text, copyLabel: 'Copy file text' }] as item (item.label)}
+		{#each [{ label: 'Your text', text: draft?.editText ?? '', copyLabel: 'Copy your text' }, { label: 'The file’s text', text: read.file.text, copyLabel: 'Copy the file’s text' }] as item (item.label)}
 			<section><h3>{item.label}</h3><pre>{item.text}</pre><Button size="sm" variant="ghost" onclick={() => copy(item.text)}>{item.copyLabel}</Button></section>
 		{/each}
 		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'mine'}>Keep your text</Button>

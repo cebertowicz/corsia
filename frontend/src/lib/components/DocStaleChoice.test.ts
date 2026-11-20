@@ -63,7 +63,7 @@ describe('DocStaleChoice', () => {
 		expect(document.body.textContent).toContain('my typed text');
 		expect(document.body.textContent).toContain('what the file holds');
 		button('Copy your text').click();
-		button('Copy file text').click();
+		button('Copy the file’s text').click();
 		await vi.waitFor(() => expect(copy.mock.calls).toEqual([['my typed text'], ['what the file holds']]));
 	});
 
