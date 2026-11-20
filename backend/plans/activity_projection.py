@@ -16,10 +16,8 @@ from plans import (
     activity_subagents,
     held_attention,
     hierarchy,
-    node_states,
     not_moving,
     operator_display_state,
-    operator_nodes,
     operator_owners,
     operator_plan_display,
     operator_projection,
@@ -90,11 +88,9 @@ def _reduce_plan(
             child_cause=child_cause,
             executor_stop_fact=executor_stop_facts.get(node_id),
         )
-    buckets = {node_id: item.bucket for node_id, item in reduced.items()}
-    branches, counts = operator_nodes.distribution_from_buckets(rows, buckets)
+    leaves, parents, counts = activity_reducer.distribution_counts(rows, reduced)
     # The rows are the open work; the settled leaves are the plan's stored counters (#731 S2-2).
     counts = {**counts, "done": counts["done"] + plan["top_done"], "failed": counts["failed"] + plan["top_failed"]}
-    leaves = node_states.leaves(rows)
     user_ready = sum(
         reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user"
         for row in leaves
@@ -137,7 +133,9 @@ def _reduce_plan(
             reduced[str(row["id"])].requires_user_action for row in leaves
         ),
     )
-    return reduced, activity_reducer.plan_state(plan, rows, reduced), display
+    return reduced, activity_reducer.plan_state(
+        plan, rows, reduced, leaves=leaves, parents=parents,
+    ), display
 
 
 def _top_level(plan_rows: list) -> list:

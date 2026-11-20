@@ -90,7 +90,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, image.diagramSource),
+					post: (region, text, taggedAgentIds, mentions, press) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, press, image.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

@@ -10,7 +10,7 @@
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
-	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
+	import { commentDraft, commentDraftScope } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createPressReveal } from '$lib/docPressReveal.svelte';
@@ -27,7 +27,7 @@
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
-	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
@@ -51,7 +51,6 @@
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { createReviewBarState } from '$lib/reviewBarState.svelte';
-	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
@@ -101,7 +100,6 @@
 		liveGeneration = state.textGeneration;
 	});
 
-	const commentRetryToast = createCommentRetryToast(toasts);
 	let presenceRanges = $state<PresenceRange[]>([]);
 	let activity = $state<DocCanvasActivity>();
 	const imageKey = createDocImageCacheKey(() => target?.threadId, () => loadedArtifactId);
@@ -126,7 +124,7 @@
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
-	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, columnFits);
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), columnFits);
 	const reviewBarState = createReviewBarState();
 	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
@@ -164,9 +162,9 @@
 	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
-		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,
+		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
-		ensureArtifactId: ensureEditorArtifactId, onFailure: commentRetryToast.remember,
+		ensureArtifactId: ensureEditorArtifactId,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
@@ -178,7 +176,6 @@
 		commentUI.state = { kind: 'thread', id };
 		commentDraft.set(null);
 		feedbackStatus?.commentCreated();
-		commentRetryToast.dismissAfterSuccess();
 	}
 	const threadActions = createThreadActions(() => loadedArtifactId, () => feedbackStatus?.commentCreated(), () => target?.threadId ?? null);
 
@@ -186,8 +183,6 @@
 	// unrelated re-render that recreates the `target` prop object (e.g. a
 	// sibling tab's status update) never re-triggers a reload.
 	const targetKey = $derived(commentDraftScope(target));
-	// A comment the user has typed but not posted: the review bar never answers over it.
-	const composerHasText = $derived(Boolean($commentDraft && $commentDraft.scope === targetKey && $commentDraft.body?.trim()));
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
@@ -227,11 +222,11 @@
 			const seq = ++loadSeq;
 			const signal = loadSignal(onSignal, d);
 
+			draftController.leave(prevTarget, key);
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
-			draftController.select(null);
 			commentUI.closeAll();
-			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
+			focusedDocComment.set(null);
 			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
 			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
@@ -365,7 +360,7 @@
 		ringId={commentUI.hovered}
 		draft={draftController.draft}
 		draftReason={draftController.reason}
-		onDraftBody={(body) => setCommentBody(body, targetKey)}
+		onDraftBody={draftController.setBody}
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
 		onThreadMissing={commentUI.focusRemainingThread}
@@ -380,6 +375,7 @@
 		onAgree={threadActions.agree}
 		{target}
 		artifactId={loadedArtifactId}
+		draftScope={draftController.keepKey}
 		readOnly={readonly || confirming}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
@@ -395,6 +391,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={commentUI.state != null && commentUI.sheetUp} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

@@ -6,6 +6,10 @@ import { docComments, type DocComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { ANCHOR_MOVED } from './ui/Popover.svelte';
 import DocCommentSurface from './DocCommentSurface.svelte';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: vi.fn(), seedDraft: vi.fn() }));
 

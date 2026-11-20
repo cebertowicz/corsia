@@ -237,12 +237,13 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
 
-			// A comment that fails to post keeps its text and says so; sending again posts it.
+			// A comment that fails to post keeps its text and says so in its box, the one place, as the box is on screen; sending again posts it.
 			await failNextPost(page, seeded);
 			await drag(page, await at(page, .2, .25), await at(page, .45, .5));
 			await composer(page).fill('The header is too tall here');
 			await page.keyboard.press('ControlOrMeta+Enter');
-			await expect(toast(page, "Couldn't post the comment")).toBeVisible();
+			await expect(page.locator('.composer [role="alert"]').filter({ hasText: 'Couldn’t post the comment. Your draft is kept. Try again.' })).toBeVisible();
+			await expect(page.locator('.toast').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
 			await expect(composer(page)).toHaveValue('The header is too tall here');
 			await shoot(page, testInfo, '1440-40-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);
@@ -270,7 +271,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await shoot(page, testInfo, '1440-21-move-pin-pending', true);
 			// Failing: the pending pin fades out and the old one comes back solid, in place.
 			// The toast lasts three seconds and the filming takes longer, so wait for it while the film runs.
-			const moveFailed = toast(page, "Couldn't move the pin").waitFor(); moveFailed.catch(() => {});
+			const moveFailed = toast(page, 'Couldn’t move the pin').waitFor(); moveFailed.catch(() => {});
 			expectTransition(await record(page, testInfo, '1440-21n-pending-to-failed', viewer(page), release, movingPin(page)), 'failed move reverting');
 			await moveFailed;
 			await expect(tag(page, 1)).not.toHaveClass(/pending/);
@@ -374,20 +375,21 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await expect(commentButton(page)).toContainText('Moving pin…');
 			await expect(tag(page, 1)).toHaveClass(/pending/);
 			await shoot(page, testInfo, '393-10-move-pin-pending', true);
-			const moveFailed = toast(page, "Couldn't move the pin").waitFor(); moveFailed.catch(() => {});
+			const moveFailed = toast(page, 'Couldn’t move the pin').waitFor(); moveFailed.catch(() => {});
 			expectTransition(await record(page, testInfo, '393-11m-pending-to-failed', viewer(page), release, movingPin(page), { rate: 0.03 }), 'failed move reverting (393)');
 			await moveFailed;
 			await expect(tag(page, 1)).not.toHaveClass(/pending/);
 			await shoot(page, testInfo, '393-11-move-pin-failed', true);
 			await page.unroute('**/api/comments/**');
 
-			// A comment that fails to post keeps its text in the sheet.
+			// A comment that fails to post keeps its text in the sheet, which says why, the one place, as it is on screen.
 			await failNextPost(page, seeded);
 			await commentButton(page).tap();
 			await touchDrag(page, await at(page, .15, .75), await at(page, .45, .95));
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
 			await sheet(page).getByRole('button', { name: 'Comment', exact: true }).tap();
-			await expect(toast(page, "Couldn't post the comment")).toBeVisible();
+			await expect(sheet(page).locator('[role="alert"]').filter({ hasText: 'Couldn’t post the comment. Your draft is kept. Try again.' })).toBeVisible();
+			await expect(page.locator('.toast').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
 			await expect(sheet(page).locator('textarea')).toHaveValue('Too much padding on phones');
 			await shoot(page, testInfo, '393-12-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);

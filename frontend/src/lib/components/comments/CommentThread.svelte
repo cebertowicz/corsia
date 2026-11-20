@@ -30,7 +30,7 @@
 	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -101,10 +101,13 @@
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		replyText?: string;
 		replyPending?: boolean;
+		/** Why the kept reply didn't post; shown under its field until the next press of Send. */
 		replyError?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
 		onReplySelection?: (selection: [number, number] | null) => void;
+		/** The kept reply's key (`replyDraftKey`), so its field counts as the box that says why a post failed. */
+		replyKey?: string;
 	} = $props();
 
 	/** The number chip's fill: the viewer disc's, so a pin's digit reads the same in the drawer. */
@@ -190,7 +193,8 @@
 		try {
 			const mentions = replyField?.mentions() ?? [];
 			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
-			if (!chatSurface) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
+			// Text typed while the reply posted is a new reply: it stays.
+			if (!chatSurface && replyText === submittedText) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
 		} finally {
@@ -245,7 +249,7 @@
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} goesTo={comment.replyGoesTo} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyError}<p class="ct-reply-error" role="alert">{replyError}</p>{/if}{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -305,8 +309,8 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} goesTo={comment.replyGoesTo} />
-			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} goesTo={comment.replyGoesTo} />
+			{#if replyError}<p class="ct-reply-error" role="alert">{replyError}</p>{/if}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
 		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} refusalKind={comment.refusalKind} {readOnly} {decisionError} onDecide={(decision) => { engage(); return onDecision?.(comment.id, decision); }} />{/if}
@@ -347,7 +351,9 @@
 	/* CommentMeta draws the avatar (Avatar owns the shared initials presentation); the Agree and Resolve boxes are in comment-link.css. */
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
-	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-decision-error, .ct-reply-error { font-size: var(--text-caption); color: var(--red-text); }
+	/* The card's gap spaces it, as it spaces the field above it: no paragraph margin of its own. */
+	.ct-reply-error { margin: 0; }
 	.ct-decided { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {

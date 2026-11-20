@@ -20,6 +20,10 @@ import { canvasCommentHighlights, canvasCommentRange, commentsInDocumentOrder } 
 import { commentLoads, docComments, flushPositions, loadComments, remapComments, type DocComment } from '$lib/stores/docComments';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 const ARTIFACT = 'artifact-1';
 const START = 'The quick brown fox.';

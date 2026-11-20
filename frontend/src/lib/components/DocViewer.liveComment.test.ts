@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
@@ -10,6 +10,7 @@ import { encodeUpdate, textDigest } from '$lib/stores/documentWire';
 import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
 import { toasts } from '$lib/stores/toast';
 import { docComments } from '$lib/stores/docComments';
@@ -58,7 +59,7 @@ afterEach(async () => {
 	for (const frame of wire.frames.filter(frame => frame.type === 'doc_flush')) emit('doc_saved', {
 		type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', request_id: frame.request_id, server_saved: true, pending: false, held: null });
 	await Promise.resolve(); await Promise.resolve();
-	host?.remove(); stop(); server?.destroy(); clearDraft(target); discardCommentDraft(); docComments.set({}); wire.frames.length = 0;
+	host?.remove(); stop(); server?.destroy(); clearDraft(target); discardCommentDraft(); keptCommentDrafts.reset(); docComments.set({}); wire.frames.length = 0;
 	vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const fn of Object.values(api)) fn.mockReset();
 });
 async function open() {
@@ -253,7 +254,7 @@ it('keeps the open composer beside its text when an edit before it shifts the te
 		window.innerWidth = width;
 	}
 });
-it('cancels the positions wait on outside close and ignores its late reply', async () => {
+it('a phone sheet closed by its scrim after Comment is pressed still posts the comment, once', async () => {
 	phone.store!.set(true);
 	await open(); await select(); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
@@ -264,10 +265,11 @@ it('cancels the positions wait on outside close and ignores its late reply', asy
 	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	await answer(ask);
-	await Promise.resolve(); await Promise.resolve();
-	expect(api.postComment).not.toHaveBeenCalled();
-	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
-	expect(get(commentDraft)?.body).toBe('Keep my body');
+	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+	expect(api.postComment.mock.calls[0][1]).toEqual(expect.objectContaining({ body: 'Keep my body', client_id: ask.reserve.client_id }));
+	expect(released()).toEqual([]);
+	// Posted: nothing is kept to post twice.
+	await vi.waitFor(() => expect(get(commentDraft)).toBeNull());
 });
 it.each([
 	['a store mismatch', { kind: 'store_mismatch', store_id: 'other' }],
@@ -281,7 +283,9 @@ it.each([
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
 	emit('doc_error', { type: 'doc_error', artifact_id: 'artifact', request_id: ask.request_id, ...fields });
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
-	expect(submit.textContent).toBe('Comment');
+	// The composer says why beside the text, so its button offers the press again.
+	expect(submit.textContent).toBe('Retry');
+	expect(document.querySelector('.composer [role="alert"]')?.textContent).toBeTruthy();
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	expect(api.postComment).not.toHaveBeenCalled();
@@ -311,7 +315,8 @@ it('after a store mismatch, reopening the composer and submitting sends one rese
 	await answer(retry);
 	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
 	expect(api.postComment.mock.calls[0][1]).toMatchObject({ client_id: retry.reserve.client_id, anchor_text: 'beta', body: 'Keep my body', live_capture: true });
-	expect(retry.reserve.client_id).not.toBe(refused.reserve.client_id);
+	// One id per draft: the press after a refused capture reserves under the same id, which the refusal released.
+	expect(retry.reserve.client_id).toBe(refused.reserve.client_id);
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(asks()).toHaveLength(2);
 	expect(api.postComment).toHaveBeenCalledOnce();
@@ -327,24 +332,26 @@ it('keeps the draft and re-enables Comment without posting when a reservation re
 	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
 	expect(toasts.show).toHaveBeenCalledWith('Couldn’t attach your comment. Your draft is kept. Try again.', 'error');
-	expect(submit.textContent).toBe('Comment');
+	expect(submit.textContent).toBe('Retry');
+	expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe('Couldn’t attach your comment. Your draft is kept. Try again.');
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	expect(api.postComment).not.toHaveBeenCalled();
 	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
 });
-it('unmount cancels its capture, discards its scoped draft and ignores late answers', async () => {
+it('unmount lets go of its draft, and a comment already pressed still posts once its answer comes', async () => {
 	await open(); await select(); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
 	const request = get(commentDraft)!.request!;
 	await unmount(component!); component = undefined;
-	expect(request.signal.aborted).toBe(true);
+	expect(request.signal.aborted).toBe(false);
 	expect(get(commentDraft)).toBeNull();
 	await answer(ask);
-	expect(api.postComment).not.toHaveBeenCalled();
-	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
+	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+	expect(api.postComment.mock.calls[0][1]).toEqual(expect.objectContaining({ body: 'Keep my body', client_id: ask.reserve.client_id }));
+	expect(released()).toEqual([]);
 });
 it('a sibling viewer loading and unmounting cannot discard another viewer’s draft', async () => {
 	await open(); await select(); await compose();
@@ -366,7 +373,7 @@ it('a sibling viewer loading and unmounting cannot discard another viewer’s dr
 	}
 	expect(get(commentDraft)?.identity).toBe(draft!.identity);
 });
-const TRY_AGAIN = "Couldn't post the comment — try again";
+const TRY_AGAIN = 'Couldn’t post the comment. Your draft is kept. Try again.';
 const postFailure = (name: string) => Object.assign(new Error('request timed out after 12000ms (may have committed server-side)'), { name });
 it.each([
 	['a server error', new Error('500 synthetic comment failure'), TRY_AGAIN],
@@ -420,7 +427,8 @@ it('keeps the body and enabled Comment after an HTTP refusal that a second captu
 	await answer(secondAsk);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
 	expect(released()).toEqual([expect.objectContaining({ client_id: refusedAsk.reserve.client_id }), expect.objectContaining({ client_id: secondAsk.reserve.client_id })]);
-	expect(submit.textContent).toBe('Comment');
+	expect(submit.textContent).toBe('Retry');
+	expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe('The document changed before your comment could be attached. Your draft is kept. Try again.');
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	expect(toasts.show).toHaveBeenCalledWith('The document changed before your comment could be attached. Your draft is kept. Try again.', 'error');
@@ -488,4 +496,156 @@ it('opens a comment where its text is clicked without scrolling to it', async ()
 	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
 	await new Promise((done) => requestAnimationFrame(() => done(null)));
 	expect(scrolledTo(scroll, 6)).toBe(false);
+});
+
+// A person's typed comment is never lost: until the server stores it, it stays in the composer or comes back in the next
+// composer opened on this document (the carry-over), with its tags, and a failed post says why in the composer.
+describe('a typed comment is never lost', () => {
+	const field = () => document.querySelector<HTMLTextAreaElement>('.composer textarea');
+	const escape = (at: EventTarget) => at.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+	async function reopen(from = 6, to = 10) {
+		await select(from, to);
+		host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
+		await vi.waitFor(() => expect(field()).not.toBeNull());
+		return field()!;
+	}
+	// The live session outlives the viewer (a tab switch keeps it), so a new viewer shows the text without a new open.
+	async function remount() {
+		await unmount(component!); component = undefined; host.remove();
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(DocViewer, { target: host, props: { target } }); flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+	}
+	function pressComment(view: EditorView, at: number) {
+		view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1 }));
+		view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' });
+		window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+	}
+	async function postAfterOutsideClick() {
+		document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
+		await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+		await answer(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+	}
+	it('path 1: Escape in the composer keeps the text and its tags for the next Comment', async () => {
+		await open(); await select(); await compose('Hey @Agent\nlook here');
+		get(commentDraft)!.mentionSelection!.select('agent-1', 4, '@Agent');
+		escape(field()!); flushSync();
+		await vi.waitFor(() => expect(field()).toBeNull());
+		expect((await reopen()).value).toBe('Hey @Agent\nlook here');
+		expect(get(commentDraft)!.mentionSelection!.occurrences('Hey @Agent\nlook here')).toEqual([{ agent_id: 'agent-1', start: 4, end: 10 }]);
+	});
+	it('path 2: Escape in the text with the composer popover open keeps the text', async () => {
+		await open(); await select(); await compose();
+		expect(document.querySelector('[data-popover]')).not.toBeNull();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		view.contentDOM.focus();
+		escape(view.contentDOM); flushSync();
+		await vi.waitFor(() => expect(field()).toBeNull());
+		expect((await reopen()).value).toBe('Keep my body');
+	});
+	it('path 4: a click outside, then Escape, keeps the text', async () => {
+		await open(); await select(); await compose();
+		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+		await vi.waitFor(() => expect(field()).toBeNull());
+		escape(document.body); flushSync();
+		expect((await reopen()).value).toBe('Keep my body');
+	});
+	it('path 4: a click outside right after Comment is pressed never aborts that post', async () => {
+		await open(); await select(); await compose();
+		await postAfterOutsideClick();
+		await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+		expect(api.postComment.mock.calls[0][1]).toEqual(expect.objectContaining({ body: 'Keep my body', anchor_text: 'beta' }));
+		await vi.waitFor(() => expect(get(docComments).artifact?.some(comment => comment.text === 'Keep my body')).toBe(true));
+		// Posted, so the next composer starts empty: nothing comes back to be posted twice.
+		expect((await reopen()).value).toBe('');
+	});
+	it('path 4: when the post a click outside left running fails, the reason shows and the text comes back with it', async () => {
+		await open(); await select(); await compose();
+		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
+		await postAfterOutsideClick();
+		await vi.waitFor(() => expect(toasts.show).toHaveBeenCalledWith(TRY_AGAIN, 'error'));
+		expect((await reopen()).value).toBe('Keep my body');
+		expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN);
+	});
+	it('a failed post shows its reason in the composer, and no toast, while the composer is on screen', async () => {
+		// jsdom lays nothing out: the selected text, the document and the composer report a place inside the window, as they
+		// have on a page, so the composer's Popover is placed and shows it.
+		vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+		await open();
+		host.querySelector<HTMLElement>('.doc')!.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 700);
+		await select(); await compose();
+		document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.composer')!.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
+		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
+		const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+		submit.click();
+		await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+		await answer(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+		await vi.waitFor(() => expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN));
+		expect(field()!.value).toBe('Keep my body');
+		expect(submit.textContent).toBe('Retry');
+		expect(toasts.show).not.toHaveBeenCalledWith(TRY_AGAIN, 'error');
+	});
+	it('path 5: picking another comment while writing, then Escape, keeps the text', async () => {
+		await open();
+		docComments.set({ artifact: [{ id: 'c1', from: 0, to: 5, anchor: 'alpha', author: 'you', text: 'note', at: '2026-10-07T00:00:00Z', resolved: false, replies: [] }] });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
+		await select(); await compose();
+		pressComment(EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!, 2);
+		await vi.waitFor(() => expect(field()).toBeNull());
+		escape(document.body); flushSync();
+		expect((await reopen()).value).toBe('Keep my body');
+	});
+	it('path 6: a tab switch or unmount keeps the text for the same document', async () => {
+		await open(); await select(); await compose();
+		await remount();
+		expect((await reopen()).value).toBe('Keep my body');
+	});
+	it('path 6: another document\'s draft does not take this document\'s text', async () => {
+		await open(); await select(); await compose();
+		commentDraft.set({ from: 0, to: 1, text: 'x', top: 0, body: 'Other document', scope: 'other|/documents/other.md||project', identity: {} });
+		expect((await reopen()).value).toBe('Keep my body');
+	});
+	it('path 7: a reload of the same tab keeps the text', async () => {
+		api.fetchContent.mockResolvedValue({ text: 'disk copy text', writable: true, artifact: { id: 'artifact' }, freshness: null, live: false });
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(DocViewer, { target: host, props: { target } }); flushSync();
+		await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
+		emit('doc_opened', { type: 'doc_opened', request_id: wire.frames.findLast(frame => frame.type === 'doc_open')!.request_id, live: false });
+		await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('disk copy text'));
+		server = new Y.Doc();
+		await select(0, 4); await compose();
+		const loads = api.fetchContent.mock.calls.length;
+		(component as unknown as { reload: () => void }).reload();
+		await vi.waitFor(() => expect(api.fetchContent.mock.calls.length).toBeGreaterThan(loads));
+		await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('disk copy text'));
+		expect((await reopen(0, 4)).value).toBe('Keep my body');
+	});
+	it.each([
+		['the adjacent section', (text: Y.Text) => text.insert(16, '\n\nThe next section, rewritten.'), true],
+		['the same section', (text: Y.Text) => { text.delete(6, 4); text.insert(6, 'BETA'); }, false],
+		['the whole document, rewritten', (text: Y.Text) => { const was = text.toString(); text.delete(0, text.length); text.insert(0, `${was}\n\nMore.`); }, false],
+	])('an outside save to %s while the composer is open keeps the text in place', async (_case, edit, anchorHolds) => {
+		await open(); await select(); await compose();
+		const input = field()!;
+		input.focus(); remote(edit);
+		await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).not.toBe('alpha beta gamma'));
+		expect(field()).toBe(input);
+		expect(input.value).toBe('Keep my body');
+		expect(get(commentDraft)?.body).toBe('Keep my body');
+		if (anchorHolds) {
+			expect(document.querySelector('.selection-reason')).toBeNull();
+			document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
+			await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+			await answer(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+			await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+			expect(api.postComment.mock.calls[0][1]).toEqual(expect.objectContaining({ anchor_text: 'beta', body: 'Keep my body' }));
+		} else {
+			await vi.waitFor(() => expect(document.querySelector('.selection-reason')?.textContent).toContain('Select the text again; your draft will carry over'));
+			expect((await reopen()).value).toBe('Keep my body');
+		}
+	});
 });

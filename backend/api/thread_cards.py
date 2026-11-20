@@ -183,9 +183,15 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
             row["cards"] = cards
 
 
-def attach_result_cards(db, thread_id: str, user_id: str, result) -> None:
-    """``attach_cards`` for a page read's result, whichever shape the read returned."""
+def attach_result_cards(db, thread_id: str, user_id: str, result, thread=None) -> None:
+    """``attach_cards`` for a page read's result, whichever shape the read returned.
+
+    ``thread`` is a caller's own read of the thread row: a batch that authorized once
+    passes it, so N pages cost no more ownership reads than one page does.
+    """
     if result is None:
         return
     page = result["messages"] if isinstance(result, dict) else result[0]
-    attach_cards(db, thread_id, user_id, get_thread_for_user(thread_id, user_id, db=db), page)
+    if thread is None:
+        thread = get_thread_for_user(thread_id, user_id, db=db)
+    attach_cards(db, thread_id, user_id, thread, page)

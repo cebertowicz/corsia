@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from infra.chat_comment_answers import place_answers
+from infra.constants import EXPLICIT_ARCHIVE_REASONS
 from infra.delivery_states import INPUT_DELIVERY_ENDED, INPUT_DELIVERY_STATE_SET
 from infra.time import utc_now_iso
 from infra.turn_provenance import refuse_reader_only_reason, turn_provenance
@@ -26,20 +27,22 @@ def _row_value(row: Any, key: str, default: Any = None) -> Any:
 def thread_available_sql(
     alias: str | None = None,
     *,
-    include_user_archived: bool = False,
+    include_explicit_archives: bool = False,
 ) -> str:
     """Return the canonical SQL predicate for a usable session row.
 
-    Purged rows are never usable. Explicit user archives are excluded unless a
-    listing explicitly asks to include them. Dormancy archives remain usable.
+    Purged rows are never usable. Explicit archives (the person's own, and a
+    worker its delegator stopped; ``EXPLICIT_ARCHIVE_REASONS``) are excluded
+    unless a listing asks to include them. Dormancy archives remain usable.
     """
     prefix = f"{alias}." if alias else ""
     state = f"COALESCE({prefix}lifecycle_state, 'active')"
     clauses = [f"{state} != 'purged'"]
-    if not include_user_archived:
+    if not include_explicit_archives:
+        reasons = ", ".join(repr(r) for r in EXPLICIT_ARCHIVE_REASONS)
         clauses.append(
             f"NOT ({state} = 'archived' "
-            f"AND COALESCE({prefix}archived_reason, '') = 'user')"
+            f"AND COALESCE({prefix}archived_reason, '') IN ({reasons}))"
         )
     return "(" + " AND ".join(clauses) + ")"
 
@@ -51,7 +54,7 @@ def thread_unavailable_reason(session: Any | None) -> str | None:
     state = _row_value(session, "lifecycle_state") or "active"
     if state == "purged":
         return "thread has been purged"
-    if state == "archived" and _row_value(session, "archived_reason") == "user":
+    if state == "archived" and _row_value(session, "archived_reason") in EXPLICIT_ARCHIVE_REASONS:
         return "thread is archived"
     return None
 
@@ -74,7 +77,7 @@ def thread_is_explicitly_archived(session: Any | None) -> bool:
     return (
         session is not None
         and (_row_value(session, "lifecycle_state") or "active") == "archived"
-        and _row_value(session, "archived_reason") == "user"
+        and _row_value(session, "archived_reason") in EXPLICIT_ARCHIVE_REASONS
     )
 
 

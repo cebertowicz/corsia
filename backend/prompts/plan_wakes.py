@@ -32,6 +32,10 @@ WAKE_CHILD_NEEDS_INPUT = (
 WAKE_REVISION_REQUESTED = (
     "[CORSIA plan] Your returned work on {title} was rejected; the revision is now yours."
 )
+WAKE_REVIEW_PASSED = "[CORSIA plan] The review of {title} passed."
+WAKE_REVIEW_FAILED = ("[CORSIA plan] The review of {title} failed; the findings are on revision {revision_id}, "
+    "now yours. Weigh them with skill apply-feedback, then restart the review with delegate_send(thread_id="
+    "{reviewer}, plan_node_id={revision_id}, message=what changed and which findings you rejected, and why).")
 WAKE_INTENT_REVISED = (
     "[CORSIA plan] Intent on {title} is now revision {requirements_revision}. "
     "Re-check your work against this revision before continuing."
@@ -228,12 +232,12 @@ WAKE_CHILD_THREAD_ENDED = (
 #: each saying what became of that worker (#2647: delete means delete).
 WAKE_STRANDED_GRANDCHILDREN = " It had delegated to other workers: {workers}."
 STRANDED_TOP_LEVEL = "{thread} is now a top-level agent and keeps its own work"
-STRANDED_ORPHANED = "{thread} still exists with no parent; stop it if it is running"
+STRANDED_ORPHANED = "{thread} still exists with no parent; stop it with delegate_stop if it is running (the CORSIA agent can if you cannot)"
 #: Replacing a worker closed steps it had delegated; those workers still run.
 REPLACE_OLD_WORKER = (
     "{thread} was replaced: its open steps were closed as replaced and it can no"
     " longer report on this step, but it may still be running. Stop it with"
-    " delegate tools if it is."
+    " delegate_stop if it is."
 )
 REPLACE_STRANDED = (
     " It had delegated to {threads}, whose steps were closed the same way. To"
@@ -279,6 +283,8 @@ WAKE_CHIPS = {
     "plan.ask_released": "Artifact ask released work",
     "plan.child_returned": "Delegated work returned for your review",
     "plan.revision_requested": "Returned work was rejected",
+    "plan.review_passed": "A review passed",
+    "plan.review_failed": "A review failed; its revision is yours",
     "plan.intent_revised": "A task’s goal changed",
     "plan.intent_input": "What you said may affect a running task",
     "plan.prerequisite_settled": "A task you depend on settled",

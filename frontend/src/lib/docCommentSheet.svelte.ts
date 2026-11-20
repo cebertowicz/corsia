@@ -2,7 +2,7 @@ import { untrack } from 'svelte';
 import type { CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
-export type SheetDraft = { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
+export type SheetDraft = { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string } | null;
 
 /**
  * The comment surface's sheet form, on AdaptiveDrawer's open/onClosed lifecycle: a close commits at once, and the sheet
