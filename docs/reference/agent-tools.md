@@ -30,6 +30,7 @@ Pack: `plans`
 | Tool | Description |
 |---|---|
 | `bulletin_disposition` | Record a CORSIA agent disposition for a System bulletin |
+| `delegate_stop` | Stop a worker you spawned, and the workers beneath it |
 | `plan_decision` | Draft, review and raise a plan decision for the user |
 | `plan_ensure` | Create this thread's plan if missing, then read it |
 

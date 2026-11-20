@@ -21,7 +21,7 @@ def _clear_timing_state():
 
 
 def test_histogram_percentiles_interpolate_fixed_buckets():
-    buckets = [0] * len(request_timing._BUCKET_UPPERS)
+    buckets = [0] * len(request_timing.BUCKET_UPPERS)
     buckets[0], buckets[1] = 2, 2
     assert request_timing.bucket_percentile(buckets, 0.5) == pytest.approx(1.0)
     assert request_timing.bucket_percentile(buckets, 0.95) == pytest.approx(1.9)
