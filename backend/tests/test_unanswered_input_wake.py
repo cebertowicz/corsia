@@ -113,6 +113,37 @@ async def test_a_turn_that_took_in_the_wake_and_errors_queues_no_other(db) -> No
     assert _THREAD not in effects.drives
 
 
+@pytest.mark.asyncio
+async def test_a_standing_agent_is_reported_only_when_its_one_rerun_fails(db, monkeypatch) -> None:
+    """The re-run for the person's message answers for the first error; its own failure is told once."""
+    import events.delivery as delivery
+    import infra.conductor as conductor
+
+    db.execute("INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES "
+               "('lead','user-1','oMLX/qwen','t0','t0')")
+    db.execute("UPDATE threads SET agent_enabled=1 WHERE id=?", (_THREAD,))
+    db.commit()
+    monkeypatch.setattr(conductor, "get_scope_coordinator", lambda scope, db=None: "lead")
+    monkeypatch.setattr(delivery, "start_idle_after_commit", lambda db, thread_id: None)
+
+    def told() -> int:
+        return db.execute("SELECT count(*) FROM messages WHERE thread_id='lead' "
+                          "AND content LIKE '%will not retry%'").fetchone()[0]
+
+    _take_in(db)
+    await _end(db)
+    (wake,) = _wakes(db)
+    assert told() == 0
+    _take_in(db, turn="t2", message="m2")
+    db.execute("UPDATE messages SET active_turn_id='t2',delivery_state='delivered' WHERE id=?", (wake["id"],))
+    db.commit()
+
+    await _end(db, turn="t2", error="again")
+
+    assert len(_wakes(db)) == 1
+    assert told() == 1
+
+
 @pytest.mark.parametrize("kind,error", [
     ("usage_limit", "You've hit your usage limit"),
     ("sign_in_expired", "session expired"),

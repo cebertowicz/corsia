@@ -19,17 +19,19 @@ def told(monkeypatch):
     import infra.conductor as conductor
     import infra.plan_limit_continue as limit_continue
 
-    state = {"coordinators": {}, "sent": [], "started": [], "rerun": False}
+    state = {"coordinators": {}, "sent": [], "started": [], "rerun": False, "refuse": set()}
     monkeypatch.setattr(
         conductor, "get_scope_coordinator",
         lambda scope, db=None: state["coordinators"].get(scope),
     )
-    monkeypatch.setattr(
-        delivery, "enqueue_event_wake",
-        lambda recipient, kind, summary, details, *, message_id, db: state["sent"].append(
-            (recipient, kind, summary, details, message_id),
-        ),
-    )
+
+    def enqueue(recipient, kind, summary, details, *, message_id, db):
+        if recipient in state["refuse"]:
+            raise ValueError("recipient unavailable")
+        state["sent"].append((recipient, kind, summary, details, message_id))
+
+    monkeypatch.setattr(delivery, "enqueue_event_wake", enqueue)
+    monkeypatch.setattr(delivery, "thread_exists_and_active", lambda thread_id, db=None: True)
     monkeypatch.setattr(
         delivery, "start_idle_after_commit", lambda db, thread_id: state["started"].append(thread_id),
     )
@@ -139,11 +141,53 @@ def test_a_worker_is_left_to_its_parents_plan_wake(isolated_db, told):
     assert told["sent"] == []
 
 
-def test_a_turn_with_its_rerun_queued_tells_nobody_yet(isolated_db, told):
-    told["coordinators"] = {"proj-1": "conductor", WORKSPACE_SCOPE: "corsia"}
+def _runs_again(thread_id: str, turn_id: str = "turn-1") -> bool:
+    db = get_db()
+    try:
+        return plan_liveness_terminal._runs_again(db, thread_id, turn_id, _ERROR)
+    finally:
+        db.close()
+
+
+def test_a_turn_with_its_rerun_queued_runs_again(isolated_db, told):
+    _agent("lane")
+    assert not _runs_again("lane")
     told["rerun"] = True
+    assert _runs_again("lane")
+
+
+def test_a_successor_already_claimed_runs_again(isolated_db, told):
+    _agent("lane")
+    db = get_db()
+    db.execute("INSERT INTO active_turns (id, thread_id, execution_epoch, model, status, started_at, boot_epoch) "
+               "VALUES ('turn-2', 'lane', 0, 'm', 'running', 't', 'b')")
+    db.commit()
+    db.close()
+
+    assert _runs_again("lane")
+
+
+def test_a_refusing_conductor_passes_it_to_the_corsia_agent(isolated_db, told):
+    told["coordinators"] = {"proj-1": "conductor", WORKSPACE_SCOPE: "corsia"}
+    told["refuse"] = {"conductor"}
     _agent("lane")
 
     _tell("lane")
 
-    assert told["sent"] == []
+    assert [s[0] for s in told["sent"]] == ["corsia"]
+    assert told["started"] == ["corsia"]
+
+
+def test_a_notice_nobody_takes_is_parked_not_dropped(isolated_db, told):
+    told["coordinators"] = {"proj-1": "conductor", WORKSPACE_SCOPE: "corsia"}
+    told["refuse"] = {"conductor", "corsia"}
+    _agent("lane")
+
+    _tell("lane")
+
+    db = get_db()
+    parked = db.execute("SELECT reason, payload_json FROM dead_letter_events").fetchall()
+    db.close()
+    assert told["sent"] == [] and told["started"] == []
+    assert [r["reason"] for r in parked] == ["no_coordinator_took_turn_error"]
+    assert "lane" in parked[0]["payload_json"]
