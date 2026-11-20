@@ -29,6 +29,8 @@ const confirmationsOwed = new Map<string, true>();
 // again: typing on keeps the draft and its error, and only a new base can save: the person's choice of
 // which text to keep (`keepMyText` when it starts, `useFileText`), the only things besides closing that delete it.
 const refusedBases = new Map<string, string>();
+/** Tabs whose person is mid-choice (Keep your text): a failure of that write must not take the chooser down. */
+const choosing = new Set<string>();
 const baseDigests = createBaseDigests();
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;
@@ -155,7 +157,8 @@ async function runSave(key: string): Promise<boolean> {
 			const stale = !live && saveErrorCode(e) === EDITOR_STALE_CODE;
 			if (stale) refusedBases.set(key, baseAtStart);
 			const message = stale ? EDITOR_STALE_STATUS : saveErrorMessage(e);
-			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, stale });
+			// A Keep your text that fails for another reason (the network) leaves the refusal up with that error, so the chooser stays and the choice can be made again.
+			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, stale: stale || choosing.has(key) });
 			// The tab's save bar says it when that bar is on screen; a document closed or hidden behind another tab says it here.
 			if (!docSaveBars.onScreen(key)) toasts.show(stale ? staleToast(draft.target.name) : message, 'error');
 			return false;
@@ -209,7 +212,9 @@ export async function keepMyText(target: TargetIdentity, fileText: string): Prom
 	// Nothing to write when the file already reads as his text: that ends the refusal here.
 	const same = cur.editText === fileText;
 	patchDraft(key, { savedText: fileText, status: same ? 'idle' : 'dirty', ...(same ? { error: '', stale: false } : {}) });
-	return flushDraft(target);
+	choosing.add(key);
+	try { return await flushDraft(target); }
+	finally { choosing.delete(key); }
 }
 
 /**

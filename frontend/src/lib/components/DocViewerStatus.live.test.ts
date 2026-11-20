@@ -44,36 +44,36 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
-const SETTLING = 'Couldn’t confirm this save; the document may have changed. Open Details to reload the latest.';
+const SETTLING = 'Still saving. If it doesn’t finish, open Details to reload the latest version.';
 // The wait before the notice; real timers elsewhere in this file, so each case turns fake timers on and the afterEach above restores them.
 function passTime(ms: number) { vi.advanceTimersByTime(ms); flushSync(); }
 
 it('says nothing at 1.9 s of an unsettled write, shows the notice at 2.1 s, and drops it once the write settles', () => {
 	vi.useFakeTimers(); setup(); session.pending = true; render();
-	passTime(SETTLING_NOTICE_AFTER_MS - 100); expect(host.textContent).not.toContain('Couldn’t confirm this save'); expect(button('Details')).toBeUndefined();
+	passTime(SETTLING_NOTICE_AFTER_MS - 100); expect(host.textContent).not.toContain('Still saving. If it doesn’t finish'); expect(button('Details')).toBeUndefined();
 	passTime(200); expect(host.textContent).toContain(SETTLING); expect(button('Details')).toBeDefined();
 	session.handle({ type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', pending: false }); flushSync();
-	expect(host.textContent).not.toContain('Couldn’t confirm this save'); expect(button('Details')).toBeUndefined();
+	expect(host.textContent).not.toContain('Still saving. If it doesn’t finish'); expect(button('Details')).toBeUndefined();
 });
 it('restarts the wait when a settled write is followed by another, so a run of saves never shows the notice', () => {
 	vi.useFakeTimers(); setup(); render();
 	for (let save = 0; save < 5; save += 1) {
 		session.handle({ type: 'doc_pending', artifact_id: 'artifact', store_id: 'store', pending: true }); flushSync(); passTime(1500);
-		expect(host.textContent).not.toContain('Couldn’t confirm this save');
+		expect(host.textContent).not.toContain('Still saving. If it doesn’t finish');
 		session.handle({ type: 'doc_pending', artifact_id: 'artifact', store_id: 'store', pending: false }); flushSync();
-		expect(host.textContent).not.toContain('Couldn’t confirm this save');
+		expect(host.textContent).not.toContain('Still saving. If it doesn’t finish');
 	}
 });
 it('keeps counting a stuck write through unrelated updates to the session', () => {
 	vi.useFakeTimers(); setup(); session.pending = true; render();
-	passTime(SETTLING_NOTICE_AFTER_MS - 500); expect(host.textContent).not.toContain('Couldn’t confirm this save'); session.reconnecting(); flushSync();
+	passTime(SETTLING_NOTICE_AFTER_MS - 500); expect(host.textContent).not.toContain('Still saving. If it doesn’t finish'); session.reconnecting(); flushSync();
 	passTime(600); expect(host.textContent).toContain(SETTLING);
 });
 it('opens Details for a held write without the settling guidance until the wait has passed', () => {
 	vi.useFakeTimers(); setup(); session.pending = true;
 	session.held = { corsia_text: 'kept CORSIA', file_text: 'outside file', candidate_text: 'candidate', choice_pending: false };
 	render(); passTime(SETTLING_NOTICE_AFTER_MS - 100);
-	expect(host.textContent).not.toContain('Couldn’t confirm this save');
+	expect(host.textContent).not.toContain('Still saving. If it doesn’t finish');
 	button('Details').click(); flushSync();
 	expect(document.body.textContent).toContain('outside file'); expect(document.body.textContent).not.toContain('Show the latest version before you save again.');
 	passTime(200);
@@ -82,7 +82,7 @@ it('opens Details for a held write without the settling guidance until the wait 
 it('shows the approved settling row and offers reading and copying without a second write', async () => {
 	vi.useFakeTimers(); setup(); session.pending = true;
 	const retry = vi.spyOn(session, 'retry'); const flush = vi.spyOn(session, 'flush');
-	render(); passTime(2100); expect(host.textContent).toContain('Couldn’t confirm this save; the document may have changed. Open Details to reload the latest.');
+	render(); passTime(2100); expect(host.textContent).toContain('Still saving. If it doesn’t finish, open Details to reload the latest version.');
 	button('Details').click(); flushSync();
 	expect(document.body.textContent).toContain('Show the latest version before you save again.');
 	vi.useRealTimers();
@@ -139,7 +139,7 @@ it('keeps settling precedence and two neutral blockers with one disabled Retry a
 	vi.useFakeTimers(); setup(); blockers(true);
 	const retry = vi.spyOn(session, 'retry'), flush = vi.spyOn(session, 'flush');
 	render(); passTime(2100); vi.useRealTimers();
-	expect(host.textContent).toContain('Couldn’t confirm this save');
+	expect(host.textContent).toContain('Still saving. If it doesn’t finish');
 	expect(host.textContent).toContain("Live updates couldn't be shared for this document.");
 	expect(host.textContent).toContain("Live editing couldn't start for this document.");
 	expect(host.textContent).not.toContain('private fixture');

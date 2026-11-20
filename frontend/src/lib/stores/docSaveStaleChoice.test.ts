@@ -108,13 +108,19 @@ describe('the choice after a stale refusal', () => {
 		clearDraft(doc);
 	});
 
-	it('keeps his text and says why when the save fails for another reason', async () => {
+	it('keeps his text and the refusal up, with the real error, when the save fails for another reason', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const doc = await refused('base', 'mine');
 		mocks.writeContent.mockRejectedValueOnce(new Error('network failed'));
 		expect(await keepMyText(doc, 'file now')).toBe(false);
-		expect(existingDraft(doc)).toMatchObject({ editText: 'mine', status: 'error', stale: false });
+		// The chooser stays (stale), and its error is the failure's own, not the refusal's sentence.
+		expect(existingDraft(doc)).toMatchObject({ editText: 'mine', status: 'error', stale: true });
 		expect(existingDraft(doc)?.error).not.toBe('');
+		expect(existingDraft(doc)?.error).not.toBe(EDITOR_STALE_STATUS);
+		// A later ordinary save of the same text is not held by a refusal the file never made.
+		mocks.writeContent.mockResolvedValueOnce({ revision: 'r-next' });
+		expect(await flushDraft(doc)).toBe(true);
+		expect(existingDraft(doc)).toMatchObject({ status: 'saved', stale: false });
 		clearDraft(doc);
 	});
 

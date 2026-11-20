@@ -148,6 +148,27 @@ describe('DocStaleChoice', () => {
 		expect(onUseFile).not.toHaveBeenCalled();
 	});
 
+	it('says its own sentence when Keep your text fails with no detail, and the refusal’s own line when it has one', async () => {
+		mocks.fetchContent.mockResolvedValue(file('what the file holds'));
+		mocks.writeContent.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		await openDetails();
+		button('Keep your text').click();
+		flushSync();
+		confirm('Keep your text');
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t save the document. Your text stays here. Choose Keep your text to try again.'));
+		expect(document.body.textContent).not.toContain('edits are still local');
+		expect(existingDraft(doc)).toMatchObject({ editText: 'my typed text', stale: true, status: 'error' });
+
+		const deleted = 'Couldn’t save because this document is deleted. Your text stays here until you close it.';
+		mocks.writeContent.mockRejectedValueOnce(new Error(`404 ${JSON.stringify({ detail: deleted })}`));
+		button('Keep your text').click();
+		flushSync();
+		confirm('Keep your text');
+		await vi.waitFor(() => expect(document.body.textContent).toContain(deleted));
+		expect(document.body.textContent).not.toContain('Choose Keep your text to try again.');
+		expect(existingDraft(doc)).toMatchObject({ editText: 'my typed text', stale: true, error: deleted });
+	});
+
 	it('refreshes Details and keeps his text when the file changed again', async () => {
 		mocks.fetchContent.mockResolvedValueOnce(file('file, first version')).mockResolvedValueOnce(file('file, second version'));
 		mocks.writeContent.mockRejectedValueOnce(staleRefusal());

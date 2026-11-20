@@ -116,7 +116,7 @@
 	{#if view.connection === 'connected' && view.deviceError}
 		<div class="live-block" role="status">Changes aren't saved on this device; keep this tab open. <Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button></div>
 	{/if}
-	{#if settling}<div class="live-block" role="status">Couldn’t confirm this save; the document may have changed. Open Details to reload the latest.</div>{/if}
+	{#if settling}<div class="live-block" role="status">Still saving. If it doesn’t finish, open Details to reload the latest version.</div>{/if}
 	{#if view.held}<div class="live-block" role="status">Couldn’t save because this document changed during the save. Open Details to choose which text to keep.</div>{/if}
 	{#if view.recovery.length}<div class="live-block" role="status">This document was reset on the server. Your unsaved text is on this device.</div>{/if}
 	{#if view.failureLines.length}

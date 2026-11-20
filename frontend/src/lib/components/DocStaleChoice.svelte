@@ -7,6 +7,8 @@
 	import { fetchContent, type DocContent } from '$lib/api/docs';
 	import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 	import { docSaveDrafts, keepMyText, useFileText } from '$lib/stores/docSaveQueue';
+	import { EDITOR_STALE_STATUS } from '$lib/stores/docSaveBase';
+	import { GENERIC_SAVE_FAILURE } from '$lib/stores/docSaveError';
 
 	/**
 	 * After a save was refused because the file changed after this tab's base: both texts, and the person's choice of which
@@ -63,8 +65,10 @@
 		try {
 			if (await keepMyText(target, file.text)) return;
 			// A file that changed again refuses again: the text stays, and Details shows the file as it is now.
-			if ($docSaveDrafts[tabKey]?.stale) { notice = 'This document changed again. Choose which text to keep.'; await load(); }
-			else actionError = $docSaveDrafts[tabKey]?.error || 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
+			const after = $docSaveDrafts[tabKey];
+			if (after?.stale && after.error === EDITOR_STALE_STATUS) { notice = 'This document changed again. Choose which text to keep.'; await load(); }
+			// A refusal that says something specific (a deleted file, a server line) keeps its own words; the no-detail failure gets this chooser's sentence, which says who acts next.
+			else actionError = after?.error && after.error !== GENERIC_SAVE_FAILURE ? after.error : 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
 		} finally { busy = false; }
 	}
 	const CONFIRMS = {

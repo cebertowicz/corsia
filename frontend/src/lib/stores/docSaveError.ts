@@ -14,6 +14,9 @@ function refusalDetail(error: unknown): Record<string, unknown> | string | null 
 	return null;
 }
 
+/** What a save failure with no detail says (the network, an HTML error page). A surface with room for more may say its own thing instead of this. */
+export const GENERIC_SAVE_FAILURE = "Couldn't save the document — edits are still local";
+
 export function saveErrorMessage(error: unknown): string {
 	if (error instanceof LiveOperationError && (error.kind === 'publication_failed' || error.kind === 'setup_failed')) return error.message;
 	const detail = refusalDetail(error);
@@ -26,7 +29,7 @@ export function saveErrorMessage(error: unknown): string {
 			: [];
 		return errors.length ? `${message}: ${errors.join('; ')}` : message;
 	}
-	return "Couldn't save the document — edits are still local";
+	return GENERIC_SAVE_FAILURE;
 }
 
 /**

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import uuid
 from urllib.parse import urlencode
 
@@ -40,13 +39,6 @@ def document(integration_client, integration_workspace):
 def _put(client, path, text, project_id, **extra):
     return client.put("/api/files/content" + _AUTH, json={
         "path": str(path), "text": text, "project_id": project_id, **extra})
-
-
-@pytest.fixture(autouse=True)
-def _digest_log_unspent(monkeypatch):
-    from api import files
-
-    monkeypatch.setattr(files, "_digest_absence_logged", False)
 
 
 def test_a_matching_base_saves_and_the_next_save_builds_on_what_it_wrote(integration_client, document):
@@ -90,18 +82,15 @@ def test_a_deleted_file_still_answers_that_it_is_gone_not_that_it_changed(integr
     assert gone.status_code == 404
 
 
-def test_an_old_client_without_a_digest_still_overwrites_and_the_gap_is_logged_once(integration_client, document, caplog):
+def test_an_old_client_without_a_digest_still_overwrites(integration_client, document):
     path, project_id = document
     path.write_text("outside edit\n", encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="api.files"):
-        one = _put(integration_client, path, "old client one\n", project_id)
-        two = _put(integration_client, path, "old client two\n", project_id)
+    one = _put(integration_client, path, "old client one\n", project_id)
+    two = _put(integration_client, path, "old client two\n", project_id)
 
     assert one.status_code == two.status_code == 200, (one.text, two.text)
     assert path.read_text(encoding="utf-8") == "old client two\n"
-    lines = [r for r in caplog.records if "without expected_sha256" in r.getMessage()]
-    assert len(lines) == 1
 
 
 def test_a_save_with_no_digest_over_non_utf8_bytes_still_saves(integration_client, document):
@@ -113,16 +102,6 @@ def test_a_save_with_no_digest_over_non_utf8_bytes_still_saves(integration_clien
 
     assert saved.status_code == 200, saved.text
     assert path.read_bytes() == b"cafe\n"
-
-
-def test_a_client_that_sends_a_digest_never_logs_the_gap(integration_client, document, caplog):
-    path, project_id = document
-
-    with caplog.at_level(logging.WARNING, logger="api.files"):
-        saved = _put(integration_client, path, "guarded\n", project_id, expected_sha256=_sha(BASE))
-
-    assert saved.status_code == 200, saved.text
-    assert not [r for r in caplog.records if "without expected_sha256" in r.getMessage()]
 
 
 def test_a_guidance_file_refuses_a_stale_base_and_records_no_version(integration_client, integration_workspace):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -26,8 +25,6 @@ from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
 from registry import service as registry_service
 from registry.path_access import path_allowed
-
-log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -176,30 +173,19 @@ def document_save_http_exception(exc: DocumentSaveError) -> HTTPException:
     )
 
 
-#: The missing-digest line is a signal about which clients send their base, not a per-request
-#: diagnostic, so it is said once per process.
-_digest_absence_logged = False
-
-
 @router.put("/content")
 async def write_content(token: str, body: WriteBody):
-    """Persist the editor's autosave (plain overwrite — CRDT merge is a later
-    layer; the doc editor is single-writer today). Registers the write to the
+    """Persist the editor's autosave. With ``expected_sha256`` the save is refused
+    (409 ``stale_base``) unless the file still holds those bytes, so an outside edit
+    is never overwritten; without it (an older client, or a base the client cannot
+    hash) the write is a plain overwrite, as it always was. Registers the write to the
     session when one is in scope (register-on-write, registry §0.0 1.4).
-
-    With ``expected_sha256`` the save is refused unless the file still holds those
-    bytes, so an outside edit is never overwritten; without it the
-    write behaves exactly as it did before.
     """
-    global _digest_absence_logged
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
     fields = body.model_dump()
     expected_sha256 = fields.pop("expected_sha256")
-    if expected_sha256 is None and not _digest_absence_logged:
-        _digest_absence_logged = True
-        log.warning("document save arrived without expected_sha256; the write is not guarded against an outside edit")
     try:
         return await save_document_text(DocumentSave(**fields), user["id"], expected_sha256=expected_sha256)
     except DocumentSaveError as exc:
