@@ -85,7 +85,8 @@ def persist_client_positions(db, artifact_id: str, text: str | None, requested: 
         return persist_updates(connection, artifact_id, text, versioned, legacy_updates=legacy, invalid=invalid)
 
 
-def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None) -> tuple[list[dict], list[dict], list[dict]]:
+def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None,
+                      detached_point=False) -> tuple[list[dict], list[dict], list[dict]]:
     """Resolve each persisted source once; NULL source keeps the legacy rule."""
     groups = {}
     legacy = []
@@ -119,7 +120,8 @@ def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None)
                 valid.append(comment)
         expected = {c['id']: tuple(c.get(field) for field in _ANCHOR_FIELDS) for c in valid}
         for update in resolve(valid, versions[snapshot_id], text, new_index=new_index,
-                              snapshot_id=snapshot_id, destination_digest=digest, line_context=line_context):
+                              snapshot_id=snapshot_id, destination_digest=digest, line_context=line_context,
+                              detached_point=detached_point):
             update['expected_snapshot_id'] = snapshot_id
             update['expected_anchor'] = expected[update['id']]
             versioned_updates.append(update)
@@ -142,13 +144,50 @@ def _map_spans(old: str, new: str, spans: list[tuple[int, int]]) -> list[tuple[i
     return live_text.follow_spans(spans, old, delta)[0] if delta else spans
 
 
+def _accept(eligible, candidates, spans, ranges, old, new, old_index, new_index,
+            line_pairs, line_counts, detached_point) -> set[str]:
+    """Apply only the mapped anchors whose quote still names the same text.
+
+    Returns the ids accepted. A rejected row keeps its stored offsets; only the
+    live-document frames are given a nearby point to draw the detached card at.
+    """
+    accepted = set()
+    for original, candidate, old_span in zip(eligible, candidates, spans):
+        quote = comment_anchoring._anchored_quote(original)
+        allowed, _, _ = snapshot_showing.evaluate(
+            old, new, old_span, (candidate['from_off'], candidate['to_off']), quote,
+            line_pairs=line_pairs, line_counts=line_counts, old_index=old_index, new_index=new_index)
+        edit_rejected = False
+        if allowed and not candidate.get('orphaned'):
+            start = new_index.cp_at_u16(candidate['from_off'])
+            end = new_index.cp_at_u16(candidate['to_off'])
+            if start is not None and end is not None and new[start:end] != quote:
+                legacy = dict(original)
+                comment_anchoring.resolve_threads([legacy], new)
+                allowed = not legacy.get('orphaned') and (
+                    legacy['from_off'], legacy['to_off']) == (candidate['from_off'], candidate['to_off'])
+                edit_rejected = not allowed
+        if allowed and not candidate.get('orphaned'):
+            original.update(candidate)
+            accepted.add(original['id'])
+        else:
+            original['orphaned'] = not bool(original.get('decision'))
+            if detached_point and original['orphaned'] and not edit_rejected:
+                # The nearby point is absent from the persistence updates and from a list response.
+                point = ranges[original['id']][0]
+                original['from_off'] = original['to_off'] = point
+    return accepted
+
+
 def resolve(threads: list[dict], old: str, new: str, *, new_index=None,
-            snapshot_id=None, destination_digest=None, line_context=None) -> list[dict]:
-    """Map and judge candidates; rejected anchors retain their persisted evidence.
+            snapshot_id=None, destination_digest=None, line_context=None,
+            detached_point=False) -> list[dict]:
+    """Map and judge anchors; rejected anchors keep their stored offsets in the rows.
 
     The caller groups rows by snapshot and owns persistence of accepted updates.
-    Rejected rows receive a detached response point but no persistence update;
-    the caller must not save that point against the old snapshot.
+    A rejected row is never persisted; ``detached_point`` is for the live-document
+    frames only, which need a place to draw the detached card. A list response leaves
+    the stored offsets where they are, because that is what an agent reads back.
     """
     old_index = snapshot_showing.TextIndex(old)
     new_index = new_index or snapshot_showing.TextIndex(new)
@@ -210,32 +249,8 @@ def resolve(threads: list[dict], old: str, new: str, *, new_index=None,
         else:
             to_resolve.append(candidate)
     updates = comment_anchoring.resolve_threads(to_resolve, new, ranges=ranges)
-    accepted = set()
-    for original, candidate, old_span in zip(eligible, candidates, spans):
-        quote = comment_anchoring._anchored_quote(original)
-        allowed, _, _ = snapshot_showing.evaluate(
-            old, new, old_span, (candidate['from_off'], candidate['to_off']), quote,
-            line_pairs=line_pairs, line_counts=line_counts, old_index=old_index, new_index=new_index)
-        edit_rejected = False
-        if allowed and not candidate.get('orphaned'):
-            start = new_index.cp_at_u16(candidate['from_off'])
-            end = new_index.cp_at_u16(candidate['to_off'])
-            if start is not None and end is not None and new[start:end] != quote:
-                legacy = dict(original)
-                comment_anchoring.resolve_threads([legacy], new)
-                allowed = not legacy.get('orphaned') and (
-                    legacy['from_off'], legacy['to_off']) == (candidate['from_off'], candidate['to_off'])
-                edit_rejected = not allowed
-        if allowed and not candidate.get('orphaned'):
-            original.update(candidate)
-            accepted.add(original['id'])
-        else:
-            original['orphaned'] = not bool(original.get('decision'))
-            if original['orphaned'] and not edit_rejected:
-                # The response carries a nearby point for the detached card;
-                # it is deliberately absent from the persistence updates.
-                point = ranges[original['id']][0]
-                original['from_off'] = original['to_off'] = point
+    accepted = _accept(eligible, candidates, spans, ranges, old, new, old_index, new_index,
+                       line_pairs, line_counts, detached_point)
     result = [update for update in updates if update['id'] in accepted]
     changed_ids = {update['id'] for update in result}
     if old != new:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import logging
 
 from doceditor import comments, comment_recipients, comment_snapshots, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
 from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed, not_active_message
@@ -15,8 +14,6 @@ from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from infra.write_effects import after_commit
 from registry import models as registry_models, service as registry_service
-
-log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -168,13 +165,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 review=request.review, replacement=request.replacement, insert_after=request.insert_after,
                 tagged_user_id=request.user_id if request.tag_person else None, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
-            )
+                source_text=source_text, source_reason=invalid)
             if created:
-                if source_text is not None:
-                    snapshot_id = comment_snapshots.intern(connection, source_text)
-                    connection.execute('UPDATE doc_comments SET snapshot_id=? WHERE id=?', (snapshot_id, row['id']))
-                if invalid:
-                    after_commit(connection, lambda: log.info('comment snapshot omitted id=%s reason=%s', row['id'], invalid))
                 _record_tags(connection, request, row)
             if row["parent_id"]:
                 # An agent reply made holding the thread's writer turn settles its saved row in this write.

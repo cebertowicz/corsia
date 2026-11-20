@@ -19,6 +19,29 @@ REPLIES_BY_PARENT_INDEX_SQL = """
         ON doc_comments(parent_id) WHERE parent_id IS NOT NULL;
 """
 
+#: The exact document text each comment's anchor was measured against, kept once per
+#: distinct text. An anchor is offsets into this text, so a rewrite that deletes the
+#: commented line can be re-measured against what was actually there instead of being
+#: re-matched against the new text, which is how a comment used to land on a neighbour.
+#: `digest` is sha256 of `text` and only narrows the lookup: the writer compares the
+#: bytes before reusing a row, and different bytes sharing a digest keep separate rows
+#: (doceditor.comment_snapshots.intern), so it is indexed, never unique.
+DOC_COMMENT_SNAPSHOTS_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS doc_comment_snapshots (
+        id INTEGER PRIMARY KEY,
+        digest BLOB NOT NULL,
+        text BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS snapshots_digest ON doc_comment_snapshots(digest);
+"""
+
+#: Anchors by their snapshot: listing a document resolves every anchor through its
+#: snapshot, and collection asks which snapshots no anchor references any more.
+ANCHORS_BY_SNAPSHOT_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS idx_doc_comments_snapshot
+        ON doc_comments(snapshot_id) WHERE snapshot_id IS NOT NULL;
+"""
+
 DOC_COMMENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comments (
         id TEXT PRIMARY KEY,
@@ -64,14 +87,19 @@ DOC_COMMENTS_SCHEMA_SQL = """
         -- (doceditor.comment_create_db). Never an agent tag, which stays a doc_comment_tags row.
         tagged_user_id TEXT,
         -- 1 while everyone's agreement is what resolved the thread; any other change to `resolved` clears it.
-        closed_by_agreement INTEGER NOT NULL DEFAULT 0
+        closed_by_agreement INTEGER NOT NULL DEFAULT 0,
+        -- The document text these offsets count from (doceditor.comment_snapshots).
+        -- NULL for comments written before snapshots were kept, which are placed as before.
+        -- Kept last, because an upgrade appends it here and a fresh schema and a migrated
+        -- database are compared column by column in order.
+        snapshot_id INTEGER REFERENCES doc_comment_snapshots(id)
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_doc_comments_decision_event
         ON doc_comments(decision_event_id)
         WHERE decision_event_id IS NOT NULL;
-""" + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL + REPLIES_BY_PARENT_INDEX_SQL
+""" + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL + REPLIES_BY_PARENT_INDEX_SQL + ANCHORS_BY_SNAPSHOT_INDEX_SQL
 
 # Feedback batches reference doc_comments, so they follow it.
 # Tag and recipient state also follow their referenced comments.
@@ -146,5 +174,6 @@ COMMENT_IDENTITY_MOVES_SQL = """
         PRIMARY KEY (table_name, row_id)
     );
 """
-DOCUMENT_SCHEMA_SQL = (DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL
+# Snapshots come first: doc_comments references them.
+DOCUMENT_SCHEMA_SQL = (DOC_COMMENT_SNAPSHOTS_SCHEMA_SQL + DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL
                        + COMMENT_RECIPIENT_SCHEMA_SQL + WRITER_LINE_SCHEMA_SQL + COMMENT_IDENTITY_MOVES_SQL)

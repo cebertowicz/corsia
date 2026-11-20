@@ -19,18 +19,6 @@ from tests.test_shared_document_ownership import ownership_scope as ownership_sc
 from tools.documents import DocCommentCreateTool
 
 
-@pytest.fixture(autouse=True)
-def snapshot_schema(ownership_scope):
-    # Temporary test schema until the ordered production migration is available.
-    db = ownership_scope['db']
-    db.executescript('''
-        CREATE TABLE doc_comment_snapshots (id INTEGER PRIMARY KEY, digest BLOB NOT NULL, text BLOB NOT NULL);
-        CREATE INDEX snapshots_digest ON doc_comment_snapshots(digest);
-        ALTER TABLE doc_comments ADD COLUMN snapshot_id INTEGER REFERENCES doc_comment_snapshots(id);
-    ''')
-    db.commit()
-
-
 def snapshot(entry):
     live = entry.live
     return dict(store_id=live.store.store_id, vector=base64.b64encode(live.doc.get_state()).decode(),
@@ -611,7 +599,7 @@ async def test_unopened_document_creation_stores_the_source_version(ownership_sc
 
 @pytest.mark.asyncio
 async def test_unopened_invalid_selection_keeps_legacy_comment(ownership_scope, tmp_path, monkeypatch, caplog):
-    caplog.set_level('INFO', logger='doceditor.comment_create_db')
+    caplog.set_level('INFO', logger='doceditor.comment_snapshots')
     from doceditor import live_runtime
     manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
     await manager.close()

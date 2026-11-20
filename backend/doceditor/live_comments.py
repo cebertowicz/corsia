@@ -50,7 +50,9 @@ async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
         rows = await run_in_db(comments.list_for_artifact, artifact_id)
     live = entry.live
     if reload:
-        snapshot_reanchor.resolve_versioned(rows, live.text, versions=versions)
+        # These frames draw the cards, so a detached comment gets a nearby place for its
+        # card. A list response leaves the stored offsets alone; that is what an agent reads.
+        snapshot_reanchor.resolve_versioned(rows, live.text, versions=versions, detached_point=True)
     else:
         resolve_threads(rows, live.text, ranges=live.ranges)
     # A decided suggestion that lost its place keeps its last offsets, which a

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, comment_snapshots, feedback_reopens, feedback_settlement, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -236,6 +236,8 @@ def create_with_status(
     region: tuple[float, float, float, float] | None = None,
     image_rev: str | None = None,
     image_src: str | None = None,
+    source_text: str | None = None,
+    source_reason: str | None = None,
     announce: bool = True,
     db=None,
 ) -> tuple[dict[str, Any], bool]:
@@ -243,6 +245,9 @@ def create_with_status(
 
     A ``region`` (x, y, w, h in fractions of the image) takes the next number
     on its image, counting resolved comments too, so a number is never reused.
+    ``source_text`` is the document text ``from_off``/``to_off`` count from, kept
+    with the row so a later rewrite can be re-measured against it; a comment whose
+    text is gone keeps no snapshot and ``source_reason`` says why.
     """
     cid = client_id or str(uuid.uuid4())[:12]
     now = _now()
@@ -279,6 +284,7 @@ def create_with_status(
         elif created and parent_id:
             reopen_unless_agreed(connection, r["parent_id"], replier=replier)
         if created:
+            comment_snapshots.attach_on_create(connection, cid, source_text, source_reason)
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id
             if announce:

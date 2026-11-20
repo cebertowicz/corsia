@@ -211,11 +211,15 @@ def test_deleted_line_keeps_quote_and_stored_anchor_evidence():
     before = dict(comment)
     updates = snapshot_reanchor.resolve([comment], old, new)
     assert comment['orphaned']
-    assert comment['from_off'] == comment['to_off'] == new.index('- other')
+    assert (comment['from_off'], comment['to_off']) == (before['from_off'], before['to_off'])
     assert comment['anchor_text'] == before['anchor_text']
     assert comment['anchor_prefix'] == before['anchor_prefix']
     assert comment['anchor_suffix'] == before['anchor_suffix']
     assert updates == []
+
+    drawing = row(old, 'deleted target', old.index('deleted'))
+    snapshot_reanchor.resolve([drawing], old, new, detached_point=True)
+    assert drawing['orphaned'] and drawing['from_off'] == drawing['to_off'] == new.index('- other')
 
 
 def test_two_edits_keep_the_same_anchor_when_each_version_is_saved():
@@ -321,3 +325,20 @@ def test_utf16_offsets_survive_insertion_before_anchor():
     encoded = new.encode('utf-16-le')
     assert not comment['orphaned']
     assert encoded[comment['from_off'] * 2:comment['to_off'] * 2].decode('utf-16-le') == 'keep this line'
+
+
+def test_an_unplaced_comment_keeps_its_stored_offsets_unless_the_frames_ask_for_a_point():
+    """A list response reads back what is stored; only the drawing frames get a nearby point."""
+    source = 'head\ntarget\nother\ntail\n'
+    rewritten = 'nothing of it here\n'
+    listed = row(source, 'target', 5)
+    frames = row(source, 'target', 5)
+
+    listed_updates = snapshot_reanchor.resolve([listed], source, rewritten, snapshot_id=3)
+    frames_updates = snapshot_reanchor.resolve([frames], source, rewritten, snapshot_id=3,
+                                               detached_point=True)
+
+    assert listed['orphaned'] and frames['orphaned']
+    assert (listed['from_off'], listed['to_off']) == (5, 11)
+    assert frames['from_off'] == frames['to_off'] and frames['from_off'] <= len(rewritten)
+    assert listed_updates == frames_updates == []

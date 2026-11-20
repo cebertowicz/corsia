@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import sqlite3
 
 from doceditor.quote_anchor import _cp_at_u16
+from infra.write_effects import after_commit
+
+log = logging.getLogger(__name__)
 
 
 def invalid_reason(text: str, start, end, quote: str | None) -> str | None:
@@ -17,6 +21,23 @@ def invalid_reason(text: str, start, end, quote: str | None) -> str | None:
     if first is None or last is None:
         return 'boundary'
     return None if quote is not None and text[first:last] == quote else 'quote_mismatch'
+
+
+def attach_on_create(db: sqlite3.Connection, comment_id: str, text: str | None,
+                     invalid_reason: str | None) -> None:
+    """Record the version a new anchor was measured against, inside the creating transaction.
+
+    Nothing is stored when the comment carries no verifiable selection (a reply, a
+    review, a read that failed): the comment is still created, and the reason is
+    logged once after the commit, because it is a lost optimization, not a lost comment.
+    """
+    if not db.in_transaction:
+        raise ValueError("snapshot changes require an owning transaction")
+    if text is not None:
+        db.execute('UPDATE doc_comments SET snapshot_id=? WHERE id=?', (intern(db, text), comment_id))
+    if invalid_reason:
+        after_commit(db, lambda: log.info('comment snapshot omitted id=%s reason=%s',
+                                          comment_id, invalid_reason))
 
 
 def intern(db: sqlite3.Connection, text: str) -> int:
