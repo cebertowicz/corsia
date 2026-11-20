@@ -228,7 +228,10 @@ WAKE_CHILD_THREAD_ENDED = (
 #: each saying what became of that worker (#2647: delete means delete).
 WAKE_STRANDED_GRANDCHILDREN = " It had delegated to other workers: {workers}."
 STRANDED_TOP_LEVEL = "{thread} is now a top-level agent and keeps its own work"
-STRANDED_ORPHANED = "{thread} still exists with no parent; stop it if it is running"
+STRANDED_ORPHANED = (
+    "{thread} still exists with no parent; stop it with delegate_stop if it is running"
+    " (the CORSIA agent can if you cannot)"
+)
 #: Replacing a worker closed steps it had delegated; those workers still run.
 REPLACE_OLD_WORKER = (
     "{thread} was replaced: its open steps were closed as replaced and it can no"

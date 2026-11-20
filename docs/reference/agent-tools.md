@@ -30,6 +30,7 @@ Pack: `plans`
 | Tool | Description |
 |---|---|
 | `bulletin_disposition` | Record a CORSIA agent disposition for a System bulletin |
+| `delegate_stop` | Stop a worker you spawned, and the workers beneath it |
 | `plan_decision` | Draft, review and raise a plan decision for the user |
 | `plan_ensure` | Create this thread's plan if missing, then read it |
 
@@ -45,7 +46,6 @@ Pack: `delegation`
 | `delegate_create_thread` | Create a visible chat or a hidden subagent thread |
 | `delegate_send` | Send a message into another thread |
 | `delegate_set_model` | Change a running thread's model or harness in place |
-| `delegate_stop` | Stop a worker you spawned, and the workers beneath it |
 | `delegate_status` | Read a delegated thread's status and recent messages |
 | `delegate_task` | Delegate a self-contained task to a new subagent |
 | `model_catalog` | Read the live model catalog before selecting a delegation target |

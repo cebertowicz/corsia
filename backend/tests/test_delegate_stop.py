@@ -126,7 +126,6 @@ async def test_standing_agent_beneath_is_skipped_with_its_subtree(tree):
     assert _state(tree.db, "grand")[0] == "archived"
 
 
-@pytest.mark.xfail(strict=True, reason="thread_unavailable_reason only treats archived_reason user as unavailable; see return note")
 @pytest.mark.asyncio
 async def test_idle_worker_with_queued_input_starts_nothing_after_stop(tree):
     from infra.database import write_transaction
@@ -179,3 +178,57 @@ async def test_parent_is_told_which_open_step_to_close(tree, monkeypatch):
     monkeypatch.setattr("plans.public.has_open_structured_attachment", lambda sid, *, db=None: sid == "worker")
     out = await _stop("parent", "worker")
     assert "still open" in out and "close it or re-delegate" in out
+
+
+@pytest.mark.asyncio
+async def test_plain_send_to_a_stopped_worker_is_refused(tree):
+    from infra.input_admission import accept_thread_input
+    from infra.send_types import SendRejected
+
+    await _stop("parent", "worker")
+    with pytest.raises(SendRejected) as refused:
+        accept_thread_input("worker", role="user", content="hi", intent="apply_now", message_id="q2", db=tree.db)
+    assert refused.value.status_code == 409 and "archived" in refused.value.detail
+
+
+@pytest.mark.asyncio
+async def test_attaching_a_step_reactivates_the_stopped_worker_and_its_held_input_runs(tree):
+    from infra.database import write_transaction
+    from infra.input_admission import accept_thread_input
+    from infra.thread_inputs import _claimable_prefix
+    from plans import mutations, service
+
+    accept_thread_input("worker", role="user", content="more", intent="apply_now", message_id="q1", db=tree.db)
+    tree.db.commit()
+    await _stop("parent", "worker")
+    node = service.add_node(
+        service.ensure_plan("thread", "parent", db=tree.db).id, kind="task", title="Delegate",
+        acceptance_criteria="Reviewed", spawn_kind="claude-code", db=tree.db)
+    service.transition_node(node.id, "active", db=tree.db)
+    mutations.attach_spawned_thread(node.id, "worker", db=tree.db)
+    tree.db.commit()
+    assert _state(tree.db, "worker") == ("active", None)
+    with write_transaction(tree.db, scope="after_attach"):
+        assert _claimable_prefix(tree.db, "worker") is not None
+
+
+def test_explicit_archive_predicates_agree(tree):
+    from infra.queries import thread_available_sql, thread_is_explicitly_archived, thread_unavailable_reason
+
+    for reason, hidden in (("user", True), ("stopped_by_delegator", True), ("assignment_settled", False), ("dormancy", False)):
+        tree.db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason=? WHERE id='worker'", (reason,))
+        row = tree.db.execute("SELECT * FROM threads WHERE id='worker'").fetchone()
+        usable = tree.db.execute(f"SELECT 1 FROM threads t WHERE t.id='worker' AND {thread_available_sql('t')}").fetchone()
+        assert (thread_unavailable_reason(row) is not None) == hidden == (usable is None) == thread_is_explicitly_archived(row)
+
+
+@pytest.mark.asyncio
+async def test_open_watches_and_schedules_are_retired(tree):
+    tree.db.execute(
+        "INSERT INTO expected_event_watches (id,owner_thread_id,condition_type,status,armed_at,created_at,updated_at) VALUES ('wt','worker','deadline','armed','t','t','t')")
+    tree.db.execute(
+        "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,created_by_actor,created_at,updated_at) VALUES ('sc','worker','s','clock','x','t',1,'active','a','t','t')")
+    tree.db.commit()
+    await _stop("parent", "worker")
+    assert tree.db.execute("SELECT status FROM expected_event_watches WHERE id='wt'").fetchone()[0] == "resolved"
+    assert tree.db.execute("SELECT state FROM automation_schedules WHERE id='sc'").fetchone()[0] == "cancelled"

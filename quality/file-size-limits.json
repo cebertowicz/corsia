@@ -23,7 +23,7 @@
     "backend/api/project_repos.py": 681,
     "backend/api/project_scaffolding.py": 451,
     "backend/core/step_handler.py": 417,
-    "backend/core/thread_lifecycle.py": 481,
+    "backend/core/thread_lifecycle.py": 446,
     "backend/host_access/processes.py": 1400,
     "backend/host_access/redaction.py": 853,
     "backend/host_access/supervisor.py": 1696,

@@ -130,7 +130,7 @@ class DelegateStopTool(Tool):
         }, ["thread_id"])
 
     async def execute(self, thread_id: str, reason: str | None = None, **kwargs: Any) -> str:
-        from core.thread_lifecycle import STOPPED_BY_DELEGATOR_REASON
+        from infra.constants import STOPPED_BY_DELEGATOR_REASON
         from tools import delegation
         from ws.stop_control import stop_turn_for_cause
 
