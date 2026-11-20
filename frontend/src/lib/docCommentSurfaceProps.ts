@@ -6,7 +6,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 
-/** What DocCommentSurface takes; `resolvedCount` and `resolvedOpen` are bindable. */
+/** What DocCommentSurface takes; `resolvedOpen` is bindable. */
 export interface DocCommentSurfaceProps {
 	state: CommentSurfaceState;
 	onThreadMissing?: (remaining: string[]) => void;
@@ -73,13 +73,11 @@ export interface DocCommentSurfaceProps {
 	onSheetModalChange?: (open: boolean) => void;
 	/** Asks the editor to keep the draft's text, or the text a thread sheet was opened from, clear of the sheet, now and whenever it moves. */
 	onRevealDraft?: (opening: boolean) => void; onRevealCard?: (opening: boolean, panel: HTMLElement | null) => void;
-	/** Resolved threads at every width (zero on an image's drawer), for the header control that opens their drawer. */
-	resolvedCount?: number;
 	/** A new comment is being written over the margin column: the column stays, its cards where they were, with the composer beside the text. */
 	draftOverColumn?: boolean;
 	/** Changes each time the reader opens something (the surface state's count of picks, drafts and lists). */
 	opened?: number;
-	/** The resolved drawer is open: set by that control only. */
+	/** The drawer shows the resolved list rather than the open one: set by its Open | Resolved switch and by the viewer's jump to a resolved reply. */
 	resolvedOpen?: boolean;
 	/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
 	commentsEntry?: HTMLElement | null;

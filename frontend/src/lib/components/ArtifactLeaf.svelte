@@ -193,8 +193,9 @@
 				const uncover = () => {
 					if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
 				};
-				// If placement fails or stalls, return the document to use rather than covering it indefinitely.
-				documentRestore.restore(place, { mode: 'tab-return', onPlaced: uncover }, uncover, 4000);
+				// Placement uncovers the document when it lays the place, and also when it returns early or throws, so a
+				// cover never outlives the restore that put it there.
+				documentRestore.restore(place, { mode: 'tab-return', onPlaced: uncover }, uncover);
 			}
 		} else if (signal.status === 'error' || signal.status === 'unavailable') {
 			failArtifactOpen(signal.instanceId);

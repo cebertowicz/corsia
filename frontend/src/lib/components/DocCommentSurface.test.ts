@@ -65,13 +65,14 @@ function noRoomCanvas(): HTMLElement {
 	canvases.push(app);
 	return box(doc, 'bounds', new DOMRect(0, 0, 600, 800));
 }
-/** The resolved drawer's two bound props, as the viewer holds them for its header control. */
+/** The drawer's Open/Resolved answer, as the viewer holds it: only the open answer is shared out now. */
 function resolvedDrawerProps() {
 	const open = writable(false), liveOpen = fromStore(open);
-	let count = 0;
 	return {
-		props: Object.getOwnPropertyDescriptors({ get resolvedOpen() { return liveOpen.current; }, set resolvedOpen(value: boolean) { open.set(value); }, get resolvedCount() { return count; }, set resolvedCount(value: number) { count = value; } }),
-		set: (value: boolean) => open.set(value), isOpen: () => get(open), count: () => count,
+		props: Object.getOwnPropertyDescriptors({ get resolvedOpen() { return liveOpen.current; }, set resolvedOpen(value: boolean) { open.set(value); } }),
+		set: (value: boolean) => open.set(value), isOpen: () => get(open),
+		/** The count the drawer's Resolved answer shows; it is kept inside the surface, so read it from the control. */
+		count: () => Number(document.body.querySelector<HTMLElement>('[data-resolved-entry]')?.textContent?.match(/Resolved · (\d+)/)?.[1] ?? 0),
 	};
 }
 afterEach(() => {
@@ -336,8 +337,9 @@ describe('DocCommentSurface suggestions', () => {
 		const state = writable<{ kind: 'list' } | null>(null), liveState = fromStore(state);
 		render(Object.defineProperties({ narrow: true, get state() { return liveState.current; }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
 		expect(document.body.querySelector('[data-doc-comments-drawer]')).toBeNull();
-		expect(open.count()).toBe(1);
+		// The count lives with the switch the list shows, so it is read once the surface is open.
 		state.set({ kind: 'list' }); flushSync();
+		expect(open.count()).toBe(1);
 		document.body.querySelector<HTMLButtonElement>('[data-resolved-entry]')!.click(); flushSync(); await tick();
 		expect([...document.body.querySelectorAll('[data-resolved-column] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});

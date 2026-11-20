@@ -376,6 +376,38 @@ describe('DocViewerStatus toolbar', () => {
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
 
+	it('names behind Details what waits there, in the words the panel uses, and never a count', () => {
+		const detailsName = () => host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label');
+		const ask = { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false };
+		// One need, Overdue: its card is up, so the ask adds nothing.
+		render(value({ state: 'overdue' }), vi.fn().mockResolvedValue(undefined), { ask: { ...ask, onCard: true } });
+		expect(detailsName()).toBe('Document details · Overdue');
+		// One need, a hidden ask: the ask's own words.
+		component!.$set({ ask, freshness: value() });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Is this skill ready?');
+		// Two needs: each in its own words, joined with ' · '.
+		component!.$set({ freshness: value({ state: 'overdue' }) });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Overdue · Is this skill ready?');
+		// An ask with no reason text is named by its asker, never left as an empty leg.
+		component!.$set({ ask: { ...ask, text: '   ' } });
+		flushSync();
+		expect(detailsName()).toBe('Document details · Overdue · Structured Plans asks');
+		// Nothing waiting: the plain name, and the amber number stays a visual mark only.
+		component!.$set({ ask: null, freshness: value() });
+		flushSync();
+		expect(detailsName()).toBe('Document details');
+		expect(host.querySelector('.bar-needs')).toBeNull();
+	});
+
+	it('keeps the amber number out of the accessible name while two needs are up', () => {
+		render(value({ state: 'overdue' }), vi.fn().mockResolvedValue(undefined), { ask: { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false } });
+		const needsMark = host.querySelector('.bar-needs');
+		expect(needsMark?.getAttribute('aria-hidden')).toBe('true');
+		expect(host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label')).not.toMatch(/\d/);
+	});
+
 	it('counts beside Details exactly the two things behind it that need the reader, one each', () => {
 		// Every combination of the two sources; a third source is a new required field of DetailsNeeds, so this list stops compiling.
 		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>

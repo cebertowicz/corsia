@@ -121,7 +121,7 @@
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 	/** The comments drawer's selected view and resolved count. */
-	let resolvedCount = $state(0), resolvedOpen = $state(false);
+	let resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
@@ -388,7 +388,7 @@
 		{offScreen}
 		draftOverColumn={commentUI.draftOverColumn}
 		opened={commentUI.opened}
-		bind:resolvedCount bind:resolvedOpen
+		bind:resolvedOpen
 	/>
 </div>
 {#snippet reviewControls()}

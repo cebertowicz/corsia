@@ -74,6 +74,10 @@
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen: Overdue and an ask whose card is hidden. */
 	const needsCount = $derived(detailsNeedsCount({ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard }));
+	/** The same things, named in the words the panel itself uses for each entry, so the control says what is waiting rather than how many. An ask with no reason text is named by its asker rather than leaving an empty leg. */
+	const needsWords = $derived([freshnessPresentation?.overdue ? 'Overdue' : null,
+		ask && !ask.onCard ? (ask.text.trim() || `${ask.who} asks`) : null]
+		.filter((word): word is string => !!word));
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
@@ -232,7 +236,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsCount ? ` · ${needsCount} needs you` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsWords.length ? ` · ${needsWords.join(' · ')}` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>

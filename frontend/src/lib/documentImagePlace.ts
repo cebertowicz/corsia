@@ -17,16 +17,13 @@ export interface RestoreDocumentPlaceOptions {
 /** Cancel an older restore before starting a new one, and run its completion only if current. */
 export function documentRestorer(root: () => HTMLElement | undefined, restore = restoreDocumentPlace) {
 	let current: AbortController | null = null;
-	let timer: ReturnType<typeof setTimeout> | null = null;
 	function abort() {
 		current?.abort();
 		current = null;
-		if (timer !== null) clearTimeout(timer);
-		timer = null;
 	}
 	return {
 		abort,
-		restore(place: OpenImageRequest | TextDocumentPlace, options: RestoreDocumentPlaceOptions = {}, then?: () => void, timeoutMs?: number) {
+		restore(place: OpenImageRequest | TextDocumentPlace, options: RestoreDocumentPlaceOptions = {}, then?: () => void) {
 			abort();
 			const controller = new AbortController();
 			current = controller;
@@ -35,7 +32,8 @@ export function documentRestorer(root: () => HTMLElement | undefined, restore = 
 				abort();
 				then?.();
 			};
-			if (timeoutMs !== undefined) timer = setTimeout(finish, timeoutMs);
+			// The restorer settles on its own: it calls onPlaced when the place is laid, resolves on every early return, and
+			// is bounded by its own frame budget. A wall-clock timer here would cut a hold that is still working.
 			void restore(root(), place, { ...options, signal: controller.signal }).then(finish, (error) => {
 				console.error('Document place restore failed', error);
 				finish();
@@ -50,7 +48,7 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
 const STABLE_FRAMES = 3;
 /** The editor re-measures the text it left unrendered some time after the width returns, so the place is laid each frame for this long (about 0.75 s) after it last moved. */
 const HOLD_FRAMES = 45;
-/** The pane eases for under half a second; the restore gives up after about four. */
+/** The pane eases for under half a second; the restore gives up after about four, which is its only time bound. */
 const MAX_FRAMES = 240;
 
 /**

@@ -43,7 +43,7 @@
 	import { refusalMessage, suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocCommentSurfaceProps } from '$lib/docCommentSurfaceProps';
-	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedCount = $bindable(0), resolvedOpen = $bindable(false), commentsEntry = null }: DocCommentSurfaceProps = $props();
+	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedOpen = $bindable(false), commentsEntry = null }: DocCommentSurfaceProps = $props();
 	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
@@ -142,7 +142,8 @@
 	/** With the column up a new comment is written in it, level with its selection, so the text it is on stays uncovered. */
 	const marginDraft = $derived(margin && surfaceState?.kind === 'draft' ? { id: 'draft', anchor: () => anchorRect(anchor), body: content } : null);
 	const resolvedList = $derived(comments.filter((comment) => comment.resolved && !held.kept(comment) && !held.leaving.has(comment.id) && !comment.review).sort(byNewest));
-	$effect(() => { resolvedCount = image ? 0 : resolvedList.length; });
+	/** The count the drawer's Resolved answer shows. Nothing outside the surface reads it, so it stays here. */
+	const resolvedCount = $derived(image ? 0 : resolvedList.length);
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
 		if (showing?.kind === 'thread') return comments.filter((comment) => showing.ids ? showing.ids.includes(comment.id) : comment.id === showing.id);

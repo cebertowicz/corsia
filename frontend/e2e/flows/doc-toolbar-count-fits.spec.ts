@@ -68,12 +68,17 @@ async function measureBar(page: Page) {
 }
 type BarMeasured = Awaited<ReturnType<typeof measureBar>>;
 
+/** The ask this spec raises, in its own words: the Details name repeats them when its card is hidden. */
+const ASK_TEXT = 'Is this skill ready?';
+const OVERDUE_WORD = 'Overdue';
+
 /** Each count is whole, inside the bar and the window; no control in the bar overlaps another; the page does not scroll sideways. */
-async function expectCountsWhole(page: Page, measured: BarMeasured, label: string, { threads, unread, needs }: { threads: number; unread: number; needs: number }) {
+async function expectCountsWhole(page: Page, measured: BarMeasured, label: string, { threads, unread, needs, needsWords }: { threads: number; unread: number; needs: number; needsWords: string[] }) {
 	expect.soft(measured.commentsText, `${label}: the Comments count reads whole`).toBe(countText(threads, unread, measured.phoneHeader));
 	expect.soft(measured.commentsName, `${label}: the Comments button names the total and the unread`).toMatch(countName(threads, unread));
 	expect.soft(measured.needsText, `${label}: the amber count beside Details`).toBe(needs ? `${needs}` : null);
-	expect.soft(measured.detailsName, `${label}: Details names what needs you`).toBe(`Document details${needs ? ` · ${needs} needs you` : ''}`);
+	expect.soft(measured.detailsName, `${label}: Details names what waits, not how many`).toBe(`Document details${needsWords.length ? ` · ${needsWords.join(' · ')}` : ''}`);
+	expect.soft(measured.needsText ? measured.needsText.trim().length : 0, `${label}: the amber count and the named needs are the same number`).toBe(needsWords.length);
 	expect.soft(measured.clipped, `${label}: no count is cut`).toEqual([]);
 	for (const [name, control] of [['Comments', measured.comments], ['Details', measured.details], ...(measured.needs ? [['amber count', measured.needs] as const] : [])] as const) {
 		expect.soft(control.left, `${label}: ${name} starts inside the bar`).toBeGreaterThanOrEqual(measured.bar.left - 0.5);
@@ -145,7 +150,7 @@ for (const { width, scheme, resolved } of CASES) {
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
 		await expect(page.getByRole('button', { name: /^1 comment\b/ })).toBeEnabled();
-		await expect(page.locator('[data-document-details]')).toHaveAccessibleName('Document details · 1 needs you');
+		await expect(page.locator('[data-document-details]')).toHaveAccessibleName('Document details · Overdue');
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		if (resolved) {
@@ -172,7 +177,7 @@ for (const { width, scheme, resolved } of CASES) {
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), fullPage: false });
 			await closeComments(page);
 			// The Comments button counts open threads, and all three are resolved.
-			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1 });
+			await expectCountsWhole(page, await measureBar(page), label, { threads: 0, unread: 0, needs: 1, needsWords: [OVERDUE_WORD] });
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			return;
 		}
@@ -196,7 +201,7 @@ for (const { width, scheme, resolved } of CASES) {
 			const measured = await measureBar(page);
 			const label = `${threads}/${unread} at ${width} ${scheme}`;
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-${threads}-${unread}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, measured.bar.bottom + 60) } });
-			await expectCountsWhole(page, measured, label, { threads, unread, needs: 1 });
+			await expectCountsWhole(page, measured, label, { threads, unread, needs: 1, needsWords: [OVERDUE_WORD] });
 			expect.soft(measured.bar.bottom - measured.bar.top, `${label}: the bar keeps its height when the count changes`).toBeCloseTo(idleHeight, 0);
 			await info.attach(`count-${threads}-${unread}`, { body: JSON.stringify(measured), contentType: 'application/json' });
 		}
@@ -335,7 +340,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the bar\'s counts stay who
 			await settled(page, viewport);
 			const label = (split ? `${viewport}px window, pane ${split}px` : `${viewport}px window`) + variant;
 			const measured = await measureBar(page);
-			await expectCountsWhole(page, measured, label, { threads: 120, unread: 45, needs: 1 });
+			await expectCountsWhole(page, measured, label, { threads: 120, unread: 45, needs: 1, needsWords: [OVERDUE_WORD] });
 			if (frames && (split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-${split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), clip: { x: 0, y: 0, width: viewport, height: Math.max(240, Math.ceil(measured.bar.bottom + 40)) } });
 			const details = await measureSwitch(page, viewport);
 			expectSwitchWhole(details, label);
@@ -433,7 +438,7 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		const title = `needs-${width}-${Date.now()}`;
 		const threadId = await createSession(page.request, title);
 		const doc = await seedSkillDocument(page, threadId, title);
-		raiseAsk(threadId, doc.artifactId, 'Is this skill ready?');
+		raiseAsk(threadId, doc.artifactId, ASK_TEXT);
 		await answerOverdue(page);
 		await installWorkspace(page, threadId, [doc], 0);
 		await openThread(page, threadId, title);
@@ -446,9 +451,11 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		const card = page.locator('[data-ask-card]');
 		const frame = async (state: string) => { if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `needs-${width}x${height}-${state}.png`), fullPage: false }); } };
 		const expectNeeds = async (needs: number, state: string) => {
-			await expect(details, `${name}, ${state}`).toHaveAccessibleName(`Document details · ${needs} needs you`);
+			// Overdue is always one; the ask joins by its own words when its card is hidden (needs reaches the case's max).
+			const needsWords = needs >= 2 ? [OVERDUE_WORD, ASK_TEXT] : [OVERDUE_WORD];
+			await expect(details, `${name}, ${state}`).toHaveAccessibleName(`Document details · ${needsWords.join(' · ')}`);
 			await page.waitForTimeout(400);
-			await expectCountsWhole(page, await measureBar(page), `${name}, ${state}`, { threads: 1, unread: 0, needs });
+			await expectCountsWhole(page, await measureBar(page), `${name}, ${state}`, { threads: 1, unread: 0, needs, needsWords });
 			await frame(state);
 		};
 
@@ -587,7 +594,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		await page.setViewportSize({ width, height: 900 });
 		await settled(page, width);
 		const label = `History at ${width} px`;
-		await expectCountsWhole(page, await measureBar(page), label, { threads: 120, unread: 45, needs: 0 });
+		await expectCountsWhole(page, await measureBar(page), label, { threads: 120, unread: 45, needs: 0, needsWords: [] });
 		if ([360, 393, 430].includes(width)) {
 			const panel = await openDetails(page);
 			await expect(panel.locator('.history-tool')).toBeVisible();

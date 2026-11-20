@@ -622,7 +622,7 @@ describe('restoreDocumentPlace', () => {
 	it('finishes the real restore when no editor exists', async () => {
 		const finished = vi.fn();
 		const restorer = documentRestorer(() => root);
-		restorer.restore({ from: 0, top: 0, scrollTop: 300 }, { mode: 'tab-return' }, finished, 4000);
+		restorer.restore({ from: 0, top: 0, scrollTop: 300 }, { mode: 'tab-return' }, finished);
 		await vi.waitFor(() => expect(finished).toHaveBeenCalledOnce());
 		restorer.abort();
 	});
@@ -632,7 +632,7 @@ describe('restoreDocumentPlace', () => {
 		const { place } = await leftAt(page, 3000);
 		const placed = vi.fn();
 		const restorer = documentRestorer(() => root);
-		restorer.restore(place, { mode: 'tab-return', onPlaced: placed }, undefined, 4000);
+		restorer.restore(place, { mode: 'tab-return', onPlaced: placed });
 		await vi.waitFor(() => expect(placed).toHaveBeenCalledOnce());
 		restorer.abort();
 		page.stop();
