@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The browser chip in chat and the browser's address bar now lead with the site's real domain, so a long web address cut short no longer hides which site the agent is on; before, the cut-off end was the part that named the site.
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
+- A chat comment card in the margin returns to rest when you click plain transcript text or empty space, keeping any reply you were writing. A thread also reopens with its reply after you switch conversations and return.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat comment's answer now comes only from what the agent sent you when Focus is on, so a comment answered with an update and again in the agent's closing words shows one reply; before, it showed both. With Focus off, every step you see still answers.
