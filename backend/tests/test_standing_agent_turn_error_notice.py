@@ -191,3 +191,27 @@ def test_a_notice_nobody_takes_is_parked_not_dropped(isolated_db, told):
     assert told["sent"] == [] and told["started"] == []
     assert [r["reason"] for r in parked] == ["no_coordinator_took_turn_error"]
     assert "lane" in parked[0]["payload_json"]
+
+
+def test_a_delivery_failure_is_parked_as_a_failure_not_as_unclaimed(isolated_db, told, monkeypatch):
+    import events.delivery as delivery
+
+    told["coordinators"] = {"proj-1": "conductor", WORKSPACE_SCOPE: "corsia"}
+    _agent("lane")
+    calls = []
+
+    def broken(recipient, kind, summary, details, *, message_id, db):
+        calls.append(recipient)
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(delivery, "enqueue_event_wake", broken)
+
+    _tell("lane")
+
+    db = get_db()
+    parked = db.execute("SELECT reason, payload_json FROM dead_letter_events").fetchall()
+    db.close()
+    assert calls == ["conductor"]  # a broken delivery is not passed down the chain as a refusal
+    assert told["started"] == []
+    assert [r["reason"] for r in parked] == ["turn_error_notice_failed"]
+    assert '"told": "conductor"' in parked[0]["payload_json"]

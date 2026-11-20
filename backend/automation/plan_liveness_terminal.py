@@ -121,13 +121,25 @@ def _tell_coordinator(connection, thread_id: str, *, turn_id: str | None, error:
         try:
             enqueue_event_wake(told, "agent.turn_errored", summary, details,
                                message_id=message_id, db=connection)
-        except Exception:
+        except ValueError:
+            # The delivery's refusal: this recipient can't take it, so the next one is asked.
             from loguru import logger
 
-            logger.exception("turn error of {}: notice to {} refused; trying next", thread_id, told)
+            logger.error("turn error of {}: notice to {} refused; trying next", thread_id, told)
             connection.execute("ROLLBACK TO turn_errored_notice")
             connection.execute("RELEASE turn_errored_notice")
             continue
+        except Exception:
+            # A failure of the delivery itself, not a refusal: park it under its own reason
+            # rather than asking the next recipient or calling it unclaimed.
+            from loguru import logger
+
+            logger.exception("turn error of {}: notice to {} failed", thread_id, told)
+            connection.execute("ROLLBACK TO turn_errored_notice")
+            connection.execute("RELEASE turn_errored_notice")
+            dead_letter.park("agent.turn_errored", {**details, "summary": summary, "told": told},
+                             "turn_error_notice_failed", message_id, db=connection, code_named=True)
+            return
         connection.execute("RELEASE turn_errored_notice")
         start_idle_after_commit(connection, told)
         return
