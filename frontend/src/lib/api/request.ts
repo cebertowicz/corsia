@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/sessionToken';
-import { CLIENT_TIMING_PATH, startClientTiming, type ClientTimingRow } from './clientTiming';
+import { CLIENT_TIMING_PATH, startClientTiming, type ClientTimingBatch } from './clientTiming';
 
 /** What `apiFetch` accepts on top of `RequestInit`; the extra field never reaches `fetch`. */
 export interface ApiInit extends RequestInit {
@@ -59,11 +59,11 @@ function withSessionParameter(input: string, session: string): string {
 }
 
 /** The page's request timing aggregates, posted through the same signed path as any other call. */
-function sendClientTiming(rows: ClientTimingRow[], keepalive: boolean): Promise<Response> {
+function sendClientTiming(batch: ClientTimingBatch, keepalive: boolean): Promise<Response> {
 	return apiFetch(CLIENT_TIMING_PATH, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ rows }),
+		body: JSON.stringify(batch),
 		keepalive,
 	});
 }

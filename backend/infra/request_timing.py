@@ -20,8 +20,13 @@ from infra.product_events import analytics_disabled
 
 log = logging.getLogger(__name__)
 
-_BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
-                  8_192, 16_384, 32_768, 60_000)
+#: Upper edges (ms) of the timing histogram; the browser's copy is STATS_BUCKET_UPPERS in
+#: frontend/src/lib/browserPaneStats.ts, tied to this one by a test.
+BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
+                 8_192, 16_384, 32_768, 60_000)
+#: Browser-side timing is a diagnostic reading, taken over days; two weeks covers it (see
+#: infra/client_request_timing.py), so it is kept for less time than the route timing above.
+CLIENT_TIMING_RETENTION_DAYS = 14
 _FLUSH_SECONDS = 60
 _SLOW_MS = 1_000
 #: A request this slow is also logged, so it can be read where the analytics database can't.
@@ -57,7 +62,7 @@ class Aggregate:
     max_ms: float = 0.0
     sum_bytes: int | None = 0
     max_bytes: int | None = 0
-    buckets: list[int] = field(default_factory=lambda: [0] * len(_BUCKET_UPPERS))
+    buckets: list[int] = field(default_factory=lambda: [0] * len(BUCKET_UPPERS))
 
     def add(self, duration_ms: float, response_bytes: int | None = None) -> None:
         """Add one completed request's duration and emitted body length."""
@@ -70,7 +75,7 @@ class Aggregate:
         elif self.sum_bytes is not None:
             self.sum_bytes += response_bytes
             self.max_bytes = max(self.max_bytes or 0, response_bytes)
-        for index, upper in enumerate(_BUCKET_UPPERS):
+        for index, upper in enumerate(BUCKET_UPPERS):
             if duration_ms <= upper:
                 self.buckets[index] += 1
                 return
@@ -128,13 +133,13 @@ def bucket_percentile(buckets: list[int], percentile: float) -> float:
     target = total * percentile
     cumulative = 0
     lower = 0.0
-    for upper, count in zip(_BUCKET_UPPERS, buckets, strict=True):
+    for upper, count in zip(BUCKET_UPPERS, buckets, strict=True):
         if cumulative + count >= target and count:
             fraction = (target - cumulative) / count
             return lower + (upper - lower) * fraction
         cumulative += count
         lower = float(upper)
-    return float(_BUCKET_UPPERS[-1])
+    return float(BUCKET_UPPERS[-1])
 
 
 def route_template(scope: dict) -> str:
@@ -377,7 +382,7 @@ def prune_retention(now: datetime | None = None) -> None:
         )
         cur.execute(
             "DELETE FROM client_request_timing_daily WHERE day < ?",
-            ((now - timedelta(days=90)).date(),),
+            ((now - timedelta(days=CLIENT_TIMING_RETENTION_DAYS)).date(),),
         )
     except Exception:
         log.exception("request timing analytics retention failed")

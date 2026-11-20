@@ -4,27 +4,42 @@
  * For each /api request the page reads its resource timing entry and splits the time into the wait
  * inside the browser (queued behind the per-host connection limit, stalled), connection setup, the
  * server's own duration (from the response's `Server-Timing` header) and the network remainder. The
- * split is aggregated in memory per day, engine, method and route template, and sent in one small
- * batch at most once a minute, so a day of use says whether waiting in the browser or server work is
- * most of a slow chat switch.
+ * split is aggregated in memory per day, engine, method and route template, and sent in small batches
+ * at most once a minute, so a day of use says whether waiting in the browser or server work is most of
+ * a slow chat switch.
  *
- * A field the engine leaves unfilled makes that measure unknown for that request: it is left out, never
- * counted as 0. Only durations, the method and the route template leave this module; never a path,
- * a query, an id or a header. The module owns no timer loop: one single-shot timer is armed when the
- * first sample arrives and nothing runs while the page is idle.
+ * Diagnostic: delete it with the server's table and endpoints once the decision it informs is made.
+ *
+ * A field the engine leaves unfilled makes that measure unknown for that request: left out, never 0.
+ * Only durations, the method and the server's route template leave this module; never a path, query, id
+ * or header. One single-shot timer is armed when the first sample (or a capture failure) arrives; an
+ * idle page runs nothing. Each failure kind is counted for the page load, logged once to the console,
+ * and the counts ride on the next batch, where the server logs them; no failure path throws.
  */
+import { STATS_BUCKET_UPPERS } from '$lib/browserPaneStats';
 
-/** Same upper edges (ms) as the server's route timing histogram, so both read with one function. */
-export const BUCKET_UPPERS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 60_000];
+/** Upper edges (ms) of the server's route timing histogram; the one client copy, tied to the server's by a test. */
+export const BUCKET_UPPERS = STATS_BUCKET_UPPERS;
 export const MEASURES = ['total', 'wait', 'connect', 'server', 'network'] as const;
 export type Measure = (typeof MEASURES)[number];
 export type Engine = 'chromium' | 'webkit' | 'gecko' | 'other';
 
 export const CLIENT_TIMING_PATH = '/api/system/perf/client-timing';
+/** The key for a request whose response named no route (an engine that hides Server-Timing). The server accepts this one non-template route. */
+export const UNKNOWN_ROUTE = '/<unknown>';
+
+/** The server's own timing flush runs once a minute; one batch a minute keeps the page to the same rate. */
 const FLUSH_MS = 60_000;
-/** One batch is the most the server accepts; a window that sees more distinct keys drops the rest. */
-const MAX_KEYS = 500;
-const UNKNOWN_ROUTE = '/<unknown>';
+/** Rows per POST: the server's limit. The largest row measured is 270 bytes (the longest registered route, five-digit counts), so a batch is under 28 KiB. */
+export const BATCH_ROWS = 100;
+/** The browser refuses keepalive bodies past 64 KiB in flight across the page; 48 KiB leaves room for other keepalive sends. */
+export const KEEPALIVE_BODY_BYTES = 48 * 1024;
+/** One page load counting more of an issue than this is plainly broken; matches the server's cap. */
+const ISSUE_COUNT_CAP = 1_000;
+/** Distinct issue keys in one POST: the server refuses more. */
+const MAX_ISSUE_KEYS = 8;
+/** Resource timestamps are rounded by the browser; a request "sent" up to a millisecond before it started is rounding, not a measurement. */
+const TIMER_ROUNDING_MS = 1;
 
 export interface ClientTimingRow {
 	day: string;
@@ -38,9 +53,17 @@ export interface ClientTimingRow {
 	buckets: number[];
 }
 
+export interface ClientTimingBatch {
+	engine: Engine;
+	rows: ClientTimingRow[];
+	/** Counts of what went wrong in this capture: `observer_install_failed`, `kept_lt_sent`, `post_failed:<status>` or `post_failed:network`. */
+	issues?: Record<string, number>;
+}
+
+export type SendBatch = (batch: ClientTimingBatch, keepalive: boolean) => Promise<Response>;
+
 /** Durations in ms that the entry let us derive; a measure that could not be derived is absent. */
 export type Split = Partial<Record<Measure, number>>;
-
 export interface TimingEntry {
 	name: string;
 	initiatorType?: string;
@@ -87,7 +110,7 @@ export function splitEntry(entry: TimingEntry): Split | null {
 			setup = connectEnd - (filled(lookup) && lookup <= connectStart ? lookup : connectStart);
 		}
 		const wait = sent - entry.startTime - setup;
-		if (wait >= -1) split.wait = Math.max(0, wait);
+		if (wait >= -TIMER_ROUNDING_MS) split.wait = Math.max(0, wait);
 		if (setup > 0) split.connect = setup;
 	}
 	const app = entry.serverTiming?.find((item) => item.name === 'app')?.duration;
@@ -103,43 +126,113 @@ function bucketIndex(ms: number): number {
 	return BUCKET_UPPERS.length - 1;
 }
 
-interface Cell {
-	row: ClientTimingRow;
+/** A row as sent: sums to the microsecond, so a row stays small. */
+function wire(row: ClientTimingRow): ClientTimingRow {
+	return { ...row, sum_ms: Math.round(row.sum_ms * 1000) / 1000, max_ms: Math.round(row.max_ms * 1000) / 1000 };
 }
 
 export function createClientTiming(options: {
-	send: (rows: ClientTimingRow[], keepalive: boolean) => Promise<unknown>;
+	send: SendBatch;
 	engine: Engine;
 	setTimer?: (run: () => void, ms: number) => unknown;
+	report?: (message: string) => void;
 }) {
-	let cells = new Map<string, Cell>();
+	// Keys come only from the route templates the server names, so this map is bounded by the server's route table.
+	let cells = new Map<string, ClientTimingRow>();
+	let issues: Record<string, number> = {};
+	const reported = new Set<string>();
 	let armed = false;
 	const setTimer = options.setTimer ?? ((run: () => void, ms: number) => setTimeout(run, ms));
+	const report = options.report ?? ((message: string) => console.error(message));
+
+	function arm(): void {
+		if (armed) return;
+		armed = true;
+		setTimer(() => flush(false), FLUSH_MS);
+	}
+
+	function addIssue(kind: string, by = 1): void {
+		if (!(kind in issues) && Object.keys(issues).length >= MAX_ISSUE_KEYS) return;
+		issues[kind] = Math.min((issues[kind] ?? 0) + by, ISSUE_COUNT_CAP);
+	}
+
+	/** Count a failure of this capture, and say so once per kind for the page load. */
+	function noteIssue(kind: string, detail = ''): void {
+		addIssue(kind);
+		if (reported.has(kind)) return;
+		reported.add(kind);
+		try {
+			report(`[client timing] ${kind} (${options.engine})${detail ? `: ${detail}` : ''}`);
+		} catch {} // a failing logger cannot be reported to itself
+	}
+
+	/** One POST. Resolves true when the server took it; every failure becomes a count that rides on the next batch. */
+	async function post(rows: ClientTimingRow[], keepalive: boolean): Promise<boolean> {
+		const taken = issues;
+		issues = {};
+		const batch: ClientTimingBatch = { engine: options.engine, rows: rows.map(wire) };
+		if (Object.keys(taken).length > 0) batch.issues = taken;
+		const restore = () => Object.entries(taken).forEach(([kind, count]) => addIssue(kind, count));
+		try {
+			const response = await options.send(batch, keepalive);
+			if (!response.ok) {
+				restore();
+				noteIssue(`post_failed:${response.status}`);
+				return false;
+			}
+			const body = (await response.json().catch(() => null)) as { kept?: unknown } | null;
+			if (typeof body?.kept === 'number' && body.kept < rows.length) noteIssue('kept_lt_sent', `${body.kept} of ${rows.length} rows kept`);
+			return true;
+		} catch (error) {
+			restore();
+			noteIssue('post_failed:network', error instanceof Error ? error.message : '');
+			return false;
+		}
+	}
+
+	/** The rows a page-hide POST may carry: as many as fit the keepalive budget, never more than one batch. */
+	function takeForKeepalive(): ClientTimingRow[] {
+		const rows: ClientTimingRow[] = [];
+		let bytes = 0;
+		for (const [key, row] of cells) {
+			const size = JSON.stringify(wire(row)).length + 1;
+			if (rows.length >= BATCH_ROWS || bytes + size > KEEPALIVE_BODY_BYTES) break;
+			rows.push(row);
+			bytes += size;
+			cells.delete(key);
+		}
+		return rows;
+	}
+
+	/** Send what is pending: on page hide one keepalive body (the rest waits for the armed timer); otherwise batches in turn, stopping at the first failure. */
+	function flush(hidden: boolean): void {
+		if (!hidden) armed = false;
+		if (cells.size === 0 && !issues.observer_install_failed) return;
+		if (hidden) {
+			void post(takeForKeepalive(), true);
+			return;
+		}
+		const all = [...cells.values()];
+		cells = new Map();
+		const batches: ClientTimingRow[][] = [];
+		for (let at = 0; at < all.length; at += BATCH_ROWS) batches.push(all.slice(at, at + BATCH_ROWS));
+		if (batches.length === 0) batches.push([]);
+		void (async () => {
+			for (const rows of batches) if (!(await post(rows, false))) return;
+		})();
+	}
 
 	function add(day: string, method: string, route: string, measure: Measure, ms: number): void {
 		const key = `${day}\u0000${method}\u0000${route}\u0000${measure}`;
-		let cell = cells.get(key);
-		if (!cell) {
-			if (cells.size >= MAX_KEYS) return;
-			cell = {
-				row: { day, engine: options.engine, method, route, measure, count: 0, sum_ms: 0, max_ms: 0, buckets: BUCKET_UPPERS.map(() => 0) },
-			};
-			cells.set(key, cell);
+		let row = cells.get(key);
+		if (!row) {
+			row = { day, engine: options.engine, method, route, measure, count: 0, sum_ms: 0, max_ms: 0, buckets: BUCKET_UPPERS.map(() => 0) };
+			cells.set(key, row);
 		}
-		const row = cell.row;
 		row.count += 1;
 		row.sum_ms += ms;
 		row.max_ms = Math.max(row.max_ms, ms);
 		row.buckets[bucketIndex(ms)] += 1;
-	}
-
-	function flush(keepalive = false): void {
-		armed = false;
-		if (cells.size === 0) return;
-		const rows = [...cells.values()].map((cell) => cell.row);
-		cells = new Map();
-		// One attempt: a failed batch is dropped, since this is measurement and never worth a retry.
-		options.send(rows, keepalive).catch(() => undefined);
 	}
 
 	function record(entry: TimingEntry, epochMs: number): void {
@@ -151,35 +244,43 @@ export function createClientTiming(options: {
 			const ms = split[measure];
 			if (ms !== undefined) add(day, method, route, measure, ms);
 		}
-		if (!armed) {
-			armed = true;
-			setTimer(() => flush(), FLUSH_MS);
-		}
+		arm();
 	}
 
-	return { record, flush };
+	/** The observer could not be installed: say so once, and let the next flush carry one issues-only batch. */
+	function installFailed(error: unknown): void {
+		noteIssue('observer_install_failed', error instanceof Error ? error.message : '');
+		arm();
+	}
+
+	return { record, flush, installFailed };
+}
+
+/** Whether a resource entry is one of the page's own /api fetches. The flush's own POST is not: measuring it would arm another flush forever. */
+export function isApiFetch(entry: TimingEntry): boolean {
+	if (entry.initiatorType !== 'fetch' && entry.initiatorType !== 'xmlhttprequest') return false;
+	try {
+		const path = new URL(entry.name).pathname;
+		return path.startsWith('/api/') && path !== CLIENT_TIMING_PATH;
+	} catch {
+		return false;
+	}
 }
 
 let started = false;
 
 /** Install the page's single observer. Safe to call on every request; only the first does anything. */
-export function startClientTiming(send: (rows: ClientTimingRow[], keepalive: boolean) => Promise<unknown>): void {
+export function startClientTiming(send: SendBatch): void {
 	if (started) return;
 	started = true;
+	const timing = createClientTiming({ send, engine: detectEngine(globalThis.navigator?.userAgent ?? '') });
 	try {
-		if (typeof PerformanceObserver === 'undefined' || typeof performance === 'undefined') return;
-		const timing = createClientTiming({ send, engine: detectEngine(globalThis.navigator?.userAgent ?? '') });
+		if (typeof PerformanceObserver === 'undefined' || typeof performance === 'undefined') {
+			throw new Error('PerformanceObserver is not available');
+		}
 		const observer = new PerformanceObserver((list) => {
 			for (const entry of list.getEntries() as unknown as Array<PerformanceResourceTiming>) {
-				if (entry.initiatorType !== 'fetch' && entry.initiatorType !== 'xmlhttprequest') continue;
-				let path: string;
-				try {
-					path = new URL(entry.name).pathname;
-				} catch {
-					continue;
-				}
-				if (!path.startsWith('/api/') || path === CLIENT_TIMING_PATH) continue;
-				timing.record(entry, performance.timeOrigin);
+				if (isApiFetch(entry)) timing.record(entry, performance.timeOrigin);
 			}
 		});
 		observer.observe({ type: 'resource' });
@@ -188,8 +289,8 @@ export function startClientTiming(send: (rows: ClientTimingRow[], keepalive: boo
 				if (document.visibilityState === 'hidden') timing.flush(true);
 			});
 		}
-	} catch {
-		// Measurement must never affect the app.
+	} catch (error) {
+		timing.installFailed(error);
 	}
 }
 
