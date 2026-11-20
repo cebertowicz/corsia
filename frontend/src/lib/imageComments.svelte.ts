@@ -12,9 +12,10 @@ import { forgetDraft, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import { imageDraftKey, keptCommentDrafts, type DraftOrigin } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
+import { DRAFT_KEPT } from '$lib/stores/draftKept';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
-export const DIAGRAM_CHANGED_MESSAGE = 'Place the pin on the current diagram; your draft is kept.';
+export const DIAGRAM_CHANGED_MESSAGE = `Place the pin on the current diagram. ${DRAFT_KEPT}`;
 const isDiagramChanged = (error: unknown) => error instanceof RequestRefused && error.kind === 'diagram_changed';
 
 const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;

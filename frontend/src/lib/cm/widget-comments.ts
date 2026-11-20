@@ -10,7 +10,7 @@ import { CELL_EDITOR } from './widget-cell-state';
 import { cellClicked } from './widget-cell-click';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
-import { emptyCellSelection, paintOpenCell } from './widget-cell-comment';
+import { paintOpenCell, textlessCellSelection } from './widget-cell-comment';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -87,14 +87,14 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const cell = widget.matches(TABLE) ? target.closest<HTMLTableCellElement>('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
 			if (cell && !this.view.state.facet(EditorView.editable)) {
-				const empty = emptyCellSelection(this.view, cell);
-				if (empty) {
+				const textless = textlessCellSelection(this.view, cell);
+				if (textless) {
 					const range = document.createRange();
 					range.selectNodeContents(cell);
 					range.collapse(true);
 					selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
 					this.raised = true;
-					hooks.onSelect(empty);
+					hooks.onSelect(textless);
 					return;
 				}
 			}
@@ -126,7 +126,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			// An image's cell has no text but is not empty: a press on the image is the first half of a click that opens it.
 			if (drawnCellImage(target)) return;
 			// Chromium gives an empty cell a collapsed DOM range but does not announce it through selectionchange.
-			// This is the existing press path for table selection, so read the range synchronously here.
+			// This is the existing press path for table selection, so read the range synchronously here. A cell holding only an
+			// image (a status badge) has no text either: a press beside the image selects it, which is what its comment is on.
 			if (emptyCell && !emptyCell.textContent?.trim()) {
 				event.preventDefault();
 				const range = document.createRange();

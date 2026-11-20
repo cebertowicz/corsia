@@ -33,6 +33,18 @@ export interface ChatCommentAnchor {
 	anchor_suffix: string;
 }
 
+/** Find the DOM point at a rendered-text offset in a chat message body. */
+export function chatTextPoint(body: HTMLElement, offset: number): [Node, number] {
+	const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+	let remaining = offset;
+	let last: Text | null = null;
+	for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+		if (remaining <= node.length) return [node, remaining];
+		remaining -= node.length; last = node;
+	}
+	return last ? [last, last.length] : [body, 0];
+}
+
 /**
  * Send a reply to a stored comment: that comment's own anchor plus the new note, in the shape the composer's
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
