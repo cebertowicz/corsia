@@ -147,6 +147,30 @@ for (const [kind, artifact, make] of surfaces) {
 		expect(comments.draft).toBeNull();
 	});
 
+	it(`${kind}: a box reopened in a new viewer whose press fails posts again under the same id, and one comment is stored`, async () => {
+		const closed = make();
+		await closed.draw(BOX, rect);
+		closed.setDraftBody('Too dark');
+		let land!: () => void;
+		const held = new Promise<void>(resolve => { land = resolve; });
+		const post = api.postComment.getMockImplementation()!;
+		api.postComment.mockImplementationOnce(async (...args: [string, Record<string, any>]) => { await held; return post(...args); });
+		const first = closed.submit('Too dark');
+		const comments = make();
+		await comments.draw({ ...BOX, x: 0.5 }, rect);
+		land();
+		await first;
+		// The POST goes unanswered and the look for what it may have stored fails too, so the press fails.
+		api.postComment.mockRejectedValueOnce(new PostTimeoutError(12_000)); store.lookupFails = true;
+		await expect(comments.submit('Too dark')).rejects.toBeInstanceOf(PostTimeoutError);
+		expect(comments.draft?.body).toBe('Too dark');
+		store.lookupFails = false;
+		await comments.submit('Too dark');
+		expect(store.rows.size).toBe(1);
+		expect(new Set(api.postComment.mock.calls.map(([, fields]) => fields.client_id)).size).toBe(1);
+		expect(keptCommentDrafts.get(artifact === 'image' ? imageKey : 'image:doc:a.png')).toBeUndefined();
+	});
+
 	it(`${kind}: text and tags edited while the post is out stay kept, whatever the box that pressed clears`, async () => {
 		const comments = make();
 		await comments.draw(BOX, rect);

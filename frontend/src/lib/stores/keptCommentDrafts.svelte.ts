@@ -96,7 +96,11 @@ export const keptCommentDrafts = {
 	claim(key: string, body: string, mentionSelection: MentionSelection, origin?: DraftOrigin): { clientId: string; again: boolean } {
 		const prior = key ? kept.get(key) : undefined;
 		if (prior?.clientId) return { clientId: prior.clientId, again: true };
-		if (!prior && origin && origin.body === body && origin.tags === tagsOf(mentionSelection, body)) return { clientId: origin.clientId, again: true };
+		if (!prior && origin && origin.body === body && origin.tags === tagsOf(mentionSelection, body)) {
+			// Kept under that id, as a first press keeps its own, so a press after this one failing reuses it.
+			if (key) kept.set(key, { body, mentionSelection, clientId: origin.clientId });
+			return { clientId: origin.clientId, again: true };
+		}
 		const clientId = newClientId();
 		if (key) kept.set(key, { ...prior, body, mentionSelection, clientId });
 		return { clientId, again: false };

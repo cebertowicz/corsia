@@ -274,6 +274,37 @@ describe('a post that lands or fails after its composer closed and another opene
 		expect(again[11]).toBe(true);
 	});
 
+	it('lands after its viewer closed, and the reopened press fails: the next press reuses the same id, so the server holds one comment', async () => {
+		// The server stores one comment per client id, as its dedupe does.
+		const stored = new Map<string, string>();
+		const store = (clientId: string) => { if (!stored.has(clientId)) stored.set(clientId, `c${stored.size + 1}`); return stored.get(clientId)!; };
+		current = setup(false);
+		const prose = () => commentDraft.update(draft => draft && { ...draft, selection: undefined });
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockClear();
+		let end!: () => void;
+		const held = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async (...args) => { await held; return store(args[7] as string); });
+		const first = current.controller.submit('Too terse');
+		await Promise.resolve();
+		current.stop();
+		current = setup(false);
+		current.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current.controller.start(); prose(); flushSync();
+		end(); await first;
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
+		await expect(current.controller.submit('Too terse')).rejects.toThrow('500');
+		vi.mocked(addComment).mockImplementationOnce(async (...args) => store(args[7] as string));
+		expect(await current.controller.submit('Too terse')).toBe('c1');
+		const [earlier, failed, again] = vi.mocked(addComment).mock.calls;
+		expect(failed[7]).toBe(earlier[7]);
+		expect(again[7]).toBe(earlier[7]);
+		expect(stored.size).toBe(1);
+		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
+	});
+
 	it('lands while its text and tags were edited: the kept edit keeps both, whatever the composer that pressed clears', async () => {
 		current = setup(false);
 		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
