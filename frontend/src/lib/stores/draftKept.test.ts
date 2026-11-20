@@ -39,7 +39,15 @@ describe('the line under a box whose draft this device does not keep', () => {
 		expect(withoutDraftKept(POST_FAILED)).toBe('Couldn’t post the comment. Try again.');
 	});
 	it('takes the kept sentence out from the end of a reason, with one space', () => {
-		expect(withoutDraftKept(liveFailureMessage(timeout))).toBe('We couldn’t confirm your comment was posted. Check the comments before posting again.');
+		expect(withoutDraftKept(liveFailureMessage(new Error('404 {"detail":"This document is no longer shared."}')))).toBe('Couldn’t post the comment: This document is no longer shared.');
+		expect(withoutDraftKept(DIAGRAM_CHANGED_MESSAGE)).toBe('Place the pin on the current diagram.');
+	});
+	it('takes it out from the middle of the timeout reason, which keeps its next step', () => {
+		expect(withoutDraftKept(liveFailureMessage(timeout))).toBe('Couldn’t confirm the comment was posted. Check the comments before you post it again.');
+	});
+	it('names a next step in every reason without one of the server’s: a failure with no reason is the plain post failure', () => {
+		for (const failure of ['lost', new Error('400 <html>Bad request</html>'), new Error('422 {"detail":[{"msg":"bad"}]}')]) expect(liveFailureMessage(failure)).toBe(POST_FAILED);
+		for (const [, reason] of REASONS) expect(reason).not.toMatch(/\bwe\b/i);
 	});
 	it('says a full share in one line, the reason first', () => {
 		expect(failedLine(POST_FAILED, NOT_KEPT_MESSAGE.full)).toBe('Couldn’t post the comment. Try again. This device has no room left to keep this draft. Post it or copy it before you close CORSIA.');
