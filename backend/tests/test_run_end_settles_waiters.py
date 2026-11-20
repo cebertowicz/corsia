@@ -220,3 +220,24 @@ async def test_archiving_a_finished_runs_steps_keeps_its_dependent_free(isolated
     assert _causes(task) == ([], {})
     assert _blocked_events(run, task) == ["blocked_raised", "blocked_cleared"]
     assert len(_wakes(run, other)) == 1
+
+
+async def test_a_completed_run_stops_its_dependents_waiting_time(isolated_db, tmp_path, monkeypatch):
+    """Waiting time reads the run's end the way waits do: a freed dependent stops counting it."""
+    from datetime import datetime, timedelta, timezone
+
+    from plans import node_cost, node_waiting
+
+    run, phase, draft, review, task = await _waiting_on_a_run(tmp_path, monkeypatch)
+    for step in (draft, review):
+        done = await run.update("mark_done", _args(run, step, evidence="done", verification_result="passed"))
+        assert not isinstance(done, str), done
+    assert run.rows("SELECT state FROM plan_nodes WHERE id=?", phase) == [{"state": "pending"}]
+
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    db = get_db()
+    try:
+        waited = node_waiting.own_waiting(db, [task], later, node_cost._rows_in)
+    finally:
+        db.close()
+    assert waited.get(task, 0) < 60, waited

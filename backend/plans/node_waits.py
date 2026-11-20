@@ -51,7 +51,8 @@ def prerequisite_state_sql(connection: sqlite3.Connection, alias: str) -> str:
     failed. That record is written once and never undone, so a waiter freed by
     it stays free. Every other row, a plain phase included, reads as its
     stored state. Written by nobody: waits, the
-    writer-side deltas and the cross-plan notice all read it here.
+    writer-side deltas and the cross-plan notice all read it here; waiting
+    time reads the same record over time (``node_waiting._read_by_waiters``).
     Older rungs of the migration ladder run plans code before the aggregate
     (and workflow) columns exist; there every row reads as its stored state.
     """
