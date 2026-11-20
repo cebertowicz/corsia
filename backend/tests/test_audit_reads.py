@@ -720,3 +720,141 @@ def test_seat_usage_window_bounds_and_length(isolated_db, monkeypatch):
     assert long_window.value.category == "invalid_window"
     with pytest.raises(audit_reads.AuditReadError):
         audit_reads.read_audit_metric("steve-p1", "steve", "seat_usage")
+
+
+_HEALTH_WINDOW = {"since": "2026-09-22T00:00:00Z", "until": "2026-09-23T00:00:00Z"}
+_NARRATIVE = "Decisions so far and what is next. " * 20
+_USAGE_LIMIT_TEXT = "You've hit your session limit · resets 10am (America/Los_Angeles)"
+_ENTRY_LIST = '[{"field":"decisions","entry_id":1,"body":{"text":"keep"}}]'
+
+
+def _health_rows(isolated_db, monkeypatch, checkpoints, *, thread="steve-p1"):
+    """Seed installed/other checkpoints, then read checkpoint_health for ``thread``.
+
+    Each checkpoint is (id, thread_id, status, mode, started_at, raw_result, snapshot, harness).
+    """
+    from infra import audit_reads
+
+    _seed(isolated_db)
+    monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
+    with sqlite3.connect(isolated_db) as db:
+        db.executemany(
+            "INSERT INTO checkpoints (id,thread_id,history_epoch,through_seq,"
+            "through_message_id,trigger,mode,status,source_harness,source_model,"
+            "writer_harness,writer_model,continuity_base_revision,"
+            "continuity_base_snapshot_json,started_at,raw_result,continuity_snapshot_json) "
+            "VALUES (?,?,0,1,'m','idle',?,?,'x','x',?,'x',0,'[]',?,?,?)",
+            [(cid, tid, mode, status, harness, started, raw, snap)
+             for cid, tid, status, mode, started, raw, snap, harness in checkpoints],
+        )
+    return audit_reads.read_audit_metric(
+        thread, "steve", "checkpoint_health", **_HEALTH_WINDOW
+    )["rows"]
+
+
+def _installed(cid, *, mode="warm", raw=_NARRATIVE, snap=_ENTRY_LIST, harness="claude-code",
+               thread="steve-p1", started="2026-09-22T02:00:00"):
+    return (cid, thread, "installed", mode, started, raw, snap, harness)
+
+
+def test_checkpoint_health_splits_rows_by_mode(isolated_db, monkeypatch):
+    rows = _health_rows(isolated_db, monkeypatch, [
+        _installed("w1"), _installed("w2"), _installed("k1", mode="cold"),
+    ])
+    assert [(row["mode"], row["n"]) for row in rows] == [("cold", 1), ("warm", 2)]
+
+
+def test_checkpoint_health_counts_zero_entry_installs_only_when_readable(isolated_db, monkeypatch):
+    rows = _health_rows(isolated_db, monkeypatch, [
+        _installed("empty", snap="[]"),
+        _installed("null-snapshot", snap=None),
+        _installed("full", snap=_ENTRY_LIST),
+        _installed("garbled", snap="{not json"),
+        _installed("not-a-list", snap='{"entries":[]}'),
+    ])
+    assert len(rows) == 1
+    assert rows[0]["n"] == 5
+    # Empty and NULL read as no entries (as read_continuity_snapshot reads them);
+    # a garbled snapshot and a non-list one are unreadable, never zero.
+    assert rows[0]["zero_entry"] == 2
+
+
+def test_checkpoint_health_counts_limit_refusal_by_the_canonical_classifier(isolated_db, monkeypatch):
+    rows = _health_rows(isolated_db, monkeypatch, [
+        _installed("limited-claude", raw=_USAGE_LIMIT_TEXT),
+        _installed("limited-codex", raw="You've hit your usage limit.", harness="codex"),
+        _installed("narrative", raw=_NARRATIVE),
+        # Longer than a provider refusal: a narrative that merely discusses billing.
+        _installed("long-talk", raw="We discussed the billing quota in detail. " * 40),
+        ("failed-limit", "steve-p1", "failed", "warm", "2026-09-22T03:00:00", _USAGE_LIMIT_TEXT, None, "claude-code"),
+    ])
+    by_status = {row["status"]: row for row in rows}
+    assert by_status["installed"]["n"] == 4
+    assert by_status["installed"]["limit_refusal"] == 2
+    # Only installed rows carry the two counts; no row carries text or a thread id.
+    assert "zero_entry" not in by_status["failed"] and "limit_refusal" not in by_status["failed"]
+    assert all(set(row) <= {
+        "trigger", "status", "mode", "n", "recovered", "unrecovered", "zero_entry", "limit_refusal",
+    } for row in rows)
+
+
+def test_checkpoint_health_counts_only_the_window_and_caller_project(isolated_db, monkeypatch):
+    rows = _health_rows(isolated_db, monkeypatch, [
+        _installed("old", started="2026-08-01T00:00:00"),
+        _installed("before", started="2026-09-21T23:59:59"),
+        # Another stored ISO form (space separator) sorts below the "T" form as text.
+        _installed("spaced", started="2026-09-22 00:00:01"),
+        _installed("at-start", started="2026-09-22T00:00:00"),
+        _installed("inside", started="2026-09-22T23:59:59.999999"),
+        _installed("at-end", started="2026-09-23T00:00:00"),
+        _installed("other-project", thread="steve-p2"),
+        _installed("other-user", thread="leksi-p1"),
+    ])
+    assert [row["n"] for row in rows] == [3]
+
+
+def test_checkpoint_health_empty_window_returns_no_rows(isolated_db, monkeypatch):
+    assert _health_rows(isolated_db, monkeypatch, [
+        _installed("elsewhere", started="2026-01-01T00:00:00"),
+    ]) == []
+
+
+def test_checkpoint_health_denies_a_thread_outside_any_project(isolated_db, monkeypatch):
+    from infra import audit_reads
+
+    _seed(isolated_db)
+    monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
+    with sqlite3.connect(isolated_db) as db:
+        db.execute(
+            "INSERT INTO threads (id,user_id,project_id,title,created_at,updated_at) "
+            "VALUES ('no-project','steve',NULL,'N','t','t')"
+        )
+    with pytest.raises(audit_reads.AuditReadError) as denied:
+        audit_reads.read_audit_metric("no-project", "steve", "checkpoint_health", **_HEALTH_WINDOW)
+    assert denied.value.category == "scope_denied"
+
+
+def test_checkpoint_health_result_limit_still_holds(isolated_db, monkeypatch):
+    from infra import audit_reads
+
+    monkeypatch.setattr(audit_reads, "MAX_ROWS", 1)
+    with pytest.raises(audit_reads.AuditReadError) as limited:
+        _health_rows(isolated_db, monkeypatch, [
+            _installed("warm-one"), _installed("cold-one", mode="cold"),
+        ])
+    assert limited.value.category == "result_limit"
+
+
+def test_checkpoint_health_starts_reading_at_the_windows_first_checkpoint(isolated_db, monkeypatch):
+    """The read skips older checkpoints by generation order, not by reading each one's started_at."""
+    from infra import audit_reads
+
+    _health_rows(isolated_db, monkeypatch, [
+        _installed(f"day-{day}", started=f"2026-09-{day:02d}T12:00:00") for day in range(1, 31)
+    ])
+    with sqlite3.connect(isolated_db) as db:
+        first = audit_reads._first_order_in_window(db, "2026-09-22T00:00:00+00:00")
+        day_21 = db.execute("SELECT generation_order FROM checkpoints WHERE id='day-21'").fetchone()[0]
+        day_20 = db.execute("SELECT generation_order FROM checkpoints WHERE id='day-20'").fetchone()[0]
+    # One day of margin: the day before the window is still read, the one before that is not.
+    assert day_20 < first <= day_21
