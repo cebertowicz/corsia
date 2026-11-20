@@ -147,7 +147,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		comments.setDraftBody('Keep this');
 		await expect(comments.submit('Keep this')).rejects.toThrow('409');
-		expect(mocks.show).toHaveBeenCalledWith('Place the pin on the current diagram; your draft is kept.', 'error');
+		expect(mocks.show).toHaveBeenCalledWith('Place the pin on the current diagram. Your draft is kept.', 'error');
 		expect(comments.boxMode).toBe(true);
 		expect(comments.hasDraftText).toBe(true);
 	});
@@ -408,7 +408,7 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		await comments.draw(BOX, rect);
 		await expect(comments.submit('Keep this')).rejects.toThrow('409');
 		drop();
-		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram. Your draft is kept.', 'error');
 	});
 
 	it('never in a box on another image: the failing draft keeps its reason and a toast says why', async () => {
@@ -453,7 +453,7 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		await expect(comments.submit('Keep this')).rejects.toThrow('409');
 		drop();
 		expect(mocks.show).not.toHaveBeenCalled();
-		expect(comments.draft).toMatchObject({ body: 'Keep this', error: 'Place the pin on the current diagram; your draft is kept.' });
+		expect(comments.draft).toMatchObject({ body: 'Keep this', error: 'Place the pin on the current diagram. Your draft is kept.' });
 	});
 
 	it('once, in a toast, for a changed diagram that could not be redrawn after its box closed', async () => {
@@ -471,8 +471,8 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		comments.close(); drop();
 		end();
 		await expect(posting).rejects.toThrow('409');
-		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
-		expect(keptCommentDrafts.get(imageDraftKey('doc'))?.error).toBe('Place the pin on the current diagram; your draft is kept.');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram. Your draft is kept.', 'error');
+		expect(keptCommentDrafts.get(imageDraftKey('doc'))?.error).toBe('Place the pin on the current diagram. Your draft is kept.');
 	});
 
 	it('always in a toast for a pin that did not move: no box says why', async () => {

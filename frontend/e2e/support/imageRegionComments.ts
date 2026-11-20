@@ -46,6 +46,13 @@ export async function seedImage(page: Page, request: APIRequestContext, label: s
 	const registered = await request.post(`/api/files/register?token=${tok()}`, { data: { path: imagePath, thread_id: sessionId } });
 	expect(registered.ok(), `register failed: ${registered.status()}`).toBeTruthy();
 	const artifactId = (await registered.json()).artifact.id as string;
+	const seeded = { sessionId, sessionTitle, imagePath, artifactId };
+	await restoreImageTab(page, seeded, artifactWidth);
+	return seeded;
+}
+
+/** The seeded image's tab, open in its thread's canvas on this page's next load (`seedImage` does it for the first page). */
+export async function restoreImageTab(page: Page, { sessionId, imagePath, artifactId }: Seeded, artifactWidth: number | null = null): Promise<void> {
 	await page.addInitScript(
 		({ threadId, id, tabPath, title, width }) => {
 			localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
@@ -58,7 +65,6 @@ export async function seedImage(page: Page, request: APIRequestContext, label: s
 		},
 		{ threadId: sessionId, id: artifactId, tabPath: imagePath, title: path.basename(imagePath), width: artifactWidth },
 	);
-	return { sessionId, sessionTitle, imagePath, artifactId };
 }
 
 /** A real, busy screen to comment on: the signed-in app itself at the image's natural size. */
