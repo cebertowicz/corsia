@@ -144,20 +144,8 @@ def is_multi_person(db) -> bool:
 SHARED_ACCESS_REFUSAL = "Giving it to an agent would hide it from the other people who use CORSIA here."
 
 
-PROJECT_DOCUMENT_REFUSAL = "Project documents stay with the project's conductor; it edits them directly."
-
-
-def change_refusal(
-    current: str | None, new_owner: str | None, multi_person: bool, *, agent_in_project: bool = False,
-) -> str | None:
-    """Why this owner change is refused, or ``None``.
-
-    Shared access holds when a multi-person document would move to an agent. An agent (``agent_in_project``)
-    never hands the person a project-owned or released project document, whoever the agent is; the person's
-    own take in the screen does not pass the flag and is unchanged.
-    """
-    if agent_in_project and new_owner == UI_PRINCIPAL and (current is None or current.startswith("project:")):
-        return PROJECT_DOCUMENT_REFUSAL
+def change_refusal(current: str | None, new_owner: str | None, multi_person: bool) -> str | None:
+    """Preserve shared access when a multi-person document would move to an agent."""
     if multi_person and current and is_owner_sentinel(current) and new_owner and not is_owner_sentinel(new_owner):
         return SHARED_ACCESS_REFUSAL
     return None
