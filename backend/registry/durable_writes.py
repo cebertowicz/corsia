@@ -17,6 +17,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
+from registry.durable_write_inputs import source_claim, validate_publication_input
 from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected, restore_if_owned
 from registry.durable_write_recovery import recover_intents, recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
@@ -114,12 +115,6 @@ def _intent_identity(target: Path, *, db) -> tuple[str, str]:
     return identity.artifact_type, identity.external_id
 
 
-def _source_claim(source: Path | None, intent_id: str) -> Path | None:
-    if source is None:
-        return None
-    return source.parent / f".corsia-write-{intent_id}.source"
-
-
 def _recover_unpublished_claim(
     claim: Path | None,
     source: Path | None,
@@ -151,6 +146,7 @@ def _register_applied(
     before: bytes | None,
     db,
     origin: registration_writer.RegistrationOrigin | None = None,
+    suppress_feedback: bool = False,
 ) -> dict:
     """Register the applied bytes, metadata, and owner events atomically."""
     registration_owner = shared.actor_principal or thread_id
@@ -186,6 +182,7 @@ def _register_applied(
             after=shared.path.read_bytes(),
             actor_thread_id=thread_id,
             db=db,
+            suppress_feedback=suppress_feedback,
         )
     return artifact
 
@@ -283,7 +280,7 @@ def _validated_intent_paths(
             raise RuntimeError(
                 f"Durable write intent {row['id']} has an invalid created parent."
             )
-    return target, stage, backup, source, _source_claim(source, intent_id)
+    return target, stage, backup, source, source_claim(source, intent_id)
 
 
 def _register_in_category_index(
@@ -385,15 +382,12 @@ def _publish_bytes(
     operation: str,
     direct_user: bool = False,
     source: Path | None = None, origin: registration_writer.RegistrationOrigin | None = None,
-    notify: bool = True, expected_sha256: str | None = None,
+    notify: bool = True, expected_sha256: str | None = None, suppress_feedback: bool = False,
 ) -> dict:
-    if (source is None) == (content is None):
-        raise ValueError(
-            "A durable publication requires bytes or one promotion source."
-        )
+    validate_publication_input(source, content)
     artifact_type, external_id = _intent_identity(shared.path, db=db)
     intent_id = str(uuid4())
-    claim = _source_claim(source, intent_id)
+    claim = source_claim(source, intent_id)
     content_hash = hashlib.sha256(content).hexdigest() if content is not None else ""
     stage = shared.path.parent / f".corsia-write-{intent_id}.stage"
     before = shared.path.read_bytes() if shared.path.exists() else None
@@ -454,6 +448,7 @@ def _publish_bytes(
             before=before,
             db=db,
             origin=origin,
+            suppress_feedback=suppress_feedback,
         )
     except Exception as exc:
         if file_applied:
@@ -514,6 +509,7 @@ def write_text(
     origin: registration_writer.RegistrationOrigin | None = None,
     notify: bool = True,
     expected_sha256: str | None = None,
+    suppress_feedback: bool = False,
 ) -> dict | WriteAuthority | None:
     """Publish governed shared text; for any other write, return the ownership decision to report.
 
@@ -550,7 +546,7 @@ def write_text(
             description=description,
             db=db,
             operation="write", direct_user=direct_user,
-            origin=origin, notify=notify, expected_sha256=expected_sha256,
+            origin=origin, notify=notify, expected_sha256=expected_sha256, suppress_feedback=suppress_feedback,
         )
     finally:
         db.close()

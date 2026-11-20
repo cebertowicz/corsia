@@ -247,7 +247,7 @@
 	}
 	const decisions = createSuggestionDecisions({
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
-		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
+		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text, history) => history ? onSuggestionAccepted?.(text, history) : onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
 	// Stale and missing-file accept refusals go to `suggestionRefusals`, which also shows the card as orphaned.
 	const cardErrors = $derived({
