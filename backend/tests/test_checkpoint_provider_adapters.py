@@ -652,7 +652,15 @@ async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendor_thread):
+    """A body written before the process failed is kept, marked partial under a provider error.
+
+    Changed on purpose: the diagnostic now carries the partial-provider-error
+    marker, so capture appends the body after the previous narrative instead of
+    replacing it, and the body ends on a line break because its assistant record
+    was complete.
+    """
     from core import fork_cc as cc
+    from core.fork_types import partial_provider_error
     from core.fork_render import fit_cold_fork_input
 
     async def prepare(_process, request, _cancel, _on_input, _spawned_at):
@@ -680,8 +688,8 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
 
     result = await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
-    assert result.raw_body == "paid body"
-    assert result.diagnostic == "quota/auth process terminal"
+    assert result.raw_body == "paid body\n"
+    assert result.diagnostic == partial_provider_error("quota/auth process terminal")
 
 
 @pytest.mark.asyncio
@@ -805,10 +813,18 @@ async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stderr", ["provider process terminal", "quota/auth process terminal"])
 async def test_codex_usable_body_retains_process_exit_diagnostic(
-    tmp_path, monkeypatch, vendor_thread,
+    tmp_path, monkeypatch, vendor_thread, stderr,
 ):
+    """A body written before the process failed is kept as partial, unless the failure is a usage limit.
+
+    Changed on purpose: a usage limit (here named by the exit text, as
+    ``harness_cause_kind`` reads it) installs nothing; any other failure keeps
+    the completed body, marked partial under a provider error.
+    """
     from core import fork_codex as codex
+    from core.fork_types import ProviderForkRejected, partial_provider_error
 
     class Session:
         def __init__(self, **kwargs):
@@ -817,7 +833,7 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
 
         async def start(self):
             await self.on_event({"kind": "assistant_text", "text": "paid body"})
-            await self.on_exit(7, "quota/auth process terminal")
+            await self.on_exit(7, stderr)
             return True
 
         async def terminate(self):
@@ -836,7 +852,7 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
     from connections.account_operation import prepare_operation_home
 
     request = prepare_operation_home(admit_fork(request), Path(tmp_path), kind='checkpoint')
-    result = await codex._run_app_server_fork(
+    run = codex._run_app_server_fork(
         request,
         None,
         source_home=Path(tmp_path),
@@ -846,9 +862,14 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
         cold_input=ColdFoldInput((), 10, None, 0),
         kind=CHECKPOINT_KIND,
     )
+    if "quota" in stderr:
+        with pytest.raises(ProviderForkRejected, match="quota"):
+            await run
+        return
+    result = await run
 
-    assert result.raw_body == "paid body"
-    assert result.diagnostic == "quota/auth process terminal"
+    assert result.raw_body == "paid body\n"
+    assert result.diagnostic == partial_provider_error(stderr)
 
 
 async def _async_value(value):

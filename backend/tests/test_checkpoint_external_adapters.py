@@ -766,7 +766,11 @@ async def test_cc_tool_boundary_capture_freezes_matching_row_and_live_launch(
 async def test_cc_preserves_launch_and_accepts_error_envelope_body(
     tmp_path, monkeypatch, vendor_thread
 ):
-    """CC keeps cwd/model/effort/tools and returns a body even on is_error."""
+    """CC keeps cwd/model/effort/tools and returns its assistant body even on is_error.
+
+    Changed on purpose: the error result's own text is never a body, so the
+    usable body is the assistant output written before the error.
+    """
     from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
 
@@ -794,13 +798,16 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
         default_home("claude-code"),
         vendor_account_receipt=default_receipt("claude-code"),
     )
+    assistant = {"type": "assistant", "message": {"content": [{"type": "text", "text": "usable checkpoint"}]}}
     record = {
         "type": "result",
         "is_error": True,
-        "result": "usable checkpoint",
+        "result": "API Error: upstream overloaded",
         "usage": {"input_tokens": 80, "output_tokens": 20},
     }
-    process = FakeProcess((json.dumps(record) + "\n").encode(), returncode=1)
+    process = FakeProcess(
+        (json.dumps(assistant) + "\n" + json.dumps(record) + "\n").encode(), returncode=1,
+    )
     observed = {}
 
     async def spawn(argv, *, cwd, env):
@@ -814,7 +821,8 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
     result = await cc.invoke_fork(
         _request(_target("claude-code"), source, binary="claude"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
-    assert result.raw_body == "usable checkpoint"
+    assert result.raw_body == "usable checkpoint\n"
+    assert "upstream overloaded" not in result.raw_body
     assert observed["snapshot"] == transcript.read_bytes()
     assert observed["cwd"] == str(tmp_path)
     assert "--max-turns" not in observed["argv"]
