@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import CommentComposer from './CommentComposer.svelte';
 import { postDocumentComment, submitDocumentComment } from '$lib/docViewerOperations';
 import { toasts } from '$lib/stores/toast';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -50,7 +51,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this draft');
 			expect(addComment).not.toHaveBeenCalled();
 		} finally {
@@ -70,7 +71,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this refused draft');
 			expect(post).toHaveBeenCalledOnce();
 		} finally {
@@ -103,5 +104,21 @@ describe('CommentComposer', () => {
 		expect(textarea.value).toBe('Kept to copy');
 		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
 		expect(onSubmit).not.toHaveBeenCalled();
+	});
+
+	it('says why a post failed as an error, and why the button is off as a note', () => {
+		// jsdom applies no stylesheet: the colour itself (the error token, as a reply's failure line) is proven in the browser by
+		// support/failureLook.ts in comment-failure-one-place and doc-reply-draft-kept.
+		render(async () => {}, { body: 'Kept', error: 'Couldn’t post the comment. Your draft is kept. Try again.', disabledReason: 'Select the text again' });
+		expect(host.querySelector('[role="alert"]')?.classList.contains('failed')).toBe(true);
+		expect(host.querySelector('.selection-reason:not([role="alert"])')?.classList.contains('failed')).toBe(false);
+	});
+
+	it('counts as the box that says why a post failed while it is mounted, under the key it is given', () => {
+		render(async () => {}, { shownKey: 'draft-key' });
+		host.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(false);
 	});
 });

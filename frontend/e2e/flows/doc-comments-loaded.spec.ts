@@ -9,10 +9,10 @@ import { settled } from '../support/reviewFixtures';
 
 /**
  * The comment drawer at full load (support/loadedComments.ts), at every width it ships at, in both themes. The permanent
- * gate for the drawer's structure: on a phone the sheet stays on screen, keyboard up or down; its header with Accept all is
+ * gate for the drawer's structure: on a phone the sheet stays on screen, keyboard up or down; its header with Accept suggestions is
  * always reachable; the list is the one thing that scrolls; a long thread collapses in the list and opens whole in the same
  * sheet with Back; long text wraps; touch targets are 44 px; no comment card scrolls inside itself. Desktop widths keep their
- * own layout and must not lose Accept all, wrap or scrolling. Each case records what it measured, so a failing run says every
+ * own layout and must not lose Accept suggestions, wrap or scrolling. Each case records what it measured, so a failing run says every
  * defect at once. At 852 and 900 the Workspace panel, when open, slides the main view aside and covers it (the shell's narrow
  * layout), so only the panel-closed state shows the drawer there; at 1440 the panel sits beside the canvas, open or closed, and a
  * widened canvas brings the margin column.
@@ -42,8 +42,8 @@ type Look = {
 	cardScrollers: string[];
 	/** Elements drawn past the drawer's sides: content cut or the sheet widened. */
 	wide: string[];
-	/** Each Accept all control and whether it is on screen and takes a tap at its centre. */
-	acceptAll: { name: string; reachable: boolean }[];
+	/** Each Accept suggestions control and whether it is on screen and takes a tap at its centre. */
+	acceptSuggestions: { name: string; reachable: boolean }[];
 	/** Touch controls under 44 px. */
 	small: string[];
 };
@@ -72,7 +72,7 @@ function look(page: Page, touch: boolean): Promise<Look> {
 			if (rect.width < 2 || rect.height < 2) return false;
 			return rect.right > box.right + 1 || rect.left < box.left - 1 || el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX);
 		}).map(name))].slice(0, 8);
-		const acceptAll = [...container.querySelectorAll<HTMLButtonElement>('button')].filter((b) => /^Accept all/.test(b.textContent?.trim() ?? '')).map((button) => {
+		const acceptSuggestions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.trim() === 'Accept suggestions').map((button) => {
 			const rect = button.getBoundingClientRect();
 			const onScreen = rect.height > 0 && rect.top >= vTop && rect.bottom <= vTop + vHeight && rect.left >= 0 && rect.right <= vWidth;
 			const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
@@ -84,7 +84,7 @@ function look(page: Page, touch: boolean): Promise<Look> {
 			// A control whose ::before is its larger hit area (an image comment's number) counts that area.
 			const before = getComputedStyle(el, '::before');
 			if (before.content !== 'none' && before.position === 'absolute') {
-				const inset = (side: string) => -(parseFloat(before.getPropertyValue(side)) || 0);
+				const inset = (side: string) => Math.max(0, -(parseFloat(before.getPropertyValue(side)) || 0));
 				width += inset('left') + inset('right'); height += inset('top') + inset('bottom');
 			}
 			return Math.min(width, height);
@@ -92,7 +92,7 @@ function look(page: Page, touch: boolean): Promise<Look> {
 		const small = touch ? [...new Set(all.filter((el) => el.matches('button, a[href], textarea, summary, [role="button"]') && visible(el) && !clipped(el)
 			&& el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().bottom > vTop && el.getBoundingClientRect().top < vTop + vHeight
 			&& !el.closest('.cm-editor') && target(el) < 43.5).map((el) => `${name(el)} ${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`))].slice(0, 12) : [];
-		return { offscreen, scrollers, cardScrollers, wide, acceptAll, small };
+		return { offscreen, scrollers, cardScrollers, wide, acceptSuggestions, small };
 	}, { selector: DRAWER, touch });
 }
 
@@ -200,8 +200,16 @@ for (const { label, view } of CASES) {
 			const top = await look(page, view.touch);
 			report.top = top;
 			if (top.offscreen) fail(`list: the drawer runs ${top.offscreen}px off screen`);
-			if (top.acceptAll.length < 2) fail(`list: ${top.acceptAll.length} Accept all controls, expected one per agent`);
-			for (const control of top.acceptAll) if (!control.reachable) fail(`list top: "${control.name}" can't be reached`);
+			if (top.acceptSuggestions.length !== 1) fail(`list: ${top.acceptSuggestions.length} Accept suggestions controls, expected one`);
+			for (const control of top.acceptSuggestions) if (!control.reachable) fail(`list top: "${control.name}" can't be reached`);
+			if (top.acceptSuggestions.length === 1 && top.acceptSuggestions[0].reachable) {
+				await page.locator(DRAWER).getByRole('button', { name: 'Accept suggestions', exact: true }).click();
+				const choices = page.getByRole('group', { name: 'Choose whose suggestions to accept' });
+				const suggesters = choices.getByRole('checkbox');
+				if (await suggesters.count() !== 2) fail('list: expected both suggesters in the checklist');
+				for (const direction of ['North', 'South']) if (!(await choices.getByRole('checkbox', { name: new RegExp(`Review Agent ${direction}`) }).count())) fail(`list: missing ${direction} suggester`);
+				await choices.getByRole('button', { name: 'Cancel' }).click();
+			}
 			if (top.scrollers.length > 1) fail(`list: ${top.scrollers.length} areas scroll (${top.scrollers.join(', ')})`);
 			if (top.cardScrollers.length) fail(`list: a comment card scrolls inside itself (${top.cardScrollers.join(', ')})`);
 			if (top.wide.length) fail(`list: content past the drawer's edge (${top.wide.join(', ')})`);
@@ -230,12 +238,12 @@ for (const { label, view } of CASES) {
 			if (!(await read.locator('[data-discussion-original]').getByRole('button', { name: 'Show more' }).count())) fail('list: the long comment the person has read does not collapse');
 			if (await read.locator('.ct-reply').getByRole('button', { name: 'Show more' }).count()) fail('list: the long unread reply is collapsed behind Show more');
 
-			// The list at its end: Accept all is still there.
+			// The list at its end: Accept suggestions is still there.
 			await scrollListToEnd(page);
 			await shot(page, info, label, '2-list-end');
 			const end = await look(page, view.touch);
 			report.end = end;
-			for (const control of end.acceptAll) if (!control.reachable && sheet) fail(`list end: "${control.name}" can't be reached`);
+			for (const control of end.acceptSuggestions) if (!control.reachable && sheet) fail(`list end: "${control.name}" can't be reached`);
 			if (end.offscreen) fail(`list end: the drawer runs ${end.offscreen}px off screen`);
 
 			// From the list into a long thread and back (the sheet's journey).
@@ -328,7 +336,7 @@ for (const { label, view } of CASES) {
 					report.back = after;
 					if (!after) fail('back: Back closed the sheet instead of returning to the list');
 					else {
-						for (const control of after.acceptAll) if (!control.reachable) fail(`back: "${control.name}" can't be reached`);
+						for (const control of after.acceptSuggestions) if (!control.reachable) fail(`back: "${control.name}" can't be reached`);
 						if (await back.count()) fail('back: the thread view is still open');
 						if (!(await page.locator(`${DRAWER} [data-comment-id]`).nth(3).count())) fail('back: the list did not come back');
 						const listTopAfter = await listTop();

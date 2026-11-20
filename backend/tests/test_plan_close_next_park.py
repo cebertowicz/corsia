@@ -85,8 +85,8 @@ def test_each_park_operation_returns_the_next_block_without_the_parked_task(db, 
 def test_a_named_task_starts_in_the_park_call_ahead_of_queued_work(db, operation):
     plan = owner_plan(db)
     task_a = task(db, plan.id, "Task A")
-    earlier = task(db, plan.id, "Earlier queued work")
     task_b = task(db, plan.id, "Task B")
+    earlier = task(db, plan.id, "Queued work below")
     select(db, plan.id, task_a.id)
     queue_active(db, earlier.id)
 

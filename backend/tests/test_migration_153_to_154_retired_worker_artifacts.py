@@ -103,5 +103,5 @@ def test_later_release_takes_precedence(db):
 
 
 def test_registered():
-    assert SCHEMA_VERSION == 202
+    assert SCHEMA_VERSION == 204
     assert MIGRATIONS[153] is migrate_153_to_154

@@ -36,4 +36,9 @@
 	.filter-check { display: inline-flex; flex: none; width: var(--space-3); height: var(--space-3); }
 	.filter-popup button[aria-checked="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: var(--touch-target); } .drawer-heading :global(.ico-btn) { min-width: var(--touch-target); } }
+	@media (max-width: 48rem) {
+		/* Keep the full touch target inside the drawer instead of extending it past the edge. */
+		.drawer-heading :global(.ico-btn) { width: var(--touch-target); height: var(--touch-target); }
+		.drawer-heading :global(.ico-btn::after) { inset: 0; }
+	}
 </style>

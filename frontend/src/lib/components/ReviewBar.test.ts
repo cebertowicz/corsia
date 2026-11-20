@@ -53,16 +53,16 @@ afterEach(() => {
 });
 
 describe('ReviewBar', () => {
-	it('offers all three answers regardless of feedback', async () => {
+	it('offers the two answers, Approve and Send back, regardless of feedback', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		expect(button('Approve')).toBeTruthy();
-		expect(button('Approve with changes')).toBeTruthy();
 		expect(button('Send back')).toBeTruthy();
+		expect(button('Approve with changes')).toBeUndefined();
 		unmount(component!); component = null; host.innerHTML = '';
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render();
-		expect(button('Approve with changes')).toBeTruthy();
+		expect([...host.querySelectorAll('.rb-actions button')].map((b) => b.textContent?.trim())).toEqual(['Send back', 'Approve']);
 	});
 
 	it.each([[1, 'Your 1 comment goes to Docs agent'], [2, 'Your 2 comments go to Docs agent']])(
@@ -74,7 +74,7 @@ describe('ReviewBar', () => {
 		},
 	);
 
-	it.each(['Send back', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
+	it.each(['Send back'])('returns focus to %s when its note is dismissed', async (label) => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		button(label)!.click();
@@ -416,10 +416,10 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
-	it('R3: an open comment draft blocks Approve with changes and Request changes', async () => {
+	it('R3: an open comment draft blocks an Approve that sends comments, and Send back', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render(true);
-		button('Approve with changes')!.click();
+		button('Approve')!.click();
 		flushSync();
 		expect(host.textContent).toContain(DRAFT_OPEN);
 		expect(api.answerReview).not.toHaveBeenCalled();
@@ -451,11 +451,51 @@ describe('ReviewBar', () => {
 		const onAnswered = vi.fn();
 		await render(false, onAnswered);
 		api.answerReview.mockRejectedValueOnce(new Error('500'));
-		button('Approve with changes')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(onAnswered).not.toHaveBeenCalled();
-		api.answerReview.mockResolvedValueOnce({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(2) });
-		button('Approve with changes')!.click();
+		api.answerReview.mockResolvedValueOnce({ verdict: 'approved', note: null, feedback_counts: counts(2) });
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(onAnswered).toHaveBeenCalledTimes(1));
+	});
+});
+
+describe('ReviewBar docked to the document canvas', () => {
+	async function renderDocked(props: Record<string, unknown> = {}) {
+		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', docked: true, ...props } });
+		await vi.waitFor(() => expect(host.querySelector('.rb-dock')).toBeTruthy());
+		flushSync();
+	}
+
+	it('rests on the question alone above both answers, and opens to the asker and the full question', async () => {
+		api.fetchReviewBar.mockResolvedValue({ ...read(0), other_askers: ['Research'], other_asks: [{ name: 'Research', reason: 'Check the evidence links.' }] });
+		await renderDocked();
+		const card = host.querySelector<HTMLElement>('.rb-dock')!;
+		expect(card.hasAttribute('data-ask-card')).toBe(true);
+		const question = card.querySelector<HTMLButtonElement>('.rb-dock-ask')!;
+		expect(question.getAttribute('aria-expanded')).toBe('false');
+		expect(card.querySelector('.rb-dock-q')?.textContent).toBe('Is the rollout plan right?');
+		expect(card.classList.contains('open')).toBe(false);
+		expect([...card.querySelectorAll('.rb-actions button')].map((b) => b.textContent?.trim())).toEqual(['Send back', 'Approve']);
+		expect(card.querySelector('.rb-others')).toBeNull();
+		question.click(); flushSync();
+		expect(question.getAttribute('aria-expanded')).toBe('true');
+		expect(card.classList.contains('open')).toBe(true);
+		expect(card.querySelector('.rb-dock-who')?.textContent).toContain('Docs agent');
+		expect(card.querySelector('.rb-others')?.textContent).toContain('Research: Check the evidence links.');
+	});
+
+	it('steps aside under a comment sheet without leaving the page, and keeps no room for it there', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		await renderDocked({ suppressed: true });
+		expect(host.querySelector('.rb-dock')?.classList.contains('suppressed')).toBe(true);
+	});
+
+	it('shows the receipt in the card once answered', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0) });
+		await renderDocked();
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-dock.receipt .rb-receipt')?.textContent).toContain('Approved'));
 	});
 });

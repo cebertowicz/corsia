@@ -15,6 +15,15 @@ describe('Avatar accessibility', () => {
 		unmount(component); component = mount(Avatar, { target: host, props: { name: 'Quality Gate', color: 'red', hidden: true } }); flushSync();
 		expect(host.querySelector('.avatar')?.getAttribute('aria-hidden')).toBe('true');
 	});
+	it('opts into a separate badge only for the one-avatar mode', () => {
+		component = mount(AvatarStack, { target: target(), props: { max: 1, separateMore: true, people: [
+			{ name: 'Reader', color: 'red', detail: 'read' }, { name: 'Writer', color: 'blue' },
+		] } }); flushSync();
+		expect(host.querySelector('.stack.separate-more > .participant-trigger')).not.toBeNull();
+		expect(host.querySelector('.stack.separate-more > .more')).not.toBeNull();
+		expect(avatarStackSource).toContain('.stack.separate-more > .more { margin-left: var(--space-1); }');
+	});
+
 	it('names the people summarized by +N', () => {
 		component = mount(AvatarStack, { target: target(), props: { people: [{ name: 'Quality Gate', color: 'red' }, { name: 'Bugs', color: 'amber' }, { name: 'Context & Memory', color: 'blue' }, { name: 'Structured Plans', color: 'green' }] } }); flushSync();
 		const more = host.querySelector('.more');

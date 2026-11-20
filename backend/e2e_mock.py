@@ -166,6 +166,8 @@ async def _mock_acompletion(**kwargs: Any) -> Any:
     """Drop-in replacement for ``llm.base.acompletion``."""
     reply = _next_reply(stream=bool(kwargs.get("stream")))
     await _wait_for_gate(reply, "response_gate")
+    if reply.get("raise"):  # a provider call that fails outright, with this text
+        raise RuntimeError(str(reply["raise"]))
     if kwargs.get("stream"):
         return _streaming_iter(reply)
     delay_ms = reply.get("delay_ms", 0) or 0

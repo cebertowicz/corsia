@@ -14,7 +14,7 @@ import { syntheticPng } from '../support/syntheticImages';
 // the stored version and keep the change in the box, and the next press posts the change as its own comment.
 
 const EARLIER = 'Your earlier version was posted. Your changes are kept here.';
-/** The composer's own line under the text, not the toast that repeats it. */
+/** The composer's own line under the text: with the box on screen it is the one place that says why. */
 const earlierLine = (page: Page) => page.getByRole('alert').filter({ hasText: EARLIER });
 /** Comment, or Retry once a press has failed: the composer's one submit button. */
 const press = (page: Page) => page.locator('.composer').getByRole('button', { name: /^(Comment|Retry)$/ }).click();
@@ -48,10 +48,11 @@ async function dropFirstAnswer(page: Page, artifactId: string) {
 	return { answer: () => { state.blocking = false; }, posted: () => state.posts };
 }
 
-/** The press failed: the box still holds the text and the person is told it didn't post. */
+/** The press failed: the box still holds the text and says it didn't post, in the box only, since the box is on screen. */
 async function expectFailedPress(page: Page, text: string) {
-	await expect(page.locator('.toast').filter({ hasText: /post/i }).first()).toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('.composer [role="alert"]').filter({ hasText: /post/i }), 'the box says why').toBeVisible({ timeout: 30_000 });
 	await expect(composer(page)).toHaveValue(text);
+	await expect(page.locator('.toast').filter({ hasText: /post/i }), 'no toast tells it a second time').toHaveCount(0);
 }
 
 const DOC = '# Retry once\n\nThe router decides where an inbound event goes.\n\nA second paragraph to keep the margin honest.\n';

@@ -1,8 +1,10 @@
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
+import { closeDetails, expectOneRow, openDetails, openFilesButton } from '../support/documentBar';
+import { closeComments, openComments } from '../support/commentDrawer';
 import {
-	deliveredBatches, headerSend, heldIn, installWorkspace, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
+	deliveredBatches, headerSend, heldIn, installWorkspace, labelLines, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
 	type TextDocument,
 } from '../support/heldComments';
 
@@ -17,7 +19,7 @@ async function addUserComment(request: Parameters<typeof createSession>[0], arti
 // Narrow viewports keep tabs in the compact sheet; its close uses the same path.
 async function tabControl(page: Page, fileName: string, action: 'close' | 'select'): Promise<Locator> {
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: /^Files \(/ }).click();
+		await openFilesButton(page).click();
 		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		return action === 'close'
 			? sheet.getByRole('button', { name: `Close ${fileName}` })
@@ -43,11 +45,13 @@ test('@surface:doc-send-on-close sends an unsent user batch exactly once before 
 	await installWorkspace(page, threadId, [document], 0);
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
-	// The open document's header is the one sender; a held comment waits for it, with no drawer footer and no Send now.
+	// The open document's drawer is the one sender; a held comment waits there.
+	await openComments(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expectSenders(page, ['header: Send 1 comment']);
 	expect(heldIn(document.artifactId, 'document-held')).toBe(1);
-	expect(sends.document, 'looking at the header sends nothing').toHaveLength(0);
+	expect(sends.document, 'looking at the drawer sends nothing').toHaveLength(0);
+	await closeComments(page);
 
 	// Closing the tab sends what is still held, once, without the header Send.
 	await (await tabControl(page, document.fileName, 'close')).click();
@@ -67,24 +71,29 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^1 comment, 1 waiting for Send$/ })).toBeVisible();
-	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
-
-	// Request review shares a row with the comment count and the header Send, whatever the owner's name.
+	// The bar stays one row whatever the owner's name; Request review and Send are whole in their respective surfaces.
 	// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
+	await expectOneRow(page);
+	const panel = await openDetails(page);
+	await expect(panel.locator('.review-request')).toBeVisible();
+	const reviewInside = await panel.evaluate((root) => { const review = root.querySelector<HTMLElement>('.review-request')!.getBoundingClientRect(), bounds = root.getBoundingClientRect(); return review.width > 0 && review.left >= bounds.left - 0.5 && review.right <= bounds.right + 0.5; });
+	await closeDetails(page);
+	await openComments(page);
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+	await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toBeVisible();
 	const layout = await headerSend(page).evaluate((send) => {
-		const row = (selector: string) => document.querySelector<HTMLElement>(`.document-header ${selector}`)!.getBoundingClientRect();
-		const label = document.createRange();
-		label.selectNodeContents(send);
+		const panel = send.closest<HTMLElement>('[data-doc-comments-drawer]')!;
+		const inside = (element: Element | null) => { if (!element) return false; const box = element.getBoundingClientRect(), bounds = panel.getBoundingClientRect(); return box.width > 0 && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5; };
 		return {
-			count: row('.comment-status').top,
-			review: row('.review-request').top,
-			sendTop: send.getBoundingClientRect().top,
-			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
+			send: inside(send),
+			sideways: panel.scrollWidth - panel.clientWidth,
 		};
 	});
-	expect(Math.abs(layout.review - layout.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
-	expect(layout.lines, 'the header Send reads on one line').toBe(1);
+	expect(reviewInside, 'Request review sits whole inside Details').toBe(true);
+	expect(layout.send, 'Send sits whole inside the drawer').toBe(true);
+	expect(layout.sideways, 'the drawer does not scroll sideways').toBeLessThanOrEqual(1);
+	expect(await labelLines(headerSend(page)), 'the header Send reads on one line').toBe(1);
+	await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 
 	// The header Send is the batch's own Send: one send, then it goes.
 	await headerSend(page).click();
@@ -93,8 +102,8 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	expect(deliveredBatches(document.artifactId, 'document-held')).toBe(1);
 });
 
-// The pinned header once widened the canvas at phone width: a long Send button pushed the editor sideways.
-test('@surface:doc-send-on-close at 393 px the pinned header with a pending send fits inside the canvas', async ({ page, request }) => {
+// A long Send button must not push the editor sideways at phone width.
+test('@surface:doc-send-on-close at 393 px the drawer with a pending send fits inside the canvas', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `header-fits-a-long-owner-thread-title-${Date.now()}`;
 	const { threadId, document: narrow } = await seedHeldDocument(request, title, 'narrow', 2);
@@ -104,6 +113,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^2 comments, 2 waiting for Send$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
+	await openComments(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 	await expectSenders(page, ['header: Send 2 comments']);
@@ -112,7 +122,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 		const doc = document.querySelector<HTMLElement>('.doc')!;
 		const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
 		const bounds = doc.getBoundingClientRect();
-		const outside = [...document.querySelectorAll<HTMLElement>('.document-header button')]
+		const outside = [...document.querySelectorAll<HTMLElement>('[data-doc-comments-drawer] .drawer-foot button')]
 			.filter((button) => button.getClientRects().length > 0)
 			.map((button) => ({ name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '', rect: button.getBoundingClientRect() }))
 			.filter(({ rect }) => rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5)
@@ -123,11 +133,9 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 		};
 	});
 	expect(layout.overflow, 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
-	expect(layout.outside, 'every header button lies inside the canvas').toEqual([]);
+	expect(layout.outside, 'every drawer footer button lies inside the canvas').toEqual([]);
 
-	// A near-44 px target under a coarse pointer, inside the canvas: the small button's own box is 28 px and the design
-	// system's tap area (its ::after) reaches 8 px past each edge. The header's last row sits against the document, which
-	// covers the last pixel of the lower edge (43 px measured), so the hit test above and below the box must reach 42.
+	// Under a coarse pointer, the Send target includes any tap area beyond its visible box.
 	const sendBox = (await headerSend(page).boundingBox())!;
 	expect(sendBox.x).toBeGreaterThanOrEqual(0);
 	expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(393);

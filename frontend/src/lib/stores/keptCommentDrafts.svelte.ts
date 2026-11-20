@@ -7,11 +7,14 @@
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
+import { clippedWindow } from '$lib/cm/visible-region';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { newClientId } from './documentWire';
+import { toasts } from './toast';
 
 export type MentionSelection = ReturnType<typeof createMentionSelection>;
-export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number] };
+/** `toast`: the toast up now telling why the draft's post failed (`keptCommentDrafts.toast`), while its box is not on screen. */
+export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number]; toast?: string };
 /** The kept draft a box opened from, once Comment was pressed on it: its id, and the text and tags it held then. */
 export type DraftOrigin = { clientId: string; body: string; tags: string };
 
@@ -34,8 +37,65 @@ const cell = (key: string): Cell => {
 const kept = {
 	get: (key: string) => cell(key).draft,
 	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; },
-	delete: (key: string) => { const found = cells.get(key); if (found) found.draft = undefined; },
+	/** The draft goes, and the toast telling its failure with it: what it told of is posted, cancelled or cleared. */
+	delete: (key: string) => {
+		const found = cells.get(key);
+		if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
+		if (found) found.draft = undefined;
+	},
 };
+
+/**
+ * The boxes on the page that show a draft's text and its reason (a new comment's composer, a reply's field, an image's box),
+ * by the draft's key. A failed post says why in one place: in such a box when one is on screen at that moment, else in a toast.
+ */
+const boxes = new Map<string, Set<Element>>();
+function register(key: string, box: Element): () => void {
+	if (!key) return () => {};
+	let found = boxes.get(key);
+	if (!found) boxes.set(key, found = new Set());
+	found.add(box);
+	// A box that slides in is laid out off screen as it mounts, so it is asked once more on the next frame.
+	if (!told(key, box) && typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { if (found.has(box)) told(key, box); });
+	return () => { found.delete(box); if (!found.size && boxes.get(key) === found) boxes.delete(key); };
+}
+/**
+ * The draft's own box is on screen: if a toast is up telling why its post failed, the box says it now (it shows the kept
+ * reason), so the toast goes and the reason is told in one place. True once the box was found on screen.
+ */
+function told(key: string, box: Element): boolean {
+	if (!onScreen(box)) return false;
+	const draft = kept.get(key);
+	if (draft?.error && draft.toast) {
+		toasts.dismiss(draft.toast);
+		kept.set(key, { ...draft, toast: undefined });
+	}
+	return true;
+}
+/**
+ * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
+ * shrink it) and the part every clipping ancestor shows (`clippedWindow`), so a box its scroller has scrolled away is not
+ * on screen. Nor is a box drawn invisible where it lies: hidden (`visibility`, which it inherits) or inside an inert
+ * surface (a Popover not yet placed is inert as well as clipped away).
+ */
+function onScreen(box: Element): boolean {
+	if (getComputedStyle(box).visibility !== 'visible' || box.closest('[inert]')) return false;
+	const rect = box.getBoundingClientRect(), view = window.visualViewport, { rect: clip } = clippedWindow(box);
+	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip.left);
+	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip.top);
+	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip.right);
+	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip.bottom);
+	return right > left && bottom > top;
+}
+
+/** `use:showsDraft={key}` on a box's root: registered under the draft's key while mounted (`keptCommentDrafts.shown`). */
+export function showsDraft(node: Element, key: string) {
+	let drop = register(key, node);
+	return {
+		update(next: string) { drop(); drop = register(next, node); },
+		destroy() { drop(); },
+	};
+}
 
 /** One document, whichever tab or viewer shows it. */
 export function documentDraftKey(target: Pick<DocViewerTarget, 'path' | 'projectId'> | null): string {
@@ -52,6 +112,16 @@ export function replyDraftKey(scope: string, commentId: string): string {
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/**
+	 * A box showing this draft is mounted at `box` until the returned function is called (`showsDraft` calls it on unmount).
+	 * Coming on screen with a failure toast up for the draft, it takes the toast's place (`toast`).
+	 */
+	shown(key: string, box: Element): () => void { return register(key, box); },
+	/** A box showing this draft is on the page and on screen now: one read at the moment of asking, nothing observed. */
+	onScreen(key: string): boolean {
+		for (const box of (key && boxes.get(key)) || []) if (onScreen(box)) return true;
+		return false;
+	},
 	/** The box's text and the tags it holds; an empty box with no failure to show keeps nothing. */
 	keep(key: string, body: string, mentionSelection: MentionSelection): void {
 		if (!key) return;
@@ -76,11 +146,22 @@ export const keptCommentDrafts = {
 	 */
 	fail(key: string, body: string, mentionSelection: MentionSelection, error: string, freshId = false): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection });
+		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast });
 	},
+	/**
+	 * The toast telling why the draft's post failed (`id`), or none because its box says why (null). The draft holds it
+	 * until the post succeeds, the draft goes, a later failure replaces it, or the draft's box comes on screen (`shown`):
+	 * an earlier one is dismissed, so a failure is never told twice. With no draft kept, there is nothing to hold it.
+	 */
+	toast(key: string, id: string | null): void {
+		const prior = key ? kept.get(key) : undefined;
+		if (prior?.toast && prior.toast !== id) toasts.dismiss(prior.toast);
+		if (prior) kept.set(key, { ...prior, toast: id ?? undefined });
+	},
+	/** A new press: the reason goes from the box, and its toast stays until that press ends one way or the other. */
 	clearError(key: string): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection });
+		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast });
 	},
 	/** What a box opening from this draft carries with it: the draft's id once Comment was pressed, with the text and tags it held. */
 	origin(key: string): DraftOrigin | undefined {
@@ -116,9 +197,10 @@ export const keptCommentDrafts = {
 		const prior = key ? kept.get(key) : undefined;
 		if (!prior) return false;
 		if (prior.body.trim() === sent.trim() && sameTags(prior.mentionSelection, prior.body, sentTags)) { kept.delete(key); return true; }
+		if (prior.toast) toasts.dismiss(prior.toast);
 		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection });
 		return false;
 	},
 	/** Tests only: a fresh page. */
-	reset(): void { for (const found of cells.values()) found.draft = undefined; },
+	reset(): void { for (const found of cells.values()) found.draft = undefined; boxes.clear(); },
 };

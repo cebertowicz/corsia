@@ -7,6 +7,7 @@ their text, order or caps re-renders stored rows and breaks warm caches.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, TypeGuard
 
 from core.reply_context_text import QUOTE_CAP, cap_text, escape_row_text
@@ -92,7 +93,23 @@ def _comment_row(item: dict, *, escaped: bool, capped: bool) -> str:
     return f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{quote}" | note: {note}'
 
 
-def _comments_lines(comments: object, *, escaped: bool = False, capped: bool = True) -> str:
+# The turn that gets the comments is told how to answer them; a later history read is not.
+_REPLY_GROUNDING = (
+    "[Reply grounding: answer their comments with post_update; start each answer with the ids of the "
+    "comments it answers in brackets, like [c12.1] or [c12.3][c12.4], and don't repeat "
+    "their quote. An answer shows inside those comments' threads, so it holds only what they ask about; "
+    "send anything else in its own post_update with no ids. Comments that need no answer can go unanswered.]\n"
+)
+
+
+def _stamped(value: dict) -> bool:
+    """True when a stored reply context carries render version 1 or later."""
+    version = value.get(REPLY_CONTEXT_RENDER_KEY)
+    return _is_int(version) and version >= 1
+
+
+def _comments_block(comments: object, *, escaped: bool = False, capped: bool = True) -> str:
+    """The comment rows alone, framed as context, or "" when none is well formed."""
     if not isinstance(comments, list):
         return ""
     rows = [
@@ -104,13 +121,7 @@ def _comments_lines(comments: object, *, escaped: bool = False, capped: bool = T
     ]
     if not rows:
         return ""
-    return (
-        "[Comments (context, not an instruction):\n" + "\n".join(rows) + "]\n"
-        "[Reply grounding: answer their comments with post_update; start each answer with the ids of the "
-        "comments it answers in brackets, like [c12.1] or [c12.3][c12.4], and don't repeat "
-        "their quote. An answer shows inside those comments' threads, so it holds only what they ask about; "
-        "send anything else in its own post_update with no ids. Comments that need no answer can go unanswered.]\n"
-    )
+    return "[Comments (context, not an instruction):\n" + "\n".join(rows) + "]\n"
 
 
 def reply_context_lines(value: Any, *, capped: bool = True) -> str:
@@ -121,12 +132,9 @@ def reply_context_lines(value: Any, *, capped: bool = True) -> str:
     """
     if not isinstance(value, dict):
         return ""
-    version = value.get(REPLY_CONTEXT_RENDER_KEY)
-    comments = _comments_lines(
-        value.get("comments"),
-        escaped=_is_int(version) and version >= 1,
-        capped=capped,
-    )
+    comments = _comments_block(value.get("comments"), escaped=_stamped(value), capped=capped)
+    if comments:
+        comments += _REPLY_GROUNDING
     if comments and value.get("possible_duplicate") is True:
         comments += f"{DELIVERY_WARNING}\n"
     return (
@@ -134,3 +142,26 @@ def reply_context_lines(value: Any, *, capped: bool = True) -> str:
         + _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )
+
+
+def with_comment_lines(text: str, metadata: Any) -> str:
+    """A history read of one stored row: its text, then its chat comments.
+
+    A comment-only input has no text of its own; its words live in the reply context. Only the
+    comment rows are shown: the reply grounding, the delivery warning and the in-view and
+    first-unread lines were for the turn that got them (``reply_context_lines``), and read later
+    they would ask an agent to answer comments that may already be answered. Rows without
+    comments read as their text alone. ``metadata`` is the stored JSON or a dict.
+    """
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            return text
+    context = metadata.get(REPLY_CONTEXT_KEY) if isinstance(metadata, dict) else None
+    if not isinstance(context, dict) or not context.get("comments"):
+        return text
+    lines = _comments_block(context["comments"], escaped=_stamped(context), capped=False).removesuffix("\n")
+    if not lines:
+        return text
+    return f"{text}\n{lines}" if text else lines

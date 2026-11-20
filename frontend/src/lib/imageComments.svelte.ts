@@ -3,7 +3,7 @@ import { fromStore } from 'svelte/store';
 import { RequestRefused } from '$lib/api/docs';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
-import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
+import { createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
@@ -52,7 +52,9 @@ export function createImageComments(context: {
 	const ui = createCommentSurfaceState(context.restoreFocus);
 	const key = () => context.draftKey?.() ?? imageDraftKey(context.artifactId());
 	const focused = fromStore(focusedDocComment);
-	const retryToast = createCommentRetryToast(toasts);
+	/** The toast telling why this viewer's last pin move failed: a later failure replaces it, a move that lands dismisses it. */
+	let pinToast: string | null = null;
+	const tellPin = (id: string | null) => { if (pinToast) toasts.dismiss(pinToast); pinToast = id; };
 	const threads = createThreadActions(context.artifactId, () => context.onCreated?.(), () => context.threadId?.() ?? null);
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
@@ -63,6 +65,8 @@ export function createImageComments(context: {
 	let mentionSelection = createMentionSelection();
 	/** The kept draft the open box was drawn from, if Comment was pressed on it (`keptCommentDrafts.origin`). */
 	let draftOrigin: DraftOrigin | undefined;
+	/** The kept draft the open box shows (`imageDraftKey`): the image it was drawn on. */
+	let boxKey = '';
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -112,8 +116,9 @@ export function createImageComments(context: {
 			// Keep the new location visible until the server accepts it or rejects it.
 			moving = { ...move, region };
 			try {
-				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), retryToast.remember, () => "Couldn't move the pin — try again");
-				retryToast.dismissAfterSuccess();
+				// No box says why a pin did not move, so its failure is always a toast.
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), tellPin, () => 'Couldn’t move the pin — try again');
+				tellPin(null);
 				moving = null;
 				show(move.id, anchor);
 			} catch (error) {
@@ -123,6 +128,7 @@ export function createImageComments(context: {
 			return;
 		}
 		draftRegion = region;
+		boxKey = key();
 		// The composer starts from what the last one on this image held: its text, its tags and why it did not post.
 		const kept = keptCommentDrafts.get(key());
 		draftBody = kept?.body ?? '';
@@ -137,47 +143,63 @@ export function createImageComments(context: {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
-		const post = context.post?.(), tags = mentionSelection;
-		keptCommentDrafts.clearError(key());
+		// The draft this press posts, kept under its own image's key even if another image is shown before it ends.
+		const post = context.post?.(), tags = mentionSelection, draftKey = key();
+		keptCommentDrafts.clearError(draftKey);
 		draftError = undefined;
-		let id: string, failure = '';
+		let id: string, failure = '', toastId: string | null = null;
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press: ImagePress = keptCommentDrafts.claim(key(), text, tags, draftOrigin);
+		const press: ImagePress = keptCommentDrafts.claim(draftKey, text, tags, draftOrigin);
 		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
 		// a new region, while its tags can be the same object, carried over from the kept draft.
 		const pressing = () => draftRegion === region;
+		// The open box shows this draft: the one that pressed, or one drawn from the kept draft since. Never a box on another image.
+		const showsThis = () => !!draftRegion && boxKey === draftKey;
+		// A failure says why in that box when it is on screen, and nowhere else.
+		const inBox = () => showsThis() && keptCommentDrafts.onScreen(draftKey);
 		// What the field holds now, not the text this press sent: typing while it was out is never lost.
-		const now = () => keptCommentDrafts.get(key());
+		const now = () => keptCommentDrafts.get(draftKey);
 		try {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
-				(toastId, message) => { retryToast.remember(toastId); failure = message; },
+				(shown, message) => { toastId = shown; failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
+				// A changed diagram is told once its refresh ends (below): whether a box is left to say why depends on it.
+				(error) => isDiagramChanged(error) || inBox(),
 			));
 		} catch (error) {
+			const changed = isDiagramChanged(error);
 			if (await refreshAfterStale(error)) {
-				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next.
+				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next, and the toast says why.
 				const held = now();
 				draftBody = held?.body ?? text;
+				// Kept for the redrawn diagram (its key names the new snapshot), which the next box is drawn on.
 				keptCommentDrafts.keep(key(), draftBody, held?.mentionSelection ?? tags);
 				draftRegion = null;
 				replacingDraft = true;
 				ui.close();
 				boxMode = true;
+				// The carried text holds the toast: the box drawn next on the new diagram does not say why, so it stays up.
+				keptCommentDrafts.toast(draftKey, null);
+				keptCommentDrafts.toast(key(), toasts.show(failure, 'error'));
 			} else if (failure) {
 				const held = now();
-				keptCommentDrafts.fail(key(), held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
-				if (pressing()) draftError = failure;
+				keptCommentDrafts.fail(draftKey, held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
+				// A changed diagram that could not be redrawn leaves the box open: told in it when it is on screen, else in a toast.
+				// The draft holds its toast until its box comes on screen to say why, or it is posted.
+				keptCommentDrafts.toast(draftKey, changed && !inBox() ? toasts.show(failure, 'error') : toastId);
+				// The box showing this draft says why, never a box on another image.
+				if (showsThis()) draftError = failure;
 			}
 			throw error;
 		}
-		retryToast.dismissAfterSuccess();
-		// Text or tags changed since the press stay kept, with a fresh id for their own post.
-		const stored = keptCommentDrafts.posted(key(), text, taggedAgentIds);
+		// Text or tags changed since the press stay kept, with a fresh id for their own post. Either way a toast that told an
+		// earlier press failed goes.
+		const stored = keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
 		context.onCreated?.();
 		// The box that pressed closes. A box drawn meanwhile is that draft too once what it shows is stored, and closes the
 		// same way; one whose text or tags changed keeps them.
-		if (!pressing() && !(stored && draftRegion)) return;
+		if (!pressing() && !(stored && showsThis())) return;
 		draftRegion = null;
 		draftOrigin = undefined;
 		draftBody = '';

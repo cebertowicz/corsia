@@ -29,6 +29,7 @@ EXCLUDED: dict[str, str] = {
         "checkpoint_entry_search_fts_config", "checkpoint_entry_search_fts_data",
         "checkpoint_entry_search_fts_docsize", "checkpoint_entry_search_fts_idx",
         "checkpoints_fts_config", "checkpoints_fts_data", "checkpoints_fts_docsize", "checkpoints_fts_idx",
+        "comment_fts_config", "comment_fts_data", "comment_fts_docsize", "comment_fts_idx",
         "messages_fts_config", "messages_fts_data", "messages_fts_docsize", "messages_fts_idx")},
     **{table: DERIVED_ROLLUP for table in (
         "llm_usage_hourly", "llm_usage_hourly_dirty", "llm_usage_hourly_state")},
@@ -47,6 +48,7 @@ EXCLUDED: dict[str, str] = {
     "system_bulletin_identity": _small(1),
     "outcome_event_counters": _small(1),
     "users": _small(1),
+    "feedback_recipient_migration_journal": "populated only by migration of legacy feedback; fresh fixtures have none",
     "comment_identity_moves": ("written once by schema step 199 -> 200 and read only by its reverse script; "
                                "no request path reads it"),
     **{table: NOT_IN_CENSUS for table in (

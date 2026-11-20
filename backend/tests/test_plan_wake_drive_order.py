@@ -22,6 +22,9 @@ from tests.test_plan_wake_drive import lineage  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.usefixtures('signed_in_defaults')
 
+#: A worker's input is its parent's, as ``delegate_send`` stamps it: an agent's, not a person's.
+BRIEF = {"sender_kind": "agent"}
+
 
 @pytest.fixture
 def order(lineage, monkeypatch):
@@ -65,7 +68,7 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
         codex_thread_id="codex-thread", session=None,
         parent_thread_id="parent", name="codex",
     )
-    _bind_active_turn(live, "worker")
+    _bind_active_turn(live, "worker", metadata=BRIEF)
     settle = codex_runtime_state.drive_turn_settlement
 
     async def recorded_settlement(settlement):
@@ -81,9 +84,7 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
     ))
 
     assert len(wakes(lineage)) == 1
-    # An errored worker Turn also left its input unanswered, so its own wake drives last.
-    woken = ["drive:worker"] if kind == "child_turn_errored" else []
-    assert order == ["release:start", "release:done", "drive:parent", *woken]
+    assert order == ["release:start", "release:done", "drive:parent"]
 
 
 def test_a_codex_release_failure_still_drives_the_parent_it_woke(
@@ -100,7 +101,7 @@ def test_a_codex_release_failure_still_drives_the_parent_it_woke(
         codex_thread_id="codex-thread", session=None,
         parent_thread_id="parent", name="codex",
     )
-    _bind_active_turn(live, "worker")
+    _bind_active_turn(live, "worker", metadata=BRIEF)
 
     async def failing_settlement(settlement):
         order.append("release:start")
@@ -114,7 +115,7 @@ def test_a_codex_release_failure_still_drives_the_parent_it_woke(
         {"kind": "turn_failed", "cause": "process_exited"}, live,
     ))
 
-    assert order == ["release:start", "drive:parent", "drive:worker"]
+    assert order == ["release:start", "drive:parent"]
     assert any("terminal drive for worker failed" in message for message in caplog.messages)
 
 
@@ -132,7 +133,7 @@ async def test_cc_result_keeps_event_db_but_uses_canonical_terminal_owner(
     from subagents.cc_runtime_events import _make_on_event
     from tests.test_cc_turn_preempt import _admit_active_turn
 
-    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    identity = _admit_active_turn(lineage, "worker", "turn-worker", metadata=BRIEF)
     live = cc_runtime._Live(
         session=None, parent_thread_id="parent", name="cc",
         corsia_turn=identity, turn_active=True,
@@ -170,7 +171,7 @@ async def test_cc_non_owner_returns_no_terminal_carrier(lineage, monkeypatch):
     from subagents.cc_runtime_events import _make_on_event
     from tests.test_cc_turn_preempt import _admit_active_turn
 
-    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    identity = _admit_active_turn(lineage, "worker", "turn-worker", metadata=BRIEF)
     live = cc_runtime._Live(
         session=None, parent_thread_id="parent", name="cc",
         corsia_turn=identity, turn_active=True,
@@ -205,7 +206,7 @@ async def test_a_claude_code_childs_parent_is_driven_after_its_settlement(
     from tests.test_cc_turn_preempt import _admit_active_turn
 
     delegated(lineage)
-    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    identity = _admit_active_turn(lineage, "worker", "turn-worker", metadata=BRIEF)
     live = cc_runtime._Live(
         session=None, parent_thread_id="parent", name="cc",
         corsia_turn=identity, turn_active=True,
@@ -230,7 +231,7 @@ async def test_a_claude_code_childs_parent_is_driven_after_its_settlement(
     cc_stream_control.observe_terminal_event(session, delivered)
     await session._terminal_driver
 
-    assert order == ["release", "drive:parent", "drive:worker"]
+    assert order == ["release", "drive:parent"]
 
 
 async def test_cc_broadcast_failure_is_recoverable_after_commit(
@@ -247,7 +248,7 @@ async def test_cc_broadcast_failure_is_recoverable_after_commit(
     _step, _plan, node = delegated(lineage)
     service.transition_node(node.id, "active", actor_id="worker", db=lineage)
     submit_review_evidence(node.id, db=lineage, actor_id="worker")
-    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    identity = _admit_active_turn(lineage, "worker", "turn-worker", metadata=BRIEF)
     lineage.execute(
         "UPDATE active_turns SET started_at=? WHERE id=?",
         ("2026-09-22T00:00:00+00:00", identity.turn_id),
@@ -280,8 +281,7 @@ async def test_cc_broadcast_failure_is_recoverable_after_commit(
     cc_stream_control.observe_terminal_event(session, completed)
     await session._terminal_driver
 
-    # The errored worker Turn took in an input it never answered, so it is also woken.
-    assert order == ["release", "drive:parent", "drive:worker"]
+    assert order == ["release", "drive:parent"]
     process.kill.assert_not_called()
     assert any(
         "Post-commit plans_changed delivery failed" in message
@@ -414,7 +414,7 @@ async def test_a_claude_code_process_exit_drives_the_parent_it_woke(lineage, ord
     from tests.test_cc_turn_preempt import _admit_active_turn
 
     delegated(lineage)
-    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    identity = _admit_active_turn(lineage, "worker", "turn-worker", metadata=BRIEF)
     live = rt._Live(session=None, parent_thread_id="parent", name="cc",
                     corsia_turn=identity, turn_active=True)
 

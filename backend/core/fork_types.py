@@ -14,6 +14,22 @@ FORK_OUTPUT_TOKENS = 16_384
 FORK_TOOL_ROUND_TRIP_TOKENS = 4_096
 # Persisted diagnostic value; retained checkpoint rows must still render warnings.
 FORK_CONTEXT_TRUNCATED = "checkpoint_context_truncated"
+#: Persisted prefix of a diagnostic whose body is assistant output cut short by
+#: a provider error other than truncation; the provider's own detail follows it.
+FORK_PARTIAL_PROVIDER_ERROR = "checkpoint_partial_provider_error"
+
+
+def partial_provider_error(detail: str) -> str:
+    """Mark a fork diagnostic as a partial body under a provider error (idempotent)."""
+    if detail.startswith(FORK_PARTIAL_PROVIDER_ERROR):
+        return detail
+    return f"{FORK_PARTIAL_PROVIDER_ERROR}: {detail}"
+
+
+def is_partial_provider_error(diagnostic: str | None) -> bool:
+    return bool(diagnostic) and str(diagnostic).startswith(FORK_PARTIAL_PROVIDER_ERROR)
+
+
 ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
 
 # (call key, model the vendor reported for the call or None, measured usage)

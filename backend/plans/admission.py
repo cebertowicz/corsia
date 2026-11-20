@@ -260,7 +260,6 @@ def make_current(
     actor_id: str | None,
     provenance: str,
     db,
-    payload: dict | None = None,
 ) -> dict:
     """Make one node the caller's current work, whichever verb was used.
 
@@ -280,7 +279,7 @@ def make_current(
     if node["state"] == "pending":
         return activate(
             node_id, expected_revision=expected_revision, actor_id=actor_id,
-            provenance=provenance, db=db, payload=payload,
+            provenance=provenance, db=db,
         )
     if node["state"] == "review_requested" and node["kind"] == "task":
         if node["spawned_thread_id"]:
@@ -318,13 +317,8 @@ def activate(
     actor_id: str | None,
     provenance: str,
     db,
-    payload: dict | None = None,
 ) -> dict:
-    """Activate pending work only when its executor slot can be acquired.
-
-    ``payload`` rides the task's activation event: the one durable fact a
-    caller wants recorded with the start (``plans.triage_lines``).
-    """
+    """Activate pending work only when its executor slot can be acquired."""
 
     node = service._live_node_row(db, node_id)
     errors.require_node_revision(node, expected_revision)
@@ -341,7 +335,7 @@ def activate(
         return result(node_id, db=db, conflict=conflict)
     service._transition(
         db, node_id, "active", actor_id=actor_id, provenance=provenance,
-        verification_result=None, verified_by=None, payload=payload,
+        verification_result=None, verified_by=None,
     )
     _attempt, conflict = select(
         node_id, actor_id=actor_id, provenance=provenance, db=db, touch=False,

@@ -47,7 +47,7 @@ def _keys(db: sqlite3.Connection) -> dict[str, str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 202
+    assert SCHEMA_VERSION == 204
     assert MIGRATIONS[117] is migrate_117_to_118
 
 
@@ -143,6 +143,7 @@ def test_no_designation_changes_no_titles():
 
 def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
     from infra.database_migrations import migrate_to_current
+    from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
     from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 
     path = tmp_path / "upgrade.db"
@@ -156,14 +157,15 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
             """
         )
         connection.execute(_GUIDANCE_47_DDL[1])
+        connection.executescript(DOC_FEEDBACK_SCHEMA_SQL)
         _setting(connection, OLD_KEY, "ws")
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)
-        rows = connection.execute("SELECT key, value FROM settings").fetchall()
+        rows = connection.execute("SELECT key, value FROM settings WHERE key != 'person_comment_recovery_pending'").fetchall()
         title = connection.execute("SELECT title FROM threads").fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert result.migrated is True
-    assert (result.from_version, result.to_version) == (117, 202)
-    assert version == 202
+    assert (result.from_version, result.to_version) == (117, 204)
+    assert version == 204
     assert [(k, json.loads(v)["session_id"]) for k, v in rows] == [(NEW_KEY, "ws")]
     assert title == "CORSIA"

@@ -4,6 +4,14 @@ import type { DocComment } from '$lib/stores/docCommentProjection';
 import { pendingSuggestion } from '$lib/docCanvasComments';
 import { sheetHeld, TRANSCRIPT_MOVED } from '$lib/sheetClearance';
 
+/** Anchor the list to the bottom of the row holding its entry, retaining the entry's horizontal position. */
+export function listAnchorRect(entry: HTMLElement | null): DOMRect | null {
+	if (!entry) return null;
+	const rect = entry.getBoundingClientRect();
+	const row = entry.closest('[data-document-bar-row]')?.getBoundingClientRect();
+	return row ? new DOMRect(rect.left, rect.top, rect.width, Math.max(rect.bottom, row.bottom) - rect.top) : rect;
+}
+
 /** Image comments follow their tag numbers. */
 export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 
@@ -16,11 +24,11 @@ export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolea
 	return { duration: leaving ? token('--dur-drawer') * pace : 0 };
 }
 
-/** Authors with at least two open, placed suggestions whose text is unchanged can accept them together. */
+/** Group eligible suggestions when at least two can be accepted together. */
 export function authorsWithOpenSuggestions(comments: DocComment[]) {
-	return Object.entries(comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged)
-		.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {}))
-		.filter(([, suggestions]) => suggestions.length >= 2);
+	const eligible = comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged);
+	if (eligible.length < 2) return [];
+	return Object.entries(eligible.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {}));
 }
 
 export const COMMENT_FILTERS = [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']] as const;

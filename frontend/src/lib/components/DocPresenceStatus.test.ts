@@ -34,7 +34,7 @@ function render(root: HTMLElement | null, projectComment?: (comment: DocComment)
 	component = mount(DocPresenceStatus, {
 		target: host,
 		props: {
-			target: { threadId: 'thread-1', instanceId: 'tab-1' } as never, artifactId: 'artifact-1', docState: 'ready', root,
+			target: { threadId: 'thread-1', instanceId: 'tab-1' } as never, artifactId: 'artifact-1', root,
 			onPrepareCleanReload: async () => null, onFeedback: () => {}, projectComment,
 		},
 	});

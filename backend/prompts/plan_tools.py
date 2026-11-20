@@ -275,22 +275,6 @@ def mark_done_slot_held(holder_title: str, holder_id: str, node_id: str) -> str:
     )
 
 
-#: ``jumped`` on a named start that passes ready top-level work (T2).
-TRIAGE_JUMPED = (
-    "Started ahead of ready '{title}' ({node}), ranked {rank} of {total}. If this "
-    "outranks it, reorder node_id={top} order_key={key} so the plan says so."
-)
-
-
-def triage_jumped(
-    title: str, node_id: str, rank: int, total: int, top_id: str, key: int,
-) -> str:
-    """Return the ``jumped`` line for the ready task a start passed over."""
-    return TRIAGE_JUMPED.format(
-        title=title, node=node_id, rank=rank, total=total, top=top_id, key=key,
-    )
-
-
 def listed_text(shown: int, total: int, *, later: int = 0) -> str:
     """Return how many of the executor's other open tasks a block lists, then the Later count."""
     return _LISTED.format(shown=shown, total=total) + in_later(later)
