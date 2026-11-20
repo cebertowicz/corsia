@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { Page, TestInfo } from '@playwright/test';
+import type { Locator, Page, TestInfo } from '@playwright/test';
 import { test, expect } from '../support/test';
+import { expectContrast, TEXT } from '../support/contrast';
 import { openSuggestionDocument, setEvidenceViewport } from '../support/docSuggestions';
 
 const original = '# Proof\n\nThe original sentence is here.\n';
@@ -37,6 +38,14 @@ test('@flow:editor-stale-choice Use the file’s text asks first, then shows the
 	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	await expect(page.getByText('The sentence an outside edit wrote.').first()).toBeVisible();
 	await page.screenshot({ path: info.outputPath('stale-details.png') });
+	// The quiet labels (Copy, and Close on the popover) are readable in both themes, over their composited background.
+	const quiet: Record<string, { target: Locator; min: number }> = {
+		copyYours: { target: page.getByRole('button', { name: 'Copy your text', exact: true }), min: TEXT },
+		copyFiles: { target: page.getByRole('button', { name: 'Copy the file’s text', exact: true }), min: TEXT },
+	};
+	if ((page.viewportSize()?.width ?? 0) > 1024) quiet.close = { target: page.getByRole('button', { name: 'Close', exact: true }), min: TEXT };
+	await expectContrast(page, info, 'stale-choice-details', quiet);
+	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	await page.getByRole('button', { name: 'Use the file’s text', exact: true }).click();
 	await expect(confirmDialog(page)).toContainText('This replaces your text with the file’s text.');
 	await expect(doc.editor).toContainText('Typed after the outside edit.');

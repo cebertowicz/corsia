@@ -107,5 +107,6 @@
 	.stale-details { border: 0; background: none; padding: 0; margin-left: var(--space-2); color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 	section { margin-block: var(--space-3); }
 	h3 { font-size: var(--text-subhead); margin: 0 0 var(--space-2); }
-	pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--text-caption); max-height: 30vh; overflow: auto; }
+	pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--text-footnote); max-height: 30vh; overflow: auto; }
+	@media (pointer: coarse), (max-width: 48em) { pre { font-size: var(--text-body); } }
 </style>
