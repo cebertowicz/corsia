@@ -53,42 +53,104 @@ export async function togglePanel(page: Page): Promise<void> {
 	await (await openDetails(page)).getByRole('button', { name: 'Show panel', exact: true }).click();
 }
 
-type Box = { name: string; left: number; top: number; right: number; bottom: number };
+export type Box = { left: number; top: number; right: number; bottom: number };
+/**
+ * A control as a person meets it, in two boxes because their two questions differ. `left/top/right/bottom` is the box they can
+ * tap: the border box, cut to every ancestor that clips its overflow, so a tab scrolled under the strip's edge counts only where
+ * it shows. `ink` is everything the control actually paints, which is wider than the tap box whenever a label overflows it.
+ */
+export type ControlBox = { name: string; left: number; top: number; right: number; bottom: number; ink: Box };
 
 /**
- * Each control in `controls` is at least `min` px each way and keeps at least `gap` px from every other visible control in the
- * same `scope` (0: they may touch, never overlap). Returns the boxes so a spec can attach them. Each box is the part a person can
- * see and tap: cut to every ancestor that clips its overflow, so a tab scrolled under the strip's edge counts only where it shows.
+ * The controls matching `controls` in `scope` (`mine`) and every other visible control in that scope (`others`, targets included,
+ * so a spec can compare targets with each other too).
+ *
+ * Clearance has to be measured on the painted box: a button whose box is narrower than its label still paints the label past its
+ * edge. The 1920 document bar wore File changed in a 44px box whose words ran past 115px over the comment count, and a check on
+ * border boxes alone called that clear. Text under a clip is not painted, so it counts only where it shows.
  */
-export async function expectTouchTargets(scope: Locator, controls: string, { min = 44, gap = 0 }: { min?: number; gap?: number } = {}): Promise<Box[]> {
-	const { mine, others } = await scope.evaluate((root, selector) => {
-		const box = (element: Element) => {
-			const rect = element.getBoundingClientRect();
+function measureControls(scope: Locator, controls: string): Promise<{ mine: ControlBox[]; others: ControlBox[] }> {
+	return scope.evaluate((root, selector) => {
+		const clamp = (rect: DOMRect | DOMRectReadOnly, owner: Element): Box => {
 			let { left, top, right, bottom } = rect;
-			for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+			for (let parent = owner.parentElement; parent; parent = parent.parentElement) {
 				const style = getComputedStyle(parent);
 				if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
 				const clip = parent.getBoundingClientRect();
 				if (style.overflowX !== 'visible') { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
 				if (style.overflowY !== 'visible') { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
 			}
-			return { name: element.getAttribute('aria-label') || element.textContent?.trim() || element.tagName, left, top, right: Math.max(left, right), bottom: Math.max(top, bottom) };
+			return { left, top, right: Math.max(left, right), bottom: Math.max(top, bottom) };
+		};
+		// An invisible subtree paints nothing, so a hidden measuring copy (the receipt's `width: max-content` twin) never reads
+		// as ink the visible control never shows. REJECT on an element prunes its whole subtree.
+		const paints = (element: Element) => {
+			const style = getComputedStyle(element);
+			return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0;
+		};
+		const inkOf = (element: Element): Box => {
+			let union = clamp(element.getBoundingClientRect(), element);
+			const add = (rect: DOMRect | DOMRectReadOnly, owner: Element) => {
+				if (rect.width <= 0 || rect.height <= 0) return;
+				const box = clamp(rect, owner);
+				union = {
+					left: Math.min(union.left, box.left), top: Math.min(union.top, box.top),
+					right: Math.max(union.right, box.right), bottom: Math.max(union.bottom, box.bottom),
+				};
+			};
+			const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, (node) =>
+				node.nodeType === Node.TEXT_NODE
+					? node.parentElement && paints(node.parentElement) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+					: paints(node as Element) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT);
+			for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+				if (node.nodeType === Node.TEXT_NODE) {
+					const range = document.createRange();
+					range.selectNodeContents(node);
+					for (const rect of range.getClientRects()) add(rect, node.parentElement!);
+				} else {
+					add((node as Element).getBoundingClientRect(), node as Element);
+				}
+			}
+			return union;
+		};
+		const box = (element: Element): ControlBox => {
+			const tap = clamp(element.getBoundingClientRect(), element);
+			return {
+				name: element.getAttribute('aria-label') || element.textContent?.trim() || element.tagName,
+				...tap,
+				ink: inkOf(element),
+			};
 		};
 		const shown = (element: Element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden'; };
 		const targets = [...root.querySelectorAll(selector)].filter(shown);
 		const all = [...root.querySelectorAll('button, a[href], input, select, textarea, [role="button"], [role="switch"]')].filter(shown);
-		return { mine: targets.map(box), others: all.filter((element) => !targets.some((target) => target === element || target.contains(element) || element.contains(target))).map(box).concat(targets.map(box)) };
+		const neighbours = all.filter((element) => !targets.some((target) => target === element || target.contains(element) || element.contains(target)));
+		return { mine: targets.map(box), others: [...neighbours, ...targets].map(box) };
 	}, controls);
+}
+
+/** What each control in `controls` taps and paints, in document order, for a spec that measures clearance itself and writes the numbers into frame JSON. */
+export async function paintedBoxes(scope: Locator, controls: string): Promise<ControlBox[]> {
+	return (await measureControls(scope, controls)).mine;
+}
+
+/**
+ * Each control in `controls` is at least `min` px each way (the tap box) and keeps at least `gap` px from every other visible
+ * control in the same `scope` (0: they may touch, never overlap), measured on what each paints. Returns the boxes so a spec can
+ * attach them.
+ */
+export async function expectTouchTargets(scope: Locator, controls: string, { min = 44, gap = 0 }: { min?: number; gap?: number } = {}): Promise<ControlBox[]> {
+	const { mine, others } = await measureControls(scope, controls);
 	expect(mine.length, `${controls} is on screen`).toBeGreaterThan(0);
 	for (const control of mine) {
 		expect(control.right - control.left, `${control.name} is at least ${min}px wide`).toBeGreaterThanOrEqual(min - 0.5);
 		expect(control.bottom - control.top, `${control.name} is at least ${min}px tall`).toBeGreaterThanOrEqual(min - 0.5);
 		for (const other of others) {
-			if (other.right - other.left <= 0 || other.bottom - other.top <= 0) continue; // scrolled wholly out of sight
-			if (other === control || (other.left === control.left && other.top === control.top && other.right === control.right && other.bottom === control.bottom)) continue;
-			// The space between two boxes: positive when apart on either axis, negative when they overlap on both.
-			const apart = Math.max(other.left - control.right, control.left - other.right, other.top - control.bottom, control.top - other.bottom);
-			expect(apart, `${control.name} keeps ${gap}px from ${other.name}`).toBeGreaterThanOrEqual(gap - 0.5);
+			if (other.ink.right - other.ink.left <= 0 || other.ink.bottom - other.ink.top <= 0) continue; // scrolled wholly out of sight
+			if (other.left === control.left && other.top === control.top && other.right === control.right && other.bottom === control.bottom) continue; // the same control, measured twice
+			// The painted gap between two controls: positive when apart on either axis, negative when what they paint overlaps.
+			const apart = Math.max(other.ink.left - control.ink.right, control.ink.left - other.ink.right, other.ink.top - control.ink.bottom, control.ink.top - other.ink.bottom);
+			expect(apart, `${control.name} keeps ${gap}px of painted room from ${other.name}`).toBeGreaterThanOrEqual(gap - 0.5);
 		}
 	}
 	return mine;
@@ -98,7 +160,7 @@ export async function expectTouchTargets(scope: Locator, controls: string, { min
 export const documentBarHost = (page: Page): Locator => page.locator('.shell-header, .strip').filter({ has: page.locator('[data-comments-entry]') });
 
 /** Comments and Details are 44px touch targets on a phone and overlap nothing else in their bar. */
-export async function expectBarHitAreas(page: Page, { min = 44 }: { min?: number } = {}): Promise<Box[]> {
+export async function expectBarHitAreas(page: Page, { min = 44 }: { min?: number } = {}): Promise<ControlBox[]> {
 	return expectTouchTargets(documentBarHost(page), '[data-comments-entry], [data-document-details]', { min });
 }
 

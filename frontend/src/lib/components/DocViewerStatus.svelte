@@ -300,6 +300,9 @@
 	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
 	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
+	/* File changed is one control with two forms: the words, which size the button (dev's 135x32 text button), and the ↻ mark,
+	 * which is the square below. Its width is never fixed, or the label paints past the box and over its neighbour. */
+	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
 	@media (max-width: 768px) {
@@ -344,7 +347,9 @@
 	.bar-tools .bar-save:not(.saving) { color: var(--green); }
 	.bar-tools .bar-save.yields { display: none; }
 	.bar-needs { color: var(--amber-text); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
-	.bar-reload { width: var(--touch-target); height: var(--touch-target); padding: 0; color: var(--amber-text); }
+	.bar-reload { color: var(--amber-text); }
+	/* The app bar's mark after the document's name is the square; the strip's words form keeps its label's width. */
+	.bar-reload:not(.bar-stale) { width: var(--touch-target); height: var(--touch-target); padding: 0; }
 	.bar-reload svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 	/* The panel drops over the document (it never moves the text), on the Popover primitive's solid surface: the document would read through a translucent one. */

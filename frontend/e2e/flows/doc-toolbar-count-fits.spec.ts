@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '../support/test';
 import { expect, type Page, type Route } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails } from '../support/documentBar';
+import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails, paintedBoxes, type Box } from '../support/documentBar';
 import { raiseAsk } from '../support/reviewAsk';
 import { closeComments, openComments } from '../support/commentDrawer';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
@@ -671,7 +671,7 @@ for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLO
 		}
 		const close = page.locator('.tab-wrap.active .tab-close');
 		await expect(close).toBeVisible();
-		const geometry = await close.evaluate((node) => {
+		const measured = await close.evaluate((node) => {
 			const strip = node.closest<HTMLElement>('.strip')!;
 			const row = node.closest<HTMLElement>('.tabs')!;
 			const pill = node.closest<HTMLElement>('.tab-wrap')!;
@@ -692,16 +692,15 @@ for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLO
 				// The narrow File changed mark is the phone header's ↻: a small box that answers a tap on its own centre.
 				reloadCompact: reloadBox.width <= 40,
 				reloadCentre: reaches(at(reloadBox.left + reloadBox.width / 2, reloadBox.top + reloadBox.height / 2), '[data-file-changed]'),
-				controls: [...document.querySelectorAll<HTMLElement>('.strip .doc-tools button, .strip .collapse-btn')].map((el) => {
-					const rect = el.getBoundingClientRect();
-					return {
-						name: (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 42),
-						left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
-						inWindow: rect.left >= -0.5 && rect.right <= window.innerWidth + 0.5,
-					};
-				}),
 			};
 		});
+		// Clearance is measured on what each control paints, never on its border box alone: a button sized narrower than its
+		// label still paints the label past that box, and those pixels are what a neighbour runs into (see paintedBoxes).
+		const geometry = {
+			...measured,
+			controls: await paintedBoxes(documentBarHost(page), '.doc-tools button, .collapse-btn'),
+			pillInk: (await paintedBoxes(page.locator('.strip'), '.tab-wrap.active'))[0]?.ink ?? null,
+		};
 		if (FRAMES) {
 			mkdirSync(FRAMES, { recursive: true });
 			const stem = path.join(FRAMES, `tab-close-${width}-${stemPart}-${scheme}-${longName ? 'long' : 'typical'}`);
@@ -713,12 +712,19 @@ for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLO
 		expect(geometry.close.right, `the close sits inside the tab row: ${JSON.stringify([geometry.row, geometry.close])}`).toBeLessThanOrEqual(geometry.row.right + 0.5);
 		expect(geometry.closeCentre, 'a tap at the close\'s centre reaches the close').toBe(true);
 		expect(geometry.closeEdge, 'a tap at the close\'s right edge reaches the close').toBe(true);
-		// Nothing in the bar covers the tab, and nothing is pushed out of the window.
-		for (const control of geometry.controls) {
-			const overlapsX = control.left < geometry.pill.right - 0.5 && geometry.pill.left < control.right - 0.5;
-			const overlapsY = control.top < geometry.close.bottom - 0.5 && geometry.close.top < control.bottom - 0.5;
-			expect(overlapsX && overlapsY, `${control.name} covers the document tab: ${JSON.stringify([geometry.pill, control])}`).toBeFalsy();
-			expect(control.inWindow, `${control.name} stays inside the window`).toBeTruthy();
+		// Nothing the bar paints covers the document tab or another of its controls, and nothing is pushed out of the window.
+		const windowWidth = await page.evaluate(() => window.innerWidth);
+		for (const [index, control] of geometry.controls.entries()) {
+			expect(control.ink.left, `${control.name} stays inside the window: ${JSON.stringify(control.ink)}`).toBeGreaterThanOrEqual(-0.5);
+			expect(control.ink.right, `${control.name} stays inside the window: ${JSON.stringify(control.ink)}`).toBeLessThanOrEqual(windowWidth + 0.5);
+			const clearOf = (painted: Box | null, label: string) => {
+				if (!painted) return;
+				// The space between what two controls paint: positive when apart on either axis, negative when they overlap on both.
+				const apart = Math.max(painted.left - control.ink.right, control.ink.left - painted.right, painted.top - control.ink.bottom, control.ink.top - painted.bottom);
+				expect(apart, `${control.name} paints clear of ${label}: ${JSON.stringify([painted, control.ink])}`).toBeGreaterThanOrEqual(-0.5);
+			};
+			clearOf(geometry.pillInk, 'the document tab');
+			for (const other of geometry.controls.slice(index + 1)) clearOf(other.ink, other.name);
 		}
 		// The pill's floor is its close plus a few characters of name, never less.
 		expect(geometry.pill.width, `the pill keeps its floor: ${JSON.stringify(geometry.pill)}`).toBeGreaterThanOrEqual(96);
