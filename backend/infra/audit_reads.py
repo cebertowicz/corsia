@@ -263,6 +263,19 @@ def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
     return rows
 
 
+def _register_functions(db: sqlite3.Connection) -> None:
+    """The canonical classifiers the metrics' SQL calls, so no query keeps its own copy."""
+    db.create_function(
+        "safe_rejection_category", 1,
+        lambda value: safe_rejection(value)[0], deterministic=True,
+    )
+    db.create_function(
+        "usage_limit_refusal", 2,
+        lambda harness, text: int(harness_cause_kind(harness, None, text) == "usage_limit"),
+        deterministic=True,
+    )
+
+
 def _read_audit_metric(
     actor_thread_id: str,
     user_id: str | None,
@@ -285,15 +298,7 @@ def _read_audit_metric(
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
             stop_at(db, deadline)
-            db.create_function(
-                "safe_rejection_category", 1,
-                lambda value: safe_rejection(value)[0], deterministic=True,
-            )
-            db.create_function(
-                "usage_limit_refusal", 2,
-                lambda harness, text: int(harness_cause_kind(harness, None, text) == "usage_limit"),
-                deterministic=True,
-            )
+            _register_functions(db)
             # Bind identity and all metric rows to one read snapshot.
             db.execute("SAVEPOINT scoped_audit_read")
             actor = db.execute(
