@@ -323,8 +323,7 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
 
     node = _live_node_row(connection, node_id)
     old_state = node["state"]
-    affected = material_events.transition_affected_nodes(connection, node_id)
-    blocked_before = material_events.blocked_snapshot(connection, affected)
+    before = material_events.transition_before(connection, node, ends=new_state in _TERMINAL_STATES and settles_worker)
     if new_state not in _TRANSITIONS.get(old_state, frozenset()):
         raise errors.illegal_transition(
             old_state, new_state, _TRANSITIONS.get(old_state, frozenset()),
@@ -354,9 +353,8 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
             connection, node_id, new_state, event_id=event_id, actor_id=actor_id,
             provenance=provenance, settles_worker=settles_worker,
         )
-    material_events.settle_blocked_deltas(
-        connection, blocked_before, actor_id=actor_id, provenance=provenance,
-        causal_event_id=event_id,
+    material_events.settle_transition(
+        connection, before, actor_id=actor_id, provenance=provenance, causal_event_id=event_id,
     )
     if new_state in _TERMINAL_STATES and settles_worker:
         from plans.cross_plan import conductor_task_settled, prerequisite_settled

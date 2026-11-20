@@ -41,11 +41,51 @@ def inherited_sql(prerequisite: str, ancestor: str) -> str:
     )
 
 
-def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
+def prerequisite_state_sql(connection: sqlite3.Connection, alias: str) -> str:
+    """The state the ``plan_nodes`` row ``alias`` reads as to work waiting on it, as SQL (#3145).
+
+    A phase's stored state never moves when its work ends (it reads as its
+    children), so for a pending phase the end comes from elsewhere:
+
+    - a workflow run (``run_end._run_phase``) from its one recorded end, the
+      first ``workflow_run_ended`` row as ``run_end.records`` reads it:
+      completed reads as accepted, failed as failed;
+    - any other phase from its stored fold: accepted once something beneath it
+      is done and nothing is open or failed. An empty phase is not done.
+
+    Every other row reads as its stored state. Written by nobody: waits, the
+    writer-side deltas and the cross-plan notice all read it here.
+    Older rungs of the migration ladder run plans code before the aggregate
+    (and workflow) columns exist; there every row reads as its stored state.
+    """
+    from plans import aggregates
+    from plans.run_end import EVENT
+
+    if not aggregates.ready(connection):
+        return f"{alias}.state"
+    run = (
+        f"{alias}.workflow_ref IS NOT NULL AND EXISTS (SELECT 1 FROM plan_nodes step WHERE"
+        f" step.plan_id={alias}.plan_id AND step.parent_id={alias}.id AND step.workflow_step IS NOT NULL)"
+    )
+    outcome = (
+        f"(SELECT json_extract(ended.payload_json,'$.outcome') FROM plan_node_events ended WHERE"
+        f" ended.node_id={alias}.id AND ended.event='{EVENT}' ORDER BY ended.created_at,ended.rowid LIMIT 1)"
+    )
+    return (
+        f"(CASE WHEN {alias}.kind<>'phase' OR {alias}.state<>'pending' THEN {alias}.state"
+        f" WHEN {run} THEN COALESCE((CASE {outcome}"
+        f" WHEN 'completed' THEN 'accepted' WHEN 'failed' THEN 'failed' END),{alias}.state)"
+        f" WHEN {alias}.folded=1 AND {alias}.sub_failed=0 AND {alias}.sub_done>0 THEN 'accepted'"
+        f" ELSE {alias}.state END)"
+    )
+
+
+def _prerequisite_columns(node_id: str, owner: str, compact: bool, state_sql: str) -> str:
     """The prerequisite row's columns; ``owner`` is the alias of the waiting node."""
+    state = f"{state_sql} AS state"
     if compact:
-        return f"{node_id},p.id,p.state,p.plan_id,p.archived_at"
-    return f"""{node_id},p.id,p.title,p.state,
+        return f"{node_id},p.id,{state},p.plan_id,p.archived_at"
+    return f"""{node_id},p.id,p.title,{state},
                CASE WHEN p.plan_id<>{owner}.plan_id THEN pl.owner_id END AS foreign_owner,
                CASE WHEN p.plan_id<>{owner}.plan_id
                     THEN COALESCE(NULLIF(t.title,''),'Untitled thread') END AS foreign_label"""
@@ -56,8 +96,10 @@ def unmet_prerequisites(
 ) -> dict[str, list]:
     """Each node's prerequisites that are not accepted yet, in plan order.
 
-    A dependency is met only by an accepted prerequisite. A failed one is
-    unmet and never will be met; the caller names that as its own cause.
+    A dependency is met only by a prerequisite that reads as accepted
+    (``prerequisite_state_sql``: a phase whose work ended done reads so). A
+    failed one is unmet and never will be met; the caller names that as its
+    own cause.
     An open ancestor's edges hold its descendants too (``via`` names that
     ancestor). This read is the one place that inheritance lives: writers
     pass ``inherit=False`` to change and record only the edges a node owns,
@@ -70,7 +112,8 @@ def unmet_prerequisites(
     found: dict[str, list] = defaultdict(list)
     if not ids:
         return {}
-    unmet = "AND p.state NOT IN ('accepted','accepted_with_followup')"
+    state_sql = prerequisite_state_sql(connection, "p")
+    unmet = f"AND {state_sql} NOT IN ('accepted','accepted_with_followup')"
     # A node's own edges (depth 0), then those of its open ancestors: an
     # ancestor's dependency on work outside it holds its descendants too.
     # Nearest first, so a prerequisite reached at several levels keeps the
@@ -78,7 +121,7 @@ def unmet_prerequisites(
     # already exists, so the walk up always ends at a root.
     touched = set()
     inherited = f"""UNION ALL
-            SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
+            SELECT {_prerequisite_columns('up.root', 'r', compact, state_sql)},up.id,p.order_key,up.depth
             FROM up JOIN plan_node_dependencies d ON d.node_id=up.id
             JOIN plan_nodes n ON n.id=up.id
             {"" if compact else "JOIN plan_nodes r ON r.id=up.root"}
@@ -95,7 +138,7 @@ def unmet_prerequisites(
                 SELECT up.root,a.parent_id,up.depth+1 FROM up JOIN plan_nodes a ON a.id=up.id
                 WHERE a.parent_id IS NOT NULL
             )
-            SELECT {_prerequisite_columns('d.node_id', 'n', compact)},NULL AS via,p.order_key AS order_key,0 AS depth
+            SELECT {_prerequisite_columns('d.node_id', 'n', compact, state_sql)},NULL AS via,p.order_key AS order_key,0 AS depth
             FROM plan_node_dependencies d
             JOIN plan_nodes p ON p.id=d.depends_on_node_id
             JOIN plan_nodes n ON n.id=d.node_id
