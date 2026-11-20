@@ -30,7 +30,7 @@
 			const title = el.querySelector<HTMLElement>('.tab-wrap.active .tab-title');
 			const tab = title?.closest<HTMLElement>('.tab-wrap');
 			const context = document.createElement('canvas').getContext('2d');
-			if (!title || !tab || !context) return;
+			if (!title || !tab || typeof context?.measureText !== 'function') return;
 			context.font = getComputedStyle(title).font;
 			const floor = name.length > 6 ? `${name[0]}…${name.slice(-5)}` : name;
 			tabFloor = Math.ceil(context.measureText(floor).width + tab.getBoundingClientRect().width - title.getBoundingClientRect().width);
