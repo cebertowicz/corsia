@@ -20,7 +20,6 @@ from infra.workspace_paths import looks_like_workspace_reference
 from registry import service as registry_service
 from registry.doc_freshness import freshness
 from registry.identity_metadata import parse_metadata
-from registry.document_supervisor import is_multi_person
 from registry.shared_principals import is_under_shared_roots, person_owner_label, shared_roots
 
 MAX_NODES = 2000
@@ -131,15 +130,14 @@ def artifact_index(db) -> dict:
     return by_path
 
 
-def shared_projector(db) -> Callable[[str, dict], None]:
+def shared_projector(db, *, user_id: str | None = None) -> Callable[[str, dict], None]:
     """Add owner name and freshness to a shared-document row, on demand.
 
     Resolving every indexed path costs ~8 syscalls each, so the tree pays
     it only for rows its walk matched. Roots and owner names resolve once.
     """
     roots = shared_roots(workspace=config.WORKSPACE, db=db)
-    multi_person = is_multi_person(db)
-    labels: dict[str, str] = {}
+    labels: dict[tuple[str, str | None], str] = {}
     seen: set[str] = set()
     now = datetime.now(timezone.utc)
 
@@ -150,10 +148,12 @@ def shared_projector(db) -> Callable[[str, dict], None]:
         if not is_under_shared_roots(path, roots):
             return
         owner = row["parent_thread_id"]
-        if owner not in labels:
-            labels[owner] = person_owner_label(owner, db=db, multi_person=multi_person)
-        row["owner_name"] = labels[owner]
-        row["freshness"] = freshness(path, parse_metadata(row["metadata"]), now)
+        metadata = parse_metadata(row["metadata"])
+        key = (owner, metadata.get("owner_user_id"))
+        if key not in labels:
+            labels[key] = person_owner_label(owner, db=db, user_id=user_id, owner_user_id=key[1])
+        row["owner_name"] = labels[key]
+        row["freshness"] = freshness(path, metadata, now)
 
     return project
 

@@ -94,7 +94,7 @@ async def revision(
                 "writable": _writable(candidate, bases, db=db),
                 "artifact_id": resolved_artifact_id,
                 "artifact": art,
-                "freshness": artifact_freshness(art, candidate, db=db, multi_person=is_multi_person(db)),
+                "freshness": artifact_freshness(art, candidate, db=db, multi_person=is_multi_person(db), user_id=user["id"]),
             }
         finally:
             db.close()

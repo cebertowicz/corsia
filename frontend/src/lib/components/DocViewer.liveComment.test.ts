@@ -373,7 +373,7 @@ it('a sibling viewer loading and unmounting cannot discard another viewer’s dr
 	}
 	expect(get(commentDraft)?.identity).toBe(draft!.identity);
 });
-const TRY_AGAIN = "Couldn't post the comment — try again";
+const TRY_AGAIN = 'Couldn’t post the comment. Your draft is kept. Try again.';
 const postFailure = (name: string) => Object.assign(new Error('request timed out after 12000ms (may have committed server-side)'), { name });
 it.each([
 	['a server error', new Error('500 synthetic comment failure'), TRY_AGAIN],
@@ -569,8 +569,15 @@ describe('a typed comment is never lost', () => {
 		expect((await reopen()).value).toBe('Keep my body');
 		expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN);
 	});
-	it('a failed post shows its reason in the composer as well as the toast', async () => {
-		await open(); await select(); await compose();
+	it('a failed post shows its reason in the composer, and no toast, while the composer is on screen', async () => {
+		// jsdom lays nothing out: the selected text, the document and the composer report a place inside the window, as they
+		// have on a page, so the composer's Popover is placed and shows it.
+		vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+		await open();
+		host.querySelector<HTMLElement>('.doc')!.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 700);
+		await select(); await compose();
+		document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.composer')!.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
 		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
 		const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 		submit.click();
@@ -579,6 +586,7 @@ describe('a typed comment is never lost', () => {
 		await vi.waitFor(() => expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN));
 		expect(field()!.value).toBe('Keep my body');
 		expect(submit.textContent).toBe('Retry');
+		expect(toasts.show).not.toHaveBeenCalledWith(TRY_AGAIN, 'error');
 	});
 	it('path 5: picking another comment while writing, then Escape, keeps the text', async () => {
 		await open();

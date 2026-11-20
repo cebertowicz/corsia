@@ -120,7 +120,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         multi_person = is_multi_person(db)
-        freshness = artifact_freshness(art, p, db=db, multi_person=multi_person)
+        freshness = artifact_freshness(art, p, db=db, multi_person=multi_person, user_id=user_id)
         ownership = document_ownership(
             db, art, user_id=user_id, workspace=config.WORKSPACE, multi_person=multi_person,
         ) if art else None

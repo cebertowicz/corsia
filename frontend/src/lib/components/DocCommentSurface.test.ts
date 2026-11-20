@@ -1077,10 +1077,10 @@ describe('DocCommentSurface: a reply being typed', () => {
 	});
 
 	it('shows why it did not post under its field, and keeps the text', () => {
-		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment — try again');
+		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment. Your draft is kept. Try again.');
 		open();
 		expect(field().value).toBe('half a reply');
-		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment — try again');
+		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
 	});
 
 	it('posts under its own key, and text typed while it posted stays in the field', async () => {
@@ -1093,5 +1093,30 @@ describe('DocCommentSurface: a reply being typed', () => {
 		finish(); await tick(); await tick(); flushSync();
 		expect(field().value).toBe('first and more');
 		expect(onReply).toHaveBeenCalledWith('comment-1', 'first', [], [], replyDraftKey(scope, 'comment-1'));
+	});
+
+	// A failed post says why under the field only while that field is on screen, so the field registers under its kept key.
+	it('counts as the box that says why a post failed while it is mounted, under its own key', () => {
+		const key = replyDraftKey(scope, 'comment-1');
+		open();
+		const box = document.body.querySelector<HTMLElement>('[data-comment-id="comment-1"] [data-reply-composer]')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+	});
+});
+
+describe('DocCommentSurface: a new comment being typed', () => {
+	it('counts its composer as the box that says why a post failed while it is mounted, under the document\'s key', async () => {
+		const scope = documentDraftKey(target);
+		// Drawn beside its text in the window, so its Popover is placed and shows it.
+		render({ state: { kind: 'draft' }, draft: { text: 'old text' }, comments: [], draftScope: scope, anchor: () => new DOMRect(520, 100, 20, 20) });
+		const box = document.body.querySelector<HTMLElement>('.composer')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(box.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
+		expect(keptCommentDrafts.onScreen(scope)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(scope)).toBe(false);
 	});
 });

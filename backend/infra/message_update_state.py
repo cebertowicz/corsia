@@ -64,14 +64,16 @@ def apply_replacement(db, thread_id, message_id, ids, reason, now):
 
 
 def unseen_updates(db, thread_id, user_id, exclude_id, live, now):
-    """Return every other active unseen update, newest first, with its visible chat text."""
-    rows = db.execute("SELECT s.*,m.seq,COALESCE(cv.content,m.content) AS content "
+    """Return every other active unseen update, newest first, with all the words the person reads in it."""
+    from infra.chat_comment_answers import words_for_the_person
+
+    rows = db.execute("SELECT s.*,m.seq,m.content AS content "
                       "FROM message_update_state s JOIN messages m ON m.id=s.message_id "
-                      "LEFT JOIN chat_visible_content cv ON cv.message_id=m.id "
                       "WHERE s.thread_id=? AND s.update_kind IS NOT NULL AND s.replaced_by IS NULL "
                       "AND s.seen_at IS NULL AND s.message_id!=? ORDER BY m.seq DESC",
                       (thread_id, exclude_id)).fetchall()
-    return [row for row in rows if not seen(db, row, user_id, live, now).reason]
+    return [{**dict(row), "content": words_for_the_person(row["content"])}
+            for row in rows if not seen(db, row, user_id, live, now).reason]
 
 
 def projection_fields_many(db, message_ids) -> dict[str, dict]:
