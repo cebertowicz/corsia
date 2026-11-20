@@ -44,9 +44,9 @@ describe('ReviewBar accepted count across rounds', () => {
 	it('keeps round 1’s accepted count out of round 2’s receipt', async () => {
 		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 2, onAcceptAll: vi.fn(async () => 2) });
 		component = mount(ReviewBar, { target: host, props });
-		await vi.waitFor(() => expect(button('Approve all')).toBeTruthy());
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
 
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(receiptText()).toContain('2 suggestions accepted');
 
@@ -67,11 +67,11 @@ describe('ReviewBar accepted count across rounds', () => {
 		const onAcceptAll = vi.fn().mockRejectedValueOnce(new Error('stale')).mockResolvedValueOnce(3);
 		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 3, onAcceptAll });
 		component = mount(ReviewBar, { target: host, props });
-		await vi.waitFor(() => expect(button('Approve all')).toBeTruthy());
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
 
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.rb-status')?.textContent).toContain('Try again'));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(receiptText()).toMatch(/^Approved · 3 suggestions accepted · /);
 		expect(onAcceptAll).toHaveBeenCalledTimes(2);

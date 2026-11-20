@@ -3,7 +3,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
-import { openComments, openResolved, resolvedEntry } from '../support/commentDrawer';
+import { closeResolved, openComments, openResolved, resolvedEntry } from '../support/commentDrawer';
 import { isolatedDb } from '../support/imageRegionComments';
 import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
 
@@ -18,7 +18,7 @@ test.afterEach(({ request }) => deleteSeededThreads(request));
 const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
 /** The list is showing its threads. Read from a thread, not the list: the margin column's own box is 0 px tall, its cards placed beside their lines. */
 const listShown = (drawer: Locator) => expect(drawer.locator('[data-comment-id]').first()).toBeVisible();
-const pill = (page: Page) => page.locator('.comment-status');
+const pill = (page: Page) => page.locator('[data-comments-entry]');
 /** A margin card at rest is a short preview that counts its replies; picking it (by its header: its jump button lies under it) shows them. A list row or a sheet shows them already. */
 async function showReplies(drawer: Locator) {
 	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
@@ -86,31 +86,28 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	}
 	await shot(page, 'rs-13b-thread-replies-rendered', info);
 
-	// The resolved thread sits behind the header's Resolved entry. Beside the text the open list stays as it was. On a phone
-	// the comments sheet is modal and covers that header, so a person's tap there lands on the backdrop and closes the sheet,
-	// and their next tap opens the resolved thread.
+	// The sheet remains modal over Details; the status switch is inside the comments drawer.
 	await expect(resolvedEntry(drawer)).toContainText('Resolved · 1');
-	// The entry is in the document header, outside the drawer: found from the page, it stays reachable once the phone sheet closes.
-	const resolved = page.locator('[data-resolved-entry]');
-	await expect(resolved).toHaveCount(1);
+	await expect(resolvedEntry(drawer)).toHaveCount(1);
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	const resolvedRegion = page.getByRole('region', { name: /^Resolved comment by / });
-	// A person's tap at the header's Resolved entry, wherever a modal sheet may cover it.
-	const box = (await resolved.boundingBox())!;
-	const tap = () => info.project.use.hasTouch ? page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2) : page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 	if (mode === 'phone') {
+		const details = page.locator('[data-document-details]');
+		const box = (await details.boundingBox())!;
+		const tap = () => info.project.use.hasTouch ? page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2) : page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 		await tap();
 		await expect(drawer).toBeHidden();
 		await tap();
-		await expect(resolved).toHaveAttribute('aria-expanded', 'true');
-	} else await openResolved(drawer);
-	await expect(resolvedRegion).toHaveCount(1);
-	await shot(page, 'rs-14-resolved-entry-open', info);
-	if (mode === 'phone') {
-		await page.getByRole('dialog', { name: 'Resolved comments' }).getByRole('button', { name: 'Close', exact: true }).click();
+		await expect(details).toHaveAttribute('aria-expanded', 'true');
+		await details.click();
 		await openComments(page);
 		await listShown(drawer);
-	} else await resolved.click();
+	}
+	await openResolved(drawer);
+	await expect(resolvedEntry(drawer)).toHaveAttribute('aria-pressed', 'true');
+	await expect(resolvedRegion).toHaveCount(1);
+	await shot(page, 'rs-14-resolved-entry-open', info);
+	await closeResolved(drawer);
 	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
 
@@ -177,7 +174,7 @@ journey('the empty and the resolved-empty drawer', FINE_AND_PHONE, async ({ page
 	await shot(page, 'rs-19-empty', info);
 });
 
-journey('with nothing resolved the drawer offers no Resolved entry and no filter', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('with nothing resolved the drawer shows an empty Resolved view and no filter', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Drawer resolved empty ${mode} ${theme}`);
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
@@ -185,8 +182,11 @@ journey('with nothing resolved the drawer offers no Resolved entry and no filter
 	await openComments(page);
 	const drawer = drawerOf(page);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
-	await expect(resolvedEntry(drawer)).toHaveCount(0);
+	await expect(resolvedEntry(drawer)).toBeVisible();
+	await expect(resolvedEntry(drawer)).toContainText('Resolved · 0');
 	await expect(drawer.locator('[data-drawer-filter]')).toHaveCount(0);
+	await openResolved(drawer);
+	await expect(drawer.getByText('No resolved comments.')).toBeVisible();
 	await settled(page);
 	await shot(page, 'rs-20-nothing-resolved', info);
 });

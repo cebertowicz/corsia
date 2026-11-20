@@ -59,25 +59,52 @@ export async function routeDocumentSaves(context: BrowserContext, delayMs = 0) {
 /** Record every animation frame, not merely the final DOM assertion. */
 export async function observeSaveCue(page: Page) {
 	await page.evaluate(() => {
-		const samples: Array<{ at: number; cue: string; visible: boolean; stale: boolean; disconnected: boolean }> = [];
+		(window as any).__saveCueSamples = [];
 		const sample = () => {
-			const cue = document.querySelector<HTMLElement>('.save-ghost');
+			const cue = document.querySelector<HTMLElement>('.bar-save');
 			const style = cue ? getComputedStyle(cue) : null;
-			samples.push({ at: performance.now(), cue: cue?.textContent ?? '',
+			(window as any).__saveCueSamples.push({ at: performance.now(), cue: cue?.textContent ?? '',
 				visible: Boolean(cue && style?.display !== 'none' && style?.visibility !== 'hidden'),
 				stale: Boolean(document.querySelector('.stale-control')),
 				disconnected: document.body.textContent?.includes('Disconnected') ?? false });
-			(window as any).__saveCueSamples = samples;
 			requestAnimationFrame(sample);
 		};
 		sample();
 	});
 }
+/** Prove the selector with a slow save before recording the quiet episode. */
+export async function proveSaveCue(page: Page, link: Awaited<ReturnType<typeof routeDocumentSaves>>, edit: () => Promise<void>) {
+	link.hold();
+	await edit();
+	await expect(page.locator('.bar-save')).toHaveText('Saving…');
+	await expect(page.locator('.bar-save')).toBeVisible();
+	link.release();
+	await expect(page.locator('.bar-save')).toHaveCount(0, { timeout: 20_000 });
+}
+
+export async function expectTextOnlyCue(page: Page, text: string) {
+	const cue = page.locator('.bar-save');
+	await expect(cue).toHaveCount(1);
+	await expect(cue).toHaveText(text);
+	await expect(cue).toBeVisible();
+	const style = await cue.evaluate(element => {
+		const computed = getComputedStyle(element);
+		return { background: computed.backgroundColor, shadow: computed.boxShadow,
+			borders: ['Top', 'Right', 'Bottom', 'Left'].map(side => ({
+				style: computed.getPropertyValue(`border-${side.toLowerCase()}-style`),
+				width: parseFloat(computed.getPropertyValue(`border-${side.toLowerCase()}-width`)),
+			})) };
+	});
+	expect(style.background).toBe('rgba(0, 0, 0, 0)');
+	expect(style.shadow).toBe('none');
+	for (const border of style.borders) expect(border.style === 'none' || border.width === 0).toBe(true);
+}
+
 export async function cueSamples(page: Page): Promise<Array<{ at: number; cue: string; visible: boolean; stale: boolean; disconnected: boolean }>> {
 	return page.evaluate(() => (window as any).__saveCueSamples ?? []);
 }
 export async function expectQuietSave(page: Page) {
 	const frames = await cueSamples(page);
 	expect(frames.filter(frame => frame.visible && frame.cue !== ''), 'no cue appeared on any animation frame').toEqual([]);
-	await expect(page.locator('.save-ghost')).toHaveCount(0);
+	await expect(page.locator('.bar-save')).toHaveCount(0);
 }

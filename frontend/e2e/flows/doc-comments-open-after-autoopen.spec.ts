@@ -12,7 +12,7 @@ test('@flow:document-comments opening comments on a document whose column opened
 	await page.setViewportSize({ width: 2200, height: 900 });
 	const { ids: [id] } = await openSuggestionDocument(page, request, '## A\n\nThe commentable words are right here.', [{ quote: 'commentable words', body: 'Hi', author: 'person' }], { splitWidth: 5000 });
 	const card = page.locator(`[data-comment-id="${id}"]`);
-	const pill = page.locator('.comment-status');
+	const pill = page.locator('[data-comments-entry]');
 	await expect(card).toBeVisible();
 	await expect(pill).toHaveAttribute('aria-expanded', 'true');
 	await openComments(page);

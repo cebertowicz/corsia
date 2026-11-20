@@ -38,6 +38,7 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 	await loginByUrl(page, { waitForComposer: false });
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.locator('.thread-item').filter({ hasText: title }).click();
+	await page.locator('[data-document-details]').click();
 	await page.locator('.reviewer-group').click();
 	const rows = page.locator('[data-review-request]');
 	await expect(rows).toHaveCount(cases.length);

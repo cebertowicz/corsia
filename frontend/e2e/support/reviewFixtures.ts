@@ -97,11 +97,15 @@ export async function selectThread(page: Page, doc: Doc, mode: Mode) {
 
 export const shot = (page: Page, name: string, info: TestInfo) => page.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' });
 
-/** A pointer at the element's centre lands on the element, not on whatever is drawn above it (named in the failure). */
+/**
+ * A pointer at the element's centre lands on the element, not on whatever is drawn above it (named in the failure). Text inside
+ * the ask card's own button (its question and asker sit inside it) counts as reached when the pointer lands on that button itself.
+ */
 export const hitAtCentre = (locator: ReturnType<Page['locator']>) => locator.evaluate((el) => {
 	const rect = el.getBoundingClientRect();
 	const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-	return el.contains(top) ? true : `${top?.tagName.toLowerCase()}.${[...(top?.classList ?? [])].join('.')}`;
+	const holder = el.parentElement?.closest('.rb-dock-ask');
+	return el.contains(top) || (holder && top === holder) ? true : `${top?.tagName.toLowerCase()}.${[...(top?.classList ?? [])].join('.')}`;
 });
 /** Wait out the finite animations (the ask's entrance, the pane's slide) so geometry and hit tests read the settled layout. */
 export const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
