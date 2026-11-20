@@ -29,6 +29,7 @@
 	import { createReplyStamps } from './replyStamps';
 	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
+	import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
@@ -112,6 +113,8 @@
 
 	/** The number chip's fill: the viewer disc's, so a pin's digit reads the same in the drawer. */
 	const chipFill = $derived(tagColor ? badgeFill(tagColor) : null);
+	// Why the reply didn't post, and that this device does not keep it while it does not: one line under its field.
+	const replyLine = $derived([replyError, keptCommentDrafts.notKept(replyKey)].filter(Boolean).join(' '));
 	const me = $derived($userParticipant);
 	const who = (id: string, kind?: 'user' | 'agent') => resolveParticipant(id, me, kind);
 	// CommentMeta draws the author's avatar in this colour.
@@ -249,7 +252,7 @@
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyError}<p class="ct-reply-error" role="alert">{replyError}</p>{/if}{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -310,7 +313,7 @@
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
 			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} goesTo={comment.replyGoesTo} />
-			{#if replyError}<p class="ct-reply-error" role="alert">{replyError}</p>{/if}
+			{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
 		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} refusalKind={comment.refusalKind} {readOnly} {decisionError} onDecide={(decision) => { engage(); return onDecision?.(comment.id, decision); }} />{/if}

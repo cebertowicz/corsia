@@ -6,6 +6,7 @@ type Page = {
 	drafts: typeof import('./keptCommentDrafts.svelte');
 	auth: typeof import('./auth');
 	tags: typeof import('$lib/components/comments/mentionSelection');
+	toast: typeof import('./toast');
 };
 
 let current: Page | null = null;
@@ -17,14 +18,14 @@ async function open(userId: string | null = 'person-1'): Promise<Page> {
 		drafts: await import('./keptCommentDrafts.svelte'),
 		auth: await import('./auth'),
 		tags: await import('$lib/components/comments/mentionSelection'),
+		toast: await import('./toast'),
 	};
 	if (userId) page.auth.user.set({ id: userId, name: userId });
 	current = page;
 	return page;
 }
-/** The page is left (reload, quit, update restart) and opened again. */
+/** The page is left (reload, quit, update restart, a crash) and opened again: nothing runs on the way out. */
 async function relaunch(userId: string | null = 'person-1'): Promise<Page> {
-	window.dispatchEvent(new Event('pagehide'));
 	current?.drafts.keptCommentDrafts.reset();
 	return open(userId);
 }
@@ -69,7 +70,6 @@ describe.each(surfaces)('%s outlives the page', (_name, keyOf, keep) => {
 		const { body, tags } = tagged(page);
 		page.drafts.keptCommentDrafts[keep](keyOf(page), body, tags);
 		page.drafts.keptCommentDrafts.claim(keyOf(page), body, tags);
-		window.dispatchEvent(new Event('pagehide'));
 		expect(page.drafts.keptCommentDrafts.posted(keyOf(page), body, ['agent-ada'])).toBe(true);
 		page = await relaunch();
 		expect(page.drafts.keptCommentDrafts.get(keyOf(page))).toBeUndefined();
@@ -90,7 +90,6 @@ describe.each(surfaces)('%s outlives the page', (_name, keyOf, keep) => {
 		let page = await open();
 		const { body, tags } = tagged(page);
 		page.drafts.keptCommentDrafts[keep](keyOf(page), body, tags);
-		window.dispatchEvent(new Event('pagehide'));
 		page.drafts.keptCommentDrafts[keep](keyOf(page), '', tags);
 		page = await relaunch();
 		expect(page.drafts.keptCommentDrafts.get(keyOf(page))).toBeUndefined();
@@ -98,11 +97,10 @@ describe.each(surfaces)('%s outlives the page', (_name, keyOf, keep) => {
 });
 
 describe('Cancel', () => {
-	it('clears the device at once, even with a write still waiting', async () => {
+	it('clears the device at once', async () => {
 		let page = await open();
 		const key = documentKey(page), { body, tags } = tagged(page);
 		page.drafts.keptCommentDrafts.keep(key, body, tags);
-		window.dispatchEvent(new Event('pagehide'));
 		page.drafts.keptCommentDrafts.keep(key, `${body} more`, tags);
 		page.drafts.keptCommentDrafts.forget(key);
 		expect(localStorage.length).toBe(0);
@@ -112,32 +110,18 @@ describe('Cancel', () => {
 });
 
 describe('writing', () => {
-	it('waits for typing to pause, and writes nothing more for a caret move', async () => {
-		vi.useFakeTimers();
+	it('writes each change at once, and nothing more for a caret move', async () => {
 		const page = await open();
 		const key = documentKey(page), { body, tags } = tagged(page);
 		const setItem = vi.spyOn(localStorage, 'setItem');
 		page.drafts.keptCommentDrafts.keep(key, 'A', tags);
-		page.drafts.keptCommentDrafts.keep(key, body, tags);
-		expect(localStorage.length).toBe(0);
-		vi.advanceTimersByTime(300);
 		expect(setItem).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(localStorage.getItem(localStorage.key(0)!)!).body).toBe('A');
+		page.drafts.keptCommentDrafts.keep(key, body, tags);
+		expect(setItem).toHaveBeenCalledTimes(2);
 		expect(JSON.parse(localStorage.getItem(localStorage.key(0)!)!).body).toBe(body);
-		const before = setItem.mock.calls.length;
 		page.drafts.keptCommentDrafts.select(key, [1, 1]);
-		vi.advanceTimersByTime(300);
-		expect(setItem.mock.calls.length).toBe(before);
-	});
-
-	it('writes when the page is hidden, without waiting', async () => {
-		vi.useFakeTimers();
-		const page = await open();
-		const { body, tags } = tagged(page);
-		page.drafts.keptCommentDrafts.keep(documentKey(page), body, tags);
-		Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-		document.dispatchEvent(new Event('visibilitychange'));
-		Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
-		expect(localStorage.length).toBe(1);
+		expect(setItem).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps under the signed-in person a draft typed before anyone was signed in', async () => {
@@ -159,8 +143,13 @@ describe('signing out', () => {
 		page.drafts.keptCommentDrafts.keep(documentKey(page), body, tags);
 		page.drafts.keptCommentDrafts.keepReply(page.drafts.replyDraftKey(documentKey(page), 'comment-1'), body, tags);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) })));
+		const setItem = vi.spyOn(localStorage, 'setItem');
 		await page.auth.logout();
 		expect(page.drafts.keptCommentDrafts.get(documentKey(page))).toBeUndefined();
+		// Every other window hears whose drafts went, and nothing of the signal stays stored.
+		expect(setItem).toHaveBeenCalledWith('corsia:commentDraftSignOut:v1', 'person-1');
+		expect(localStorage.getItem('corsia:commentDraftSignOut:v1')).toBeNull();
+		setItem.mockRestore();
 		page.auth.user.set({ id: 'person-1', name: 'person-1' });
 		expect(page.drafts.keptCommentDrafts.get(documentKey(page))).toBeUndefined();
 		page = await relaunch('person-1');
@@ -206,48 +195,91 @@ describe('signing out', () => {
 	});
 });
 
-describe('the cap on drafts kept on the device', () => {
-	it('a draft too long to keep stays in this page with a warning, and nothing kept already is lost', async () => {
+describe('a draft this device does not keep', () => {
+	const stored = (key: string) => localStorage.getItem(`corsia:commentDraft:v1:person-1:${key}`);
+	const toastsUp = (page: Page) => { let list: { message: string }[] = []; page.toast.toasts.subscribe((value) => (list = value))(); return list.map((toast) => toast.message); };
+	/** A box showing the draft, laid out inside the window (jsdom lays nothing out). */
+	function boxOnScreen(page: Page, key: string): () => void {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		document.body.append(node);
+		const drop = page.drafts.keptCommentDrafts.shown(key, node);
+		return () => { drop(); node.remove(); };
+	}
+
+	it('too long: stays in this page, its stored earlier version goes, its box says why, and nothing else kept is lost', async () => {
 		let page = await open();
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const key = documentKey(page), other = page.drafts.imageDraftKey('artifact-7');
 		page.drafts.keptCommentDrafts.keep(other, 'another draft', page.tags.createMentionSelection('another draft'));
 		page.drafts.keptCommentDrafts.keep(key, 'short version', page.tags.createMentionSelection('short version'));
-		window.dispatchEvent(new Event('pagehide'));
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+		const close = boxOnScreen(page, key);
 		const huge = 'x'.repeat(200_001);
 		page.drafts.keptCommentDrafts.keep(key, huge, page.tags.createMentionSelection(huge));
-		window.dispatchEvent(new Event('pagehide'));
 		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe(huge);
-		expect(warn).toHaveBeenCalledTimes(1);
-		expect(String(warn.mock.calls[0][0])).toContain('kept in this window only');
-		expect(String(warn.mock.calls[0][0])).not.toContain('xxx');
+		expect(stored(key)).toBeNull();
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('Too long to keep on this device. Post it or copy it before you close CORSIA.');
+		// Its box is on screen, so the line under it is the one place this is said.
+		expect(toastsUp(page)).toEqual([]);
+		close();
 		page = await relaunch();
-		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe('short version');
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
 		expect(page.drafts.keptCommentDrafts.get(other)?.body).toBe('another draft');
 	});
 
-	it('once the drafts kept fill their share, a new one stays in this page and the others stay kept', async () => {
+	it('the line goes once a later change is kept, and when the draft leaves this page', async () => {
+		const page = await open();
+		const key = documentKey(page), huge = 'x'.repeat(200_001);
+		page.drafts.keptCommentDrafts.keep(key, huge, page.tags.createMentionSelection(huge));
+		expect(page.drafts.keptCommentDrafts.notKept(key)).not.toBe('');
+		page.drafts.keptCommentDrafts.keep(key, 'shorter', page.tags.createMentionSelection('shorter'));
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+		expect(JSON.parse(stored(key)!).body).toBe('shorter');
+		page.drafts.keptCommentDrafts.keep(key, huge, page.tags.createMentionSelection(huge));
+		page.drafts.keptCommentDrafts.forget(key);
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+	});
+
+	it('with no box of it on screen, a toast says why, and goes once its box comes on screen', async () => {
+		const page = await open();
+		const key = documentKey(page), huge = 'x'.repeat(200_001);
+		page.drafts.keptCommentDrafts.keep(key, huge, page.tags.createMentionSelection(huge));
+		expect(toastsUp(page)).toEqual(['Too long to keep on this device. Post it or copy it before you close CORSIA.']);
+		// Told once: a further change that is still not kept raises no second toast.
+		page.drafts.keptCommentDrafts.keep(key, `${huge}y`, page.tags.createMentionSelection(`${huge}y`));
+		expect(toastsUp(page)).toHaveLength(1);
+		const close = boxOnScreen(page, key);
+		expect(toastsUp(page)).toEqual([]);
+		expect(page.drafts.keptCommentDrafts.notKept(key)).not.toBe('');
+		close();
+	});
+
+	it('once the drafts kept fill their share, a new one stays in this page with its line, and the others stay kept', async () => {
 		let page = await open();
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const long = 'y'.repeat(199_000), tags = page.tags.createMentionSelection(long);
 		const keys = [...Array(11).keys()].map((index) => page.drafts.imageDraftKey(`artifact-${index}`));
 		for (const key of keys) page.drafts.keptCommentDrafts.keep(key, long, tags);
-		window.dispatchEvent(new Event('pagehide'));
-		expect(warn).toHaveBeenCalledTimes(1);
-		const keptCount = localStorage.length;
-		expect(keptCount).toBe(10);
+		expect(localStorage.length).toBe(10);
+		expect(page.drafts.keptCommentDrafts.notKept(keys[10])).toBe('No room left to keep this draft on this device. Post it or copy it before you close CORSIA.');
+		expect(keys.slice(0, 10).map((key) => page.drafts.keptCommentDrafts.notKept(key))).toEqual(Array(10).fill(''));
 		page = await relaunch();
 		expect(keys.filter((key) => page.drafts.keptCommentDrafts.get(key)?.body === long)).toHaveLength(10);
 	});
 
-	it('a device that refuses the write keeps the draft in this page with a warning', async () => {
+	it('a device that refuses the write: the draft stays in this page, its stored earlier version goes, and its line says so', async () => {
 		const page = await open();
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
-		page.drafts.keptCommentDrafts.keep(documentKey(page), 'kept here', page.tags.createMentionSelection('kept here'));
-		window.dispatchEvent(new Event('pagehide'));
-		expect(page.drafts.keptCommentDrafts.get(documentKey(page))?.body).toBe('kept here');
-		expect(warn).toHaveBeenCalledTimes(1);
+		const key = documentKey(page);
+		page.drafts.keptCommentDrafts.keep(key, 'kept there', page.tags.createMentionSelection('kept there'));
+		expect(stored(key)).not.toBeNull();
+		const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+		page.drafts.keptCommentDrafts.keep(key, 'kept here', page.tags.createMentionSelection('kept here'));
+		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe('kept here');
+		expect(stored(key)).toBeNull();
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('This device refused to keep this draft. Post it or copy it before you close CORSIA.');
+		setItem.mockRestore();
+		page.drafts.keptCommentDrafts.keep(key, 'kept again', page.tags.createMentionSelection('kept again'));
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+		expect(JSON.parse(stored(key)!).body).toBe('kept again');
 	});
 });
 
@@ -293,9 +325,42 @@ describe('two windows', () => {
 		window.dispatchEvent(new StorageEvent('storage', { key: `corsia:commentDraft:v1:person-2:${key}`, newValue: JSON.stringify({ body: 'not yours', tags: [] }) }));
 		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
 		localStorage.setItem(`corsia:commentDraft:v1:person-1:${key}`, '{not json');
+		localStorage.setItem(`corsia:commentDraft:v1:person-2:${key}:other`, '{"body":7}');
 		const next = await relaunch();
 		expect(next.drafts.keptCommentDrafts.get(key)).toBeUndefined();
-		// Left where it was: nothing kept is dropped.
-		expect(localStorage.getItem(`corsia:commentDraft:v1:person-1:${key}`)).toBe('{not json');
+		// Signing in removes what no version can read, anyone's, so it does not keep its room; another person's readable draft stays.
+		expect(localStorage.getItem(`corsia:commentDraft:v1:person-1:${key}`)).toBeNull();
+		expect(localStorage.getItem(`corsia:commentDraft:v1:person-2:${key}:other`)).toBeNull();
+		expect(JSON.parse(localStorage.getItem(`corsia:commentDraft:v1:person-2:${key}`)!).body).toBe('not yours');
+	});
+
+	it('a Sign out in another window takes the person’s drafts from this one too, even one being typed', async () => {
+		const page = await open();
+		const key = documentKey(page), reply = page.drafts.replyDraftKey(key, 'comment-1');
+		page.drafts.keptCommentDrafts.keep(key, 'a comment', page.tags.createMentionSelection('a comment'));
+		page.drafts.keptCommentDrafts.keepReply(reply, 'mine here', page.tags.createMentionSelection('mine here'));
+		const box = document.createElement('div'), field = document.createElement('textarea');
+		box.append(field); document.body.append(box);
+		const drop = page.drafts.keptCommentDrafts.shown(reply, box);
+		field.focus();
+		// What the other window's Sign out leaves: its entries removed, then the sign-out set and removed.
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: 'corsia:commentDraftSignOut:v1', newValue: 'person-1' }));
+		window.dispatchEvent(new StorageEvent('storage', { key: 'corsia:commentDraftSignOut:v1', newValue: null }));
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+		expect(page.drafts.keptCommentDrafts.get(reply)).toBeUndefined();
+		// Nothing more is kept on the device for them from this window.
+		page.drafts.keptCommentDrafts.keepReply(reply, 'mine here, more', page.tags.createMentionSelection('mine here, more'));
+		expect(localStorage.length).toBe(0);
+		drop(); box.remove();
+	});
+
+	it('another person’s Sign out in another window leaves this person’s drafts', async () => {
+		const page = await open();
+		const key = documentKey(page);
+		page.drafts.keptCommentDrafts.keep(key, 'a comment', page.tags.createMentionSelection('a comment'));
+		window.dispatchEvent(new StorageEvent('storage', { key: 'corsia:commentDraftSignOut:v1', newValue: 'person-2' }));
+		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe('a comment');
+		expect(localStorage.length).toBe(1);
 	});
 });

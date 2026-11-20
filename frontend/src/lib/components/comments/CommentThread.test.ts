@@ -6,6 +6,10 @@ import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 import { formatDateTime } from '$lib/time';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
+import { createMentionSelection } from './mentionSelection';
+import { toasts } from '$lib/stores/toast';
+import { get } from 'svelte/store';
 
 const hexToRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 let host: HTMLElement;
@@ -599,6 +603,26 @@ describe('CommentThread', () => {
 		expect(line?.previousElementSibling?.querySelector('textarea'), 'the line sits right under the reply field').not.toBeNull();
 		expect(line?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
 		expect(line?.classList.contains('ct-reply-error')).toBe(true);
+	});
+
+	it('says under the reply field, in its failure line, that this device does not keep the reply, until a change is kept', () => {
+		user.set({ id: 'person-1', name: 'person-1' });
+		try {
+			render(thread(), false, { replyKey: 'reply-key' });
+			expect(host.querySelector('[role="alert"]')).toBeNull();
+			const huge = 'x'.repeat(200_001);
+			keptCommentDrafts.keepReply('reply-key', huge, createMentionSelection(huge));
+			flushSync();
+			const line = host.querySelector('[role="alert"]');
+			expect(line?.textContent).toBe('Too long to keep on this device. Post it or copy it before you close CORSIA.');
+			expect(line?.classList.contains('ct-reply-error')).toBe(true);
+			keptCommentDrafts.keepReply('reply-key', 'short', createMentionSelection('short'));
+			flushSync();
+			expect(host.querySelector('[role="alert"]')).toBeNull();
+		} finally {
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+			keptCommentDrafts.reset(); user.set(null); localStorage.clear();
+		}
 	});
 
 	it('marks a rejected suggestion with a cross and an accepted one with a check', () => {

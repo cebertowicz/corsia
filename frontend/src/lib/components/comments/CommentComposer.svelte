@@ -8,7 +8,7 @@
 	import RecipientLine from './RecipientLine.svelte';
 	import { recipientNames, type Recipient } from './recipients';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
-	import { showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
+	import { keptCommentDrafts, showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
@@ -47,6 +47,8 @@
 	$effect(() => { const field = input; if (field) untrack(() => { if (selection) field.setSelectionRange(...selection); }); });
 	const saveSelection = () => { if (input) onSelection?.([input.selectionStart, input.selectionEnd]); };
 	const explanationId = $props.id();
+	// Why a post failed, and that this device does not keep the draft while it does not: one line under the box.
+	const failedLine = $derived([error, keptCommentDrafts.notKept(shownKey)].filter(Boolean).join(' '));
 	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
 	const tagged = $derived(mentions && picker ? picker.occurrences(text).map((item) => ({ id: item.agent_id, name: text.slice(item.start, item.end).replace(/^@/, '') })) : []);
 	const names = $derived(recipientNames(goesTo?.state === 'agent' ? goesTo.agents ?? [] : [], tagged));
@@ -86,7 +88,7 @@
 		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
-	{#if error}<p class="selection-reason failed" role="alert">{error}</p>{/if}
+	{#if failedLine}<p class="selection-reason failed" role="alert">{failedLine}</p>{/if}
 </div>
 
 <style>
