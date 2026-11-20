@@ -86,7 +86,7 @@
 		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
-	{#if error}<p class="selection-reason" role="alert">{error}</p>{/if}
+	{#if error}<p class="selection-reason failed" role="alert">{error}</p>{/if}
 </div>
 
 <style>
@@ -107,4 +107,6 @@
 	/* At touch widths each button is a full target, a target's width apart, so a miss on Cancel never posts. */
 	@media (pointer: coarse), (max-width: 768px) { .actions { gap: var(--touch-target); } .actions button { min-width: var(--touch-target); min-height: var(--touch-target); } }
 	.selection-reason { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	/* Why a post failed: the box is the one place it shows, so it reads as an error, in the colour a reply's failure line uses. */
+	.selection-reason.failed { color: var(--red-text); }
 </style>

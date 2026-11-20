@@ -5,6 +5,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { beginComment } from '../support/liveCommentProof';
 import { at, commentButton, composer, drag, openThread, seedImage } from '../support/imageRegionComments';
+import { expectFailureLook } from '../support/failureLook';
 
 // A failed post says why in one place, decided as it fails: in its box when the box is on screen then (the retry legs
 // in comment-retry-once and doc-reply-draft-kept prove that case), otherwise in a toast, with the reason kept so the
@@ -30,7 +31,8 @@ async function frame(page: Page, name: string) {
 
 /**
  * The toast stays up, as a pointer resting on it keeps it, however long the way back to the box takes (an ordinary toast
- * otherwise goes after 3 s, which a phone's way back can outlast). So only the box coming back can take it away.
+ * otherwise goes after 3 s, which a phone's way back can outlast). So only the box coming back can take it away. A phone has
+ * no resting pointer: where its way back is under the toast (an image's Comment control), the leg lets the toast go instead.
  */
 async function holdToast(toastLocator: Locator) {
 	await toastLocator.dispatchEvent('mouseenter');
@@ -77,7 +79,7 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await page.setViewportSize(SIZES[testInfo.project.name as Project]);
 	});
 
-	test('document: closed while posting, a toast; the composer opened again says why, and the toast goes', async ({ page, request }) => {
+	test('document: closed while posting, a toast; the composer opened again says why, and the toast goes', async ({ page, request }, testInfo) => {
 		const document = await seedLiveDocument(request, 'one-place-doc', DOC);
 		await openLiveDocument(page, document);
 		const wire = await holdFirstPost(page, document.artifactId);
@@ -94,10 +96,11 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await expect(composer(page), 'the text is kept').toHaveValue('Name the fallback route');
 		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
 		await expect(toast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
+		await expectFailureLook(page, testInfo, reason(page), 'document comment box');
 		await frame(page, 'document-reopened-reason');
 	});
 
-	test('image: closed while posting, a toast; the box drawn again says why, and the toast goes', async ({ page, request }) => {
+	test('image: closed while posting, a toast; the box drawn again says why, and the toast goes', async ({ page, request }, testInfo) => {
 		const seeded = await seedImage(page, request, 'one-place-image');
 		const wire = await holdFirstPost(page, seeded.artifactId);
 		await openThread(page, seeded.sessionTitle, page.viewportSize()!.width);
@@ -111,10 +114,17 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await expect(toast(page), 'with no box on screen, the toast says why').toBeVisible({ timeout: 30_000 });
 		await holdToast(toast(page));
 		await frame(page, 'image-closed-toast');
+		if (phone(page)) {
+			// A phone has no pointer to rest on the toast, so once the frame is taken it is let go and lasts its own time. It sits over
+			// the image's Comment control, so the way back waits for it to run out; the box drawn then says why, with no toast.
+			await toast(page).dispatchEvent('mouseleave');
+			await expect(toast(page), 'on a phone the toast runs out').toHaveCount(0, { timeout: 15_000 });
+		}
 		await drawBox(page, [0.5, 0.55], [0.7, 0.75]);
 		await expect(composer(page), 'the text is kept').toHaveValue('The header is too tall');
 		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
 		await expect(toast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
+		await expectFailureLook(page, testInfo, reason(page), 'image comment box');
 		await frame(page, 'image-reopened-reason');
 	});
 });

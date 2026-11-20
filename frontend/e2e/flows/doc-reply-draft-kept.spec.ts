@@ -6,6 +6,7 @@ import { createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support
 import { waitForMainSlideToSettle } from '../support/sidebar';
 import { openComments } from '../support/commentDrawer';
 import { putSheetAway } from '../support/docImageComments';
+import { expectFailureLook } from '../support/failureLook';
 
 /**
  * A reply half typed on a document comment is still there, with its caret, after the person goes to another conversation and
@@ -220,7 +221,7 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			}
 		});
 
-		test('a reply whose post fails after going to another conversation says why in a toast, and under its field on return', async ({ page }) => {
+		test('a reply whose post fails after going to another conversation says why in a toast, and under its field on return', async ({ page }, testInfo) => {
 			const { title, other, id } = await seed(page);
 			const wire = await holdReply(page, id);
 			await loginByUrl(page, { waitForComposer: false });
@@ -242,6 +243,7 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await expect(back, 'the text is kept').toHaveValue(DRAFT);
 			await expect(card(page, id).getByRole('alert'), 'the field says why on return').toBeVisible();
 			await expect(failToast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
+			await expectFailureLook(page, testInfo, card(page, id).getByRole('alert'), 'reply field');
 			await frame(page, 'reply-returned-reason');
 		});
 
