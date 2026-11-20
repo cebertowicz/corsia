@@ -154,11 +154,13 @@ def _load(
     if pending is None:
         pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
     # One row per commitment and Turn, not per call.
-    usage = fetch_all(
-        db, f"""SELECT plan_commitment_id,turn_id,{usage_cost.USAGE_TOKENS} FROM llm_usage
-            WHERE plan_commitment_id IN ({marks})
+    usage = usage_cost.stored_tokens(
+        db, "plan_commitment_id", list(params), ("turn_id",),
+        f"""SELECT plan_commitment_id,turn_id,{usage_cost.USAGE_TOKENS} FROM llm_usage
+            WHERE plan_commitment_id IN ({{marks}})
             GROUP BY plan_commitment_id,turn_id""",
-        params,
+        lambda connection, sql, ids: fetch_all(
+            connection, sql.format(marks=",".join("?" for _ in ids)), tuple(ids)),
     )
     return {
         "nodes": _rows_by(nodes, "commitment_id"),

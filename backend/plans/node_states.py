@@ -4,15 +4,16 @@ Split from ``plans.service`` so the state machine is one small table a reader
 can take in at once, rather than constants buried at the top of the
 transaction core. ``service`` re-exports every name here, so each existing
 ``service._TERMINAL_STATES``-style reader keeps working unchanged. Like
-``plans.errors``, this imports nothing from ``plans``, so it can never be part
-of an import cycle.
+``plans.errors``, this imports from ``plans`` only a leaf that imports nothing
+from it, so it can never be part of an import cycle.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import weakref
 from collections.abc import Iterable, Mapping
+
+from plans.later_probe import later_ready  # noqa: F401  (re-exported: readers ask it here)
 
 _ACCEPTED_STATES = frozenset({"accepted", "accepted_with_followup"})
 
@@ -142,27 +143,6 @@ def listed_open_sql(alias: str) -> str:
     return f"{unarchived_sql(alias)} AND {alias}.folded = 0"
 
 
-#: Per connection, the schema version at which ``plan_nodes.later`` was last seen.
-_LATER_READY: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDictionary()
-
-
-def later_ready(connection: sqlite3.Connection) -> bool:
-    """Whether ``plan_nodes`` carries the Later cut (schema 185); older ladder rungs run plans code first.
-
-    The answer is kept per connection until its schema changes (``PRAGMA schema_version``),
-    exactly as ``plans.aggregates.ready`` keeps it for the aggregate columns. A read that
-    has no Later rows to exclude is what a pre-185 database already means, so a caller
-    without the column reads the pre-cut behaviour, never an error.
-    """
-    version = connection.execute("PRAGMA schema_version").fetchone()[0]
-    if _LATER_READY.get(connection) == version:
-        return True
-    found = any(row[1] == "later" for row in connection.execute("PRAGMA table_info(plan_nodes)").fetchall())
-    if found:
-        _LATER_READY[connection] = version
-    return found
-
-
 def outside_retired_branch_sql(alias: str) -> str:
     """No ancestor of the ``plan_nodes`` row ``alias`` is retired, as SQL.
 
@@ -220,16 +200,18 @@ def child_counts(parent: Mapping | sqlite3.Row, child: Mapping | sqlite3.Row) ->
     return not retired(child) and (not step_task(parent) or child["state"] not in _TERMINAL_STATES)
 
 
-def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
+def parent_ids(rows: Iterable[Mapping | sqlite3.Row], *, work: set[str] | None = None) -> set[str]:
     """The one rule for who is a parent: a node with a counting child.
 
     A workflow task counts only open children so it can do its own check after
     they settle. Other parents count children in work, including settled ones.
     ``parent_sql`` is the same rule for SQL readers, ``stored_parent`` for a row
-    whose children are not read.
+    whose children are not read. A passed ``work`` set must be computed from
+    these same rows.
     """
     rows = list(rows)
-    work = work_ids(rows)
+    if work is None:
+        work = work_ids(rows)
     by_id = {str(row["id"]): row for row in rows}
     listed = {
         str(row["parent_id"]) for row in rows
@@ -345,55 +327,64 @@ def folded_subtrees(
     }
 
 
-def folded_ids(nodes: Iterable[Mapping]) -> set[str]:
+def folded_ids(nodes: Iterable[Mapping], *, parents: set[str] | None = None) -> set[str]:
     """Fold one plan's nodes: the single rule the pane, the reads and progress share.
 
     A folded node heads a branch with no open work left in it, and it folds
     the moment that becomes true; the pane's fold wave is where the user sees
     it go. Each node carries ``id``, ``parent_id``, ``state``,
     ``spawned_thread_id`` and, when it can be archived, ``archived_at``.
+    A passed ``parents`` set (``parent_ids``) must be computed from these same nodes.
     """
     rows = list(nodes)
-    parents: dict[str, str | None] = {str(node["id"]): node["parent_id"] for node in rows}
-    with_children = parent_ids(rows)
+    if parents is None:
+        parents = parent_ids(rows)
     own = {
         str(node["id"]): folded(
             node["state"], node.get("archived_at"),
-            container=is_container(node, str(node["id"]) in with_children),
+            container=is_container(node, str(node["id"]) in parents),
         )
         for node in rows
     }
-    return folded_subtrees(parents, own)
+    return folded_subtrees({str(node["id"]): node["parent_id"] for node in rows}, own)
 
 
-def leaves(rows: list) -> list:
+def leaves(rows: list, *, work: set[str] | None = None, parents: set[str] | None = None) -> list:
     """Return the leaves -- work with no child in work -- of one plan's rows.
 
     The one definition of "the leaves of a plan": progress, liveness, the
     return wake and the harvest all read it, in the rows' plan order. Nothing
     out of the work is a leaf (``work_ids``): not a closed node, and not what
-    sits beneath one.
+    sits beneath one. Passed ``work`` and ``parents`` sets must be computed
+    from these same rows.
     """
-    work = work_ids(rows)
-    parents = parent_ids(rows)
+    if work is None:
+        work = work_ids(rows)
+    if parents is None:
+        parents = parent_ids(rows, work=work)
     return [row for row in rows if str(row["id"]) in work and str(row["id"]) not in parents]
 
 
-def in_play(rows: list) -> list:
+def in_play(
+    rows: list, *, leaf_rows: list | None = None, parents: set[str] | None = None,
+) -> list:
     """Return the leaves whose root branch has not folded.
 
     A root branch leaves the progress count the moment it folds, so the ratio
     is about work still in play: a fully finished plan reads 0/0 while its
-    folded nodes stay on the plan, one expansion away.
+    folded nodes stay on the plan, one expansion away. Passed ``leaf_rows``
+    (``leaves``) and ``parents`` (``parent_ids``) must be computed from these same rows.
     """
-    fold = folded_ids(dict(row) for row in rows)
-    parents = {row["id"]: row["parent_id"] for row in rows}
+    fold = folded_ids((dict(row) for row in rows), parents=parents)
+    by_parent = {row["id"]: row["parent_id"] for row in rows}
 
     def root(node_id: str) -> str:
         seen = {node_id}
-        while parents.get(node_id) in parents and parents[node_id] not in seen:
-            node_id = parents[node_id]
+        while by_parent.get(node_id) in by_parent and by_parent[node_id] not in seen:
+            node_id = by_parent[node_id]
             seen.add(node_id)
         return node_id
 
-    return [leaf for leaf in leaves(rows) if root(leaf["id"]) not in fold]
+    if leaf_rows is None:
+        leaf_rows = leaves(rows)
+    return [leaf for leaf in leaf_rows if root(leaf["id"]) not in fold]

@@ -11,6 +11,8 @@ from __future__ import annotations
 FTS_SHADOW = "FTS5 shadow table: SQLite maintains it from the rows of the indexed table"
 DERIVED_ROLLUP = ("derived from llm_usage by the application's own rollup refresh, which the harness drains "
                   "inside the measured window")
+DERIVED_NODE_GROUPS = ("derived from llm_usage by its own triggers as the fixture writes and attributes the ledger "
+                       "(the state row comes from init_db); not seeded on its own")
 PRESENCE_ROLLUP = ("derived from presence_visits by the application's own rollup refresh, which the harness drains "
                    "inside the measured window")
 NOT_IN_CENSUS = "absent from the production census's table list, so there is no volume to reproduce"
@@ -30,6 +32,7 @@ EXCLUDED: dict[str, str] = {
         "messages_fts_config", "messages_fts_data", "messages_fts_docsize", "messages_fts_idx")},
     **{table: DERIVED_ROLLUP for table in (
         "llm_usage_hourly", "llm_usage_hourly_dirty", "llm_usage_hourly_state")},
+    **{table: DERIVED_NODE_GROUPS for table in ("llm_usage_node_groups", "llm_usage_node_state")},
     **{table: PRESENCE_ROLLUP for table in (
         "presence_focus_rollup", "presence_focus_sets", "presence_focus_set_members", "presence_focus_rollup_state")},
     "models": _small(221),

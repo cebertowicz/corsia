@@ -171,6 +171,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "Concrete evidence against the current requirements."
         ),
     },
+    "verdict": {"type": "string", "enum": ["pass", "fail"]},
     "artifact_ids": {
         "type": "array",
         "uniqueItems": True,

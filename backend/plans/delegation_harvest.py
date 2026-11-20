@@ -14,6 +14,7 @@ import plans.node_states as node_states
 import plans.notifications as notifications
 import plans.plan_wake as plan_wake
 import plans.plan_write as plan_write
+import plans.review_settle as review_settle
 import plans.service as service
 from plans.delegation_epoch import attached_since, open_leaves, open_row_sql, return_rows
 from plans.harvest_review_event import HARVEST_EVENT, latest_review_event_sql
@@ -291,7 +292,7 @@ def record_round_return(
 
 
 def _harvest(node, attachment, payload, child_event, db, reply: str = "") -> bool:
-    """Harvest one return as a unit: event, review transition, slot and wake.
+    """Harvest one return as a unit: event, review transition, slot, a reviewer's verdict settle, and wake.
 
     The result-bearing wake is the one way the parent learns the return, so
     a return the parent cannot take now (no model, or nothing left to act on)
@@ -315,10 +316,12 @@ def _harvest(node, attachment, payload, child_event, db, reply: str = "") -> boo
         verification_result=None, verified_by=None,
     )
     _hand_on_parent_slot(node, db)
-    accepted = plan_wake.notify_returned(
-        db, node_id=node["id"], child_plan_id=payload["child_plan_id"],
-        worker_thread_id=payload["spawned_thread_id"], reply=reply,
-    )
+    accepted = review_settle.settle_at_harvest(db, node, payload["spawned_thread_id"])
+    if accepted == review_settle.NOT_SETTLED:
+        accepted = plan_wake.notify_returned(
+            db, node_id=node["id"], child_plan_id=payload["child_plan_id"],
+            worker_thread_id=payload["spawned_thread_id"], reply=reply,
+        )
     if accepted is None:
         db.execute("ROLLBACK TO harvest_one")
     db.execute("RELEASE harvest_one")

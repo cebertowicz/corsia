@@ -238,7 +238,9 @@ def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(ope
 #: with the whole parameter vocabulary each accepts. The named next task carries
 #: no revision evidence of its own, so `next_node_id` is the one addition.
 _CLOSING_FIELDS = {
-    "request_review": {"node_id", "evidence", "artifact_ids", "expected_revision", "next_node_id"},
+    "request_review": {
+        "node_id", "evidence", "artifact_ids", "verdict", "expected_revision", "next_node_id",
+    },
     "mark_done": {
         "node_id", "evidence", "verification_result", "expected_revision", "next_node_id",
     },
@@ -394,7 +396,10 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # two more bulk bodies inside that budget: the rule is trim, never raise, so `edit` and
 # `close_node` bought their shape lines by putting every bulk verb in one "one: …; many: …"
 # idiom, and by shortening the nested `affected_nodes` revision note to its own words.
-_PUBLISHED_BYTES = {"plan_update": 9_620, "plan_decision": 3_100}
+# plan_update 9,620 -> 9,680 (+60): `request_review` takes a reviewer's `verdict`, which
+# settles a review step. The field is a bare enum: only a reviewer handed a review step
+# uses it, so its instruction rides in that reviewer's hand-over brief, not in every turn.
+_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():
