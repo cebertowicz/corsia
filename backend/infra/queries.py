@@ -27,17 +27,18 @@ def _row_value(row: Any, key: str, default: Any = None) -> Any:
 def thread_available_sql(
     alias: str | None = None,
     *,
-    include_user_archived: bool = False,
+    include_explicit_archives: bool = False,
 ) -> str:
     """Return the canonical SQL predicate for a usable session row.
 
-    Purged rows are never usable. Explicit user archives are excluded unless a
-    listing explicitly asks to include them. Dormancy archives remain usable.
+    Purged rows are never usable. Explicit archives (the person's own, and a
+    worker its delegator stopped; ``EXPLICIT_ARCHIVE_REASONS``) are excluded
+    unless a listing asks to include them. Dormancy archives remain usable.
     """
     prefix = f"{alias}." if alias else ""
     state = f"COALESCE({prefix}lifecycle_state, 'active')"
     clauses = [f"{state} != 'purged'"]
-    if not include_user_archived:
+    if not include_explicit_archives:
         reasons = ", ".join(repr(r) for r in EXPLICIT_ARCHIVE_REASONS)
         clauses.append(
             f"NOT ({state} = 'archived' "

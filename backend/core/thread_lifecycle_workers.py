@@ -75,8 +75,3 @@ def reactivate_retired_worker(db, sid: str, *, now: datetime | str | None = None
         (_timestamp(now), sid, *RETIRED_WORKER_REASONS),
     )
     return bool(cursor.rowcount)
-
-
-#: The name ``plans.delegation`` imports; it brings back stopped workers too. Kept
-#: until Structured Plans switches that import (cebertowicz/corsia#3148).
-reactivate_settled_worker = reactivate_retired_worker

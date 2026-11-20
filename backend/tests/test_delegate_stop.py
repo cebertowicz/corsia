@@ -187,6 +187,25 @@ async def test_unsuccessful_stop_is_reported_not_called_stopped(tree, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_each_stop_records_one_event_with_its_counts(tree, monkeypatch):
+    events = []
+    monkeypatch.setattr("infra.product_events.emit_product_event",
+                        lambda category, action, **kw: events.append((category, action, kw)))
+
+    async def stale_for_grand(sid, turn_id, *, plan_limit=True):
+        return SimpleNamespace(outcome="stale_active" if sid == "grand" else "stopped")
+
+    monkeypatch.setattr("ws.stop_control.stop_turn_for_cause", stale_for_grand)
+    _run_turn(tree.db, "worker")
+    _run_turn(tree.db, "grand")
+    await _stop("parent", "worker")
+    assert events == [("delegate_stop", "stopped", {"thread_id": "parent", "properties": {
+        "workers": 2, "mid_turn": 2, "not_stopped": 1, "standing_skipped": 0, "by_spawner": True}})]
+    await _stop("parent", "nobody")  # refused: records nothing
+    assert len(events) == 1
+
+
+@pytest.mark.asyncio
 async def test_wakes_watches_and_schedules_are_cancelled(tree):
     tree.db.execute(
         "INSERT INTO plan_liveness_wakes (id,thread_id,status,deadline,armed_at,updated_at) "

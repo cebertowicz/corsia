@@ -122,6 +122,16 @@ def _running_turn(sid: str) -> str | None:
     return None if row is None else str(row["id"])
 
 
+def _record_stop(caller: str, workers: int, mid_turn: int, not_stopped: int, skipped: int, own: bool) -> None:
+    """One ``delegate_stop.stopped`` event per call (docs/observability.md)."""
+    from infra.product_events import emit_product_event
+
+    emit_product_event("delegate_stop", "stopped", thread_id=caller, properties={
+        "workers": workers, "mid_turn": mid_turn, "not_stopped": not_stopped,
+        "standing_skipped": skipped, "by_spawner": own,
+    })
+
+
 class DelegateStopTool(Tool):
     """Stop a worker the caller spawned, and every worker beneath it."""
 
@@ -163,6 +173,7 @@ class DelegateStopTool(Tool):
             return refusal
         lines: list[str] = []
         step_open = False
+        mid_turn = not_stopped = 0
         for sid in stop:
             archived, held, open_step = await run_in_db(
                 _retire, sid, (reason or "").strip() or None, sid == target and caller != parent)
@@ -172,8 +183,11 @@ class DelegateStopTool(Tool):
                 what = "was idle" if archived else "was idle and already archived"
             else:
                 outcome = (await stop_turn_for_cause(sid, turn_id, plan_limit=False)).outcome
+                mid_turn += 1
+                not_stopped += outcome != "stopped"
                 what = "stopped mid-turn" if outcome == "stopped" else f"could not stop (stop outcome: {outcome})"
             lines.append(f"{sid}: {what}; {held} queued input(s) left held")
+        _record_stop(caller, len(stop), mid_turn, not_stopped, len(skipped), caller == parent)
         for sid in skipped:
             lines.append(f"{sid}: skipped, a standing agent beneath {target}; only the person stops it")
         if caller == parent:
