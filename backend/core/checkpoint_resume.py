@@ -200,6 +200,19 @@ def _payload(
     )
 
 
+async def _limited_writer(record: CheckpointRecord):
+    """The hold on a failed fold's own writer, read from the stored verdict only.
+
+    The same predicate as the fold gate (``limited_admission`` on the thread's
+    chosen account), so a fold that failed on a limit holds only once that
+    limit is recorded; an unrecorded one finds nothing and fails visibly.
+    """
+    from infra.db_async import run_in_db
+    from infra.held_admission import limited_admission
+
+    return await run_in_db(limited_admission, record.thread_id, record.writer_model)
+
+
 async def _await_installed(
     boundary: ProviderBoundary,
     record: CheckpointRecord,
@@ -218,9 +231,15 @@ async def _await_installed(
         on_stop=cancel_waiting_checkpoint if owned else None,
     )
     if completed.status != "installed":
-        raise boundary.unavailable(
-            completed.error or f"checkpoint ended {completed.status}"
-        )
+        detail = completed.error or f"checkpoint ended {completed.status}"
+        held = await _limited_writer(completed) if completed.status == "failed" else None
+        if held is not None:
+            # A mid-call limit was recorded on the fold's own target: settle it as
+            # the fold gate would have, so admission holds the inputs until the reset.
+            raise boundary.unavailable(
+                detail, limited_target=held.model, limited_connection=held.connection,
+            )
+        raise boundary.unavailable(detail)
     boundary = replace(boundary, installed_checkpoint=completed)
     installed = await boundary.render_installed(completed)
     if installed.input_tokens > boundary.context_window:
