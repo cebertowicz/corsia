@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_pane_state, browser_script_review, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -92,6 +92,15 @@ def _script_config(config: dict) -> bool:
     return configured or any(os.environ.get(key) for key in env) or "--load-extension" in launch_args
 
 
+def _reviewed_script(args: Sequence[str], *, pane: bool, trusted_navigation: bool, config: dict) -> bool:
+    """An agent's eval of one script text, the one script form a saved session admits after its review.
+
+    Other eval forms (a base64 or stdin script, extra arguments) and launch-time script configuration stay refused.
+    """
+    return (len(args) == 2 and args[0] == "eval" and not args[1].startswith("-") and not pane and
+            not trusted_navigation and not _script_config(config))
+
+
 def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = False) -> bool:
     """Admit only command shapes produced by the public browser callers."""
     command = args[0]
@@ -145,11 +154,16 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
+    reviewed = False
     if runtime.record.profile or runtime.record.copy_of:
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
-        if _script_config(config) or not (trusted_navigation and not pane or
+        reviewed = _reviewed_script(args, pane=pane, trusted_navigation=trusted_navigation, config=config)
+        if reviewed:
+            # Before the action lock: a review can take tens of seconds, and the person's pane shares the lock.
+            await browser_script_review.check(thread_id, args[1])
+        elif _script_config(config) or not (trusted_navigation and not pane or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(_SCRIPT_REFUSAL)
     # Pane and agent commands share this lock, but direct person interaction and
@@ -160,7 +174,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     finally:
         owner._queued_actions -= 1
     try:
-        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane, blank=reviewed)
         if (show_window or pane) and not rendered.startswith("Error:"):
             # A connected pane already shows the page, so only an agent's share reveals it.
             await _share(runtime, thread_id, reveal=not pane)
@@ -173,7 +187,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
 
 
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],
-                      lease_id: str | None, timeout: float, pane: bool) -> str:
+                      lease_id: str | None, timeout: float, pane: bool, *, blank: bool = False) -> str:
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
@@ -212,6 +226,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         if hidden is None:
             return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
         result = hidden
+    if blank:
+        # Behind the review, a reviewed script's output never shows the page's sign-in cookies or passwords.
+        checked = await browser_script_review.blank_result(endpoint, result)
+        if checked is None:
+            return _noted(browser_script_review.WITHHELD, note)
+        result = checked
     rendered = owner._model_result(result, runtime.record)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
