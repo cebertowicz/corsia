@@ -289,3 +289,45 @@ def test_a_document_named_only_in_a_placed_comment_answer_is_not_counted(db, eve
     assert shown == ["plan.md"]
     assert "Your update links 'plan.md' for the person to read: 1,000 words" in notice
     assert events[-1]["properties"]["linked_documents"] == len(shown)
+    # The person reads the answer too, in its comment thread: every word counts, the tag does not.
+    from core.attention_measure import measure_text
+
+    assert events[-1]["properties"]["update_words"] == measure_text(
+        "The plan is in plan.md. The detail is in brief.md.").words > measure_text("The plan is in plan.md.").words
+
+
+def test_an_update_that_only_answers_a_comment_counts_every_word_and_lists_them(db, events, workspace):  # noqa: F811
+    """No chat text is left once its answer moves to the comment thread, yet the person reads all of it."""
+    import json
+
+    from infra.message_update_state import register, unseen_updates
+
+    seq = db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE thread_id='owner'").fetchone()[0]
+    db.execute(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq,input_order) "
+        "VALUES ('question','owner','user','text',?,'2026-01-01',?,1)",
+        (json.dumps({"reply_context": {"comments": [{"cid": "c1.1"}]}}), seq),
+    )
+    db.execute("UPDATE threads SET next_message_seq=? WHERE id='owner'", (seq + 1,))
+    db.commit()
+    answer = "Yes, it ships tonight. " + _words(127)
+    arguments, result = _post(db, f"[c1.1] {answer}")
+    message_id = db.execute(
+        "SELECT id FROM messages WHERE thread_id='owner' AND role='assistant'",
+    ).fetchone()[0]
+    assert db.execute(
+        "SELECT content FROM chat_visible_content WHERE message_id=?", (message_id,),
+    ).fetchone()[0] == ""
+
+    notice = mod.attention_notice(
+        thread_id="owner", tool_name="post_update", arguments=arguments, result=result,
+    )
+
+    assert "Your update: 131 words" in notice
+    assert events[-1]["properties"]["update_words"] == 131
+    register(db, message_id, "owner", "post_update")
+    db.execute("UPDATE message_update_state SET seen_at=NULL,seen_reason=NULL,presence_at_post='away' "
+               "WHERE message_id=?", (message_id,))
+    rows = unseen_updates(db, "owner", "user", "another", False, "2026-01-02T00:00:00")
+    assert [row["content"] for row in rows] == [answer]
+    assert result_text("another", [], rows, "owner").splitlines()[3].endswith("| " + answer)

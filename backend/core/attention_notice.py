@@ -161,24 +161,27 @@ def _update_notice(thread_id: str, arguments: dict, result: Any) -> str | None:
         return None
     db = get_db()
     try:
-        from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
+        from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, words_for_the_person
 
         row = db.execute(
-            f"SELECT {VISIBLE_CONTENT} AS content, t.user_id AS user_id, t.project_id AS project_id"
+            f"SELECT {VISIBLE_CONTENT} AS content, m.content AS saved,"
+            " t.user_id AS user_id, t.project_id AS project_id"
             f" FROM messages AS m JOIN threads AS t ON t.id = m.thread_id {VISIBLE_CONTENT_JOIN}"
             " WHERE m.id=? AND m.thread_id=?",
             (saved.group(1), thread_id),
         ).fetchone()
-        if row is None or not isinstance(row["content"], str):
+        if row is None or not isinstance(row["saved"], str):
             return None
-        text = row["content"]
+        # Cards follow the chat text; the person reads every word, answers in comment threads included.
+        text = row["content"] or ""
+        words = words_for_the_person(row["saved"])
         linked = _linked_documents(db, text, row["user_id"], row["project_id"]) if targets(text) else []
         waiting = _waiting_paths(db, thread_id) if linked else []
     finally:
         db.close()
     measured = [(path, measure_file(path)) for path in linked]
     others = [measure_file(other) for other in waiting if other not in linked]
-    update_measure = measure_text(text)
+    update_measure = measure_text(words)
     _record(
         thread_id, "update", [measure for _path, measure in measured],
         len(others) + len(linked) if linked else None, text_measure=update_measure,
