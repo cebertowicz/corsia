@@ -4,7 +4,7 @@
  * `crypto.subtle` exists only in a secure context, so CORSIA served over plain
  * HTTP to a LAN address — the common way to reach a machine from a phone or
  * another computer on the same network — has no SHA-256 at all. The document
- * save precondition (issue #3049) needs the file's real digest, so this fills
+ * save precondition needs the file's real digest, so this fills
  * that gap. It is byte-for-byte the same function as `crypto.subtle.digest`
  * over the same UTF-8 bytes, which is what the server compares: `sha256_file`
  * hashes the file's bytes, and `TextEncoder` produces exactly those bytes,

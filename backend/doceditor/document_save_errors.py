@@ -5,7 +5,7 @@ from typing import Any
 MISSING_DOCUMENT_MESSAGE = "This document is deleted, so nothing changed."
 MISSING_SAVE_MESSAGE = "Couldn’t save because this document was deleted. Your text stays here until you close it, so copy it to keep it."
 
-#: The editor PUT's own stale refusal (issue #3049). The writer's ``stale`` is worded for
+#: The editor PUT's own stale refusal. The writer's ``stale`` is worded for
 #: suggestion batches and live writes and invites a retry, which is wrong for typed text
 #: whose base is gone: the tab keeps the text and the person decides. ``PUT /api/files/content``
 #: answers with this code and message; the tab keys its one-refusal-per-base rule and its

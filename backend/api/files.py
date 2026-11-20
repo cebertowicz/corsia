@@ -143,7 +143,7 @@ class WriteBody(BaseModel):
     project_id: str | None = None
     thread_id: str | None = None
     create: bool = False  # allow creating a new file (New document)
-    #: SHA-256 of the bytes the editor's tab started from (issue #3049). Optional: an
+    #: SHA-256 of the bytes the editor's tab started from. Optional: an
     #: older client omits it and keeps the plain-overwrite behavior it always had.
     expected_sha256: str | None = None
 
@@ -188,7 +188,7 @@ async def write_content(token: str, body: WriteBody):
     session when one is in scope (register-on-write, registry §0.0 1.4).
 
     With ``expected_sha256`` the save is refused unless the file still holds those
-    bytes, so an outside edit is never overwritten (issue #3049); without it the
+    bytes, so an outside edit is never overwritten; without it the
     write behaves exactly as it did before.
     """
     global _digest_absence_logged

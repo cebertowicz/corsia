@@ -1,6 +1,6 @@
 import { textSha256 } from './documentWire';
 
-/** `detail.code` of the 409 the editor save answers when the file changed after the tab's base (issue #3049). */
+/** `detail.code` of the 409 the editor save answers when the file changed after the tab's base. */
 export const EDITOR_STALE_CODE = 'stale_base';
 
 /** What the tab's save bar says for that refusal: the server's plain sentence, then the way on (the Details beside it). */

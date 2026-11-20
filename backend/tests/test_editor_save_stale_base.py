@@ -1,4 +1,4 @@
-"""The editor's PUT refuses a save whose base the file has since left (issue #3049)."""
+"""The editor's PUT refuses a save whose base the file has since left."""
 
 from __future__ import annotations
 
