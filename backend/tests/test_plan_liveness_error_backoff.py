@@ -69,7 +69,7 @@ def _deliver_reminder_into_running_turn(main_db) -> str:
     )
     boundary.mutate(
         plan.id, "activate", {"node_id": node.id, "expected_revision": node.revision},
-        actor=boundary.PlanActor(THREAD, "user-1", None),
+        actor=boundary.PlanActor(THREAD, "steve", None),
         provenance="test.error_backoff", mutation_id="activate", db=main_db,
     )
     plan_liveness.on_turn_complete(THREAD, db=main_db)
