@@ -3,6 +3,7 @@
 	import { loadMentionRoster } from './comments/mentionRoster.svelte';
 	import { documentHalfSheetRoom } from '$lib/actions/documentHalfSheetRoom';
 	import { documentThreadFooterRoom } from '$lib/actions/documentThreadFooterRoom';
+	import { documentThreadChromeRoom } from '$lib/actions/documentThreadChromeRoom';
 	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
@@ -298,7 +299,7 @@
 	{#if margin && surfaceState}
 		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:documentThreadFooterRoom={(scrolls) => scrollThreadFooter = scrolls} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:documentThreadFooterRoom={(scrolls) => scrollThreadFooter = scrolls} use:documentThreadChromeRoom use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list' && !image && !columnFits}
 		<!-- Below the column's threshold on a desktop canvas: a popover from the comments control, so nothing is dimmed or covered but the list itself. -->
 		<Popover anchor={listAnchor} placement="bottom-end" bounds={listBounds} fill {covered} initialFocus={form.handoff ?? undefined} takeFocus={!form.redrawn || !!form.handoff} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isShellControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
@@ -321,6 +322,11 @@
 	.drawer-comments.in-margin { position: relative; overflow: visible; scrollbar-gutter: auto; }
 	.stacked-title { margin: 0; padding: var(--space-1) var(--space-3) var(--space-1); color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
+	/* A short sheet (a phone held sideways under its keyboard) puts Back on the heading's row, fixed and 44px tall, so a reply field, its "Goes to" line and Send fit the one scroller (documentThreadChromeRoom). */
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) { position: relative; }
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) > :global(.drawer-heading) { min-height: var(--touch-target); padding-left: calc(var(--space-1) + var(--back-room, 0px)); }
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) > :global(.thread-back) { position: absolute; top: 0; left: 0; display: flex; height: var(--touch-target); }
+	.canvas-comment-drawer.sheet:global([data-short-chrome]) :global(.drawer-back) { min-height: var(--touch-target); }
 	/* The single-thread sheet shows every reply in full, so its card's reply count gives its room to the author's name. */
 	.sheet-thread { display: contents; }
 	.sheet-thread :global(.ct-reply-count) { display: none; }

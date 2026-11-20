@@ -7,7 +7,8 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 		const footer = drawer.querySelector<HTMLElement>('.drawer-foot');
 		const back = drawer.querySelector<HTMLElement>(':scope > .thread-back');
 		if (!list || !footer || !back) { onChange(false); return; }
-		const fixed = [...drawer.children].filter((child) => child !== list && child !== footer);
+		// Back is out of the flow on a short sheet (documentThreadChromeRoom), so it takes no row.
+		const fixed = [...drawer.children].filter((child) => child !== list && child !== footer && getComputedStyle(child).position !== 'absolute');
 		const gap = parseFloat(getComputedStyle(drawer).rowGap) || 0;
 		const required = fixed.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0)
 			+ footer.getBoundingClientRect().height + gap * (fixed.length + 1) + 44;
