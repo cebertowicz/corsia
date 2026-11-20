@@ -222,14 +222,16 @@ describe('a box that shows a draft, read once when a post fails', () => {
 		} finally { host.remove(); }
 	});
 
-	it('is not on screen inside a Popover clipped away whole before it is placed', () => {
+	it('is not on screen inside a Popover not yet placed (clipped away whole and inert, as Popover renders it)', () => {
 		const host = document.createElement('div');
 		const node = inside(host);
 		try {
 			keptCommentDrafts.shown(key, node);
 			host.style.clipPath = 'inset(100%)';
+			host.setAttribute('inert', '');
 			expect(keptCommentDrafts.onScreen(key)).toBe(false);
 			host.style.clipPath = '';
+			host.removeAttribute('inert');
 			expect(keptCommentDrafts.onScreen(key)).toBe(true);
 		} finally { host.remove(); }
 	});
@@ -281,6 +283,8 @@ describe('the toast that told a failure while the draft’s box was not on scree
 			const host = document.body.appendChild(document.createElement('div'));
 			if (name === 'inert') host.setAttribute('inert', value);
 			else host.style.setProperty(name, value);
+			// An unplaced Popover is inert as well as clipped (Popover.svelte).
+			if (name === 'clip-path') host.setAttribute('inert', '');
 			host.append(box(inView));
 			return host;
 		});
