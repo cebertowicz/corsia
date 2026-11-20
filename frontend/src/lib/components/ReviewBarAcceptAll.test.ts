@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
+import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
 
@@ -22,6 +23,7 @@ function read(comments = 0): ReviewBarRead {
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+let cardsComponent: Record<string, unknown> | null = null;
 async function render(pendingSuggestions: number, onAcceptAll?: () => Promise<number | void>) {
 	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', pendingSuggestions, onAcceptAll } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
@@ -38,7 +40,9 @@ beforeEach(() => {
 });
 afterEach(() => {
 	if (component) unmount(component);
+	if (cardsComponent) unmount(cardsComponent);
 	component = null;
+	cardsComponent = null;
 	host.remove();
 });
 
@@ -49,13 +53,14 @@ describe('ReviewBar accept all and approve', () => {
 		expect(host.textContent).not.toContain('Accept 0');
 	});
 
-	it('describes how many suggestions Approve all accepts', async () => {
+	it('keeps the Approve label and says how many suggestions it also accepts', async () => {
 		await render(2, vi.fn());
-		expect(button('Approve all')?.title).toBe('Accepts the 2 suggestions, then approves');
-		expect(button('Approve')).toBeUndefined();
+		expect(button('Approve')?.title).toBe('Accepts the 2 suggestions, then approves');
+		expect(host.querySelector('.rb-derived')?.textContent).toBe('Also accepts 2 suggestions');
 		unmount(component!); component = null; host.innerHTML = '';
 		await render(1, vi.fn());
-		expect(button('Approve all')?.title).toBe('Accepts the 1 suggestion, then approves');
+		expect(button('Approve')?.title).toBe('Accepts the 1 suggestion, then approves');
+		expect(host.querySelector('.rb-derived')?.textContent).toBe('Also accepts 1 suggestion');
 	});
 
 	it('accepts first, then sends the verdict', async () => {
@@ -63,7 +68,7 @@ describe('ReviewBar accept all and approve', () => {
 		const accept = vi.fn(async () => { order.push('accept'); });
 		api.answerReview.mockImplementation(async () => { order.push('answer'); return { verdict: 'approved', note: null, feedback_counts: counts(0) }; });
 		await render(2, accept);
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(order).toEqual(['accept', 'answer']);
 		expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']);
@@ -72,7 +77,7 @@ describe('ReviewBar accept all and approve', () => {
 	it('shows the busy state while the accept runs', async () => {
 		let finish: () => void = () => {};
 		await render(2, () => new Promise<void>((resolve) => { finish = resolve; }));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		flushSync();
 		expect(host.querySelector('.review-bar')?.getAttribute('aria-busy')).toBe('true');
 		expect(api.answerReview).not.toHaveBeenCalled();
@@ -83,11 +88,11 @@ describe('ReviewBar accept all and approve', () => {
 	it('sends no verdict when the accept fails, and says so on the bar', async () => {
 		const accept = vi.fn().mockRejectedValueOnce(new Error('stale')).mockResolvedValueOnce(undefined);
 		await render(2, accept);
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.rb-status')?.textContent).toBe('Couldn\u2019t accept the suggestions. Try again.'));
 		expect(api.answerReview).not.toHaveBeenCalled();
 		expect(host.querySelector('.review-bar')?.getAttribute('aria-busy')).toBe('false');
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledTimes(1));
 	});
 
@@ -95,17 +100,24 @@ describe('ReviewBar accept all and approve', () => {
 		api.fetchReviewBar.mockResolvedValue(read(1));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(1) });
 		await render(1, vi.fn(async () => {}));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']));
 	});
 
-	it('leaves pending suggestions undecided when approving with changes', async () => {
-		api.fetchReviewBar.mockResolvedValue(read(1));
-		api.answerReview.mockResolvedValue({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(1) });
+	it('leaves pending suggestions undecided when sending back and shows the returned counts on the card', async () => {
+		const feedback = { comments: 2, suggestions: 1, edits: 0 };
+		api.fetchReviewBar.mockResolvedValue({ ...read(2), round_feedback_counts: feedback });
+		api.answerReview.mockResolvedValue({ verdict: 'changes_requested', note: 'Tighten it', feedback_counts: feedback });
+		cardsComponent = mount(MessageArtifactCards, { target: host, props: { threadId: 't1', cards: [{ kind: 'ask', artifact_id: 'doc-1', title: 'Launch plan', type: 'document', icon: 'file-text', name: 'launch-plan.md', path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' }] } });
 		const accept = vi.fn(async () => {});
 		await render(2, accept);
-		button('Approve with changes')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved_with_changes', '', ['h1']));
+		button('Send back')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-note')).toBeTruthy());
+		const note = host.querySelector<HTMLTextAreaElement>('.rb-note')!;
+		note.value = 'Tighten it'; note.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		[...host.querySelectorAll<HTMLButtonElement>('.rb-actions button')].find((b) => b.textContent?.trim() === 'Send back')!.click();
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'changes_requested', 'Tighten it', ['h1']));
+		await vi.waitFor(() => expect(host.querySelector('.tile .name')?.textContent).toBe('2 comments, 1 suggestion'));
 		expect(accept).not.toHaveBeenCalled();
 	});
 
@@ -113,7 +125,7 @@ describe('ReviewBar accept all and approve', () => {
 		api.fetchReviewBar.mockResolvedValue(read(1));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(1) });
 		await render(3, vi.fn(async () => 3));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(host.querySelector('.rb-receipt')?.textContent?.replace(/\s+/g, ' ')).toMatch(/^Approved · 3 suggestions accepted · 1 comment sent · /);
 		// Whole segments wrap and a separator leads the segment it introduces, so no wrapped line can end on one; the separators are hidden from screen readers.
@@ -127,27 +139,28 @@ describe('ReviewBar accept all and approve', () => {
 
 	it('says one suggestion in the singular, and omits the count when none were accepted', async () => {
 		await render(1, vi.fn(async () => 1));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(host.querySelector('.rb-receipt')?.textContent).toContain('1 suggestion accepted');
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('1 suggestions');
 		unmount(component!); component = null; host.innerHTML = '';
 		await render(2, vi.fn(async () => 0));
-		button('Approve all')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toMatch(/accepted/);
 	});
 
-	it('shows the hint beside Approve all and hides it while the Send back note is open', async () => {
+	it('shows what Approve also accepts beside it, and hides it while the Send back note is open', async () => {
 		await render(3, vi.fn(async () => 3));
-		expect(host.querySelector('.rb-status')?.textContent).toBe('Approve all accepts the 3 open suggestions.');
+		expect(host.querySelector('.rb-derived')?.textContent).toBe('Also accepts 3 suggestions');
 		button('Send back')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.rb-note')).toBeTruthy());
-		expect(host.querySelector('.rb-status')?.textContent).toBe('');
+		expect(host.querySelector('.rb-derived')).toBeNull();
 	});
 
 	it('leaves the approve button plain where no accept is wired in', async () => {
 		await render(3);
 		expect(button('Approve')).toBeTruthy();
+		expect(host.querySelector('.rb-derived')).toBeNull();
 	});
 });

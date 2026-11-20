@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
+import { expectQuietSave, observeSaveCue, proveSaveCue, routeDocumentSaves } from '../support/docSaveCue';
 
 async function openChecklist(
 	page: Page,
@@ -69,10 +69,17 @@ async function replaceEditor(page: Page, editor: ReturnType<Page['locator']>, te
 }
 
 test.describe('@flow:document-checklists @surface:documents GFM document checklist interactions', () => {
-	test('renders, toggles, continues, saves, reloads, and keyboard-toggles GFM tasks', async ({ page, request }) => {
+	test('renders, toggles, continues, saves, reloads, and keyboard-toggles GFM tasks', async ({ page, request, context }) => {
 		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Desktop assertions use the split artifact leaf.');
 
+		const link = await routeDocumentSaves(context);
 		const fixture = await openChecklist(page, request, '- [ ] active\n- [x] done\n1. ordered\n');
+		// Prove the selector in a slow save, then reset samples before the quiet episode.
+		await proveSaveCue(page, link, async () => {
+			await fixture.editor.click();
+			await page.keyboard.press('ControlOrMeta+End');
+			await page.keyboard.type(' ');
+		});
 		await observeSaveCue(page);
 		const active = page.getByRole('checkbox', { name: 'Mark task complete: active' });
 		const done = page.getByRole('checkbox', { name: 'Mark task incomplete: done' });

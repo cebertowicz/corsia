@@ -319,6 +319,20 @@ async def await_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     return await _read(checkpoint_id)
 
 
+async def failed_fold_hold(record: CheckpointRecord):
+    """The usage-limit hold on a failed fold's writer, read from the stored verdict only.
+
+    The same predicate as the fold gate (``limited_admission`` on the thread's
+    chosen account), so a fold that failed on a limit holds only once that
+    limit is recorded; an unrecorded one finds nothing and fails visibly.
+    """
+    if record.status != "failed":
+        return None
+    from infra.held_admission import limited_admission
+
+    return await run_in_db(limited_admission, record.thread_id, record.writer_model)
+
+
 async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     """Signal only the exact live call and return its durable cancellation."""
     handle = _tasks.get(checkpoint_id)

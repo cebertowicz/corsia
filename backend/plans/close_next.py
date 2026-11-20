@@ -106,18 +106,17 @@ def start_named(
     refused = refusals.refused_before_write(db, node, plan, slot.executor)
     if refused is not None:
         return refused
+    out_of_order = triage_lines.out_of_order(db, node, actor_id=actor_id, compact=True)
+    if out_of_order is not None:
+        return NamedStart(node_id, refusals.OUT_OF_ORDER, out_of_order)
     common: dict[str, Any] = {"actor_id": actor_id, "provenance": provenance, "db": db}
-    jump = triage_lines.jump_for_start(db, node, actor_id=actor_id)
     if node["state"] == "pending":
-        admission.activate(
-            node_id, expected_revision=node["revision"], **common,
-            payload=None if jump is None else jump.payload,
-        )
+        admission.activate(node_id, expected_revision=node["revision"], **common)
     else:
         admission.start_selection(node_id, **common)
     holder = attempts.slot_holder(db, slot.plan_id, slot.executor)
     if _holds_validly(db, holder, node_id):
-        return NamedStart(node_id, jumped=None if jump is None else jump.line)
+        return NamedStart(node_id)
     refusal, reason = refusals.not_started(db, node_id, plan, holder)
     return NamedStart(node_id, refusal, reason)
 
@@ -182,10 +181,7 @@ def _named(named: NamedStart, started: bool) -> dict[str, Any]:
             start had selected; it never preempts a valid selection.
     """
     if started:
-        reply: dict[str, Any] = {"reason": None, "refusal": None, "started": True}
-        if named.jumped is not None:
-            reply["jumped"] = named.jumped
-        return reply
+        return {"reason": None, "refusal": None, "started": True}
     if named.refusal is None or named.reason is None:
         raise CloseNextInvariantError("reconciliation displaced the named next task")
     return {

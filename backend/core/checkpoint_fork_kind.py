@@ -35,9 +35,16 @@ async def shutdown_checkpoint(fork_id: str) -> None:
     await run_in_db(checkpoints.cancel, fork_id, ended_at=utc_now_iso())
 
 
-def provider_failure(harness: str, detail: str) -> None:
-    """Keep CC/Codex partial output; Native provider errors have no result body."""
-    if harness == "native":
+def provider_failure(harness: str, detail: str, cause: str | None = None) -> None:
+    """Keep CC/Codex partial output, except under a usage limit; Native errors have no body.
+
+    A usage limit is never a narrative: raising leaves the installed checkpoint
+    in place. ``cause`` is the adapter's structured cause; the error text decides
+    only where the cause does not name the failure (``harness_cause_kind``).
+    """
+    from llm.error_cause import harness_cause_kind
+
+    if harness == "native" or harness_cause_kind(harness, cause, detail) == "usage_limit":
         raise ProviderForkRejected(detail)
 
 

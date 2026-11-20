@@ -1,6 +1,6 @@
 import { test as base } from '../support/test';
 import { expect, type Page, type TestInfo } from '@playwright/test';
-import { cueSamples, expectQuietSave, observeSaveCue, routeDocumentSaves } from '../support/docSaveCue';
+import { cueSamples, expectQuietSave, expectTextOnlyCue, observeSaveCue, proveSaveCue, routeDocumentSaves } from '../support/docSaveCue';
 import { openLiveDocument, seedLiveDocument, serverText, typeAtDocumentEnd } from '../support/liveDocument';
 
 // Playwright's standard video option is worker-scoped. This fixture sets the
@@ -41,14 +41,14 @@ for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const)
 		await observeSaveCue(page);
 		await typeAtDocumentEnd(page, ' First thought.');
 		await expect.poll(() => link.starts).toBe(1);
-		await expect(page.locator('.save-ghost')).toHaveCount(0);
+		await expectTextOnlyCue(page, 'Saving…');
 		await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
 		await page.keyboard.type(' And a second thought.');
 		await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
 		await expect.poll(() => link.starts).toBeGreaterThanOrEqual(2);
 		await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible();
-		await expect(page.locator('.save-ghost')).toHaveCount(0);
+		await expectTextOnlyCue(page, '✓ Saved');
 		await expect.poll(() => serverText(request, fixture)).toContain('And a second thought.');
 		const frames = await cueSamples(page);
 		const firstSaving = frames.findIndex(frame => frame.cue === 'Saving…' && frame.visible);
@@ -65,6 +65,7 @@ for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const)
 		const fixture = await seedLiveDocument(request, `quiet-reconnect-${width}-${theme}`, '# Reconnect confirmation\n\nWriting stays here while the connection returns.\n');
 		await openLiveDocument(page, fixture); await assertStamp(page);
 		if (width === 1440) await expect(page.locator('.chat-col')).toBeVisible();
+		await proveSaveCue(page, link, () => typeAtDocumentEnd(page, ' Before disconnect.'));
 		await observeSaveCue(page);
 		await link.cut();
 		await typeAtDocumentEnd(page, ' An offline thought.');
@@ -79,11 +80,11 @@ for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const)
 				return owed;
 			}, source);
 		}).toBe(true);
-		await expect(page.locator('.save-ghost')).toHaveCount(0);
+		await expect(page.locator('.bar-save')).toHaveCount(0);
 		link.restore();
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible({ timeout: 20_000 });
 		await expect.poll(() => serverText(request, fixture)).toContain('An offline thought.');
-		await expect(page.locator('.save-ghost')).toHaveCount(0);
+		await expectTextOnlyCue(page, '✓ Saved');
 		const frames = await cueSamples(page);
 		expect(frames.filter(frame => frame.disconnected && frame.visible)).toEqual([]);
 		expect(frames.some(frame => frame.cue === '✓ Saved' && frame.visible)).toBe(true);
@@ -117,9 +118,11 @@ test('quiet save narrow Reload precedence 393 component layout', async ({ page, 
 
 test('quiet save ordinary fast pause 1440', async ({ page, request, context }, info) => {
 	await page.setViewportSize({ width: 1440, height: 960 });
-	await routeDocumentSaves(context);
+	const link = await routeDocumentSaves(context);
 	const fixture = await seedLiveDocument(request, 'quiet-fast', '# A quiet writing pause\n\nThe header stays still.\n');
 	await openLiveDocument(page, fixture); await assertStamp(page);
+	// Prove the selector in a slow save, then reset samples before the quiet episode.
+	await proveSaveCue(page, link, () => typeAtDocumentEnd(page, ' Slow proof.'));
 	await observeSaveCue(page);
 	// "Fast" means the save settles inside the 400 ms notice window (docSaveGhost EPISODE_NOTICE_MS); a save that takes
 	// longer is meant to say "Saving…". The real server's reply time depends on host load, so the page's clock is held

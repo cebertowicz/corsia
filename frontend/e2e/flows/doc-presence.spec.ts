@@ -99,25 +99,30 @@ test.describe('@flow:doc-presence @surface:doc-presence @surface:documents docum
 		const latest = stack.getByRole('button', { name: readers[1] });
 		const earlier = stack.getByRole('button', { name: readers[0] });
 		await expect(latest).toBeVisible();
-		await expect(earlier).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'doc-presence-two-readers', { fullPage: false });
-		if ((page.viewportSize()?.width ?? 0) <= 768) {
-			// Each avatar takes one phone slot, so the stack steps evenly (plain/detail slot parity: Avatar.test.ts).
-			const lefts = await stack.locator('.avatar').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
-			expect(lefts).toHaveLength(3);
-			expect(Math.abs((lefts[1] - lefts[0]) - (lefts[2] - lefts[1]))).toBeLessThanOrEqual(1);
+		const phone = (page.viewportSize()?.width ?? 0) <= 768;
+		if (phone) {
+			await expect(stack.locator('.avatar')).toHaveCount(1);
+			const more = stack.locator('.more');
+			await expect(more).toContainText('+2');
+			await expect(more).toContainText(readers[0]);
+			await expect(more).toContainText(firstReader);
+		} else {
+			await expect(earlier).toBeVisible();
 		}
+		await saveEvidenceScreenshot(page, testInfo, 'doc-presence-two-readers', { fullPage: false });
 
 		// Popover is portaled to document.body, so it is not a descendant of its avatar stack.
 		const detail = page.getByRole('dialog');
 		await latest.focus();
 		await expect(detail).toHaveText(new RegExp(`^${escapeRegExp(readers[1])} · read `));
 		await expectUncovered(page, detail);
-		await page.keyboard.press('Tab');
-		await expect(earlier).toBeFocused();
-		await expect(detail).toHaveCount(1);
-		await expect(detail).toHaveText(new RegExp(`^${escapeRegExp(readers[0])} · read `));
-		await expectUncovered(page, detail);
+		if (!phone) {
+			await page.keyboard.press('Tab');
+			await expect(earlier).toBeFocused();
+			await expect(detail).toHaveCount(1);
+			await expect(detail).toHaveText(new RegExp(`^${escapeRegExp(readers[0])} · read `));
+			await expectUncovered(page, detail);
+		}
 		await saveEvidenceScreenshot(page, testInfo, 'doc-presence-popover', { fullPage: false });
 		await page.keyboard.press('Escape');
 		await expect(detail).toHaveCount(0);

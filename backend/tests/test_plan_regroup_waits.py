@@ -158,6 +158,10 @@ def test_moving_a_working_task_under_a_waiting_branch_blocks_it_and_frees_its_sl
     _node(db, plan.id, "Held step", parent_id=branch.id)
     _depends(db, branch.id, prerequisite.id)
     task = _node(db, plan.id, "Working")
+    # The agent ranks its working task first before starting it.
+    plan_update(db, plan.id, "reorder", {
+        "node_id": task.id, "expected_revision": revision(db, task.id), "order_key": 0,
+    })
     plan_update(db, plan.id, "activate", {"node_id": task.id, "expected_revision": revision(db, task.id)})
     assert _held(db, task.id)
 
@@ -204,6 +208,10 @@ def test_a_move_that_also_restates_the_working_task_keeps_its_slot(db):
     branch = _phase(db, plan.id, "New home")
     _node(db, plan.id, "Home step", parent_id=branch.id)
     task = _node(db, plan.id, "Working")
+    # The agent ranks its working task first before starting it.
+    plan_update(db, plan.id, "reorder", {
+        "node_id": task.id, "expected_revision": revision(db, task.id), "order_key": 0,
+    })
     plan_update(db, plan.id, "activate", {"node_id": task.id, "expected_revision": revision(db, task.id)})
     assert _held(db, task.id)
 
