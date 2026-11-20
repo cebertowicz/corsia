@@ -1,7 +1,7 @@
 """One pass over a Turn is enough to project its Assistant Step batches.
 
 A differential test of :func:`history.turns.assistant_step_batches` against the
-rule as stated, computed the slow obvious way, over shapes whose durable
+pre-change implementation, vendored verbatim below, over shapes whose durable
 ``seq`` order deliberately disagrees with group order (a late-written tool
 result, a trailing initiating user row).
 """
@@ -28,68 +28,77 @@ TURN = "step-batch-turn"
 EPOCH = 0
 
 
-def _reference_batches(turn: PortableTurn) -> tuple[AssistantStepBatch, ...]:
-    """The documented rule, computed the slow obvious way.
+# Verbatim copy of `assistant_step_batches` as it was before the single-pass change:
+# `git show cdd5514364476442995b2b7e1ececd817c31c17f:backend/history/turns.py`
+# (base of this change). Only the function name differs; it calls the unchanged
+# `group_assistant_steps` imported above. It is the oracle for the byte-identity claim.
+def _pre_3151_assistant_step_batches(
+    turn: PortableTurn,
+) -> tuple[AssistantStepBatch, ...]:
+    """Project complete Assistant Step batches and their legal resume anchors.
 
-    Deliberately a transcription rather than a reuse: it re-reads every later
-    row for every group, which is exactly the shape the shipped function must
-    not need. It is the oracle for what a batch *is*, not for how fast one is.
+    A resume anchor is the final initiating user row immediately before the
+    Assistant output. It exists only when durable sequence order cleanly
+    partitions checkpoint-covered input from exact assistant/tool replay.
     """
     groups = group_assistant_steps(turn.messages)
     batches: list[AssistantStepBatch] = []
-    prior: list[PortableMessage] = []
-    for index, group in enumerate(groups):
+    prior_messages: list[PortableMessage] = []
+    for group_index, group in enumerate(groups):
         assistant_index = next(
             (
-                position
-                for position, message in enumerate(group)
+                index
+                for index, message in enumerate(group)
                 if message.role == "assistant"
             ),
             None,
         )
         if assistant_index is None:
-            prior.extend(group)
+            prior_messages.extend(group)
             continue
-        initiating = tuple(group[:assistant_index])
-        exact = tuple(group[assistant_index:])
+        initiating_inputs = tuple(group[:assistant_index])
+        assistant_and_tools = tuple(group[assistant_index:])
         group_end = max(group, key=lambda message: message.seq)
-        later = [
-            message for rest in groups[index + 1 :] for message in rest
-        ]
-        end_is_legal = (
-            index == len(groups) - 1
-            or group_end.seq < min(message.seq for message in later)
+        later_messages = tuple(
+            message
+            for later_group in groups[group_index + 1 :]
+            for message in later_group
         )
-        anchor = None
-        if initiating:
-            anchor_message = max(initiating, key=lambda message: message.seq)
-            covered = [*prior, *initiating]
-            exact_and_later = [*exact, *later]
-            if (
-                anchor_message.seq == max(message.seq for message in covered)
-                and anchor_message.seq
-                < min(message.seq for message in exact_and_later)
-            ):
-                anchor = HistoryBoundary(
-                    turn.boundary.thread_id,
-                    turn.boundary.history_epoch,
-                    anchor_message.seq,
-                    anchor_message.message_id,
+        end_is_legal = group_index == len(groups) - 1 or group_end.seq < min(
+            message.seq for message in later_messages
+        )
+        resume_anchor = None
+        if initiating_inputs:
+            anchor_message = max(
+                initiating_inputs,
+                key=lambda message: message.seq,
+            )
+            covered = (*prior_messages, *initiating_inputs)
+            exact_and_later = (*assistant_and_tools, *later_messages)
+            if anchor_message.seq == max(
+                message.seq for message in covered
+            ) and anchor_message.seq < min(message.seq for message in exact_and_later):
+                resume_anchor = HistoryBoundary(
+                    thread_id=turn.boundary.thread_id,
+                    history_epoch=turn.boundary.history_epoch,
+                    seq=anchor_message.seq,
+                    message_id=anchor_message.message_id,
                 )
+
         batches.append(
             AssistantStepBatch(
-                initiating_inputs=initiating,
-                assistant_and_tools=exact,
-                resume_anchor=anchor,
+                initiating_inputs=initiating_inputs,
+                assistant_and_tools=assistant_and_tools,
+                resume_anchor=resume_anchor,
                 end_boundary=(
                     turn.boundary
-                    if index == len(groups) - 1
+                    if group_index == len(groups) - 1
                     else (
                         HistoryBoundary(
-                            turn.boundary.thread_id,
-                            turn.boundary.history_epoch,
-                            group_end.seq,
-                            group_end.message_id,
+                            thread_id=turn.boundary.thread_id,
+                            history_epoch=turn.boundary.history_epoch,
+                            seq=group_end.seq,
+                            message_id=group_end.message_id,
                         )
                         if end_is_legal
                         else None
@@ -97,7 +106,7 @@ def _reference_batches(turn: PortableTurn) -> tuple[AssistantStepBatch, ...]:
                 ),
             )
         )
-        prior.extend(group)
+        prior_messages.extend(group)
     return tuple(batches)
 
 
@@ -177,7 +186,7 @@ def test_shuffled_shapes_are_not_all_trivial() -> None:
             message.seq for message in turn.messages
         ):
             out_of_order += 1
-        batches = assistant_step_batches(turn)
+        batches = _pre_3151_assistant_step_batches(turn)
         anchors += sum(1 for batch in batches if batch.resume_anchor is not None)
         illegal_ends += sum(
             1 for batch in batches[:-1] if batch.end_boundary is None
@@ -194,6 +203,6 @@ def test_shuffled_shapes_are_not_all_trivial() -> None:
 
 
 @pytest.mark.parametrize("seed", range(200))
-def test_batches_match_the_stated_rule_on_shuffled_shapes(seed: int) -> None:
+def test_batches_match_the_pre_change_code_on_shuffled_shapes(seed: int) -> None:
     turn = _shuffled_turn(random.Random(seed))
-    assert assistant_step_batches(turn) == _reference_batches(turn)
+    assert assistant_step_batches(turn) == _pre_3151_assistant_step_batches(turn)
