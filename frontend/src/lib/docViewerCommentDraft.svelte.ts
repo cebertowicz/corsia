@@ -11,7 +11,7 @@ import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 import { plainErrorText } from '$lib/plainError';
-import { isNotCommentable, submitDocumentComment } from '$lib/docViewerOperations';
+import { isNotCommentable, POST_FAILED, submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
 export type ViewerSelection = SelectionOffer | null;
@@ -25,7 +25,6 @@ type Context = {
 	text: () => string;
 	isOpen: () => boolean;
 	ensureArtifactId: () => Promise<string | null>;
-	onFailure: (id: string, message: string) => void;
 	onStart: (anchor: CommentAnchor) => void;
 	onClose: () => void;
 	/** True while a posted comment may still get its first drawn mark; false once it is drawn, cannot be placed (not_placed, orphaned) or is gone. */
@@ -40,7 +39,7 @@ export function liveFailureMessage(error: unknown): string {
 	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
 	if (error.name === 'PostTimeoutError') return "We couldn't confirm your comment was posted. Check the comments before posting again. Your draft is kept.";
 	// A lost connection (fetch's own TypeError text) and a server error ("500 <body>") carry wire text, not words for the reader.
-	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return "Couldn't post the comment — try again";
+	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
 	if (/^\d{3}\b/.test(error.message)) return refusalMessage(error.message);
 	return error.message;
 }
@@ -159,7 +158,7 @@ export function createViewerCommentDraft(context: Context) {
 		const identity = {};
 		opened.add(identity);
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
+			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), key: keepKey(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -184,9 +183,12 @@ export function createViewerCommentDraft(context: Context) {
 			// Text changed since an earlier version was stored goes out as a new comment on the next press.
 			const now = keptCommentDrafts.get(key);
 			keptCommentDrafts.fail(key, now?.body ?? text, now?.mentionSelection ?? tags, message, message === EARLIER_VERSION_POSTED);
-			mine(value => ({ ...value, error: message }));
-			context.onFailure(toastId, message);
-		}, draft.selection ? liveFailureMessage : undefined));
+			// The box showing this draft says why: the one that pressed, or one opened from the kept draft since it closed.
+			// Never a box showing another draft: its reason would tell of the wrong post.
+			commentDraft.update(value => value && value.key === key ? { ...value, error: message } : value);
+			// The draft holds the toast, if one was shown, until its box comes on screen to say why or the draft is posted.
+			keptCommentDrafts.toast(key, toastId);
+		}, draft.selection ? liveFailureMessage : undefined, () => keptCommentDrafts.onScreen(key)));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
 		// or tags changed since the press (in this composer, or one opened after it closed) stay, with a fresh id for their own post.
 		const stored = keptCommentDrafts.posted(key, text, taggedAgentIds);

@@ -1,7 +1,7 @@
 import { flushSync } from 'svelte';
 import { get } from 'svelte/store';
 import * as Y from 'yjs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentDraft, commentDraftScope, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
 import { captureComment, SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
 import { addComment } from '$lib/stores/docComments';
@@ -50,7 +50,7 @@ function setup(inWidget: boolean, label?: string) {
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
 			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
-			isOpen: () => open, ensureArtifactId: async () => 'a', onFailure: () => {}, onStart: () => { open = true; },
+			isOpen: () => open, ensureArtifactId: async () => 'a', onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});
 	});
@@ -332,6 +332,111 @@ describe('a post that lands or fails after its composer closed and another opene
 		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBeTruthy();
 		expect(current!.controller.draft?.body).toBe('Too terse: say who reads it');
 		log.mockRestore();
+	});
+});
+
+describe('a failed post says why in one place, decided as it fails', () => {
+	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
+	const show = vi.spyOn(toasts, 'show');
+	let drop = () => {};
+	/** The composer's root, mounted on screen for this document's draft (CommentComposer `use:showsDraft`). */
+	const composerOnScreen = () => {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		drop = keptCommentDrafts.shown(keyOf('one'), node);
+	};
+	const open = () => {
+		current!.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current!.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+	};
+	const held = () => {
+		let end!: () => void;
+		const wait = new Promise<void>(resolve => { end = resolve; });
+		vi.mocked(addComment).mockImplementationOnce(async () => { await wait; throw new Error('500 boom'); });
+		return () => end();
+	};
+	let log: ReturnType<typeof vi.spyOn>;
+	beforeEach(() => { show.mockReset(); show.mockImplementation(() => 'toast'); log = vi.spyOn(console, 'error').mockImplementation(() => {}); current = setup(false); });
+	afterEach(() => { drop(); drop = () => {}; log.mockRestore(); show.mockReset(); });
+
+	it('in the open composer, with no toast, while the composer is on screen', async () => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
+		await expect(current!.controller.submit('Too terse')).rejects.toThrow('500');
+		expect(show).not.toHaveBeenCalled();
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ error: REASON, toast: undefined });
+		expect(current!.controller.draft?.error).toBe(REASON);
+	});
+
+	it('in a toast when the composer closed while it posted; the composer opened again says why', async () => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		const end = held();
+		const posting = current!.controller.submit('Too terse');
+		await Promise.resolve();
+		current!.escape(); drop(); commentDraft.set(null); flushSync();
+		end();
+		await expect(posting).rejects.toThrow('500');
+		expect(show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		// The kept draft holds the toast that told it.
+		expect(keptCommentDrafts.get(keyOf('one'))).toMatchObject({ error: REASON, toast: 'toast' });
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			open();
+			expect(current!.controller.draft).toMatchObject({ body: 'Too terse', error: REASON });
+			// Its box on screen again says why, so the toast goes: the reason is told in one place.
+			composerOnScreen();
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+			expect(keptCommentDrafts.get(keyOf('one'))?.toast).toBeUndefined();
+		} finally {
+			dismiss.mockRestore();
+		}
+	});
+
+	it('in the composer opened again from the kept draft while it posted, when that one is on screen', async () => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		const end = held();
+		const posting = current!.controller.submit('Too terse');
+		await Promise.resolve();
+		current!.escape(); drop();
+		current!.controller.select({ from: 6, to: 10, text: 'beta', top: 0, left: 0 });
+		current!.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		composerOnScreen();
+		end();
+		await expect(posting).rejects.toThrow('500');
+		expect(show).not.toHaveBeenCalled();
+		expect(current!.controller.draft).toMatchObject({ body: 'Too terse', error: REASON });
+	});
+
+	/** The press goes out, its composer closes, and `next` is the composer open on the page when the post fails. */
+	const failWhileOpen = async (next: { scope: string; key: string }) => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		const end = held();
+		const posting = current!.controller.submit('Too terse');
+		await Promise.resolve();
+		current!.escape(); drop();
+		commentDraft.set({ from: 0, to: 1, text: 'x', top: 0, body: 'Shown there', identity: {}, ...next }); flushSync();
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		drop = keptCommentDrafts.shown(next.key, node);
+		end();
+		await expect(posting).rejects.toThrow('500');
+	};
+
+	it('in the composer showing this draft in another viewer of the same document, matched by the draft\'s key', async () => {
+		await failWhileOpen({ scope: 'another viewer of one', key: keyOf('one') });
+		expect(show).not.toHaveBeenCalled();
+		expect(get(commentDraft)?.error).toBe(REASON);
+	});
+
+	it('never in a composer showing another document\'s draft: that one is not on screen for this post, so a toast says why', async () => {
+		await failWhileOpen({ scope: 'two', key: keyOf('two') });
+		expect(show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(get(commentDraft)?.error).toBeUndefined();
+		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBe(REASON);
 	});
 });
 

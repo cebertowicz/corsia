@@ -8,9 +8,10 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import RecipientLine from './RecipientLine.svelte';
 	import { recipientNames, type Recipient } from './recipients';
+	import { showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection() }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection(), shownKey = '' }: {
 		/** The reply's text. The field grows with it and never scrolls itself; the card's outer scroller keeps the caret in view. */
 		value?: string;
 		selection?: [number, number] | null;
@@ -23,6 +24,8 @@
 		/** The agents this reply wakes, from the server's reply rule; absent where the caller does not know (chat comments). */
 		goesTo?: Recipient[];
 		onSelection?: (selection: [number, number] | null) => void;
+		/** The kept reply this field shows (`replyDraftKey`): a failed post says why under it, not in a toast, while it is on screen. */
+		shownKey?: string;
 	} = $props();
 
 	const inputId = $props.id();
@@ -77,7 +80,7 @@
 	}
 </script>
 
-<div class="ct-compose open" data-reply-composer>
+<div class="ct-compose open" data-reply-composer use:showsDraft={shownKey}>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
 		<textarea use:keepTyped id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard, clearAfter: lineHeight ? lineHeight + gap() : undefined }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
