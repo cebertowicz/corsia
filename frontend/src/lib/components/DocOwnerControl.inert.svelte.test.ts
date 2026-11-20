@@ -11,7 +11,7 @@ const choice = (id: string, name: string) => ({ id, name, status: 'ready', respo
 const value: DocOwnership = {
 	owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },
 	supervisor: { id: 'a2', name: 'Research coordinator', source: 'picked', status: 'ready' },
-	can_act: true, multi_person: false, can_change: true, refusal: null, multi_person_refusal: null, scope: 'project',
+	can_act: true, multi_person: false, multi_person_refusal: null, scope: 'project',
 	choices: [choice('a1', 'Release planning'), choice('a2', 'Research coordinator')],
 };
 const changed = vi.mocked(changeOwnership);

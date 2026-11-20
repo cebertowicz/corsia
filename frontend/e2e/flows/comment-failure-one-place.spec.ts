@@ -1,0 +1,171 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
+import { beginComment } from '../support/liveCommentProof';
+import { at, commentButton, composer, drag, openThread, seedImage } from '../support/imageRegionComments';
+import { expectFailureLook } from '../support/failureLook';
+import { bar, commentOnRegion, openDocument, openImage, overlay, seedImageDocument } from '../support/docImageComments';
+import { openComments, replyField } from '../support/commentDrawer';
+
+// A failed post says why in one place, decided as it fails: in its box when the box is on screen then (the retry legs
+// in comment-retry-once and doc-reply-draft-kept prove that case), otherwise in a toast, with the reason kept so the
+// box shows it when it opens again, and the toast goes once it does. These legs close the box while the post is still out.
+// Taken at 1440 (chromium-desktop) and at 393 (chromium-mobile, by touch).
+
+const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
+const toast = (page: Page) => page.locator('.toast').filter({ hasText: REASON });
+/** The box's own line: a toast is a status, never this. */
+const reason = (page: Page) => page.locator('[role="alert"]:not(.toast)').filter({ hasText: REASON });
+/** Frames for the review of where the reason shows, in both themes, when set (as doc-reply-draft-kept takes them). */
+const FRAMES = process.env.CORSIA_REPLY_FRAMES;
+async function frame(page: Page, name: string) {
+	if (!FRAMES) return;
+	fs.mkdirSync(FRAMES, { recursive: true });
+	for (const scheme of ['light', 'dark'] as const) {
+		await page.emulateMedia({ colorScheme: scheme });
+		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+		await page.screenshot({ path: path.join(FRAMES, `${name}-${page.viewportSize()!.width}-${scheme}.png`), animations: 'disabled' });
+	}
+	await page.emulateMedia({ colorScheme: 'light' });
+}
+
+/**
+ * The toast stays up, as a pointer resting on it keeps it, however long the way back to the box takes (an ordinary toast
+ * otherwise goes after 3 s, which a phone's way back can outlast). So only the box coming back can take it away. A phone has
+ * no resting pointer: where its way back is under the toast (an image's Comment control), the leg lets the toast go instead.
+ */
+async function holdToast(toastLocator: Locator) {
+	await toastLocator.dispatchEvent('mouseenter');
+}
+
+/**
+ * The first comment POST (to any artifact when `artifactId` is `*`) that `match` takes is held until `fail()`, which then
+ * fails it as a dropped connection; later ones go through.
+ */
+async function holdFirstPost(page: Page, artifactId: string, match: (body: { parent_id?: string } | null) => boolean = () => true) {
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	let posts = 0, seen!: () => void;
+	const arrived = new Promise<void>((resolve) => { seen = resolve; });
+	await page.route(`**/api/artifacts/${artifactId}/comments*`, async (route) => {
+		const request = route.request();
+		if (request.method() !== 'POST' || !match(request.postDataJSON()) || posts++ > 0) return route.continue();
+		seen();
+		await held;
+		return route.abort('failed');
+	});
+	return { arrived, fail: release };
+}
+
+const DOC = '# One place\n\nThe router decides where an inbound event goes.\n\nA second paragraph to keep the margin honest.\n';
+const QUOTE = 'The router decides';
+const SIZES = { 'chromium-desktop': { width: 1440, height: 900 }, 'chromium-mobile': { width: 393, height: 852 } } as const;
+type Project = keyof typeof SIZES;
+const phone = (page: Page) => page.viewportSize()!.width <= 768;
+
+/** Opens an image's comment box at (fx, fy) to (gx, gy): a drag with the mouse, or Comment then a tap on a phone. */
+async function drawBox(page: Page, from: [number, number], to: [number, number]) {
+	if (phone(page)) {
+		await commentButton(page).tap();
+		const spot = await at(page, ...from);
+		await page.touchscreen.tap(spot.x, spot.y);
+	} else {
+		await drag(page, await at(page, ...from), await at(page, ...to));
+	}
+	await expect(composer(page)).toBeVisible();
+}
+
+test.describe('@flow:document-comments a post that fails after its box closed says why in a toast, then only in its box', () => {
+	test.beforeEach(async ({ page }, testInfo) => {
+		test.skip(!(testInfo.project.name in SIZES), 'Taken at 1440 and 393 only');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(150_000);
+		await page.setViewportSize(SIZES[testInfo.project.name as Project]);
+	});
+
+	test('document: closed while posting, a toast; the composer opened again says why, and the toast goes', async ({ page, request }, testInfo) => {
+		const document = await seedLiveDocument(request, 'one-place-doc', DOC);
+		await openLiveDocument(page, document);
+		const wire = await holdFirstPost(page, document.artifactId);
+		await beginComment(page, QUOTE, 'Name the fallback route');
+		await composer(page).press('ControlOrMeta+Enter');
+		await wire.arrived;
+		await composer(page).press('Escape');
+		await expect(composer(page), 'the box is closed while the post is out').toHaveCount(0);
+		wire.fail();
+		await expect(toast(page), 'with no box on screen, the toast says why').toBeVisible({ timeout: 30_000 });
+		await holdToast(toast(page));
+		await frame(page, 'document-closed-toast');
+		await beginComment(page, QUOTE);
+		await expect(composer(page), 'the text is kept').toHaveValue('Name the fallback route');
+		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
+		await expect(toast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
+		await expectFailureLook(page, testInfo, reason(page), 'document comment box');
+		await frame(page, 'document-reopened-reason');
+	});
+
+	test('image: closed while posting, a toast; the box drawn again says why, and the toast goes', async ({ page, request }, testInfo) => {
+		const seeded = await seedImage(page, request, 'one-place-image');
+		const wire = await holdFirstPost(page, seeded.artifactId);
+		await openThread(page, seeded.sessionTitle, page.viewportSize()!.width);
+		await drawBox(page, [0.2, 0.25], [0.45, 0.5]);
+		await composer(page).fill('The header is too tall');
+		await composer(page).press('ControlOrMeta+Enter');
+		await wire.arrived;
+		await composer(page).press('Escape');
+		await expect(composer(page), 'the box is closed while the post is out').toHaveCount(0);
+		wire.fail();
+		await expect(toast(page), 'with no box on screen, the toast says why').toBeVisible({ timeout: 30_000 });
+		await holdToast(toast(page));
+		await frame(page, 'image-closed-toast');
+		if (phone(page)) {
+			// A phone has no pointer to rest on the toast, so once the frame is taken it is let go and lasts its own time. It sits over
+			// the image's Comment control, so the way back waits for it to run out; the box drawn then says why, with no toast.
+			await toast(page).dispatchEvent('mouseleave');
+			await expect(toast(page), 'on a phone the toast runs out').toHaveCount(0, { timeout: 15_000 });
+		}
+		await drawBox(page, [0.5, 0.55], [0.7, 0.75]);
+		await expect(composer(page), 'the text is kept').toHaveValue('The header is too tall');
+		await expect(reason(page), 'the box says why once it is open again').toBeVisible();
+		await expect(toast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
+		await expectFailureLook(page, testInfo, reason(page), 'image comment box');
+		await frame(page, 'image-reopened-reason');
+	});
+
+	test('reply in the comments drawer: the image viewer opened over the drawer as its post fails, so a toast says why', async ({ page, request }) => {
+		const width = page.viewportSize()!.width;
+		const seeded = await seedImageDocument(page, request, `one-place-drawer-${width}`, null);
+		await openDocument(page, seeded, width);
+		// Two comments on parts of the document's image, made as a person makes them; Back sends what the image holds.
+		await openImage(page);
+		await commentOnRegion(page, 'The header crowds the logo', { x: 0.1, y: 0.1 });
+		await page.keyboard.press('Escape');
+		await commentOnRegion(page, 'The footer is too faint', { x: 0.6, y: 0.6 });
+		await page.keyboard.press('Escape');
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+
+		await openComments(page);
+		const list = page.locator('[data-doc-comments-drawer]');
+		const replying = list.locator('.ct').filter({ hasText: 'The footer is too faint' });
+		const reply = await replyField(replying);
+		await reply.fill('Lighten it a step');
+		const wire = await holdFirstPost(page, '*', (body) => !!body?.parent_id);
+		await replying.getByRole('button', { name: 'Send reply' }).click();
+		await wire.arrived;
+
+		// While the reply is out, the other card opens the viewer at its tag, over the drawer: the drawer stays open beneath it,
+		// out of sight, so the reply's field is still on the page and laid out where it was, but nobody can see it.
+		await list.locator('.ct').filter({ hasText: 'The header crowds the logo' }).locator('.ct-original').click();
+		await expect(overlay(page)).toBeVisible();
+		await expect(list).toBeHidden();
+		await expect(reply, 'the field is still mounted under the viewer').toBeAttached();
+		await expect(reply).toBeHidden();
+
+		wire.fail();
+		await expect(toast(page), 'its field is covered, so the toast says why').toBeVisible({ timeout: 30_000 });
+		await expect(reply, 'the reply is kept').toHaveValue('Lighten it a step');
+	});
+});

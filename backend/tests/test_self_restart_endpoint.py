@@ -921,6 +921,7 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
     from automation import restart, restart_startup, update_failure_notice
     from automation import self_restart as sr
     from loguru import logger
+    from plans import public as plans
 
     events: list[str] = []
     monkeypatch.setattr(
@@ -953,6 +954,12 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
 
     async def harness_ready() -> None:
         events.append("harness")
+
+    async def no_recovery() -> None:
+        return None
+
+    # The drive also starts the marker-gated comment-recovery pass; not this test's subject.
+    monkeypatch.setattr(plans, "recover_person_comments", no_recovery)
 
     await restart_startup.run_startup_drive(
         harness_ready(), recovered, wakes, rolled_back, logger,

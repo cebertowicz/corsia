@@ -66,6 +66,20 @@ ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_bulk_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_bulk_ms DOUBLE;
+-- Browser-side request timing (see infra/client_request_timing.py): one row per day, engine, method,
+-- route template and measure. A request whose browser left a measure unfilled adds no row for it.
+CREATE TABLE IF NOT EXISTS client_request_timing_daily (
+    day DATE NOT NULL,
+    engine VARCHAR NOT NULL,
+    method VARCHAR NOT NULL,
+    route VARCHAR NOT NULL,
+    measure VARCHAR NOT NULL,
+    count BIGINT NOT NULL,
+    sum_ms DOUBLE NOT NULL,
+    max_ms DOUBLE NOT NULL,
+    buckets INTEGER[] NOT NULL,
+    PRIMARY KEY (day, engine, method, route, measure)
+);
 -- request_slow has no index. Nothing in the app reads it, the nightly age prune is
 -- a range delete that row-group min/max already narrows, and deleting through
 -- the old ts index failed ('Failed to delete all rows from index'), invalidating

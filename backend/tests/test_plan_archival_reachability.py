@@ -81,12 +81,12 @@ def test_archive_still_refuses_a_terminal_node_whose_live_child_has_open_work(db
     A cancellation settles the work the child had and retires it; work the
     child takes on after being brought back is open work like any other.
     """
-    from core.thread_lifecycle import reactivate_settled_worker
+    from core.thread_lifecycle import reactivate_retired_worker
 
     plan, node = _delegated(db)
     service.transition_node(node.id, "failed", db=db)
     db.commit()
-    reactivate_settled_worker(db, "child")
+    reactivate_retired_worker(db, "child")
     _open_child_work(db)
 
     with pytest.raises(service.PlanError, match="settled first"):
@@ -98,12 +98,12 @@ def test_archive_still_refuses_a_terminal_node_whose_live_child_has_open_work(db
 
 def test_the_spawned_work_refusal_names_the_childs_exact_open_nodes(db):
     """"Settle the child's work" is only actionable if it says which work."""
-    from core.thread_lifecycle import reactivate_settled_worker
+    from core.thread_lifecycle import reactivate_retired_worker
 
     plan, node = _delegated(db)
     service.transition_node(node.id, "failed", db=db)
     db.commit()
-    reactivate_settled_worker(db, "child")
+    reactivate_retired_worker(db, "child")
     child_plan = _open_child_work(db)
     (open_id,) = [
         row["id"] for row in db.execute(

@@ -271,14 +271,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
     ask = params.get("ask_artifact_id")
     if not isinstance(ask, str) or not ask.strip():
         raise service.PlanInputError(NO_ASK)
-    known, owner = artifact_links.identity_owner(ask, db=db)
-    if not known:
-        raise service.PlanInputError(f"ask_artifact_id {ask!r} names no registered artifact")
-    if owner != plan["owner_id"]:
-        raise service.PlanInputError("ask_artifact_id must name an artifact this thread owns")
-    identity = db.execute(
-        "SELECT type,state FROM artifact_identities WHERE id=?", (ask.strip(),),
-    ).fetchone()
+    identity = artifact_links.require_ask_owner(db, ask, plan["owner_id"])
     if identity["type"] == decision_projection.DECISION_TYPE:
         raise service.PlanInputError(
             "a decision is not blocked on; raise it, and it holds its task by itself"

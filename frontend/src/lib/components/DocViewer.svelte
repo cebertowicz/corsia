@@ -27,7 +27,7 @@
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reloadAfterLegacySave, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
-	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
@@ -52,7 +52,6 @@
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { createReviewBarState, documentAskOf } from '$lib/reviewBarState.svelte';
-	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
@@ -100,7 +99,6 @@
 		liveGeneration = state.textGeneration;
 	});
 
-	const commentRetryToast = createCommentRetryToast(toasts);
 	let presenceRanges = $state<PresenceRange[]>([]);
 	let presenceView = $state<PresenceView | null>(null);
 	let activity = $state<DocCanvasActivity>();
@@ -169,7 +167,7 @@
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
-		ensureArtifactId: ensureEditorArtifactId, onFailure: commentRetryToast.remember,
+		ensureArtifactId: ensureEditorArtifactId,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
@@ -181,7 +179,6 @@
 		commentUI.state = { kind: 'thread', id };
 		commentDraft.set(null);
 		feedbackStatus?.commentCreated();
-		commentRetryToast.dismissAfterSuccess();
 	}
 	const threadActions = createThreadActions(() => loadedArtifactId, () => feedbackStatus?.commentCreated(), () => target?.threadId ?? null);
 

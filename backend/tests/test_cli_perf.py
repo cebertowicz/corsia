@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 import cli_perf
-from infra.request_timing import _BUCKET_UPPERS
+from infra.request_timing import BUCKET_UPPERS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,8 +32,8 @@ def api(monkeypatch):
 
 
 def _bucketed(duration_ms: float) -> list[int]:
-    buckets = [0] * len(_BUCKET_UPPERS)
-    buckets[next(i for i, upper in enumerate(_BUCKET_UPPERS) if duration_ms <= upper)] = 1
+    buckets = [0] * len(BUCKET_UPPERS)
+    buckets[next(i for i, upper in enumerate(BUCKET_UPPERS) if duration_ms <= upper)] = 1
     return buckets
 
 

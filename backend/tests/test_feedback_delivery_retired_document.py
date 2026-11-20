@@ -104,6 +104,49 @@ def test_a_re_keyed_batch_answers_the_review_request_that_sits_on_the_live_ident
     assert public.get_node(result["node_id"], db=db).state == "accepted"
 
 
+@pytest.mark.parametrize('state', ['open', 'undelivered'])
+def test_migrated_project_recipient_rekeys_before_settling_live_person_review(review_env, state):
+    db, source = review_env
+    live = seed_document(db, "owner", name="Promoted.md")
+    result = escalated_request(db, source)
+    add_comment(db, source, author_id="reviewer")
+    _retire(db, source, live, "promoted")
+    db.execute("UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?", (live,))
+    db.execute("UPDATE doc_review_requests SET artifact_id=? WHERE id=?", (live, result["id"]))
+    db.execute("UPDATE doc_comments SET artifact_id=? WHERE artifact_id=?", (live, source))
+    db.execute("UPDATE doc_feedback_batches SET recipient_id='project:legacy',state=?,attempts=2,undelivered_reason='owner_unavailable'", (state,))
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203, reverse_203_to_202
+    migrate_202_to_203(db)
+    db.commit()
+    if state == 'open':
+        feedback_batches.close_due(FAR_FUTURE, db=db)
+    else:
+        assert feedback_batches.retry_batch(db, batches(db)[0]['id'])[0]
+    reverse_203_to_202(db)
+    (batch,) = batches(db)
+    assert batch['attempts'] == 3 and batch['undelivered_reason'] is None
+    assert not feedback_batches.retry_batch(db, batch['id'])[0]
+    assert (batch["artifact_id"], batch["recipient_id"], batch["delivery_outcome"]) == (live, "ui", "ui")
+    assert stored(db, result["id"])["state"] == "submitted"
+    assert public.get_node(result["node_id"], db=db).state == "accepted"
+
+
+def test_legacy_project_recipient_without_live_identity_keeps_ui_outcome(db, notes):
+    source = seed_document(db, "owner")
+    add_comment(db, source, author_kind="agent", author_id="author", author="Author")
+    db.execute("UPDATE doc_feedback_batches SET recipient_id='project:legacy'")
+    _retire(db, source, None, "file_gone")
+    from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
+    migrate_202_to_203(db)
+    db.commit()
+    feedback_batches.close_due(FAR_FUTURE, db=db)
+    (batch,) = batches(db)
+    assert (batch["artifact_id"], batch["recipient_id"], batch["state"], batch["delivery_outcome"]) == (
+        source, "ui", "delivered", "ui"
+    )
+    assert notes == []
+
+
 def test_a_persons_batch_on_a_document_with_no_live_identity_settles_silently(db, notes):
     source = seed_document(db, "owner")
     add_comment(db, source, author_kind="user", author="Steve")
