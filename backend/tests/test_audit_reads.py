@@ -309,8 +309,10 @@ def test_checkpoint_health_counts_only_owned_rows(isolated_db, monkeypatch):
         since="2026-09-22T00:00:00Z", until="2026-09-23T00:00:00Z",
     )
     assert result["rows"] == [
-        {"trigger": "idle", "status": "failed", "n": 1, "recovered": 1, "unrecovered": 0},
-        {"trigger": "idle", "status": "installed", "n": 1, "recovered": 0, "unrecovered": 0},
+        {"trigger": "idle", "status": "failed", "mode": "cold", "n": 1,
+         "recovered": 1, "unrecovered": 0},
+        {"trigger": "idle", "status": "installed", "mode": "cold", "n": 1,
+         "recovered": 0, "unrecovered": 0, "zero_entry": 1, "limit_refusal": 0},
     ]
 
 
@@ -334,7 +336,8 @@ def test_checkpoint_health_unrecovered_failure_has_zero_recovered(isolated_db, m
         since="2026-09-22T00:00:00Z", until="2026-09-23T00:00:00Z",
     )
     assert result["rows"] == [
-        {"trigger": "idle", "status": "failed", "n": 1, "recovered": 0, "unrecovered": 1},
+        {"trigger": "idle", "status": "failed", "mode": "cold", "n": 1,
+         "recovered": 0, "unrecovered": 1},
     ]
 
 
@@ -372,10 +375,10 @@ def test_checkpoint_health_aggregates_large_scoped_history_within_deadline(
     )
 
     assert result["rows"] == [
-        {"trigger": "idle", "status": "failed", "n": 20_000, "recovered": 20_000,
-         "unrecovered": 0},
-        {"trigger": "idle", "status": "installed", "n": 1, "recovered": 0,
-         "unrecovered": 0},
+        {"trigger": "idle", "status": "failed", "mode": "cold", "n": 20_000,
+         "recovered": 20_000, "unrecovered": 0},
+        {"trigger": "idle", "status": "installed", "mode": "cold", "n": 1,
+         "recovered": 0, "unrecovered": 0, "zero_entry": 1, "limit_refusal": 0},
     ]
 
 
