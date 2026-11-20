@@ -62,6 +62,11 @@ REVIEWER_BRIEF = (
     "The step's check, as of hand-over: {check}"
 )
 REVIEWER_HOW = "\n\nHow to review: {instruction}"
+#: How a reviewer whose verdict settles the step reports it: told here, at hand-over, not in every turn's tool schema.
+REVIEWER_VERDICT = (
+    "\n\nWhen you finish, submit your plan task with request_review and verdict 'pass' or 'fail', "
+    "with your findings in evidence, worst first. The verdict settles the review; you change nothing yourself."
+)
 #: The author's own message, kept as help in finding the work.
 AUTHOR_NOTE = (
     "From the author, to help you find the work (where it is, what changed); "
@@ -163,6 +168,10 @@ def _reviewer_brief(db, node) -> str | None:
         brief += REVIEWER_HOW.format(
             instruction=field(str(node["description"]), REVISION_BRIEF_MAX_BYTES, what="description"),
         )
+    from plans import review_settle
+
+    if review_settle.settled_by_review(workflow_fields.creation_payload(db, str(node["id"]))):
+        brief += REVIEWER_VERDICT
     return brief
 
 

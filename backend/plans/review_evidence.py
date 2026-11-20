@@ -153,12 +153,14 @@ def submit(
     db,
     owner_thread_id: str | None = None,
     paused_plan_binds: bool = True,
+    verdict: str | None = None,
 ):
     """Append review evidence and move active work to review exactly once.
 
     ``paused_plan_binds`` is False only for Mark done, which has already ended
     the task's own holds: it skips the paused-plan refusal, because a plan the
-    user paused does not stop the user settling their own task.
+    user paused does not stop the user settling their own task. ``verdict`` is
+    a reviewer's pass or fail, kept with its evidence (``plans.review_settle``).
     """
 
     node = service._live_node_row(db, node_id)
@@ -183,6 +185,7 @@ def submit(
             "evidence": evidence,
             "artifact_ids": ids,
             "requirements_revision": node["requirements_revision"],
+            **({"verdict": verdict} if verdict is not None else {}),
         },
     )
     if node["state"] == "active":
