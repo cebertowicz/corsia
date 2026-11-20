@@ -192,20 +192,34 @@ describe('createClientTiming', () => {
 			expect(BATCH_ROWS * 300).toBeLessThan(KEEPALIVE_BODY_BYTES);
 		});
 
-		it('sends one keepalive body inside the limit and leaves the rest for the timer', async () => {
+		it('sends every body that fits the budget at once, so more than one batch is not lost on exit', async () => {
 			const { sent, timers, timing, settle } = setup();
 			for (let n = 0; n < 45; n += 1) timing.record(routed(n), 0); // 180 rows
 			timing.flush(true);
 			await settle();
-			expect(sent).toHaveLength(1);
-			expect(sent[0].keepalive).toBe(true);
-			expect(sent[0].batch.rows.length).toBe(BATCH_ROWS);
-			expect(JSON.stringify(sent[0].batch).length).toBeLessThan(KEEPALIVE_BODY_BYTES);
-			// The page may only be a background tab: the timer armed by the first sample still sends the other 80.
-			expect(timers).toHaveLength(1);
+			expect(sent.map((s) => s.batch.rows.length)).toEqual([BATCH_ROWS, 80]);
+			expect(sent.every((s) => s.keepalive)).toBe(true);
+			expect(sent.reduce((sum, s) => sum + JSON.stringify(s.batch).length, 0)).toBeLessThan(KEEPALIVE_BODY_BYTES);
+			timers[0](); // nothing is left for the timer
+			await settle();
+			expect(sent).toHaveLength(2);
+		});
+
+		it('keeps the keepalive total inside the budget and leaves only the rest for the timer', async () => {
+			const { sent, timers, timing, settle } = setup();
+			for (let n = 0; n < 150; n += 1) timing.record(routed(n), 0); // 600 rows
+			timing.flush(true);
+			await settle();
+			const total = sent.reduce((sum, s) => sum + JSON.stringify(s.batch).length, 0);
+			const inHide = sent.reduce((sum, s) => sum + s.batch.rows.length, 0);
+			expect(sent.length).toBeGreaterThan(1);
+			expect(sent.every((s) => s.keepalive)).toBe(true);
+			expect(total).toBeLessThanOrEqual(KEEPALIVE_BODY_BYTES);
+			expect(inHide).toBeLessThan(600);
+			// The page may only be a background tab: the armed timer sends what the budget could not.
 			timers[0]();
 			await settle();
-			expect(sent.map((s) => s.batch.rows.length)).toEqual([BATCH_ROWS, 80]);
+			expect(sent.reduce((sum, s) => sum + s.batch.rows.length, 0)).toBe(600);
 		});
 
 		it('never sends a body over the keepalive budget even with fewer rows than a batch', async () => {
@@ -254,18 +268,33 @@ describe('createClientTiming', () => {
 			expect(sent[1].batch.issues).toEqual({ 'post_failed:503': 1 });
 		});
 
-		it('counts the rows the server did not keep', async () => {
-			let kept = 1;
-			const { sent, timers, reports, timing, settle } = setup(() => Promise.resolve(reply(202, { kept })));
+		it('counts a POST in which the server dropped rows, and not one it kept nothing of on purpose', async () => {
+			let body = { kept: 1, dropped: 3 };
+			const { sent, timers, reports, timing, settle } = setup(() => Promise.resolve(reply(202, body)));
 			timing.record(base, 0); // 4 rows (total, wait, server, network)
 			timers[0]();
 			await settle();
-			kept = 99;
+			body = { kept: 0, dropped: 0 }; // analytics disabled: kept nothing, dropped nothing
 			timing.record(base, 0);
 			timers[1]();
 			await settle();
-			expect(sent[1].batch.issues).toEqual({ kept_lt_sent: 1 });
-			expect(reports.some((message) => message.includes('kept_lt_sent'))).toBe(true);
+			timing.record(base, 0);
+			timers[2]();
+			await settle();
+			expect(sent[1].batch.issues).toEqual({ server_dropped: 1 });
+			expect(sent[2].batch.issues).toBeUndefined();
+			expect(reports.filter((message) => message.includes('server_dropped'))).toHaveLength(1);
+		});
+
+		it('raises no issue when the server keeps nothing because analytics is off', async () => {
+			const { sent, timers, reports, timing, settle } = setup(() => Promise.resolve(reply(202, { kept: 0, dropped: 0 })));
+			for (let i = 0; i < 3; i += 1) {
+				timing.record(base, 0);
+				timers[i]();
+				await settle();
+			}
+			expect(reports).toHaveLength(0);
+			expect(sent.every((s) => s.batch.issues === undefined)).toBe(true);
 		});
 
 		it('delivers issues once they were taken by a successful POST', async () => {

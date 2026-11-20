@@ -28,15 +28,15 @@ export const CLIENT_TIMING_PATH = '/api/system/perf/client-timing';
 /** The key for a request whose response named no route (an engine that hides Server-Timing). The server accepts this one non-template route. */
 export const UNKNOWN_ROUTE = '/<unknown>';
 
-/** The server's own timing flush runs once a minute; one batch a minute keeps the page to the same rate. */
 const FLUSH_MS = 60_000;
 /** Rows per POST: the server's limit. The largest row measured is 270 bytes (the longest registered route, five-digit counts), so a batch is under 28 KiB. */
 export const BATCH_ROWS = 100;
 /** The browser refuses keepalive bodies past 64 KiB in flight across the page; 48 KiB leaves room for other keepalive sends. */
 export const KEEPALIVE_BODY_BYTES = 48 * 1024;
-/** One page load counting more of an issue than this is plainly broken; matches the server's cap. */
+/** What a body carries besides its rows: the engine and up to MAX_ISSUE_KEYS issues, counted against the budget for each body. */
+const KEEPALIVE_BODY_OVERHEAD = 512;
+/** Matches the server's caps: a count past this is plainly broken; the server refuses more keys. */
 const ISSUE_COUNT_CAP = 1_000;
-/** Distinct issue keys in one POST: the server refuses more. */
 const MAX_ISSUE_KEYS = 8;
 /** Resource timestamps are rounded by the browser; a request "sent" up to a millisecond before it started is rounding, not a measurement. */
 const TIMER_ROUNDING_MS = 1;
@@ -56,7 +56,7 @@ export interface ClientTimingRow {
 export interface ClientTimingBatch {
 	engine: Engine;
 	rows: ClientTimingRow[];
-	/** Counts of what went wrong in this capture: `observer_install_failed`, `kept_lt_sent`, `post_failed:<status>` or `post_failed:network`. */
+	/** Counts of what went wrong in this capture: `observer_install_failed`, `server_dropped`, `post_failed:<status>` or `post_failed:network`. */
 	issues?: Record<string, number>;
 }
 
@@ -146,9 +146,8 @@ export function createClientTiming(options: {
 	const report = options.report ?? ((message: string) => console.error(message));
 
 	function arm(): void {
-		if (armed) return;
+		if (!armed) setTimer(() => flush(false), FLUSH_MS);
 		armed = true;
-		setTimer(() => flush(false), FLUSH_MS);
 	}
 
 	function addIssue(kind: string, by = 1): void {
@@ -161,9 +160,7 @@ export function createClientTiming(options: {
 		addIssue(kind);
 		if (reported.has(kind)) return;
 		reported.add(kind);
-		try {
-			report(`[client timing] ${kind} (${options.engine})${detail ? `: ${detail}` : ''}`);
-		} catch {} // a failing logger cannot be reported to itself
+		try { report(`[client timing] ${kind} (${options.engine})${detail ? `: ${detail}` : ''}`); } catch {} // a failing logger cannot be reported to itself
 	}
 
 	/** One POST. Resolves true when the server took it; every failure becomes a count that rides on the next batch. */
@@ -180,8 +177,8 @@ export function createClientTiming(options: {
 				noteIssue(`post_failed:${response.status}`);
 				return false;
 			}
-			const body = (await response.json().catch(() => null)) as { kept?: unknown } | null;
-			if (typeof body?.kept === 'number' && body.kept < rows.length) noteIssue('kept_lt_sent', `${body.kept} of ${rows.length} rows kept`);
+			const body = (await response.json().catch(() => null)) as { dropped?: unknown } | null;
+			if (typeof body?.dropped === 'number' && body.dropped > 0) noteIssue('server_dropped', `${body.dropped} of ${rows.length} rows rejected`);
 			return true;
 		} catch (error) {
 			restore();
@@ -190,26 +187,30 @@ export function createClientTiming(options: {
 		}
 	}
 
-	/** The rows a page-hide POST may carry: as many as fit the keepalive budget, never more than one batch. */
-	function takeForKeepalive(): ClientTimingRow[] {
-		const rows: ClientTimingRow[] = [];
+	/** The bodies a page-hide flush may send: batches of up to BATCH_ROWS, all together inside the keepalive budget. */
+	function takeForKeepalive(): ClientTimingRow[][] {
+		const bodies: ClientTimingRow[][] = [];
 		let bytes = 0;
 		for (const [key, row] of cells) {
 			const size = JSON.stringify(wire(row)).length + 1;
-			if (rows.length >= BATCH_ROWS || bytes + size > KEEPALIVE_BODY_BYTES) break;
-			rows.push(row);
-			bytes += size;
+			let body = bodies[bodies.length - 1];
+			const overhead = !body || body.length >= BATCH_ROWS ? KEEPALIVE_BODY_OVERHEAD : 0;
+			if (bytes + overhead + size > KEEPALIVE_BODY_BYTES) break;
+			if (overhead) bodies.push((body = []));
+			body.push(row);
+			bytes += overhead + size;
 			cells.delete(key);
 		}
-		return rows;
+		return bodies;
 	}
 
-	/** Send what is pending: on page hide one keepalive body (the rest waits for the armed timer); otherwise batches in turn, stopping at the first failure. */
+	/** Send what is pending: on page hide every body that fits the keepalive budget at once (a background tab sends the rest on the armed timer); otherwise batches in turn, stopping at the first failure. */
 	function flush(hidden: boolean): void {
 		if (!hidden) armed = false;
 		if (cells.size === 0 && !issues.observer_install_failed) return;
 		if (hidden) {
-			void post(takeForKeepalive(), true);
+			const bodies = takeForKeepalive();
+			for (const rows of bodies.length ? bodies : [[]]) void post(rows, true); // [[]]: issues only
 			return;
 		}
 		const all = [...cells.values()];
@@ -268,7 +269,6 @@ export function isApiFetch(entry: TimingEntry): boolean {
 }
 
 let started = false;
-
 /** Install the page's single observer. Safe to call on every request; only the first does anything. */
 export function startClientTiming(send: SendBatch): void {
 	if (started) return;

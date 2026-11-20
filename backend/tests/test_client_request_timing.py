@@ -141,9 +141,10 @@ def test_a_batch_over_the_row_limit_is_refused():
     assert _post(_client(), rows).status_code == 422
 
 
-def test_disabled_analytics_keeps_nothing(analytics, monkeypatch):
+def test_disabled_analytics_keeps_nothing_drops_nothing_and_warns_of_nothing(analytics, monkeypatch, warnings):
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
-    assert _post(_client(), [_item()]).json() == {"kept": 0, "dropped": 1}
+    assert _post(_client(), [_item()], issues={"observer_install_failed": 1}).json() == {"kept": 0, "dropped": 0}
+    assert not [w for w in warnings if "client request timing" in w]
     assert analytics.execute("SELECT COUNT(*) FROM client_request_timing_daily").fetchone()[0] == 0
 
 
@@ -159,13 +160,13 @@ def test_write_failure_is_swallowed_and_logged(monkeypatch, warnings):
 
 def test_issues_are_validated_capped_and_logged_once_per_post(analytics, warnings):
     issues = {"observer_install_failed": 1, "post_failed:503": 5_000_000, "post_failed:network": 2,
-              "post_failed:99999": 1, "made_up": 4, "kept_lt_sent": -3}
+              "post_failed:99999": 1, "made_up": 4, "server_dropped": -3}
     assert _post(_client(), [], engine="webkit", issues=issues).json() == {"kept": 0, "dropped": 0}
     [line] = [w for w in warnings if "client request timing:" in w]
     assert "engine=webkit" in line and "posts_from_engine=1" in line
     assert "'observer_install_failed': 1" in line
     assert f"'post_failed:503': {crt.ISSUE_COUNT_CAP}" in line
-    assert "'post_failed:network': 2" in line and "'kept_lt_sent': 0" in line
+    assert "'post_failed:network': 2" in line and "'server_dropped': 0" in line
     assert "made_up" not in line and "99999" not in line
 
 

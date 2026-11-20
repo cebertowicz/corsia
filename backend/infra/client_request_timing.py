@@ -54,7 +54,7 @@ DAY_SLACK = timedelta(days=1)
 #: the only stored route that is not a registered template, so such an engine still shows its waits.
 UNKNOWN_ROUTE: Final = "/<unknown>"
 #: What the page's capture can report about itself. ``post_failed:<status>`` takes any HTTP status.
-ISSUE_KINDS = ("observer_install_failed", "kept_lt_sent", "post_failed:network")
+ISSUE_KINDS = ("observer_install_failed", "server_dropped", "post_failed:network")
 _ISSUE_STATUS = re.compile(r"post_failed:[1-5]\d\d")
 #: Distinct issue keys in one POST: the three fixed kinds plus a handful of statuses.
 MAX_ISSUE_KEYS = 8
@@ -144,14 +144,16 @@ def write_rows(conn, rows: list[Row]) -> None:
 def ingest(engine: str, batch: list[Item], issues: dict[str, int], templates: frozenset[str]) -> tuple[int, int]:
     """Validate and store one client batch; return (kept, dropped) rows.
 
+    ``dropped`` is what the server rejected or failed to write; with analytics disabled both are 0.
+
     One WARNING per batch that carries issues or dropped rows is the server-side signal that a page's
     capture is failing. Analytics is non-load-bearing: a failed write drops the rows and says so.
     """
     _posts_by_engine[engine] += 1
     today = datetime.now(UTC).date()
-    rows = [] if analytics_disabled() else [
-        row for item in batch if (row := validate_row(item, today, templates)) is not None
-    ]
+    if analytics_disabled():
+        return 0, 0  # rows never meant to be stored are not dropped, and a disabled install has nothing to warn about
+    rows = [row for item in batch if (row := validate_row(item, today, templates)) is not None]
     kept = len(rows)
     if rows:
         try:
@@ -163,7 +165,7 @@ def ingest(engine: str, batch: list[Item], issues: dict[str, int], templates: fr
             kept = 0
     dropped = len(batch) - kept
     kinds = clean_issues(issues)
-    if kinds or (dropped and not analytics_disabled()):
+    if kinds or dropped:
         logger.warning(
             "client request timing: engine={} sent={} kept={} dropped={} issues={} posts_from_engine={}",
             engine, len(batch), kept, dropped, kinds, _posts_by_engine[engine],
