@@ -22,6 +22,8 @@ import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { sidebarCollapsed } from '$lib/stores/ui';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from './comments/mentionSelection';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -79,6 +81,8 @@ afterEach(() => {
 	canvases.forEach((canvas) => canvas.remove()); canvases = [];
 	vi.unstubAllGlobals();
 	suggestionRefusals.set({});
+	// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+	keptCommentDrafts.reset();
 	vi.clearAllMocks();
 });
 
@@ -131,7 +135,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('gives the column back to the picked card when a highlight is picked while the resolved list holds the place of a column at rest', () => {
 		const open = resolvedDrawerProps();
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		const focused = fromStore(focusedDocComment);
 		surface.state = { kind: 'list' };
 		try {
@@ -633,7 +637,7 @@ describe('DocCommentSurface suggestions', () => {
 		accept().click();
 		await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')).not.toBeNull());
 		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
-		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': 'The text changed on the server' } });
+		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': { message: 'The text changed on the server', kind: 'stale' } } });
 		// The card's note changed, but the card did not move: anything typed in it stays where it was.
 		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
@@ -700,7 +704,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ get state() { return liveState.current; }, get artifactId() { return liveArtifact.current; } });
 		const refuse = async () => {
 			document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!.click();
-			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': 'The text changed on the server' }));
+			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': { message: 'The text changed on the server', kind: 'stale' } }));
 		};
 		await refuse();
 		state.set(null); flushSync();
@@ -1041,5 +1045,78 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const decided = (id: string) => ({ ...suggestion, id, decision: 'accepted' as const, replies: [{ id: 'r', author: 'you', text: 'Thanks', at: 'now' }] });
 		render({ state: { kind: 'list' }, comments: [decided('a'), decided('b')] });
 		expect(document.body.textContent).not.toMatch(/accept all/i);
+	});
+});
+
+describe('DocCommentSurface: a reply being typed', () => {
+	const plain = { ...suggestion, replacement: undefined };
+	const scope = documentDraftKey(target);
+	const field = () => document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+	function type(text: string, caret: [number, number]) {
+		const input = field();
+		input.value = text; input.setSelectionRange(...caret);
+		input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	}
+	function again(overrides: Record<string, unknown> = {}) {
+		unmount(component!); component = null; host.remove();
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+	afterEach(() => { delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollIntoView; });
+	function open(overrides: Record<string, unknown> = {}) {
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+
+	// Every exit that loses a reply on dev (another conversation, another tab, the pane closed, Back on a phone) unmounts this surface.
+	it('keeps its text and caret when the surface goes away and comes back', () => {
+		open();
+		type('half a reply', [2, 6]);
+		again();
+		expect(field().value).toBe('half a reply');
+		expect([field().selectionStart, field().selectionEnd]).toEqual([2, 6]);
+	});
+
+	it('shows why it did not post under its field, and keeps the text', () => {
+		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment. Your draft is kept. Try again.');
+		open();
+		expect(field().value).toBe('half a reply');
+		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+	});
+
+	it('posts under its own key, and text typed while it posted stays in the field', async () => {
+		let finish!: () => void;
+		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+		open({ onReply });
+		type('first', [5, 5]);
+		field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); flushSync();
+		type('first and more', [14, 14]);
+		finish(); await tick(); await tick(); flushSync();
+		expect(field().value).toBe('first and more');
+		expect(onReply).toHaveBeenCalledWith('comment-1', 'first', [], [], replyDraftKey(scope, 'comment-1'));
+	});
+
+	// A failed post says why under the field only while that field is on screen, so the field registers under its kept key.
+	it('counts as the box that says why a post failed while it is mounted, under its own key', () => {
+		const key = replyDraftKey(scope, 'comment-1');
+		open();
+		const box = document.body.querySelector<HTMLElement>('[data-comment-id="comment-1"] [data-reply-composer]')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+	});
+});
+
+describe('DocCommentSurface: a new comment being typed', () => {
+	it('counts its composer as the box that says why a post failed while it is mounted, under the document\'s key', async () => {
+		const scope = documentDraftKey(target);
+		// Drawn beside its text in the window, so its Popover is placed and shows it.
+		render({ state: { kind: 'draft' }, draft: { text: 'old text' }, comments: [], draftScope: scope, anchor: () => new DOMRect(520, 100, 20, 20) });
+		const box = document.body.querySelector<HTMLElement>('.composer')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(box.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
+		expect(keptCommentDrafts.onScreen(scope)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(scope)).toBe(false);
 	});
 });

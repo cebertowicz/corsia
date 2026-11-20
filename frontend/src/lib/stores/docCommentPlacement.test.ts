@@ -173,8 +173,10 @@ describe('comment placement in a live document (4.2)', () => {
 		const doc = await placedQuote();
 		doc.remote(text => { text.delete(4, 5); text.insert(4, 'H'); });
 		expect(doc.asks()).toHaveLength(2); // the edit inside the row asks for its flags
+		// The row already agrees with the answer; its next placement write proves the digest finished.
+		const placementWrite = vi.spyOn(docComments, 'update');
 		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 4, to_off: 5 }] });
-		await settled();
+		await vi.waitFor(() => expect(placementWrite).toHaveBeenCalledTimes(1));
 		doc.remote(text => text.insert(5, 'a'));
 		expect(row()).toMatchObject({ from: 4, to: 6 });
 	});
@@ -281,11 +283,12 @@ describe('comment placement in a live document (4.2)', () => {
 		await loadComments('artifact');
 		// The server's answer for an unresolved quote names only the rows its resolution placed.
 		doc.answer(doc.asks()[1]);
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placed', drawn: true, from: 6, to: 10 });
-		expect(row('c2')).toMatchObject({ placement: undefined, drawn: false, orphaned: true });
-		expect(commentsInDocumentOrder(rows(), doc.session.text.toString()).filter(comment => comment.orphaned).map(comment => comment.id))
-			.toEqual(['c2', 'lost']);
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placed', drawn: true, from: 6, to: 10 });
+			expect(row('c2')).toMatchObject({ placement: undefined, drawn: false, orphaned: true });
+			expect(commentsInDocumentOrder(rows(), doc.session.text.toString()).filter(comment => comment.orphaned).map(comment => comment.id))
+				.toEqual(['c2', 'lost']);
+		});
 	});
 
 	it('re-queues an older Reload after a newer refresh completes while its digest is delayed', async () => {
@@ -312,9 +315,13 @@ describe('comment placement in a live document (4.2)', () => {
 		release();
 		await vi.waitFor(() => expect(doc.asks()).toHaveLength(4));
 		expect(doc.asks()[3]).toMatchObject({ reload: true });
+		// The newer refresh already put the row here; wait for this Reload's own placement write.
+		const placementWrite = vi.spyOn(docComments, 'update');
 		doc.answer(doc.asks()[3], { ranges: [{ id: 'c1', from_off: 0, to_off: 5 }] });
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placed', from: 0, to: 5 });
+		await vi.waitFor(() => {
+			expect(placementWrite).toHaveBeenCalledTimes(1);
+			expect(row()).toMatchObject({ placement: 'placed', from: 0, to: 5 });
+		});
 		await loadLost(); // the re-queued reload settled
 		expect(doc.asks()).toHaveLength(5);
 	});
@@ -650,10 +657,11 @@ describe('placement classification by cleanliness (4.2 revision 13)', () => {
 		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 		overtake(doc);
 		release();
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placing', drawn: false });
-		expect(errors).not.toHaveBeenCalled();
-		expect(doc.asks()).toHaveLength(2);
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placing', drawn: false });
+			expect(errors).not.toHaveBeenCalled();
+			expect(doc.asks()).toHaveLength(2);
+		});
 	});
 });
 
@@ -704,11 +712,12 @@ describe('lost comments are placed again on comments load', () => {
 		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
 		doc.answer(reloads(doc)[0]); // names only c1: the reload can't place c2
-		await settled();
-		expect(row('c2')).toMatchObject({ orphaned: true, drawn: false });
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placed' });
+			expect(row('c2')).toMatchObject({ orphaned: true, drawn: false });
+		});
 		await loadComments('artifact');
-		await settled();
-		expect(reloads(doc)).toHaveLength(2);
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
 	});
 
 	it('asks on a later load when more comments are lost, even while the last answer is still being checked', async () => {
@@ -723,10 +732,9 @@ describe('lost comments are placed again on comments load', () => {
 		await settled();
 		expect(reloads(doc)).toHaveLength(2);
 		doc.answer(reloads(doc)[1]);
-		await settled();
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed' }));
 		await loadComments('artifact');
-		await settled();
-		expect(reloads(doc)).toHaveLength(3);
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(3));
 	});
 
 	it.each([

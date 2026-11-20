@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from infra.limit_history_schema import LIMIT_HISTORY_SCHEMA_SQL
+from infra.node_usage_schema import NODE_USAGE_SQL
 from infra.usage_rollup_schema import USAGE_ROLLUP_SQL
 
 LLM_USAGE_TURN_INDEX = "CREATE INDEX IF NOT EXISTS idx_llm_usage_turn ON llm_usage(turn_id) WHERE turn_id IS NOT NULL"
@@ -115,3 +116,5 @@ USAGE_SCHEMA_SQL = """
 """ + LIMIT_HISTORY_SCHEMA_SQL
 # The hourly rollup Measurement reads in place of the ledger (``api.usage_rollup``).
 USAGE_SCHEMA_SQL += USAGE_ROLLUP_SQL
+# Each plan node's usage grouped at write (``core.node_usage_groups`` adds the triggers).
+USAGE_SCHEMA_SQL += NODE_USAGE_SQL

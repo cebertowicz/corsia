@@ -148,6 +148,10 @@ def test_existing_database_startup_does_not_scan_every_btree(monkeypatch) -> Non
     monkeypatch.setattr(database, "get_db", lambda: Connection())
     monkeypatch.setattr(connections, "seed_builtin_connections", lambda: None)
     monkeypatch.setattr(subagent_caps, "seed_subagent_caps", lambda: None)
+    # This fixture holds no usage ledger; the stored-groups step's own startup paths are
+    # pinned in test_node_usage_groups and test_node_usage_rebuild_before_serving.
+    import core.node_usage_groups as node_usage_groups
+    monkeypatch.setattr(node_usage_groups, "ensure", lambda _db: {"rebuilt": False, "reason": "current"})
     try:
         database.init_db()
     finally:

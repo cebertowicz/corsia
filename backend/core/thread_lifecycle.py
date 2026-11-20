@@ -55,6 +55,11 @@ from infra.constants import (
 from thread.runtime_boundary import bump_history_epoch
 from infra.thread_driver import delete_thread_turns
 from infra.thread_inputs import invalidate_markers_for_archive
+from core.thread_lifecycle_workers import (  # noqa: F401 - this module is the one import path
+    RETIRED_WORKER_REASONS, SETTLED_WORKER_REASON,
+    archive_settled_worker, archive_stopped_worker,
+    reactivate_retired_worker,
+)
 from core.thread_lifecycle_paths import thread_dir as _thread_dir
 from core.thread_lifecycle_plans import (
     announce_lifecycle as _announce_lifecycle,
@@ -214,47 +219,6 @@ def set_user_archive_state(
     return False
 
 
-SETTLED_WORKER_REASON = "assignment_settled"
-
-
-def archive_settled_worker(db, sid: str, *, now: datetime | str | None = None) -> bool:
-    """Archive a temporary worker whose assignment settled; the sweep owns cleanup.
-
-    The third synchronous archive reason after the user's and the engine's:
-    the plan's, for a spawned worker with nothing left to do for the step that
-    spawned it. A root thread or a durable roster owner (``agent_enabled``) is
-    never retired this way. Like a user archive this changes lifecycle state
-    and withdraws open decisions. Retention later trims unregistered stale
-    ``working/`` units after the normal TTL; registered units stay until purge.
-    This transition deletes no result. Returns whether it changed.
-    """
-    timestamp = now if isinstance(now, str) else _iso(now or _now())
-    cursor = db.execute(
-        "UPDATE threads SET lifecycle_state = 'archived', archived_at = ?, "
-        "archived_reason = ?, updated_at = ? "
-        "WHERE id = ? AND spawned_by IS NOT NULL AND COALESCE(agent_enabled, 0) = 0 "
-        "AND COALESCE(lifecycle_state, 'active') IN ('active', 'dormant')",
-        (timestamp, SETTLED_WORKER_REASON, timestamp, sid),
-    )
-    if not cursor.rowcount:
-        return False
-    _rehome_on_end(db, sid, "archived")
-    _withdraw_owned_decisions(db, sid, reason="assignment settled")
-    return True
-
-
-def reactivate_settled_worker(db, sid: str, *, now: datetime | str | None = None) -> bool:
-    """Bring a retired worker back for an explicit new assignment -- only that reason."""
-    timestamp = now if isinstance(now, str) else _iso(now or _now())
-    cursor = db.execute(
-        "UPDATE threads SET lifecycle_state = 'active', dormant_at = NULL, "
-        "archived_at = NULL, archived_reason = NULL, updated_at = ? "
-        "WHERE id = ? AND lifecycle_state = 'archived' AND archived_reason = ?",
-        (timestamp, sid, SETTLED_WORKER_REASON),
-    )
-    return bool(cursor.rowcount)
-
-
 def _apply_archive(db, sid: str, now: datetime, reason: str) -> None:
     """Mark archived without deleting files or retiring their identities.
 
@@ -329,7 +293,7 @@ def _evaluate_thread(
     # user's unarchive does) nor a settled worker's (only a new assignment does).
     resumed = (
         state in ("dormant", "archived")
-        and archived_reason not in ("user", SETTLED_WORKER_REASON)
+        and archived_reason not in ("user", *RETIRED_WORKER_REASONS)
         and idle_days < cfg.dormant_after_days
     )
     if resumed:

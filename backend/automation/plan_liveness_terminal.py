@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from automation import plan_liveness as liveness
+from automation.continuation.progress import ADVANCED
 from automation.turn_end_effects import PendingTurnEndEffects
 from infra.database import write_transaction
 
@@ -33,6 +34,38 @@ def _stopped_below_cut(connection, thread_id: str, after) -> bool:
     )
 
 
+def withdraw_unread_wake(connection, thread_id: str, *, error) -> None:
+    """After an error, withdraw the reminder the Turn never read and back off.
+
+    A reminder delivered into a running Turn steers it at the flat in-Turn
+    interval with the cycle held. A Turn blocked in one provider call never
+    reads it, so left queued it would start the successor at once, with no
+    backoff, on every error. ``finish_turn`` calls it, through
+    ``queue_continue_or_withdraw_wake``, inside the terminal write before the
+    successor claim, for an error that left no continue input; a person's
+    input queued behind it still starts a Turn. A restart keeps its own
+    recovery. A provider reset needs no exemption: its wait,
+    armed by ``on_thread_turn_complete`` from the text or the harness's
+    reset time, replaces this backoff and owns the resumption.
+    """
+    from infra.queued_input_settlement import cancel_queued_liveness_wakes
+    from infra.thread_recovery import RESTART_TURN_ERROR
+    from plans.public import liveness_signal
+
+    if str(error or "") == RESTART_TURN_ERROR:
+        return
+    if not cancel_queued_liveness_wakes(connection, thread_id):
+        return
+    current = liveness.wake_for(thread_id, connection)
+    if current is None or not _stopped_open(current):
+        return
+    signal = liveness_signal(thread_id, db=connection)
+    advanced = signal.count > 0 and liveness._progress(signal, current) == ADVANCED
+    liveness.arm_plan_wake(
+        thread_id, signal, cycle=0 if advanced else current["cycle"] + 1, db=connection,
+    )
+
+
 def on_thread_turn_complete(
     thread_id: str,
     *,
@@ -46,6 +79,8 @@ def on_thread_turn_complete(
     """Apply terminal child and liveness effects through their canonical owners.
 
     Every harness's terminal handler calls this one seam, native and external.
+    The one liveness effect that must precede the successor claim, withdrawing
+    an unread reminder after an error, runs earlier in ``withdraw_unread_wake``.
     """
     from automation import provider_reset_liveness
     from plans import public

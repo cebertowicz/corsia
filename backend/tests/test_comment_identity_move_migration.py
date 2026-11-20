@@ -324,12 +324,31 @@ def _edit_owners(db) -> list[str]:
     return [row[0] for row in db.execute("SELECT batch_id FROM doc_feedback_edit_items")]
 
 
+@pytest.mark.parametrize('snapshot_artifact', ['source', 'live'])
+def test_fold_and_reverse_count_comments_and_edit(db, snapshot_artifact):
+    source, live = _chain(db, 1)
+    _comment_on(db, source)
+    _comment_on(db, live)
+    source_id = _open_batch_on(db, source)['id']
+    target_id = _open_batch_on(db, live)['id']
+    edit_id = source_id if snapshot_artifact == 'source' else target_id
+    db.execute(EDIT_SQL, (edit_id,))
+    db.execute('UPDATE doc_feedback_batches SET item_count=2 WHERE id=?', (edit_id,))
+    db.commit()
+    move_comments_to_live_identities(db)
+    assert db.execute('SELECT item_count FROM doc_feedback_batches WHERE id=?', (target_id,)).fetchone()[0] == 3
+    reverse_moves(db)
+    counts = dict(db.execute('SELECT id,item_count FROM doc_feedback_batches WHERE id IN (?,?)', (source_id, target_id)))
+    assert counts == {source_id: 1 + (edit_id == source_id), target_id: 1 + (edit_id == target_id)}
+
+
 def test_an_edit_snapshot_moves_with_a_fold_when_the_live_batch_has_none_and_the_reverse_puts_it_back(db):
     source, live = _chain(db, 1)
     _comment_on(db, source)
     _comment_on(db, live)
     stranded = _open_batch_on(db, source)
     db.execute(EDIT_SQL, (stranded["id"],))
+    db.execute('UPDATE doc_feedback_batches SET item_count=2 WHERE id=?', (stranded['id'],))
     db.commit()
     before = _feedback_state(db)
     report = move_comments_to_live_identities(db)

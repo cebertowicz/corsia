@@ -11,6 +11,7 @@ from typing import Any
 
 from loguru import logger
 
+# No reading yet: needs title-call latency and output size, and the lengths of names people set.
 TITLE_MAX_OUTPUT_TOKENS = 1024
 THREAD_TITLE_MAX_CHARS = 80
 TITLE_TIMEOUT_SECONDS = 60.0

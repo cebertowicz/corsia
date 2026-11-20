@@ -1,8 +1,10 @@
-"""The user steers any open row: pause or resume it; Mark done and Won't do settle it.
+"""The user steers any open row: move it, pause or resume it; Mark done and Won't do settle it.
 
 The plan pane's right-click menu posts the ordinary ``pause_node``,
 ``resume_node`` and ``close_node`` operations, plus the user's ``mark_done``,
-so an agent's tool and the user share one vocabulary. Mark done and Won't do
+so an agent's tool and the user share one vocabulary. A drag or a Move item
+posts the ordinary ``reorder``; the owner hears of it from
+``plans.plan_top.tell_owner_moved``, as of any move but its own. Mark done and Won't do
 go to ``plans.user_settle``; pause and resume take ``plans.boundary_dispatch``'s
 normal path, and this module adds only what the user's word adds:
 
@@ -77,7 +79,8 @@ def offered(
 ) -> list[str]:
     """Return the controls the pane shows on this row, in display order.
 
-    Every open row offers Mark done and Won't do, whoever it is assigned to and
+    Every open row offers Move (``reorder`` among its open siblings; plan order
+    is priority), Mark done and Won't do, whoever it is assigned to and
     whatever holds it (``plans.user_settle``). A task adds Pause, or Resume
     when a pause holds it; a task handed to a live worker offers Pause while the
     worker's plan is active and Resume while it is paused and this plan is not.
@@ -88,8 +91,8 @@ def offered(
         return []
     if review is not None and review["kind"] == "human_decision":
         pause = "resume_node" if placed_pause(causes) is not None else "pause_node"
-        return [pause, "close_node"]
-    actions = ["mark_done"]
+        return ["reorder", pause, "close_node"]
+    actions = ["reorder", "mark_done"]
     control = (
         _pause_control(causes, worker_plan_state, plan_state)
         if node["kind"] == "task" else None

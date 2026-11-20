@@ -125,14 +125,15 @@ test.describe(`${TAG} phone`, () => {
 		await saveEvidenceScreenshot(page, testInfo, 'tap-393');
 	});
 
-	test('a tap on a suggestion\'s word inside a longer comment opens the comment in the sheet', async ({ page, request }, testInfo) => {
+	test('a tap on a suggestion\'s word inside a longer comment opens the suggestion in the sheet, as a click does at 1440 wide', async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		await openSuggestionDocument(page, request, TEXT, REVERSE, { splitWidth: 540 });
 		await expect(page.locator('.cm-suggestion-del', { hasText: /^reviewer$/ })).toBeVisible();
 		const { x, y } = await struckCentre(page);
 		await page.touchscreen.tap(x, y);
 		const sheet = page.locator('.drawer-panel');
-		await expect(sheet.getByText(LONG), 'the comment around the suggestion opens in the sheet').toBeVisible();
+		await expect(sheet.getByText(SUGGESTION), 'the innermost, the suggestion, opens in the sheet').toBeVisible();
+		await expect(sheet.getByText(LONG)).toHaveCount(0);
 		await logBuild(page, testInfo);
 		await saveEvidenceScreenshot(page, testInfo, 'tap-393-reverse');
 	});

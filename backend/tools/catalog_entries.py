@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tools.catalog_automation_entries import AUTOMATION_CATALOG_ENTRIES
+from tools.catalog_delegation_entries import DELEGATION_CATALOG_ENTRIES
 from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.post_update_text import REPLACE_RULE
@@ -204,31 +205,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     "browser_close": _Entry(
         "browser", summary="Close the browser session", activity="Closing browser",
     ),
-    "delegate_create_thread": _Entry(
-        "delegation", status="substrate",
-        summary="Create a visible chat or a hidden subagent thread",
-        activity="Creating thread",
-    ),
-    "delegate_send": _Entry(
-        "delegation", status="substrate",
-        summary="Send a message into another thread",
-        activity="Messaging",
-    ),
-    "delegate_status": _Entry(
-        "delegation", status="substrate",
-        summary="Read a delegated thread's status and recent messages",
-        activity="Checking agent",
-    ),
-    "delegate_set_model": _Entry(
-        "delegation", status="substrate", authority="model-switch",
-        summary="Change a running thread's model or harness in place",
-        activity="Switching model",
-    ),
-    "delegate_task": _Entry(
-        "delegation", status="substrate",
-        summary="Delegate a self-contained task to a new subagent",
-        activity="Delegating",
-    ),
     "model_catalog": _Entry(
         "delegation", status="substrate",
         summary="Read the live model catalog before selecting a delegation target",
@@ -385,7 +361,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "artifact_rehome": _Entry(
         "artifacts", status="substrate", authority="artifact-ownership",
-        summary="Transfer an artifact's ownership to another thread",
+        summary="Transfer an artifact's ownership to the person or another thread",
         activity="Transferring artifact",
     ),
     "artifact_release": _Entry(
@@ -397,4 +373,5 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     **MICROSOFT_CATALOG_ENTRIES, **MAILHOST_CATALOG_ENTRIES, **MESSAGES_CATALOG_ENTRIES,
     **LIBRARY_CATALOG_ENTRIES,
     **CONSENT_CATALOG_ENTRIES,
+    **DELEGATION_CATALOG_ENTRIES,
 }

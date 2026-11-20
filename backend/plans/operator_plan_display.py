@@ -6,7 +6,7 @@ precedence, so the header's own rules have one home.
 
 from __future__ import annotations
 
-from plans import not_moving
+from plans import not_moving, rollup
 from plans.operator_node_state import leading
 
 _FINISHED_DISPLAY = {
@@ -14,6 +14,18 @@ _FINISHED_DISPLAY = {
     "done": {"label_key": "finished", "tone_key": "complete"},
     "empty": {"label_key": "finished", "tone_key": "closed"},
 }
+
+
+def child_summary(projected: rollup.PlanRollup | None, thread_id: str | None) -> dict | None:
+    """Present the child plan's identity and progress when available."""
+    if projected is None or thread_id is None:
+        return None
+    return {
+        "available": True,
+        "plan_id": projected.plan["id"],
+        "thread_id": thread_id,
+        "progress": dict(projected.progress),
+    }
 
 
 def display_from_facts(

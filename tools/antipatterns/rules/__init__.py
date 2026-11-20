@@ -14,6 +14,7 @@ from __future__ import annotations
 from ._base import Rule
 from . import (
     direct_commit_outside_write_transaction,
+    file_io_in_write_transaction,
     fallback_chain_masks_error,
     hardcoded_model_name,
     hardcoded_path_or_id,
@@ -28,6 +29,7 @@ from . import (
 
 ALL_RULES: list[Rule] = [
     direct_commit_outside_write_transaction.RULE,
+    file_io_in_write_transaction.RULE,
     silent_error_swallow.RULE,
     hardcoded_path_or_id.RULE,
     hardcoded_model_name.RULE,

@@ -16,8 +16,8 @@ from __future__ import annotations
 from functools import partial
 
 from plans import (
-    boundary_dispatch, delegate_attach, dependencies, holds, intent_creation, service, status_cursor,
-    system_user_steps,
+    boundary_dispatch, delegate_attach, dependencies, holds, intent_creation, review_settle_script, service,
+    status_cursor, system_user_steps,
 )
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
@@ -49,6 +49,43 @@ def _workflow_fields_before_migration(db, scene):
     return partial(
         service.add_node, scene.plan_id, kind="task", title="T",
         acceptance_criteria="DOD", workflow_ref="sample", db=db,
+    )
+
+
+def _child_of_non_agent_step(db, scene, *, by):
+    step = service._create_node(
+        db, scene.plan_id, kind="task", title="Other step", acceptance_criteria="Answered",
+        parent_id=None, order_key=None, description=None, workflow_ref=None,
+        workflow_version=None, workflow_step=by, difficulty="routine", size="S",
+        checkpoint_exception=False, assignee="user" if by == "person" else None, spawn_kind=None,
+        watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
+        node_id=service._id(), workflow_by=by,
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "add", {
+            "kind": "task", "title": "Child", "acceptance_criteria": "Done",
+            "size": "S", "intent": "Do the work", "parent_id": step.id,
+        }, _mid(),
+    )
+
+
+def _phase_under_agent_step(db, scene):
+    """An agent step holds tasks only: a phase under it is refused."""
+    step = service._create_node(
+        db, scene.plan_id, kind="task", title="Build step", acceptance_criteria="Built",
+        parent_id=None, order_key=None, description=None, workflow_ref=None,
+        workflow_version=None, workflow_step="build", difficulty="routine", size="S",
+        checkpoint_exception=False, assignee=None, spawn_kind=None,
+        watchdog_budget_seconds=None, follow_up_of=None, actor_id=None, provenance="test",
+        node_id=service._id(), workflow_by="agent",
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "add", {
+            "kind": "phase", "title": "Inner", "acceptance_criteria": "Done",
+            "size": "S", "intent": "Do the work", "parent_id": step.id,
+        }, _mid(),
     )
 
 
@@ -748,12 +785,13 @@ _CASES = {
     ): partial(_user_block, owner_id="someone-else"),
     ("user_ask.py", "NO_ASK"): _user_block,
     (
-        "user_ask.py",
-        'f"ask_artifact_id {ask!r} names no registered artifact"',
+        "artifact_links.py",
+        'f"ask_artifact_id {artifact_id!r} names no registered artifact"',
     ): partial(_user_block, ask_artifact_id="missing-artifact"),
     (
-        "user_ask.py",
-        '"ask_artifact_id must name an artifact this thread owns"',
+        "artifact_links.py",
+        '"ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises, " '
+        '"or a project-owned document whose conductor is this thread"',
     ): _user_block_on_foreign_document,
     (
         "user_ask.py",
@@ -777,11 +815,17 @@ _CASES = {
             "watchdog_budget_seconds": 0,
         }),
     ("node_creation.py", '"order key must be non-negative"'): _negative_order_key,
-    ("node_creation.py", '"task nodes are leaves and cannot contain children"'):
+    ("node_creation.py", '"task nodes are leaves and cannot contain children unless they are workflow steps"'):
         _operation("add", {
             "kind": "task", "title": "T", "acceptance_criteria": "DOD",
             "parent_id": NODE,
         }),
+    ("node_creation.py", '"The person does that step, so the agent\'s work goes in its own step or task."'):
+        partial(_child_of_non_agent_step, by="person"),
+    ("node_creation.py", '"A reviewer does that step independently, so it cannot contain author subtasks."'):
+        partial(_child_of_non_agent_step, by="reviewer"),
+    ("node_creation.py", 'f"A workflow step holds tasks only, not a {kind}: add its smaller pieces as tasks."'):
+        _phase_under_agent_step,
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
     ("node_creation.py", '"task intent requires schema version 138"'): _intent_before_migration,
@@ -1078,5 +1122,13 @@ _CASES = {
     ),
     ("system_user_steps.py", '"close_user_step needs a reason"'): lambda db, scene: partial(
         system_user_steps.close_user_step, db, scene.own, reason=" ", provenance="test",
+    ),
+    # --- plans/review_settle.py and review_settle_script.py (a review's verdict) ---
+    ("review_settle.py", '"verdict must be \'pass\' or \'fail\'"'): _operation(
+        "request_review", {"node_id": OWN, "expected_revision": REV, "evidence": "E", "verdict": "maybe"},
+    ),
+    ("review_settle_script.py", '"verdict must be \'pass\', \'fail\' or None"'): lambda db, scene: partial(
+        review_settle_script.settle_step_from_script, db, node_id=scene.own, attempt_id="a1",
+        run_id="r1", verdict="maybe", findings=None, version="v1",
     ),
 }

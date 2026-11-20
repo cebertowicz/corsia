@@ -28,27 +28,28 @@ stale, never wrong.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from plans import node_history, operator_node_state, service, status_facts, status_later, wait_causes
-from plans.close_next_bounds import bounded, json_bytes
+from plans import (
+    later_review, node_history, operator_node_state, service, status_facts, status_later, wait_causes,
+)
+from plans.close_next_bounds import bounded, json_bytes, title as _title
 from plans.errors import PlanError
 from plans.status_facts import facts as _facts, full_facts as _full_facts
 from plans.status_cursor import STALE, decode as _decode, encode as _encode, token as _token
 from plans.status_time import ages as _ages, clock_at as _clock_at, parse as _parse
 
-#: Engineering budgets: at most 4 Current and 2 Recent rows per page, each
-#: section under its own serialized-byte cap, pagination included.
+#: Engineering budgets: at most 4 Current and 2 Recent rows per page,
+#: pagination included. A section's bytes need no cap of their own: each row is
+#: bounded by its fields' cuts (title, reason, path) and fixed-size facts, so a
+#: page is at most its row count times that row.
 CURRENT_ROWS = 4
 RECENT_ROWS = 2
-CURRENT_BYTES = 3584
-RECENT_BYTES = 1536
 #: The pile below the cut gets its own page: a review, not a queue to work
-#: through, so it is capped to the same size as its weekly wake.
-LATER_ROWS = 8
-LATER_BYTES = 2048
-TITLE_MAX_BYTES = 96
+#: through, so it lists as many rows as its weekly wake.
+LATER_ROWS = later_review.WAKE_ROWS
 REASON_MAX_BYTES = 72
 PATH_MAX_BYTES = 72
 RECENT_DAYS = status_facts.RECENT_DAYS
@@ -174,7 +175,7 @@ def _delegated_worker(node: dict) -> dict[str, str] | None:
 
 
 def _row(node: dict, facts: dict) -> dict[str, Any]:
-    title = bounded(str(node["title"]), TITLE_MAX_BYTES)
+    title = _title(str(node["title"]))
     reason = _reason(node)
     reason_text = bounded(str(reason), REASON_MAX_BYTES) if reason else None
     path = facts["path"](node["id"])
@@ -207,13 +208,6 @@ def _row(node: dict, facts: dict) -> dict[str, Any]:
     return row
 
 
-def _minimal(row: dict) -> dict:
-    """The smallest truthful row: identity, state and the read that gets the rest."""
-    return {
-        key: row[key] for key in ("id", "title", "state", "revision", "detail_read")
-    } | {"truncated": True}
-
-
 def _members(facts: dict, section: str) -> list[dict]:
     if section == "current":
         open_leaves = [n for n in facts["leaves"] if n["state"] not in _TERMINAL]
@@ -235,12 +229,12 @@ def _members(facts: dict, section: str) -> list[dict]:
 
 
 def cut_rows(
-    rows: list[dict], max_rows: int, max_bytes: int, minimal=_minimal,
+    rows: list[dict], max_rows: int, max_bytes: int, minimal: Callable[[dict], dict],
 ) -> list[dict]:
     """Keep rows while both caps hold; the first row is always kept, minimal if it must be.
 
-    ``minimal`` shapes that first row when it alone exceeds the byte cap, so
-    other row kinds (the checkpoint artifact snapshot) share this one rule.
+    ``minimal`` shapes that first row when it alone exceeds the byte cap. The
+    checkpoint artifact snapshot uses this; a status section needs no byte cap.
     """
     kept: list[dict] = []
     spent = 0
@@ -258,13 +252,9 @@ def cut_rows(
     return kept
 
 
-#: Each section's own caps: the pile below the cut is a review rather than a
-#: queue, so its page is sized like the weekly wake about the same pile.
-_CAPS = {
-    "current": (CURRENT_ROWS, CURRENT_BYTES),
-    "recent": (RECENT_ROWS, RECENT_BYTES),
-    "later": (LATER_ROWS, LATER_BYTES),
-}
+#: Each section's rows per page: the pile below the cut is a review rather than
+#: a queue, so its page lists as many rows as the weekly wake about the same pile.
+_ROWS = {"current": CURRENT_ROWS, "recent": RECENT_ROWS, "later": LATER_ROWS}
 
 
 def _page(facts: dict, section: str, position: dict | None, db=None) -> dict[str, Any]:
@@ -275,15 +265,14 @@ def _page(facts: dict, section: str, position: dict | None, db=None) -> dict[str
         if position["t"] != token or position["o"] >= len(members):
             raise PlanError(STALE)
         offset = position["o"]
-    max_rows, max_bytes = _CAPS[section]
+    max_rows = _ROWS[section]
     later = section == "later"
     # The window is cut before its rows are built, so a pile of a thousand rows
     # costs one page of reads: a Later row's reason and date are keyed reads.
     window = members[offset:offset + max_rows]
-    rows = cut_rows(
-        status_later.rows(db, window, title_bytes=TITLE_MAX_BYTES, reason_bytes=REASON_MAX_BYTES)
-        if later else [_row(node, facts) for node in window],
-        max_rows, max_bytes, minimal=status_later.minimal if later else _minimal,
+    rows = (
+        status_later.rows(db, window, reason_bytes=REASON_MAX_BYTES)
+        if later else [_row(node, facts) for node in window]
     )
     omitted = len(members) - offset - len(rows)
     page: dict[str, Any] = {
@@ -357,7 +346,7 @@ def _overview(db, plan_row, facts: dict) -> dict[str, Any]:
 def _brief(node: dict, facts: dict) -> dict[str, Any]:
     reason = _reason(node)
     brief = {
-        "id": node["id"], "title": bounded(str(node["title"]), TITLE_MAX_BYTES),
+        "id": node["id"], "title": _title(str(node["title"])),
         "state": node["state"], "revision": node["revision"],
         "condition": _condition(node),
         "reason": bounded(str(reason), REASON_MAX_BYTES) if reason else None,

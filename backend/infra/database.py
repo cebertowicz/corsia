@@ -342,6 +342,9 @@ def init_db():
     """Create or open the exact current schema; never upgrade an older one."""
     conn = get_db()
     initialize_schema(conn)
+    # Before serving, where the migrations ran: never inside a request.
+    from core.node_usage_groups import ensure as ensure_node_usage_groups
+    ensure_node_usage_groups(conn)
 
     conn.close()
 

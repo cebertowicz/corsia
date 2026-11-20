@@ -84,10 +84,9 @@ def reorder_node(
                     connection, "UPDATE plan_nodes SET order_key=? WHERE id=? AND order_key<>?",
                     (position, sibling_id, position),
                 )
-        service._event(
-            connection, node_id, "node_reordered", actor_id=actor_id, provenance=provenance,
-            payload={"from": old_position, "to": order_key},
-        )
+        if target != current:  # sparse keys made dense in place are no move
+            service._event(connection, node_id, "node_reordered", actor_id=actor_id,
+                           provenance=provenance, payload={"from": old_position, "to": order_key})
         return service._node_from_row(connection, service._node_row(connection, node_id))
 
 
@@ -330,24 +329,21 @@ def request_review(
     provenance: str = "plan_mutation",
     owner_thread_id: str | None = None,
     db=None,
+    verdict: str | None = None,
 ) -> PlanNode:
     """Submit evidence and move active work to review through one event owner.
 
     ``owner_thread_id`` is the thread submitting, when one is: the results it
-    owns are linked to the node as part of the submission.
+    owns are linked to the node as part of the submission. ``verdict`` is a
+    reviewer's pass or fail (``plans.review_settle``).
     """
     from plans import review_evidence
 
     with service._connection(db) as connection, service._write(connection):
         return review_evidence.submit(
-            node_id,
-            evidence=evidence,
-            artifact_ids=artifact_ids,
-            expected_revision=expected_revision,
-            actor_id=actor_id,
-            provenance=provenance,
-            owner_thread_id=owner_thread_id,
-            db=connection,
+            node_id, evidence=evidence, artifact_ids=artifact_ids, expected_revision=expected_revision,
+            actor_id=actor_id, provenance=provenance, owner_thread_id=owner_thread_id,
+            db=connection, verdict=verdict,
         )
 
 
