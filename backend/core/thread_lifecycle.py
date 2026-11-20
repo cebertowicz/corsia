@@ -55,11 +55,10 @@ from infra.constants import (
 from thread.runtime_boundary import bump_history_epoch
 from infra.thread_driver import delete_thread_turns
 from infra.thread_inputs import invalidate_markers_for_archive
-from core.thread_lifecycle_workers import (  # noqa: F401 - the workers' retirement lives beside
-    RETIRED_WORKER_REASONS,
-    SETTLED_WORKER_REASON,
-    archive_settled_worker,
-    reactivate_settled_worker,
+from core.thread_lifecycle_workers import (  # noqa: F401 - this module is the one import path
+    RETIRED_WORKER_REASONS, SETTLED_WORKER_REASON,
+    archive_settled_worker, archive_stopped_worker,
+    reactivate_retired_worker, reactivate_settled_worker,
 )
 from core.thread_lifecycle_paths import thread_dir as _thread_dir
 from core.thread_lifecycle_plans import (

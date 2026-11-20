@@ -24,10 +24,10 @@ def _stop_plan(caller: str, target: str, user_id: str) -> tuple[list[str], list[
             return [], [], None, f"Error: {target} is not a temporary worker; only the person stops it."
         if target == caller:
             return [], [], None, "Error: a thread cannot stop itself with this tool."
-        if target not in thread_and_descendants(db, caller) and caller != get_scope_coordinator(WORKSPACE_SCOPE, db=db):
+        if not _spawned_under(db, target, caller) and caller != get_scope_coordinator(WORKSPACE_SCOPE, db=db):
             return [], [], None, (
-                f"Error: only {parent} (the thread that spawned {target}), its spawners above it, or the "
-                "CORSIA agent can stop it."
+                f"Error: only {parent} (the thread that spawned {target}), its spawners above it up to the "
+                "nearest standing agent, or the CORSIA agent can stop it."
             )
         members = thread_and_descendants(db, target)
         info = {
@@ -55,20 +55,39 @@ def _stop_plan(caller: str, target: str, user_id: str) -> tuple[list[str], list[
         db.close()
 
 
-def _retire(sid: str, reason: str, notify_parent: bool) -> tuple[bool, int, bool]:
+def _spawned_under(db, target: str, caller: str) -> bool:
+    """Whether ``caller`` spawned ``target`` with no standing agent between them.
+
+    A standing agent's subtree is its own, so the climb from ``target`` stops there.
+    """
+    seen: set[str] = set()
+    row = db.execute("SELECT spawned_by FROM threads WHERE id=?", (target,)).fetchone()
+    node = row["spawned_by"] if row else None
+    while node and node not in seen:
+        if node == caller:
+            return True
+        seen.add(node)
+        row = db.execute("SELECT spawned_by, agent_enabled FROM threads WHERE id=?", (node,)).fetchone()
+        if row is None or row["agent_enabled"]:
+            return False
+        node = row["spawned_by"]
+    return False
+
+
+def _retire(sid: str, why: str | None, notify_parent: bool) -> tuple[bool, int, bool]:
     """Archive first (nothing queued can start, no send is admitted), then cancel wakes.
 
     Returns (archived now, queued inputs held, an open step still delegates to it).
     """
     from automation import schedules, watches
     from automation.plan_liveness import cancel_plan_wake
-    from core.thread_lifecycle import archive_settled_worker
+    from core.thread_lifecycle import archive_stopped_worker
     from infra.database import write_transaction
     from infra.thread_liveness import read_thread_liveness
     from plans import public as plans
 
     with write_transaction(None, scope="delegate_stop") as connection:
-        archived = archive_settled_worker(connection, sid, reason=reason)
+        archived = archive_stopped_worker(connection, sid, why=why)
         cancel_plan_wake(sid, db=connection)
         for watch in connection.execute(
             "SELECT id FROM expected_event_watches WHERE owner_thread_id=? AND status='armed'", (sid,),
@@ -115,9 +134,9 @@ class DelegateStopTool(Tool):
         return (
             "Stop a temporary worker you spawned (or one beneath it), and every worker beneath it: "
             "its running turn ends and it is archived, so queued messages stay held and nothing "
-            "new starts. Allowed for the thread that spawned it, any spawner above it, and the "
-            "CORSIA agent; a standing agent is never stopped this way. Attaching or replacing a "
-            "step onto the same worker brings it back."
+            "new starts. Allowed for the thread that spawned it, any spawner above it up to the "
+            "nearest standing agent, and the CORSIA agent; a standing agent is never stopped this "
+            "way. Attaching or replacing a step onto the same worker brings it back."
         )
 
     @property
@@ -126,11 +145,11 @@ class DelegateStopTool(Tool):
 
         return _tool_schema({
             "thread_id": {"type": "string", "description": "The worker to stop"},
-            "reason": {"type": ["string", "null"], "description": "Audit reason"},
+            "reason": {"type": ["string", "null"], "description": (
+                "Why you stopped it; recorded on any decision a stopped worker had open, which is withdrawn")},
         }, ["thread_id"])
 
     async def execute(self, thread_id: str, reason: str | None = None, **kwargs: Any) -> str:
-        from infra.constants import STOPPED_BY_DELEGATOR_REASON
         from tools import delegation
         from ws.stop_control import stop_turn_for_cause
 
@@ -146,7 +165,7 @@ class DelegateStopTool(Tool):
         step_open = False
         for sid in stop:
             archived, held, open_step = await run_in_db(
-                _retire, sid, STOPPED_BY_DELEGATOR_REASON, sid == target and caller != parent)
+                _retire, sid, (reason or "").strip() or None, sid == target and caller != parent)
             step_open = step_open or (sid == target and open_step)
             turn_id = await run_in_db(_running_turn, sid)
             if turn_id is None:

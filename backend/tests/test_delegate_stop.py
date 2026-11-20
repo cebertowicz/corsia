@@ -127,6 +127,39 @@ async def test_standing_agent_beneath_is_skipped_with_its_subtree(tree):
 
 
 @pytest.mark.asyncio
+async def test_a_spawner_above_a_standing_agent_cannot_stop_beneath_it(tree):
+    _thread(tree.db, "standing", "worker", standing=1)
+    _thread(tree.db, "under-standing", "standing")
+    out = await _stop("parent", "under-standing")
+    assert out.startswith("Error:") and "nearest standing agent" in out
+    assert _state(tree.db, "under-standing")[0] == "active"
+    assert "Error" not in await _stop("standing", "under-standing")
+
+
+@pytest.mark.asyncio
+async def test_the_stated_reason_is_recorded_on_withdrawn_decisions(tree, monkeypatch):
+    from tools.delegation_stop import DelegateStopTool
+
+    withdrawn = []
+    monkeypatch.setattr("core.thread_lifecycle_workers.withdraw_owned_decisions",
+                        lambda db, sid, *, reason: withdrawn.append((sid, reason)))
+    await DelegateStopTool().execute("worker", reason="wrong brief", _thread_id="parent")
+    assert withdrawn == [("worker", "stopped by its delegator: wrong brief"),
+                         ("grand", "stopped by its delegator: wrong brief")]
+
+
+def test_a_settled_worker_keeps_its_own_withdraw_reason(tree, monkeypatch):
+    from core.thread_lifecycle import archive_settled_worker
+
+    withdrawn = []
+    monkeypatch.setattr("core.thread_lifecycle_workers.withdraw_owned_decisions",
+                        lambda db, sid, *, reason: withdrawn.append(reason))
+    assert archive_settled_worker(tree.db, "worker") is True
+    assert _state(tree.db, "worker") == ("archived", "assignment_settled")
+    assert withdrawn == ["assignment settled"]
+
+
+@pytest.mark.asyncio
 async def test_idle_worker_with_queued_input_starts_nothing_after_stop(tree):
     from infra.database import write_transaction
     from infra.input_admission import accept_thread_input
@@ -166,10 +199,10 @@ async def test_wakes_watches_and_schedules_are_cancelled(tree):
 
 @pytest.mark.asyncio
 async def test_reattach_after_stop_reactivates(tree):
-    from core.thread_lifecycle import reactivate_settled_worker
+    from core.thread_lifecycle import reactivate_retired_worker
 
     await _stop("parent", "worker")
-    assert reactivate_settled_worker(tree.db, "worker") is True
+    assert reactivate_retired_worker(tree.db, "worker") is True
     assert _state(tree.db, "worker") == ("active", None)
 
 
