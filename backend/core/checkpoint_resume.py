@@ -200,26 +200,13 @@ def _payload(
     )
 
 
-async def _limited_writer(record: CheckpointRecord):
-    """The hold on a failed fold's own writer, read from the stored verdict only.
-
-    The same predicate as the fold gate (``limited_admission`` on the thread's
-    chosen account), so a fold that failed on a limit holds only once that
-    limit is recorded; an unrecorded one finds nothing and fails visibly.
-    """
-    from infra.db_async import run_in_db
-    from infra.held_admission import limited_admission
-
-    return await run_in_db(limited_admission, record.thread_id, record.writer_model)
-
-
 async def _await_installed(
     boundary: ProviderBoundary,
     record: CheckpointRecord,
     *,
     allow_newer_fold: bool = True,
 ) -> ProviderContinuation:
-    from core.checkpoint_runtime import await_checkpoint
+    from core.checkpoint_runtime import await_checkpoint, failed_fold_hold
 
     # An attempt this Turn started and is blocked on is part of its work, so
     # Stop ends it; an attempt from anywhere else stays independent (#1921).
@@ -231,15 +218,9 @@ async def _await_installed(
         on_stop=cancel_waiting_checkpoint if owned else None,
     )
     if completed.status != "installed":
-        detail = completed.error or f"checkpoint ended {completed.status}"
-        held = await _limited_writer(completed) if completed.status == "failed" else None
-        if held is not None:
-            # A mid-call limit was recorded on the fold's own target: settle it as
-            # the fold gate would have, so admission holds the inputs until the reset.
-            raise boundary.unavailable(
-                detail, limited_target=held.model, limited_connection=held.connection,
-            )
-        raise boundary.unavailable(detail)
+        held = await failed_fold_hold(completed)  # a recorded usage limit holds, as the fold gate would
+        raise boundary.unavailable(completed.error or f"checkpoint ended {completed.status}",
+                                   limited_target=held and held.model, limited_connection=held and held.connection)
     boundary = replace(boundary, installed_checkpoint=completed)
     installed = await boundary.render_installed(completed)
     if installed.input_tokens > boundary.context_window:
