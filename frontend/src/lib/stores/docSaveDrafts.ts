@@ -9,6 +9,8 @@ export interface DocSaveDraft {
 	savedText: string;
 	status: DocSaveStatus;
 	error: string;
+	/** The save was refused because the file changed after this tab's base: the tab offers the choice of which text to keep. */
+	stale?: boolean;
 	/** Revision the server reported for this draft's last successful write. */
 	savedRevision: string | null;
 }

@@ -3,14 +3,15 @@
 from typing import Any
 
 MISSING_DOCUMENT_MESSAGE = "This document is deleted, so nothing changed."
-MISSING_SAVE_MESSAGE = "Couldn’t save: this document is deleted. Your text stays here until you close it."
+MISSING_SAVE_MESSAGE = "Couldn’t save because this document is deleted. Your text stays here until you close it."
 
 #: The editor PUT's own stale refusal (issue #3049). The writer's ``stale`` is worded for
 #: suggestion batches and live writes and invites a retry, which is wrong for typed text
 #: whose base is gone: the tab keeps the text and the person decides. ``PUT /api/files/content``
-#: answers with this code and message; the tab keys its one-refusal-per-base rule on the code.
+#: answers with this code and message; the tab keys its one-refusal-per-base rule and its
+#: choose-which-text-to-keep Details on the code, and words its own bar for that Details.
 EDITOR_STALE_CODE = "stale_base"
-EDITOR_STALE_MESSAGE = "Couldn’t save: this document changed after you started editing. Your text stays here."
+EDITOR_STALE_MESSAGE = "Couldn’t save because this document changed after you started editing."
 
 
 class DocumentSaveError(ValueError):

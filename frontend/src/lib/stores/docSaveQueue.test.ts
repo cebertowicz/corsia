@@ -20,6 +20,7 @@ import {
 	clearDraft, closeTabWithSaveGate, docSaveActivities, docSaveDrafts, draftKey, withDraftArtifactId,
 	enrichDraftTarget, existingDraft, flushDraft, relocateDraftTarget, seedDraft, setDraftText,
 } from './docSaveQueue';
+import { EDITOR_STALE_STATUS } from './docSaveBase';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 let instanceSeq = 0;
@@ -352,8 +353,8 @@ describe('docSaveQueue', () => {
 		expect(mocks.writeContent).toHaveBeenCalledTimes(1);
 		expect(mocks.toastShow).toHaveBeenCalledTimes(1);
 		expect(existingDraft(doc)).toMatchObject({
-			editText: 'first edit, more again', savedText: 'server text', status: 'error',
-			error: 'This file changed after you started editing.',
+			editText: 'first edit, more again', savedText: 'server text', status: 'error', stale: true,
+			error: EDITOR_STALE_STATUS,
 		});
 		clearDraft(doc);
 	});

@@ -131,6 +131,7 @@
 		void tick().then(() => { listEl?.scrollTo({ top: 0 }); listEl?.querySelector<HTMLElement>('.vrow')?.focus(); });
 	}
 
+	// A TypeError is the browser's network failure from fetch; a code bug that throws one inside the same call would also read as one.
 	function historyFailure(error: unknown): string {
 		return error instanceof TypeError ? 'Couldn’t load history. Check the connection and try again.' : 'Couldn’t load history. Try again.';
 	}

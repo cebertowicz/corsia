@@ -16,7 +16,7 @@ async def test_deleted_document_save_explains_refusal(ownership_scope, tmp_path,
             response = await save_old(client, entry.live.path, "unsaved text")
         assert response.status_code == 404
         assert response.json()["detail"] == (
-            "Couldn’t save: this document is deleted. Your text stays here until you close it."
+            "Couldn’t save because this document is deleted. Your text stays here until you close it."
         )
         assert not entry.live.path.exists()
     finally:

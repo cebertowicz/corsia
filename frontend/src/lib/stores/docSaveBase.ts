@@ -3,6 +3,9 @@ import { textSha256 } from './documentWire';
 /** `detail.code` of the 409 the editor save answers when the file changed after the tab's base (issue #3049). */
 export const EDITOR_STALE_CODE = 'stale_base';
 
+/** What the tab's save bar says for that refusal: the server's plain sentence, then the way on (the Details beside it). */
+export const EDITOR_STALE_STATUS = 'Couldn’t save because this document changed after you started editing. Open Details to choose which text to keep.';
+
 /**
  * The digest a non-live save sends as `expected_sha256`: the SHA-256 of the text the tab last
  * saved or loaded, which is the file's bytes when this tab started editing. Null sends the

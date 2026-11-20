@@ -113,7 +113,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await other.keyboard.press('ControlOrMeta+End');
 	await other.keyboard.type(' Typed while restoring.');
 	// The restore already changed the document, so this window's save is refused and its text stays on screen.
-	await expect(other.locator('.save-error[role="alert"]')).toHaveText('Couldn’t save: this document changed after you started editing. Your text stays here.');
+	await expect(other.locator('.save-error[role="alert"]')).toContainText('Couldn’t save because this document changed after you started editing. Open Details to choose which text to keep.');
 	await expect(other.locator('.cm-content')).toContainText('Typed while restoring.');
 	if (out) await other.screenshot({ path: path.join(out, `editor-changed-since-${width}.png`), animations: 'disabled' });
 	release();

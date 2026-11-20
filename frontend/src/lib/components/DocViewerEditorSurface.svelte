@@ -22,6 +22,10 @@
 	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
+	import DocStaleChoice from './DocStaleChoice.svelte';
+	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
+	import { showsSaveBar } from '$lib/stores/docSaveBars';
+	import type { ViewerContent } from '$lib/docViewerLoading';
 
 	type DocState = 'loading' | 'ready' | 'error';
 	type PendingSelection = SelectionOffer;
@@ -57,6 +61,7 @@
 		tabInstanceId = null,
 		onDocumentPlace,
 		artifactId = null,
+		onUseFile,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -91,6 +96,8 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
 		artifactId?: string | null;
+		/** The viewer's one content writer after the first load (also a clean reload's): the file's text the person chose after a stale refusal goes into the editor through it. */
+		onUseFile: (content: ViewerContent) => void;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
@@ -164,10 +171,10 @@
 </script>
 
 {#snippet editorBlock()}
-	<div class="ed-wrap">
+	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
 		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		{#if saveError}
-			<div class="save-error" role="alert">{saveError}</div>
+			<div class="save-error" role="alert">{saveError}{#if tabInstanceId && $docSaveDrafts[tabInstanceId]?.stale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
 		{/if}
 	</div>
 {/snippet}
