@@ -67,24 +67,6 @@ export async function postDocumentComment<T>(ensureArtifactId: () => Promise<str
 	return post(artifactId);
 }
 
-/**
- * Failure toasts for an action with no kept draft (an image's pin move), owned by its viewer so one retry cannot dismiss
- * another viewer's error; `key` keeps one per action. A later failure replaces its toast; a success dismisses it. A draft's
- * failure toast is held by the draft itself (`keptCommentDrafts.toast`).
- */
-export function createCommentRetryToast(toastStore: { dismiss: (id: string) => void }) {
-	const shown = new Map<string, string>();
-	const drop = (key: string) => {
-		const id = shown.get(key);
-		if (id) toastStore.dismiss(id);
-		shown.delete(key);
-	};
-	return {
-		remember: (id: string | null, key = '') => { drop(key); if (id) shown.set(key, id); },
-		dismissAfterSuccess: (key = '') => drop(key),
-	};
-}
-
 /** Prepares a clean reload of a document another participant edited; it applies only while this tab holds no edit of its own. */
 export async function prepareDocumentReload(
 	target: DocViewerTarget,

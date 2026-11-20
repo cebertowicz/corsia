@@ -3,7 +3,7 @@ import { fromStore } from 'svelte/store';
 import { RequestRefused } from '$lib/api/docs';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
-import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
+import { createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
@@ -52,7 +52,9 @@ export function createImageComments(context: {
 	const ui = createCommentSurfaceState(context.restoreFocus);
 	const key = () => context.draftKey?.() ?? imageDraftKey(context.artifactId());
 	const focused = fromStore(focusedDocComment);
-	const retryToast = createCommentRetryToast(toasts);
+	/** The toast telling why this viewer's last pin move failed: a later failure replaces it, a move that lands dismisses it. */
+	let pinToast: string | null = null;
+	const tellPin = (id: string | null) => { if (pinToast) toasts.dismiss(pinToast); pinToast = id; };
 	const threads = createThreadActions(context.artifactId, () => context.onCreated?.(), () => context.threadId?.() ?? null);
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
@@ -115,8 +117,8 @@ export function createImageComments(context: {
 			moving = { ...move, region };
 			try {
 				// No box says why a pin did not move, so its failure is always a toast.
-				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), (id) => retryToast.remember(id, 'pin'), () => "Couldn't move the pin — try again");
-				retryToast.dismissAfterSuccess('pin');
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), tellPin, () => 'Couldn’t move the pin — try again');
+				tellPin(null);
 				moving = null;
 				show(move.id, anchor);
 			} catch (error) {

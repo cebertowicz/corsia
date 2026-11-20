@@ -1108,11 +1108,13 @@ describe('DocCommentSurface: a reply being typed', () => {
 });
 
 describe('DocCommentSurface: a new comment being typed', () => {
-	it('counts its composer as the box that says why a post failed while it is mounted, under the document\'s key', () => {
+	it('counts its composer as the box that says why a post failed while it is mounted, under the document\'s key', async () => {
 		const scope = documentDraftKey(target);
-		render({ state: { kind: 'draft' }, draft: { text: 'old text' }, comments: [], draftScope: scope });
+		// Drawn beside its text in the window, so its Popover is placed and shows it.
+		render({ state: { kind: 'draft' }, draft: { text: 'old text' }, comments: [], draftScope: scope, anchor: () => new DOMRect(520, 100, 20, 20) });
 		const box = document.body.querySelector<HTMLElement>('.composer')!;
 		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(box.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
 		expect(keptCommentDrafts.onScreen(scope)).toBe(true);
 		unmount(component!); component = null;
 		expect(keptCommentDrafts.onScreen(scope)).toBe(false);

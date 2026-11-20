@@ -483,6 +483,11 @@ describe('a failed image comment says why in one place, decided as it fails', ()
 		comments.movePin('pin');
 		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
 		drop();
-		expect(mocks.show).toHaveBeenCalledExactlyOnceWith("Couldn't move the pin — try again", 'error');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Couldn’t move the pin — try again', 'error');
+		// The next move lands: its failure's toast goes with it.
+		mocks.dismiss.mockClear();
+		comments.movePin('pin');
+		await comments.draw({ x: 0.4, y: 0.4, w: 0, h: 0 }, rect);
+		expect(mocks.dismiss).toHaveBeenCalledExactlyOnceWith('toast');
 	});
 });

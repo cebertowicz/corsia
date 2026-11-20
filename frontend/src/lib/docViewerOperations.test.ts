@@ -18,7 +18,7 @@ vi.mock('$lib/stores/docComments', async (importOriginal) => ({
 import { addReply } from '$lib/stores/docComments';
 import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshness';
 import { emit } from '$lib/ws/events';
-import { createCommentRetryToast, createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
+import { createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
 import { RequestRefused, type ServerComment } from '$lib/api/docs';
 import { EarlierVersionPosted, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
@@ -147,19 +147,6 @@ describe('comment submission failure delivery', () => {
 		expect(addComment).not.toHaveBeenCalled();
 	});
 
-	it('dismisses only the viewer instance’s remembered failure after a successful retry', () => {
-		const dismiss = vi.fn();
-		const firstViewer = createCommentRetryToast({ dismiss });
-		const secondViewer = createCommentRetryToast({ dismiss });
-		firstViewer.remember('first-failure');
-		secondViewer.remember('second-failure');
-
-		firstViewer.dismissAfterSuccess();
-
-		expect(dismiss).toHaveBeenCalledTimes(1);
-		expect(dismiss).toHaveBeenCalledWith('first-failure');
-	});
-
 	it('says why in the box, with no toast, when a box that shows the reason is on screen as the post fails', async () => {
 		const error = new Error('offline');
 		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
@@ -181,23 +168,6 @@ describe('comment submission failure delivery', () => {
 			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 			expect(failed).toHaveBeenCalledWith('toast', 'Couldn’t post the comment. Your draft is kept. Try again.');
 		} finally { report.mockRestore(); }
-	});
-
-	it('keeps one toast per draft: a later failure replaces it, a failure said in the box drops it, a success dismisses it', () => {
-		const dismiss = vi.fn();
-		const viewer = createCommentRetryToast({ dismiss });
-		viewer.remember('reply-1-first', 'reply-1');
-		viewer.remember('reply-2-first', 'reply-2');
-		viewer.remember('reply-1-second', 'reply-1');
-		expect(dismiss).toHaveBeenLastCalledWith('reply-1-first');
-		// The box is on screen at the next failure: the toast from before goes, so the failure is not told twice.
-		viewer.remember(null, 'reply-1');
-		expect(dismiss).toHaveBeenLastCalledWith('reply-1-second');
-		dismiss.mockClear();
-		viewer.dismissAfterSuccess('reply-1');
-		expect(dismiss).not.toHaveBeenCalled();
-		viewer.dismissAfterSuccess('reply-2');
-		expect(dismiss).toHaveBeenCalledExactlyOnceWith('reply-2-first');
 	});
 });
 

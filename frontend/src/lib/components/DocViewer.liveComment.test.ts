@@ -570,9 +570,14 @@ describe('a typed comment is never lost', () => {
 		expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN);
 	});
 	it('a failed post shows its reason in the composer, and no toast, while the composer is on screen', async () => {
-		await open(); await select(); await compose();
-		// jsdom lays nothing out: the composer reports a place inside the window, as it has on a page.
+		// jsdom lays nothing out: the selected text, the document and the composer report a place inside the window, as they
+		// have on a page, so the composer's Popover is placed and shows it.
+		vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+		await open();
+		host.querySelector<HTMLElement>('.doc')!.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 700);
+		await select(); await compose();
 		document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.composer')!.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
 		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
 		const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 		submit.click();

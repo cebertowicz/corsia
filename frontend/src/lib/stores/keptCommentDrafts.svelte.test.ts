@@ -188,6 +188,52 @@ describe('a box that shows a draft, read once when a post fails', () => {
 		}
 	});
 
+	/** A box in view inside `host` on the page, so it inherits and is clipped as it would be drawn. */
+	const inside = (host: HTMLElement) => {
+		document.body.append(host);
+		const node = box(inView());
+		host.append(node);
+		return node;
+	};
+
+	it('is not on screen while hidden, on the box or inherited from a surface over it', () => {
+		const host = document.createElement('div');
+		const node = inside(host);
+		try {
+			keptCommentDrafts.shown(key, node);
+			expect(keptCommentDrafts.onScreen(key)).toBe(true);
+			host.style.visibility = 'hidden';
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+			host.style.visibility = '';
+			node.style.visibility = 'hidden';
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+		} finally { host.remove(); }
+	});
+
+	it('is not on screen inside an inert surface', () => {
+		const host = document.createElement('div');
+		const node = inside(host);
+		try {
+			keptCommentDrafts.shown(key, node);
+			host.setAttribute('inert', '');
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+			host.removeAttribute('inert');
+			expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		} finally { host.remove(); }
+	});
+
+	it('is not on screen inside a Popover clipped away whole before it is placed', () => {
+		const host = document.createElement('div');
+		const node = inside(host);
+		try {
+			keptCommentDrafts.shown(key, node);
+			host.style.clipPath = 'inset(100%)';
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+			host.style.clipPath = '';
+			expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		} finally { host.remove(); }
+	});
+
 	it('is registered by `use:showsDraft` while mounted, moves with its key, and is gone on unmount', () => {
 		const node = box(inView());
 		const action = showsDraft(node, key);
@@ -228,6 +274,22 @@ describe('the toast that told a failure while the draft’s box was not on scree
 		return id;
 	}
 	afterEach(() => { for (const toast of get(toasts)) toasts.dismiss(toast.id); vi.unstubAllGlobals(); });
+
+	it('stays while the draft’s box mounts hidden (inherited visibility, an inert surface, an unplaced Popover)', () => {
+		const id = failedAway();
+		const hosts = [['visibility', 'hidden'], ['inert', ''], ['clip-path', 'inset(100%)']].map(([name, value]) => {
+			const host = document.body.appendChild(document.createElement('div'));
+			if (name === 'inert') host.setAttribute('inert', value);
+			else host.style.setProperty(name, value);
+			host.append(box(inView));
+			return host;
+		});
+		try {
+			for (const host of hosts) showsDraft(host.firstElementChild!, key);
+			expect(up(id)).toBe(true);
+			expect(keptCommentDrafts.get(key)?.toast).toBe(id);
+		} finally { for (const host of hosts) host.remove(); }
+	});
 
 	it('goes once the draft’s own box comes on screen, which says why instead; the reason stays with the draft', () => {
 		const id = failedAway();

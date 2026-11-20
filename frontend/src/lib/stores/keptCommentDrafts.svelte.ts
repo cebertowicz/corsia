@@ -7,6 +7,7 @@
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
+import { clippedWindow } from '$lib/cm/visible-region';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { newClientId } from './documentWire';
 import { toasts } from './toast';
@@ -71,24 +72,20 @@ function told(key: string, box: Element): boolean {
 	}
 	return true;
 }
-/** The nearest ancestor that scrolls its content, which hides what it has scrolled out of its own box. */
-function scroller(box: Element): Element | null {
-	for (let node = box.parentElement; node; node = node.parentElement) {
-		const style = getComputedStyle(node);
-		if (/(auto|scroll)/.test(`${style.overflowX} ${style.overflowY}`)) return node;
-	}
-	return null;
-}
 /**
  * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
- * shrink it) and the part of its scroller that shows. A box its scroller has scrolled away is not on screen.
+ * shrink it) and the part every clipping ancestor shows (`clippedWindow`), so a box its scroller has scrolled away is not
+ * on screen. Nor is a box drawn invisible where it lies: hidden (`visibility`, which it inherits), inside an inert surface,
+ * or inside one clipped away whole (a Popover not yet placed).
  */
 function onScreen(box: Element): boolean {
-	const rect = box.getBoundingClientRect(), view = window.visualViewport, clip = scroller(box)?.getBoundingClientRect();
-	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip?.left ?? -Infinity);
-	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip?.top ?? -Infinity);
-	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip?.right ?? Infinity);
-	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip?.bottom ?? Infinity);
+	if (getComputedStyle(box).visibility !== 'visible' || box.closest('[inert]')) return false;
+	for (let node: Element | null = box; node; node = node.parentElement) if (getComputedStyle(node).clipPath === 'inset(100%)') return false;
+	const rect = box.getBoundingClientRect(), view = window.visualViewport, { rect: clip } = clippedWindow(box);
+	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip.left);
+	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip.top);
+	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip.right);
+	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip.bottom);
 	return right > left && bottom > top;
 }
 
