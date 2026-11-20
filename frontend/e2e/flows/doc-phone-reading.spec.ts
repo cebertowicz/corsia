@@ -28,7 +28,8 @@ for (const width of [320, 393, 768, 1440]) {
 				await expect(content).toHaveAttribute('contenteditable', 'true');
 				expect(await inEditorView(page, view => view.state.selection.main.empty, null)).toBe(true);
 				await page.screenshot({ path: info.outputPath('edit.png') });
-				await content.click();
+				// A known text paragraph, never the box centre: that can land on the image widget and open its preview.
+				await content.locator('.cm-line').filter({ hasText: 'Passage 2:' }).click();
 				await page.keyboard.type('local writing ');
 				const edited = await inEditorView(page, view => view.state.doc.toString(), null);
 				await selectReadingTab(page, seeded.tabs[1].title, true);

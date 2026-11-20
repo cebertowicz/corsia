@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { enterDocumentEdit } from '../support/documentReading';
 import { openReadingDocument, selectReadingTab } from '../support/phoneReading';
 import { inEditorView } from '../support/liveDocument';
+import { settled } from '../support/tableCells';
 
 for (const width of [320, 393, 768]) {
 	test.describe(`@flow:doc-phone-reading-selection @surface:documents ${width}`, () => {
@@ -11,25 +12,33 @@ for (const width of [320, 393, 768]) {
 			await openReadingDocument(page, width);
 			const cell = page.locator('.cm-md-table td').filter({ hasText: /^Cell passage$/ });
 			await expect(cell).toBeVisible();
-			await page.locator('.doc .cm-content').first().focus();
-			await cell.evaluate(el => {
-				const range = document.createRange(); range.selectNodeContents(el);
-				const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
-				document.dispatchEvent(new Event('selectionchange'));
-			});
+			const selectCell = async () => {
+				await page.locator('.doc .cm-content').first().focus();
+				await cell.evaluate(el => {
+					const range = document.createRange(); range.selectNodeContents(el);
+					const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+					document.dispatchEvent(new Event('selectionchange'));
+				});
+			};
+			await selectCell();
 			await expect(cell.locator('.cm-comment-pending')).toBeVisible();
 			expect(await page.evaluate(() => document.getSelection()?.toString())).toBe('Cell passage');
 			await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
 			await page.locator('.touch-comment-bar').getByRole('button', { name: 'Comment', exact: true }).click();
-			const field = page.locator('.composer textarea');
-			await field.fill('Keep the cell note');
+			const sheet = page.getByRole('dialog', { name: 'Document comments' });
+			await sheet.locator('.composer textarea').fill('Keep the cell note');
+			// The draft sheet is modal and Edit is not offered while drafting: close it as a person would, then use the menu.
+			await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+			await expect(sheet).toBeHidden();
 			await enterDocumentEdit(page);
-			await expect(field).toHaveValue('Keep the cell note');
-			await expect(field).toBeFocused();
+			await expect(page.locator('.doc .cm-content').first()).toHaveAttribute('contenteditable', 'true');
 			await page.getByRole('button', { name: 'Done', exact: true }).click();
-			await expect(field).toBeFocused();
-			await expect(field).toHaveValue('Keep the cell note');
 			await expect(page.locator('.doc .cm-content').first()).toHaveAttribute('contenteditable', 'false');
+			await settled(page);
+			await selectCell();
+			await expect(cell.locator('.cm-comment-pending')).toBeVisible();
+			await page.locator('.touch-comment-bar').getByRole('button', { name: 'Comment', exact: true }).click();
+			await expect(sheet.locator('.composer textarea'), 'reopening the comment shows the kept draft').toHaveValue('Keep the cell note');
 		});
 		test('Comment stays above a controlled keyboard/accessory viewport in both modes', async ({ page }, info) => {
 			await page.addInitScript(() => Object.defineProperty(window, 'visualViewport', { configurable: true,
