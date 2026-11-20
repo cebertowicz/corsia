@@ -61,8 +61,8 @@ function drop(key: string): void {
 /** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
 export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
 	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
-	full: 'No room left to keep this draft on this device. Post it or copy it before you close CORSIA.',
-	refused: 'This device refused to keep this draft. Post it or copy it before you close CORSIA.',
+	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
+	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
 };
 /**
  * Whether this device keeps the draft changed. Said in one place: the line under its box (which reads `notKept`), or, when

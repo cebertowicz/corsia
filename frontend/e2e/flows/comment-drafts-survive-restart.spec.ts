@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
@@ -5,6 +7,7 @@ import { openLiveDocument, seedLiveDocument, type LiveDocument } from '../suppor
 import { beginComment, submitButton } from '../support/liveCommentProof';
 import { openComments } from '../support/commentDrawer';
 import { at, commentButton, composer, drag, openThread, restoreImageTab, seedImage } from '../support/imageRegionComments';
+import { expectFailureLook } from '../support/failureLook';
 
 // An unsent comment or reply is kept on this device: it is still there after a reload, and after the app is quit and opened
 // again (a new page over the same storage stands in for that, and for an update restart), until it posts or is cancelled.
@@ -22,6 +25,22 @@ const PREFIX = 'corsia:commentDraft:v1:';
 /** The kept drafts' bodies on this device, as the page wrote them. */
 const stored = (page: Page) => page.evaluate((prefix) => Object.keys(localStorage).filter((name) => name.startsWith(prefix))
 	.map((name) => (JSON.parse(localStorage.getItem(name)!) as { body: string }).body), PREFIX);
+
+/** A draft longer than one draft may be on this device (200,000 UTF-16 units), in words a person might paste. */
+const TOO_LONG = 'The crew walks the loop on Saturday and meets at the north gate. '.repeat(3_100);
+const NOT_KEPT = 'Too long to keep on this device. Post it or copy it before you close CORSIA.';
+/** Frames of the line under the box, in both themes, when set; taken before the line is asserted, so a build without it gives its frame too. */
+const FRAMES = process.env.CORSIA_DRAFT_FRAMES;
+async function frame(page: Page, name: string) {
+	if (!FRAMES) return;
+	fs.mkdirSync(FRAMES, { recursive: true });
+	for (const scheme of ['light', 'dark'] as const) {
+		await page.emulateMedia({ colorScheme: scheme });
+		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+		await page.screenshot({ path: path.join(FRAMES, `${name}-${page.viewportSize()!.width}-${scheme}.png`), animations: 'disabled' });
+	}
+	await page.emulateMedia({ colorScheme: 'light' });
+}
 
 type WayOut = 'reload' | 'relaunch';
 /**
@@ -123,6 +142,29 @@ test.describe('@flow:document-comments an unsent comment outlives the page', () 
 			await field.pressSequentially('Park on Elm Street');
 			page = await leave(page, way, (next) => openLiveDocument(next, document).then(() => undefined));
 			await expect(await openReply(page, id), 'the reply typed before is there').toHaveValue('Park on Elm Street');
+		});
+	}
+
+	for (const surface of ['document', 'image'] as const) {
+		test(`${surface}: a draft too long to keep on this device says so under its box, and nothing is stored for it`, async ({ page, request }, testInfo) => {
+			if (surface === 'document') {
+				const document = await seedLiveDocument(request, 'drafts-too-long-doc', DOC);
+				await openLiveDocument(page, document);
+				await beginComment(page, QUOTE);
+			} else {
+				const seeded = await seedImage(page, request, 'drafts-too-long-image');
+				await openThread(page, seeded.sessionTitle, page.viewportSize()!.width);
+				await drawBox(page);
+			}
+			await composer(page).fill(TOO_LONG);
+			const line = page.locator('[role="alert"]:not(.toast)').filter({ hasText: NOT_KEPT });
+			await line.waitFor({ timeout: 3_000 }).catch(() => {});
+			await frame(page, `not-kept-${surface}`);
+			await expect(line, 'the box says the draft is not kept on this device').toBeVisible();
+			await expect(page.locator('.toast').filter({ hasText: NOT_KEPT }), 'its box is on screen, so no toast says it too').toHaveCount(0);
+			await expectFailureLook(page, testInfo, line, `${surface} not-kept line`);
+			expect(await stored(page), 'nothing is stored for it').toEqual([]);
+			await expect(composer(page), 'the text stays in the box').toHaveValue(TOO_LONG);
 		});
 	}
 

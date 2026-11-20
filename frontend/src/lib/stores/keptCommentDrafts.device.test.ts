@@ -260,7 +260,7 @@ describe('a draft this device does not keep', () => {
 		const keys = [...Array(11).keys()].map((index) => page.drafts.imageDraftKey(`artifact-${index}`));
 		for (const key of keys) page.drafts.keptCommentDrafts.keep(key, long, tags);
 		expect(localStorage.length).toBe(10);
-		expect(page.drafts.keptCommentDrafts.notKept(keys[10])).toBe('No room left to keep this draft on this device. Post it or copy it before you close CORSIA.');
+		expect(page.drafts.keptCommentDrafts.notKept(keys[10])).toBe('This device has no room left to keep this draft. Post it or copy it before you close CORSIA.');
 		expect(keys.slice(0, 10).map((key) => page.drafts.keptCommentDrafts.notKept(key))).toEqual(Array(10).fill(''));
 		page = await relaunch();
 		expect(keys.filter((key) => page.drafts.keptCommentDrafts.get(key)?.body === long)).toHaveLength(10);
@@ -275,7 +275,7 @@ describe('a draft this device does not keep', () => {
 		page.drafts.keptCommentDrafts.keep(key, 'kept here', page.tags.createMentionSelection('kept here'));
 		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe('kept here');
 		expect(stored(key)).toBeNull();
-		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('This device refused to keep this draft. Post it or copy it before you close CORSIA.');
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.');
 		setItem.mockRestore();
 		page.drafts.keptCommentDrafts.keep(key, 'kept again', page.tags.createMentionSelection('kept again'));
 		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
