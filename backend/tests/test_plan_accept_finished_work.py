@@ -82,8 +82,9 @@ def test_mark_done_requires_evidence_even_beyond_the_tool_schema(db):
 )
 def test_mark_done_names_the_operation_for_reviewed_work(db, state, message):
     plan = _plan(db)
-    node = _task(db, plan.id, title="Ship it")
-    if state == "review_requested":
+    if state != "review_requested":
+        node = _task(db, plan.id, title="Ship it")
+    else:
         node = _active(db, plan.id)
         mutate(plan.id, "request_review", {
             "node_id": node.id, "expected_revision": _row(db, node.id)["revision"],
