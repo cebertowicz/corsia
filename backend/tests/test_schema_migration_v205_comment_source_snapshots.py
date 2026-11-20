@@ -1,6 +1,6 @@
-"""Schema 203 -> 204: the snapshot store an anchor is measured against.
+"""Schema 204 -> 205: the snapshot store an anchor is measured against.
 
-The step is purely additive, so these tests are the whole step: it registers at 203,
+The step is purely additive, so these tests are the whole step: it registers at 204,
 gives an existing database the same shapes a fresh install declares, runs twice, and
 backfills nothing, because the text a past version held is not recoverable from the
 current file and a guessed snapshot would place anchors worse than NULL does.
@@ -13,7 +13,7 @@ from contextlib import closing
 
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS
-from infra.migration_203_to_204_comment_source_snapshots import migrate_203_to_204
+from infra.migration_204_to_205_comment_source_snapshots import migrate_204_to_205
 from infra.schema import SCHEMA_VERSION
 
 _COMMENT = ("INSERT INTO doc_comments (id,artifact_id,author,author_kind,body,anchor_text,"
@@ -27,13 +27,13 @@ def _fresh() -> sqlite3.Connection:
     return db
 
 
-def _installed_at_203() -> sqlite3.Connection:
-    """A database as it stands at schema 203: this build's schema with what 204 adds taken back out.
+def _installed_at_204() -> sqlite3.Connection:
+    """A database as it stands at schema 204: this build's schema with what 205 adds taken back out.
 
     SQLite will not drop the column on its own here (it re-parses the table's own DDL
     afterwards and refuses), so the comments table is rebuilt from the DDL it was created
     with, minus its last definition, and its other indexes are re-created from the
-    definitions they were created with. No part of the 203 shape is hand-written.
+    definitions they were created with. No part of the 204 shape is hand-written.
     """
     db = _fresh()
     table_sql = db.execute("SELECT sql FROM sqlite_master WHERE name='doc_comments'").fetchone()[0]
@@ -60,7 +60,7 @@ def _installed_at_203() -> sqlite3.Connection:
         db.executemany(
             f"INSERT INTO doc_comments ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})", rows
         )
-    db.execute('PRAGMA user_version=203')
+    db.execute('PRAGMA user_version=204')
     return db
 
 
@@ -94,9 +94,9 @@ def _snapshot_objects(db: sqlite3.Connection) -> list[tuple[str, str]]:
     )
 
 
-def test_the_step_is_registered_at_203() -> None:
-    assert SCHEMA_VERSION == 204
-    assert MIGRATIONS[203] is migrate_203_to_204
+def test_the_step_is_registered_at_204() -> None:
+    assert SCHEMA_VERSION == 205
+    assert MIGRATIONS[204] is migrate_204_to_205
 
 
 def test_a_fresh_install_declares_the_store_and_the_reference() -> None:
@@ -114,12 +114,12 @@ def test_a_fresh_install_declares_the_store_and_the_reference() -> None:
 
 
 def test_the_step_gives_an_older_database_the_fresh_shapes_and_runs_twice() -> None:
-    with closing(_fresh()) as fresh, closing(_installed_at_203()) as db:
+    with closing(_fresh()) as fresh, closing(_installed_at_204()) as db:
         assert _snapshot_objects(db) == []
         assert 'snapshot_id' not in _columns(db)
 
-        migrate_203_to_204(db)
-        migrate_203_to_204(db)
+        migrate_204_to_205(db)
+        migrate_204_to_205(db)
 
         # The step appends the column, which is where a fresh schema declares it, so the two
         # agree column by column in order as well as by name and definition.
@@ -131,12 +131,12 @@ def test_the_step_gives_an_older_database_the_fresh_shapes_and_runs_twice() -> N
 
 def test_an_existing_comment_starts_with_no_snapshot_and_keeps_its_anchor() -> None:
     """Nothing is backfilled: the old text is not recoverable, and NULL places as before."""
-    with closing(_installed_at_203()) as db:
+    with closing(_installed_at_204()) as db:
         db.execute(_COMMENT)
         assert db.execute('SELECT id,anchor_text,from_off,to_off FROM doc_comments'
                           " WHERE id='c1'").fetchone() == ('c1', 'target', 7, 13)
 
-        migrate_203_to_204(db)
+        migrate_204_to_205(db)
 
         assert db.execute('SELECT id,anchor_text,from_off,to_off,snapshot_id'
                           " FROM doc_comments WHERE id='c1'").fetchone() == ('c1', 'target', 7, 13, None)
@@ -147,9 +147,9 @@ def test_the_step_skips_a_database_without_document_comments() -> None:
     """An old database that never held a comment gains nothing, as the other comment steps do."""
     db = sqlite3.connect(':memory:')
     db.execute('CREATE TABLE threads (id TEXT PRIMARY KEY)')
-    db.execute('PRAGMA user_version=203')
+    db.execute('PRAGMA user_version=204')
 
-    migrate_203_to_204(db)
+    migrate_204_to_205(db)
 
     assert _snapshot_objects(db) == []
     assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='doc_comments'").fetchone()[0] == 0
@@ -158,10 +158,10 @@ def test_the_step_skips_a_database_without_document_comments() -> None:
 def test_the_step_writes_nothing_besides_the_new_shapes() -> None:
     """Row-for-row the same comment data, only with the new column widened onto it."""
     carried = 'id,artifact_id,author,author_kind,body,anchor_text,from_off,to_off,review,resolved'
-    with closing(_installed_at_203()) as db:
+    with closing(_installed_at_204()) as db:
         db.execute(_COMMENT)
         rows_before = db.execute(f'SELECT {carried} FROM doc_comments').fetchall()
 
-        migrate_203_to_204(db)
+        migrate_204_to_205(db)
 
         assert db.execute(f'SELECT {carried} FROM doc_comments').fetchall() == rows_before

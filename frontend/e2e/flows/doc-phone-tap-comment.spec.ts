@@ -95,7 +95,7 @@ async function frames(page: Page, testInfo: TestInfo, name: string) {
 const highlight = (page: Page, word: Word): Locator => page.locator('.cm-comment-anchor', { hasText: new RegExp(`^${word}$`) }).first();
 const sheet = (page: Page) => page.locator('.drawer-panel');
 const sign = (page: Page) => page.locator('[data-highlight-dot] [aria-label^="New"]');
-const pill = (page: Page) => page.locator('.comment-status');
+const pill = (page: Page) => page.locator('[data-comments-entry]');
 
 /** The sheet shows this word's comment, and no other thread's. */
 async function expectOpenOn(page: Page, word: Word, why: string) {

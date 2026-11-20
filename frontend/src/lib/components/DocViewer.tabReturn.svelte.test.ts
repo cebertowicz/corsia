@@ -30,7 +30,8 @@ let host: HTMLElement;
 let stop: () => void;
 const docs: Y.Doc[] = [];
 const flushes = () => wire.frames.filter(frame => frame.type === 'doc_flush');
-const ghost = () => host.querySelector('.save-ghost')?.textContent?.trim() ?? '';
+// The save line, in the Details panel's status section (present whether the panel is open or closed).
+const ghost = () => host.querySelector('.doc-panel .p-quiet')?.textContent?.trim() ?? '';
 
 beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });

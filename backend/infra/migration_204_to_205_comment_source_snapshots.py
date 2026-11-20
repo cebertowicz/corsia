@@ -1,4 +1,4 @@
-"""Schema 203 -> 204: keep the document text each comment's anchor was measured against.
+"""Schema 204 -> 205: keep the document text each comment's anchor was measured against.
 
 A comment's anchor is a pair of offsets into the document as it was when the comment was
 made. Until now only the offsets and the quoted text were stored, so after a whole-file
@@ -49,7 +49,7 @@ def _has_column(db: sqlite3.Connection, table: str, column: str) -> bool:
     return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
 
 
-def migrate_203_to_204(db: sqlite3.Connection) -> None:
+def migrate_204_to_205(db: sqlite3.Connection) -> None:
     """Add the snapshot store and the reference from each anchored comment to it."""
     if not _has_table(db, 'doc_comments'):
         return  # a database that never held a document comment has no anchors to keep

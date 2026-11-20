@@ -10,6 +10,15 @@ export function reopenOnReconnect(connected: () => boolean, refused: () => boole
 	});
 }
 
+/** A document opened awaiting its first save reloads once its draft has saved. */
+export function reloadAfterLegacySave(awaiting: () => boolean, saved: () => boolean, done: () => void, reload: () => void): void {
+	$effect(() => {
+		if (!awaiting() || !saved()) return;
+		done();
+		reload();
+	});
+}
+
 export function bindViewerSession(session: () => LiveDocumentSession | undefined, apply: (state: LiveDocumentSession | null) => void): void {
 	$effect(() => {
 		const current = session();

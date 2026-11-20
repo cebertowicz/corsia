@@ -68,6 +68,80 @@ def _init_messages_fts(conn: sqlite3.Connection) -> None:
     """)
 
 
+def comment_search_words_sql(user_message_id: str, cid: str) -> str:
+    """SQL for the words one chat comment is searched by, or NULL when its input has none.
+
+    A comment lives in its input's ``metadata.reply_context.comments``; ``chat_comments`` holds
+    only its keys. The words are the input's own text, then the comment's quote and note, so a
+    search can match a word from the text and one from the comment together. The two arguments
+    are SQL expressions for the comment's keys (``new.user_message_id``, ``cc.cid``).
+
+    This is the one definition: the insert trigger and ``infra.comment_search_fill`` both use it.
+    Malformed metadata or a non-object comment yields no row rather than an error, because the
+    trigger runs inside the transaction that stores the person's input.
+    """
+    return (
+        f"(SELECT coalesce(m.content, '') || char(10) || {_comment_words('j')} "
+        f"FROM messages m, {comments_of_sql('m')} j "
+        f"WHERE m.id = {user_message_id} AND {comment_field_sql('j', 'cid')} = {cid} LIMIT 1)"
+    )
+
+
+def comment_words_like_sql(message: str) -> str:
+    """SQL that is true when one of ``message``'s chat comments has a quote or note LIKE ``?``.
+
+    The search fallback's counterpart of ``comment_search_words_sql``: the same comments and the
+    same quote and note fields, so a word that appears only in another metadata key or line
+    (``in_view``, ``first_unread``, attachment fields, the key names themselves) never matches.
+    ``message`` is the SQL alias of the ``messages`` row; it takes one parameter, the pattern.
+    """
+    return f"EXISTS (SELECT 1 FROM {comments_of_sql(message)} j WHERE {_comment_words('j')} LIKE ?)"
+
+
+def comments_of_sql(message: str) -> str:
+    """The comments of a ``messages`` row; malformed metadata yields none rather than an error."""
+    return (f"json_each(CASE WHEN json_valid({message}.metadata) THEN {message}.metadata ELSE '{{}}' END, "
+            "'$.reply_context.comments')")
+
+
+def comment_field_sql(comment: str, name: str) -> str:
+    """One field of a comment from ``comments_of_sql``; NULL for a comment that is not an object."""
+    return f"CASE WHEN {comment}.type = 'object' THEN json_extract({comment}.value, '$.{name}') END"
+
+
+def _comment_words(comment: str) -> str:
+    """The searchable words of one comment: its quote, then its note."""
+    return (f"coalesce({comment_field_sql(comment, 'quote')}, '') || char(10) "
+            f"|| coalesce({comment_field_sql(comment, 'note')}, '')")
+
+
+def _init_comment_fts(conn: sqlite3.Connection) -> None:
+    """Index chat-comment words for history search: one row per ``chat_comments`` row, by its rowid.
+
+    Contentless, so no words are stored twice, and ``contentless_delete`` so a row is removed by
+    rowid alone. ``messages_fts`` is left as it is: a search reads both, message hits first.
+    Comments stored before this table existed are filled after startup by
+    ``infra.comment_search_fill``, never here.
+    """
+    conn.execute("""
+        CREATE VIRTUAL TABLE comment_fts USING fts5(
+            words, content='', contentless_delete=1
+        )
+    """)
+    words = comment_search_words_sql("new.user_message_id", "new.cid")
+    conn.execute(f"""
+        CREATE TRIGGER comment_fts_insert AFTER INSERT ON chat_comments BEGIN
+            INSERT OR REPLACE INTO comment_fts(rowid, words)
+                SELECT new.rowid, w FROM (SELECT {words} AS w) WHERE w IS NOT NULL;
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER comment_fts_delete AFTER DELETE ON chat_comments BEGIN
+            DELETE FROM comment_fts WHERE rowid = old.rowid;
+        END
+    """)
+
+
 def _init_checkpoints_fts(conn: sqlite3.Connection) -> None:
     """Index checkpoint narratives for bounded search.
 
@@ -157,5 +231,6 @@ def _init_checkpoint_entry_search_fts_triggers(conn: sqlite3.Connection) -> None
 def _init_fts(conn: sqlite3.Connection) -> None:
     """Create the exact fresh-schema FTS indexes."""
     _init_messages_fts(conn)
+    _init_comment_fts(conn)
     _init_checkpoints_fts(conn)
     _init_checkpoint_entry_search_fts(conn)

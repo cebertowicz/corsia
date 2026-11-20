@@ -4,6 +4,9 @@ import CommentComposer from './CommentComposer.svelte';
 import { postDocumentComment, submitDocumentComment } from '$lib/docViewerOperations';
 import { toasts } from '$lib/stores/toast';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
+import { createMentionSelection } from './mentionSelection';
+import { get } from 'svelte/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -120,5 +123,23 @@ describe('CommentComposer', () => {
 		expect(keptCommentDrafts.onScreen('draft-key')).toBe(true);
 		unmount(component!); component = null;
 		expect(keptCommentDrafts.onScreen('draft-key')).toBe(false);
+	});
+	it('says under the box, in the same line as a failure, that this device does not keep its draft, until a change is kept', () => {
+		user.set({ id: 'person-1', name: 'person-1' });
+		try {
+			render(async () => {}, { shownKey: 'draft-key', body: 'Kept', error: 'Couldn’t post the comment. Your draft is kept. Try again.' });
+			const huge = 'x'.repeat(200_001);
+			keptCommentDrafts.keep('draft-key', huge, createMentionSelection(huge));
+			flushSync();
+			const line = host.querySelector('[role="alert"]');
+			expect(line?.textContent).toBe('Couldn’t post the comment. Try again. Too long to keep on this device. Post it or copy it before you close CORSIA.');
+			expect(line?.classList.contains('failed')).toBe(true);
+			keptCommentDrafts.keep('draft-key', 'Kept', createMentionSelection('Kept'));
+			flushSync();
+			expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+		} finally {
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+			keptCommentDrafts.reset(); user.set(null); localStorage.clear();
+		}
 	});
 });

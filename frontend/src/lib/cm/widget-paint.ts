@@ -214,7 +214,9 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 			addCommentId(cell, mark);
 			if (mark.unread) cell.dataset.unread = '';
 			cell.dataset.commentAria = 'true';
-			cell.setAttribute('aria-label', `Commented cell: ${clean(cell.textContent ?? '')}`);
+			// The label replaces the name the cell's content would give it, so a cell with no text is named by its images' alt text.
+			const name = clean(cell.textContent ?? '') || clean([...cell.querySelectorAll('img')].map((img) => img.alt).join(' '));
+			cell.setAttribute('aria-label', `Commented cell: ${name}`);
 		}
 	}
 }

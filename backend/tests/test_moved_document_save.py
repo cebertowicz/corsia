@@ -106,7 +106,7 @@ def test_a_deleted_path_keeps_no_such_file(durable_scope):
 
     refusal = _refusal(db, thread_id, source)
     assert refusal.kind == "no_such_file"
-    assert refusal.message == "This file no longer exists, so nothing was changed. You can close it."
+    assert refusal.message == "This document is deleted, so nothing changed."
 
 
 def test_a_path_never_registered_keeps_no_such_file(durable_scope):

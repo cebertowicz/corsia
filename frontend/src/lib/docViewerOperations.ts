@@ -10,10 +10,11 @@ import { shouldReloadPresenceEdit } from '$lib/docPresence';
 import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { DRAFT_KEPT } from '$lib/stores/draftKept';
 import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
 
 /** One message per known reason the server refuses a comment's tags, picked by the refusal's `kind`. */
-const TAG_REFUSALS: Record<string, string> = {
+export const TAG_REFUSALS: Record<string, string> = {
 	no_viewing_thread: 'Open this document from a chat to tag agents. Your comment is still here.',
 	tag_unavailable: 'An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.',
 };
@@ -39,7 +40,7 @@ function tagRefusal(error: unknown): string | undefined {
  * What a comment or reply on a document or an image says when its post fails for no reason it can name. Its box keeps the
  * text, and once the box is off screen this toast is the only word of it, so it says the draft is kept.
  */
-export const POST_FAILED = 'Couldn’t post the comment. Your draft is kept. Try again.';
+export const POST_FAILED = `Couldn’t post the comment. ${DRAFT_KEPT} Try again.`;
 
 // The kept draft holds the failure's toast (`keptCommentDrafts.toast`); the composer needs the rejection to keep its draft, and `message` to say why in it.
 // A failure says why in one place, decided as it fails: `inBox` answers whether a box that shows the reason is on screen

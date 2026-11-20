@@ -22,6 +22,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
+	// DocViewerStatus.svelte writes the Details panel's horizontal correction.
+	'--panel-shift',
 	// BrowserLeaf assigns the shared session owner's colour with Svelte `style:--presence-color`.
 	'--presence-color',
 	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
@@ -37,6 +39,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--drawer-bottom',
 	'--drawer-left',
 	'--drawer-h',
+	// documentHalfSheetRoom measures extra space and writes it on the drawer panel.
+	'--drawer-half-extra',
 	'--depth',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
@@ -53,6 +57,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--header-right-controls-inset',
 	// HomeShell's `style:--status-banners-height` on main: the height the status banners add to the column's flow.
 	'--status-banners-height',
+	// DocViewerStatus's `style:--panel-max` on the Details panel: the height left below its top edge.
+	'--panel-max',
 ]);
 
 /**

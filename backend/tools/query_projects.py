@@ -7,6 +7,7 @@ for retrieving thread messages and managing project associations.
 from typing import Any
 
 from core.message_display import durable_row_text
+from core.reply_context import with_comment_lines
 from core.registered_repos import format_registered_repo_policy
 from infra.db_async import run_in_db
 from infra.passive_changes import append_agent_roster_transition
@@ -27,7 +28,7 @@ _MESSAGE_PREVIEW_CHARS = 500
 
 def _history_line(row: Any, tool_output: str) -> str:
     """Render one history row, led by the number a checkpoint would cite."""
-    content = durable_row_text(row["content"], row["metadata"])
+    content = with_comment_lines(durable_row_text(row["content"], row["metadata"]), row["metadata"])
     is_tool = row["role"] == "tool"
     if tool_output == "full":
         body = content
