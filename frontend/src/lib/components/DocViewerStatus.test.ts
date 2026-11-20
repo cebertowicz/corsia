@@ -7,7 +7,7 @@ import type { DocFeedback } from '$lib/docFeedback.svelte';
 import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { detailsNeedsCount, detailsNeedsUp, type DetailsNeeds, type DetailsNeedsWords } from '$lib/docDetailsNeeds';
+import { detailsNeedsUp, type DetailsNeeds, type DetailsNeedsWords } from '$lib/docDetailsNeeds';
 import type { CommentFeedback } from '$lib/api/docs';
 import { deliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 import { get } from 'svelte/store';
@@ -416,7 +416,7 @@ describe('DocViewerStatus toolbar', () => {
 		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?' };
 		for (const needs of all) {
 			const up = detailsNeedsUp(needs, words);
-			expect(detailsNeedsCount(needs, words), JSON.stringify(needs)).toBe(up.length);
+			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk].filter(Boolean).length);
 			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null].filter((word): word is string => !!word));
 		}
 	});

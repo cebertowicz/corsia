@@ -691,6 +691,17 @@ for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLO
 				closeEdge: reaches(at(box.right - 1, box.top + box.height / 2), '.tab-close'),
 				// The narrow File changed mark is the phone header's ↻: a small box that answers a tap on its own centre.
 				reloadCompact: reloadBox.width <= 40,
+				// The words form wears dev's look: the amber fill and the medium weight, read from the same tokens dev drew them with.
+				reloadLook: (() => {
+					const own = getComputedStyle(reload);
+					const probe = document.createElement('span');
+					probe.style.cssText = 'background: var(--amber-bg); font-weight: var(--fw-medium);';
+					document.body.append(probe);
+					const token = getComputedStyle(probe);
+					const look = { background: own.backgroundColor, weight: own.fontWeight, tokenBackground: token.backgroundColor, tokenWeight: token.fontWeight };
+					probe.remove();
+					return look;
+				})(),
 				reloadCentre: reaches(at(reloadBox.left + reloadBox.width / 2, reloadBox.top + reloadBox.height / 2), '[data-file-changed]'),
 			};
 		});
@@ -738,6 +749,10 @@ for (const { split, atMin, scheme, name, width = 1440, wide = false } of TAB_CLO
 		if (wide) {
 			// With room the row is today's row: a typical name keeps all of itself.
 			expect(wholeName, `a typical name stays whole where the row has room: ${JSON.stringify([geometry.name, geometry.pill, geometry.stripWidth])}`).toBe(true);
+		}
+		if (!geometry.reloadCompact) {
+			expect(geometry.reloadLook.background, `the words form is filled with --amber-bg: ${JSON.stringify(geometry.reloadLook)}`).toBe(geometry.reloadLook.tokenBackground);
+			expect(geometry.reloadLook.weight, `the words form is set in --fw-medium: ${JSON.stringify(geometry.reloadLook)}`).toBe(geometry.reloadLook.tokenWeight);
 		}
 		if (geometry.reloadCompact) expect(geometry.reloadCentre, 'the compact File changed mark answers a tap on its centre').toBe(true);
 		await page.unrouteAll({ behavior: 'ignoreErrors' });

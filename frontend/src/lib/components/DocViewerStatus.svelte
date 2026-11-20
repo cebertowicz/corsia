@@ -294,15 +294,12 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	/* The bar's controls: 36px with a pointer, 44px at phone width (IconButton lg's sizes), 16px apart (the hosts' gap). */
-	.bar-stale { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--amber-bg); color: var(--amber-text); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
-	.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-	.bar-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
 	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
 	/* File changed is one control with two forms: the words, which size the button (dev's 135x32 text button), and the ↻ mark,
 	 * which is the square below. Its width is never fixed, or the label paints past the box and over its neighbour. */
-	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); }
+	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); background: var(--amber-bg); font-weight: var(--fw-medium); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
 	@media (max-width: 768px) {
@@ -333,10 +330,12 @@
 	}
 	@container strip (max-width: 34rem) {
 		/* 2. File changed takes the ↻ mark, so its words stop costing the tab its room. */
-		.bar-reload.bar-stale { width: var(--bar-row); height: var(--bar-row); padding: 0; }
+		.bar-reload.bar-stale { width: var(--bar-row); height: var(--bar-row); padding: 0; background: none; font-weight: var(--fw-regular); }
 		.bar-reload.bar-stale svg { display: block; width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 		.bar-stale-word { display: none; }
 	}
+	/* Both forms tint on hover, as dev's File changed did; written after the narrow rung so its fill reset cannot take it away. */
+	.bar-reload.bar-stale:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }

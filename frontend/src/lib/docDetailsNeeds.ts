@@ -11,13 +11,8 @@ export type DetailsNeeds = {
  * fields as the flags, so a new source does not compile until it says what it is called. */
 export type DetailsNeedsWords = { [source in keyof DetailsNeeds]: string };
 
-/** The sources that are up, each named by its own words. The amber count and the control's accessible name both read
- * this one list, so what the count says and what the name says can't drift apart. */
+/** The sources that are up, each named by its own words. The amber count is this list's length and the control's accessible
+ * name reads the list itself, so what the count says and what the name says can't drift apart. */
 export function detailsNeedsUp(needs: DetailsNeeds, words: DetailsNeedsWords): string[] {
 	return (Object.keys(needs) as (keyof DetailsNeeds)[]).filter((source) => needs[source]).map((source) => words[source]);
-}
-
-/** The amber count beside Details: one per source that is up, so it always matches the words in the name. */
-export function detailsNeedsCount(needs: DetailsNeeds, words: DetailsNeedsWords): number {
-	return detailsNeedsUp(needs, words).length;
 }

@@ -71,9 +71,11 @@ export type ControlBox = { name: string; left: number; top: number; right: numbe
  */
 function measureControls(scope: Locator, controls: string): Promise<{ mine: ControlBox[]; others: ControlBox[] }> {
 	return scope.evaluate((root, selector) => {
-		const clamp = (rect: DOMRect | DOMRectReadOnly, owner: Element): Box => {
+		// What an overflow-clipping ancestor lets through. A box is clipped by its ancestors; a text node is clipped by the element
+		// that holds it too, so the walk for text starts at that element (`self`), and a 1px `.sr-only` span cuts its own sentence.
+		const clamp = (rect: DOMRect | DOMRectReadOnly, owner: Element, self = false): Box => {
 			let { left, top, right, bottom } = rect;
-			for (let parent = owner.parentElement; parent; parent = parent.parentElement) {
+			for (let parent: Element | null = self ? owner : owner.parentElement; parent; parent = parent.parentElement) {
 				const style = getComputedStyle(parent);
 				if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
 				const clip = parent.getBoundingClientRect();
@@ -84,15 +86,18 @@ function measureControls(scope: Locator, controls: string): Promise<{ mine: Cont
 		};
 		// An invisible subtree paints nothing, so a hidden measuring copy (the receipt's `width: max-content` twin) never reads
 		// as ink the visible control never shows. REJECT on an element prunes its whole subtree.
+		// The two ways this app hides text from the eye and keeps it for a screen reader are not painting either: `clip: rect(0,0,0,0)`
+		// (every `.sr-only`, AvatarStack's among them) and `clip-path: inset(100%)` (the Popover primitive's closed state).
 		const paints = (element: Element) => {
 			const style = getComputedStyle(element);
+			if (style.clip.replace(/\s+/g, '') === 'rect(0px,0px,0px,0px)' || style.clipPath.replace(/\s+/g, '') === 'inset(100%)') return false;
 			return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0;
 		};
 		const inkOf = (element: Element): Box => {
 			let union = clamp(element.getBoundingClientRect(), element);
-			const add = (rect: DOMRect | DOMRectReadOnly, owner: Element) => {
+			const add = (rect: DOMRect | DOMRectReadOnly, owner: Element, self = false) => {
 				if (rect.width <= 0 || rect.height <= 0) return;
-				const box = clamp(rect, owner);
+				const box = clamp(rect, owner, self);
 				union = {
 					left: Math.min(union.left, box.left), top: Math.min(union.top, box.top),
 					right: Math.max(union.right, box.right), bottom: Math.max(union.bottom, box.bottom),
@@ -106,7 +111,7 @@ function measureControls(scope: Locator, controls: string): Promise<{ mine: Cont
 				if (node.nodeType === Node.TEXT_NODE) {
 					const range = document.createRange();
 					range.selectNodeContents(node);
-					for (const rect of range.getClientRects()) add(rect, node.parentElement!);
+					for (const rect of range.getClientRects()) add(rect, node.parentElement!, true);
 				} else {
 					add((node as Element).getBoundingClientRect(), node as Element);
 				}
