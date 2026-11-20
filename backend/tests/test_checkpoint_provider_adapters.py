@@ -651,16 +651,18 @@ async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendor_thread):
-    """A body written before the process failed is kept, marked partial under a provider error.
+@pytest.mark.parametrize("stderr", ["provider process terminal", "quota/auth process terminal"])
+async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendor_thread, stderr):
+    """A body written before the process failed is kept as partial, unless the failure is a usage limit.
 
-    Changed on purpose: the diagnostic now carries the partial-provider-error
+    Changed on purpose, twice: the diagnostic now carries the partial-provider-error
     marker, so capture appends the body after the previous narrative instead of
     replacing it, and the body ends on a line break because its assistant record
-    was complete.
+    was complete. And, matching the Codex test, an exit text that names a usage
+    limit (as ``harness_cause_kind`` reads it) installs nothing.
     """
     from core import fork_cc as cc
-    from core.fork_types import partial_provider_error
+    from core.fork_types import ProviderForkRejected, partial_provider_error
     from core.fork_render import fit_cold_fork_input
 
     async def prepare(_process, request, _cancel, _on_input, _spawned_at):
@@ -679,17 +681,21 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
     async def spawn(*_args, **_kwargs):
         from test_checkpoint_external_adapters import FakeProcess
 
-        return FakeProcess(stdout, returncode=7, stderr=b"quota/auth process terminal")
+        return FakeProcess(stdout, returncode=7, stderr=stderr.encode())
 
     monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind, **_kwargs: ["claude"])
     monkeypatch.setattr(cc, "_fork_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
+    if "quota" in stderr:
+        with pytest.raises(ProviderForkRejected, match="quota"):
+            await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+        return
     result = await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "paid body\n"
-    assert result.diagnostic == partial_provider_error("quota/auth process terminal")
+    assert result.diagnostic == partial_provider_error(stderr)
 
 
 @pytest.mark.asyncio

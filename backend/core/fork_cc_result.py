@@ -219,6 +219,7 @@ def result_after_process(
         return parsed
     combined = f"{parsed.diagnostic}; {diagnostic}" if parsed.diagnostic else diagnostic
     if returncode not in {None, 0}:
+        kind.provider_failure("claude-code", diagnostic)  # an exit text naming a limit keeps nothing
         combined = partial_provider_error(combined)  # the process failed after this output
         return ProviderForkResult(_whole_messages(parsed.raw_body), parsed.usage, combined)
     return ProviderForkResult(parsed.raw_body, parsed.usage, combined)
