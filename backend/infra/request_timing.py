@@ -150,10 +150,24 @@ def _normalized_method(method: object) -> str:
     return method if method in _HTTP_METHODS else "OTHER"
 
 
-def _server_timing(started_at: float, timing: DbTiming) -> bytes:
+def _route_entry(scope: dict | None) -> str:
+    """Return the ``route`` Server-Timing entry naming the matched template, or an empty string.
+
+    The browser reads it from its resource timing entry, so a client-side sample joins the
+    server's own aggregate on the same method and template without guessing from a client path.
+    """
+    if scope is None:
+        return ""
+    route = route_template(scope)
+    if route == _UNMATCHED_ROUTE or '"' in route or "\\" in route:
+        return ""
+    return f'route;desc="{_normalized_method(scope.get("method"))} {route}", '
+
+
+def _server_timing(started_at: float, timing: DbTiming, scope: dict | None = None) -> bytes:
     app_ms = (time.perf_counter() - started_at) * 1_000
     return (
-        f"app;dur={app_ms:.1f}, dbq;dur={timing.queue_ms:.1f}, "
+        f"{_route_entry(scope)}app;dur={app_ms:.1f}, dbq;dur={timing.queue_ms:.1f}, "
         f"db;dur={timing.execution_ms:.1f}, "
         f"dbq_read;dur={timing.read_queue_ms:.1f}, db_read;dur={timing.read_execution_ms:.1f}, "
         f"dbq_bulk;dur={timing.bulk_queue_ms:.1f}, db_bulk;dur={timing.bulk_execution_ms:.1f}"
@@ -188,7 +202,9 @@ class RequestTimingMiddleware:
             if message_type == "http.response.start":
                 status = message["status"]
                 headers = list(message.get("headers", ()))
-                headers.append((b"server-timing", _server_timing(started_at, timing)))
+                headers.append((b"server-timing", _server_timing(started_at, timing, scope)))
+                # Lets a page on another origin read the timing fields of its own request.
+                headers.append((b"timing-allow-origin", b"*"))
                 message = {**message, "headers": headers}
                 response_started = True
             elif message_type == "http.response.body":
@@ -359,6 +375,10 @@ def prune_retention(now: datetime | None = None) -> None:
         cur.execute("DELETE FROM request_slow WHERE ts < ?", (now - timedelta(days=30),))
         cur.execute(
             "DELETE FROM request_timing_daily WHERE day < ?",
+            ((now - timedelta(days=90)).date(),),
+        )
+        cur.execute(
+            "DELETE FROM client_request_timing_daily WHERE day < ?",
             ((now - timedelta(days=90)).date(),),
         )
     except Exception:
