@@ -6,6 +6,8 @@ import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { beginComment } from '../support/liveCommentProof';
 import { at, commentButton, composer, drag, openThread, seedImage } from '../support/imageRegionComments';
 import { expectFailureLook } from '../support/failureLook';
+import { bar, commentOnRegion, openDocument, openImage, overlay, seedImageDocument } from '../support/docImageComments';
+import { openComments, replyField } from '../support/commentDrawer';
 
 // A failed post says why in one place, decided as it fails: in its box when the box is on screen then (the retry legs
 // in comment-retry-once and doc-reply-draft-kept prove that case), otherwise in a toast, with the reason kept so the
@@ -38,14 +40,18 @@ async function holdToast(toastLocator: Locator) {
 	await toastLocator.dispatchEvent('mouseenter');
 }
 
-/** The first comment POST is held until `fail()`, which then fails it as a dropped connection; later ones go through. */
-async function holdFirstPost(page: Page, artifactId: string) {
+/**
+ * The first comment POST (to any artifact when `artifactId` is `*`) that `match` takes is held until `fail()`, which then
+ * fails it as a dropped connection; later ones go through.
+ */
+async function holdFirstPost(page: Page, artifactId: string, match: (body: { parent_id?: string } | null) => boolean = () => true) {
 	let release!: () => void;
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	let posts = 0, seen!: () => void;
 	const arrived = new Promise<void>((resolve) => { seen = resolve; });
 	await page.route(`**/api/artifacts/${artifactId}/comments*`, async (route) => {
-		if (route.request().method() !== 'POST' || posts++ > 0) return route.continue();
+		const request = route.request();
+		if (request.method() !== 'POST' || !match(request.postDataJSON()) || posts++ > 0) return route.continue();
 		seen();
 		await held;
 		return route.abort('failed');
@@ -126,5 +132,40 @@ test.describe('@flow:document-comments a post that fails after its box closed sa
 		await expect(toast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
 		await expectFailureLook(page, testInfo, reason(page), 'image comment box');
 		await frame(page, 'image-reopened-reason');
+	});
+
+	test('reply in the comments drawer: the image viewer opened over the drawer as its post fails, so a toast says why', async ({ page, request }) => {
+		const width = page.viewportSize()!.width;
+		const seeded = await seedImageDocument(page, request, `one-place-drawer-${width}`, null);
+		await openDocument(page, seeded, width);
+		// Two comments on parts of the document's image, made as a person makes them; Back sends what the image holds.
+		await openImage(page);
+		await commentOnRegion(page, 'The header crowds the logo', { x: 0.1, y: 0.1 });
+		await page.keyboard.press('Escape');
+		await commentOnRegion(page, 'The footer is too faint', { x: 0.6, y: 0.6 });
+		await page.keyboard.press('Escape');
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+
+		await openComments(page);
+		const list = page.locator('[data-doc-comments-drawer]');
+		const replying = list.locator('.ct').filter({ hasText: 'The footer is too faint' });
+		const reply = await replyField(replying);
+		await reply.fill('Lighten it a step');
+		const wire = await holdFirstPost(page, '*', (body) => !!body?.parent_id);
+		await replying.getByRole('button', { name: 'Send reply' }).click();
+		await wire.arrived;
+
+		// While the reply is out, the other card opens the viewer at its tag, over the drawer: the drawer stays open beneath it,
+		// out of sight, so the reply's field is still on the page and laid out where it was, but nobody can see it.
+		await list.locator('.ct').filter({ hasText: 'The header crowds the logo' }).locator('.ct-original').click();
+		await expect(overlay(page)).toBeVisible();
+		await expect(list).toBeHidden();
+		await expect(reply, 'the field is still mounted under the viewer').toBeAttached();
+		await expect(reply).toBeHidden();
+
+		wire.fail();
+		await expect(toast(page), 'its field is covered, so the toast says why').toBeVisible({ timeout: 30_000 });
+		await expect(reply, 'the reply is kept').toHaveValue('Lighten it a step');
 	});
 });
