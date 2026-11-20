@@ -21,7 +21,7 @@ test('save after deletion keeps typed text and explains the refusal', async ({ p
 	await page.keyboard.type('\nUnsaved writing.');
 	await expect(doc.editor).toContainText('Unsaved writing.');
 	const status = page.locator('.save-error[role="alert"]');
-	await expect(status).toHaveText('Couldn’t save because this document is deleted. Your text stays here until you close it.');
+	await expect(status).toHaveText('Couldn’t save because this document was deleted. Your text stays here until you close it, so copy it to keep it.');
 	await expect(status).toBeVisible();
 	await page.screenshot({ path: info.outputPath('missing-save.png') });
 });

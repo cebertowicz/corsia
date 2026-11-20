@@ -33,7 +33,7 @@ test('@flow:editor-stale-choice Use the file’s text asks first, then shows the
 	const { doc, bar, details } = await refused(page, request);
 	await details.click();
 	await expect(page.getByText('Your text', { exact: true })).toBeVisible();
-	await expect(page.getByText('File text', { exact: true })).toBeVisible();
+	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	await expect(page.getByText('The sentence an outside edit wrote.').first()).toBeVisible();
 	await page.screenshot({ path: info.outputPath('stale-details.png') });
 	await page.getByRole('button', { name: 'Use the file’s text', exact: true }).click();
@@ -48,12 +48,12 @@ test('@flow:editor-stale-choice Use the file’s text asks first, then shows the
 	expect(await doc.storedText()).toBe(outside);
 });
 
-test('@flow:editor-stale-choice Keep my text saves the typed text over the file after a confirmation', async ({ page, request }) => {
+test('@flow:editor-stale-choice Keep your text saves the typed text over the file after a confirmation', async ({ page, request }) => {
 	const { doc, bar, details } = await refused(page, request);
 	await details.click();
-	await page.getByRole('button', { name: 'Keep my text', exact: true }).click();
+	await page.getByRole('button', { name: 'Keep your text', exact: true }).click();
 	await expect(confirmDialog(page)).toContainText('This replaces the file’s text with yours.');
-	await confirmDialog(page).getByRole('button', { name: 'Keep my text', exact: true }).click();
+	await confirmDialog(page).getByRole('button', { name: 'Keep your text', exact: true }).click();
 	await expect(bar).toHaveCount(0);
 	await expect.poll(() => doc.storedText()).toContain('Typed after the outside edit.');
 	await expect(doc.editor).toContainText('Typed after the outside edit.');
@@ -62,11 +62,11 @@ test('@flow:editor-stale-choice Keep my text saves the typed text over the file 
 test('@flow:editor-stale-choice a file that changed again is refused again, with the typed text kept and Details refreshed', async ({ page, request }, info) => {
 	const { doc, bar, details } = await refused(page, request);
 	await details.click();
-	await expect(page.getByText('File text', { exact: true })).toBeVisible();
+	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	const second = '# Proof\n\nThe sentence a second outside edit wrote.\n';
 	fs.writeFileSync(doc.docPath, second);
-	await page.getByRole('button', { name: 'Keep my text', exact: true }).click();
-	await confirmDialog(page).getByRole('button', { name: 'Keep my text', exact: true }).click();
+	await page.getByRole('button', { name: 'Keep your text', exact: true }).click();
+	await confirmDialog(page).getByRole('button', { name: 'Keep your text', exact: true }).click();
 	await expect(page.getByText('This document changed again. Choose which text to keep.')).toBeVisible();
 	await expect(page.getByText('The sentence a second outside edit wrote.').first()).toBeVisible();
 	await page.screenshot({ path: info.outputPath('stale-changed-again.png') });
@@ -80,9 +80,9 @@ test('@flow:editor-stale-choice Details that cannot read the file offers Retry a
 	await page.route((url) => url.pathname === '/api/files/content', (route) => route.request().method() === 'GET' ? route.abort('internetdisconnected') : route.fallback(), { times: 1 });
 	await details.click();
 	await expect(page.getByText('Couldn’t load the file’s text. Your text stays here.')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Keep my text', exact: true })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Keep your text', exact: true })).toHaveCount(0);
 	await page.screenshot({ path: info.outputPath('stale-fetch-failed.png') });
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
-	await expect(page.getByText('File text', { exact: true })).toBeVisible();
+	await expect(page.getByText('The file’s text', { exact: true })).toBeVisible();
 	await expect(doc.editor).toContainText('Typed after the outside edit.');
 });

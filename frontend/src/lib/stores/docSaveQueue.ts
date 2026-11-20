@@ -5,7 +5,7 @@ import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
 import { saveErrorCode, saveErrorMessage } from './docSaveError';
-import { createBaseDigests, EDITOR_STALE_CODE, EDITOR_STALE_STATUS } from './docSaveBase';
+import { createBaseDigests, EDITOR_STALE_CODE, EDITOR_STALE_STATUS, staleToast } from './docSaveBase';
 import { docSaveBars } from './docSaveBars';
 import { createDocSaveActivityProjection } from './docSaveActivity';
 export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
@@ -157,7 +157,7 @@ async function runSave(key: string): Promise<boolean> {
 			const message = stale ? EDITOR_STALE_STATUS : saveErrorMessage(e);
 			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, stale });
 			// The tab's save bar says it when that bar is on screen; a document closed or hidden behind another tab says it here.
-			if (!docSaveBars.onScreen(key)) toasts.show(message, 'error');
+			if (!docSaveBars.onScreen(key)) toasts.show(stale ? staleToast(draft.target.name) : message, 'error');
 			return false;
 		}
 		return true;

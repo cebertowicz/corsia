@@ -64,11 +64,11 @@
 			if (await keepMyText(target, file.text)) return;
 			// A file that changed again refuses again: the text stays, and Details shows the file as it is now.
 			if ($docSaveDrafts[tabKey]?.stale) { notice = 'This document changed again. Choose which text to keep.'; await load(); }
-			else actionError = $docSaveDrafts[tabKey]?.error || 'Couldn’t save the document. Your text stays here.';
+			else actionError = $docSaveDrafts[tabKey]?.error || 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
 		} finally { busy = false; }
 	}
 	const CONFIRMS = {
-		mine: { title: 'Keep my text', description: 'This replaces the file’s text with yours.' },
+		mine: { title: 'Keep your text', description: 'This replaces the file’s text with yours.' },
 		file: { title: 'Use the file’s text', description: 'This replaces your text with the file’s text.' },
 	};
 </script>
@@ -83,10 +83,10 @@
 		<p role="alert">Couldn’t load the file’s text. Your text stays here.</p>
 		<Button size="sm" variant="ghost" onclick={load}>Retry</Button>
 	{:else}
-		{#each [{ label: 'Your text', text: draft?.editText ?? '', copyLabel: 'Copy your text' }, { label: 'File text', text: read.file.text, copyLabel: 'Copy file text' }] as item (item.label)}
+		{#each [{ label: 'Your text', text: draft?.editText ?? '', copyLabel: 'Copy your text' }, { label: 'The file’s text', text: read.file.text, copyLabel: 'Copy file text' }] as item (item.label)}
 			<section><h3>{item.label}</h3><pre>{item.text}</pre><Button size="sm" variant="ghost" onclick={() => copy(item.text)}>{item.copyLabel}</Button></section>
 		{/each}
-		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'mine'}>Keep my text</Button>
+		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'mine'}>Keep your text</Button>
 		<Button size="sm" variant="ghost" disabled={busy} onclick={() => confirmation = 'file'}>Use the file’s text</Button>
 	{/if}
 	{#if actionError}<p role="alert">{actionError}</p>{/if}

@@ -12,7 +12,7 @@ vi.mock('$lib/stores/docComments', () => ({ flushPositions: mocks.flushPositions
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.toastShow } }));
 
 import { clearDraft, draftKey, existingDraft, flushDraft, keepMyText, seedDraft, setDraftText, useFileText } from './docSaveQueue';
-import { EDITOR_STALE_STATUS } from './docSaveBase';
+import { EDITOR_STALE_STATUS, staleToast } from './docSaveBase';
 import { docSaveBars } from './docSaveBars';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
@@ -173,7 +173,8 @@ describe('where a save error is said', () => {
 		const doc = target();
 		docSaveBars.shown(draftKey(doc), bar({ width: 0, height: 0, right: 0, bottom: 0 }));
 		await failOnce(doc, staleRefusal());
-		expect(mocks.toastShow).toHaveBeenCalledWith(EDITOR_STALE_STATUS, 'error');
+		expect(mocks.toastShow).toHaveBeenCalledWith('Couldn’t save note.md because it changed after you started editing. Open it to choose which text to keep.', 'error');
+		expect(staleToast('')).toBe('Couldn’t save a document because it changed after you started editing. Open it to choose which text to keep.');
 		clearDraft(doc);
 	});
 

@@ -50,7 +50,7 @@ const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]')
 const confirm = (label: string) => [...dialog()!.querySelectorAll('button')].find((button) => button.textContent?.trim() === label)!.click();
 async function openDetails() {
 	button('Details').click();
-	await vi.waitFor(() => expect(document.body.textContent).toContain('File text'));
+	await vi.waitFor(() => expect(document.body.textContent).toContain('The file’s text'));
 }
 
 describe('DocStaleChoice', () => {
@@ -71,7 +71,7 @@ describe('DocStaleChoice', () => {
 		mocks.fetchContent.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(file('the file, read on retry'));
 		button('Details').click();
 		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t load the file’s text. Your text stays here.'));
-		expect(buttons('Keep my text')).toHaveLength(0);
+		expect(buttons('Keep your text')).toHaveLength(0);
 		expect(buttons('Use the file’s text')).toHaveLength(0);
 		expect(existingDraft(doc)).toMatchObject({ editText: 'my typed text', stale: true });
 
@@ -107,14 +107,14 @@ describe('DocStaleChoice', () => {
 		expect(existingDraft(doc)).toMatchObject({ editText: 'what the file holds', savedText: 'what the file holds', status: 'idle', stale: false, error: '' });
 	});
 
-	it('Keep my text, once confirmed, saves his text against the digest of the file text it showed', async () => {
+	it('Keep your text, once confirmed, saves his text against the digest of the file text it showed', async () => {
 		mocks.fetchContent.mockResolvedValue(file('what the file holds'));
 		mocks.writeContent.mockResolvedValueOnce({ saved: true, revision: 'r8' });
 		await openDetails();
-		button('Keep my text').click();
+		button('Keep your text').click();
 		flushSync();
 		expect(dialog()?.textContent).toContain('This replaces the file’s text with yours.');
-		confirm('Keep my text');
+		confirm('Keep your text');
 
 		await vi.waitFor(() => expect(existingDraft(doc)).toMatchObject({ savedText: 'my typed text', stale: false, error: '' }));
 		const call = mocks.writeContent.mock.calls.at(-1)!;
@@ -127,9 +127,9 @@ describe('DocStaleChoice', () => {
 		mocks.fetchContent.mockResolvedValueOnce(file('file, first version')).mockResolvedValueOnce(file('file, second version'));
 		mocks.writeContent.mockRejectedValueOnce(staleRefusal());
 		await openDetails();
-		button('Keep my text').click();
+		button('Keep your text').click();
 		flushSync();
-		confirm('Keep my text');
+		confirm('Keep your text');
 
 		await vi.waitFor(() => expect(document.body.textContent).toContain('file, second version'));
 		expect(document.body.textContent).toContain('This document changed again. Choose which text to keep.');
