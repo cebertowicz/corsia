@@ -212,25 +212,11 @@ def test_a_reminder_the_turn_claimed_but_never_wrote_is_withdrawn_too(main_db):
     assert _wake_row(main_db)["cycle"] == 1
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        "backend restarted while Turn was running",
-        "You've hit your usage limit. Try again at 2099-01-01T00:00:00Z",
-    ],
-)
-def test_restart_and_provider_reset_errors_keep_their_own_path(main_db, monkeypatch, error):
-    from automation import provider_reset_liveness
-
-    if "usage limit" in error:
-        monkeypatch.setattr(
-            provider_reset_liveness, "deadline",
-            lambda _error, **_kw: datetime.now(timezone.utc) + timedelta(hours=1),
-        )
-    turn_id = _running_turn(main_db, "turn-error-own-path")
+def test_a_restart_error_keeps_its_own_recovery(main_db):
+    turn_id = _running_turn(main_db, "turn-error-restart")
     wake_id = _deliver_reminder_into_running_turn(main_db)
 
-    _error_terminal(main_db, turn_id, error)
+    _error_terminal(main_db, turn_id, "backend restarted while Turn was running")
 
     assert _message(main_db, wake_id)["delivery_state"] == "queued"
     assert _wake_row(main_db)["cycle"] == 0

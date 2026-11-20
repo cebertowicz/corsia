@@ -1,5 +1,7 @@
 """The one continue input a Turn's terminal cause leaves behind.
 
+An error that leaves none withdraws the unread plan liveness reminder instead.
+
 Four causes share it: CORSIA's own plan-limit Stop (#2477 amendment 12), a
 vendor's usage-limit refusal, and two re-runs: a harness provider refusing the
 Turn for size, and Claude Code reporting its login failed while it still
@@ -288,13 +290,15 @@ def unanswered_rerun_notices(message_ids: tuple[str, ...]) -> list[tuple[str, st
     return found
 
 
-def queue_terminal_continue(
+def queue_continue_or_withdraw_wake(
     db: sqlite3.Connection, turn_id: str, thread_id: str, *,
     outcome: str, error: object, limit_recorded: bool,
 ) -> None:
     """Queue the continue input a Turn's terminal cause leaves behind, if it leaves one.
 
-    Any other error leaves none, and withdraws the plan reminder it never read.
+    Any other error leaves none and withdraws the plan liveness reminder the
+    Turn never read (``plan_liveness_terminal.withdraw_unread_wake``), so it
+    cannot start the successor before the backoff.
     """
     if outcome == "cancelled" and isinstance(error, PlanLimitStop):
         queue_plan_limit_continue(db, turn_id, thread_id)
