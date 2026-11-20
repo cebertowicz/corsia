@@ -23,7 +23,11 @@ def _held_from(text: str) -> int:
 
 
 class VisibleAnswerStream:
-    """Stream a step's text until an answer section opens; the saved step settles the rest."""
+    """Stream a step's text until an answer section opens; the saved step settles the rest.
+
+    It holds an answer section only for a step that reaches the person, the test ``place_answers`` uses.
+    A streamed step is never a sent message, so that is Focus off; with Focus on its text passes through.
+    """
 
     def __init__(self) -> None:
         self.reset()
@@ -32,8 +36,13 @@ class VisibleAnswerStream:
         self.pending = ""
         self.started = False
         self.held = False
+        self.shown: bool | None = None  # Read once, at the step's first text.
 
     def feed(self, chunk: str) -> str:
+        if self.shown is None:
+            self.shown = reaches_the_person(None, None)
+        if not self.shown:
+            return chunk
         if self.held:
             return ""
         text = self.pending + chunk
@@ -77,6 +86,15 @@ def strip_answer_tags(text: str | None) -> str | None:
     if not text:
         return text
     return _TAGGED.sub(lambda match: match.group(0)[:match.start(1) - match.start(0)], text)
+
+
+def words_for_the_person(text: str | None) -> str:
+    """All a message tells the person, in chat and in the comment threads its answers move to, untagged.
+
+    An update that only answers comments keeps no chat text (``VISIBLE_CONTENT`` is empty), yet the
+    person reads every word of it; measure and list it by these words, never by its chat text.
+    """
+    return (strip_answer_tags(text) or "").strip()
 
 
 # A message's chat text: what place_answers saved for it, else its content as written.
@@ -154,17 +172,35 @@ def has_comment_cid(metadata: str | None, cid: str) -> bool:
         return False
 
 
+def focus_mode_on(db: sqlite3.Connection | None = None) -> bool:
+    """As the settings API reads it: Focus is on unless saved off."""
+    from infra.settings import get_setting
+
+    return (get_setting("features", db=db) or {}).get("focus_mode", True) is not False
+
+
+def reaches_the_person(db: sqlite3.Connection | None, metadata: dict | None) -> bool:
+    """Whether the person is shown this assistant message's words: sent for them, or Focus is off.
+
+    The one test behind both placing an answer (``place_answers``) and holding its text back while it streams.
+    """
+    return bool(isinstance(metadata, dict) and metadata.get("for_user")) or not focus_mode_on(db)
+
+
 def place_answers(
     db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
     metadata: dict | None = None,
 ) -> None:
     """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
 
+    A comment is answered only by words the person is shown: a ``post_update`` message, or a message
+    the Focus fallback turns into one (``place_flipped_answers``). Other closing text places nothing.
+
     This is the one stamper of ``metadata.chat_drawn``; the appender clears it (``assistant_step_tool_append``).
     A step that placed answers and has nothing left for chat is stamped ``false`` here, in the transaction
     that saves it.
     """
-    if role != "assistant" or "[c" not in content:
+    if role != "assistant" or "[c" not in content or not reaches_the_person(db, metadata):
         return
     placed = []
     for cid in parse_answers(content, message_id):
@@ -191,6 +227,21 @@ def place_answers(
                 "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),'$.chat_drawn',json('false')) WHERE id=?",
                 (message_id,),
             )
+
+
+def place_flipped_answers(db: sqlite3.Connection, thread_id: str, message_id: str) -> None:
+    """Place the answers in a message just made ``for_user``, in the transaction that flipped it."""
+    row = db.execute(
+        "SELECT role,content,seq,created_at,metadata FROM messages WHERE id=? AND thread_id=?",
+        (message_id, thread_id),
+    ).fetchone()
+    if row is None or row[2] is None:
+        return
+    try:
+        metadata = json.loads(row[4] or "{}")
+    except ValueError:
+        metadata = {}
+    place_answers(db, message_id, thread_id, row[0], row[1] or "", row[2], row[3], metadata)
 
 
 def save_visible_content(db: sqlite3.Connection, message_id: str, thread_id: str, content: str) -> None:

@@ -8,6 +8,7 @@ import pytest
 
 from automation import restart, self_restart
 from infra.db_async import run_in_db
+from plans import public as plans
 from test_packaged_update_lifecycle import operation_in
 
 
@@ -53,6 +54,8 @@ async def test_startup_removes_only_terminal_result_files(isolated_db, monkeypat
 
     monkeypatch.setattr(restart_startup, "drive_startup_continuity", no_work)
     monkeypatch.setattr(update_verification, "settle_unconfirmed_update", no_work)
+    # The drive also starts the marker-gated comment-recovery pass; not this test's subject.
+    monkeypatch.setattr(plans, "recover_person_comments", no_work)
     logger = SimpleNamespace(info=lambda *_: None, error=lambda *_: None,
                              exception=lambda *_: None)
     await restart_startup.run_startup_drive(no_work(), None, (), None, logger)
@@ -76,6 +79,8 @@ async def test_startup_cleanup_failure_does_not_hide_a_settlement_failure(monkey
     monkeypatch.setattr(restart_startup, "drive_startup_continuity", no_work)
     monkeypatch.setattr(update_verification, "settle_unconfirmed_update", failed_settlement)
     monkeypatch.setattr(restart_startup, "_remove_terminal_lifecycle_results", failed_cleanup)
+    # The drive also starts the marker-gated comment-recovery pass; not this test's subject.
+    monkeypatch.setattr(plans, "recover_person_comments", no_work)
     logger = SimpleNamespace(info=lambda *_: None, error=lambda *_: None,
                              warning=lambda *_: None, exception=lambda *_: None)
     with pytest.raises(RuntimeError, match="settlement failed"):

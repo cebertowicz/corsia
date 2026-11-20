@@ -375,21 +375,25 @@ def test_promotion_streams_claim_without_using_the_in_memory_write_path(
     assert not source.exists()
 
 
+@pytest.mark.parametrize("existing", [False, True])
 def test_startup_finishes_undo_after_crash_just_after_target_restore(
     durable_scope,
     monkeypatch,
+    existing,
 ):
     from registry import durable_writes, service
 
     workspace, project_root, thread_id, db = durable_scope
     target = project_root / "shared" / "planning" / "undo-crash.md"
+    if existing:
+        target.write_text("original\n")
     original_restore = durable_writes._restore_target
 
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registration failed")
 
-    def restore_then_crash(path, backup):
-        original_restore(path, backup)
+    def restore_then_crash(path, backup, content_hash):
+        original_restore(path, backup, content_hash)
         raise RuntimeError("simulated crash after restore")
 
     monkeypatch.setattr(service, "register_write_strict", fail_registration)
@@ -405,13 +409,13 @@ def test_startup_finishes_undo_after_crash_just_after_target_restore(
             description="Crash recovery proof",
         )
 
-    assert not target.exists()
+    assert target.read_text() == "original\n" if existing else not target.exists()
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
 
     monkeypatch.setattr(durable_writes, "_restore_target", original_restore)
     durable_writes.recover_write_intents(workspace=workspace)
 
-    assert not target.exists()
+    assert target.read_text() == "original\n" if existing else not target.exists()
     assert list(target.parent.glob(".corsia-write-*")) == []
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
 
@@ -1258,11 +1262,22 @@ def test_recovery_clears_intent_when_created_category_never_existed(durable_scop
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
 
 
-def test_recovery_rejects_tampered_cleanup_paths_without_deleting_them(
-    durable_scope,
-):
+def _assert_held_recovery(workspace, db, caplog, intent_id, message):
     from registry.durable_writes import recover_write_intents
 
+    caplog.clear()
+    recover_write_intents(workspace=workspace)
+    assert any(
+        record.levelname == "ERROR" and intent_id in record.getMessage()
+        and record.exc_info and message in str(record.exc_info[1])
+        for record in caplog.records
+    )
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents WHERE id=?", (intent_id,)).fetchone()[0] == 1
+
+
+def test_recovery_rejects_tampered_cleanup_paths_without_deleting_them(
+    durable_scope, caplog,
+):
     workspace, project_root, thread_id, db = durable_scope
     target = project_root / "shared" / "planning" / "tampered.md"
     outside = workspace.parent / "must-survive.txt"
@@ -1294,16 +1309,13 @@ def test_recovery_rejects_tampered_cleanup_paths_without_deleting_them(
     )
     db.commit()
 
-    with pytest.raises(RuntimeError, match="stage path"):
-        recover_write_intents(workspace=workspace)
+    for _ in range(2):
+        _assert_held_recovery(workspace, db, caplog, "intent-tampered", "stage path")
+        assert outside.read_text(encoding="utf-8") == "keep"
+        assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
 
-    assert outside.read_text(encoding="utf-8") == "keep"
-    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 1
 
-
-def test_recovery_rejects_path_like_intent_id_before_cleanup(durable_scope):
-    from registry.durable_writes import recover_write_intents
-
+def test_recovery_rejects_path_like_intent_id_before_cleanup(durable_scope, caplog):
     workspace, project_root, thread_id, db = durable_scope
     target = project_root / "shared" / "planning" / "tampered-id.md"
     intent_id = "bad/../../../must-survive"
@@ -1338,17 +1350,15 @@ def test_recovery_rejects_path_like_intent_id_before_cleanup(durable_scope):
     )
     db.commit()
 
-    with pytest.raises(RuntimeError, match="identifier"):
-        recover_write_intents(workspace=workspace)
-
-    assert escaped_stage.read_text(encoding="utf-8") == "keep"
+    for _ in range(2):
+        _assert_held_recovery(workspace, db, caplog, intent_id, "identifier")
+        assert escaped_stage.read_text(encoding="utf-8") == "keep"
 
 
 def test_recovery_validates_promoted_identity_before_removing_source(
-    durable_scope,
+    durable_scope, caplog,
 ):
     from core.workspace_layout import resolve_thread_working_root
-    from registry.durable_writes import recover_write_intents
 
     workspace, project_root, thread_id, db = durable_scope
     source_root = resolve_thread_working_root(project_root, thread_id)
@@ -1384,11 +1394,10 @@ def test_recovery_validates_promoted_identity_before_removing_source(
     )
     db.commit()
 
-    with pytest.raises(RuntimeError, match="identity"):
-        recover_write_intents(workspace=workspace)
-
-    assert source.read_text(encoding="utf-8") == "keep source"
-    assert target.read_text(encoding="utf-8") == "keep source"
+    for _ in range(2):
+        _assert_held_recovery(workspace, db, caplog, "intent-wrong-identity", "identity")
+        assert source.read_text(encoding="utf-8") == "keep source"
+        assert target.read_text(encoding="utf-8") == "keep source"
 
 
 def test_recovery_cleans_claim_without_deleting_newer_source(durable_scope):
@@ -1495,9 +1504,7 @@ def test_recovery_preserves_unpublished_claim_when_newer_source_exists(
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
 
 
-def test_recovery_rejects_forged_created_parent_before_cleanup(durable_scope):
-    from registry.durable_writes import recover_write_intents
-
+def test_recovery_rejects_forged_created_parent_before_cleanup(durable_scope, caplog):
     workspace, project_root, thread_id, db = durable_scope
     category = project_root / "shared" / "planning"
     target = category / "ordinary.md"
@@ -1528,11 +1535,10 @@ def test_recovery_rejects_forged_created_parent_before_cleanup(durable_scope):
     )
     db.commit()
 
-    with pytest.raises(RuntimeError, match="created parent"):
-        recover_write_intents(workspace=workspace)
-
-    assert category.is_dir()
-    assert (category / "INDEX.md").is_file()
+    for _ in range(2):
+        _assert_held_recovery(workspace, db, caplog, "intent-forged-parent", "created parent")
+        assert category.is_dir()
+        assert (category / "INDEX.md").is_file()
 
 
 @pytest.mark.asyncio

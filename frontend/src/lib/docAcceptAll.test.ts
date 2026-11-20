@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { acceptAllOpen, openSuggestionCount } from './docAcceptAll';
+import { commentsInDocumentOrder } from './docCanvasComments';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import type { DocComment } from '$lib/stores/docComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -8,7 +9,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 const mocks = vi.hoisted(() => ({ acceptAllSuggestions: vi.fn(), flushDraft: vi.fn(), seedDraft: vi.fn(), loadComments: vi.fn() }));
 vi.mock('$lib/api/commentSuggestions', async (importOriginal) => ({ ...(await importOriginal<object>()), acceptAllSuggestions: mocks.acceptAllSuggestions }));
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedDraft: mocks.seedDraft }));
-vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
+vi.mock('$lib/stores/docComments', async (importOriginal) => ({ ...(await importOriginal<object>()), loadComments: mocks.loadComments }));
 
 const target = { instanceId: 'tab-1' } as DocViewerTarget;
 const comment = (patch: Partial<DocComment>) => ({ resolved: false, orphaned: false, replacement: 'x', ...patch }) as DocComment;
@@ -30,13 +31,19 @@ describe('openSuggestionCount', () => {
 	it('leaves out a suggestion edited inside, which the server refuses as stale', () => {
 		expect(openSuggestionCount([comment({}), comment({ textChanged: true })])).toBe(1);
 	});
+
+	it.each(['stale', 'no_such_file'] as const)('excludes a %s refusal from Accept all', (kind) => {
+		const rows = [comment({ id: 'refused', anchor: 'quote', from: 0, to: 5, statusText: 'quote here' }), comment({ id: 'open', anchor: 'here', from: 6, to: 10, statusText: 'quote here' })];
+		const projected = commentsInDocumentOrder(rows, 'quote here', { refused: { message: 'Refused', kind } });
+		expect(openSuggestionCount(projected)).toBe(1);
+	});
 });
 
 describe('acceptAllOpen', () => {
 	it('saves the document, accepts, puts the accepted text on screen and reloads the comments', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: ['c1'], skipped: [], text: 'new text', revision: 'r2' });
 		const h = hooks();
-		await acceptAllOpen(target, 'art-1', h);
+		await expect(acceptAllOpen(target, 'art-1', h)).resolves.toBe(1);
 		expect(mocks.flushDraft).toHaveBeenCalledWith(target);
 		expect(mocks.acceptAllSuggestions).toHaveBeenCalledWith('art-1');
 		expect(mocks.seedDraft).toHaveBeenCalledWith(target, 'new text', 'r2');
@@ -47,7 +54,7 @@ describe('acceptAllOpen', () => {
 	it('changes nothing on screen when there was nothing to accept', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: [], skipped: [], text: null, revision: null });
 		const h = hooks();
-		await acceptAllOpen(target, 'art-1', h);
+		await expect(acceptAllOpen(target, 'art-1', h)).resolves.toBe(0);
 		expect(h.onText).not.toHaveBeenCalled();
 	});
 

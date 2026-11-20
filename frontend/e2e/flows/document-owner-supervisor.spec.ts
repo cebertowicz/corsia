@@ -130,10 +130,12 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		// Each item opens a picker for its own role only; "You" is offered only as owner.
 		await ownerItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'owner');
+		await expect(page.getByRole('combobox', { name: 'Owner' })).toHaveAttribute('placeholder', 'Search');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toBeVisible();
 		await reachable(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'supervisor');
+		await expect(page.getByRole('combobox', { name: 'Supervisor' })).toHaveAttribute('placeholder', 'Search agents');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toHaveCount(0);
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveCount(0);
@@ -276,7 +278,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 			const made = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: path.join(dir, file), text: '# Notes\n', thread_id: owner, description: text, create: true } });
 			expect(made.ok(), await made.text()).toBeTruthy();
 		}
-		// A document two people share has no single owner: its row reads "Owner: Not set".
+		// A person-owned document still shows its owner when two people use the installation.
 		isolatedDb([
 			"connection.execute(\"INSERT OR IGNORE INTO users (id,password_hash,created_at,password_changed_at) VALUES ('second-person','x','2026-01-01','2026-01-01')\")",
 			"connection.execute(\"UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?\", (sys.argv[2],))",
@@ -288,7 +290,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 		await page.getByPlaceholder('Search docs…').fill('Project planning');
 		// This test's own rows: earlier tests on the same server seed documents with the same names.
 		const rows = page.locator('.body .row').filter({ hasText: `${path.basename(dir)}/` });
-		for (const [file, owner] of [['Project planning.md', 'Owner: Not set'], ['Project planning notes.md', 'Owner: Release planning'], ['Project planning rota.md', `Owner: ${LONG_NAME}`]]) {
+		for (const [file, owner] of [['Project planning.md', 'Owner: You'], ['Project planning notes.md', 'Owner: Release planning'], ['Project planning rota.md', `Owner: ${LONG_NAME}`]]) {
 			const row = rows.filter({ hasText: file });
 			await expect(row.locator('.row-desc-owner'), `${label}: ${file}`).toHaveText(owner, { timeout: 20_000 });
 			const fit = await row.locator('.row-desc').evaluate((line) => {

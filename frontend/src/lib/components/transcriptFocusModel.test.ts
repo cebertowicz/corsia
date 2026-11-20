@@ -116,7 +116,7 @@ describe('Focus transcript presentation', () => {
 		let seq = 0;
 		// A Step whose open succeeded: the server stored the chip on it.
 		const opener = (id: string, host: string) =>
-			assistant({ id, seq: ++seq, content: '', metadata: { turn_id: 'turn-2', tool_calls: [call], browser_chip: { host } } });
+			assistant({ id, seq: ++seq, content: '', metadata: { turn_id: 'turn-2', tool_calls: [call], browser_chip: { host, domain: host } } });
 		const update = (id: string, metadata: Record<string, unknown> = {}) =>
 			assistant({ id, seq: ++seq, content: `Update ${id}`, metadata: { turn_id: 'turn-2', for_user: true, ...metadata } });
 		const human = (id: string) => ({ id, seq: ++seq, thread_id: 'thread', role: 'user', content: 'Thanks', metadata: {} });
@@ -149,14 +149,14 @@ describe('Focus transcript presentation', () => {
 		});
 
 		it('goes with the activity half of an update that made the open itself', () => {
-			const entries = buildTranscriptPresentation([update('self', { tool_calls: [call], browser_chip: { host: 'github.com' } })], true);
+			const entries = buildTranscriptPresentation([update('self', { tool_calls: [call], browser_chip: { host: 'github.com', domain: 'github.com' } })], true);
 
 			expect(chips(entries)).toEqual(['fold:github.com', 'self:-']);
-			expect(entries[0]).toMatchObject({ items: [{ message: { metadata: { browser_chip: { host: 'github.com' } } } }] });
+			expect(entries[0]).toMatchObject({ items: [{ message: { metadata: { browser_chip: { host: 'github.com', domain: 'github.com' } } } }] });
 		});
 
 		it('shows on an open block with nothing after it, live Steps included', () => {
-			const live = assistant({ id: 'live', seq: undefined, content: '', metadata: { turn_id: 'turn-2', browser_chip: { host: 'live.example' } } });
+			const live = assistant({ id: 'live', seq: undefined, content: '', metadata: { turn_id: 'turn-2', browser_chip: { host: 'live.example', domain: 'live.example' } } });
 			expect(chips(buildTranscriptPresentation([opener('open', 'github.com'), live], true, { turnId: 'turn-2' })))
 				.toEqual(['fold:live.example']);
 		});

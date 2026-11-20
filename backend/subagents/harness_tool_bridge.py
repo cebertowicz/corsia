@@ -276,7 +276,8 @@ async def _with_notice_and_marker(
     arguments: dict[str, Any] | None,
     workspace: Path | None = None,
 ) -> str:
-    """Return a result's model text: the projection, plan/repo notices, then the echo marker."""
+    """Return a result's model text: the projection, its notices, then the echo marker."""
+    from core.attention_notice import attention_notice
     from core.plan_notice import plan_notice, with_notice
     from core.repo_staleness_notice import repo_staleness_notice
     from core.tool_result_invocation import with_invocation_reference
@@ -285,7 +286,7 @@ async def _with_notice_and_marker(
 
     # The notice classifies the tool the call dispatches to, not its
     # ``tool_call`` wrapper.
-    dispatched_name, _dispatched_args, _dispatcher = resolve_dispatch(name, arguments)
+    dispatched_name, dispatched_args, _dispatcher = resolve_dispatch(name, arguments)
     notice = await asyncio.to_thread(
         plan_notice,
         thread_id=thread_id,
@@ -305,6 +306,15 @@ async def _with_notice_and_marker(
     projected = with_notice(projected, repo_notice)
     projected = with_notice(projected, await asyncio.to_thread(
         pr_event_notice, thread_id=thread_id, tool_name=name, arguments=arguments,
+    ))
+    # The attention notice reads the canonical receipt, not a bounded model projection.
+    projected = with_notice(projected, await asyncio.to_thread(
+        attention_notice,
+        thread_id=thread_id,
+        tool_name=dispatched_name,
+        arguments=dispatched_args,
+        result=delivery.content,
+        workspace=workspace,
     ))
     return with_invocation_reference(projected, delivery.invocation_id)
 

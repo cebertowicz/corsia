@@ -7,7 +7,7 @@ import sqlite3
 
 from core.tool_result_settlement import settle_turn_tool_lineage
 from infra.database import write_transaction
-from infra.plan_limit_continue import queue_terminal_continue
+from infra.plan_limit_continue import queue_continue_or_withdraw_wake
 from infra.completed_tool_results import (
     persist_completed_tool_results,
     persist_completed_tool_results_in_transaction as _persist_completed_tool_results,
@@ -229,7 +229,7 @@ def finish_turn(
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
         _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
         line_wakes = _pass_on_writer_turns(connection, row, turn_id, boot_epoch)
-        queue_terminal_continue(
+        queue_continue_or_withdraw_wake(
             connection, turn_id, thread_id, outcome=outcome, error=error,
             limit_recorded=isinstance(limits.limit, Recorded))
         successor, switch_transition, switch_request, idle = _claim_after_terminal(

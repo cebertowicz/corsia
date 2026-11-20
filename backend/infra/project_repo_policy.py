@@ -462,7 +462,7 @@ def _switch_existing_local(repo: Path, branch: str) -> None:
 
 
 def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
-    """Move a clean named checkout to a local or unique cached remote branch."""
+    """Move a clean checkout to a local or unique remote branch; its own branch moves nothing, dirty or not."""
     repo = repo_path.expanduser().resolve(strict=False)
     target = target_branch.strip()
     if not target:
@@ -473,12 +473,12 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
         operation="branch validation",
     )
     previous = current_repo_branch(repo)
+    if target == previous:
+        return RepoBranchSwitch(previous, target, False)
     if not _repo_is_clean(repo):
         raise ValueError("dirty checkout cannot change branches")
     local, remote_branches = _branch_inventory(repo)
     created = False
-    if target == previous:
-        return RepoBranchSwitch(previous, target, False)
     if target in local:
         mutation = ["switch", "--", target]
     else:
@@ -505,15 +505,14 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
             mutation,
             operation=f"branch switch to {target}",
         )
-        if current_repo_branch(repo) != target or not _repo_is_clean(repo):
-            raise ValueError(
-                f"branch switch to {target} did not leave the requested clean checkout"
-            )
+        # Branch only: git won't overwrite local changes, so new dirt is a running writer's.
+        if current_repo_branch(repo) != target:
+            raise ValueError(f"branch switch to {target} did not leave the requested branch")
     except Exception as exc:
         try:
-            if not _repo_is_clean(repo):
-                raise RuntimeError("branch-switch rollback found a dirty checkout")
             if current_repo_branch(repo) != previous:
+                if not _repo_is_clean(repo):
+                    raise RuntimeError("branch-switch rollback found a dirty checkout")
                 _switch_existing_local(repo, previous)
             local_after_failure, _remote = _branch_inventory(repo)
             if created and target in local_after_failure:

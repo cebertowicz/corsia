@@ -96,8 +96,8 @@ def test_an_undo_that_a_restart_interrupted_is_told_to_the_agent(durable_scope, 
     def refuse_registration(*_args, **_kwargs):
         raise RuntimeError("registration failed")
 
-    def restore_then_crash(path, backup):
-        original_restore(path, backup)
+    def restore_then_crash(path, backup, content_hash):
+        original_restore(path, backup, content_hash)
         raise RuntimeError("simulated crash after restore")
 
     monkeypatch.setattr(service, "register_write_strict", refuse_registration)

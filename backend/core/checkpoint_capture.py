@@ -5,11 +5,18 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
-from core.checkpoint_render import carry_partial_narrative, usable_result
+from core.checkpoint_render import (
+    carry_partial_narrative,
+    carry_provider_error_partial,
+    complete_lines,
+    complete_narrative,
+    usable_result,
+)
 from core.fork_types import (
     FORK_CONTEXT_TRUNCATED,
     ProviderForkRejected,
     ProviderForkResult,
+    is_partial_provider_error,
 )
 from core.checkpoint_types import (
 
@@ -64,11 +71,24 @@ async def capture_and_install(checkpoint_id: str, result: ProviderForkResult) ->
             checkpoint_id, ProviderForkRejected("checkpoint provider produced no content"),
         )
     truncated = result.diagnostic == FORK_CONTEXT_TRUNCATED
-    if truncated:
+    provider_error = is_partial_provider_error(result.diagnostic)
+    if truncated or provider_error:
         current = await read_checkpoint(checkpoint_id)
-        if current.previous_generation_id:
-            previous = await read_checkpoint(current.previous_generation_id)
-            body = carry_partial_narrative(previous.raw_result or "", result.raw_body)
+        previous = (
+            await read_checkpoint(current.previous_generation_id)
+            if current.previous_generation_id else None
+        )
+        if provider_error:
+            # Never replaces the last complete narrative: only whole lines of the
+            # assistant's output before the error are carried after it.
+            partial = complete_lines(result.raw_body)
+            if not partial:
+                return await terminal_failure(checkpoint_id, ProviderForkRejected(
+                    "checkpoint provider error left no complete line"))
+            body = carry_provider_error_partial(complete_narrative(previous), partial)
+            result = replace(result, raw_body=body)
+        elif previous is not None:
+            body = carry_partial_narrative(complete_narrative(previous), result.raw_body)
             result = replace(result, raw_body=body)
     usage = (
         json.dumps(checkpoint_call_receipts(result.usage), sort_keys=True, separators=(",", ":"))

@@ -14,6 +14,10 @@ vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (val
 import DocCommentSurface from './DocCommentSurface.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 const first = { instanceId: 'tab-1', path: 'notes.md', name: 'Notes', projectId: 'project-1', threadId: 'thread-1', artifactId: 'artifact-1' };
 const second = { ...first, instanceId: 'tab-2', path: 'other.md', name: 'Other', artifactId: 'artifact-2' };
@@ -98,7 +102,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new Error('The document could not be saved'));
 		await settled();
-		expect(document.body.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'The document could not be saved' : null);
+		expect(document.body.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'Couldn’t accept the suggestions. Try again.' : null);
 	});
 
 	it.each(meanwhile)('a reject fails after $what: shown only on the opening that started it', async ({ act, sameOpening }) => {
@@ -109,7 +113,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new Error('Network down'));
 		await settled();
-		expect(host.querySelector('[role="alert"]')?.textContent ?? null).toBe(sameOpening ? 'Network down' : null);
+		expect(host.querySelector('[role="alert"]')?.textContent ?? null).toBe(sameOpening ? 'Couldn’t reject this suggestion. Try again.' : null);
 	});
 
 	it.each(meanwhile)('an accept refused with 409 after $what: recorded only on the opening that started it', async ({ act, sameOpening }) => {
@@ -120,7 +124,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new SuggestionRefused('The text changed on the server', 409, 'stale'));
 		await settled();
-		expect(get(suggestionRefusals)).toEqual(sameOpening ? { 'artifact-1': { 'comment-1': 'The text changed on the server' } } : {});
+		expect(get(suggestionRefusals)).toEqual(sameOpening ? { 'artifact-1': { 'comment-1': { message: 'The text changed on the server', kind: 'stale' } } } : {});
 	});
 
 	it.each(meanwhile)('accept-all succeeds after $what: its text goes to its own document', async ({ act, sameOpening, sameDocument }) => {

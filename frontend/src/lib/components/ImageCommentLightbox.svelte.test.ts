@@ -29,6 +29,7 @@ import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
 const row = (id: string, number: number, x: number) => ({
@@ -69,6 +70,8 @@ beforeEach(() => {
 		return this.hasAttribute('data-image-regions') ? new DOMRect(24, 50, 500, 250) : measured.call(this);
 	});
 	docComments.set({});
+	// Text a test left in a comment box stays with its image for the page's life; each test is a fresh page.
+	keptCommentDrafts.reset();
 	mocks.fetchComments.mockReset().mockResolvedValue({
 		comments: [row('first', 1, 0.1), row('second', 3, 0.6)],
 		feedback: { owner_label: null, undelivered_batches: [] },
@@ -121,7 +124,7 @@ describe('ImageCommentLightbox', () => {
 		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep this');
 		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		expect(post.mock.calls.map((args) => args[6])).toEqual(['old', 'new']);
+		expect(post.mock.calls.map((args) => args[7])).toEqual(['old', 'new']);
 		clearTabViewState('thread', 'tab');
 	});
 	it('shows the document jump control for replies arriving while its image is open', async () => {
@@ -254,6 +257,31 @@ describe('ImageCommentLightbox', () => {
 		expect(props.draftOpen).toBe(false);
 	});
 
+	// Path 15: of every way out of a new comment's box, only the Cancel the person presses drops what they typed.
+	it('path 15: pressing Cancel drops the typed text, so the next box on the image starts empty', async () => {
+		const props = $state({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', draftOpen: false });
+		await render(props);
+		const openBox = async () => {
+			commentButton()!.click();
+			await settle();
+			host.querySelector<HTMLElement>('[data-image-regions] .surface')!
+				.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+			await settle();
+			return document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		};
+		const textarea = await openBox();
+		textarea.value = 'Drop this one';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		expect(props.draftOpen).toBe(true);
+
+		document.body.querySelector<HTMLButtonElement>('.actions button.cancel')!.click();
+		await settle();
+		expect(document.body.querySelector('textarea')).toBeNull();
+		expect(props.draftOpen).toBe(false);
+		expect((await openBox()).value).toBe('');
+	});
+
 	describe('the drawer and the image, linked', () => {
 		let scrollTo: ReturnType<typeof vi.fn>;
 		let scrollIntoView: ReturnType<typeof vi.fn>;
@@ -353,6 +381,19 @@ describe('ImageCommentLightbox', () => {
 			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 			await settle();
 			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
+		});
+
+		it('keeps a reply typed on a thread when the viewer goes away and comes back', async () => {
+			// Picking a tag lands focus on its card's Reply field.
+			const field = () => document.activeElement as HTMLTextAreaElement;
+			const pick = async () => { tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); await settle(); expect(field().classList.contains('ct-input')).toBe(true); };
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await pick();
+			field().value = 'half a reply'; field().dispatchEvent(new Event('input', { bubbles: true })); await settle();
+			unmount(component!); component = null;
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await pick();
+			expect(field().value).toBe('half a reply');
 		});
 
 		it('does not focus a reply whose anchor is outside the canvas', async () => {
@@ -529,7 +570,7 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
-			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], []);
+			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], [], { clientId: expect.any(String), again: false });
 		});
 
 		it('opens at the comment it was opened on, its card at its tag', async () => {
@@ -540,6 +581,20 @@ describe('ImageCommentLightbox', () => {
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'also-here' } });
 			expect(host.querySelector('[data-region-tag="2"]')!.getAttribute('aria-pressed')).toBe('true');
 			expect(document.body.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
+		});
+
+		// The overlay is keyed by the image it shows: Back to the document, or the next image, unmounts it.
+		it('keeps a reply typed on a thread when the overlay goes away and comes back', async () => {
+			for (const name of ['scrollTo', 'scrollIntoView']) {
+				Object.defineProperty(Element.prototype, name, { configurable: true, value: vi.fn() });
+				onTestFinished(() => { delete (Element.prototype as unknown as Record<string, unknown>)[name]; });
+			}
+			const field = () => document.body.querySelector<HTMLTextAreaElement>('[data-popover] .ct-input')!;
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here' } });
+			field().value = 'half a reply'; field().dispatchEvent(new Event('input', { bubbles: true })); await settle();
+			unmount(component!); component = null;
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here' } });
+			expect(field().value).toBe('half a reply');
 		});
 
 		it('opened to move a stale pin, starts placing it again', async () => {

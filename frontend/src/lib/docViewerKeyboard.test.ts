@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 import { focusTrap } from '$lib/actions/focusTrap';
+import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 
 function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const anchor = document.createElement('button');
@@ -8,7 +9,7 @@ function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const state: DocumentKeyState = {
 		covered: false,
 		commentUI,
-		draftController: { draft: null, cancel: vi.fn(), pending: null, select: vi.fn() },
+		draftController: { pending: null, select: vi.fn() },
 		paneOpen: false,
 		isPaneDrawer: true,
 		escapeCloses: true,
@@ -108,6 +109,19 @@ describe('handleDocumentKey typing with a phone sheet up', () => {
 		}
 		field.remove();
 	});
+
+	it('leaves a sheet a tap in the text opened alone while the phone navigation is over it, for a key pressed on a nav row', () => {
+		const row = document.body.appendChild(document.createElement('button'));
+		phoneNavOver.set(true);
+		try {
+			const { state, commentUI } = sheetFrom(true);
+			handleDocumentKey(key(row, { key: 'Z' }), state);
+			expect(commentUI.close).not.toHaveBeenCalled();
+		} finally {
+			phoneNavOver.set(false);
+			row.remove();
+		}
+	});
 });
 
 describe('closeCardPopover: Escape with a comment popover open over the text', () => {
@@ -137,10 +151,12 @@ describe('closeCardPopover: Escape with a comment popover open over the text', (
 		cleanup();
 	});
 
-	it('cancels a new comment in a popover the same way, without closing the panel', () => {
-		const { state, text, closePanel, escape, cleanup } = page('draft');
+	it('closes a new comment in a popover the same way, keeping its text, without closing the panel', () => {
+		const { commentUI, text, closePanel, escape, cleanup } = page('draft');
 		escape(text);
-		expect(state.draftController.cancel).toHaveBeenCalledOnce();
+		// A close, not Cancel: the viewer keeps the draft for the next Comment.
+		expect(commentUI.close).toHaveBeenCalledOnce();
+		expect(commentUI.restoreFocus).toHaveBeenCalledOnce();
 		expect(closePanel).not.toHaveBeenCalled();
 		cleanup();
 	});

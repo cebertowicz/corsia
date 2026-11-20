@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from core.workspace_layout import resolve_thread_working_root
-from infra.database import TransactionOwnershipError
+from infra.database import SchemaVersionError, TransactionOwnershipError
+from infra.db_connection import LaneWriteError
+from infra.db_loop_guard import LoopThreadWriteError
 from registry import durable_writes, models, service
 from tests.test_durable_writes import durable_scope as durable_scope
 
@@ -81,6 +83,61 @@ def _run(scope, operation, source=None):
     )
 
 
+@pytest.mark.parametrize("outside_edit", ["changed", "deleted"])
+def test_failed_registration_does_not_restore_over_a_newer_outside_edit(durable_scope, monkeypatch, outside_edit):
+    workspace, project, thread, db = durable_scope
+    target = project / "shared" / "planning" / "transaction.md"
+    kwargs = dict(thread_id=thread, project_id="project-alpha", workspace=workspace,
+                  description="Transaction proof", notify=False)
+    durable_writes.write_text(target, "original", **kwargs)
+
+    def fail_after_outside_edit(*args, **kwargs):
+        if outside_edit == "changed":
+            target.write_text("outside edit")
+        else:
+            target.unlink()
+        raise sqlite3.OperationalError("injected registration failure")
+
+    monkeypatch.setattr(durable_writes, "_register_applied", fail_after_outside_edit)
+    with pytest.raises(sqlite3.OperationalError, match="injected registration failure"):
+        durable_writes.write_text(target, "candidate", **kwargs)
+    expected = "outside edit" if outside_edit == "changed" else None
+    assert (target.read_text() if target.exists() else None) == expected
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+    assert not list(target.parent.glob("*.stage"))
+    assert not list(target.parent.glob(".corsia-write-*"))
+    durable_writes.recover_write_intents(workspace=workspace)
+    assert (target.read_text() if target.exists() else None) == expected
+
+
+def test_recovery_finishes_interrupted_undo_after_outside_edit(durable_scope, monkeypatch):
+    workspace, project, thread, db = durable_scope
+    target = project / "shared" / "planning" / "transaction.md"
+    kwargs = dict(thread_id=thread, project_id="project-alpha", workspace=workspace,
+                  description="Transaction proof", notify=False)
+    durable_writes.write_text(target, "original", **kwargs)
+
+    def fail_after_outside_edit(*args, **kwargs):
+        target.write_text("outside edit")
+        raise sqlite3.OperationalError("injected registration failure")
+
+    def interrupt_undo(*args, **kwargs):
+        raise RuntimeError("injected interruption")
+
+    monkeypatch.setattr(durable_writes, "_register_applied", fail_after_outside_edit)
+    original_finish = durable_writes._finish_undo
+    monkeypatch.setattr(durable_writes, "_finish_undo", interrupt_undo)
+    with pytest.raises(RuntimeError, match="injected interruption"):
+        durable_writes.write_text(target, "candidate", **kwargs)
+    assert db.execute("SELECT undoing FROM durable_write_intents").fetchone()[0] == 1
+
+    monkeypatch.setattr(durable_writes, "_finish_undo", original_finish)
+    durable_writes.recover_write_intents(workspace=workspace)
+    assert target.read_text() == "outside edit"
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+    assert not list(target.parent.glob(".corsia-write-*"))
+
+
 @pytest.mark.parametrize("operation", ["write", "promote", "recover"])
 def test_unknown_owner_is_preserved_before_any_work(durable_scope, monkeypatch, operation):
     _workspace, project, thread, db = durable_scope
@@ -128,7 +185,7 @@ def test_filesystem_work_is_outside_sqlite_writer(durable_scope, monkeypatch, op
         monkeypatch.setattr(Path, name, guarded(getattr(Path, name), name))
     for name in (
         "claim_bound_file", "stage_bound_file", "stage_bound_bytes", "copy_bound_file",
-        "replace_bound_file", "restore_claimed_file", "_sha256_file",
+        "replace_if_expected", "restore_claimed_file", "_sha256_file",
     ):
         monkeypatch.setattr(durable_writes, name, guarded(getattr(durable_writes, name), name))
 
@@ -158,6 +215,41 @@ def test_failed_first_commit_is_rolled_back_before_connection_cleanup(
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == (operation == "recover")
     target = project / "shared" / "planning" / "transaction.md"
     assert target.exists() == (operation == "recover")
+
+
+@pytest.mark.parametrize("error", [sqlite3.OperationalError, sqlite3.DatabaseError,
+                                  TransactionOwnershipError, SchemaVersionError, LaneWriteError, LoopThreadWriteError])
+def test_recovery_propagates_database_failure_after_rollback(durable_scope, monkeypatch, caplog, error):
+    workspace, _project, thread, db = durable_scope
+    _seed_applied(durable_scope)
+    db.execute(
+        "INSERT INTO durable_write_intents "
+        "(id, operation, phase, actor_thread_id, artifact_type, external_id, target_path, stage_path, "
+        "description, content_sha256, created_at, updated_at) "
+        "SELECT 'later', operation, phase, actor_thread_id, artifact_type, external_id, target_path || '.later', "
+        "stage_path || '.later', description, content_sha256, 'z', updated_at "
+        "FROM durable_write_intents WHERE id='g34-applied'"
+    )
+    db.commit()
+    probe = ConnectionProbe(db)
+    monkeypatch.setattr(durable_writes, "get_db", lambda: probe)
+    seen = []
+
+    def fail_row(row, *, workspace, db):
+        seen.append(row['id'])
+        db.execute("UPDATE threads SET title='uncommitted' WHERE id=?", (thread,))
+        raise error("injected row failure")
+
+    monkeypatch.setattr(durable_writes, "_recover_one_intent", fail_row)
+    with pytest.raises(error, match="injected row failure"):
+        durable_writes.recover_write_intents(workspace=workspace)
+
+    assert seen == ['g34-applied']
+    assert "Could not recover durable write intent" not in caplog.text
+    assert probe.closed_dirty == [False]
+    assert not db.in_transaction
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents WHERE id='g34-applied'").fetchone()[0] == 1
+    assert db.execute("SELECT title FROM threads WHERE id=?", (thread,)).fetchone()[0] != "uncommitted"
 
 
 @pytest.mark.parametrize("fail_commit", [1, 2, 3, 4])
@@ -239,6 +331,9 @@ def test_cleanup_commit_failure_keeps_committed_publication_recoverable(
         assert identity["id"] == original["id"]
         assert models.get_artifact(original["id"], db=db)["state"] == "active"
     retained = target.read_bytes()
+    def no_second_write(*args, **kwargs):
+        pytest.fail("recovery must not replace an already committed target")
+    monkeypatch.setattr(durable_writes, "replace_if_expected", no_second_write)
     durable_writes.recover_write_intents(workspace=workspace)
     assert target.read_bytes() == retained
     assert service.find_file_identity(str(target), db=db)["id"] == identity["id"]

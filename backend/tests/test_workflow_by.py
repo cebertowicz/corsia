@@ -9,7 +9,7 @@ from core.skill_workflow_validation import validate_workflow
 from infra.database import get_db
 from plans import boundary, delegation, mutations, service
 from plans.boundary import PlanActor
-from plans.close_next_bounds import REASON_MAX_BYTES
+from plans.fresh_reviewer import AUTHOR_FAIL
 from plans.workflow_fields import PERSON_GATE_READY, PERSON_GATE_ROUTE
 from prompts.plan_tools import PERSON_GATE_NAMED
 from tests.child_parent_notice_helpers import db
@@ -29,6 +29,12 @@ def test_by_validation():
     assert ".by must be one of" in errors({"by": "owner"})[0]
     assert "can't be set on a step that runs a workflow" in errors({"by": "person", "workflow": "other"})[0]
     assert errors({"by": "agent", "workflow": "other"}) == []
+
+
+def test_settle_is_not_a_definition_key_until_a_runner_runs_it():
+    """settle: enters definitions with the script runner that reads it; until then a definition can't set it."""
+    errors = validate_workflow({"workflow": {"steps": [{"id": "one", "by": "reviewer", "settle": "check-totals"}]}})
+    assert any(".settle is an unknown key" in error for error in errors)
 
 
 @pytest.mark.asyncio
@@ -141,7 +147,7 @@ async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, mo
     result = await run.update("fail", {
         "node_id": reviewer, "expected_revision": run.revision(reviewer), "evidence": "Review failed",
     })
-    assert result["node"]["state"] == "failed"
+    assert result.endswith(AUTHOR_FAIL)
 
 
 @pytest.mark.asyncio
@@ -269,7 +275,6 @@ async def test_naming_the_persons_gate_as_next_says_how_to_ask_them(isolated_db,
     reply = await run.update("mark_done", {**_done(run, work), "next_node_id": gate})
     named = reply["next"]["named"]
     assert (named["started"], named["refusal"], named["reason"]) == (False, "user_assigned", PERSON_GATE_NAMED)
-    assert len(PERSON_GATE_NAMED.encode()) <= REASON_MAX_BYTES
 
 
 @pytest.mark.asyncio

@@ -147,8 +147,19 @@ def test_concurrent_activation_serializes_one_slot_and_other_executors_progress(
             (thread_id,),
         )
     plan = service.ensure_plan("thread", "owner", db=setup)
-    first = _task(setup, plan.id, "First concurrent")
-    second = _task(setup, plan.id, "Second concurrent")
+    # Both under one phase: order inside an item is the agent's, so neither start
+    # passes ready work and the two contend only for the slot.
+    phase = service.add_node(
+        plan.id, kind="phase", title="Concurrent", acceptance_criteria="Both ran", db=setup,
+    )
+    first = service.add_node(
+        plan.id, kind="task", title="First concurrent", parent_id=phase.id,
+        acceptance_criteria="First concurrent is verified", db=setup,
+    )
+    second = service.add_node(
+        plan.id, kind="task", title="Second concurrent", parent_id=phase.id,
+        acceptance_criteria="Second concurrent is verified", db=setup,
+    )
     # Only a plan's owner runs its tasks, so another executor's slot is in its own plan.
     worker_plan = service.ensure_plan("thread", "worker", db=setup)
     independent = _task(setup, worker_plan.id, "Independent executor")

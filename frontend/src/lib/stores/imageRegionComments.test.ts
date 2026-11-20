@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({ postComment: vi.fn(), captureComment: vi.fn(),
 vi.mock('$lib/api/docs', async (importOriginal) => ({
 	...(await importOriginal<object>()), postComment: mocks.postComment, fetchComments: vi.fn(async () => ({ comments: [] })),
 }));
-vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment }));
+vi.mock('./commentSelection', async (importOriginal) => ({
+	...(await importOriginal<object>()), captureComment: mocks.captureComment, selectComment: mocks.selectComment,
+}));
 
 import { RequestRefused } from '$lib/api/docs';
 import { docComments } from './docComments';
@@ -34,7 +36,7 @@ describe('a comment on part of an image inside a document', () => {
 
 	it('sends the displayed diagram source with a live capture and keeps no failed comment', async () => {
 		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
-		mocks.selectComment.mockReturnValue('selection');
+		mocks.selectComment.mockImplementation((s: LiveDocumentSession) => ({ session: s }));
 		mocks.captureComment.mockResolvedValue({ clientId: 'diagram-1', quote: '```mermaid', from: 0, to: 10 });
 		mocks.postComment.mockRejectedValueOnce(new Error('Changed'));
 		await expect(addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD\n A-->B' }, BOX, 'Pin')).rejects.toThrow('Changed');
@@ -45,7 +47,7 @@ describe('a comment on part of an image inside a document', () => {
 
 	it('leaves a diagram whose range is gone from the live document as a lost selection, never a changed diagram the viewer could refresh to', async () => {
 		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
-		mocks.selectComment.mockReturnValue('selection');
+		mocks.selectComment.mockImplementation((s: LiveDocumentSession) => ({ session: s }));
 		mocks.captureComment.mockRejectedValue(new Error('Lost'));
 		const diagram = addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD' }, BOX, 'Pin');
 		await expect(diagram).rejects.toThrow('Lost');
@@ -55,7 +57,7 @@ describe('a comment on part of an image inside a document', () => {
 
 	it('captures the image in a live document as it does a selected quote, and frees the capture when posting fails', async () => {
 		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
-		mocks.selectComment.mockReturnValue('selection');
+		mocks.selectComment.mockImplementation((s: LiveDocumentSession) => ({ session: s }));
 		mocks.captureComment.mockResolvedValue({ clientId: 'cap-1', quote: '![Mock](a.png)', from: 9, to: 23 });
 		mocks.postComment.mockResolvedValueOnce(row({ id: 'live-1' }));
 		expect(await addDocImageComment({ artifactId: 'doc', from: 9, to: 23, text: TEXT, session }, BOX, 'Too dark')).toBe('live-1');

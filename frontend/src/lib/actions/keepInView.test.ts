@@ -52,6 +52,24 @@ function sheet() {
 }
 
 describe('keepInView', () => {
+	it('gives up the room it leaves clear under a field only as far as the field itself needs it', () => {
+		const clearance = (room: number) => {
+			height = room;
+			const { field } = sheet();
+			const action = keepInView(field, { enabled: false, clearAfter: 70 });
+			action.update({ enabled: true, clearAfter: 70 });
+			const margin = parseFloat(field.style.scrollMarginBlockEnd);
+			action.destroy();
+			document.body.replaceChildren();
+			return margin;
+		};
+		// The field is 40px tall: with 100px of room it leaves 60px, not 70, so the whole field stays in view.
+		expect(clearance(100)).toBe(60);
+		expect(clearance(497)).toBe(70);
+		// A field taller than the room keeps the whole clearance, so its end and the line under it show.
+		expect(clearance(30)).toBe(70);
+	});
+
 	it('keeps a picked card in view while its sheet shrinks, though its own scroll is read only after a further shrink', () => {
 		const { owner, card, field, reveals, shrink } = sheet();
 		const action = keepInView(field, { enabled: false, whole: card });
@@ -97,6 +115,139 @@ describe('keepInView', () => {
 		field.setSelectionRange(field.value.length, field.value.length);
 		field.dispatchEvent(new Event('input'));
 		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	it('keeps a sheet\'s field above the keyboard: a visual viewport resize brings it back', () => {
+		const { card, field, reveals } = sheet();
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card });
+		expect(reveals).toHaveBeenCalledTimes(1);
+		viewport.dispatchEvent(new Event('resize'));
+		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	it('never scrolls the chat transcript a margin card sits in for its own or the viewport\'s change of size, only for the field growing', () => {
+		const { owner, card, field, reveals, shrink } = sheet();
+		owner.setAttribute('data-reading-scroller', '');
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card });
+		expect(reveals).toHaveBeenCalledTimes(1);
+		// Something below the text grows (the composer, an attention stack) and the transcript's view shrinks.
+		shrink(290);
+		viewport.dispatchEvent(new Event('resize'));
+		expect(reveals).toHaveBeenCalledTimes(1);
+		// The reader's own field grows as they type.
+		observers.get(field)?.();
+		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	/** A reading scroller (the chat transcript) holding a margin card's field, and a visual viewport whose height the keyboard takes from. */
+	function readingWithKeyboard() {
+		const parts = sheet();
+		parts.owner.setAttribute('data-reading-scroller', '');
+		const viewport = Object.assign(new EventTarget(), { height: 1100, offsetTop: 0 });
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(parts.field, { enabled: false, whole: parts.card });
+		action.update({ enabled: true, whole: parts.card });
+		const keyboardUp = (to: number) => { viewport.height = to; viewport.dispatchEvent(new Event('resize')); };
+		return { ...parts, action, keyboardUp };
+	}
+
+	it('brings a focused margin field back by the least scroll when the keyboard comes up over it', () => {
+		const { field, action, keyboardUp } = readingWithKeyboard();
+		expect(scrollTop).toBe(0);
+		field.focus();
+		// The field ends at 1059 on screen; the keyboard leaves 700 of the viewport.
+		keyboardUp(700);
+		expect(field.getBoundingClientRect().bottom).toBe(700);
+		expect(scrollTop).toBe(359);
+		action.destroy();
+	});
+
+	it('moves nothing when the viewport shrinks with no field focused, grows, or the transcript shrinks for another reason', () => {
+		const { field, shrink, action, keyboardUp } = readingWithKeyboard();
+		keyboardUp(700);
+		expect(scrollTop).toBe(0);
+		field.focus();
+		// The viewport grows back (the keyboard going down): nothing moves.
+		keyboardUp(1100);
+		expect(scrollTop).toBe(0);
+		// The composer or an attention stack grows and the transcript's view shrinks, with the field focused.
+		shrink(290);
+		expect(scrollTop).toBe(0);
+		action.destroy();
+	});
+});
+
+/** A scroller holding a field and, below it, a sticky row pinned to the scroller's bottom. */
+function pinnedScroller(pinnedHeight: number | null) {
+	const owner = document.createElement('div');
+	owner.style.overflowY = 'auto';
+	const field = document.createElement('textarea');
+	owner.append(field);
+	if (pinnedHeight !== null) {
+		const pin = document.createElement('div');
+		pin.setAttribute('data-pin-bottom', '');
+		pin.style.position = 'sticky';
+		Object.defineProperty(pin, 'offsetHeight', { value: pinnedHeight });
+		owner.append(pin);
+	}
+	document.body.append(owner);
+	return { owner, field };
+}
+
+
+describe('keepInView with a pinned bottom row', () => {
+	it('leaves the height of a sticky [data-pin-bottom] row clear at the scroller\'s bottom, for the browser\'s caret reveal too', () => {
+		const { owner, field } = pinnedScroller(52);
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('52px');
+		action.destroy();
+		expect(owner.style.scrollPaddingBottom).toBe('');
+	});
+
+	it('adds no scroll padding when nothing is pinned', () => {
+		const { owner, field } = pinnedScroller(null);
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('');
+		action.destroy();
+	});
+	it('scrolls the scroller by what is left when a reveal still ends the field under the pinned row', () => {
+		const { owner, field } = pinnedScroller(52);
+		let top = 0;
+		Object.defineProperty(owner, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+		owner.getBoundingClientRect = () => ({ top: 0, bottom: 420, height: 420 }) as DOMRect;
+		// scrollIntoView left the field's end at 400, 32 px under the row that covers 368 to 420.
+		field.getBoundingClientRect = () => ({ top: 100, bottom: 400 - top, height: 300 }) as DOMRect;
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(top).toBe(32);
+		action.destroy();
+	});
+	it('counts the scroller\'s bottom padding and border, since a sticky row sticks inside them', () => {
+		const { owner, field } = pinnedScroller(52);
+		owner.style.paddingBottom = '12px';
+		owner.style.borderBottom = '1px solid';
+		let top = 0;
+		Object.defineProperty(owner, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+		owner.getBoundingClientRect = () => ({ top: 0, bottom: 420, height: 420 }) as DOMRect;
+		// The row covers 355 to 407 (12 px padding and a 1 px border under it): a field ending at 390 is under it.
+		field.getBoundingClientRect = () => ({ top: 100, bottom: 390 - top, height: 290 }) as DOMRect;
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('64px');
+		expect(top).toBe(35);
 		action.destroy();
 	});
 });

@@ -224,7 +224,11 @@ async def test_never_healthy_retry_does_not_admit_held_call(isolated_db, monkeyp
     monkeypatch.setattr(omlx_supervisor, "_port_owner_pid", lambda *_args: 123)
     monkeypatch.setattr(omlx_supervisor, "watch", lambda *_args: None)
     monkeypatch.setattr(omlx_supervisor, "_failed_boot_result", lambda *_args, **_kwargs: {"ok": False})
-    monkeypatch.setattr(omlx_supervisor, "MANAGED_HEALTH_STARTUP_CAP_S", 0.03)
+    # The health wait reads its own clock, which moves one second per read, so it gives up after five polls
+    # however slow the runner is. Recovery's wall-clock bound (cap x 4 = 20 s) stays far outside that.
+    ticks = iter(range(1_000_000))
+    monkeypatch.setattr(omlx_supervisor, "time", SimpleNamespace(monotonic=lambda: float(next(ticks))))
+    monkeypatch.setattr(omlx_supervisor, "MANAGED_HEALTH_STARTUP_CAP_S", 5.0)
     monkeypatch.setattr(omlx_supervisor, "HEALTH_POLL_INTERVAL_S", 0.001)
     monkeypatch.setattr("llm.providers.omlx_public_auth.public_headers", AsyncMock(return_value={}))
     seen = []

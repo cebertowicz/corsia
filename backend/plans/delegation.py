@@ -220,9 +220,9 @@ def attach_spawned_thread(
             )
         plan = service._plan_row(connection, node["plan_id"])
         _require_spawned_by_owner(connection, plan, spawned_thread_id)
-        from core.thread_lifecycle import reactivate_settled_worker
+        from core.thread_lifecycle import reactivate_retired_worker
 
-        reactivate_settled_worker(connection, spawned_thread_id)
+        reactivate_retired_worker(connection, spawned_thread_id)
         _reject_other_open_attachment(spawned_thread_id, node_id, db=connection)
         delegation_adoption.adopt_orphan(connection, plan, spawned_thread_id)
         child_plan = service.ensure_plan("thread", spawned_thread_id, db=connection)

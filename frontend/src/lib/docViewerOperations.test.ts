@@ -10,11 +10,20 @@ vi.mock('$lib/api/docs', async (importOriginal) => ({
 	fetchContent: vi.fn(),
 }));
 
+vi.mock('$lib/stores/docComments', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/stores/docComments')>(),
+	addReply: vi.fn(),
+}));
+
+import { addReply } from '$lib/stores/docComments';
 import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshness';
 import { emit } from '$lib/ws/events';
-import { createCommentRetryToast, markFreshnessVerified, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
+import { createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
-import { RequestRefused } from '$lib/api/docs';
+import { RequestRefused, type ServerComment } from '$lib/api/docs';
+import { EarlierVersionPosted, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
+import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -28,6 +37,15 @@ function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshnes
 	};
 }
 
+/** A box mounted for `key`, laid out at `rect` (jsdom lays nothing out); in the window unless told otherwise. */
+function mountBox(key: string, rect = new DOMRect(20, 100, 300, 80)) {
+	const node = document.createElement('div');
+	node.getBoundingClientRect = () => rect;
+	return keptCommentDrafts.shown(key, node);
+}
+
+const NOT_COMMENTABLE_SENTENCE = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
+
 describe('comment submission failure delivery', () => {
 	it('reports the failure and preserves its rejection for the draft-owning composer', async () => {
 		const error = new Error('save refused');
@@ -36,8 +54,9 @@ describe('comment submission failure delivery', () => {
 		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		try {
 			await expect(submitDocumentComment(async () => { throw error; }, rememberFailureToast)).rejects.toBe(error);
-			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
-			expect(rememberFailureToast).toHaveBeenCalledWith('toast');
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+			// The composer gets the toast to dismiss on a later success, and the reason to show beside its text.
+			expect(rememberFailureToast).toHaveBeenCalledWith('toast', 'Couldn’t post the comment. Your draft is kept. Try again.');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -50,7 +69,7 @@ describe('comment submission failure delivery', () => {
 		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		try {
 			await expect(submitDocumentComment(async () => { throw error; })).rejects.toBe(error);
-			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -73,6 +92,52 @@ describe('comment submission failure delivery', () => {
 		}
 	});
 
+	it('shows the server\'s sentence for a not_commentable refusal as given, with no "try again", and keeps the rejection', async () => {
+		const error = new RequestRefused(`409 ${JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE, kind: 'not_commentable' })}`, 'not_commentable');
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await expect(submitDocumentComment(async () => { throw error; }, undefined, () => 'The document changed. Try again.')).rejects.toBe(error);
+			expect(report).toHaveBeenCalledWith(NOT_COMMENTABLE_SENTENCE, 'error');
+			expect(report.mock.calls[0][0]).not.toMatch(/try again/i);
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it('matches the refusal by its kind, never by its sentence or the 409 status alone', () => {
+		const body = JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE });
+		expect(isNotCommentable(new RequestRefused(`409 ${body}`, 'not_commentable'))).toBe(true);
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, 'not_commentable'))).toBe(NOT_COMMENTABLE_SENTENCE);
+		// Same sentence and status without the kind, another kind, a plain Error and a body with no sentence: none is this refusal.
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, null))).toBeUndefined();
+		expect(notCommentableMessage(new RequestRefused(`409 ${body}`, 'diagram_changed'))).toBeUndefined();
+		expect(notCommentableMessage(new Error(`409 ${body}`))).toBeUndefined();
+		expect(notCommentableMessage(new RequestRefused('409 not json', 'not_commentable'))).toBeUndefined();
+	});
+
+	it('keeps a reply refused as not_commentable: the sentence shows, the rejection reaches the composer, and no other 409 is changed', async () => {
+		const refused = new RequestRefused(`409 ${JSON.stringify({ detail: NOT_COMMENTABLE_SENTENCE, kind: 'not_commentable' })}`, 'not_commentable');
+		const commentCreated = vi.fn();
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			vi.mocked(addReply).mockRejectedValueOnce(refused);
+			await expect(createThreadActions(() => 'artifact', commentCreated).reply('root', 'My reply')).rejects.toBe(refused);
+			expect(report).toHaveBeenCalledWith(NOT_COMMENTABLE_SENTENCE, 'error');
+			expect(commentCreated).not.toHaveBeenCalled();
+			// Another 409 has no named reason here, so the existing generic toast shows as on dev.
+			const other = new RequestRefused('409 {"detail":"changed"}', null);
+			vi.mocked(addReply).mockRejectedValueOnce(other);
+			await expect(createThreadActions(() => 'artifact', commentCreated).reply('root', 'My reply')).rejects.toBe(other);
+			expect(report).toHaveBeenLastCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
 	it('rejects a missing artifact before attempting to post a comment', async () => {
 		const ensureArtifactId = vi.fn().mockResolvedValue(null);
 		const addComment = vi.fn();
@@ -82,17 +147,27 @@ describe('comment submission failure delivery', () => {
 		expect(addComment).not.toHaveBeenCalled();
 	});
 
-	it('dismisses only the viewer instance’s remembered failure after a successful retry', () => {
-		const dismiss = vi.fn();
-		const firstViewer = createCommentRetryToast({ dismiss });
-		const secondViewer = createCommentRetryToast({ dismiss });
-		firstViewer.remember('first-failure');
-		secondViewer.remember('second-failure');
+	it('says why in the box, with no toast, when a box that shows the reason is on screen as the post fails', async () => {
+		const error = new Error('offline');
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const failed = vi.fn();
+		const inBox = vi.fn(() => true);
+		try {
+			await expect(submitDocumentComment(async () => { throw error; }, failed, undefined, inBox)).rejects.toBe(error);
+			expect(inBox).toHaveBeenCalledWith(error);
+			expect(report).not.toHaveBeenCalled();
+			expect(failed).toHaveBeenCalledWith(null, 'Couldn’t post the comment. Your draft is kept. Try again.');
+		} finally { report.mockRestore(); }
+	});
 
-		firstViewer.dismissAfterSuccess();
-
-		expect(dismiss).toHaveBeenCalledTimes(1);
-		expect(dismiss).toHaveBeenCalledWith('first-failure');
+	it('shows the toast when no box that shows the reason is on screen', async () => {
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const failed = vi.fn();
+		try {
+			await expect(submitDocumentComment(async () => { throw new Error('offline'); }, failed, undefined, () => false)).rejects.toThrow('offline');
+			expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+			expect(failed).toHaveBeenCalledWith('toast', 'Couldn’t post the comment. Your draft is kept. Try again.');
+		} finally { report.mockRestore(); }
 	});
 });
 
@@ -120,5 +195,144 @@ describe('subscribeToDocumentCommentChanges', () => {
 		emit('doc_comment_changed', { artifact_id: 'artifact-current' });
 		expect(reload).toHaveBeenCalledTimes(1);
 		expect(reload).toHaveBeenCalledWith('artifact-current');
+	});
+});
+
+describe('a reply kept until it posts', () => {
+	const key = replyDraftKey('scope', 'root');
+	const row = { id: 'stored', author: 'you', author_kind: 'user', body: 'My reply', created_at: '2026-10-02T00:00:00Z' } as ServerComment;
+	function quiet() {
+		vi.mocked(addReply).mockReset();
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		return () => { report.mockRestore(); log.mockRestore(); keptCommentDrafts.reset(); vi.mocked(addReply).mockReset(); };
+	}
+
+	it('posts every press under the draft’s one id, keeps the reason a press failed, and lets it go once stored', async () => {
+		const restore = quiet();
+		try {
+			const commentCreated = vi.fn();
+			const actions = createThreadActions(() => 'artifact', commentCreated);
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			const first = vi.mocked(addReply).mock.calls[0];
+			expect(first[8]).toBe(false);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: 'Couldn’t post the comment. Your draft is kept. Try again.', clientId: first[7] });
+			await actions.reply('root', 'My reply', [], [], key);
+			const retry = vi.mocked(addReply).mock.calls[1];
+			expect(retry[7]).toBe(first[7]);
+			expect(retry[8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toBeUndefined();
+			expect(commentCreated).toHaveBeenCalledOnce();
+		} finally { restore(); }
+	});
+
+	it('keeps text typed while the reply posted, under a fresh id', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			// As the mention picker does: it reads the field's text, then records the agent picked in it.
+			const tags = createMentionSelection();
+			tags.update('Ask @Agent');
+			tags.select('agent-1', 4, '@Agent');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent', tags);
+			let finish!: () => void;
+			vi.mocked(addReply).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+			const posting = actions.reply('root', 'Ask @Agent', ['agent-1'], [], key);
+			// Typed at the end, as the field reports it (beforeinput, then input).
+			tags.begin(10, 10, 'insertText'); tags.update('Ask @Agent and more');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent and more', tags);
+			finish(); await posting;
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'Ask @Agent and more' });
+			// Its own copy of the tags: the field that pressed clears its own once the reply is stored.
+			const copy = keptCommentDrafts.get(key)!.mentionSelection;
+			expect(copy).not.toBe(tags);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual([{ agent_id: 'agent-1', start: 4, end: 10 }]);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual(tags.occurrences('Ask @Agent and more'));
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
+	});
+
+	it('keeps changes made after an unanswered press, with the sentence, under a fresh id, when the earlier version was posted', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			const tags = createMentionSelection();
+			keptCommentDrafts.keepReply(key, 'My reply', tags);
+			keptCommentDrafts.claim(key, 'My reply', tags);
+			keptCommentDrafts.keepReply(key, 'My reply, changed', tags);
+			vi.mocked(addReply).mockRejectedValueOnce(new EarlierVersionPosted(row));
+			await expect(actions.reply('root', 'My reply, changed', [], [], key)).rejects.toBeInstanceOf(EarlierVersionPosted);
+			expect(vi.mocked(addReply).mock.calls[0][8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply, changed', error: EARLIER_VERSION_POSTED });
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
+	});
+
+	it('says why under the reply field, with no toast, when the field is on screen as the post fails', async () => {
+		const restore = quiet();
+		const drop = mountBox(key);
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(toasts.show).not.toHaveBeenCalled();
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: 'Couldn’t post the comment. Your draft is kept. Try again.' });
+		} finally { drop(); restore(); }
+	});
+
+	it.each([
+		['its card was closed while it posted', null],
+		['its field was scrolled out of the window', new DOMRect(20, -400, 300, 80)],
+	])('shows the toast when %s, keeps the reason for the field that shows it next, and the toast goes once that field is on screen', async (_name, rect) => {
+		const restore = quiet();
+		const drop = rect ? mountBox(key, rect) : () => {};
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(toasts.show).toHaveBeenCalledExactlyOnceWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
+			expect(keptCommentDrafts.get(key)).toMatchObject({ error: 'Couldn’t post the comment. Your draft is kept. Try again.', toast: 'toast' });
+			expect(dismiss).not.toHaveBeenCalled();
+			// The field comes back on screen, saying why: the toast goes.
+			const back = mountBox(key);
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+			expect(keptCommentDrafts.get(key)?.toast).toBeUndefined();
+			back();
+		} finally { drop(); dismiss.mockRestore(); restore(); }
+	});
+
+	it('dismisses its failure toast when a later press posts, as a new comment’s does', async () => {
+		const restore = quiet();
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(dismiss).not.toHaveBeenCalled();
+			await actions.reply('root', 'My reply', [], [], key);
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		} finally { dismiss.mockRestore(); restore(); }
+	});
+
+	it('takes its toast back when the next failure is said under the field, so a failure is never told twice', async () => {
+		const restore = quiet();
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValue(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			const drop = mountBox(key);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			drop();
+			expect(toasts.show).toHaveBeenCalledOnce();
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		} finally { dismiss.mockRestore(); restore(); }
 	});
 });

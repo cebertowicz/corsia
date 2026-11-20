@@ -301,7 +301,7 @@ def test_a_review_wake_is_current_when_the_open_work_is_all_later(db):
 # --- the wake text ---------------------------------------------------------
 
 
-def test_the_wake_lists_the_pile_inside_two_kilobytes(db):
+def test_the_wake_lists_the_first_rows_of_the_pile_and_counts_the_rest(db):
     plan = owner_plan(db)
     pile = _pile_below(db, plan.id, 40, reason="Not before the launch cut")
     _arm(db, plan.id, DUE)
@@ -309,10 +309,10 @@ def test_the_wake_lists_the_pile_inside_two_kilobytes(db):
     _sweep(db)
 
     content = _wakes(db)[0]["content"]
-    assert len(content.encode()) <= later_review.WAKE_MAX_BYTES <= 2048
     assert "40" in content
     assert pile[0]["title"] in content and pile[0]["id"] in content
-    omitted = 40 - content.count("\n- ")
+    assert content.count("\n- ") == later_review.WAKE_ROWS
+    omitted = 40 - later_review.WAKE_ROWS
     assert f"+{omitted} more: plan_read(section='later')" in content
 
 

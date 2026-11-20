@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from infra.chat_comment_ids import CID_PATTERN, could_start_cid, format_cid
+from test_chat_comment_answers import focus_off  # noqa: F401  (fixture)
 
 _GRAMMAR_HOMES = {'infra/chat_comment_ids.py', 'infra/chat_comment_answers.py'}
 
@@ -39,7 +40,7 @@ def test_text_that_cannot_become_a_cid_fails_the_prefix_check():
         assert not could_start_cid(text), text
 
 
-def test_stream_sends_the_same_chat_text_however_the_reply_is_chunked():
+def test_stream_sends_the_same_chat_text_however_the_reply_is_chunked(focus_off):
     from infra.chat_comment_answers import VisibleAnswerStream
 
     cases = {

@@ -105,7 +105,7 @@ def _tell_parent(
                 changed_plan_ids=changed_plan_ids,
             )
         )
-        failed = _step_failed(connection, str(plan["id"]), parent_plan_id, worker)
+        failed = _step_failed(connection, str(plan["id"]), parent_plan_id, worker, step)
         if nothing or failed:
             return True
         return _held_by_user(connection, str(plan["id"]), parent_plan_id, worker)
@@ -155,9 +155,12 @@ def _returned_nothing(
     return True
 
 
-def _step_failed(connection, plan_id: str, parent_plan_id: str, worker: str) -> bool:
-    """A step failed during this Turn and unreturned work remains. Once per Turn."""
-    from plans import node_states, projections
+def _step_failed(connection, plan_id: str, parent_plan_id: str, worker: str, step) -> bool:
+    """A step failed during this Turn and unreturned work remains. Once per Turn.
+
+    On a review step the wake offers no fail, since only the reviewer's verdict settles it.
+    """
+    from plans import fresh_reviewer, node_states, projections, workflow_fields
     from plans.delegation_notice import _wake_parent
 
     turn = latest_turn(connection, worker)
@@ -181,6 +184,8 @@ def _step_failed(connection, plan_id: str, parent_plan_id: str, worker: str) -> 
         connection, parent_plan_id, worker,
         kind="child_step_failed", subject_id=str(turn["id"]), revision=0,
         extra={"failed_node_ids": sorted(set(failed))},
+        template=(fresh_reviewer.REVIEW_STEP_CHILD_FAILED_TEMPLATE
+                  if workflow_fields.reviewer_step(connection, str(step["id"])) else None),
     )
     return True
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plans import hierarchy, node_states, operator_display_state, service
-from plans.user_ask import ask_attention_state_sql, askable_sql
+from plans.user_ask import ask_attention_state_sql, ask_exists_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
 
@@ -15,8 +15,16 @@ _ATTENTION_STATE_SQL = f"""CASE
         THEN {ask_attention_state_sql('l.artifact_id', node_id_sql='l.node_id')}
     ELSE json_extract(i.metadata, '$.attention_state')
 END"""
+# Whether the link still asks the person, as its look in the plan. A pause
+# defers only an ask's attention (``ask_deferred``: badges, counts, the dock),
+# never its look, so this ignores it; the person's own deferral still clears it.
+_ASKS_PERSON_SQL = f"""CASE
+    WHEN l.role!='attention' THEN 0
+    WHEN {askable_sql('i')} THEN {ask_exists_sql('l.artifact_id', 'l.node_id', deferred=False)}
+    ELSE COALESCE(json_extract(i.metadata, '$.attention_state')='raised', 0)
+END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
-    {_ATTENTION_STATE_SQL} AS attention_state"""
+    {_ATTENTION_STATE_SQL} AS attention_state, {_ASKS_PERSON_SQL} AS asks_person"""
 
 
 def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
@@ -47,8 +55,8 @@ def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
     return deferred
 
 
-def raised_attention_nodes(node_ids, *, db) -> set[str]:
-    """The same linked-attention scalar the full node presentation reads."""
+def asking_attention_nodes(node_ids, *, db) -> set[str]:
+    """The nodes whose attention link asks the person: the scalar the full node presentation reads."""
     from plans import node_waits
 
     if not node_ids:
@@ -59,7 +67,7 @@ def raised_attention_nodes(node_ids, *, db) -> set[str]:
             f"""SELECT DISTINCT l.node_id FROM plan_node_artifact_links l
                 JOIN artifact_identities i ON i.id=l.artifact_id
                 WHERE l.node_id IN (SELECT value FROM json_each(?))
-                  AND l.role='attention' AND {_ATTENTION_STATE_SQL}='raised'""",
+                  AND {_ASKS_PERSON_SQL}""",
             (node_waits.encoded_ids(node_ids),),
         )
     }
@@ -170,6 +178,40 @@ def list_for_node(node_id: str, *, db=None) -> list[dict]:
             (node_id,),
         ).fetchall()
         return [_projection(row) for row in rows]
+
+
+def require_ask_owner(db, artifact_id, thread_id):
+    """Resolve an ask's identity and require ownership or document supervision."""
+    known, owner = identity_owner(artifact_id, db=db)
+    if not known:
+        raise service.PlanInputError(f"ask_artifact_id {artifact_id!r} names no registered artifact")
+    identity = db.execute(
+        "SELECT type,state FROM artifact_identities WHERE id=?", (artifact_id.strip(),),
+    ).fetchone()
+    if owner != thread_id and not may_ask_for_document(db, artifact_id.strip(), owner, identity, thread_id):
+        raise service.PlanInputError(
+            "ask_artifact_id must name an artifact this thread owns, or a person-owned document this thread supervises, "
+            "or a project-owned document whose conductor is this thread"
+        )
+    return identity
+
+
+def may_ask_for_document(db, artifact_id, owner, identity, thread_id) -> bool:
+    """Whether this thread can ask for review of a shared-owned document."""
+    from infra import config
+    from registry import models
+    from registry.document_supervisor import effective_supervisor, owner_kind
+    from registry.shared_principals import scope_conductor
+
+    if identity["type"] == "document" and owner and owner.startswith("project:"):
+        return scope_conductor(owner.removeprefix("project:"), db=db) == thread_id
+    if identity["type"] != "document" or owner_kind(owner) != "person":
+        return False
+    artifact = models.get_artifact(artifact_id, db=db)
+    if artifact is None:
+        return False
+    supervisor, _ = effective_supervisor(db, artifact, owner=owner, workspace=config.WORKSPACE)
+    return supervisor is not None and supervisor["id"] == thread_id
 
 
 def linked_node_for_artifact(integration: str, type: str, external_id: str, *, db) -> dict:

@@ -1,8 +1,13 @@
+import { get } from 'svelte/store';
+import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
+
 export function handleDocumentEscape(
 	event: KeyboardEvent,
 	state: {
-		hasCommentDraft: boolean;
-		clearCommentDraft: () => void;
+		/** The composer is open; a draft kept while it is closed is not. */
+		composing: boolean;
+		/** Closes the composer and keeps what it holds. */
+		closeComposer: () => void;
 		paneOpen: boolean;
 		isPaneDrawer: boolean;
 		hasPendingSelection: boolean;
@@ -13,7 +18,7 @@ export function handleDocumentEscape(
 	},
 ): void {
 	if (event.key !== 'Escape') return;
-	if (state.hasCommentDraft) return state.clearCommentDraft();
+	if (state.composing) return state.closeComposer();
 	if (state.isPaneDrawer && state.paneOpen) return;
 	if (state.hasPendingSelection) return state.clearPendingSelection();
 	if (!state.escapeCloses) return;
@@ -26,7 +31,7 @@ export interface DocumentKeyState {
 	/** The canvas shows an image viewer over the document; the document answers no keys. */
 	covered: boolean;
 	commentUI: { state: { kind: string; fromText?: boolean } | null; anchor: unknown; sheetUp: boolean; close: () => void; restoreFocus: () => void; release: () => boolean };
-	draftController: { draft: unknown; cancel: () => void; pending: unknown; select: (selection: null) => void };
+	draftController: { pending: unknown; select: (selection: null) => void };
 	/** How a card opened from the text shows now (`DocCommentSurface.cardMode`). */
 	cardMode?: 'margin' | 'popover' | 'sheet';
 	paneOpen: boolean;
@@ -44,8 +49,10 @@ function typedKey(event: KeyboardEvent): boolean {
 }
 
 export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState): void {
-	if (event.defaultPrevented || state.covered) return;
+	// The phone navigation over the document covers it as an image does: keys pressed there are the navigation's.
+	if (event.defaultPrevented || state.covered || get(phoneNavOver)) return;
 	const { commentUI, draftController } = state;
+	const composing = commentUI.state?.kind === 'draft';
 	// A raised phone sheet is the topmost layer even when focus has left it, so Escape closes it before the document.
 	if (
 		event.key === 'Escape' &&
@@ -63,14 +70,14 @@ export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState)
 		commentUI.restoreFocus();
 		return;
 	}
-	// A card picked in the margin lets go before anything else closes (a draft or a pending selection still come first).
-	if (event.key === 'Escape' && !draftController.draft && !draftController.pending && commentUI.release()) {
+	// A card picked in the margin lets go before anything else closes (an open composer or a pending selection still come first).
+	if (event.key === 'Escape' && !composing && !draftController.pending && commentUI.release()) {
 		event.preventDefault();
 		return;
 	}
 	handleDocumentEscape(event, {
-		hasCommentDraft: draftController.draft !== null,
-		clearCommentDraft: draftController.cancel,
+		composing,
+		closeComposer: () => { commentUI.close(); commentUI.restoreFocus(); },
 		paneOpen: state.paneOpen,
 		isPaneDrawer: state.isPaneDrawer,
 		hasPendingSelection: Boolean(draftController.pending),
@@ -87,13 +94,13 @@ export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState)
  * holding the document hears it, so an overlaid Workspace panel never closes for it. Inside the card, the card's own Escape answers.
  */
 export function closeCardPopover(event: KeyboardEvent, state: DocumentKeyState): void {
-	const { commentUI, draftController } = state;
+	const { commentUI } = state;
 	const kind = commentUI.state?.kind;
 	if (event.key !== 'Escape' || event.defaultPrevented || state.covered || state.cardMode !== 'popover' || (kind !== 'thread' && kind !== 'draft')) return;
 	if (event.target instanceof Element && event.target.closest('[data-popover]')) return;
 	event.preventDefault();
 	event.stopPropagation();
-	if (kind === 'draft') return draftController.cancel();
+	// The composer closes as a card does, keeping what it holds; only its Cancel drops it.
 	commentUI.close();
 	commentUI.restoreFocus();
 }

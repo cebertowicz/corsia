@@ -380,3 +380,21 @@ def read_authorized_run_range(
     return in_read_snapshot(
         db, _range_read, thread_id, limit, from_id, to_id, before, user_id=user_id,
     )
+
+
+def _ranges_read(thread_id, limit, ranges, *, db, user_id=None):
+    if not _authorized(db, thread_id, user_id):
+        return None
+    pages = []
+    for from_id, to_id in ranges:
+        try:
+            pages.append(page_run_range(db, thread_id, limit, from_id, to_id, None))
+        except (CursorNotFound, InvertedRange):
+            pages.append(None)  # a bad range reads empty and cannot fail the ranges beside it
+    return pages
+
+
+def read_authorized_run_ranges(db, thread_id: str, limit: int, ranges: list[tuple[str, str]],
+                               *, user_id: str | None = None) -> list[dict | None] | None:
+    """One ownership check and one read snapshot for N ranges; None for a range that reads empty."""
+    return in_read_snapshot(db, _ranges_read, thread_id, limit, ranges, user_id=user_id)

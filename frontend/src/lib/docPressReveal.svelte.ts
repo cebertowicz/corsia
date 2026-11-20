@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view';
 import { pressSpan } from '$lib/cm/comment-marks';
 import { visibleRegion } from '$lib/cm/visible-region';
 import { releasePlace } from '$lib/documentReadingPlace';
-import { capSheetAboveText, giveBackRoom, placeAboveSheet } from '$lib/sheetClearance';
+import { capSheetAboveText, giveBackRoom, placeAboveSheet, sheetRaised } from '$lib/sheetClearance';
 
 type Span = { from: number; to: number };
 type Scroll = { from: number; to: number; origin: 'comment-save' };
@@ -16,7 +16,7 @@ type Scroll = { from: number; to: number; origin: 'comment-save' };
 export function createPressReveal(deps: {
 	highlights: () => (Span & { id: string })[];
 	view: () => EditorView | undefined;
-	draftCovered: (from: number, opening: boolean) => boolean | undefined;
+	coveredBySheet: (from: number, opening: boolean) => boolean | undefined;
 	scrollTo: (to: Scroll) => void;
 	draft: () => Span | null | undefined;
 	sheetUp: () => boolean;
@@ -33,8 +33,9 @@ export function createPressReveal(deps: {
 			pressedAt = range ? (at != null && at >= range.from && at <= range.to ? at : range.from) : null;
 			pressedRange = range ? { from: range.from, to: range.to } : null;
 		},
-		/** The sheet rises only as far as leaves the pressed highlight above it (up to three lines of it, else the pressed line), and the document puts that text there. */
+		/** The sheet rises only as far as leaves the pressed highlight above it (up to three lines of it, else the pressed line), and the document puts that text there. A sheet the reader pulled up moves nothing. */
 		revealCard(opening: boolean, panel: HTMLElement | null) {
+			if (sheetRaised(panel)) return;
 			const at = pressedAt, range = pressedRange, view = deps.view();
 			const span = at !== null && range && view ? pressSpan(view, range, at) : null;
 			if (!span || !view) return;
@@ -48,7 +49,7 @@ export function createPressReveal(deps: {
 		/** The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it. */
 		revealDraft(opening: boolean) {
 			const draft = deps.draft();
-			if (draft && (deps.draftCovered(draft.from, opening) ?? opening)) deps.scrollTo({ from: draft.from, to: draft.to, origin: 'comment-save' });
+			if (draft && (deps.coveredBySheet(draft.from, opening) ?? opening)) deps.scrollTo({ from: draft.from, to: draft.to, origin: 'comment-save' });
 		},
 	};
 }

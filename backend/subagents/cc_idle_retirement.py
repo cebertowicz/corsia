@@ -95,21 +95,6 @@ def working_thread_ids(*, db=None) -> tuple[str, ...]:
     return tuple(working)
 
 
-def thread_titles(thread_ids: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
-    """Pair each thread id with its title for an inspectable refusal."""
-    if not thread_ids:
-        return ()
-    marks = ",".join("?" for _ in thread_ids)
-    rows = get_db().execute(
-        f"SELECT id,title FROM threads WHERE id IN ({marks})", thread_ids,
-    ).fetchall()
-    titles = {str(row["id"]): row["title"] for row in rows}
-    return tuple(
-        (thread_id, str(titles.get(thread_id) or "Untitled thread"))
-        for thread_id in thread_ids
-    )
-
-
 def _durable_idle_since(connection, thread_id: str) -> datetime | None:
     """When the thread's last Turn ended, or None while anything durable is open.
 

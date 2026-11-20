@@ -16,13 +16,16 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from api.comment_post_timing import COMMENT_TIMING_HEADER, log_comment_timing
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
+from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
@@ -37,11 +40,12 @@ from doceditor.comment_actions import (
     decide_suggestion, reopen_fields, validate_create,
 )
 from doceditor.comment_batch_actions import accept_all_open, decide_all_from_author
-from doceditor.comments import CrossArtifactIdError
+from doceditor.comments import CommentTargetMoved, CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
-from infra.auth import authenticate, may_access_artifact, require_user_header_only
+from infra.auth import authenticate, require_user_header_only
 from infra.database import get_db, write_transaction
+from api.doc_comment_access import NotCommentable, _artifact_for_read, _artifact_for_write, _assert_owns_artifact, not_commentable_response
 from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
@@ -51,36 +55,27 @@ from registry import models as registry_models
 router = APIRouter(prefix="/api", tags=["doc-comments"])
 
 
-def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
-    """Raise 404 unless ``user_id`` may access ``artifact_id``'s comments.
-
-    The single ownership gate the comment routes share: artifact →
-    ``parent_thread_id`` → ``threads.user_id``. Allowed when the caller owns
-    the owning thread or the owner is a workspace/project sentinel (shared
-    substrate). A real OTHER user's thread, or an absent artifact, is a 404 —
-    foreign ids stay non-enumerable.
-    """
-    art = registry_models.get_artifact(artifact_id, db=db)
-    if art is None or not may_access_artifact(art["parent_thread_id"], user_id, db=db):
-        raise HTTPException(404, "Artifact not found")
-
-
 @router.get("/artifacts/{artifact_id}/comments")
-async def list_comments(artifact_id: str, token: str):
+async def list_comments(
+    artifact_id: str, token: str,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
+):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "GET", artifact_id)
 
     def _list():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
+            read_id = _artifact_for_read(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(read_id, db=db)
             path = artifact["path"] if artifact else None
-            comments, anchors_checked = anchored_threads(artifact_id, path, db)
+            comments, anchors_checked = anchored_threads(read_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
-            feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
-            feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
+            feedback_state.annotate_thread_attention(db, user["id"], read_id, comments)
+            goes_to = comment_audience.annotate(db, artifact, comments)
+            feedback = {**feedback_batches.user_feedback_for_document(db, read_id), "goes_to": goes_to}
             return comments, anchors_checked, feedback
         finally:
             db.close()
@@ -92,11 +87,13 @@ async def list_comments(artifact_id: str, token: str):
 @router.post("/artifacts/{artifact_id}/comments")
 async def create_comment(
     artifact_id: str, token: str, body: CommentCreate,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
 ):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "POST", artifact_id)
     if body.replacement is None:
         text = body.body.strip()
         if not text:
@@ -120,13 +117,16 @@ async def create_comment(
     def _access():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
-            return artifact["path"] if artifact else None
+            live_id = _artifact_for_write(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(live_id, db=db)
+            return live_id, artifact["path"] if artifact else None
         finally:
             db.close()
 
-    path = await run_in_db(_access)
+    try:
+        artifact_id, path = await run_in_db(_access)
+    except NotCommentable:
+        return not_commentable_response()
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
@@ -144,6 +144,8 @@ async def create_comment(
     )
     try:
         row, _registered, feedback, _created = await create_validated_comment(request, body.client_id)
+    except CommentTargetMoved:
+        return not_commentable_response()
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except TagValidationError as exc:
@@ -165,7 +167,7 @@ async def create_comment(
 
 from api.doc_feedback_routes import add_feedback_routes
 
-add_feedback_routes(router, _assert_owns_artifact)
+add_feedback_routes(router, _artifact_for_write)
 
 
 class PositionUpdates(BaseModel):
@@ -182,8 +184,8 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
     def _update():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
+            live_id = _artifact_for_write(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(live_id, db=db)
             from doceditor.live_tools import find_live
             if artifact and artifact.get("path") and find_live(Path(artifact["path"])) is not None:
                 raise HTTPException(409, "Live comment positions are saved by the server")
@@ -205,7 +207,7 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
                     if context is not None:
                         prepared["anchor_prefix"], prepared["anchor_suffix"] = context
                 updates.append(prepared)
-            return store.update_positions(artifact_id, updates, db=db)
+            return store.update_positions(live_id, updates, db=db)
         finally:
             db.close()
 
@@ -229,13 +231,10 @@ def _person_writer(user: dict, saved: dict):
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
         _suggestion_author: str | None, accepted: tuple[str, ...],
     ) -> dict:
-        try:
-            receipt = await save_document_text(
-                DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-                expected_sha256=expected_sha256, accepted=accepted,
-            )
-        except DocumentSaveError as exc:
-            raise document_save_http_exception(exc) from exc
+        receipt = await save_document_text(
+            DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
+            expected_sha256=expected_sha256, accepted=accepted,
+        )
         saved.update(text=text, revision=receipt["revision"])
         return receipt
     return write
@@ -247,6 +246,15 @@ async def accept_all_suggestions(artifact_id: str, token: str):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+
+    def _live():
+        db = get_db()
+        try:
+            return _artifact_for_write(artifact_id, user["id"], db)
+        finally:
+            db.close()
+
+    artifact_id = await run_in_db(_live)
     saved: dict = {}
     try:
         result = await accept_all_open(
@@ -277,6 +285,8 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            return JSONResponse({"detail": exc.message, "kind": exc.kind}, status_code=404)
         raise document_save_http_exception(exc) from exc
     if body.all_from_author:
         return {**row, **saved}

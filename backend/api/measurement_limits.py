@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from zoneinfo import ZoneInfo
 
 from api.measurement_scope import resolve_grain, validate_scope
+from api.measurement_updates import nearest_rank
 from core.measurement_scope import Grain, query_params, scope_cte
 from infra.auth import require_user
 from infra.database import get_db
@@ -128,12 +129,8 @@ def account_usage_summary(db) -> dict[str, int | None] | None:
 def limit_summary(hits: list[dict[str, Any]]) -> dict[str, Any]:
     breakdown = Counter(item["next"] for item in hits)
     waits = sorted(item["wait_seconds"] for item in hits if item["wait_seconds"] is not None)
-    # Nearest-rank p90 makes the stated "1 in 10 waited X or more" a mechanical
-    # rule, including short histories where interpolation would invent precision.
-    p90 = waits[max(0, (9 * len(waits) + 9) // 10 - 1)] if waits else None
-    median = waits[(len(waits) - 1) // 2] if waits else None
     return {"hits": len(hits), "next": {kind: breakdown[kind] for kind in NEXT_KINDS},
-            "median_wait_seconds": median, "p90_wait_seconds": p90}
+            "median_wait_seconds": nearest_rank(waits, 1, 2), "p90_wait_seconds": nearest_rank(waits, 9, 10)}
 
 
 @router.get("/limits")

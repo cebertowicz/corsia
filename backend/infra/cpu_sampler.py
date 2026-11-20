@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from types import FrameType
 
@@ -28,10 +29,12 @@ ENABLE_ENV = "CORSIA_CPU_SAMPLER"
 DEFAULT_INTERVAL_SECONDS = 0.1
 SUMMARY_SECONDS = 60.0
 STOP_TIMEOUT_SECONDS = 1.0
-MAX_SUMMARY_CHARS = 8_192
+# Every record stays under log_read's 1,500-character per-record cap so no reader cuts it.
+MAX_SUMMARY_CHARS = 1_400
 SUMMARY_ENTRY_COUNT = 15
 THREAD_ENTRY_CHARS = 100
-STACK_ENTRY_CHARS = 320
+# Each stack is its own record, bounded by the same cap.
+STACK_ENTRY_CHARS = 1_400
 _BACKEND_PREFIX = f"{Path(__file__).resolve().parents[1]}{os.sep}"
 # Decorator plumbing between a reader and its caller: three frames per memoized call that
 # name no work, and would otherwise push the caller out of the six frames a signature keeps.
@@ -100,6 +103,28 @@ def _ellipsize(value: str, limit: int) -> str:
     return f"{value[: limit - 3]}..."
 
 
+def _callable_name(fn: Callable) -> str:
+    while isinstance(fn, partial):
+        fn = fn.func
+    target = getattr(fn, "__func__", fn)
+    if not hasattr(target, "__qualname__"):
+        target = type(target)
+    return f"{target.__module__}.{target.__qualname__}"
+
+
+def run_profiled_db_job(sampler, worker, fn, scope, lane: str):
+    """Run ``worker(fn, scope)`` and add the thread CPU it used to ``lane``'s total for ``fn``.
+
+    The name is resolved before the job runs, so only the counter update follows it.
+    """
+    name = _callable_name(fn)
+    started = time.thread_time_ns()
+    try:
+        return worker(fn, scope)
+    finally:
+        sampler.record_job_cpu(lane, name, time.thread_time_ns() - started)
+
+
 class CpuSampler:
     """Attribute process native-thread CPU deltas to Python stack snapshots."""
 
@@ -132,6 +157,29 @@ class CpuSampler:
         self._sampler_cpu_seconds = 0.0
         self._max_tick_lag_seconds = 0.0
         self._window_started_at = self._clock()
+        self._job_lock = threading.Lock()
+        self._job_cpu: dict[tuple[str, str], tuple[int, int, int]] = {}
+
+    def record_job_cpu(self, lane: str, name: str, elapsed_ns: int) -> None:
+        with self._job_lock:
+            count, total, maximum = self._job_cpu.get((lane, name), (0, 0, 0))
+            self._job_cpu[(lane, name)] = (count + 1, total + elapsed_ns, max(maximum, elapsed_ns))
+
+    def _emit_jobs(self) -> None:
+        with self._job_lock:
+            jobs, self._job_cpu = self._job_cpu, {}
+        if not jobs:
+            return
+        entries = sorted(jobs.items(), key=lambda item: item[1][1], reverse=True)
+        prefix = "cpu sampler jobs: top=["
+        parts: list[str] = []
+        for (lane, name), (count, total, maximum) in entries:
+            item = f"{lane}:{name} count={count} cpu={total / 1e9:.6f}s max={maximum / 1e9:.6f}s"
+            candidate = prefix + "; ".join([*parts, item]) + "]"
+            if len(candidate) > MAX_SUMMARY_CHARS:
+                break
+            parts.append(item)
+        self._logger.warning("%s", prefix + "; ".join(parts) + "]")
 
     def start(self) -> None:
         """Start once, or reuse the active sampler thread."""
@@ -209,10 +257,6 @@ class CpuSampler:
             self._stack_cpu_seconds.items(), key=lambda item: item[1], reverse=True
         )[:SUMMARY_ENTRY_COUNT]
         top_stack_seconds = sum(seconds for _, seconds in top_stack_items)
-        top_stacks = "; ".join(
-            f"{seconds:.6f}s {_ellipsize(signature, STACK_ENTRY_CHARS)}"
-            for signature, seconds in top_stack_items
-        ) or "none"
         other_stack_seconds = max(0.0, self._process_cpu_seconds - top_stack_seconds)
         message = (
             "cpu sampler: "
@@ -220,14 +264,23 @@ class CpuSampler:
             f"window_seconds={window_seconds:.3f} "
             f"sampler_cpu_seconds={self._sampler_cpu_seconds:.6f} "
             f"max_tick_lag_seconds={self._max_tick_lag_seconds:.6f} "
-            f"top_threads=[{top_threads}] "
-            f"top_stacks=[{top_stacks}; other={other_stack_seconds:.6f}s]"
+            f"top_stacks={len(top_stack_items)} other={other_stack_seconds:.6f}s "
+            # Last, so a cut drops only the lowest-ranked threads.
+            f"top_threads=[{top_threads}]"
         )
         # WARNING, not INFO: the served process leaves the stdlib root logger at
         # WARNING (uvicorn configures only its own loggers), and both the stderr
         # fallback and the OTel capture handler accept WARNING and above, so an
         # INFO summary is dropped before it reaches any sink.
         self._logger.warning("%s", _ellipsize(message, MAX_SUMMARY_CHARS))
+        self._emit_jobs()
+        # One record per stack: log readers cap each record's message, so stacks
+        # packed into the summary line were cut after the first few.
+        for rank, (signature, seconds) in enumerate(top_stack_items, start=1):
+            self._logger.warning(
+                "cpu sampler stack: rank=%d seconds=%.6f %s",
+                rank, seconds, _ellipsize(signature, STACK_ENTRY_CHARS),
+            )
         self._thread_cpu_seconds = {}
         self._stack_cpu_seconds = {}
         self._process_cpu_seconds = 0.0

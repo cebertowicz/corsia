@@ -42,8 +42,21 @@ def is_checking(account_id: str) -> bool:
     return task is not None and not task.done()
 
 
-def limited_accounts(*, db=None) -> list[tuple[str, str]]:
-    """(provider, account id) of every current login that needs the canonical control read."""
+def _no_reset_limit(usage) -> bool:
+    """Whether a stored limit has no reset time: nothing would ever make it due."""
+    from connections.usage_verdicts import verdicts
+
+    return isinstance(usage, dict) and any(
+        verdict.get("state") == "limited" and parse_time(verdict.get("resets_at")) is None
+        for verdict in verdicts(usage).values()
+    )
+
+
+def limited_accounts(*, no_reset_only: bool = False, db=None) -> list[tuple[str, str]]:
+    """(provider, account id) of every current login that needs the canonical control read.
+
+    ``no_reset_only`` keeps only logins held by a limit with no reset time.
+    """
     from connections.account_receipts import account_receipt
     from connections.vendor_accounts import list_accounts
     from infra.database import get_db
@@ -55,6 +68,10 @@ def limited_accounts(*, db=None) -> list[tuple[str, str]]:
             if account['provider'] not in VENDORS or account_receipt(account) is None:
                 continue
             usage = harness_usage.stored_usage(provider=account['provider'], account_id=account['id'], db=connection)
+            if no_reset_only:
+                if _no_reset_limit(usage):
+                    limited.append((account['provider'], account['id']))
+                continue
             projection = harness_usage.account_usage(usage, provider=account['provider'])
             reset_passed = any(
                 isinstance(window, dict)
@@ -73,6 +90,18 @@ def limited_accounts(*, db=None) -> list[tuple[str, str]]:
 async def schedule_limited_usage_rechecks() -> None:
     """Schedule one control read per limited or expired visible account when the picker opens."""
     for provider, account_id in await run_in_db(limited_accounts):
+        _schedule(provider, account_id)
+
+
+async def schedule_no_reset_rechecks() -> None:
+    """The release sweep's bounded probe for a limit with no reset time.
+
+    Such a limit is never due (``usage_verdicts.release_due`` needs a reset),
+    so the sweep asks each held login's own usage read instead, at that read's
+    throttle. An allowed answer releases the scope's held heads through
+    ``record_usage``; a still-limited one changes nothing.
+    """
+    for provider, account_id in await run_in_db(limited_accounts, no_reset_only=True):
         _schedule(provider, account_id)
 
 

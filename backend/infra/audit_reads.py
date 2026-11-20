@@ -14,12 +14,14 @@ from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
 from infra.sqlite_deadline import stop_at
+from llm.error_cause import harness_cause_kind
 from infra.audit_plan_activity import plan_activity
 from infra.audit_limit_stops import limit_stops
+from infra.audit_set_aside import set_aside
 
 AUDIT_METRICS = (
     "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure",
-    "agent_hours", "agent_day_levels", "limit_stops"
+    "agent_hours", "agent_day_levels", "limit_stops", "set_aside"
 )
 MAX_WINDOW = timedelta(days=7)
 #: Metrics read by their own module from (db, caller user, since, until).
@@ -27,11 +29,14 @@ _WINDOWED_READERS = {
     "plan_activity": plan_activity,
     # Accounts belong to the install, not to a user or project.
     "limit_stops": lambda db, _user_id, since, until: limit_stops(db, since, until),
+    # Set-aside rows carry no user or project: counts only, and only code-named kinds by name.
+    "set_aside": lambda db, _user_id, since, until: set_aside(db, since, until),
 }
 MAX_ROWS = 50
 TOP_PRESSURE_ROWS = 10
 MAX_BYTES = 16 * 1024
 TIMEOUT_SECONDS = 1.5
+LIMIT_REFUSAL_MAX_CHARS = 1000
 
 
 class AuditReadError(Exception):
@@ -120,28 +125,84 @@ def _seat_usage_cursor(
     )
 
 
+# started_at sits after the large text columns of a checkpoint row, so reading it
+# walks the row's overflow pages, and no index covers it: filtering every
+# checkpoint on it reads the whole table's bytes. Everything else this read needs
+# is in checkpoints_current and checkpoints_listing, so it goes by
+# generation_order (AUTOINCREMENT: a thread's later checkpoint has a higher one)
+# and reads started_at only for rows from the window's first checkpoint on.
+# - recovered: a failed row with a later installed row on its thread.
+# - zero_entry: an installed row whose continuity snapshot is an empty JSON list
+#   (NULL reads as empty, as read_continuity_snapshot does); a snapshot that is
+#   not a JSON list is unreadable, never zero.
+# - limit_refusal: an installed row whose installed text (raw_result) is a
+#   provider usage-limit refusal, by the canonical classifier. A refusal is a
+#   short provider line, so only a text of at most LIMIT_REFUSAL_MAX_CHARS is
+#   classified: that bounds the per-row cost and keeps a long narrative that
+#   merely discusses billing or quotas from matching the classifier's keywords.
+_SNAPSHOT = "coalesce(c.continuity_snapshot_json,'[]')"
+_ZERO_ENTRY_SQL = (
+    f"CASE WHEN json_valid({_SNAPSHOT}) "
+    f"THEN json_type({_SNAPSHOT})='array' AND json_array_length({_SNAPSHOT})=0 ELSE 0 END"
+)
+_CHECKPOINT_HEALTH_SQL = (
+    "WITH scoped_threads AS ("
+    "  SELECT t.id FROM threads t WHERE t.user_id=? AND t.project_id=? "
+    f"  AND {thread_available_sql('t')}"
+    "), latest_installed AS ("
+    "  SELECT later.thread_id, max(later.generation_order) AS generation_order "
+    "  FROM checkpoints later JOIN scoped_threads t ON t.id=later.thread_id "
+    "  WHERE later.status='installed' GROUP BY later.thread_id"
+    ") "
+    "SELECT c.trigger, c.status, c.mode, count(*) AS n, "
+    "coalesce(sum(c.status='failed' AND "
+    "c.generation_order<latest_installed.generation_order),0) AS recovered, "
+    f"coalesce(sum(CASE WHEN c.status='installed' THEN {_ZERO_ENTRY_SQL} ELSE 0 END),0) AS zero_entry, "
+    "coalesce(sum(CASE WHEN c.status='installed' AND length(c.raw_result)<=? "
+    "THEN usage_limit_refusal(c.writer_harness,c.raw_result) ELSE 0 END),0) AS limit_refusal "
+    "FROM checkpoints c JOIN scoped_threads t ON t.id=c.thread_id "
+    "LEFT JOIN latest_installed ON latest_installed.thread_id=c.thread_id "
+    "WHERE c.generation_order>=? "
+    "AND julianday(c.started_at)>=julianday(?) "
+    "AND julianday(c.started_at)<julianday(?) "
+    "GROUP BY c.trigger,c.status,c.mode ORDER BY c.trigger,c.status,c.mode LIMIT ?"
+)
+
+
+def _first_order_in_window(db: sqlite3.Connection, since: str) -> int:
+    """The lowest generation_order that can start at or after ``since``.
+
+    Binary search over generation_order on the stored started_at text (naive UTC
+    ISO). It stops a day early so a started_at a little out of order, or in
+    another ISO form, still lands inside; the query's julianday() bounds decide.
+    """
+    floor = (datetime.fromisoformat(since) - timedelta(days=1)).replace(tzinfo=None).isoformat()
+    low, high = db.execute("SELECT min(generation_order), max(generation_order) FROM checkpoints").fetchone()
+    if low is None:
+        return 0
+    while low < high:
+        mid = (low + high) // 2
+        probe = db.execute(
+            "SELECT started_at FROM checkpoints WHERE generation_order>=? "
+            "ORDER BY generation_order LIMIT 1", (mid,),
+        ).fetchone()
+        if probe is None or probe[0] >= floor:
+            high = mid
+        else:
+            low = mid + 1
+    return low
+
+
 def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
            since: str | None, until: str | None, deadline: float) -> list[dict]:
     scope = (user_id, project_id)
     if metric == "checkpoint_health":
+        # _window requires both bounds for this metric.
+        assert since is not None and until is not None
         cursor = db.execute(
-            "WITH scoped_threads AS ("
-            "  SELECT t.id FROM threads t WHERE t.user_id=? AND t.project_id=? "
-            f"  AND {thread_available_sql('t')}"
-            "), latest_installed AS ("
-            "  SELECT later.thread_id, max(julianday(later.started_at)) AS started_at "
-            "  FROM checkpoints later JOIN scoped_threads t ON t.id=later.thread_id "
-            "  WHERE later.status='installed' GROUP BY later.thread_id"
-            ") "
-            "SELECT c.trigger, c.status, count(*) AS n, "
-            "coalesce(sum(c.status='failed' AND "
-            "julianday(c.started_at)<latest_installed.started_at),0) AS recovered "
-            "FROM checkpoints c JOIN scoped_threads t ON t.id=c.thread_id "
-            "LEFT JOIN latest_installed ON latest_installed.thread_id=c.thread_id "
-            "WHERE julianday(c.started_at)>=julianday(?) "
-            "AND julianday(c.started_at)<julianday(?) "
-            "GROUP BY c.trigger,c.status ORDER BY c.trigger,c.status LIMIT ?",
-            (*scope, since, until, MAX_ROWS + 1),
+            _CHECKPOINT_HEALTH_SQL,
+            (*scope, LIMIT_REFUSAL_MAX_CHARS, _first_order_in_window(db, since), since, until,
+             MAX_ROWS + 1),
         )
     elif metric == "seat_usage":
         cursor = _seat_usage_cursor(db, user_id, since, until)
@@ -197,9 +258,24 @@ def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
     if metric == "checkpoint_health":
         for row in rows:
             row["unrecovered"] = row["n"] - (row["recovered"] or 0) if row["status"] == "failed" else 0
+            if row["status"] != "installed":
+                del row["zero_entry"], row["limit_refusal"]
     if len(rows) > MAX_ROWS:
         raise AuditReadError("result_limit", "Audit result exceeds the fixed row limit; narrow the window.")
     return rows
+
+
+def _register_functions(db: sqlite3.Connection) -> None:
+    """The canonical classifiers the metrics' SQL calls, so no query keeps its own copy."""
+    db.create_function(
+        "safe_rejection_category", 1,
+        lambda value: safe_rejection(value)[0], deterministic=True,
+    )
+    db.create_function(
+        "usage_limit_refusal", 2,
+        lambda harness, text: int(harness_cause_kind(harness, None, text) == "usage_limit"),
+        deterministic=True,
+    )
 
 
 def _read_audit_metric(
@@ -224,10 +300,7 @@ def _read_audit_metric(
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
             stop_at(db, deadline)
-            db.create_function(
-                "safe_rejection_category", 1,
-                lambda value: safe_rejection(value)[0], deterministic=True,
-            )
+            _register_functions(db)
             # Bind identity and all metric rows to one read snapshot.
             db.execute("SAVEPOINT scoped_audit_read")
             actor = db.execute(
@@ -270,7 +343,7 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "install_accounts" if metric == "limit_stops" else (
+        "scope": "install_accounts" if metric == "limit_stops" else "install" if metric == "set_aside" else (
             "caller_user" if metric in {"seat_usage", "plan_activity", "agent_hours", "agent_day_levels"}
             else "caller_user_and_project"
         ),

@@ -53,6 +53,18 @@ function rightClick(row: HTMLElement) {
 }
 
 describe('PlanTree task context menu', () => {
+	it('does not offer reorder on a timed wait even when the server allows it', async () => {
+		const base = node({ id: 'timed' });
+		const row = mountTree({
+			user_actions: ['reorder', 'pause_node'],
+			display: { label_key: 'waiting', tone_key: 'waiting' },
+			execution: { ...base.execution, condition: 'waiting', causes: [{ kind: 'waiting', reason_key: 'watch', reason: 'Waiting', owner_kind: 'thread', owner_id: 'agent', ends_at: '2030-01-01T00:00:00Z' }] },
+		}, vi.fn());
+		expect(row.classList.contains('can-drag')).toBe(false);
+		rightClick(row);
+		await settle();
+		expect(labels()).toEqual(['Pause']);
+	});
 	it('opens on right-click and lists what the row state allows', async () => {
 		const row = mountTree({ user_actions: ['pause_node', 'close_node'] }, vi.fn());
 		expect(row.querySelector('.row-body')!.getAttribute('aria-haspopup')).toBe('menu');

@@ -225,6 +225,11 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
 
 
 def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
+    """Changed on purpose: an error result's text is never checkpoint content, for any error.
+
+    It used to be accepted as the body when the error was not a context limit;
+    a provider error's prose would then replace the last complete narrative.
+    """
     from core.fork_cc_result import result
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.fork_types import ProviderForkRejected
@@ -240,9 +245,8 @@ def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
     unrelated = json.dumps({
         "type": "result", "is_error": True, "result": "usable checkpoint",
     }).encode()
-    accepted = result(unrelated, kind=CHECKPOINT_KIND)
-    assert accepted.raw_body == "usable checkpoint"
-    assert accepted.diagnostic == "usable checkpoint"
+    with pytest.raises(ProviderForkRejected, match="produced no body"):
+        result(unrelated, kind=CHECKPOINT_KIND)
 
 
 def test_cc_checkpoint_preserves_every_auto_continued_generation() -> None:
@@ -385,6 +389,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
 ) -> None:
     seed_vendor_checkpoint_thread([_target("codex")])
     from core import fork_codex as codex
+    from core.fork_types import partial_provider_error
 
     class Session:
         def __init__(self, **kwargs):
@@ -421,8 +426,10 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
 
     result = await codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
-    assert result.raw_body == "usable paid checkpoint"
-    assert result.diagnostic == "unrelated terminal failure"
+    # Changed on purpose: the kept body is marked as cut short by a provider error,
+    # and a completed item ends on a line break so its last line counts as whole.
+    assert result.raw_body == "usable paid checkpoint\n"
+    assert result.diagnostic == partial_provider_error("unrelated terminal failure")
 
 
 @pytest.mark.asyncio

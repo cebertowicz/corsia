@@ -2,12 +2,53 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+import sqlite3
 
 from core.workspace_layout import resolve_project_root
+from infra.database import SchemaVersionError, TransactionOwnershipError
+from infra.db_connection import LaneWriteError
+from infra.db_loop_guard import LoopThreadWriteError
 from registry import service
 from registry.shared_principals import artifact_owner
 from registry.shared_target import SharedTarget
+
+
+logger = logging.getLogger(__name__)
+
+
+def remove_created_parent(path: Path) -> None:
+    """Remove an unpublished category directory, failing on foreign contents."""
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unpublished shared category contains unexpected files: {path}"
+        ) from exc
+
+
+def recover_intents(db, workspace: Path, recover_one) -> None:
+    """Hold document failures; propagate database faults. Cleanup remains best effort."""
+    rows = db.execute(
+        "SELECT * FROM durable_write_intents ORDER BY created_at,id"
+    ).fetchall()
+    for raw in rows:
+        try:
+            recover_one(dict(raw), workspace=workspace, db=db)
+        except (sqlite3.Error, TransactionOwnershipError, SchemaVersionError, LaneWriteError, LoopThreadWriteError):
+            if db.in_transaction:
+                db.rollback()
+            raise
+        except Exception:
+            if db.in_transaction:
+                db.rollback()
+            logger.exception(
+                "Could not recover durable write intent %s for %s.",
+                raw["id"], raw["target_path"],
+            )
 
 
 def recovery_shared_target(target: Path, row: dict, *, workspace: Path, db) -> SharedTarget:

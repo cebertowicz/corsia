@@ -94,7 +94,7 @@ first needs it, from what that screen gets approved with.
 | Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
-| Text field | One shape for every free-text control: 1px `--border`, `--radius-lg`, transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-lg` at every height, a capsule only at one line). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
+| Text field | One shape for every free-text control, select and code box: 1px `--border`, `--radius-sm` (the buttons' corners, so a field and its Cancel and Save match), transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-sm` at every height). Never a capsule. An inline rename inside a list row is the one exception: `--radius-2xs`, by the concentricity rule (§2.3). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
 | Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
@@ -246,8 +246,8 @@ project scope every role is derived from the project's colour
 | Token | Value | Use |
 |---|---|---|
 | `--radius` | `12px` | Modals, major containers, drawers |
-| `--radius-sm` | `8px` | Buttons, inputs (when not stripped), code-block wrappers, cards |
-| `--radius-xs` | `6px` | IconButton, StatePill, Message banner, Field input |
+| `--radius-sm` | `8px` | Buttons, every text field, select and code box (§0.1 Text field), code-block wrappers, cards |
+| `--radius-xs` | `6px` | IconButton, StatePill, Message banner |
 | `--radius-2xs` | `4px` | Micro chips, badges, kbd hints |
 | `--radius-lg` | `16px` | Large cards (pairs with `--lg-card-radius: 14px`) |
 | `--radius-xl` | `24px` | Floating input chip |
@@ -915,7 +915,7 @@ trailing col. Mobile (≤720px) collapses to single column.
 
 **Native control styling** (provided via `:global()` selectors): in the
 `default` variant, inputs/selects/textareas get `--bg-tertiary` bg,
-`--border` border, `--radius-xs` (6px), 32px height, 12.5px font. Focus ring
+`--border` border, `--radius-sm` (8px, the Text field corners of §0.1), 32px height, 12.5px font. Focus ring
 is 3px `--accent-wash` box-shadow.
 
 **Variants.** `chip` and `nested` draw the Text field role of §0.1 from

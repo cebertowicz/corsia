@@ -163,7 +163,11 @@ export const docTheme = EditorView.theme({
 	'@media (prefers-reduced-motion: reduce)': { '.cm-scroller, .cm-scroller *': { transitionProperty: 'none !important' } },
 	// Forced colours drop shadows and washes: an unread pin is the system highlight colours as a fill, a read one keeps its own.
 	'@media (forced-colors: active)': { '.cm-image-pin[data-unread] .disc, .cm-image-pin.removed[data-unread] .disc': { forcedColorAdjust: 'none', background: 'Highlight', color: 'HighlightText', border: '1.5px solid HighlightText', boxShadow: '0 0 0 2px Highlight' } },
-	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-table': { paddingBottom: OFFER_BELOW_PADDING }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
+	// At phone width the text you edit is the input size, so a phone's browser does not zoom the page when the editor or a
+	// table cell's editor takes focus; a table's text keeps that size too, so an opened cell reads like the cell it replaces.
+	// The selectors name elements inside the editor: a bare '&' inside @media renders as a rule with no selector, which no
+	// browser applies.
+	'@media (max-width: 768px)': { '.cm-scroller, .cm-md-table table': { fontSize: 'var(--text-input)' }, '.cm-md-table': { paddingBottom: OFFER_BELOW_PADDING }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
 // A line the editor scrolls into view stops above the notices floating over a document's foot. The room is the scroller's own

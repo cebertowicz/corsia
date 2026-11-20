@@ -3,6 +3,8 @@ import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { highlightAtPress, pickHighlight, MAX_SCROLL_PASSES, scrollToRange, type CommentRange } from './comment-marks';
 import { widgetTarget } from './widget-scroll';
+import { trackOverlaySheet } from './visible-region';
+import { liftSheetCap } from '$lib/sheetClearance';
 
 vi.mock('./widget-scroll', () => ({ widgetTarget: vi.fn(() => null) }));
 // The reading place is the editor's own; these stand-in editors have no line blocks to take it from.
@@ -200,6 +202,30 @@ describe('a jump whose frame moves after it lands', () => {
 		expect(watch.disconnected).toBe(true);
 	});
 
+	it('stops holding the place once the reader pulls the sheet over it up, so the keyboard that follows moves nothing', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, dom, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+		const panel = document.createElement('div');
+		const untrack = trackOverlaySheet(dom, () => panel);
+
+		scrollToRange(view, 450, 454);
+		settle();
+		const watch = observers.at(-1)!;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+
+		liftSheetCap(panel);
+		// The keyboard comes up and shrinks the pane, leaving the landing below the band.
+		moved = true;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		expect(watch.disconnected).toBe(true);
+		untrack();
+	});
+
 	it('never moves the reader from a check the pane queued before the reader scrolled', () => {
 		const observers = watching();
 		let moved = false;
@@ -249,7 +275,7 @@ describe('a jump whose frame moves after it lands', () => {
 
 describe('the highlight a press is in', () => {
 	// A stand-in editor that puts every press at `at` and knows no line edges, so the press counts wherever it is inside a range.
-	const pressAt = (at: number, ranges: CommentRange[], tapOpensSuggestion = true) => highlightAtPress({ posAtCoords: () => at, coordsAtPos: () => null } as unknown as EditorView, { clientX: 0, clientY: 0 }, ranges, tapOpensSuggestion);
+	const pressAt = (at: number, ranges: CommentRange[]) => highlightAtPress({ posAtCoords: () => at, coordsAtPos: () => null } as unknown as EditorView, { clientX: 0, clientY: 0 }, ranges);
 	const suggestion = { quote: 'the reviewer signs', insert: 'a reviewer signs', color: 'red', inline: true };
 
 	it('is the one-word comment inside a longer suggestion, not the suggestion that starts before it', () => {
@@ -264,12 +290,19 @@ describe('the highlight a press is in', () => {
 		expect(pressAt(4, ranges)?.id).toBe('long');
 	});
 
-	it('is the comment, in either nesting, where a tap opens no suggestion card (the phone sheet)', () => {
+	it('is the same highlight in every card mode: a press opens a suggestion on the phone sheet too', () => {
 		const inside: CommentRange[] = [{ id: 'long', from: 3, to: 21 }, { id: 'sugg', from: 7, to: 15, suggestion }];
 		const around: CommentRange[] = [{ id: 'sugg', from: 3, to: 21, suggestion }, { id: 'word', from: 7, to: 15 }];
-		expect(pressAt(10, inside, false)?.id).toBe('long');
-		expect(pressAt(10, around, false)?.id).toBe('word');
-		expect(pressAt(4, around, false)?.id).toBe('sugg');
+		expect(pressAt(10, inside)?.id).toBe('sugg');
+		expect(pressAt(10, around)?.id).toBe('word');
+		expect(pressAt(4, around)?.id).toBe('sugg');
+	});
+
+	it('is the suggestion where a comment covers exactly the same text, whichever is listed first', () => {
+		const comment: CommentRange = { id: 'comment', from: 3, to: 21 };
+		const sugg: CommentRange = { id: 'sugg', from: 3, to: 21, suggestion };
+		expect(pressAt(10, [comment, sugg])?.id).toBe('sugg');
+		expect(pressAt(10, [sugg, comment])?.id).toBe('sugg');
 	});
 
 	it('is the earlier of two highlights covering the same text', () => {
@@ -293,5 +326,14 @@ describe('the highlight a caret arrives in', () => {
 		expect(pickHighlight([{ ...long, suggestion }, word], false)?.id).toBe('word');
 		expect(pickHighlight([long, { ...word, suggestion }], false)?.id).toBe('long');
 		expect(pickHighlight([], true)).toBeUndefined();
+	});
+
+	it('prefers a suggestion over a comment of the same extent in either listing order, and on the phone sheet a comment is still preferred to a suggestion', () => {
+		const comment = { id: 'comment', from: 3, to: 21 };
+		const sugg = { id: 'sugg', from: 3, to: 21, suggestion };
+		expect(pickHighlight([comment, sugg], true)?.id).toBe('sugg');
+		expect(pickHighlight([sugg, comment], true)?.id).toBe('sugg');
+		expect(pickHighlight([comment, sugg], false)?.id).toBe('comment');
+		expect(pickHighlight([sugg, comment], false)?.id).toBe('comment');
 	});
 });

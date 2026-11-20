@@ -137,25 +137,26 @@ def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
     return [dict(row) for row in db.execute(sql, () if artifact_id is None else (artifact_id,))]
 
 
+def ask_exists_sql(artifact_id_sql: str, node_id_sql: str | None = None, *, deferred=True, paused=True) -> str:
+    """EXISTS an open ask on the artifact (from that node); ``False`` drops one the person or a pause defers."""
+    where = f"ask.owner_id={artifact_id_sql}" + ("" if node_id_sql is None else f" AND ask.node_id={node_id_sql}")
+    if not deferred:
+        where += " AND NOT EXISTS (SELECT 1 FROM plan_ask_deferrals d WHERE d.hold_id=ask.hold_id)"
+    if not paused:
+        where += f" AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}"
+    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
+    return f"EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where})"
+
+
 def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = None) -> str:
     """Return the one SQL scalar for an ask's derived attention state.
 
     ``node_id_sql`` keeps link projections scoped to their own asking node;
     without it, the scalar summarizes every open ask for the artifact.
     """
-    node_scope = "" if node_id_sql is None else f" AND ask.node_id={node_id_sql}"
-    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
-    where = f"ask.owner_id={artifact_id_sql}{node_scope}"
-    return f"""CASE
-        WHEN EXISTS (
-            SELECT 1 FROM ({asks}) ask
-            LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
-            WHERE {where} AND deferred.hold_id IS NULL
-              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
-        ) THEN 'raised'
-        WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
-        ELSE 'cleared'
-    END"""
+    raised = ask_exists_sql(artifact_id_sql, node_id_sql, deferred=False, paused=False)
+    return f"""CASE WHEN {raised} THEN 'raised'
+        WHEN {ask_exists_sql(artifact_id_sql, node_id_sql)} THEN 'deferred' ELSE 'cleared' END"""
 
 
 def ask_attention_state(db, artifact_id: str) -> str | None:
@@ -270,14 +271,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
     ask = params.get("ask_artifact_id")
     if not isinstance(ask, str) or not ask.strip():
         raise service.PlanInputError(NO_ASK)
-    known, owner = artifact_links.identity_owner(ask, db=db)
-    if not known:
-        raise service.PlanInputError(f"ask_artifact_id {ask!r} names no registered artifact")
-    if owner != plan["owner_id"]:
-        raise service.PlanInputError("ask_artifact_id must name an artifact this thread owns")
-    identity = db.execute(
-        "SELECT type,state FROM artifact_identities WHERE id=?", (ask.strip(),),
-    ).fetchone()
+    identity = artifact_links.require_ask_owner(db, ask, plan["owner_id"])
     if identity["type"] == decision_projection.DECISION_TYPE:
         raise service.PlanInputError(
             "a decision is not blocked on; raise it, and it holds its task by itself"

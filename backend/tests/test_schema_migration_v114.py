@@ -5,8 +5,10 @@ from __future__ import annotations
 import sqlite3
 
 from infra.database_migrations import migrate_to_current
+from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.schema import SCHEMA_VERSION
+from infra.settings_schema import SETTINGS_SCHEMA_SQL
 
 
 def test_v114_adds_update_operation_columns_to_existing_database(tmp_path) -> None:
@@ -20,6 +22,8 @@ def test_v114_adds_update_operation_columns_to_existing_database(tmp_path) -> No
             PRAGMA user_version=113;
         """)
         connection.execute(_GUIDANCE_47_DDL[1])
+        connection.execute(SETTINGS_SCHEMA_SQL)
+        connection.executescript(DOC_FEEDBACK_SCHEMA_SQL)
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(self_restart_requests)")}

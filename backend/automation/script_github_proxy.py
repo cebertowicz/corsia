@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import h11
 import httpx
 
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import ReadBudget, budget
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ async def _reply(conn: h11.Connection, writer: asyncio.StreamWriter, status: int
 async def _serve(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
     credential: Callable[[], str], transport: httpx.AsyncBaseTransport | None,
+    read_budget: ReadBudget = budget,
 ) -> None:
     conn = h11.Connection(h11.SERVER)
     started = False
@@ -95,7 +96,8 @@ async def _serve(
             await _reply(conn, writer, 403, b"")
             return
         host, target = github
-        if request.method in (b"GET", b"HEAD") and budget.blocked_until(low_priority=True) is not None:
+        if request.method in (b"GET", b"HEAD") and read_budget.blocked_until(low_priority=True) is not None:
+            logger.warning("script GitHub forwarder deferred a read: the read budget is paused")
             await _reply(conn, writer, 429, b"GitHub reads are paused by the shared rate-limit budget\n")
             return
         headers = [(name, value) for name, value in request.headers
@@ -124,7 +126,7 @@ async def _serve(
                                                  content=bytes(forbidden_body)).json() if forbidden_body else None
                 except (ValueError, httpx.DecodingError):
                     parsed_body = None
-                budget.record(response.status_code, dict(response.headers), parsed_body)
+                read_budget.record(response.status_code, dict(response.headers), parsed_body)
                 writer.write(conn.send(h11.EndOfMessage()))
                 await writer.drain()
     except Exception as exc:  # The client gets fixed text, never request or credential details.
@@ -145,12 +147,15 @@ async def _serve(
 
 @asynccontextmanager
 async def github_proxy(path: Path, credential: Callable[[], str], *,
-                       transport: httpx.AsyncBaseTransport | None = None):
-    """Serve GitHub requests until the associated script run exits."""
+                       transport: httpx.AsyncBaseTransport | None = None,
+                       read_budget: ReadBudget = budget):
+    """Serve GitHub requests until the associated script run exits; reads ask and feed
+    ``read_budget``, the budget of the login ``credential`` belongs to."""
     active: set[asyncio.Task] = set()
 
     def connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        task = asyncio.create_task(_serve(reader, writer, credential=credential, transport=transport))
+        task = asyncio.create_task(_serve(reader, writer, credential=credential, transport=transport,
+                                         read_budget=read_budget))
         active.add(task)
         task.add_done_callback(active.discard)
 

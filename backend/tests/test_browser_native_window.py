@@ -132,4 +132,7 @@ async def test_one_budget_covers_each_readiness_phase(monkeypatch, phase):
     message = 'no owned X display' if phase == 'discovery' else 'window or frame did not become ready'
     with pytest.raises(AssertionError, match=message):
         await window.wait_for_headed_window('endpoint', '/owned/sockets')
-    assert budgets == [10]
+    # One 10 s budget covers readiness; a frame timeout's page-state diagnostic runs after it with its own.
+    assert budgets[0] == 10 and budgets.count(10) == 1
+    if phase != 'frame':
+        assert budgets == [10]

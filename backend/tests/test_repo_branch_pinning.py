@@ -15,6 +15,7 @@ from core.turn_core import TurnIdentity
 from tests.backend_git_helpers import git_subcommand
 from tests.project_ref_helpers import project_ref, select_workspace
 from tools.workspace_git_paths import workspace_git_rules
+from tools.sandbox_git import worktree_folder_rules
 
 
 _RECOVERY_FETCH = "fetches the configured remote"
@@ -682,6 +683,57 @@ def test_controlled_branch_switch_failure_preserves_checkout(tmp_path, failure):
         switch_repo_branch(repo, target)
 
     assert current_repo_branch(repo) == "main"
+
+
+def test_pinning_the_current_branch_of_a_dirty_checkout_moves_nothing(tmp_path):
+    from infra.project_repo_policy import switch_repo_branch
+
+    repo = _git_repo_with_commit(tmp_path / "repo")
+    (repo / "agent-wrote.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    switched = switch_repo_branch(repo, "main")
+
+    assert (switched.previous_branch, switched.selected_branch, switched.created_local_branch) == ("main", "main", False)
+    assert (repo / "agent-wrote.txt").read_text(encoding="utf-8") == "uncommitted\n"
+
+
+def _repo_with_diverging_target(path: Path) -> Path:
+    repo = _git_repo_with_commit(path)
+    _git(repo, "switch", "-q", "-c", "target")
+    (repo / "tracked.txt").write_text("target\n", encoding="utf-8")
+    _git(repo, "-c", "user.name=CORSIA Test", "-c", "user.email=test@corsia.local",
+         "commit", "-qam", "target")
+    _git(repo, "switch", "-q", "main")
+    return repo
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_a_writer_racing_the_branch_switch_keeps_its_work(tmp_path, monkeypatch, when):
+    """A running writer's change is never overwritten or lost by a pinned-branch switch."""
+    from infra import project_repo_policy
+
+    repo = _repo_with_diverging_target(tmp_path / "repo")
+    real_mutation = project_repo_policy._run_branch_mutation
+
+    def _writer_races(repo_path, args, *, operation):
+        if when == "before":
+            (repo / "tracked.txt").write_text("writer\n", encoding="utf-8")
+        real_mutation(repo_path, args, operation=operation)
+        if when == "after":
+            (repo / "tracked.txt").write_text("writer\n", encoding="utf-8")
+
+    monkeypatch.setattr(project_repo_policy, "_run_branch_mutation", _writer_races)
+
+    if when == "before":
+        # Git refuses to overwrite the change; the checkout stays put, with no rollback error.
+        with pytest.raises(ValueError) as raised:
+            project_repo_policy.switch_repo_branch(repo, "target")
+        assert "rollback" not in str(raised.value)
+        assert project_repo_policy.current_repo_branch(repo) == "main"
+    else:
+        project_repo_policy.switch_repo_branch(repo, "target")
+        assert project_repo_policy.current_repo_branch(repo) == "target"
+    assert (repo / "tracked.txt").read_text(encoding="utf-8") == "writer\n"
 
 
 def test_controlled_fast_forward_uses_one_upstream_and_exact_commit(
@@ -1590,7 +1642,7 @@ def test_pinned_repo_sandbox_profile_denies_base_and_allows_worktree(
     profile = shell_guard.pinned_repo_sandbox_profile("pytest", str(worktree))
     assert f'(deny file-write* (subpath "{repo.resolve()}"))' in profile
     assert (
-        f'(allow file-read* file-write* (subpath "{worktree.resolve()}"))'
+        f'(allow file-read* file-write* (subpath "{repo.resolve() / ".worktrees"}"))'
         in profile
     )
 
@@ -1691,21 +1743,25 @@ def test_recovery_commands_receive_only_narrow_write_exceptions(tmp_path, monkey
     assert git_allow not in upstream_fetch
     assert git_allow not in trailing_dot_fetch
     assert git_allow not in uppercase_lock_fetch
-    assert worktrees_allow not in fetch
-    assert worktrees_allow not in upstream_fetch
-    assert worktrees_allow not in trailing_dot_fetch
-    assert worktrees_allow not in uppercase_lock_fetch
+    # Folder writes are now constant; denied immediate entries still prevent
+    # these commands from acquiring the base worktree-management exception.
+    folder_deny = worktree_folder_rules(repo)[1]
+    for profile in (fetch, upstream_fetch, trailing_dot_fetch, uppercase_lock_fetch):
+        assert worktrees_allow in profile
+        assert folder_deny in profile
     assert repo_literal_allow not in fetch
     assert repo_literal_allow not in upstream_fetch
     assert repo_literal_allow not in trailing_dot_fetch
     assert repo_literal_allow not in uppercase_lock_fetch
     assert all(git_allow not in profile for profile in rejected_fetches)
     assert git_allow not in worktree_add
-    assert worktrees_allow not in worktree_add
+    assert worktrees_allow in worktree_add
+    assert folder_deny in worktree_add
     assert repo_literal_allow not in worktree_add
     assert repo_allow not in worktree_add
     assert git_allow not in upstream_worktree_add
-    assert worktrees_allow not in upstream_worktree_add
+    assert worktrees_allow in upstream_worktree_add
+    assert folder_deny in upstream_worktree_add
     assert repo_literal_allow not in upstream_worktree_add
     assert repo_allow not in upstream_worktree_add
     assert shell_guard.check_worktree_targets("git fetch origin", str(repo)) is None
@@ -2186,7 +2242,7 @@ def test_worktree_git_access_does_not_reopen_base_git_identity(
         assert worktree_commit.index(deny) > worktree_commit.index(git_allow)
         assert deny in base_pull
     hooks_deny = workspace_git_rules((repo / ".git" / "hooks",))[0]
-    marker_deny = f'(deny file-write* (literal "{worktree / ".git"}"))'
+    marker_deny = worktree_folder_rules(repo)[-1]
     assert worktree_commit.index(hooks_deny) > worktree_commit.index(git_allow)
     assert worktree_commit.index(marker_deny) > worktree_commit.index(git_allow)
     assert hooks_deny in base_pull

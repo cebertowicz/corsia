@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { untrack } from 'svelte';
 	import { Button, Field, Message, Section } from '$lib/components/ui';
 	import { setModelLabel } from '$lib/stores/harnessProviders';
@@ -40,7 +41,7 @@
 		label="Label in the model picker"
 		hint={`Leave empty to use the name your CLI reports: ${discoveredName}.`}
 	>
-		<input placeholder={discoveredName} bind:value={draft} />
+		<input use:keepTyped={{ prose: false }} placeholder={discoveredName} bind:value={draft} />
 	</Field>
 	{#if errMsg}<Message variant="err">{errMsg}</Message>{/if}
 	<div class="actions">

@@ -75,13 +75,13 @@ for (const [width, height, project] of layouts) {
 				lost.release();
 
 				if (loss === 'request') {
-					await expect(reader.getByText("Couldn't post the comment — try again")).toBeVisible();
+					await expect(reader.getByText('Couldn’t post the comment. Your draft is kept. Try again.')).toBeVisible();
 					await expect(composer, 'a failed create keeps the draft').toHaveValue(draft);
 					expect(await storedWithBody(request, document, draft)).toEqual([]);
-					if (width <= 768) {
-						await reader.getByRole('status').filter({ hasText: "Couldn't post the comment" }).getByRole('button', { name: 'Dismiss' }).click();
-					}
-					await reader.getByRole('button', { name: 'Comment', exact: true }).last().click();
+					// The composer is on screen as the create fails, so it says why there and no toast says it again (or covers Comment).
+					await expect(reader.getByRole('status').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
+					// The box that says why offers Retry in place of Comment.
+					await reader.getByRole('button', { name: 'Retry', exact: true }).last().click();
 				}
 				await expect.poll(() => storedWithBody(request, document, draft), { message: 'exactly one stored comment carries the draft' }).toHaveLength(1);
 				const [created] = await storedWithBody(request, document, draft);
@@ -89,7 +89,7 @@ for (const [width, height, project] of layouts) {
 					// The client reconciles by its own id; the real server's row is the one shown, never a second.
 					expect(lost.committed()).toBe(created);
 					expect(lost.clientId()).toBe(created);
-					await expect(reader.getByText("Couldn't post the comment — try again")).toHaveCount(0);
+					await expect(reader.getByText('Couldn’t post the comment. Your draft is kept. Try again.')).toHaveCount(0);
 				}
 				// Save opens the single thread; data-comment-id decorates only whole-document list cards.
 				await expect(reader.getByRole('region', { name: /^Comment by / }).filter({
@@ -172,8 +172,8 @@ for (const [width, height, project] of layouts) {
 
 			// Accept flushes the live draft first (DocCommentSurface); that flush's file rename is refused once.
 			await refuseLiveFaultOnce(request, document.artifactId, 'rename');
-			await row.getByRole('button', { name: 'Accept', exact: true }).click();
-			await expect(row.getByRole('alert')).toHaveText("Couldn't save the document before accepting this suggestion");
+			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
+			await expect(row.getByRole('alert')).toHaveText('Couldn’t save the document before accepting. Try again.');
 			expect(decisions, 'a refused flush never sends the decision').toBe(0);
 			await expect(page.getByText(/^Not saved to the file:/)).toBeVisible();
 			await expect(page.getByRole('button', { name: 'Copy text', exact: true })).toBeVisible();
@@ -192,7 +192,7 @@ for (const [width, height, project] of layouts) {
 			await page.screenshot({ path: testInfo.outputPath(`live-accept-flush-refused-${width}.png`) });
 
 			// The one refusal is spent: the same Accept now flushes, applies once and keeps the typed text.
-			await row.getByRole('button', { name: 'Accept', exact: true }).click();
+			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
 			await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), () => expect(resolvedList(page).locator(`[data-comment-id="${loose}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			expect(decisions).toBe(1);
 			await expect.poll(() => renderedCount(page, 'tight line')).toBe(1);

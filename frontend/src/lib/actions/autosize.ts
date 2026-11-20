@@ -46,10 +46,12 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	const hold = () => { if (node.style.overflowY === 'hidden' && node.scrollTop !== 0) node.scrollTop = 0; };
 	node.addEventListener('scroll', hold);
 	resize();
-	// Refit when the field's width changes (a drawer resized around a keyboard or a drag rewraps its text). A refit
+	// Refit when the field's width changes (a drawer resized around a keyboard or a drag rewraps its text), whether the
+	// width that moved is its holder's or its own: a button that mounts beside the field once it holds text narrows it
+	// without moving the holder, and text set all at once (a paste, a dictation) was fitted before that. A refit
 	// measures with the transition off, which cancels a growth ease still running on the field, so it waits for the
 	// ease instead of aborting it mid-flight.
-	let width = owner?.clientWidth, height = owner?.clientHeight, frame = 0;
+	let width = owner?.clientWidth, height = owner?.clientHeight, own = node.clientWidth, frame = 0;
 	const refit = () => {
 		cancelAnimationFrame(frame);
 		// Check and write in the same frame: measuring turns the transition off, so an ease started between the
@@ -67,11 +69,13 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 			resize();
 		});
 	};
-	const observer = owner && typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-		if (owner.clientWidth === width && owner.clientHeight === height) return;
-		width = owner.clientWidth; height = owner.clientHeight;
+	// Only widths and the holder's height are compared: the refit's own height change on the field must not trigger another.
+	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+		if (node.clientWidth === own && owner?.clientWidth === width && owner?.clientHeight === height) return;
+		own = node.clientWidth; width = owner?.clientWidth; height = owner?.clientHeight;
 		refit();
 	}) : null;
+	observer?.observe(node);
 	if (owner) observer?.observe(owner);
 	return {
 		update: (_next?: string) => resize(),

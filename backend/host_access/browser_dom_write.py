@@ -37,10 +37,11 @@ _SETTLE_READS = 40
 class DomWriteRefused(BrowserSessionError):
     """A page-context write that could not be proven, refused instead of sent as the person's input."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, cover: str | None = None) -> None:
+        why = _WRITE_REFUSALS[reason] + (f" (a <{cover}>)" if cover else "")
         super().__init__(
             "The person has this browser open, so clicks and typing run inside the page without moving "
-            f"their cursor, and this one couldn't: {_WRITE_REFUSALS[reason]}. Nothing was sent as real "
+            f"their cursor, and this one couldn't: {why}. Nothing was sent as real "
             "input. Try another element, or ask the person in chat to do this step.")
         self.reason = reason
 
@@ -62,7 +63,8 @@ async def shared_action(run: RunCommand, endpoint: str, args: Sequence[str],
         try:
             backend_id, unresolved = await _locate(run, cdp, args[1])
             if backend_id is None:
-                raise DomWriteRefused(unresolved)
+                cover = await _cover(cdp, await _box(run, args[1])) if unresolved == "covered" else None
+                raise DomWriteRefused(unresolved, cover)
             context_id = await _isolated_context(cdp)
             resolved = await cdp.call("DOM.resolveNode", backendNodeId=backend_id, executionContextId=context_id)
             object_id = _object_id(resolved)
@@ -103,6 +105,16 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         # agent-browser's own click scrolls its target into view the same way.
         await run(("scrollintoview", selector), 10)
         box = await _box(run, selector)
+    node, reason = await _settled_hit(run, cdp, selector, box)
+    if node is None and reason == "covered" and scroll:
+        # A sticky header or a bottom bar covers part of the viewport, so a target in view can sit under
+        # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
+        await run(("scrollintoview", selector), 10)
+        node, reason = await _settled_hit(run, cdp, selector, await _box(run, selector))
+    return node, reason
+
+
+async def _settled_hit(run: RunCommand, cdp: CdpClient, selector: str, box: dict | None) -> tuple[int | None, str]:
     # The box comes from agent-browser and the hit test from CDP, so the page can move between the two
     # reads. A hit test holds only when the box was in view and the same before and after it.
     seen = False
@@ -210,6 +222,11 @@ async def _box(run: RunCommand, selector: str) -> dict | None:
 
 
 async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
+    node = await _node_at_centre(cdp, box)
+    return await _matching_ancestor(cdp, node, box) if node else None
+
+
+async def _node_at_centre(cdp: CdpClient, box: dict) -> int | None:
     # The box is in viewport pixels, but the hit test takes document pixels: add the scroll offset.
     viewport = await _viewport(cdp)
     scroll_x, scroll_y = viewport.get("pageX"), viewport.get("pageY")
@@ -222,8 +239,20 @@ async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
     except BrowserSessionError:
         # Chrome reports no node at a point nothing hit-tests at.
         return None
-    node = protocol_int(location.get("backendNodeId"))
-    return await _matching_ancestor(cdp, node, box)
+    return protocol_int(location.get("backendNodeId"))
+
+
+async def _cover(cdp: CdpClient, box: dict | None) -> str | None:
+    """The tag of the element at the target's centre, so the agent can dismiss or scroll past it."""
+    node = await _node_at_centre(cdp, box) if box is not None and not _is_empty(box) else None
+    if not node:
+        return None
+    try:
+        name = (await cdp.call("DOM.describeNode", backendNodeId=node)).get("node", {}).get("nodeName")
+    except BrowserSessionError:
+        return None
+    # Only a tag name: page text, ids and classes stay out of the agent's error.
+    return name.lower() if isinstance(name, str) and re.fullmatch(r"[A-Za-z][\w-]*", name) else None
 
 
 async def _matching_ancestor(cdp: CdpClient, node: int, expected: dict) -> int | None:

@@ -7,7 +7,7 @@
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
-	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
+	import { commentHighlight, commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
 	import { transcriptTextChanged } from './chatTranscriptMutations';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
@@ -290,10 +290,14 @@
 				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};
+		let pressedAt: Element | null = null; const press = (event: PointerEvent) => { pressedAt = event.target as Element | null; };
 		const click = (event: MouseEvent) => {
 			const root = messageRoot();
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
+			// A press that began on the transcript away from any highlight or card lets the picked card go, as Escape does. Read where the pointer went down: a click lands on what the press and its release share, the transcript when the card moved under a still pointer between them.
+			const from = event.detail > 0 ? pressedAt ?? target : target; pressedAt = null;
+			if (!hit && marginComments && selectedCommentId && !open && (document.getSelection()?.isCollapsed ?? true) && from && root?.contains(from) && !from.closest('.chat-margin, [data-comment-ids]')) { selectedCommentId = null; returnFocus = null; return; }
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
@@ -306,13 +310,19 @@
 			if (!open) openHighlight(ids, hit, row);
 		};
 		const keydown = (event: KeyboardEvent) => {
-			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin.
-			if (event.key === 'Escape' && marginComments && !open && selectedCommentId) { selectedCommentId = null; returnFocus = null; return; }
+			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin,
+			// and focus in the card goes back to the text it came from: its highlight. An unsent reply stays in the card.
+			if (event.key === 'Escape' && marginComments && !open && selectedCommentId) {
+				const released = selectedCommentId, inCard = !!document.querySelector(`.chat-margin [data-comment-uuid="${CSS.escape(released)}"]`)?.contains(document.activeElement);
+				selectedCommentId = null; returnFocus = null;
+				if (inCard) commentHighlight(messageRoot(), released)?.focus({ preventScroll: true });
+				return;
+			}
 			if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.matches('[data-comment-ids][role="button"]')) {
 				event.preventDefault(); (event.target as HTMLElement).click();
 			}
 		};
-		document.addEventListener('click', click);
+		document.addEventListener('pointerdown', press, true); document.addEventListener('click', click);
 		document.addEventListener('keydown', keydown);
 		document.addEventListener('chat-comment-reply', replyClick);
 		observer = new MutationObserver(records => {
@@ -320,7 +330,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('pointerdown', press, true); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	function replyInThread(note: string): Promise<void> {
 		// The row this thread opened on may have been replaced or removed while the reply was being typed.
@@ -350,10 +360,7 @@
 		void tick().then(() => requestAnimationFrame(() => {
 			if (!free()) return;
 			const reply = marginComments ? document.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"] textarea`) : null;
-			const row = messageRoot()?.querySelector(`[data-message-id="${CSS.escape(posted.messageId)}"]`);
-			const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
-				.find(item => item.dataset.commentIds?.split(',').includes(comment.id));
-			(reply ?? mark)?.focus({ preventScroll: true });
+			(reply ?? commentHighlight(messageRoot(), comment.id, posted.messageId))?.focus({ preventScroll: true });
 		}));
 	}
 </script>
@@ -375,7 +382,7 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer bind:panel={sheet} keepsText fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer bind:panel={sheet} keepsText fill ariaLabel={heading} {heading} doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}
