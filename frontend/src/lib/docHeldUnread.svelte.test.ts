@@ -13,7 +13,7 @@ function setup(initial: Listed[]) {
 	let comments = $state<Listed[]>(initial);
 	let focused = $state<string | null>(get(focusedDocComment));
 	const unsubscribe = focusedDocComment.subscribe((id) => { focused = id; });
-	const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+	const surface = createCommentSurfaceState(() => {}, () => true);
 	let held!: ReturnType<typeof createHeldUnread>;
 	const teardown = $effect.root(() => {
 		held = createHeldUnread(() => openCommentIds(surface.state, focused), () => comments);

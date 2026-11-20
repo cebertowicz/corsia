@@ -54,8 +54,9 @@ def _scene(thread_id: str, *, criteria: str | None = None) -> dict:
             plan.id, kind="task", title="Task A",
             acceptance_criteria=criteria or "Task A is verified", db=db,
         )
-        queued = add_task(db, plan.id, "Queued work")
+        # Task B ranks above the queued work, so naming it follows plan order.
         task_b = add_task(db, plan.id, "Task B")
+        queued = add_task(db, plan.id, "Queued work")
         blocked = add_task(db, plan.id, "Blocked work")
         service.add_dependency(blocked.id, task_b.id, db=db)
         admission.activate(

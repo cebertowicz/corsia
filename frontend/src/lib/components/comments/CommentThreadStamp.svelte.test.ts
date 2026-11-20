@@ -85,6 +85,23 @@ describe('chat thread read stamps', () => {
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
 	});
 
+	it('reads nothing on a press of a link in the card, or a press that ends a text selection', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, text: 'See [the guide](https://example.com/guide) for the rest.', replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		const link = host.querySelector<HTMLAnchorElement>('[data-comment-card] a')!;
+		link.addEventListener('click', (event) => event.preventDefault());
+		link.click(); flushSync();
+		expect(onViewed).not.toHaveBeenCalled();
+		const selection = window.getSelection()!;
+		selection.selectAllChildren(host.querySelector('[data-comment-card]')!);
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed).not.toHaveBeenCalled();
+		selection.removeAllRanges();
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+	});
+
 	it('leaves an answer that arrives while the thread is open unread until the next press', () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
@@ -95,6 +112,41 @@ describe('chat thread read stamps', () => {
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('reads an answer that arrived while the thread was open when the thread closes', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		shown.hideReply = true;
+		render(onViewed, { inMargin: true });
+		shown.hideReply = false; shown.opened = true; flushSync();
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		// Escape, a press outside or another pick lets the card go: that close reads what arrived while it was open.
+		shown.hideReply = true; shown.opened = false; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('reads what arrived while open when an opened thread leaves the page (its popover or sheet closed)', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: [] };
+		shown.opened = true;
+		render(onViewed);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		expect(onViewed).not.toHaveBeenCalled();
+		unmount(component!); component = null; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+	});
+
+	it('reads nothing when a thread nobody opened rests or leaves the page', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		shown.hideReply = true;
+		render(onViewed, { inMargin: true });
+		shown.hideReply = false; flushSync();
+		shown.hideReply = true; flushSync();
+		unmount(component!); component = null; flushSync();
+		expect(onViewed).not.toHaveBeenCalled();
 	});
 
 	it('keeps the New marks the thread opened with after the stamp clears them, until it is no longer open', () => {
@@ -143,6 +195,81 @@ describe('document thread stamps', () => {
 		// The person moving focus into the field opens the thread.
 		host.querySelector('textarea')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); flushSync();
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+	});
+
+	it('reads an image comment when its number disc is pressed, as a press on its card does', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		const onFocus = vi.fn();
+		state.comment = { ...state.comment, regionNumber: 1, newComment: true, author: 'agent-1', authorKind: 'agent' };
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, onFocus, selectable: true, drawerCard: true, scrollOnFocus: false } });
+		flushSync();
+		host.querySelector<HTMLElement>('button.ct-num')!.click(); flushSync();
+		expect(onFocus).toHaveBeenCalledTimes(1);
+		expect(onViewed.mock.calls).toEqual([['c1', 'c1']]);
+	});
+
+	it('reads a reply that arrived while a pressed document card was open when the card rests again', () => {
+		const card = $state({ resting: false });
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		// As CommentList draws a margin card: its reply shows exactly while it is the focused one.
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, inMargin: true, scrollOnFocus: false, get hideReply() { return card.resting; }, get focused() { return !card.resting; } } });
+		flushSync();
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		expect(onViewed).toHaveBeenCalledTimes(1);
+		card.resting = true; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('lets a pressed list card go when another thread is picked: a reply that reaches it afterwards stays unread when the list closes', () => {
+		const card = $state({ focused: true });
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		// A row of a drawer, sheet or image list: never a resting preview, so only the pick says whether it is open.
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, drawerCard: true, scrollOnFocus: false, get focused() { return card.focused; } } });
+		flushSync();
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		// A reply that arrives while it is still the picked row is read as the pick moves on.
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		card.focused = false; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		// Another thread holds the pick now; a reply that reaches this row afterwards waits for its own engagement.
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z'), reply('r3', '2026-10-16T18:02:00Z')], newReplyIds: ['r3'] });
+		unmount(component); component = null; flushSync();
+		expect(onViewed).toHaveBeenCalledTimes(2);
+	});
+
+	it('reads an unplaced card on a press the pick does not follow, and lets it go: a reply that reaches it afterwards stays unread when the list closes', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		// CommentList gives an unplaced margin row no onFocus, so a press on it never makes it the picked one.
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, drawerCard: true, scrollOnFocus: false, focused: false } });
+		flushSync();
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		unmount(component); component = null; flushSync();
+		expect(onViewed).toHaveBeenCalledTimes(1);
+	});
+
+	it('reads a resolved card on a press and lets it go: a reply that reaches it afterwards stays unread when the list closes', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, resolved: true, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, drawerCard: true, scrollOnFocus: false, focused: false } });
+		flushSync();
+		host.querySelector<HTMLElement>('.ct.resolved')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		unmount(component); component = null; flushSync();
+		expect(onViewed).toHaveBeenCalledTimes(1);
 	});
 
 	it('keeps the New marks a picked document card opened with after the viewed stamp clears them, until the card rests again', () => {

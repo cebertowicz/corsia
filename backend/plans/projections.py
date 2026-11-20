@@ -147,7 +147,7 @@ def movable_leaf_sql(alias: str) -> str:
     return f"""{alias}.archived_at IS NULL
         AND {alias}.state IN ('pending','active')
         AND COALESCE({alias}.assignee,'') <> 'user'
-        AND NOT {node_states.has_child_in_work_sql(alias)}
+        AND NOT {node_states.parent_sql(alias)}
         AND NOT EXISTS (
           SELECT 1 FROM plan_node_holds h
            WHERE h.node_id={alias}.id AND h.cleared_at IS NULL
@@ -191,7 +191,7 @@ _LIVE_LEAVES_SQL = f"""
     WHERE n.plan_id=? AND n.archived_at IS NULL{{open_only}}{{later_only}}
       AND COALESCE(n.assignee,'') <> 'user'
       AND n.state IN ('pending','active','review_requested')
-      AND NOT {node_states.has_child_in_work_sql('n')}
+      AND NOT {node_states.parent_sql('n')}
     ORDER BY n.id"""
 
 

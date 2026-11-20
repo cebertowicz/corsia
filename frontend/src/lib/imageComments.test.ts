@@ -9,6 +9,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
+import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 const rect = () => new DOMRect(10, 10, 40, 20);
@@ -19,7 +20,7 @@ function controller(readOnly = false) {
 }
 const escape = () => new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 
-afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); pickedComments.set(new Set()); });
+afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); pickedComments.set(new Set()); keptCommentDrafts.reset(); });
 
 describe('image comments', () => {
 	it('names what a new comment is on', () => {
@@ -46,7 +47,7 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, [], { clientId: expect.any(String), again: false });
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
@@ -59,7 +60,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
 		await comments.submit('@Agent', ['agent'], mentions);
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions, { clientId: expect.any(String), again: false });
 	});
 
 	it('keeps a tagged draft and explains a missing viewing thread', async () => {
@@ -84,13 +85,28 @@ describe('image comments', () => {
 		expect(comments.draft?.body).toBe('@Agent');
 	});
 
+	it('keeps the draft and shows the server\'s sentence, without "try again", when the document no longer takes comments', async () => {
+		const sentence = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused(`409 ${JSON.stringify({ detail: sentence, kind: 'not_commentable' })}`, 'not_commentable'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments, onCreated } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		await expect(comments.submit('Too dark')).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledWith(sentence, 'error');
+		expect(mocks.addRegionComment).toHaveBeenCalledOnce();
+		expect(comments.draft?.body).toBe('Too dark');
+		expect(comments.ui.state).toEqual({ kind: 'draft' });
+		expect(onCreated).not.toHaveBeenCalled();
+	});
+
 	it('keeps the composer and says why when posting fails', async () => {
 		mocks.addRegionComment.mockRejectedValueOnce(new Error('Offline'));
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const { comments } = controller();
 		await comments.draw(BOX, rect);
 		await expect(comments.submit('Too dark')).rejects.toThrow('Offline');
-		expect(mocks.show).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+		expect(mocks.show).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error');
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
 		expect(comments.draftRegion).toEqual(BOX);
 	});
@@ -116,7 +132,7 @@ describe('image comments', () => {
 		// The kept draft keeps its picked tags with its text.
 		expect(clearTags).not.toHaveBeenCalled();
 		await comments.submit('Keep this');
-		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], []);
+		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], [], expect.objectContaining({ clientId: expect.any(String) }));
 		expect(comments.selectedId).toBe('new');
 	});
 
@@ -255,5 +271,223 @@ describe('image comments', () => {
 		expect(comments.boxMode).toBe(false);
 		expect(comments.ui.state).toBeNull();
 		expect(mocks.moveRegion).not.toHaveBeenCalled();
+	});
+});
+
+// A person's typed comment on an image is never lost: closing its composer any way but Cancel keeps the text and tags for
+// the next composer drawn on that image, even from a new viewer of it.
+describe('a typed image comment is never lost', () => {
+	type Comments = ReturnType<typeof createImageComments>;
+	const tagged = async (comments: Comments) => {
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Hey @Agent\nlook');
+		// As the mention picker does: it reads the field's text, then records the agent picked in it.
+		comments.draft!.mentionSelection.update('Hey @Agent\nlook');
+		comments.draft!.mentionSelection.select('agent-1', 4, '@Agent');
+	};
+	const kept = (comments: Comments) => ({ body: comments.draft?.body, tags: comments.draft?.mentionSelection.occurrences(comments.draft.body) });
+	const KEPT = { body: 'Hey @Agent\nlook', tags: [{ agent_id: 'agent-1', start: 4, end: 10 }] };
+	it.each([
+		['Escape', (comments: Comments) => comments.onKeydownCapture(escape())],
+		['a close (the card close, a click outside)', (comments: Comments) => comments.close()],
+		['a tag picked while writing', (comments: Comments) => comments.pick('c1', rect, document.createElement('button'))],
+		['tags picked in the drawer while writing', (comments: Comments) => comments.pickCandidates(['c1', 'c2'], document.createElement('button'))],
+		['a card opened from the document while writing', (comments: Comments) => comments.select('c1', document.createElement('button'), BOX)],
+	])('path 15/16: %s keeps the text and its tags for the next box drawn', async (_name, leave) => {
+		const { comments } = controller();
+		await tagged(comments);
+		leave(comments);
+		comments.close();
+		expect(comments.draft).toBeNull();
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		expect(kept(comments)).toEqual(KEPT);
+		expect(comments.hasDraftText).toBe(true);
+		comments.cancel();
+	});
+	// Path 15, Cancel as the one discard, is driven through the button the person presses in ImageCommentLightbox.svelte.test.ts.
+	it('a new viewer of the same image keeps the text; another image does not take it', async () => {
+		const first = controller().comments;
+		await tagged(first);
+		first.close();
+		const other = createImageComments({ artifactId: () => 'image', draftKey: () => 'image|other.png', readOnly: () => false, restoreFocus: vi.fn() });
+		await other.draw(BOX, rect);
+		expect(other.draft?.body).toBe('');
+		const again = controller().comments;
+		await again.draw(BOX, rect);
+		expect(kept(again)).toEqual(KEPT);
+		again.cancel();
+	});
+	it('a posted comment does not come back in the next composer', async () => {
+		mocks.addRegionComment.mockResolvedValueOnce('new');
+		const { comments } = controller();
+		await tagged(comments);
+		// The composer sends the agents tagged in the text it posts (CommentComposer).
+		await comments.submit('Hey @Agent\nlook', ['agent-1'], KEPT.tags);
+		comments.close();
+		await comments.draw(BOX, rect);
+		expect(kept(comments)).toEqual({ body: '', tags: [] });
+	});
+});
+
+describe('a failed image comment says why in one place, decided as it fails', () => {
+	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
+	/** The image's comment box, mounted on screen (CommentComposer `use:showsDraft`, keyed by `imageDraftKey`). */
+	const boxOnScreen = (artifact = 'image') => {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		return keptCommentDrafts.shown(imageDraftKey(artifact), node);
+	};
+	const held = () => {
+		let end!: () => void;
+		const wait = new Promise<void>((resolve) => { end = resolve; });
+		mocks.addRegionComment.mockImplementationOnce(async () => { await wait; throw new Error('Offline'); });
+		return () => end();
+	};
+
+	it('in the box, with no toast, while the box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		mocks.addRegionComment.mockRejectedValueOnce(new Error('Offline'));
+		await expect(comments.submit('Too dark')).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+	});
+
+	it('in a toast when the box closed while it posted; the box drawn next says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(keptCommentDrafts.get(imageDraftKey('image'))?.toast).toBe('toast');
+		mocks.dismiss.mockClear();
+		await comments.draw(BOX, rect);
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+		// The box drawn again comes on screen, saying why: the toast goes.
+		const again = boxOnScreen();
+		expect(mocks.dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		again();
+	});
+
+	it('in the box drawn again while it posted, when that box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		drop = boxOnScreen();
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+	});
+
+	it('in a toast for a changed diagram, whose box closes and carries the text to the next', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen('doc');
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => true });
+		await comments.draw(BOX, rect);
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
+	});
+
+	it('never in a box on another image: the failing draft keeps its reason and a toast says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		// One viewer showing the images of a document: the box on the first image presses, then the second image is shown.
+		const first = imageDraftKey('doc', 'one.png'), second = imageDraftKey('doc', 'two.png');
+		let shown = first;
+		const comments = createImageComments({ artifactId: () => 'doc', draftKey: () => shown, readOnly: () => false, restoreFocus: () => {} });
+		const onScreen = (key: string) => {
+			const node = document.createElement('div');
+			node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+			return keptCommentDrafts.shown(key, node);
+		};
+		let drop = onScreen(first);
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		shown = second;
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Crop it');
+		drop = onScreen(second);
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		expect(comments.draft).toMatchObject({ body: 'Crop it', error: undefined });
+		expect(keptCommentDrafts.get(first)).toMatchObject({ body: 'Too dark', error: REASON });
+		expect(keptCommentDrafts.get(second)?.error).toBeUndefined();
+	});
+
+	it('once, in the box, for a changed diagram that could not be redrawn while its box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen('doc');
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => false });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Keep this', error: 'Place the pin on the current diagram; your draft is kept.' });
+	});
+
+	it('once, in a toast, for a changed diagram that could not be redrawn after its box closed', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let end!: () => void;
+		const wait = new Promise<void>((resolve) => { end = resolve; });
+		const post = vi.fn(async () => { await wait; throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const drop = boxOnScreen('doc');
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => false });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		const posting = comments.submit('Keep this');
+		await Promise.resolve();
+		comments.close(); drop();
+		end();
+		await expect(posting).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
+		expect(keptCommentDrafts.get(imageDraftKey('doc'))?.error).toBe('Place the pin on the current diagram; your draft is kept.');
+	});
+
+	it('always in a toast for a pin that did not move: no box says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		mocks.moveRegion.mockRejectedValueOnce(new Error('Offline'));
+		const { comments } = controller();
+		comments.movePin('pin');
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Couldn’t move the pin — try again', 'error');
+		// The next move lands: its failure's toast goes with it.
+		mocks.dismiss.mockClear();
+		comments.movePin('pin');
+		await comments.draw({ x: 0.4, y: 0.4, w: 0, h: 0 }, rect);
+		expect(mocks.dismiss).toHaveBeenCalledExactlyOnceWith('toast');
 	});
 });

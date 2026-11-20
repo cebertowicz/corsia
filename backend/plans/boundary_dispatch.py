@@ -11,6 +11,7 @@ import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
 import plans.bulk_fields as bulk_fields
 import plans.bulk_nodes as bulk_nodes
+import plans.handoff_brief as handoff_brief
 import plans.later_fields as later_fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
@@ -63,23 +64,24 @@ def _dispatch_admission(operation: str, params: dict[str, Any], actor, common: d
     ``activate`` and ``start`` are interchangeable here: admission picks the
     move the node's own state needs. A task assigned to the user is the user's
     to complete: an agent's activate or start leaves it untouched and reports
-    ``USER_ASSIGNED_CONFLICT``. When another task holds the slot the reply
-    carries a notice saying the task did not start and how to start it.
+    ``USER_ASSIGNED_CONFLICT``. The plan owner's start that passes ready
+    work ranked above it is refused (``triage_lines.out_of_order``). When
+    another task holds the slot the reply carries a notice saying the task did
+    not start and how to start it.
     """
 
     node = service._node_row(common["db"], params["node_id"])
     if actor.kind == "thread" and node["assignee"] == "user":
         conflict = dict(USER_ASSIGNED_CONFLICT)
         return admission.result(node["id"], db=common["db"], conflict=conflict)
-    jump = triage_lines.jump_for_start(
+    out_of_order = triage_lines.out_of_order(
         common["db"], node, actor_id=actor.thread_id if actor.kind == "thread" else None,
     )
-    reply = admission.make_current(
-        params["node_id"], **fields.expected(params), **common,
-        payload=None if jump is None else jump.payload,
-    )
-    if jump is not None and reply["admission"].get("selection") is not None:
-        reply["jumped"] = jump.line
+    if out_of_order is not None:
+        raise service.PlanError(out_of_order)
+    was_selected = admission.attempts.open_attempt(common["db"], node["id"]) is not None
+    reply = admission.make_current(params["node_id"], **fields.expected(params), **common)
+    reply.update(handoff_brief.started_hint(common["db"], node, reply, was_selected=was_selected))
     conflict = reply["admission"].get("conflict") or {}
     holder = conflict.get("selected_node_id")
     if holder and holder != node["id"]:
@@ -103,12 +105,17 @@ _SETTLEMENT_OPERATIONS = frozenset(
 
 
 def _reorder(params: dict[str, Any], common: dict) -> dict:
-    """Move one node; its siblings keep their revisions (service.touch_node)."""
+    """Move one node; its siblings keep their revisions; a foreign move tells the owner."""
+    from plans import plan_top
     from plans.boundary import node_projection
 
+    before = plan_top.last_move_id(common["db"], params["node_id"])
     moved = mutations.reorder_node(
         params["node_id"], fields.integer(params, "order_key"),
         **fields.expected(params), **common,
+    )
+    plan_top.tell_owner_moved(
+        common["db"], params["node_id"], actor_id=common["actor_id"], before=before,
     )
     return {"node": node_projection(moved)}
 
@@ -132,11 +139,13 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
                 node.id, fields.text(params, "depends_on_node_id"),
                 causing_executor=acting, **common,
             )
-        line = (
-            triage_lines.add_line(db, service._plan_row(db, plan_id), node.id, actor_id=acting)
-            if operation == "add" else None
+        from plans import plan_top
+
+        placing = plan_top.placing_reply(
+            db, service._plan_row(db, plan_id), node.id, actor=actor, inserted=operation == "insert",
         )
-        return workflow_fields.added(db, node, line, workflow_steps, causing_executor=acting)
+        plan_top.tell_owner_added(db, node.id, actor_id=common["actor_id"])
+        return workflow_fields.added(db, node, placing, workflow_steps, causing_executor=acting)
     if operation == "edit":
         changed = fields.edit_fields(params)
         if "later" not in changed:
@@ -229,16 +238,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     acting = actor.thread_id if actor.kind == "thread" else None
     from plans import workflow_fields
     workflow_fields.refuse_unready_close(db, node_id, operation, by_agent=actor.kind == "thread")
+    from plans import review_settle
+    review_settle.check_verdict(db, node_id, acting, params.get("verdict"), operation=operation)
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":
         mutations.request_review(
-            node_id,
-            evidence=fields.text(params, "evidence"),
-            artifact_ids=params.get("artifact_ids"),
-            owner_thread_id=acting,
-            **fields.expected(params),
-            **common,
+            node_id, evidence=fields.text(params, "evidence"), artifact_ids=params.get("artifact_ids"),
+            owner_thread_id=acting, verdict=params.get("verdict"), **fields.expected(params), **common,
         )
         return after.after_close(
             node_id, "review_requested", params, common, executor=acting,
@@ -250,14 +257,14 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         mutations.fail_node(node_id, **fields.expected(params), **common)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
-        from plans import closure
+        from plans import closure, run_end
         workflow_fields.refuse_required_skip(db, node_id)
-        closure.close_node(
-            node_id, reason=fields.text(params, "reason"),
-            **fields.expected(params), **common,
-        )
+        reason = fields.text(params, "reason")
+        below = run_end.close_run(node_id, reason, common, **fields.expected(params))
+        # The nested closes moved the step's revision; it was checked before them.
+        closure.close_node(node_id, reason=reason, **({} if below else fields.expected(params)), **common)
         return after.after_close(
-            node_id, service.CLOSED, params, common, executor=acting,
+            node_id, service.CLOSED, params, common, executor=acting, closed_below=below,
         )
     if operation == "attach_spawned_thread":
         return mutations.attach_spawned_thread(

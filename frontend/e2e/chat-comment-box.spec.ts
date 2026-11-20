@@ -4,6 +4,7 @@ import { createSession, openAppPastLanding, sendChatMessage, sidebarThread, TEST
 import { failQueuedInput, injectMessage, readMockCallCount, seedMockResponses } from './support/mock';
 import { commentEditor, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 import { capture, framesDirectory, selectPhrase } from './support/chatCommentFrames';
+import { expectFailureLook } from './support/failureLook';
 
 /**
  * A comment's post failing, seen where the person wrote it. Refused before it is stored: the box keeps the text and
@@ -122,6 +123,16 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await expect(commentEditor(page)).toHaveValue('Refused once');
   await expect(box.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(1);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
+  // The box is where the reason shows, so it reads as an error: the colour a document box and a reply's failure line use.
+  await expectFailureLook(page, test.info(), box.getByRole('alert'), 'chat comment box');
+  if (framesDirectory) {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await frame(box, 'failed-post-dark');
+  }
+  // The look check ends in the dark theme; the rest of the leg runs light.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await frame(box, 'failed-post');
 
   // Retry posts the same text from the same box.

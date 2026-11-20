@@ -1,39 +1,43 @@
 import { writable, get } from 'svelte/store';
 import {
-	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
+	fetchComments, markCommentThreadViewed, patchComment, persistPositions, type ServerComment
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { copyStamp, heldIds, shownStamp, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
+import { EarlierVersionPosted, type DraftVersion, type PostFields } from './commentVersion';
+import { findPosted, postReconciled } from './commentReconcile';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapCommentRange } from '$lib/cm/comment-range';
 
 export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
+export { EARLIER_VERSION_POSTED, EarlierVersionPosted, type DraftVersion } from './commentVersion';
 
-function findById(rows: ServerComment[], id: string): ServerComment | null {
-	for (const r of rows) {
-		if (r.id === id) return r;
-		const reply = (r.replies ?? []).find((x) => x.id === id);
-		if (reply) return reply;
+/**
+ * A new comment's stored row, shown. When the comment stored under the draft's id was posted from other text or tags,
+ * that one shows and this fails with `EarlierVersionPosted`, so the draft keeps the changes.
+ */
+async function showing(artifactId: string, find: () => Promise<ServerComment | null>): Promise<string | null> {
+	try {
+		const row = await find();
+		if (row) upsertTop(artifactId, row);
+		return row?.id ?? null;
+	} catch (error) {
+		if (error instanceof EarlierVersionPosted) upsertTop(artifactId, error.row);
+		throw error;
 	}
-	return null;
 }
 
-export async function postReconciled(
-	artifactId: string,
-	clientId: string,
-	c: Parameters<typeof postComment>[1]
-): Promise<ServerComment> {
-	try {
-		return await postComment(artifactId, { ...c, client_id: clientId });
-	} catch (e) {
-		const result = await fetchComments(artifactId).catch(() => null);
-		const found = result && findById(result.comments, clientId);
-		if (found) return found;
-		throw e;
-	}
+/** Post a new comment under its draft's id and show it (`showing`). */
+export async function postTop(artifactId: string, clientId: string, c: PostFields, again = false): Promise<string> {
+	return (await showing(artifactId, () => postReconciled(artifactId, clientId, c, again)))!;
+}
+
+/** Show the comment an earlier press of Comment stored under `clientId`, if one did (`showing`); null when none is found. */
+export function showPosted(artifactId: string, clientId: string, c: DraftVersion): Promise<string | null> {
+	return showing(artifactId, () => findPosted(artifactId, clientId, c, true));
 }
 
 
@@ -47,7 +51,7 @@ export const pickedComments = writable<Set<string>>(new Set());
 /** A chat comment's key in `pickedComments`, kept apart from document comment ids. */
 export const chatPickKey = (commentId: string) => `chat:${commentId}`;
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
-export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
+export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null; goesTo?: { id: string; name: string }[] };
 export const commentLoads = writable<Record<string, CommentLoad>>({});
 const placements = trackPlacements(docComments);
 /** Retry a live row's placement: one new positions request for its document. */
@@ -120,7 +124,7 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 			reloadListeners.forEach((listener) => listener(artifactId, rows.filter((row) => !known.has(row.id))));
 		}
 		placements.show(artifactId, withhold(artifactId, rows, at));
-		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
+		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label, goesTo: feedback.goes_to ?? [] } }));
 		return feedback;
 	} catch (error) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'error', error: error instanceof Error ? error.message : String(error) } }));
@@ -141,30 +145,43 @@ export function upsertTop(artifactId: string, row: ServerComment) {
 	});
 }
 
-export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
-	const cid = clientId ?? newClientId();
-	const row = await postReconciled(artifactId, cid, {
+export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], again = false): Promise<string> {
+	return postTop(artifactId, clientId ?? newClientId(), commentFields(anchor, from, to, text, author, liveCapture, taggedAgentIds, threadId, mentions), again);
+}
+
+/** What `addComment` posts; a live retry looks for its stored comment with the same fields (`findPosted`). */
+export function commentFields(anchor: string, from: number, to: number, text: string, author: CommentAuthor = 'you', liveCapture = false, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): PostFields {
+	return {
 		body: text, anchor_text: anchor, from_off: from, to_off: to, ...(liveCapture ? { live_capture: true } : {}),
 		author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
-	});
-	upsertTop(artifactId, row);
-	return row.id;
+	};
 }
 
 
-export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you', taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
-	const cid = newClientId();
-	const row = await postReconciled(artifactId, cid, {
-		body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
-	});
-	docComments.update((all) => {
+/**
+ * Post a reply under its draft's one id (`keptCommentDrafts.claim`), so a retry never stores it twice; `again` says an earlier
+ * press used the id. When the reply stored under it was posted from other text or tags, that one shows in the thread and
+ * this fails with `EarlierVersionPosted`, so the draft keeps the changes.
+ */
+export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you', taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], clientId = newClientId(), again = false) {
+	const show = (row: ServerComment) => docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
 			if (c.replies.some((r) => r.id === row.id)) return c;
-			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], taggedPerson: row.tagged_person ?? null, mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
+			return { ...c, replies: [...c.replies, { id: row.id, author, text: row.body ?? text, taggedAgents: row.tagged_agents ?? [], taggedPerson: row.tagged_person ?? null, mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
 		});
 		return { ...all, [artifactId]: list };
 	});
+	let row: ServerComment;
+	try {
+		row = await postReconciled(artifactId, clientId, {
+			body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
+		}, again);
+	} catch (error) {
+		if (error instanceof EarlierVersionPosted) show(error.row);
+		throw error;
+	}
+	show(row);
 }
 
 /** Flips a flag at once and puts it back when the request fails. With `wait` the flag changes only once the request is answered: the caller shows the old state until then. Resolves true when the server took it. */

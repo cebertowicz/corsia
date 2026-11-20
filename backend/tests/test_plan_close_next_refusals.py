@@ -148,13 +148,13 @@ _DECISION = {
 
 def test_a_task_owned_by_an_open_user_decision_is_reported_and_untouched(db):
     plan = owner_plan(db)
+    task_a = _selected_a(db, plan)
     source = task(db, plan.id, "Decision source")
     decision = decisions.draft(
         plan.id, source_node_id=source.id, mutation_id="draft-venue", actor=OWNER,
         provenance="test.plan_close_next", db=db, **_DECISION,
     ).result["decision"]
     db.commit()
-    task_a = _selected_a(db, plan)
     before = _durable(db, decision["node_id"])
 
     block = next_block(

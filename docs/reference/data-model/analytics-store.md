@@ -4,6 +4,24 @@ These tables store product events and request timing data.
 
 ## Tables
 
+### `client_request_timing_daily`
+
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `day` | DATE | Yes | Yes | — | — |
+| `engine` | VARCHAR | Yes | Yes | — | — |
+| `method` | VARCHAR | Yes | Yes | — | — |
+| `route` | VARCHAR | Yes | Yes | — | — |
+| `measure` | VARCHAR | Yes | Yes | — | — |
+| `count` | BIGINT | No | Yes | — | — |
+| `sum_ms` | DOUBLE | No | Yes | — | — |
+| `max_ms` | DOUBLE | No | Yes | — | — |
+| `buckets` | INTEGER[] | No | Yes | — | — |
+
+Indexes: None.
+
 ### `product_events`
 
 Source: `backend/infra/analytics_db.py`.

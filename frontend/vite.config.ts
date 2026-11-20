@@ -54,7 +54,8 @@ export default defineConfig(() => {
 		server: {
 			port: 5173,
 			fs: {
-				allow: [process.cwd(), nodeModulesPath],
+				// The server's card-refresh limits file, which the store imports so both sides share one definition.
+				allow: [process.cwd(), nodeModulesPath, resolve('../backend/api/card_refresh_limits.json')],
 			},
 			// A fixed-checkout e2e server has no use for HMR: its full-page reloads
 			// (SvelteKit rewriting `.svelte-kit/generated` after the first request,

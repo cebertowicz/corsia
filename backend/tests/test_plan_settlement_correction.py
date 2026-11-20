@@ -60,6 +60,16 @@ def _task(db, plan_id, title, **kwargs):
     )
 
 
+def _rank_first(db, plan_id, node, key):
+    """The owner ranks this work above the open correction before starting it."""
+    _mutate(
+        db, plan_id, "reorder",
+        {"node_id": node.id, "expected_revision": node.revision, "order_key": 0},
+        key,
+    )
+    return service.get_node(node.id, db=db)
+
+
 def _activate(db, plan_id, node, key):
     return _mutate(
         db,
@@ -285,7 +295,10 @@ def test_add_correction_preserves_terminal_source_and_blocks_affected_work(db):
 
 def test_correction_inherits_the_source_canonical_intent_unless_overridden(db):
     plan = service.ensure_plan("thread", "owner", db=db)
-    canonical = _task(db, plan.id, "Canonical intent", intent="Preserve the stated outcome")
+    # The intent's own task is not work for now, so it does not outrank the work below.
+    canonical = _task(
+        db, plan.id, "Canonical intent", intent="Preserve the stated outcome", later=True,
+    )
     source = _task(
         db, plan.id, "Inherited source", intent_node_id=canonical.id,
     )
@@ -318,6 +331,7 @@ def test_correction_inherits_the_source_canonical_intent_unless_overridden(db):
     assert service.get_node(inherited["id"], db=db).intent_node_id == canonical.id
 
     override_source = _task(db, plan.id, "Independent source", intent="Original reading")
+    override_source = _rank_first(db, plan.id, override_source, "rank-override-source")
     active_override = _activate(db, plan.id, override_source, "activate-override-source")
     reviewed_override = _review(
         db, plan.id, active_override["node"], "review-override-source",
@@ -325,6 +339,7 @@ def test_correction_inherits_the_source_canonical_intent_unless_overridden(db):
     accepted_override = _accept(
         db, plan.id, reviewed_override["node"], "accept-override-source")["node"]
     other = _task(db, plan.id, "Other affected work")
+    other = _rank_first(db, plan.id, other, "rank-other-affected")
     active_other = _activate(db, plan.id, other, "activate-other-affected")
 
     overridden = _mutate(

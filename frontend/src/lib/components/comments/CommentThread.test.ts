@@ -5,6 +5,7 @@ import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 import { formatDateTime } from '$lib/time';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const hexToRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 let host: HTMLElement;
@@ -45,6 +46,29 @@ describe('CommentThread', () => {
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
+	});
+
+	it('counts its reply field as the box that says why a reply failed while it is mounted, under the reply\'s key', () => {
+		render(thread(), false, { replyKey: 'reply-key' });
+		host.querySelector<HTMLElement>('[data-reply-composer]')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		expect(keptCommentDrafts.onScreen('reply-key')).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen('reply-key')).toBe(false);
+	});
+
+	describe('the line under the reply field', () => {
+		it('names the agents the reply wakes, and says so when there are none', () => {
+			render(thread({ replyGoesTo: [{ id: 'a1', name: 'Docs lane' }, { id: 'a2', name: 'Release lane' }] }));
+			expect(host.querySelector('.rl')?.textContent).toContain('Goes to');
+			expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Release lane']);
+			unmount(component!); host.remove();
+			render(thread({ replyGoesTo: [] }));
+			expect(host.querySelector('.rl')?.textContent).toContain('No agent gets this reply.');
+		});
+		it('is absent where the caller does not know who gets a reply', () => {
+			render(thread());
+			expect(host.querySelector('.rl')).toBeNull();
+		});
 	});
 
 	it('keeps focus in the reply field when a clicked Send goes away after posting', async () => {
@@ -565,6 +589,16 @@ describe('CommentThread', () => {
 	it('shows the refusal it is given, as an alert', () => {
 		render(thread({ replacement: 'new text' }), false, { decisionError: 'The text changed on the server' });
 		expect(host.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
+	});
+
+	it.each([false, true])('shows a reply’s failure under its field in the card’s error style (resolved: %s)', (resolved) => {
+		render(thread({ resolved }), false, { replyError: 'Couldn’t post the comment. Your draft is kept. Try again.' });
+		if (resolved) (host.querySelector('.ct-res-head') as HTMLElement).click();
+		flushSync();
+		const line = host.querySelector('[role="alert"]');
+		expect(line?.previousElementSibling?.querySelector('textarea'), 'the line sits right under the reply field').not.toBeNull();
+		expect(line?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+		expect(line?.classList.contains('ct-reply-error')).toBe(true);
 	});
 
 	it('marks a rejected suggestion with a cross and an accepted one with a check', () => {

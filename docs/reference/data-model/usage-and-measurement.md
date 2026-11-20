@@ -128,6 +128,46 @@ Source: `backend/infra/usage_rollup_schema.py`.
 
 Indexes: None.
 
+### `llm_usage_node_groups`
+
+Source: `backend/infra/node_usage_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `plan_node_id` | TEXT | Yes | Yes | — | — |
+| `group_key` | TEXT | Yes | Yes | — | — |
+| `admission` | TEXT | Yes | Yes | — | — |
+| `input_tier` | TEXT | Yes | Yes | — | — |
+| `idle_hours` | INTEGER | Yes | Yes | — | — |
+| `plan_commitment_id` | TEXT | No | No | — | — |
+| `turn_id` | TEXT | No | No | — | — |
+| `model` | TEXT | No | No | — | — |
+| `context_manifest_id` | TEXT | No | No | — | — |
+| `records` | INTEGER | No | Yes | — | — |
+| `prompt_tokens` | INTEGER | No | Yes | — | — |
+| `completion_tokens` | INTEGER | No | Yes | — | — |
+| `cache_creation_tokens` | INTEGER | No | Yes | — | — |
+| `cache_read_tokens` | INTEGER | No | Yes | — | — |
+| `total_tokens` | INTEGER | No | Yes | — | — |
+| `total_known` | INTEGER | No | Yes | — | — |
+| `total_odd` | INTEGER | No | Yes | — | — |
+| `last_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_llm_usage_node_groups_commitment` (plan_commitment_id), `sqlite_autoindex_llm_usage_node_groups_1` (plan_node_id, group_key, admission, input_tier, idle_hours, unique).
+
+### `llm_usage_node_state`
+
+Source: `backend/infra/node_usage_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | INTEGER | Yes | No | — | — |
+| `definition` | TEXT | No | Yes | — | — |
+| `rebuilt_below` | TEXT | No | Yes | — | — |
+| `complete` | INTEGER | No | Yes | — | — |
+
+Indexes: None.
+
 ### `measure_breaks`
 
 Source: `backend/infra/measurement_schema.py`.

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from infra.local_connection import is_direct_loopback
-from infra.request_timing import _BUCKET_UPPERS, bucket_percentile
+from infra.request_timing import BUCKET_UPPERS, bucket_percentile
 
 if TYPE_CHECKING:
     from host_access.browser_pane import PaneAppearance
@@ -30,7 +30,7 @@ _MAX_SEQUENCE = 2**31
 _MAX_IN_FLIGHT_SAMPLES = 64
 #: Input that can change the picture; a pointer move rarely does, so it is timed but never stamped.
 _STAMPED_KINDS = frozenset({"click", "wheel", "key"})
-_BUCKETS = len(_BUCKET_UPPERS)
+_BUCKETS = len(BUCKET_UPPERS)
 
 
 class Histogram:
@@ -40,7 +40,7 @@ class Histogram:
         self.buckets = [0] * _BUCKETS
 
     def add(self, value: float) -> None:
-        self.buckets[min(bisect_left(_BUCKET_UPPERS, value), _BUCKETS - 1)] += 1
+        self.buckets[min(bisect_left(BUCKET_UPPERS, value), _BUCKETS - 1)] += 1
 
     def merge(self, counts: list[int]) -> None:
         for index, count in enumerate(counts):

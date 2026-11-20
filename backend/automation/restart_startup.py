@@ -96,13 +96,43 @@ def _remove_terminal_lifecycle_results(logger) -> None:
                 logger.exception("could not remove terminal lifecycle result {}", path.name)
 
 
+async def _join_person_comment_recovery(recovery, logger, cancelled: bool) -> None:
+    """Join the recovery pass without letting it delay, fail or outlive the drive.
+
+    A cancellation arriving here while the drive waits reaches ``recovery``
+    directly, because awaiting a task forwards its owner's cancellation to it.
+    A cancellation that arrived earlier, while the drive's own work was still
+    running, is forwarded here instead: the drive never waits out a stalled pass
+    it has already been told to stop, and never reports a cancelled drive as
+    finished. Recovery's own failure is reported, never raised: it belongs to no
+    other startup work.
+    """
+    if cancelled:
+        recovery.cancel()
+    try:
+        await recovery
+    except asyncio.CancelledError:
+        recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        raise
+    except Exception:
+        logger.exception("startup phase: person comment recovery failed")
+
+
 async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
     """Time and report the lifecycle-owned post-bind drive phase.
 
     An Update this startup left ``verifying`` is settled here too, when its
     shell never confirms; the drive failing does not stop that settlement.
+
+    The marker-gated person-comment recovery pass starts here as well, since it
+    is post-bind work that must not gate readiness. It is joined only after this
+    phase has reported its own outcome, so neither a failure nor a hang of
+    recovery touches the work above; the drive stays alive as its owner so
+    shutdown still cancels and joins it.
     """
     from automation.update_verification import settle_unconfirmed_update
+    from plans import public as plans
 
     async def drive() -> None:
         await harness_task
@@ -115,6 +145,8 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
 
     phase_started = time.monotonic()
     logger.info("startup phase: restart continuity drive started")
+    recovery = asyncio.create_task(plans.recover_person_comments())
+    cancelled = False
     try:
         outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
         for outcome in outcomes:
@@ -124,6 +156,7 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
         await run_in_db(_remove_terminal_lifecycle_results, logger)
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
+        cancelled = True
         raise
     except (Exception, BaseExceptionGroup) as exc:
         logger.error(
@@ -132,10 +165,13 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
             exc,
         )
         raise
-    logger.info(
-        "startup phase: restart continuity drive complete in {:.1f}s",
-        time.monotonic() - phase_started,
-    )
+    else:
+        logger.info(
+            "startup phase: restart continuity drive complete in {:.1f}s",
+            time.monotonic() - phase_started,
+        )
+    finally:
+        await _join_person_comment_recovery(recovery, logger, cancelled)
 
 
 async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...], str | None]:

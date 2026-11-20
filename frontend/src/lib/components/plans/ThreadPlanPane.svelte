@@ -15,7 +15,7 @@
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
-	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
+	import type { OperatorArtifactLink, OperatorNode, OperatorNodeAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
 	import { registerNodeFocus } from '$lib/planNodeFocus';
 	import { openPlanAsk } from '$lib/planLeafReturn';
@@ -187,14 +187,14 @@
 	 * beside itself (#2431), so the pane never repeats it at its top.
 	 */
 	async function applyUserAction(
-		node: OperatorNode, action: OperatorUserAction, reason?: string,
+		node: OperatorNode, action: OperatorNodeAction, reason?: string, orderKey?: number,
 	): Promise<string | null> {
 		const current = plan;
 		const bearer = $token;
 		if (!current || !bearer || userActionBusy || offline) return 'Not available right now.';
 		userActionBusy = true;
 		const result = await mutateUserTask(current.plan.id, action, node.id, node.revision,
-			`${action}:${node.id}:${node.revision}`, reason,
+			`${action}:${node.id}:${node.revision}${orderKey === undefined ? '' : `:${orderKey}`}`, reason, orderKey,
 		);
 		userActionBusy = false;
 		if (result.status === 'success') {

@@ -15,7 +15,7 @@ import plans.node_order as node_order
 import plans.node_settlement as node_settlement
 import plans.selection_validity as validity
 import plans.service as service
-from plans.close_next_bounds import CloseNextInvariantError, slot_held_reason
+from plans.close_next_bounds import WAIT_MAX_BYTES, CloseNextInvariantError, bounded, slot_held_reason
 from prompts import plan_tools as text
 
 #: ``named.refusal`` codes: why the named task did not start.
@@ -26,6 +26,8 @@ USER_ASSIGNED = "user_assigned"
 OTHER_EXECUTOR = "other_executor"
 NOT_READY = "not_ready"
 SLOT_HELD = "slot_held"
+#: Ready work ranked above it comes first (``plans.triage_lines``).
+OUT_OF_ORDER = "out_of_order"
 
 _HELD_CONDITIONS = close_next_idle.HELD_CONDITIONS
 _LANE_REASONS = {node_settlement.DECISION: text.DECISION_OWNED}
@@ -38,8 +40,6 @@ class NamedStart:
     node_id: str | None
     refusal: str | None = None
     reason: str | None = None
-    #: The triage line for a start that passed ready work (``plans.triage_lines``).
-    jumped: str | None = None
 
 
 def refused_before_write(db, node, plan, executor: str) -> NamedStart | None:
@@ -98,7 +98,7 @@ def _not_ready_reason(db, node_id: str, plan, blocker: str) -> str:
     """Return why an offered task is not ready, as the plan shows it.
 
     A held task, one in a paused plan included, reads as its projected
-    condition and reason.
+    condition and reason, cut like a listed task's wait.
 
     Raises:
         CloseNextInvariantError: No reason reads for this blocker.
@@ -107,7 +107,10 @@ def _not_ready_reason(db, node_id: str, plan, blocker: str) -> str:
         return text.HAS_CHILDREN
     projection = admission.project(node_id, db=db)
     if projection["condition"] in _HELD_CONDITIONS:
-        return text.condition_text(projection["condition"], projection["primary_reason"])
+        return bounded(
+            text.condition_text(projection["condition"], projection["primary_reason"]),
+            WAIT_MAX_BYTES,
+        )
     if blocker == validity.PLAN_INACTIVE:
         return text.PLAN_STATE.format(state=plan["state"])
     raise CloseNextInvariantError(f"an offered task has no reportable {blocker} reason")

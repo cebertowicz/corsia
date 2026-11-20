@@ -48,7 +48,7 @@ export const setCommentRanges = StateEffect.define<CommentRange[]>();
  */
 export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify(ranges);
 
-export { highlightAtPress, highlightsAtPress, pickHighlight } from './comment-press';
+export { caretAtPress, highlightAtPress, highlightsAtPress, pickHighlight } from './comment-press';
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });

@@ -167,12 +167,160 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
+		// A tap or click on the struck text, as the browser delivers it: the press, then the caret it placed, then the frame that reads it.
+		const pressStruck = async (view: EditorView, anchor = 8) => {
+			// The press is read where it lands, when the pointer goes down: the position under the pointer is the caret's place to be.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(anchor);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+		};
+
+		for (const readOnly of [false, true]) {
+			it(`a tap or click on the struck text opens the suggestion in every card mode, in a ${readOnly ? 'read-only' : 'writable'} document`, async () => {
+				for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+					const onAnchorFocus = vi.fn();
+					const view = open({ highlights: [suggestion('red')], onAnchorFocus, cardMode, readOnly });
+					vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+					await pressStruck(view);
+					expect(onAnchorFocus, cardMode).toHaveBeenLastCalledWith('sug', expect.anything(), true, expect.any(MouseEvent));
+					unmount(component!); component = null; host.remove();
+				}
+			});
+		}
+
+		it('a tap whose caret the editor has not read yet still leaves the caret where the tap landed once the card opens, so the first key typed lands there', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				const onAnchorFocus = vi.fn();
+				const view = open({ highlights: [suggestion('red')], onAnchorFocus, cardMode });
+				vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+				// The press and its frame, with no caret reported in between: the editor's caret is still at the start.
+				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+				window.dispatchEvent(new MouseEvent('mouseup'));
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				flushSync();
+				expect(onAnchorFocus, cardMode).toHaveBeenCalledOnce();
+				expect(view.state.selection.main.head, cardMode).toBe(8);
+				unmount(component!); component = null; host.remove();
+			}
+		});
+
+		it('leaves a caret the editor already placed inside the pressed highlight where it is', async () => {
+			const view = open({ highlights: [suggestion('red')], onAnchorFocus: vi.fn(), cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			// The press landed at 9; the editor's caret reached 7, inside the same highlight: it stands.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(9);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 7 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(view.state.selection.main.head).toBe(7);
+		});
+
+		it('a tap on a highlight far below a caret that is out of view opens its card and puts the caret in it', async () => {
+			// A long document with the caret still at its start, off screen: the editor has no box for a position outside the rendered rows.
+			const value = 'quick brown fox '.repeat(40);
+			const far = { from: 320, to: 325, id: 'far', suggestion: { quote: value.slice(320, 325), insert: 'red', color: '#e0489e', inline: true } };
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				const onAnchorFocus = vi.fn();
+				const view = open({ value, highlights: [far], onAnchorFocus, cardMode });
+				// The stub stands in for jsdom's missing layout: boxes only near the pressed text.
+				vi.spyOn(view, 'coordsAtPos').mockImplementation((pos) => (pos >= 300 ? { left: 10, right: 18, top: 20, bottom: 36 } : null));
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(322);
+				expect(view.state.selection.main.head).toBe(0);
+				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+				// jsdom has no layout, so its own press selects some text; put the caret back where the editor still has it, off screen at the start, as the phone's editor does before it has read the tap.
+				view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
+				window.dispatchEvent(new MouseEvent('mouseup'));
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				flushSync();
+				expect(onAnchorFocus, cardMode).toHaveBeenCalledOnce();
+				expect(view.state.selection.main.head, cardMode).toBe(322);
+				unmount(component!); component = null; host.remove();
+			}
+		});
+
+		it('a press whose text moves before the press is read leaves the caret in the highlight where the text is now, so the first key typed lands in it', async () => {
+			const highlights = writable([suggestion('red')]);
+			const live = fromStore(highlights);
+			const onAnchorFocus = vi.fn();
+			const view = open({ get highlights() { return live.current; }, onAnchorFocus, cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			// Before the frame that reads the press, text arrives above the highlight (a reload): 'brown' is now at 8 to 13, and the
+			// position under the press's old coordinates is now text before it.
+			view.dispatch({ changes: { from: 0, insert: 'XX' } });
+			highlights.set([{ ...suggestion('red'), from: 8, to: 13 }]); flushSync();
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(6);
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			const head = view.state.selection.main.head;
+			expect(head).toBeGreaterThanOrEqual(8);
+			expect(head).toBeLessThanOrEqual(13);
+			view.dispatch(view.state.replaceSelection('z'));
+			expect(view.state.sliceDoc(8, 14)).toBe('zbrown');
+		});
+
+		it('leaves the caret alone when the highlight the press opened is gone before the press is read', async () => {
+			const highlights = writable([suggestion('red')]);
+			const live = fromStore(highlights);
+			const view = open({ get highlights() { return live.current; }, onAnchorFocus: vi.fn(), cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });  // as above: the editor's caret is still at the start
+			highlights.set([]); flushSync();
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(view.state.selection.main.head).toBe(0);
+		});
+
+		it('opens the same card whichever order a comment and a suggestion over the same text are listed in, in every card mode', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				for (const order of ['suggestion first', 'comment first']) {
+					const onAnchorFocus = vi.fn(), onMarkerFocus = vi.fn();
+					const comment = { from: 6, to: 11, id: 'comment', onMarkerFocus };
+					const view = open({ highlights: order === 'suggestion first' ? [suggestion('red'), comment] : [comment, suggestion('red')], onAnchorFocus, cardMode });
+					vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+					await pressStruck(view);
+					expect(onAnchorFocus.mock.calls.map((call) => call[0]), `${cardMode}, ${order}`).toEqual(['sug']);
+					unmount(component!); component = null; host.remove();
+				}
+			}
+		});
+
+		it('opens the smallest highlight under the press in every card mode: a one-word comment inside the quote, the suggestion where it is the narrower', async () => {
+			for (const cardMode of ['sheet', 'popover', 'margin'] as const) {
+				const word = vi.fn(), wide = vi.fn();
+				const onMarkerFocus = vi.fn();
+				const inside = open({ highlights: [suggestion('red'), { from: 7, to: 9, id: 'word', onMarkerFocus }], onAnchorFocus: word, cardMode });
+				vi.spyOn(inside, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				await pressStruck(inside, 8);
+				expect(word.mock.calls.map((call) => call[0]), `${cardMode} inside`).toEqual(['word']);
+				unmount(component!); component = null; host.remove();
+				const spanning = open({ highlights: [suggestion('red'), { from: 2, to: 9, id: 'span', onMarkerFocus }], onAnchorFocus: wide, cardMode });
+				vi.spyOn(spanning, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+				await pressStruck(spanning, 8);
+				expect(wide.mock.calls.map((call) => call[0]), `${cardMode} spanning`).toEqual(['sug']);
+				unmount(component!); component = null; host.remove();
+			}
+		});
+
 		it('opens a pressed suggestion even when two comments surround it, never a list that leaves it out', async () => {
 			const onAnchorFocus = vi.fn();
 			const onMarkerFocus = vi.fn();
 			const view = open({ highlights: [{ from: 0, to: 15, id: 'one', onMarkerFocus }, { from: 0, to: 15, id: 'two', onMarkerFocus }, suggestion('red')], onAnchorFocus });
 			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
 			// A press on the struck text, in a popover: the innermost highlight under it is the suggestion.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
 			window.dispatchEvent(new MouseEvent('mouseup'));
@@ -210,6 +358,8 @@ describe('MarkdownEditor edits', () => {
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// The press the editor reports once the pointer is up, with the caret where it landed.
 			const tap = async (at: number) => {
+				// The pointer is over `at` when it goes down, as it is in a browser.
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(at);
 				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
 				view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' });
 				window.dispatchEvent(new MouseEvent('mouseup'));
@@ -230,6 +380,65 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brxown fox');
 		});
 
+		it('a tap opens the comment it landed on even when the text moves before the frame that reads it', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			// The list reloads and the text shifts: the point under the pointer is now outside the comment.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(14);
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
+		});
+
+		it('a tap on two threads over the same text opens both as a list even when the text moves before the frame that reads the press', async () => {
+			const onAnchorFocus = vi.fn();
+			const onMarkerFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'one', onMarkerFocus }, { from: 6, to: 11, id: 'two', onMarkerFocus }], onAnchorFocus, cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			// The list reloads and the text shifts: the point under the pointer is now outside both threads, and the list is still the two that were pressed.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(14);
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			expect(onMarkerFocus).toHaveBeenCalled();
+		});
+
+		it('a press held for over half a second on a comment opens it when the pointer goes up, as before', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			await new Promise<void>((resolve) => setTimeout(resolve, 600));
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+		});
+
+		it('a press that drags into a text selection opens no comment', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8, head: 14 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			expect(view.state.selection.main.empty).toBe(false);
+		});
+
 		it('where cards open as the phone sheet, keys that carry the caret into a comment before the tap is read open nothing', async () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
@@ -248,6 +457,7 @@ describe('MarkdownEditor edits', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// No pointer selection: a touch leaves the caret to the browser, whose report CodeMirror labels 'select' once 50 ms have passed.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
 			window.dispatchEvent(new MouseEvent('mouseup'));
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();

@@ -162,6 +162,55 @@ async def test_known_provider_reset_waits_until_due_then_delivers_once(isolated_
     assert dict(_wake(thread_id)) == after_due
 
 
+def _queue_reminder_into_running_turn(thread_id: str) -> str:
+    """Queue the liveness reminder a running Turn would never read."""
+    from automation.continuation.execution import event_for
+    from automation.continuation.validity import condition_for_event
+    from infra.thread_driver import admit_input
+
+    db = get_db()
+    pl.on_turn_complete(thread_id, db=db)
+    db.execute(
+        "UPDATE plan_liveness_wakes SET deadline=? WHERE thread_id=?",
+        ("2000-01-01T00:00:00+00:00", thread_id),
+    )
+    db.commit()
+    request = [r for r in LivenessSource().due(datetime.now(timezone.utc).isoformat(), db=db)
+               if r.thread_id == thread_id][0]
+    _event, _summary, details = event_for(request)
+    message_id = f"reminder-{thread_id}"
+    admit_input(
+        thread_id, role="system", content="Actionable structured plan work remains.",
+        intent="apply_now", message_id=message_id, turn_id=f"{message_id}-turn",
+        boot_epoch="provider-reset-test", admitted_at="t",
+        continuation=condition_for_event("plan.liveness_wake", details), db=db,
+    )
+    db.commit()
+    return message_id
+
+
+@pytest.mark.parametrize(
+    "error",
+    ["You've hit your session limit.", _PROVIDER_ERROR],
+    ids=["reset-only-from-harness", "reset-in-text-and-harness"],
+)
+def test_reset_error_withdraws_the_unread_reminder_and_owns_the_wake(isolated_db, error):
+    """Both terminal seams treat a harness-supplied reset alike: the reset wait resumes."""
+    thread_id = mk_session(f"provider-reset-reminder-{len(error)}")
+    _start_selected_turn(thread_id, "reminder-turn")
+    reminder = _queue_reminder_into_running_turn(thread_id)
+
+    _terminal_error(thread_id, "reminder-turn", error=error, clears_at=_RESET)
+
+    message = get_db().execute(
+        "SELECT delivery_state,delivery_error FROM messages WHERE id=?", (reminder,),
+    ).fetchone()
+    assert (message["delivery_state"], message["delivery_error"]) == ("cancelled", "stale_plan_wake")
+    wake = _wake(thread_id)
+    assert (wake["status"], wake["deadline"]) == ("armed", _RESET)
+    assert (wake["provider_reset_at"], wake["provider_reset_turn_id"]) == (_RESET, "reminder-turn")
+
+
 @pytest.mark.parametrize(
     ("reset_at", "utc_reset"),
     [

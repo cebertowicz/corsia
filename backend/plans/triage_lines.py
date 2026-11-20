@@ -1,19 +1,19 @@
-"""The two triage lines an agent reads when plan order and its own choice disagree.
+"""Plan order is priority: a start that passes ready work above it is refused.
 
-``rank`` rides an ``add`` that lands below ready top-level work, and ``jumped``
-rides a named start that passes ready top-level work. Both are guidance in a
-tool result, never a refusal, and both are for the plan's own owner: a user's
-write, a conductor's append to another agent's plan and a delegating parent's
-write carry neither.
+A named start (``activate``, ``start``, or a closing operation's
+``next_node_id``) by the plan's owner is refused while a top-level item ranked
+above it is ready: neither started nor waiting. The refusal names that item and
+the two ways on: start it, or reorder this item above it so the plan says so.
+A user's write, a conductor's write to another agent's plan and a delegating
+parent's write are never refused here; the person can always override. An add
+gets the top of the plan and a landing line instead (``plans.plan_top``).
 
 Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
-each open leaf task, less a task that already holds its slot (it is running,
-not waiting to be picked) and a Later task (never picked, so never passed
-over), so this module holds no second readiness check: a
-top-level task is ready when it is, and a top-level phase when a task under it
-is. Nothing here writes; the one durable fact, ``JUMPED_READY_NODE_ID``, is
-handed to the start's existing transition event by its caller.
+each open leaf task, less a started task (one holding its slot, or delegated to
+a worker) and a Later task (below the cut, so never passed over), so this
+module holds no second readiness check: a top-level task is ready when it is,
+and a top-level phase when a task under it is. Nothing here writes.
 """
 
 from __future__ import annotations
@@ -23,19 +23,14 @@ from dataclasses import dataclass, field
 
 import plans.admission_attempts as attempts
 import plans.aggregates as aggregates
+import plans.close_next_bounds as bounds
 import plans.node_order as node_order
 import plans.selection_validity as validity
 import plans.service as service
-from prompts import plan_tools as text
-
-#: The start event's payload key naming the ready item a start jumped (T3).
-JUMPED_READY_NODE_ID = "jumped_ready_node_id"
+from prompts import plan_start_order as order_text
 
 #: Top-level states that take a rank: work still to settle or to review.
 RANKED_STATES = frozenset({"pending", "active", "review_requested"})
-
-#: Ready items the ``rank`` line names.
-READY_ABOVE_LIMIT = 2
 
 
 @dataclass(frozen=True)
@@ -59,19 +54,6 @@ class Standing:
         if rank is None:
             return []
         return [row for row in self.open_roots[: rank - 1] if str(row["id"]) in self.ready]
-
-
-@dataclass(frozen=True)
-class Jump:
-    """A named start that passed ready work: the line, and the item it passed."""
-
-    line: str
-    ready_node_id: str
-
-    @property
-    def payload(self) -> dict[str, str]:
-        """The fact the start's transition event records."""
-        return {JUMPED_READY_NODE_ID: self.ready_node_id}
 
 
 def position(db, plan_id: str, root_id: str) -> int:
@@ -106,12 +88,13 @@ def standing(db, plan) -> Standing:
     }
     leaves = [
         row for row, _path in ordered
-        if not row["has_child_in_work"] and not row["later"]
+        if not row["is_parent"] and not row["later"] and not row["spawned_thread_id"]
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])
     eligible = [str(row["id"]) for row in leaves if blockers[str(row["id"])] is None]
-    # A task already holding its slot is running, not waiting to be picked.
+    # A task already holding its slot is running, and a delegated one is
+    # started: neither is waiting to be picked.
     running = attempts.open_attempts(eligible, db=db, compact=True)
     ready = frozenset(root_of[node_id] for node_id in eligible if node_id not in running)
     return Standing(
@@ -130,34 +113,18 @@ def _owns(plan, actor_id: str | None) -> bool:
     )
 
 
-def add_line(db, plan, node_id: str, *, actor_id: str | None) -> str | None:
-    """Return the ``rank`` line for a task just added to its owner's plan, or None.
-
-    A line only when the new node is top-level and ready top-level work ranks
-    above it. ``insert`` never calls this: its caller chose the position.
-    """
-    node = service._node_row(db, node_id)
-    if node["parent_id"] is not None or not _owns(plan, actor_id):
-        return None
-    where = standing(db, plan)
-    above = where.ready_above(node_id)
-    rank = where.rank(node_id)
-    if not above or rank is None:
-        return None
-    return text.triage_rank(
-        rank, len(where.open_roots),
-        [(str(row["title"]), str(row["id"])) for row in above[:READY_ABOVE_LIMIT]],
-        position(db, str(plan["id"]), str(above[0]["id"])),
-    )
-
-
-def jump_for_start(db, node, *, actor_id: str | None) -> Jump | None:
-    """Return what a named start of ``node`` passes over, or None.
+def out_of_order(
+    db, node, *, actor_id: str | None, compact: bool = False,
+) -> str | None:
+    """Return the refusal for a named start of ``node`` that passes ready work, or None.
 
     Call before the start writes, so the node is judged as it stands when
     chosen. None for a node that already holds its slot (a restart, or a task
-    plan order already selected), for anything but a task, and for a start by
-    anyone but the plan's owner.
+    plan order already selected), for anything but a task, for a start by
+    anyone but the plan's owner, and for a task that could not take its slot
+    anyway: its own blocker is the answer the start already gives, and
+    reordering would not change it. ``compact`` is the short form a ``next``
+    block carries, no longer than its slot-held reason, within the block's cap.
     """
     if node["kind"] != "task":
         return None
@@ -167,12 +134,17 @@ def jump_for_start(db, node, *, actor_id: str | None) -> Jump | None:
     where = standing(db, plan)
     root_id = where.root_of.get(str(node["id"]))
     above = [] if root_id is None else where.ready_above(root_id)
-    rank = where.rank(str(above[0]["id"])) if above else None
-    if root_id is None or rank is None:
+    # The node's own blocker is read only once ready work ranks above it, so a
+    # start that passes nothing adds no read beyond ``standing``.
+    if not above or validity.slot_blocker(db, node, plan) is not None:
         return None
     top = above[0]
-    line = text.triage_jumped(
-        str(top["title"]), str(top["id"]), rank, len(where.open_roots),
-        str(root_id), position(db, str(plan["id"]), str(top["id"])),
+    top_title = bounds.title(str(top["title"]))
+    nested = str(root_id) != str(node["id"])
+    root_kind = str(service._node_row(db, str(root_id))["kind"]) if nested else None
+    if compact:
+        return order_text.start_out_of_order_compact(top_title, root_kind=root_kind)
+    return order_text.start_out_of_order(
+        top_title, str(top["id"]), str(root_id),
+        position(db, str(plan["id"]), str(top["id"])), root_kind=root_kind,
     )
-    return Jump(line, str(top["id"]))

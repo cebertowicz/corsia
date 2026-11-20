@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import { registerArtifact } from '$lib/api/docs';
+import { COMMENT_POST_TIMEOUT_MS, registerArtifact } from '$lib/api/docs';
 import { resolveArtifactTab } from '$lib/stores/artifactWorkspace';
 
 /**
@@ -37,9 +37,11 @@ export async function ensureEditorArtifactId(): Promise<string | null> {
 	const editor = get(activeDocEditor);
 	if (!editor) return null;
 	if (editor.artifactId) return editor.artifactId;
+	// A comment's post waits on this, so it is bounded like the post itself.
 	const row = await registerArtifact(editor.path, {
 		projectId: editor.projectId,
 		threadId: editor.threadId,
+		within: COMMENT_POST_TIMEOUT_MS,
 	});
 	activeDocEditor.update((cur) =>
 		cur && cur.instanceId === editor.instanceId ? { ...cur, artifactId: row.id } : cur,
