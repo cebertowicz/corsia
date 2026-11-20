@@ -347,7 +347,7 @@ async function armImageSampler(page: Page, durationMs: number, noticeAtFrame = 0
 					if (++frame < noticeAtFrame) return void requestAnimationFrame(open);
 					const notice = document.createElement('div');
 					notice.className = 'live-block';
-					notice.textContent = 'Couldn’t confirm this save; the document may have changed. Reload to see the latest.';
+					notice.textContent = 'Couldn’t confirm this save; the document may have changed. Open Details to reload the latest.';
 					document.querySelector('.document-header')?.append(notice);
 				};
 				requestAnimationFrame(open);
