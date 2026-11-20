@@ -672,11 +672,24 @@ describe('lost comments are placed again on comments load', () => {
 	function holdDigest() {
 		const digest = crypto.subtle.digest.bind(crypto.subtle);
 		let release: (() => void) | undefined;
+		let finish!: () => void;
+		const finished = new Promise<void>(resolve => { finish = resolve; });
 		vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(async (algorithm, data) => {
 			await new Promise<void>(resolve => { release = resolve; });
-			return digest(algorithm, data);
+			const result = await digest(algorithm, data);
+			finish();
+			return result;
 		});
-		return { held: () => release !== undefined, release: () => release!() };
+		return {
+			held: () => release !== undefined,
+			release: () => release!(),
+			/** Releases the hash and returns once the store has taken that answer's result: the hash is done, then its follow-up work runs before the next event-loop turn. */
+			async releaseAndTake() {
+				release!();
+				await finished;
+				await new Promise<void>(resolve => setTimeout(resolve, 0));
+			},
+		};
 	}
 
 	it('places a lost comment whose words are present on load', async () => {
@@ -728,8 +741,7 @@ describe('lost comments are placed again on comments load', () => {
 		await vi.waitFor(() => expect(hash.held()).toBe(true));
 		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
 		await loadComments('artifact');
-		hash.release();
-		await settled();
+		await hash.releaseAndTake(); // the superseded answer is discarded before the newer one arrives
 		expect(reloads(doc)).toHaveLength(2);
 		doc.answer(reloads(doc)[1]);
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed' }));
@@ -750,12 +762,13 @@ describe('lost comments are placed again on comments load', () => {
 		}
 		mocks.fetchComments.mockResolvedValue({ comments: [lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
 		await loadComments('artifact');
-		if (answered) hash.release();
-		else doc.answer(reloads(doc)[0]);
-		await settled();
-		if (!answered) hash.release();
-		await settled();
-		expect(reloads(doc)).toHaveLength(2);
+		if (answered) await hash.releaseAndTake(); // the superseded answer is discarded before the newer one arrives
+		else {
+			doc.answer(reloads(doc)[0]);
+			await vi.waitFor(() => expect(hash.held()).toBe(true));
+			hash.release();
+		}
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
 		doc.answer(reloads(doc)[1], { ranges: [{ id: 'c3', from_off: 0, to_off: 5 }], states: [{ id: 'c3', orphaned: false, text_changed: false }] });
 		await vi.waitFor(() => expect(row('c3')).toMatchObject({ orphaned: false, placement: 'placed', from: 0, to: 5 }));
 	});
