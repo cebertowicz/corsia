@@ -112,8 +112,9 @@ export function createImageComments(context: {
 			// Keep the new location visible until the server accepts it or rejects it.
 			moving = { ...move, region };
 			try {
-				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), retryToast.remember, () => "Couldn't move the pin — try again");
-				retryToast.dismissAfterSuccess();
+				// No box says why a pin did not move, so its failure is always a toast.
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), (id) => retryToast.remember(id, 'pin'), () => "Couldn't move the pin — try again");
+				retryToast.dismissAfterSuccess('pin');
 				moving = null;
 				show(move.id, anchor);
 			} catch (error) {
@@ -153,6 +154,8 @@ export function createImageComments(context: {
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
 				(toastId, message) => { retryToast.remember(toastId); failure = message; },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
+				// A changed diagram closes the box and carries its text to the next one, so no box is left to say why.
+				(error) => !isDiagramChanged(error) && keptCommentDrafts.onScreen(key()),
 			));
 		} catch (error) {
 			if (await refreshAfterStale(error)) {
@@ -167,7 +170,8 @@ export function createImageComments(context: {
 			} else if (failure) {
 				const held = now();
 				keptCommentDrafts.fail(key(), held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
-				if (pressing()) draftError = failure;
+				// The open box says why: the one that pressed, or one drawn from the kept draft since (it shows that draft).
+				if (draftRegion) draftError = failure;
 			}
 			throw error;
 		}

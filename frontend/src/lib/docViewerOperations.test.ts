@@ -37,6 +37,13 @@ function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshnes
 	};
 }
 
+/** A box mounted for `key`, laid out at `rect` (jsdom lays nothing out); in the window unless told otherwise. */
+function mountBox(key: string, rect = new DOMRect(20, 100, 300, 80)) {
+	const node = document.createElement('div');
+	node.getBoundingClientRect = () => rect;
+	return keptCommentDrafts.shown(key, node);
+}
+
 const NOT_COMMENTABLE_SENTENCE = 'Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here.';
 
 describe('comment submission failure delivery', () => {
@@ -152,6 +159,46 @@ describe('comment submission failure delivery', () => {
 		expect(dismiss).toHaveBeenCalledTimes(1);
 		expect(dismiss).toHaveBeenCalledWith('first-failure');
 	});
+
+	it('says why in the box, with no toast, when a box that shows the reason is on screen as the post fails', async () => {
+		const error = new Error('offline');
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const failed = vi.fn();
+		const inBox = vi.fn(() => true);
+		try {
+			await expect(submitDocumentComment(async () => { throw error; }, failed, undefined, inBox)).rejects.toBe(error);
+			expect(inBox).toHaveBeenCalledWith(error);
+			expect(report).not.toHaveBeenCalled();
+			expect(failed).toHaveBeenCalledWith(null, "Couldn't post the comment — try again");
+		} finally { report.mockRestore(); }
+	});
+
+	it('shows the toast when no box that shows the reason is on screen', async () => {
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const failed = vi.fn();
+		try {
+			await expect(submitDocumentComment(async () => { throw new Error('offline'); }, failed, undefined, () => false)).rejects.toThrow('offline');
+			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+			expect(failed).toHaveBeenCalledWith('toast', "Couldn't post the comment — try again");
+		} finally { report.mockRestore(); }
+	});
+
+	it('keeps one toast per draft: a later failure replaces it, a failure said in the box drops it, a success dismisses it', () => {
+		const dismiss = vi.fn();
+		const viewer = createCommentRetryToast({ dismiss });
+		viewer.remember('reply-1-first', 'reply-1');
+		viewer.remember('reply-2-first', 'reply-2');
+		viewer.remember('reply-1-second', 'reply-1');
+		expect(dismiss).toHaveBeenLastCalledWith('reply-1-first');
+		// The box is on screen at the next failure: the toast from before goes, so the failure is not told twice.
+		viewer.remember(null, 'reply-1');
+		expect(dismiss).toHaveBeenLastCalledWith('reply-1-second');
+		dismiss.mockClear();
+		viewer.dismissAfterSuccess('reply-1');
+		expect(dismiss).not.toHaveBeenCalled();
+		viewer.dismissAfterSuccess('reply-2');
+		expect(dismiss).toHaveBeenCalledExactlyOnceWith('reply-2-first');
+	});
 });
 
 describe('markFreshnessVerified', () => {
@@ -251,5 +298,64 @@ describe('a reply kept until it posts', () => {
 			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply, changed', error: EARLIER_VERSION_POSTED });
 			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
 		} finally { restore(); }
+	});
+
+	it('says why under the reply field, with no toast, when the field is on screen as the post fails', async () => {
+		const restore = quiet();
+		const drop = mountBox(key);
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(toasts.show).not.toHaveBeenCalled();
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: "Couldn't post the comment — try again" });
+		} finally { drop(); restore(); }
+	});
+
+	it.each([
+		['its card was closed while it posted', null],
+		['its field was scrolled out of the window', new DOMRect(20, -400, 300, 80)],
+	])('shows the toast when %s, and keeps the reason for the field that shows it next', async (_name, rect) => {
+		const restore = quiet();
+		const drop = rect ? mountBox(key, rect) : () => {};
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(toasts.show).toHaveBeenCalledExactlyOnceWith("Couldn't post the comment — try again", 'error');
+			expect(keptCommentDrafts.get(key)?.error).toBe("Couldn't post the comment — try again");
+		} finally { drop(); restore(); }
+	});
+
+	it('dismisses its failure toast when a later press posts, as a new comment’s does', async () => {
+		const restore = quiet();
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			expect(dismiss).not.toHaveBeenCalled();
+			await actions.reply('root', 'My reply', [], [], key);
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		} finally { dismiss.mockRestore(); restore(); }
+	});
+
+	it('takes its toast back when the next failure is said under the field, so a failure is never told twice', async () => {
+		const restore = quiet();
+		const dismiss = vi.spyOn(toasts, 'dismiss').mockImplementation(() => {});
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValue(new Error('offline'));
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			const drop = mountBox(key);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			drop();
+			expect(toasts.show).toHaveBeenCalledOnce();
+			expect(dismiss).toHaveBeenCalledExactlyOnceWith('toast');
+		} finally { dismiss.mockRestore(); restore(); }
 	});
 });

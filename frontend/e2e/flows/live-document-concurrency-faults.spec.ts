@@ -78,9 +78,8 @@ for (const [width, height, project] of layouts) {
 					await expect(reader.getByText("Couldn't post the comment — try again")).toBeVisible();
 					await expect(composer, 'a failed create keeps the draft').toHaveValue(draft);
 					expect(await storedWithBody(request, document, draft)).toEqual([]);
-					if (width <= 768) {
-						await reader.getByRole('status').filter({ hasText: "Couldn't post the comment" }).getByRole('button', { name: 'Dismiss' }).click();
-					}
+					// The composer is on screen as the create fails, so it says why there and no toast says it again (or covers Comment).
+					await expect(reader.getByRole('status').filter({ hasText: "Couldn't post the comment" })).toHaveCount(0);
 					await reader.getByRole('button', { name: 'Comment', exact: true }).last().click();
 				}
 				await expect.poll(() => storedWithBody(request, document, draft), { message: 'exactly one stored comment carries the draft' }).toHaveLength(1);

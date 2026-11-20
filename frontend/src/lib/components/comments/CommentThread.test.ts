@@ -5,6 +5,7 @@ import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 import { formatDateTime } from '$lib/time';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const hexToRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 let host: HTMLElement;
@@ -45,6 +46,14 @@ describe('CommentThread', () => {
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
+	});
+
+	it('counts its reply field as the box that says why a reply failed while it is mounted, under the reply\'s key', () => {
+		render(thread(), false, { replyKey: 'reply-key' });
+		host.querySelector<HTMLElement>('[data-reply-composer]')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		expect(keptCommentDrafts.onScreen('reply-key')).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen('reply-key')).toBe(false);
 	});
 
 	describe('the line under the reply field', () => {

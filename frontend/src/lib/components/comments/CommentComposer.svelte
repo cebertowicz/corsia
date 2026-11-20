@@ -8,10 +8,11 @@
 	import RecipientLine from './RecipientLine.svelte';
 	import { recipientNames, type Recipient } from './recipients';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
+	import { showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection, shownKey = '' }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -39,6 +40,8 @@
 		/** The caret the field takes when it mounts (the same draft drawn in another form), and each place it moves to. */
 		selection?: [number, number] | null;
 		onSelection?: (selection: [number, number]) => void;
+		/** The kept draft this box shows (`keptCommentDrafts`): a failed post says why in it, not in a toast, while it is on screen. */
+		shownKey?: string;
 	} = $props();
 	let text = $state(untrack(() => body));
 	$effect(() => { const field = input; if (field) untrack(() => { if (selection) field.setSelectionRange(...selection); }); });
@@ -69,7 +72,7 @@
 	}
 </script>
 
-<div class="composer">
+<div class="composer" use:showsDraft={shownKey}>
 	<div class="quote-wrap"><CommentQuote {quote} {label} /></div>
 	{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 	<div class="input-wrap">

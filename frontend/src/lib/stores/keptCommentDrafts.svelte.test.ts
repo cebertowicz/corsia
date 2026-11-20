@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync } from 'svelte';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
-import { documentDraftKey, keptCommentDrafts, replyDraftKey } from './keptCommentDrafts.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey, showsDraft } from './keptCommentDrafts.svelte';
 
 afterEach(() => keptCommentDrafts.reset());
 
@@ -107,5 +107,76 @@ describe('a reply kept while it is typed', () => {
 		expect(runs.kept).toBe(1);
 		expect(runs.empty).toBe(1);
 		stop();
+	});
+});
+
+describe('a box that shows a draft, read once when a post fails', () => {
+	/** A box laid out at `rect` (jsdom lays nothing out, so each box reports its own). */
+	const box = (rect: DOMRect) => {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => rect;
+		return node;
+	};
+	const inView = () => new DOMRect(20, 100, 300, 80);
+	const key = replyDraftKey(scope, 'comment-1');
+
+	it('is on screen only while a box for that draft is mounted and takes room inside the window', () => {
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+		const drop = keptCommentDrafts.shown(key, box(inView()));
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		// Another draft's box says nothing about this one.
+		expect(keptCommentDrafts.onScreen(replyDraftKey(scope, 'comment-2'))).toBe(false);
+		drop();
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+	});
+
+	it.each([
+		['a hidden or collapsed box (no size)', new DOMRect(20, 100, 0, 0)],
+		['a box with height but no width', new DOMRect(20, 100, 0, 80)],
+		['a box scrolled above the window', new DOMRect(20, -200, 300, 80)],
+		['a box scrolled below the window', new DOMRect(20, window.innerHeight + 10, 300, 80)],
+		['a box off to the side', new DOMRect(window.innerWidth + 10, 100, 300, 80)],
+	])('is not on screen for %s', (_name, rect) => {
+		keptCommentDrafts.shown(key, box(rect));
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+	});
+
+	it('counts any one of several boxes for the same draft', () => {
+		keptCommentDrafts.shown(key, box(new DOMRect(20, -200, 300, 80)));
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+		keptCommentDrafts.shown(key, box(inView()));
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+	});
+
+	it('reads the visual viewport, so a box under a phone keyboard is not on screen', () => {
+		const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+		// The keyboard leaves the top 300px; the box sits at 400, inside the layout viewport but under the keyboard.
+		Object.defineProperty(window, 'visualViewport', { configurable: true, value: { offsetLeft: 0, offsetTop: 0, width: 393, height: 300 } });
+		try {
+			keptCommentDrafts.shown(key, box(new DOMRect(10, 400, 300, 80)));
+			expect(keptCommentDrafts.onScreen(key)).toBe(false);
+			keptCommentDrafts.shown(key, box(new DOMRect(10, 200, 300, 80)));
+			expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		} finally {
+			if (original) Object.defineProperty(window, 'visualViewport', original);
+			else delete (window as { visualViewport?: unknown }).visualViewport;
+		}
+	});
+
+	it('is registered by `use:showsDraft` while mounted, moves with its key, and is gone on unmount', () => {
+		const node = box(inView());
+		const action = showsDraft(node, key);
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		const other = replyDraftKey(scope, 'comment-2');
+		action.update(other);
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+		expect(keptCommentDrafts.onScreen(other)).toBe(true);
+		action.destroy();
+		expect(keptCommentDrafts.onScreen(other)).toBe(false);
+	});
+
+	it('registers nothing for a box with no key', () => {
+		showsDraft(box(inView()), '');
+		expect(keptCommentDrafts.onScreen('')).toBe(false);
 	});
 });

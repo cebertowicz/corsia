@@ -9,7 +9,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 const rect = () => new DOMRect(10, 10, 40, 20);
@@ -326,5 +326,93 @@ describe('a typed image comment is never lost', () => {
 		comments.close();
 		await comments.draw(BOX, rect);
 		expect(kept(comments)).toEqual({ body: '', tags: [] });
+	});
+});
+
+describe('a failed image comment says why in one place, decided as it fails', () => {
+	const REASON = "Couldn't post the comment — try again";
+	/** The image's comment box, mounted on screen (CommentComposer `use:showsDraft`, keyed by `imageDraftKey`). */
+	const boxOnScreen = (artifact = 'image') => {
+		const node = document.createElement('div');
+		node.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		return keptCommentDrafts.shown(imageDraftKey(artifact), node);
+	};
+	const held = () => {
+		let end!: () => void;
+		const wait = new Promise<void>((resolve) => { end = resolve; });
+		mocks.addRegionComment.mockImplementationOnce(async () => { await wait; throw new Error('Offline'); });
+		return () => end();
+	};
+
+	it('in the box, with no toast, while the box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		mocks.addRegionComment.mockRejectedValueOnce(new Error('Offline'));
+		await expect(comments.submit('Too dark')).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+	});
+
+	it('in a toast when the box closed while it posted; the box drawn next says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
+		await comments.draw(BOX, rect);
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+	});
+
+	it('in the box drawn again while it posted, when that box is on screen', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let drop = boxOnScreen();
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Too dark');
+		const end = held();
+		const posting = comments.submit('Too dark');
+		await Promise.resolve();
+		comments.close(); drop();
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		drop = boxOnScreen();
+		end();
+		await expect(posting).rejects.toThrow('Offline');
+		drop();
+		expect(mocks.show).not.toHaveBeenCalled();
+		expect(comments.draft).toMatchObject({ body: 'Too dark', error: REASON });
+	});
+
+	it('in a toast for a changed diagram, whose box closes and carries the text to the next', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen('doc');
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram: async () => true });
+		await comments.draw(BOX, rect);
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith('Place the pin on the current diagram; your draft is kept.', 'error');
+	});
+
+	it('always in a toast for a pin that did not move: no box says why', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const drop = boxOnScreen();
+		mocks.moveRegion.mockRejectedValueOnce(new Error('Offline'));
+		const { comments } = controller();
+		comments.movePin('pin');
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		drop();
+		expect(mocks.show).toHaveBeenCalledExactlyOnceWith("Couldn't move the pin — try again", 'error');
 	});
 });

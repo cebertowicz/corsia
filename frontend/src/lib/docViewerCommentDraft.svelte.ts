@@ -25,7 +25,8 @@ type Context = {
 	text: () => string;
 	isOpen: () => boolean;
 	ensureArtifactId: () => Promise<string | null>;
-	onFailure: (id: string, message: string) => void;
+	/** A post failed; `id` is its toast, or null when the open box says why instead. */
+	onFailure: (id: string | null, message: string) => void;
 	onStart: (anchor: CommentAnchor) => void;
 	onClose: () => void;
 	/** True while a posted comment may still get its first drawn mark; false once it is drawn, cannot be placed (not_placed, orphaned) or is gone. */
@@ -184,9 +185,10 @@ export function createViewerCommentDraft(context: Context) {
 			// Text changed since an earlier version was stored goes out as a new comment on the next press.
 			const now = keptCommentDrafts.get(key);
 			keptCommentDrafts.fail(key, now?.body ?? text, now?.mentionSelection ?? tags, message, message === EARLIER_VERSION_POSTED);
-			mine(value => ({ ...value, error: message }));
+			// The box open on this document now says why, the one that pressed or one opened from the kept draft since it closed.
+			commentDraft.update(value => value && value.scope === draft.scope ? { ...value, error: message } : value);
 			context.onFailure(toastId, message);
-		}, draft.selection ? liveFailureMessage : undefined));
+		}, draft.selection ? liveFailureMessage : undefined, () => keptCommentDrafts.onScreen(key)));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
 		// or tags changed since the press (in this composer, or one opened after it closed) stay, with a fresh id for their own post.
 		const stored = keptCommentDrafts.posted(key, text, taggedAgentIds);

@@ -237,12 +237,13 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
 
-			// A comment that fails to post keeps its text and says so; sending again posts it.
+			// A comment that fails to post keeps its text and says so in its box, the one place, as the box is on screen; sending again posts it.
 			await failNextPost(page, seeded);
 			await drag(page, await at(page, .2, .25), await at(page, .45, .5));
 			await composer(page).fill('The header is too tall here');
 			await page.keyboard.press('ControlOrMeta+Enter');
-			await expect(toast(page, "Couldn't post the comment")).toBeVisible();
+			await expect(page.locator('.composer [role="alert"]').filter({ hasText: "Couldn't post the comment" })).toBeVisible();
+			await expect(toast(page, "Couldn't post the comment")).toHaveCount(0);
 			await expect(composer(page)).toHaveValue('The header is too tall here');
 			await shoot(page, testInfo, '1440-40-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);
@@ -381,13 +382,14 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await shoot(page, testInfo, '393-11-move-pin-failed', true);
 			await page.unroute('**/api/comments/**');
 
-			// A comment that fails to post keeps its text in the sheet.
+			// A comment that fails to post keeps its text in the sheet, which says why, the one place, as it is on screen.
 			await failNextPost(page, seeded);
 			await commentButton(page).tap();
 			await touchDrag(page, await at(page, .15, .75), await at(page, .45, .95));
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
 			await sheet(page).getByRole('button', { name: 'Comment', exact: true }).tap();
-			await expect(toast(page, "Couldn't post the comment")).toBeVisible();
+			await expect(sheet(page).locator('[role="alert"]').filter({ hasText: "Couldn't post the comment" })).toBeVisible();
+			await expect(toast(page, "Couldn't post the comment")).toHaveCount(0);
 			await expect(sheet(page).locator('textarea')).toHaveValue('Too much padding on phones');
 			await shoot(page, testInfo, '393-12-post-failed', true);
 			await page.unroute(`**/api/artifacts/${seeded.artifactId}/comments**`);

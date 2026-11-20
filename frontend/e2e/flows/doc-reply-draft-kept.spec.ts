@@ -28,8 +28,11 @@ const BACK = 6;
 
 type Seeded = { title: string; other: string; id: string };
 
+/** Paragraphs after the comment's line, so the document scrolls the comment's card out of the window (`long`). */
+const TAIL = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of the route notes, long enough to fill a line of the page.`).join('\n\n');
+
 /** A document with one comment on QUOTE in its own conversation, a second conversation, and the document open in the first. */
-async function seed(page: Page): Promise<Seeded> {
+async function seed(page: Page, long = false): Promise<Seeded> {
 	const request = page.request, params = { token: TEST_TOKEN };
 	const title = `reply-kept-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 	const threadId = await createSession(request, title);
@@ -38,8 +41,8 @@ async function seed(page: Page): Promise<Seeded> {
 	const roots: Array<{ kind: string; path: string }> = (await (await request.get('/api/files/tree', { params })).json()).roots;
 	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
 	expect(workspace).toEqual(expect.any(String));
-	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName);
-	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text: DOC, thread_id: threadId, create: true } });
+	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName), text = long ? `${DOC}\n${TAIL}\n` : DOC;
+	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId: string = (await seeded.json()).artifact.id;
 	const from = DOC.indexOf(QUOTE);
@@ -63,6 +66,21 @@ const sheet = (page: Page) => page.locator('[data-adaptive-drawer] .drawer-panel
 const card = (page: Page, id: string) => page.locator(`[data-thread-id="${id}"]`).first();
 const field = (page: Page, id: string) => card(page, id).getByPlaceholder('Reply…');
 const phone = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768;
+/** The reply POST for thread `id` is held until `fail()`, which fails it as a dropped connection. */
+async function holdReply(page: Page, id: string) {
+	let release!: () => void, seen!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	const arrived = new Promise<void>((resolve) => { seen = resolve; });
+	await page.route('**/api/artifacts/*/comments*', async (route) => {
+		const request = route.request();
+		if (request.method() !== 'POST' || (request.postDataJSON() as { parent_id?: string } | null)?.parent_id !== id) return route.continue();
+		seen();
+		await held;
+		return route.abort('failed');
+	});
+	return { arrived, fail: release };
+}
+const failToast = (page: Page) => page.locator('.toast').filter({ hasText: /post/i });
 const painted = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
 /**
@@ -162,7 +180,7 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			expect(await back.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd]), 'the caret is where it was left').toEqual([caret, caret]);
 		});
 
-		test('a reply whose post fails says why under its field and keeps its text', async ({ page }) => {
+		test('a reply whose post fails says why under its field, and only there, and keeps its text', async ({ page }) => {
 			const { title, id } = await seed(page);
 			await page.route('**/api/artifacts/*/comments*', (route) => {
 				const request = route.request();
@@ -177,12 +195,12 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await painted(page);
 			const before = await spaceBelow(reply);
 			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
-			await expect(page.locator('.toast').first(), 'the person is told it did not post').toBeVisible({ timeout: 30_000 });
+			const reason = card(page, id).getByRole('alert');
+			await expect(reason, 'the reason shows under the field').toBeVisible({ timeout: 30_000 });
 			await painted(page);
 			await frame(page, 'reply-failed');
+			await expect(page.locator('.toast').filter({ hasText: /post/i }), 'the field is on screen, so no toast tells it a second time').toHaveCount(0);
 			await expect(reply, 'the text stays in the field').toHaveValue(DRAFT);
-			const reason = card(page, id).getByRole('alert');
-			await expect(reason, 'the reason shows under the field').toBeVisible();
 			expect(await reason.evaluate((line) => {
 				const probe = document.createElement('span');
 				probe.style.cssText = 'color: var(--red-text); font-size: var(--text-caption)';
@@ -197,6 +215,50 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			if (phone(page)) {
 				expect(after.inside, 'the reason ends inside the sheet, above its bottom padding').toBeGreaterThanOrEqual(after.pad - 0.5);
 			}
+		});
+
+		test('a reply whose post fails after going to another conversation says why in a toast, and under its field on return', async ({ page }) => {
+			const { title, other, id } = await seed(page);
+			const wire = await holdReply(page, id);
+			await loginByUrl(page, { waitForComposer: false });
+			await goTo(page, title);
+			const reply = await openThread(page, id);
+			await reply.click();
+			await reply.pressSequentially(DRAFT);
+			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
+			await wire.arrived;
+			await goTo(page, other);
+			await expect(docText(page), 'the field is gone with its conversation').toHaveCount(0);
+			wire.fail();
+			await expect(failToast(page), 'no field is on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
+			await goTo(page, title);
+			const back = await openThread(page, id);
+			await expect(back, 'the text is kept').toHaveValue(DRAFT);
+			await expect(card(page, id).getByRole('alert'), 'the field says why on return').toBeVisible();
+		});
+
+		test('a reply whose field is scrolled out of the window when its post fails says why in a toast', async ({ page }) => {
+			test.skip(phone(page), 'The phone sheet holds the field on screen; the margin at 1440 scrolls with the document');
+			const { title, id } = await seed(page, true);
+			const wire = await holdReply(page, id);
+			await loginByUrl(page, { waitForComposer: false });
+			await goTo(page, title);
+			const reply = await openThread(page, id);
+			await reply.click();
+			await reply.pressSequentially(DRAFT);
+			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
+			await wire.arrived;
+			const text = (await docText(page).boundingBox())!;
+			await page.mouse.move(text.x + text.width / 2, Math.min(text.y + 200, 800));
+			const outside = async () => {
+				const box = await reply.boundingBox(), view = page.viewportSize()!;
+				return !box || box.y + box.height <= 0 || box.y >= view.height;
+			};
+			for (let i = 0; i < 20 && !(await outside()); i += 1) { await page.mouse.wheel(0, 600); await painted(page); }
+			expect(await outside(), 'the reply field is out of the window before the post fails').toBe(true);
+			wire.fail();
+			await expect(failToast(page), 'the field is not on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
+			await expect(reply, 'the text is kept').toHaveValue(DRAFT);
 		});
 	});
 }

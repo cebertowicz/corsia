@@ -37,6 +37,34 @@ const kept = {
 	delete: (key: string) => { const found = cells.get(key); if (found) found.draft = undefined; },
 };
 
+/**
+ * The boxes on the page that show a draft's text and its reason (a new comment's composer, a reply's field, an image's box),
+ * by the draft's key. A failed post says why in one place: in such a box when one is on screen at that moment, else in a toast.
+ */
+const boxes = new Map<string, Set<Element>>();
+function register(key: string, box: Element): () => void {
+	if (!key) return () => {};
+	let found = boxes.get(key);
+	if (!found) boxes.set(key, found = new Set());
+	found.add(box);
+	return () => { found.delete(box); if (!found.size && boxes.get(key) === found) boxes.delete(key); };
+}
+/** Whether `box` takes room inside what the person sees now (the visual viewport: a phone's keyboard and pinch zoom shrink it). */
+function onScreen(box: Element): boolean {
+	const rect = box.getBoundingClientRect(), view = window.visualViewport;
+	const left = view?.offsetLeft ?? 0, top = view?.offsetTop ?? 0, width = view?.width ?? window.innerWidth, height = view?.height ?? window.innerHeight;
+	return rect.width > 0 && rect.height > 0 && rect.right > left && rect.left < left + width && rect.bottom > top && rect.top < top + height;
+}
+
+/** `use:showsDraft={key}` on a box's root: registered under the draft's key while mounted (`keptCommentDrafts.shown`). */
+export function showsDraft(node: Element, key: string) {
+	let drop = register(key, node);
+	return {
+		update(next: string) { drop(); drop = register(next, node); },
+		destroy() { drop(); },
+	};
+}
+
 /** One document, whichever tab or viewer shows it. */
 export function documentDraftKey(target: Pick<DocViewerTarget, 'path' | 'projectId'> | null): string {
 	return target ? `document:${JSON.stringify([target.projectId ?? '', target.path])}` : '';
@@ -52,6 +80,13 @@ export function replyDraftKey(scope: string, commentId: string): string {
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/** A box showing this draft is mounted at `box` until the returned function is called (`showsDraft` calls it on unmount). */
+	shown(key: string, box: Element): () => void { return register(key, box); },
+	/** A box showing this draft is on the page and on screen now: one read at the moment of asking, nothing observed. */
+	onScreen(key: string): boolean {
+		for (const box of (key && boxes.get(key)) || []) if (onScreen(box)) return true;
+		return false;
+	},
 	/** The box's text and the tags it holds; an empty box with no failure to show keeps nothing. */
 	keep(key: string, body: string, mentionSelection: MentionSelection): void {
 		if (!key) return;
@@ -120,5 +155,5 @@ export const keptCommentDrafts = {
 		return false;
 	},
 	/** Tests only: a fresh page. */
-	reset(): void { for (const found of cells.values()) found.draft = undefined; },
+	reset(): void { for (const found of cells.values()) found.draft = undefined; boxes.clear(); },
 };

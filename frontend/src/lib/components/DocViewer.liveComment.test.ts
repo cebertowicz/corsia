@@ -569,8 +569,10 @@ describe('a typed comment is never lost', () => {
 		expect((await reopen()).value).toBe('Keep my body');
 		expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN);
 	});
-	it('a failed post shows its reason in the composer as well as the toast', async () => {
+	it('a failed post shows its reason in the composer, and no toast, while the composer is on screen', async () => {
 		await open(); await select(); await compose();
+		// jsdom lays nothing out: the composer reports a place inside the window, as it has on a page.
+		document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
 		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
 		const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 		submit.click();
@@ -579,6 +581,7 @@ describe('a typed comment is never lost', () => {
 		await vi.waitFor(() => expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe(TRY_AGAIN));
 		expect(field()!.value).toBe('Keep my body');
 		expect(submit.textContent).toBe('Retry');
+		expect(toasts.show).not.toHaveBeenCalledWith(TRY_AGAIN, 'error');
 	});
 	it('path 5: picking another comment while writing, then Escape, keeps the text', async () => {
 		await open();

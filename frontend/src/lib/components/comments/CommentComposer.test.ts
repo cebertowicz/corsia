@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import CommentComposer from './CommentComposer.svelte';
 import { postDocumentComment, submitDocumentComment } from '$lib/docViewerOperations';
 import { toasts } from '$lib/stores/toast';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -103,5 +104,13 @@ describe('CommentComposer', () => {
 		expect(textarea.value).toBe('Kept to copy');
 		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
 		expect(onSubmit).not.toHaveBeenCalled();
+	});
+
+	it('counts as the box that says why a post failed while it is mounted, under the key it is given', () => {
+		render(async () => {}, { shownKey: 'draft-key' });
+		host.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(false);
 	});
 });
