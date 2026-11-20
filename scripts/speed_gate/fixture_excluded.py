@@ -29,6 +29,7 @@ EXCLUDED: dict[str, str] = {
         "checkpoint_entry_search_fts_config", "checkpoint_entry_search_fts_data",
         "checkpoint_entry_search_fts_docsize", "checkpoint_entry_search_fts_idx",
         "checkpoints_fts_config", "checkpoints_fts_data", "checkpoints_fts_docsize", "checkpoints_fts_idx",
+        "comment_fts_config", "comment_fts_data", "comment_fts_docsize", "comment_fts_idx",
         "messages_fts_config", "messages_fts_data", "messages_fts_docsize", "messages_fts_idx")},
     **{table: DERIVED_ROLLUP for table in (
         "llm_usage_hourly", "llm_usage_hourly_dirty", "llm_usage_hourly_state")},

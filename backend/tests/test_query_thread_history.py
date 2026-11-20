@@ -31,6 +31,17 @@ def _create_threads(db):
     db.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
 
 
+def _create_fts(db, rowids: range) -> None:
+    """The two indexes a search reads: messages, and person inputs' chat comments (empty here)."""
+    from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
+
+    db.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content)")
+    for rowid in rowids:
+        db.execute("INSERT INTO messages_fts(rowid, content) VALUES (?, 'alpha')", (rowid,))
+    db.executescript(CHAT_COMMENT_SCHEMA_SQL)
+    db.execute("CREATE VIRTUAL TABLE comment_fts USING fts5(words, content='', contentless_delete=1)")
+
+
 class _HistoryDb:
     def __init__(self, title: str | None, rows: list[dict]) -> None:
         self.db = sqlite3.connect(":memory:")
@@ -181,6 +192,7 @@ def test_history_results_label_thread_identity_and_title():
     rows = [
         {
             "content": "alpha",
+            "metadata": None,
             "title": "Planning",
             "bm25_score": None,
             "thread_id": "thread-1",
@@ -216,8 +228,7 @@ def test_message_search_returns_thread_identity_and_title(with_fts):
         "('message-1', 'thread-1', 'user', 'alpha', NULL, '2026-09-06T04:00:00Z', 'delivered', 1)"
     )
     if with_fts:
-        db.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content)")
-        db.execute("INSERT INTO messages_fts(rowid, content) VALUES (1, 'alpha')")
+        _create_fts(db, range(1, 2))
 
     rows = search_messages_fts(db, "alpha")
 
@@ -268,9 +279,7 @@ def test_message_search_filters_and_labels_durable_sender_class(with_fts):
         [(message_id, role, json.dumps(metadata)) for message_id, role, metadata in messages],
     )
     if with_fts:
-        db.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content)")
-        for rowid in range(1, len(messages) + 1):
-            db.execute("INSERT INTO messages_fts(rowid, content) VALUES (?, 'alpha')", (rowid,))
+        _create_fts(db, range(1, len(messages) + 1))
 
     by_sender = {
         sender: search_messages_fts(db, "alpha", sender=sender)[0]["id"]
