@@ -114,13 +114,38 @@ describe('the choice after a stale refusal', () => {
 		mocks.writeContent.mockRejectedValueOnce(new Error('network failed'));
 		expect(await keepMyText(doc, 'file now')).toBe(false);
 		// The chooser stays (stale), and its error is the failure's own, not the refusal's sentence.
-		expect(existingDraft(doc)).toMatchObject({ editText: 'mine', status: 'error', stale: true });
+		expect(existingDraft(doc)).toMatchObject({ editText: 'mine', status: 'error', stale: true, failure: { code: null, generic: true } });
 		expect(existingDraft(doc)?.error).not.toBe('');
 		expect(existingDraft(doc)?.error).not.toBe(EDITOR_STALE_STATUS);
 		// A later ordinary save of the same text is not held by a refusal the file never made.
 		mocks.writeContent.mockResolvedValueOnce({ revision: 'r-next' });
 		expect(await flushDraft(doc)).toBe(true);
 		expect(existingDraft(doc)).toMatchObject({ status: 'saved', stale: false });
+		expect(existingDraft(doc)?.failure).toBeUndefined();
+		clearDraft(doc);
+	});
+
+	it('leaves stale as it was after a failure with no detail, and a resolved choice clears it with the failure', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const doc = await refused('base', 'mine');
+		mocks.writeContent.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		expect(await keepMyText(doc, 'file now')).toBe(false);
+		// The file still changed after his base and nothing has resolved that: stale stays, and the failure says it was not the file.
+		expect(existingDraft(doc)).toMatchObject({ stale: true, status: 'error', error: "Couldn't save the document — edits are still local", failure: { code: null, generic: true } });
+		useFileText(doc, { text: 'file now', revision: 'r9' });
+		expect(existingDraft(doc)).toMatchObject({ stale: false, status: 'idle', error: '' });
+		expect(existingDraft(doc)?.failure).toBeUndefined();
+		clearDraft(doc);
+	});
+
+	it('does not mark a tab that was never refused as stale when its save fails', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const doc = target();
+		seedDraft(doc, 'base');
+		setDraftText(doc, 'mine');
+		mocks.writeContent.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		expect(await flushDraft(doc)).toBe(false);
+		expect(existingDraft(doc)?.stale).toBeFalsy();
 		clearDraft(doc);
 	});
 

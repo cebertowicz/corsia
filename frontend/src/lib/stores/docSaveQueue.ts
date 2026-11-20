@@ -4,7 +4,7 @@ import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
-import { saveErrorCode, saveErrorMessage } from './docSaveError';
+import { saveErrorCode, saveErrorIsGeneric, saveErrorMessage } from './docSaveError';
 import { createBaseDigests, EDITOR_STALE_CODE, EDITOR_STALE_STATUS, staleToast } from './docSaveBase';
 import { docSaveBars } from './docSaveBars';
 import { createDocSaveActivityProjection } from './docSaveActivity';
@@ -29,8 +29,6 @@ const confirmationsOwed = new Map<string, true>();
 // again: typing on keeps the draft and its error, and only a new base can save: the person's choice of
 // which text to keep (`keepMyText` when it starts, `useFileText`), the only things besides closing that delete it.
 const refusedBases = new Map<string, string>();
-/** Tabs whose person is mid-choice (Keep your text): a failure of that write must not take the chooser down. */
-const choosing = new Set<string>();
 const baseDigests = createBaseDigests();
 const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
 export const docSaveActivities = activity.store;
@@ -109,7 +107,7 @@ async function runSave(key: string): Promise<boolean> {
 	}
 	// The same stale base is refused once, then kept: the draft and its error stay as they are.
 	if (!live && refusedBases.get(key) === draft.savedText) {
-		patchDraft(key, { status: 'error', error: EDITOR_STALE_STATUS, stale: true });
+		patchDraft(key, { status: 'error', error: EDITOR_STALE_STATUS, stale: true, failure: { code: EDITOR_STALE_CODE, generic: false } });
 		return false;
 	}
 	const textAtStart = draft.editText;
@@ -135,6 +133,7 @@ async function runSave(key: string): Promise<boolean> {
 					savedText,
 					error: '',
 					stale: false,
+					failure: undefined,
 					status: saved && cur.editText === savedText ? 'saved' : 'dirty',
 					// The tab that wrote this revision rebaselines on it, so only the
 					// same document open elsewhere shows a changed dot.
@@ -157,8 +156,9 @@ async function runSave(key: string): Promise<boolean> {
 			const stale = !live && saveErrorCode(e) === EDITOR_STALE_CODE;
 			if (stale) refusedBases.set(key, baseAtStart);
 			const message = stale ? EDITOR_STALE_STATUS : saveErrorMessage(e);
-			// A Keep your text that fails for another reason (the network) leaves the refusal up with that error, so the chooser stays and the choice can be made again.
-			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, stale: stale || choosing.has(key) });
+			// `stale` is only ever set by the file-changed refusal: a failure for another reason (the network) leaves it as it was,
+			// so a person mid-choice keeps the chooser, and a save or a choice is what ends it.
+			if (getDraft(key)) patchDraft(key, { status: 'error', error: message, failure: { code: saveErrorCode(e), generic: saveErrorIsGeneric(e) }, ...(stale ? { stale: true } : {}) });
 			// The tab's save bar says it when that bar is on screen; a document closed or hidden behind another tab says it here.
 			if (!docSaveBars.onScreen(key)) toasts.show(stale ? staleToast(draft.target.name) : message, 'error');
 			return false;
@@ -212,9 +212,7 @@ export async function keepMyText(target: TargetIdentity, fileText: string): Prom
 	// Nothing to write when the file already reads as his text: that ends the refusal here.
 	const same = cur.editText === fileText;
 	patchDraft(key, { savedText: fileText, status: same ? 'idle' : 'dirty', ...(same ? { error: '', stale: false } : {}) });
-	choosing.add(key);
-	try { return await flushDraft(target); }
-	finally { choosing.delete(key); }
+	return flushDraft(target);
 }
 
 /**
@@ -229,7 +227,7 @@ export function useFileText(target: TargetIdentity, file: { text: string; revisi
 	if (timer) { clearTimeout(timer); timers.delete(key); }
 	needsResave.delete(key);
 	refusedBases.delete(key);
-	patchDraft(key, { editText: file.text, savedText: file.text, status: 'idle', error: '', stale: false, savedRevision: file.revision ?? cur.savedRevision });
+	patchDraft(key, { editText: file.text, savedText: file.text, status: 'idle', error: '', stale: false, failure: undefined, savedRevision: file.revision ?? cur.savedRevision });
 	publishActivity(key);
 }
 

@@ -9,8 +9,13 @@ export interface DocSaveDraft {
 	savedText: string;
 	status: DocSaveStatus;
 	error: string;
-	/** The save was refused because the file changed after this tab's base: the tab offers the choice of which text to keep. */
+	/**
+	 * The file changed after this tab's base and the person has not yet chosen which text to keep: the tab offers the choice.
+	 * Set only by that refusal; a failure for another reason (the network) leaves it as it was, and it ends only by a save or a choice.
+	 */
 	stale?: boolean;
+	/** How the last save failed, for a surface that must act on the cause: the refusal's code, and whether the failure said anything specific. */
+	failure?: { code: string | null; generic: boolean };
 	/** Revision the server reported for this draft's last successful write. */
 	savedRevision: string | null;
 }

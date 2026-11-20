@@ -33,6 +33,15 @@ export function saveErrorMessage(error: unknown): string {
 }
 
 /**
+ * Whether a failure carries nothing specific to say (the network, an HTML error page), so a surface may use its own sentence.
+ * Decided by the same branches `saveErrorMessage` takes before its fallback, never by comparing its words.
+ */
+export function saveErrorIsGeneric(error: unknown): boolean {
+	const publication = error instanceof LiveOperationError && (error.kind === 'publication_failed' || error.kind === 'setup_failed');
+	return !publication && refusalDetail(error) === null;
+}
+
+/**
  * The stable reason a save was refused (`detail.code`), or null when it names none.
  * A caller that must behave differently for one refusal keys on this, never on wording.
  */

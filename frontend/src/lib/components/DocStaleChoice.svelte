@@ -7,8 +7,7 @@
 	import { fetchContent, type DocContent } from '$lib/api/docs';
 	import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 	import { docSaveDrafts, keepMyText, useFileText } from '$lib/stores/docSaveQueue';
-	import { EDITOR_STALE_STATUS } from '$lib/stores/docSaveBase';
-	import { GENERIC_SAVE_FAILURE } from '$lib/stores/docSaveError';
+	import { EDITOR_STALE_CODE } from '$lib/stores/docSaveBase';
 
 	/**
 	 * After a save was refused because the file changed after this tab's base: both texts, and the person's choice of which
@@ -64,11 +63,13 @@
 		busy = true; actionError = '';
 		try {
 			if (await keepMyText(target, file.text)) return;
-			// A file that changed again refuses again: the text stays, and Details shows the file as it is now.
-			const after = $docSaveDrafts[tabKey];
-			if (after?.stale && after.error === EDITOR_STALE_STATUS) { notice = 'This document changed again. Choose which text to keep.'; await load(); }
-			// A refusal that says something specific (a deleted file, a server line) keeps its own words; the no-detail failure gets this chooser's sentence, which says who acts next.
-			else actionError = after?.error && after.error !== GENERIC_SAVE_FAILURE ? after.error : 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
+			// Whatever the reason, the file may have changed or gone since Details read it: read it again, so a file that no longer
+			// reads offers no choice that would write its old text over his. Keyed on the failure's code, never on its wording.
+			const after = $docSaveDrafts[tabKey], failure = after?.failure;
+			await load();
+			if (failure?.code === EDITOR_STALE_CODE) notice = 'This document changed again. Choose which text to keep.';
+			// A failure that says something specific (a deleted file, a server line) keeps its own words; one with nothing to say gets this chooser's sentence, which says who acts next.
+			else actionError = failure && !failure.generic ? after!.error : 'Couldn’t save the document. Your text stays here. Choose Keep your text to try again.';
 		} finally { busy = false; }
 	}
 	const CONFIRMS = {
