@@ -84,6 +84,20 @@ async def test_a_second_partial_replaces_the_first_instead_of_stacking(isolated_
 
 
 @pytest.mark.asyncio
+async def test_a_partial_echoing_the_marker_is_still_replaced_whole(isolated_db, monkeypatch):
+    # The fold model sees the marker in its own input and can copy it into its output.
+    _install_prior("echo", through=1)
+    await _fold(monkeypatch, "echo", "first", "Copied " + INCOMPLETE_UPDATE + "First line.\n", "prior",
+                through=2)
+
+    record = await _fold(monkeypatch, "echo", "second", "Second partial line.\n", "first")
+
+    assert record.raw_result == (
+        PRIOR + "\n\n" + INCOMPLETE_UPDATE + "Second partial line.\n" + PARTIAL_UPDATE_END
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("body", ["Started the migr", "\n"])
 async def test_no_complete_line_fails_the_attempt_and_keeps_the_prior_checkpoint(
     isolated_db, monkeypatch, body,

@@ -15,29 +15,18 @@ from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
 
-#: Same cap as the terminal path's stored reason.
-_REASON_LIMIT = 300
-
 
 def _record(limit: ForkLimit, receipt, db=None) -> None:
-    from automation.provider_reset_liveness import deadline
     from connections.claude_usage import PROVIDER, apply_rate_limit_event, names_plan_window
-    from connections.harness_usage import record_limited
     from infra.database import write_transaction
-    from subagents.provider_usage_limits import model_scope_from_limit
+    from infra.terminal_usage_limits import record_limit_text
 
     with write_transaction(db, scope="fork_usage_limit") as connection:
         for info in limit.refusals:
             apply_rate_limit_event(info, receipt=receipt, db=connection)
         if limit.text is None or any(names_plan_window(info) for info in limit.refusals):
             return
-        reset = deadline(limit.text)
-        record_limited(
-            provider=PROVIDER, reason=limit.text[:_REASON_LIMIT],
-            resets_at=reset.isoformat() if reset else None,
-            scope_model=model_scope_from_limit(limit.text), source="turn_error",
-            receipt=receipt, db=connection,
-        )
+        record_limit_text(PROVIDER, limit.text, receipt, connection)
 
 
 async def record_fork_limit(stdout: bytes, receipt) -> str | None:

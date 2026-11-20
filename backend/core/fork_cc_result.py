@@ -14,12 +14,11 @@ from core.fork_types import (
 from core.fork_types import FORK_CONTEXT_TRUNCATED, partial_provider_error
 from core.fork_runtime import ForkKind, ForkStepLimitReached
 from infra.provider_usage import TokenUsage, fork_receipt, from_anthropic
+from llm.error_cause import USAGE_LIMIT
 from subagents.provider_context_limits import is_provider_context_limit
 
 #: The model Claude Code names on an assistant record it wrote itself to carry an error.
 SYNTHETIC_MODEL = "<synthetic>"
-#: The structured cause a Claude Code usage-limit refusal carries to ``provider_failure``.
-USAGE_LIMIT_CAUSE = "provider_usage_limit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +174,7 @@ def result(
     if not truncated and (failed or (limit is not None and not terminal_seen)):
         kind.provider_failure(
             "claude-code", diagnostic or (limit.detail if limit else "result error"),
-            USAGE_LIMIT_CAUSE if limit is not None else None,
+            USAGE_LIMIT if limit is not None else None,
         )
     if not (body := "\n".join(bodies)).strip():
         if truncated:

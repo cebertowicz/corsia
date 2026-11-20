@@ -80,6 +80,9 @@ def complete_lines(partial: str) -> str:
 def carry_provider_error_partial(previous: str, partial: str) -> str:
     """Append assistant output cut short by a provider error after the last complete narrative."""
     head = previous + "\n\n" if previous else ""
+    # The fold model sees the marker in its input; a copy in its output would
+    # move ``complete_narrative``'s split into the partial.
+    partial = partial.replace(INCOMPLETE_UPDATE, "")
     return head + INCOMPLETE_UPDATE + partial + "\n" + PARTIAL_UPDATE_END
 
 
