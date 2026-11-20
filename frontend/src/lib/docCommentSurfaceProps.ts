@@ -31,7 +31,7 @@ export interface DocCommentSurfaceProps {
 	/** The thread whose text is under the pointer: its card wears the focused ring and nothing more; only the pick (`focusedId`) opens, places or reads a card. */
 	ringId?: string | null;
 	/** `label` names what a non-text comment is on, in place of the quote. */
-	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
+	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string } | null;
 	draftReason?: string;
 	onDraftBody?: (text: string) => void;
 	onCancelDraft?: () => void;
@@ -39,7 +39,8 @@ export interface DocCommentSurfaceProps {
 	restoreFocus: () => void;
 	onFocus: (id: string, placement?: 'top') => void;
 	onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
-	onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+	/** `draftKey` keys the reply in `keptCommentDrafts` (CommentList). */
+	onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[], draftKey: string) => Promise<void>;
 	/** With `wait` the comment changes only once the request is answered; the promise says whether it was taken. */
 	onResolve: (id: string, resolved: boolean, wait?: boolean) => void | Promise<boolean>;
 	onAgree: (id: string, agreed: boolean) => void;
@@ -48,6 +49,8 @@ export interface DocCommentSurfaceProps {
 	/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */
 	docPath?: string | null;
 	artifactId: string | null;
+	/** The document or image its replies are kept under (`documentDraftKey`, `imageDraftKey`): a reply being typed outlives this surface. */
+	draftScope?: string;
 	/** The document's long-lived feedback controller, shared with the drawer's delivery controls. */
 	feedback?: DocFeedback;
 	readOnly?: boolean;

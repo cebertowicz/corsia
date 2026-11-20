@@ -13,6 +13,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
+	import { imageDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
@@ -46,7 +47,7 @@
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
 			occurrence: ImageOccurrence;
-			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>;
+			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: import('$lib/stores/imageRegionComments').ImagePress) => Promise<string>;
 			failure?: (error: unknown) => string;
 		} | null;
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
@@ -87,8 +88,11 @@
 	export function refresh() {
 		if (artifactId) return reload(artifactId);
 	}
+	// An image inside a document keeps its own drafts (a new comment's and its replies'), apart from the document's and its other images'.
+	const draftKey = $derived(imageDraftKey(artifactId, inDocument ? src : ''));
 	const image = createImageComments({
 		artifactId: () => artifactId,
+		draftKey: () => draftKey,
 		threadId: () => target?.threadId ?? null,
 		readOnly: () => !canComment,
 		diagramSource: () => diagramSource,
@@ -290,7 +294,7 @@
 			focusedIds={image.listCandidates}
 			draft={image.draft}
 			onDraftBody={image.setDraftBody}
-			onCancelDraft={image.close}
+			onCancelDraft={image.cancel}
 			onClose={image.close}
 			restoreFocus={image.ui.restoreFocus}
 			onFocus={focusFromCard}
@@ -304,6 +308,7 @@
 			{target}
 			{docPath}
 			{artifactId}
+			draftScope={draftKey}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
 			onSheetModalChange={(up) => { sheetUp = up; if (!up) lightbox?.clearSheet(); }}

@@ -20,7 +20,10 @@ import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshne
 import { emit } from '$lib/ws/events';
 import { createCommentRetryToast, createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
-import { RequestRefused } from '$lib/api/docs';
+import { RequestRefused, type ServerComment } from '$lib/api/docs';
+import { EarlierVersionPosted, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
+import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -45,7 +48,8 @@ describe('comment submission failure delivery', () => {
 		try {
 			await expect(submitDocumentComment(async () => { throw error; }, rememberFailureToast)).rejects.toBe(error);
 			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
-			expect(rememberFailureToast).toHaveBeenCalledWith('toast');
+			// The composer gets the toast to dismiss on a later success, and the reason to show beside its text.
+			expect(rememberFailureToast).toHaveBeenCalledWith('toast', "Couldn't post the comment — try again");
 		} finally {
 			report.mockRestore();
 			log.mockRestore();
@@ -174,5 +178,78 @@ describe('subscribeToDocumentCommentChanges', () => {
 		emit('doc_comment_changed', { artifact_id: 'artifact-current' });
 		expect(reload).toHaveBeenCalledTimes(1);
 		expect(reload).toHaveBeenCalledWith('artifact-current');
+	});
+});
+
+describe('a reply kept until it posts', () => {
+	const key = replyDraftKey('scope', 'root');
+	const row = { id: 'stored', author: 'you', author_kind: 'user', body: 'My reply', created_at: '2026-10-02T00:00:00Z' } as ServerComment;
+	function quiet() {
+		vi.mocked(addReply).mockReset();
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		return () => { report.mockRestore(); log.mockRestore(); keptCommentDrafts.reset(); vi.mocked(addReply).mockReset(); };
+	}
+
+	it('posts every press under the draft’s one id, keeps the reason a press failed, and lets it go once stored', async () => {
+		const restore = quiet();
+		try {
+			const commentCreated = vi.fn();
+			const actions = createThreadActions(() => 'artifact', commentCreated);
+			keptCommentDrafts.keepReply(key, 'My reply', createMentionSelection());
+			vi.mocked(addReply).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+			await expect(actions.reply('root', 'My reply', [], [], key)).rejects.toThrow('offline');
+			const first = vi.mocked(addReply).mock.calls[0];
+			expect(first[8]).toBe(false);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply', error: "Couldn't post the comment — try again", clientId: first[7] });
+			await actions.reply('root', 'My reply', [], [], key);
+			const retry = vi.mocked(addReply).mock.calls[1];
+			expect(retry[7]).toBe(first[7]);
+			expect(retry[8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toBeUndefined();
+			expect(commentCreated).toHaveBeenCalledOnce();
+		} finally { restore(); }
+	});
+
+	it('keeps text typed while the reply posted, under a fresh id', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			// As the mention picker does: it reads the field's text, then records the agent picked in it.
+			const tags = createMentionSelection();
+			tags.update('Ask @Agent');
+			tags.select('agent-1', 4, '@Agent');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent', tags);
+			let finish!: () => void;
+			vi.mocked(addReply).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+			const posting = actions.reply('root', 'Ask @Agent', ['agent-1'], [], key);
+			// Typed at the end, as the field reports it (beforeinput, then input).
+			tags.begin(10, 10, 'insertText'); tags.update('Ask @Agent and more');
+			keptCommentDrafts.keepReply(key, 'Ask @Agent and more', tags);
+			finish(); await posting;
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'Ask @Agent and more' });
+			// Its own copy of the tags: the field that pressed clears its own once the reply is stored.
+			const copy = keptCommentDrafts.get(key)!.mentionSelection;
+			expect(copy).not.toBe(tags);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual([{ agent_id: 'agent-1', start: 4, end: 10 }]);
+			expect(copy.occurrences('Ask @Agent and more')).toEqual(tags.occurrences('Ask @Agent and more'));
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
+	});
+
+	it('keeps changes made after an unanswered press, with the sentence, under a fresh id, when the earlier version was posted', async () => {
+		const restore = quiet();
+		try {
+			const actions = createThreadActions(() => 'artifact', vi.fn());
+			const tags = createMentionSelection();
+			keptCommentDrafts.keepReply(key, 'My reply', tags);
+			keptCommentDrafts.claim(key, 'My reply', tags);
+			keptCommentDrafts.keepReply(key, 'My reply, changed', tags);
+			vi.mocked(addReply).mockRejectedValueOnce(new EarlierVersionPosted(row));
+			await expect(actions.reply('root', 'My reply, changed', [], [], key)).rejects.toBeInstanceOf(EarlierVersionPosted);
+			expect(vi.mocked(addReply).mock.calls[0][8]).toBe(true);
+			expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'My reply, changed', error: EARLIER_VERSION_POSTED });
+			expect(keptCommentDrafts.get(key)?.clientId).toBeUndefined();
+		} finally { restore(); }
 	});
 });

@@ -16,11 +16,13 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from api.comment_post_timing import COMMENT_TIMING_HEADER, log_comment_timing
 from api.doc_comment_models import CommentCreate
 
 from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
@@ -54,10 +56,14 @@ router = APIRouter(prefix="/api", tags=["doc-comments"])
 
 
 @router.get("/artifacts/{artifact_id}/comments")
-async def list_comments(artifact_id: str, token: str):
+async def list_comments(
+    artifact_id: str, token: str,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
+):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "GET", artifact_id)
 
     def _list():
         db = get_db()
@@ -81,11 +87,13 @@ async def list_comments(artifact_id: str, token: str):
 @router.post("/artifacts/{artifact_id}/comments")
 async def create_comment(
     artifact_id: str, token: str, body: CommentCreate,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
 ):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "POST", artifact_id)
     if body.replacement is None:
         text = body.body.strip()
         if not text:

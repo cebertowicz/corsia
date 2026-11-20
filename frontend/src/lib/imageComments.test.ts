@@ -9,6 +9,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 const rect = () => new DOMRect(10, 10, 40, 20);
@@ -19,7 +20,7 @@ function controller(readOnly = false) {
 }
 const escape = () => new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 
-afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); pickedComments.set(new Set()); });
+afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); pickedComments.set(new Set()); keptCommentDrafts.reset(); });
 
 describe('image comments', () => {
 	it('names what a new comment is on', () => {
@@ -46,7 +47,7 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, [], { clientId: expect.any(String), again: false });
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
@@ -59,7 +60,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
 		await comments.submit('@Agent', ['agent'], mentions);
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions, { clientId: expect.any(String), again: false });
 	});
 
 	it('keeps a tagged draft and explains a missing viewing thread', async () => {
@@ -131,7 +132,7 @@ describe('image comments', () => {
 		// The kept draft keeps its picked tags with its text.
 		expect(clearTags).not.toHaveBeenCalled();
 		await comments.submit('Keep this');
-		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], []);
+		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], [], expect.objectContaining({ clientId: expect.any(String) }));
 		expect(comments.selectedId).toBe('new');
 	});
 
@@ -270,5 +271,60 @@ describe('image comments', () => {
 		expect(comments.boxMode).toBe(false);
 		expect(comments.ui.state).toBeNull();
 		expect(mocks.moveRegion).not.toHaveBeenCalled();
+	});
+});
+
+// A person's typed comment on an image is never lost: closing its composer any way but Cancel keeps the text and tags for
+// the next composer drawn on that image, even from a new viewer of it.
+describe('a typed image comment is never lost', () => {
+	type Comments = ReturnType<typeof createImageComments>;
+	const tagged = async (comments: Comments) => {
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Hey @Agent\nlook');
+		// As the mention picker does: it reads the field's text, then records the agent picked in it.
+		comments.draft!.mentionSelection.update('Hey @Agent\nlook');
+		comments.draft!.mentionSelection.select('agent-1', 4, '@Agent');
+	};
+	const kept = (comments: Comments) => ({ body: comments.draft?.body, tags: comments.draft?.mentionSelection.occurrences(comments.draft.body) });
+	const KEPT = { body: 'Hey @Agent\nlook', tags: [{ agent_id: 'agent-1', start: 4, end: 10 }] };
+	it.each([
+		['Escape', (comments: Comments) => comments.onKeydownCapture(escape())],
+		['a close (the card close, a click outside)', (comments: Comments) => comments.close()],
+		['a tag picked while writing', (comments: Comments) => comments.pick('c1', rect, document.createElement('button'))],
+		['tags picked in the drawer while writing', (comments: Comments) => comments.pickCandidates(['c1', 'c2'], document.createElement('button'))],
+		['a card opened from the document while writing', (comments: Comments) => comments.select('c1', document.createElement('button'), BOX)],
+	])('path 15/16: %s keeps the text and its tags for the next box drawn', async (_name, leave) => {
+		const { comments } = controller();
+		await tagged(comments);
+		leave(comments);
+		comments.close();
+		expect(comments.draft).toBeNull();
+		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		expect(kept(comments)).toEqual(KEPT);
+		expect(comments.hasDraftText).toBe(true);
+		comments.cancel();
+	});
+	// Path 15, Cancel as the one discard, is driven through the button the person presses in ImageCommentLightbox.svelte.test.ts.
+	it('a new viewer of the same image keeps the text; another image does not take it', async () => {
+		const first = controller().comments;
+		await tagged(first);
+		first.close();
+		const other = createImageComments({ artifactId: () => 'image', draftKey: () => 'image|other.png', readOnly: () => false, restoreFocus: vi.fn() });
+		await other.draw(BOX, rect);
+		expect(other.draft?.body).toBe('');
+		const again = controller().comments;
+		await again.draw(BOX, rect);
+		expect(kept(again)).toEqual(KEPT);
+		again.cancel();
+	});
+	it('a posted comment does not come back in the next composer', async () => {
+		mocks.addRegionComment.mockResolvedValueOnce('new');
+		const { comments } = controller();
+		await tagged(comments);
+		// The composer sends the agents tagged in the text it posts (CommentComposer).
+		await comments.submit('Hey @Agent\nlook', ['agent-1'], KEPT.tags);
+		comments.close();
+		await comments.draw(BOX, rect);
+		expect(kept(comments)).toEqual({ body: '', tags: [] });
 	});
 });

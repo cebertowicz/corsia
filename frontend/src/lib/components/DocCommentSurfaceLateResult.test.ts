@@ -14,6 +14,10 @@ vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (val
 import DocCommentSurface from './DocCommentSurface.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 const first = { instanceId: 'tab-1', path: 'notes.md', name: 'Notes', projectId: 'project-1', threadId: 'thread-1', artifactId: 'artifact-1' };
 const second = { ...first, instanceId: 'tab-2', path: 'other.md', name: 'Other', artifactId: 'artifact-2' };

@@ -3,7 +3,6 @@ import { Transaction } from '@codemirror/state';
 import { get } from 'svelte/store';
 import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
-import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { CELL_EDITOR, cellAtPosition, closeCell, openCellAt, openCellState } from '$lib/cm/widget-cell-state';
@@ -68,7 +67,7 @@ export const MARGIN_MIN = 660;
 export const hasRoomForMargin = (canvasWidth: number) => canvasWidth >= MARGIN_MIN;
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
-export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string, marginUp?: () => boolean) {
+export function createCommentSurfaceState(restoreEditor: () => void, marginUp?: () => boolean) {
 	let state = $state<CommentSurfaceState>(null);
 	let anchor = $state<CommentAnchor | null>(null);
 	/** The anchor is the point a click opened the card at: the card sits there instead of beside the text. */
@@ -95,18 +94,16 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	/** Counts what the reader opened (a pick, a draft, the list, a saved comment, the next unread), never a change nobody asked for: the resolved list gives the canvas back on these alone. */
 	let opened = $state(0);
 	const bump = () => untrack(() => opened++);
-	/** Closes everything, the column under a draft included: another document, the history view. */
+	/** Closes everything, the column under a draft included: another document, the history view. A comment already pressed still posts. */
 	function closeAll() {
 		state = null;
 		quiet = false;
 		overColumn = false;
-		cancelCommentCapture(draftScope?.());
 	}
-	/** Closes what is open; a draft written over the margin column closes back to the column. */
+	/** Closes what is open; a draft written over the margin column closes back to the column. A comment already pressed still posts. */
 	function close() {
 		if (state?.kind !== 'draft' || !overColumn) { closeAll(); return; }
 		overColumn = false;
-		cancelCommentCapture(draftScope?.());
 		state = { kind: 'list' };
 	}
 	function openDraft(rect: CommentAnchor) {
