@@ -21,8 +21,14 @@ class AuditReadTool(Tool):
     def description(self) -> str:
         return (
             "Read one current, bounded CORSIA audit metric without a host lease. "
-            "checkpoint_health counts checkpoints and recovered failures in a "
-            "UTC window. lease_reviews groups each lease's state at read time "
+            "checkpoint_health counts checkpoints in a UTC window, for the caller's "
+            "project. One row per (trigger, status, mode). mode is warm (built from "
+            "the thread's cached prompt) or cold. n is how many. On failed rows, "
+            "recovered counts failures followed by a later install on the same "
+            "thread, and unrecovered those with none. On installed rows, zero_entry "
+            "counts installs whose saved-entries list is empty, and limit_refusal "
+            "counts installs whose installed text is a provider usage-limit refusal "
+            "(it should be 0). An empty window returns no rows. lease_reviews groups each lease's state at read time "
             "by safe category, selecting leases created in the UTC window; "
             "it does not count verdicts issued during that window. "
             "seat_usage returns, per vendor account, call count and token sums, "
