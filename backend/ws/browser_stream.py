@@ -20,7 +20,7 @@ from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
-from ws import browser_clipboard, browser_pane_input, browser_pane_stats
+from ws import browser_clipboard, browser_pane_input, browser_pane_stats, browser_touch_fields
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
@@ -111,9 +111,12 @@ async def _retry_pane_connection(thread_id: str, connection_token: str, kind: st
         await asyncio.sleep(PANE_RETRY_DELAYS[failures - 1])
 
 
-async def _screencast_events(thread_id: str, connection_token: str, frames: PaneFrames) -> None:
+async def _screencast_events(thread_id: str, connection_token: str, frames: PaneFrames,
+                             touch_fields: browser_touch_fields.TouchFields | None = None) -> None:
     """Reconnect the pane frame stream after a transient CDP failure."""
     def deliver(frame: str) -> object:
+        if touch_fields is not None:
+            touch_fields.frame(frame)
         return frames.offer(frame)
 
     await _retry_pane_connection(
@@ -149,7 +152,7 @@ async def _watch_targets(thread_id: str, connection_token: str, changed: asyncio
 
 
 async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames,
-                       report: Callable[[dict], None]) -> None:
+                       report: Callable[[dict], None], touch_fields: browser_touch_fields.TouchFields | None = None) -> None:
     """Restart both page streams on a target change without reconnecting the pane."""
     changed = asyncio.Event()
     browser_pane_state.watch_target_changes(thread_id, connection_token, changed.set)
@@ -160,7 +163,8 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
         while True:
             change_wait = asyncio.create_task(changed.wait())
             streams = {
-                asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
+                asyncio.create_task(_screencast_events(thread_id, connection_token, frames, touch_fields)
+                                    if touch_fields is not None else _screencast_events(thread_id, connection_token, frames)),
                 asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
                 change_wait,
             }
@@ -180,6 +184,8 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
                     task.cancel()
             await asyncio.gather(*streams, return_exceptions=True)
             browser_pane.clear_page_endpoint(thread_id, connection_token)
+            if touch_fields is not None:
+                touch_fields.reset()
             report({"type": "browser_target_changed"})  # Device metrics belong to each page target.
     finally:
         browser_pane_state.unwatch_target_changes(thread_id, connection_token)
@@ -203,6 +209,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         if not frames.control(message):
             overflow.set()
 
+    touch_fields = browser_touch_fields.TouchFields(partial(browser_pane.text_fields, thread_id, connection_token), report)
+
     browser_control.pane_connected(thread_id, connection_token, report,
                                    partial(browser_pane.password_probe, thread_id, connection_token),
                                    session=partial(browser_pane.session_identity, thread_id))
@@ -214,9 +222,11 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                 if kind == "navigate":
                     _request_navigate(thread_id, connection_token, data, report)
                 elif kind == "appearance":
+                    touch_fields.appearance(data)
                     stats.appearance(browser_pane.PaneAppearance.parse(data))
                     _request_match(thread_id, connection_token, data, report)
                 elif kind == "input_mouse":
+                    touch_fields.pointer_event(data.get("eventType"))
                     # CDP serializes pointer and key delivery on the page target, so typing cannot
                     # overtake the click that focuses its field.
                     started = time.perf_counter()
@@ -242,7 +252,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         browser_pane_stats.start(stats)
         # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
+            asyncio.create_task(_follow_page(thread_id, connection_token, frames, report, touch_fields)),
+            asyncio.create_task(touch_fields.run()),
             asyncio.create_task(from_pane()),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(browser_pane_input.close_on_overflow(pane, overflow)),

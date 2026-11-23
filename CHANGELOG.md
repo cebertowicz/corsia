@@ -9,6 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - The browser chip in chat and the browser's address bar now lead with the site's real domain, so a long web address cut short no longer hides which site the agent is on; before, the cut-off end was the part that named the site.
+- A browser page's text fields now open your phone's keyboard when you tap them, so you can type or paste into the shared page.
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread you left to switch conversations reopens with the reply you were writing when you return; before, it did not reopen.
