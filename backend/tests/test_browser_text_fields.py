@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import pytest
 
@@ -45,7 +46,7 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
     reports = []
     async def read(width, height):
         return await browser_text_fields.probe_fields('test', width, height)
-    watcher = TouchFields(read, reports.append)
+    watcher = TouchFields('thread-1', read, reports.append)
     task = asyncio.create_task(watcher.run())
     try:
         watcher.appearance({'width': 200, 'height': 100})
@@ -72,7 +73,7 @@ async def test_animated_page_reports_fields_within_max_settle():
     async def read(width, height):
         await asyncio.sleep(0.12)  # A frame arrives during the read too.
         return [{'x': 1, 'y': 2, 'width': width, 'height': height, 'kind': 'text'}], None
-    watcher = TouchFields(read, reports.append)
+    watcher = TouchFields('thread-1', read, reports.append)
     watcher.appearance({'touch': True, 'width': 200, 'height': 100})
     task = asyncio.create_task(watcher.run())
     async def animate():
@@ -99,7 +100,7 @@ async def test_page_focus_loss_closes_the_touch_target(monkeypatch):
     reports = []
     async def read(_width, _height):
         return [], focus[0]
-    watcher = TouchFields(read, reports.append)
+    watcher = TouchFields('thread-1', read, reports.append)
     watcher.appearance({'touch': True, 'width': 200, 'height': 100})
     task = asyncio.create_task(watcher.run())
     try:
@@ -113,3 +114,81 @@ async def test_page_focus_loss_closes_the_touch_target(monkeypatch):
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_closed_endpoint_leaves_the_touch_field_watch_running(monkeypatch):
+    """A tab that goes away mid-read costs one read, never the pane's whole field watch."""
+    from websockets.exceptions import ConnectionClosed
+
+    from ws import browser_touch_fields
+    monkeypatch.setattr(browser_touch_fields, '_SETTLE_SECONDS', 0.001)
+    box = {'x': 1, 'y': 2, 'width': 3, 'height': 4, 'kind': 'text'}
+    closes = [ConnectionClosed(None, None)]
+    reads = 0
+    reports: list[dict] = []
+
+    async def read(_width, _height):
+        nonlocal reads
+        reads += 1
+        if closes:
+            raise closes.pop()
+        return [box], None
+
+    watcher = TouchFields('thread-1', read, reports.append)
+    watcher.appearance({'touch': True, 'width': 200, 'height': 100})
+    task = asyncio.create_task(watcher.run())
+    try:
+        async with asyncio.timeout(2):
+            while reads < 1:
+                await asyncio.sleep(0.001)
+            assert not task.done()
+            assert reports == []
+            watcher.frame('frame data is not parsed')
+            while not reports:
+                await asyncio.sleep(0.001)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert reports == [{'type': 'text_fields', 'fields': [box]}]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_read_reports_nothing_and_keeps_the_page_state(monkeypatch, caplog):
+    """A read that fails tells nothing about the page: the keyboard stays open on the last known box."""
+    from ws import browser_touch_fields
+    monkeypatch.setattr(browser_touch_fields, '_SETTLE_SECONDS', 0.001)
+    caplog.set_level(logging.WARNING, logger='ws.browser_touch_fields')
+    box = {'x': 1, 'y': 2, 'width': 3, 'height': 4, 'kind': 'email'}
+    focus: tuple[str, int] | None = ('frame', 42)
+    failing = False
+    reads = 0
+    reports: list[dict] = []
+
+    async def read(_width, _height):
+        nonlocal reads
+        reads += 1
+        if failing:
+            raise TimeoutError('the read never answered')
+        return [box], focus
+
+    watcher = TouchFields('thread-1', read, reports.append)
+    watcher.appearance({'touch': True, 'width': 200, 'height': 100})
+    task = asyncio.create_task(watcher.run())
+    try:
+        async with asyncio.timeout(2):
+            while watcher.focused is None:
+                await asyncio.sleep(0.001)
+            reports.clear()
+            failing = True
+            watcher.frame('frame data is not parsed')
+            while reads < 2:
+                await asyncio.sleep(0.001)
+            await asyncio.sleep(0.01)
+            assert reports == []
+            assert watcher.focused == focus and watcher.last == [box]
+            assert any('thread-1' in record.getMessage() and record.exc_info for record in caplog.records)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+

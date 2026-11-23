@@ -5,17 +5,29 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
+from websockets.exceptions import WebSocketException
+
 from host_access.browser_session_state import BrowserSessionError
+from host_access.processes import ProcessOwnerError
 
 log = logging.getLogger(__name__)
-# browser_dom_write checks moving pages every 0.05s for up to 40 reads (2s).
-# Five intervals give a quiet window; the same 40-interval budget caps animation delay.
-_SETTLE_SECONDS = 5 * 0.05
-_MAX_SETTLE_SECONDS = 40 * 0.05
+# The read waits for the pane's frames to pause: Chrome sends a frame only when the page draws, so a
+# still page sending nothing is the only sign it stopped. Measured with the product's own PaneScreencast
+# at the phone capture size on Chrome for Testing 152 (headless, own /tmp profile, 4 s windows,
+# 2026-11-23): while a page animates or wheel-scrolls, frames come 27-32 ms apart (p95 148-150 ms, worst
+# 747 ms), and a page that stops sending none at all. So the quiet window must clear an ordinary hitch:
+# 0.25s is past the p95 of those gaps, and only a rare long stall (that 747 ms one, mid-scroll) reads as a
+# pause; the next pause corrects it, because a read only ever reports boxes. A page that draws forever
+# never pauses, so it is read at this ceiling instead: 2s, about three times the worst measured hitch,
+# which is how long its boxes can go stale and costs one measured read (10-50 ms, see browser_text_fields)
+# per period.
+_SETTLE_SECONDS = 0.25
+_MAX_SETTLE_SECONDS = 2.0
 
 
 class TouchFields:
-    def __init__(self, read: Callable[[float, float], Awaitable[tuple[list[dict], tuple[object, object] | None]]], report: Callable[[dict], None]):
+    def __init__(self, thread_id: str, read: Callable[[float, float], Awaitable[tuple[list[dict], tuple[object, object] | None]]], report: Callable[[dict], None]):
+        self.thread_id = thread_id
         self.read = read
         self.report = report
         self.touch = False
@@ -78,9 +90,11 @@ class TouchFields:
             generation = self.generation
             try:
                 fields, focused = await self.read(*self.size)
-            except (BrowserSessionError, OSError, TimeoutError):
-                log.warning('Could not read browser text-field boxes')
-                fields, focused = [], None
+            except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException, TimeoutError):
+                # A failed read tells nothing about the page: keep the last state and report nothing,
+                # so a dropped read never closes the phone keyboard while someone is typing.
+                log.warning('browser pane %s could not read text-field boxes', self.thread_id, exc_info=True)
+                continue
             if not self.touch or generation != self.generation:
                 continue
             if self.focused is not None and focused != self.focused:

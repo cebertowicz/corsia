@@ -163,8 +163,7 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
         while True:
             change_wait = asyncio.create_task(changed.wait())
             streams = {
-                asyncio.create_task(_screencast_events(thread_id, connection_token, frames, touch_fields)
-                                    if touch_fields is not None else _screencast_events(thread_id, connection_token, frames)),
+                asyncio.create_task(_screencast_events(thread_id, connection_token, frames, touch_fields)),
                 asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
                 change_wait,
             }
@@ -209,7 +208,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         if not frames.control(message):
             overflow.set()
 
-    touch_fields = browser_touch_fields.TouchFields(partial(browser_pane.text_fields, thread_id, connection_token), report)
+    touch_fields = browser_touch_fields.TouchFields(thread_id, partial(browser_pane.text_fields, thread_id, connection_token), report)
 
     browser_control.pane_connected(thread_id, connection_token, report,
                                    partial(browser_pane.password_probe, thread_id, connection_token),
