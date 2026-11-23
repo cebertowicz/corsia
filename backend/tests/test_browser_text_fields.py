@@ -4,8 +4,28 @@ import logging
 
 import pytest
 
-from host_access import browser_text_fields
+from host_access import browser_cdp_batch, browser_text_fields
+from host_access.browser_session_state import BrowserSessionError
 from ws.browser_touch_fields import TouchFields
+
+
+class BatchingFake:
+    """A fake page connection: `call` is the test's; a batch answers each entry through it, None where it fails."""
+
+    session_id = None
+    parents: dict[int, int] = {}
+
+    async def call(self, method, **params):
+        raise AssertionError(method)
+
+    async def call_many(self, _session_id, method, params):
+        results = []
+        for one in params:
+            try:
+                results.append(await self.call(method, **one))
+            except BrowserSessionError:
+                results.append(None)
+        return results
 
 
 @pytest.mark.asyncio
@@ -13,7 +33,7 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
     secret = 'fixture-private-value'
     calls = []
 
-    class FakeCdp:
+    class FakeCdp(BatchingFake):
         def __init__(self, _endpoint):
             pass
 
@@ -39,7 +59,7 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
                 return {'nodeId': 2}
             raise AssertionError(method)
 
-    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
     async def no_frames(*_args):
         return []
     monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
@@ -195,10 +215,16 @@ async def test_a_failed_read_reports_nothing_and_keeps_the_page_state(monkeypatc
 
 @pytest.mark.asyncio
 async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
-    """A rich-text editor's centre lands on the child the caret sits in, so its box still counts."""
+    """A rich-text editor's centre lands on the child the caret sits in, so its box still counts.
+
+    The check walks the parent ids Chrome pushed with the hit, so it costs no call however large the editor is.
+    """
     calls: list[tuple[str, object]] = []
 
-    class FakeCdp:
+    class FakeCdp(BatchingFake):
+        # The hit (8) is a grandchild of the editor (7), through 12.
+        parents = {8: 12, 12: 7, 7: 1}
+
         def __init__(self, _endpoint):
             pass
 
@@ -222,19 +248,89 @@ async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
                 return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
             if method == 'DOM.getNodeForLocation':
                 return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
-            if method == 'DOM.querySelectorAll':
-                assert params == {'nodeId': 7, 'selector': '*'}
-                return {'nodeIds': [8, 9]}
             raise AssertionError(method)
 
-    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
     async def no_frames(*_args):
         return []
     monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
     fields, focused = await browser_text_fields.probe_fields('test', 200, 100)
     assert fields == [{'x': 10, 'y': 20, 'width': 100, 'height': 20, 'kind': 'editable'}]
     assert focused is None
-    assert [call for call in calls if call[0] == 'DOM.querySelectorAll'] == [('DOM.querySelectorAll', 7)]
+    assert [method for method, _node in calls if method not in {'DOM.performSearch', 'DOM.getSearchResults', 'DOM.discardSearchResults'}] == [
+        'DOM.getDocument', 'DOM.getBoxModel', 'DOM.getNodeForLocation']
+
+
+@pytest.mark.asyncio
+async def test_in_view_fields_get_boxes_behind_many_off_screen_fields(monkeypatch):
+    """Fields matched earlier but off screen no longer use up the read before the fields in view are reached."""
+    off_screen = list(range(1000, 1300))
+    in_view = [7, 8, 9]
+    selectors = dict(browser_text_fields._SELECTORS)
+    # Off-screen fields match an earlier kind than the ones in view.
+    results = {selectors['password']: off_screen, selectors['text']: in_view}
+
+    class FakeCdp(BatchingFake):
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            if method == 'DOM.getDocument':
+                return {'root': {'nodeId': 1}}
+            if method == 'DOM.performSearch':
+                return {'searchId': params['query'], 'resultCount': len(results.get(params['query'], []))}
+            if method == 'DOM.getSearchResults':
+                return {'nodeIds': results[params['searchId']]}
+            if method == 'DOM.discardSearchResults':
+                return {}
+            if method == 'DOM.getBoxModel':
+                node = params['nodeId']
+                left, top = (10, 2000) if node in off_screen else (10 + 50 * in_view.index(node), 20)
+                return {'model': {'border': [left, top, left + 40, top, left + 40, top + 20, left, top + 20]}}
+            if method == 'DOM.getNodeForLocation':
+                return {'nodeId': in_view[(params['x'] - 10) // 50]}
+            raise AssertionError(method)
+
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
+    async def no_frames(*_args):
+        return []
+    monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
+    fields, _focused = await browser_text_fields.probe_fields('test', 200, 100)
+    assert [(field['x'], field['kind']) for field in fields] == [(10, 'text'), (60, 'text'), (110, 'text')]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them():
+    """call_many sends the whole batch, then answers each entry, None where one failed, recording pushed parents."""
+    sent: list[dict] = []
+
+    class Socket:
+        def __init__(self):
+            self.replies = iter([
+                {'method': 'DOM.setChildNodes', 'params': {'parentId': 1, 'nodes': [{'nodeId': 2}]}},
+                {'id': 1, 'error': {'code': -32000, 'message': 'Could not compute box model.'}},
+                {'id': 2, 'result': {'model': {'border': [0, 0, 1, 0, 1, 1, 0, 1]}}},
+            ])
+
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+        async def recv(self):
+            assert len(sent) == 2, 'every command goes out before the first reply is read'
+            return json.dumps(next(self.replies))
+
+    client = browser_cdp_batch.BatchingCdpClient('ws://fixture')
+    client.socket = Socket()
+    results = await client.call_many(None, 'DOM.getBoxModel', [{'nodeId': 5}, {'nodeId': 6}])
+    assert results == [None, {'model': {'border': [0, 0, 1, 0, 1, 1, 0, 1]}}]
+    assert [message['params'] for message in sent] == [{'nodeId': 5}, {'nodeId': 6}]
+    assert client.parents == {2: 1}
 
 
 @pytest.mark.asyncio
@@ -242,7 +338,7 @@ async def test_a_plain_field_hit_on_another_node_is_still_dropped(monkeypatch):
     """The exact-node rule holds for every kind but an editable, so a covered field gets no box."""
     calls: list[str] = []
 
-    class FakeCdp:
+    class FakeCdp(BatchingFake):
         def __init__(self, _endpoint):
             pass
 
@@ -268,7 +364,7 @@ async def test_a_plain_field_hit_on_another_node_is_still_dropped(monkeypatch):
                 return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
             raise AssertionError(method)
 
-    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
     async def no_frames(*_args):
         return []
     monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
@@ -285,7 +381,7 @@ async def test_one_read_probes_at_most_the_bounded_number_of_nodes(monkeypatch):
     calls: list[str] = []
     probed: list[int] = []
 
-    class FakeCdp:
+    class FakeCdp(BatchingFake):
         def __init__(self, _endpoint):
             pass
 
@@ -309,10 +405,12 @@ async def test_one_read_probes_at_most_the_bounded_number_of_nodes(monkeypatch):
                 probed.append(params['nodeId'])
                 return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
             if method == 'DOM.getNodeForLocation':
-                return {'nodeId': probed[-1], 'backendNodeId': probed[-1], 'frameId': 'frame'}
+                # Every box is the same, so the nth hit test is the nth box read's node.
+                node = probed[calls.count('DOM.getNodeForLocation') - 1]
+                return {'nodeId': node, 'backendNodeId': node, 'frameId': 'frame'}
             raise AssertionError(method)
 
-    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
     async def no_frames(*_args):
         return []
     monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
