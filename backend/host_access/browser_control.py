@@ -20,8 +20,12 @@ PASSWORD_PAGE = (
     "list, and you get a turn once they finish or decline it; end your turn. If they decline, tell them in "
     "chat what you needed the page for and stop."
 )
-# A tab list on such a page opens no task (browser_step_lifecycle R9), so its refusal promises none.
-PASSWORD_PAGE_NO_STEP = "This page asks for a password, so it is the person's to complete."
+# A tab list on such a page opens no task (browser_step_lifecycle R9), and nor does a failed store write, so
+# the person has nothing in Needs you: the refusal sends the agent to chat instead of promising a task.
+PASSWORD_PAGE_NO_STEP = (
+    "This page asks for a password, so it is the person's to complete, and they have no task for it. "
+    "Ask them in chat to sign in in the shared browser and end your turn; try again once they reply."
+)
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
     "This page has shown a password field, so running scripts on it and reading that field stay refused. "
