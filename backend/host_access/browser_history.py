@@ -12,10 +12,22 @@ from host_access.browser_session_state import BrowserSessionError
 
 # Every frame's document request on a reload, held so a form's POST is never sent again.
 _DOCUMENT_REQUESTS = [{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}]
+# Bounds, measured on Chrome for Testing 152 with the product's chrome_argv (3 runs of 5 cases, Nov 23 2026: a
+# reload after a frame POST and after a top-level POST, a page whose frame takes 4 s, and both POST pages with
+# a zero deadline). Together they keep the worst
+# case of a failed history move (10 + 5 + 50 x 0.1 + BLANK_SECONDS 10 = 30 s) within one more agent command
+# at its default timeout (browser_runtime._DEFAULT_TIMEOUT, 30 s).
+# A reload that hasn't loaded by then is stopped, not failed: whether a new document committed decides. Measured
+# loads took 0.01-0.04 s; a frame still loading at the deadline was stopped and its page still committed.
 RELOAD_SECONDS = 10.0
+# Chrome answered the stop in 0.001-0.003 s in every stopped case; no answer fails closed with requests held.
 STOP_SECONDS = 5.0
+# A committed reload showed its new loader id on the first read in every case; a load stopped before any
+# document committed read all 50 and failed closed, so this window only bounds how long that failure takes.
 COMMIT_READS = 50
 COMMIT_INTERVAL = 0.1
+# The rest of the 30-second budget above, for the blanking command after a failed reload.
+BLANK_SECONDS = 10
 
 
 async def reopen_fresh(endpoint: str) -> None:
@@ -127,7 +139,7 @@ async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command:
             thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(reopen_fresh, endpoint))
     except BaseException:
         try:
-            await command(("open", "about:blank"), 10)
+            await command(("open", "about:blank"), BLANK_SECONDS)
         except BaseException as blank_error:
             # A cancel while blanking still closes the session; the cancel itself then propagates.
             logging.getLogger(__name__).warning("browser page could not be blanked after history", exc_info=True)

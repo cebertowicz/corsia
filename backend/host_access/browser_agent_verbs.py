@@ -13,7 +13,9 @@ VERBS = frozenset({"press", "select", "scroll", "scrollintoview", "hover", "back
 KEYS = ("Enter", "Tab", "Shift+Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
         "Home", "End", "PageUp", "PageDown", "Space", "Backspace", "Delete")
 DIRECTIONS = ("up", "down", "left", "right")
-MAX_SCROLL = 5000
+# The widest viewport the pane accepts (browser_pane.Appearance: 7680 px wide, 4320 high), so one scroll moves
+# at most one full screen in any direction at any size; further takes more scrolls.
+MAX_SCROLL = 7680
 KEY_REFUSAL = ("press takes one of these keys only: Enter, Tab, Shift+Tab, Escape, ArrowUp, ArrowDown, "
                "ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Space, Backspace, Delete. "
                "Type text with browser_fill.")
@@ -94,7 +96,7 @@ def admitted(args: Sequence[str]) -> bool:
 
 def refusal(args: Sequence[str]) -> str | None:
     """The reason a press outside the key list is refused, so the agent learns the list."""
-    return KEY_REFUSAL if args[0] == "press" else None
+    return KEY_REFUSAL if args[0] == "press" and not admitted(args) else None
 
 
 def model_error(args: Sequence[str], text: str) -> str:

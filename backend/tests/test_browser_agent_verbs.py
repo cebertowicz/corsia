@@ -13,7 +13,7 @@ from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 ADMITTED = [
     *(["press", key] for key in verbs.KEYS),
     ["select", "@e5", "large"], ["select", "#size", "Large (L)"], ["select", "select[name=qty]", "2"],
-    ["scroll", "down"], ["scroll", "up", "500"], ["scroll", "left", "40"], ["scroll", "right", "5000"],
+    ["scroll", "down"], ["scroll", "up", "500"], ["scroll", "left", "40"], ["scroll", "right", "7680"],
     ["scrollintoview", "@e15"], ["scrollintoview", "#footer"],
     ["hover", "@e4"], ["hover", ".menu > li:first-child"],
     # '=' inside an attribute bracket, quoted values included, is plain CSS
@@ -46,7 +46,7 @@ REFUSED = [
     # shape: several values, extra arguments, bad directions and amounts
     ["select", "@e5", "a", "b"], ["select", "@e5"], ["hover", "@e1", "@e2"], ["scrollintoview"],
     ["scroll"], ["scroll", "sideways"], ["scroll", "down", "lots"], ["scroll", "down", "0"],
-    ["scroll", "down", "5001"], ["scroll", "down", "10", "extra"], ["scroll", "down", "1e3"],
+    ["scroll", "down", "7681"], ["scroll", "down", "10", "extra"], ["scroll", "down", "1e3"],
 ]
 
 
@@ -97,6 +97,16 @@ async def test_a_key_off_the_list_is_refused_with_the_allowed_keys(saved, args):
     with pytest.raises(BrowserSessionError) as refused:
         await saved.owner.run("a", args)
     assert "Shift+Tab" in str(refused.value) and "PageDown" in str(refused.value) and "browser_fill" in str(refused.value)
+    assert saved.calls == []
+    await saved.owner.shutdown()
+
+
+async def test_a_listed_key_refused_for_launch_scripts_gets_the_script_refusal(saved, monkeypatch):
+    """With init scripts configured every command is refused; the key-list message would name Enter as allowed."""
+    monkeypatch.setenv("AGENT_BROWSER_INIT_SCRIPTS", "/tmp/init.js")
+    with pytest.raises(BrowserSessionError) as refused:
+        await saved.owner.run("a", ["press", "Enter"])
+    assert str(refused.value) == commands._SCRIPT_REFUSAL
     assert saved.calls == []
     await saved.owner.shutdown()
 
