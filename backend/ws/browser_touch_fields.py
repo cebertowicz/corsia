@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Awaitable, Callable
 
 from host_access.browser_session_state import BrowserSessionError
 
 log = logging.getLogger(__name__)
-_SETTLE_SECONDS = 0.25
+# browser_dom_write checks moving pages every 0.05s for up to 40 reads (2s).
+# Five intervals give a quiet window; the same 40-interval budget caps animation delay.
+_SETTLE_SECONDS = 5 * 0.05
+_MAX_SETTLE_SECONDS = 40 * 0.05
 
 
 class TouchFields:
@@ -36,19 +38,9 @@ class TouchFields:
             self.focused = None
             self.generation += 1
 
-    def frame(self, raw: str) -> None:
-        if not self.touch:
-            return
-        try:
-            message = json.loads(raw)
-            metadata = message.get('metadata', {})
-            width, height = metadata.get('deviceWidth'), metadata.get('deviceHeight')
-            if message.get('type') == 'frame' and isinstance(width, (int, float)) and isinstance(height, (int, float)) and width > 0 and height > 0:
-                self.size = (width, height)
-                self.generation += 1
-                self.changed.set()
-        except (ValueError, TypeError, AttributeError):
-            return
+    def frame(self, _raw: str) -> None:
+        if self.touch:
+            self.changed.set()
 
     def pointer_event(self, event_type: object) -> None:
         if event_type == 'mouseWheel':
@@ -71,10 +63,14 @@ class TouchFields:
     async def run(self) -> None:
         while True:
             await self.changed.wait()
+            deadline = asyncio.get_running_loop().time() + _MAX_SETTLE_SECONDS
             while True:
                 self.changed.clear()
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
                 try:
-                    await asyncio.wait_for(self.changed.wait(), timeout=_SETTLE_SECONDS)
+                    await asyncio.wait_for(self.changed.wait(), timeout=min(_SETTLE_SECONDS, remaining))
                 except TimeoutError:
                     break
             if not self.touch or self.size is None:

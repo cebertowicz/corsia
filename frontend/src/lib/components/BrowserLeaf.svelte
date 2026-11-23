@@ -64,7 +64,6 @@
 		frameScroll.shift(delta);
 		redraw();
 	});
-
 	function resetInput() {
 		stats.stop();
 		clipboard?.dispose();
@@ -74,7 +73,6 @@
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
 	}
-
 	function connect() {
 		resetInput();
 		socket?.close();
@@ -107,12 +105,11 @@
 			resetInput();
 		};
 	}
-
+	// A stream that reported no browser, or an HTTP open, has no navigate_result to say the page is ready.
 	function pageConfirmed() {
 		if (!streaming || status === 'Opening') status = '';
 		streaming = true;
 	}
-
 	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown, nextDomain: unknown) {
 		// A marked field belongs to the page it was written in.
 		if (typeof nextUrl === 'string' && nextUrl !== url) agent.clearMark();
@@ -122,7 +119,6 @@
 		}
 		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url, domain));
 	}
-
 	function drawMessage(raw: string) {
 		let message: Record<string, unknown>;
 		try {
@@ -199,7 +195,7 @@
 			decodeWarned = true;
 		});
 	}
-
+	// The marker maps the field's page pixels with the same placement as drawing and input.
 	function placeMarker() {
 		if (!agent.mark || !canvas || !width || !height) return;
 		const { bounds, scale, left, top } = placement();
@@ -233,7 +229,7 @@
 		drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, frameScroll.translation, scale);
 		placeMarker();
 	}
-
+	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
 	function sendAppearance() {
 		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
 		const bounds = canvas.getBoundingClientRect();
@@ -245,8 +241,9 @@
 		lastAppearance = key;
 		socket.send(key);
 	}
-
-	function coordinates(event: PointerEvent | WheelEvent, clamp = false) { return paneCoordinates(event, canvas, width, height, clamp); }
+	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
+		return paneCoordinates(event, canvas, width, height, clamp);
+	}
 
 	function sendMouse(event: PointerEvent, overlay = false) {
 		if (socket?.readyState !== WebSocket.OPEN || !width || !height) return;
@@ -258,8 +255,10 @@
 			if (!overlay) canvas.focus();
 			activePointer = event.pointerId;
 			if (!overlay) canvas.setPointerCapture(event.pointerId);
+			// Move before pressing because Chrome may use the last cursor position for a press.
 			paneInput.press(event, point);
 		} else if (event.type === 'pointermove') {
+			// A touch drag scrolls the page, and the marker cannot follow its field there.
 			if (event.pointerType === 'touch' && activePointer !== null) agent.clearMark();
 			paneInput.move(event, point, placement().scale);
 		} else {
@@ -275,7 +274,9 @@
 		event.preventDefault();
 		const point = coordinates(event);
 		if (!point) return;
+		// The person's scroll moves the agent's field, and the marker cannot follow it there.
 		agent.clearMark();
+		// CDP takes wheel deltas in CSS pixels, so a line or page wheel is converted first.
 		paneInput.wheel(point, wheelPixels(event, height));
 	}
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrowserPaneTouch, type TextFieldKind } from './browserPaneTouch';
+import phoneTyping from '../../../backend/tests/fixtures/browser_phone_typing.json';
 
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -19,6 +20,20 @@ describe('touch keyboard target', () => {
   expect([input.inputMode, input.type, input.autocomplete]).toEqual([mode, type, autocomplete]);
   expect(input.spellcheck).toBe(false);
   touch.close();
+ });
+
+ it('emits the password input sequence replayed by the backend privacy test', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const send = vi.fn();
+  const touch = new BrowserPaneTouch(send);
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'password' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector('input')!;
+  input.value = 'x'; input.dispatchEvent(new InputEvent('input'));
+  input.value = 'yz'; input.dispatchEvent(new InputEvent('input'));
+  expect(send.mock.calls.map(([message]) => message)).toEqual(phoneTyping);
+  expect(input.value).toBe('');
  });
 
  it('forwards a completed composition once and clears the target', () => {

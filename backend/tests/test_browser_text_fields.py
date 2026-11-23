@@ -66,6 +66,32 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_animated_page_reports_fields_within_max_settle():
+    from ws.browser_touch_fields import _MAX_SETTLE_SECONDS
+    reports = []
+    async def read(width, height):
+        await asyncio.sleep(0.12)  # A frame arrives during the read too.
+        return [{'x': 1, 'y': 2, 'width': width, 'height': height, 'kind': 'text'}], None
+    watcher = TouchFields(read, reports.append)
+    watcher.appearance({'touch': True, 'width': 200, 'height': 100})
+    task = asyncio.create_task(watcher.run())
+    async def animate():
+        while True:
+            await asyncio.sleep(0.1)
+            watcher.frame('frame data is not parsed')
+    animation = asyncio.create_task(animate())
+    try:
+        async with asyncio.timeout(_MAX_SETTLE_SECONDS + 0.5):
+            while not reports:
+                await asyncio.sleep(0.01)
+        assert reports[0]['fields'][0]['width'] == 200
+    finally:
+        animation.cancel()
+        task.cancel()
+        await asyncio.gather(animation, task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_page_focus_loss_closes_the_touch_target(monkeypatch):
     from ws import browser_touch_fields
     monkeypatch.setattr(browser_touch_fields, '_SETTLE_SECONDS', 0.001)
