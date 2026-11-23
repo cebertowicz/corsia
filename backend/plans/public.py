@@ -326,6 +326,8 @@ from plans.admission import release as release_attempt
 from plans.delegation_harvest import returned_steps as returned_worker_steps
 from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdict_ages, owed_verdicts
 from plans.later_review import due as later_reviews_due, reviews as review_later_piles
+# A plan call that takes a task out of Later says to read the priorities first.
+from plans.later_pull import tell_left_later, titles_in_later
 from plans import automated_mutation_keys
 from plans.hierarchy import shown_worker_plan
 from plans.service import _transition as transition_node_in
