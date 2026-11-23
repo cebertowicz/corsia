@@ -263,7 +263,7 @@ async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_in_view_fields_get_boxes_behind_many_off_screen_fields(monkeypatch):
-    """Fields matched earlier but off screen no longer use up the read before the fields in view are reached."""
+    """Fields in view get boxes even when many off-screen fields match an earlier kind."""
     off_screen = list(range(1000, 1300))
     in_view = [7, 8, 9]
     selectors = dict(browser_text_fields._SELECTORS)
@@ -306,8 +306,12 @@ async def test_in_view_fields_get_boxes_behind_many_off_screen_fields(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them():
-    """call_many sends the whole batch, then answers each entry, None where one failed, recording pushed parents."""
+async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them(caplog):
+    """call_many sends the whole batch, then answers each entry, None where one failed, recording pushed parents.
+
+    A failed entry is logged with its CDP code and message, as call_in logs one.
+    """
+    caplog.set_level(logging.DEBUG, logger=browser_cdp_batch.__name__)
     sent: list[dict] = []
 
     class Socket:
@@ -331,6 +335,7 @@ async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them():
     assert results == [None, {'model': {'border': [0, 0, 1, 0, 1, 1, 0, 1]}}]
     assert [message['params'] for message in sent] == [{'nodeId': 5}, {'nodeId': 6}]
     assert client.parents == {2: 1}
+    assert 'DOM.getBoxModel' in caplog.text and '-32000' in caplog.text and 'Could not compute box model.' in caplog.text
 
 
 @pytest.mark.asyncio

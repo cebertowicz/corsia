@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from host_access.browser_cdp import CdpClient
+
+log = logging.getLogger(__name__)
 
 
 class BatchingCdpClient(CdpClient):
@@ -13,7 +16,9 @@ class BatchingCdpClient(CdpClient):
         """Send `method` once per entry of `params`, then read every reply in one pass; None where one failed.
 
         Chrome answers in order on one connection, so a batch costs about one round trip rather than one per
-        command. Events read meanwhile are handled exactly as call_in handles them.
+        command. Events read meanwhile are handled exactly as call_in handles them, and a failed entry is
+        logged as call_in logs one; it does not fail the batch, since one node's error says nothing about
+        the others.
         """
         pending: dict[int, int] = {}
         for index, one in enumerate(params):
@@ -26,6 +31,10 @@ class BatchingCdpClient(CdpClient):
                 self._event(response)
                 continue
             index = pending.pop(reply_id)
-            result = response.get("result")
-            results[index] = result if "error" not in response and isinstance(result, dict) else None
+            error, result = response.get("error"), response.get("result")
+            if error is not None or not isinstance(result, dict):
+                code, message = (error.get("code"), error.get("message")) if isinstance(error, dict) else (None, "no result")
+                log.debug("CDP %s failed (code %s): %s", method, code, message)
+                continue
+            results[index] = result
         return results
