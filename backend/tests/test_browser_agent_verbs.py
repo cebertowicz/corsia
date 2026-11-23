@@ -483,6 +483,42 @@ async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, 
     await saved.owner.shutdown()
 
 
+async def test_a_close_that_fails_after_a_failed_blank_is_recorded_and_blocks_the_session(saved, monkeypatch, caplog):
+    """The restored page may still be open, so the close failure is logged, reported, and the session stays blocked."""
+    from unittest.mock import AsyncMock
+
+    from host_access import browser_reporting
+    from host_access.browser_sessions import BrowserSessionCleanupError
+    report = AsyncMock(return_value=("a", "notice"))
+    monkeypatch.setattr(browser_reporting, "report_cleanup", report)
+    await _held_page(saved, monkeypatch, [])
+
+    async def reopen_fresh(_endpoint):
+        raise RuntimeError("target gone")
+
+    monkeypatch.setattr(browser_history, "reopen_fresh", reopen_fresh)
+    real = saved.owner._run_admitted
+
+    async def run_admitted(runtime, args, **kwargs):
+        if tuple(args) == ("open", "about:blank"):
+            raise BrowserSessionError("browser is gone")
+        return await real(runtime, args, **kwargs)
+
+    async def close_runtime(_runtime):
+        raise BrowserSessionCleanupError("browser client settlement is unresolved")
+
+    monkeypatch.setattr(saved.owner, "_run_admitted", run_admitted)
+    monkeypatch.setattr(saved.owner, "_close_runtime", close_runtime)
+    with pytest.raises(RuntimeError, match="target gone"):
+        await saved.owner.run("a", ["back"])
+    assert any(record.levelname == "ERROR" and "could not be closed after history" in record.message
+               for record in caplog.records)
+    report.assert_awaited_once()
+    with pytest.raises(BrowserSessionCleanupError) as blocked:
+        await saved.owner.run("a", ["snapshot"])
+    assert blocked.value.recovery == "operator_required"
+
+
 COVER_TEXT = ("Element '#pay' is covered by <div class=\"modal\" data-account=\"4417\">Account 4417</div> at its click "
               "point, so the input would land on that element instead.")
 

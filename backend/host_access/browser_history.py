@@ -143,7 +143,14 @@ async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command:
         except BaseException as blank_error:
             # A cancel while blanking still closes the session; the cancel itself then propagates.
             logging.getLogger(__name__).warning("browser page could not be blanked after history", exc_info=True)
-            await owner._close_one(runtime)
+            if (close_error := await owner._close_one(runtime)) is not None:
+                # The restored page may still be open, so the failure is recorded as a startup close failure is
+                # (browser_sessions._record_failure): the session's ownership stays blocked and a notice is filed.
+                logging.getLogger(__name__).error("browser session could not be closed after history; its page may "
+                                                  "still be open", exc_info=close_error)
+                async with runtime.command_lock:
+                    if owner._sessions.get(runtime.record.thread_id) is runtime:
+                        await owner._record_failure(runtime, close_error)
             if isinstance(blank_error, asyncio.CancelledError):
                 raise
         raise
