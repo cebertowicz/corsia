@@ -233,9 +233,11 @@ async def _node_at_centre(cdp: CdpClient, box: dict) -> int | None:
     if not isinstance(scroll_x, (int, float)) or not isinstance(scroll_y, (int, float)):
         return None
     try:
+        # Hit-test as a real click does: a layer with pointer-events: none (a toast or overlay container
+        # over the whole page) lets the click through, so it does not cover what lies beneath it.
         location = await cdp.call("DOM.getNodeForLocation", x=round(scroll_x + box["x"] + box["width"] / 2),
                                   y=round(scroll_y + box["y"] + box["height"] / 2), includeUserAgentShadowDOM=False,
-                                  ignorePointerEventsNone=True)
+                                  ignorePointerEventsNone=False)
     except BrowserSessionError:
         # Chrome reports no node at a point nothing hit-tests at.
         return None
