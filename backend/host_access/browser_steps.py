@@ -39,7 +39,7 @@ class BrowserStep:
     last_input: float | None = None
     input_seen: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     # The agent's own probe of the step's page target, re-probed while no pane can (browser_step_lifecycle).
-    page: browser_pane_state.PaneProbe | None = field(default=None, repr=False, kw_only=True)
+    page: browser_pane_state.PageProbe | None = field(default=None, repr=False, kw_only=True)
 
     provenance: ClassVar[str]
     event_prefix: ClassVar[str]

@@ -38,7 +38,6 @@ class Event:
     name: str
     result: PasswordProbe | None = None
     session: str | None = None
-    source: str = "agent"
     instruction: str = ""
 
 
@@ -158,7 +157,7 @@ _probe_locks: dict[str, asyncio.Lock] = {}
 
 async def step_event(thread_id: str, event: Event, *,
                      observer: browser_pane_state.Observer | None = None,
-                     page: browser_pane_state.PaneProbe | None = None) -> Decision:
+                     page: browser_pane_state.PageProbe | None = None) -> Decision:
     """Decide under the transition lock; notify the caller once before applying lifecycle effects.
 
     ``page`` is the agent's own probe of the page this event observed; a step it opens keeps it to
@@ -245,7 +244,7 @@ def person_input(thread_id: str) -> None:
         step.input_seen.set()
 
 
-def _page_sources(thread_id: str, step: BrowserStep) -> list[browser_pane_state.PaneProbe]:
+def _page_sources(thread_id: str, step: BrowserStep) -> list[browser_pane_state.PageProbe]:
     """Every connected pane's probe; with none, the agent's own probe of the step's page, so a sign-in the
     person finishes with no pane open still ends its step."""
     return browser_pane_state.pane_probes(thread_id) or ([step.page] if step.page is not None else [])
@@ -304,7 +303,8 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
         if session == step.session:
             return True
         result = None
-    await step_event(thread_id, Event("probe", result, session=session, source="pane"), observer=source.observer)
+    # A step this probe opens (a new visit's password field) keeps the agent's own probe of the same page.
+    await step_event(thread_id, Event("probe", result, session=session), observer=source.observer, page=step.page)
     return _steps.get(thread_id) is step and current.reprobe is not None
 
 

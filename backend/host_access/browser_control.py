@@ -283,12 +283,12 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
 
 
 def _page_source(thread_id: str, probe: browser_pane_state.Probe,
-                 current_session: Callable[[], str | None] | None) -> browser_pane_state.PaneProbe:
-    """The agent's probe as a step's own page source: the guard's known nodes, and its observer, as a pane's."""
+                 current_session: Callable[[], str | None] | None) -> browser_pane_state.PageProbe:
+    """The agent's probe as a step's own page source, with the guard's known nodes and its observer."""
     async def guarded_probe(_known: browser_pane_state.KnownNodes) -> PasswordProbe:
         return await probe(_known_nodes(thread_id))
 
-    return browser_pane_state.PaneProbe(guarded_probe, current_session, partial(_observe_read_guard, thread_id))
+    return browser_pane_state.PageProbe(guarded_probe, current_session, partial(_observe_read_guard, thread_id))
 
 
 def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_session: bool, guard_present: bool) -> None:

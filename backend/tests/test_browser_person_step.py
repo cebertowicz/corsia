@@ -144,6 +144,24 @@ async def test_a_person_step_with_no_pane_open_settles_on_a_new_visit_and_wakes_
 
 
 @pytest.mark.asyncio
+async def test_a_step_a_reprobe_opens_with_no_pane_open_keeps_reprobing_and_settles(plan):
+    """A username page that moves to a password page: the re-probe ends one step and opens the next on the
+    agent's own probe, so the person's sign-in still finishes with no pane open and no Mark done."""
+    page, db = Page(), plan["db"]
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Sign in")
+    first = lifecycle._steps[THREAD]
+    page.show("visit-two", frozenset({42}))
+    await asyncio.wait_for(first.reprobe, 1)
+    second = lifecycle._steps[THREAD]
+    assert isinstance(second, browser_steps.PasswordStep) and second.reprobe is not None
+    page.show("visit-three")
+    await asyncio.wait_for(second.reprobe, 1)
+    first_row, second_row = _steps(db)
+    assert first_row["state"] == "accepted" and second_row["state"] == "accepted" and page.pane_probes == 0
+    assert not browser_control.password_page(THREAD)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["password", "person"])
 async def test_a_reprobe_on_another_target_settles_neither_kind(plan, kind):
     """Only the agent's own probe, or one of the step's target, can end a step; a popup comes back."""
