@@ -172,7 +172,7 @@ async def _allow(*_args, **_kwargs):
 
 
 class _ScriptedCdp:
-    """A CDP connection that answers Page.navigate from a script and records each navigation."""
+    """A CDP connection that answers Page.navigate from a script (None: never) and records each navigation."""
 
     def __init__(self, url, navigations):
         self.url, self.navigations, self.sent = url, list(navigations), []
@@ -187,7 +187,9 @@ class _ScriptedCdp:
         if method == "Page.getNavigationHistory":
             return {"currentIndex": 0, "entries": [{"url": self.url}]}
         self.sent.append(params["url"])
-        return self.navigations.pop(0)
+        if (navigation := self.navigations.pop(0)) is None:
+            await asyncio.Event().wait()
+        return navigation
 
 
 NEW_DOCUMENT = {"frameId": "f", "loaderId": "L2"}
@@ -207,6 +209,14 @@ async def test_reopen_fresh_raises_when_no_new_document_commits(monkeypatch, nav
     monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: _ScriptedCdp("https://bank.test/pay", navigations))
     with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
         await browser_history.reopen_fresh("ws://page")
+
+
+async def test_reopen_fresh_fails_a_navigation_that_never_commits_within_the_reload_window(monkeypatch):
+    """A site that never answers can't hold the agent's command past the window; the caller then blanks the page."""
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: _ScriptedCdp("https://bank.test/pay", [None]))
+    monkeypatch.setattr(browser_history, "RELOAD_SECONDS", 0.05)
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await asyncio.wait_for(browser_history.reopen_fresh("ws://page"), 1)
 
 
 class _Socket:
@@ -504,11 +514,12 @@ async def test_a_close_that_fails_after_a_failed_blank_is_recorded_and_blocks_th
             raise BrowserSessionError("browser is gone")
         return await real(runtime, args, **kwargs)
 
-    async def close_runtime(_runtime):
+    async def end_session(*_args):
+        # Fails inside the real close, so the close's own failure recording is what's under test.
         raise BrowserSessionCleanupError("browser client settlement is unresolved")
 
     monkeypatch.setattr(saved.owner, "_run_admitted", run_admitted)
-    monkeypatch.setattr(saved.owner, "_close_runtime", close_runtime)
+    monkeypatch.setattr(commands, "end_session", end_session)
     with pytest.raises(RuntimeError, match="target gone"):
         await saved.owner.run("a", ["back"])
     assert any(record.levelname == "ERROR" and "could not be closed after history" in record.message

@@ -19,6 +19,8 @@ _DOCUMENT_REQUESTS = [{"urlPattern": "*", "resourceType": "Document", "requestSt
 # at its default timeout (browser_runtime._DEFAULT_TIMEOUT, 30 s).
 # A reload that hasn't loaded by then is stopped, not failed: whether a new document committed decides. Measured
 # loads took 0.01-0.04 s; a frame still loading at the deadline was stopped and its page still committed.
+# A navigation to the entry's address answers once it commits, before its load, so the same window bounds it;
+# one that hasn't committed by then fails and the page is blanked (10 + BLANK_SECONDS 10 = 20 s at worst).
 RELOAD_SECONDS = 10.0
 # Chrome answered the stop in 0.001-0.003 s in every stopped case; no answer fails closed with requests held.
 STOP_SECONDS = 5.0
@@ -49,7 +51,10 @@ async def reopen_fresh(endpoint: str) -> None:
         if "#" in url:
             await _reload_sending_no_form(cdp)
             return
-        result = await cdp.call("Page.navigate", url=url)
+        try:
+            result = await asyncio.wait_for(cdp.call("Page.navigate", url=url), RELOAD_SECONDS)
+        except TimeoutError as exc:
+            raise BrowserSessionError("This page couldn't be loaded again") from exc
         if result.get("errorText") or not result.get("loaderId"):
             raise BrowserSessionError("This page couldn't be loaded again")
 
@@ -144,13 +149,10 @@ async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command:
             # A cancel while blanking still closes the session; the cancel itself then propagates.
             logging.getLogger(__name__).warning("browser page could not be blanked after history", exc_info=True)
             if (close_error := await owner._close_one(runtime)) is not None:
-                # The restored page may still be open, so the failure is recorded as a startup close failure is
-                # (browser_sessions._record_failure): the session's ownership stays blocked and a notice is filed.
+                # The close already recorded its failure (browser_sessions._close_runtime): the session stays
+                # blocked and a notice is filed. The restored page may still be open, so it is logged as an error.
                 logging.getLogger(__name__).error("browser session could not be closed after history; its page may "
                                                   "still be open", exc_info=close_error)
-                async with runtime.command_lock:
-                    if owner._sessions.get(runtime.record.thread_id) is runtime:
-                        await owner._record_failure(runtime, close_error)
             if isinstance(blank_error, asyncio.CancelledError):
                 raise
         raise
