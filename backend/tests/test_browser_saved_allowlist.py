@@ -40,7 +40,7 @@ def test_public_pane_shapes(args):
     ['set', 'credentials', 'u', 'p'], ['open', 'https://example.com', '--headers', '{}'],
     ['cookies'], ['get', 'cdp-url'], ['unknown'], ['plugins', 'add', 'x'],
     ['fill', '#a', '--headers'], ['fill', '#a', '-p'], ['fill', '#a', '-v'],
-    ['fill', '#a', '-q'], ['eval', 'document.cookie'],
+    ['fill', '#a', '-q'], ['eval', '--stdin'],
     ['screenshot', '--full'], ['screenshot', '--full', '--headers'],
     ['screenshot', '--full', '/tmp/a.png', 'x'], ['screenshot', '--headers', '/tmp/a.png'],
 ])
