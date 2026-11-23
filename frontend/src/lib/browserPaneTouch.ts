@@ -28,10 +28,13 @@ export class BrowserPaneTouch {
   this.close();
   if (!field || !canvas.parentElement) return;
   const input = document.createElement(field.kind === 'textarea' || field.kind === 'editable' ? 'textarea' : 'input');
-  if (input instanceof HTMLInputElement) input.type = field.kind === 'password' ? 'password' : 'text';
+  // The invisible input sits on CORSIA's own page, so a password type or an autofill hint would offer
+  // the phone's saved logins for whatever site the canvas draws. The field kind only picks the
+  // keyboard layout, so every kind gets a plain text input and no autofill.
+  if (input instanceof HTMLInputElement) input.type = 'text';
   input.dataset.paneField = '';
   input.inputMode = field.kind === 'one-time-code' ? 'numeric' : ['email', 'number', 'tel', 'url', 'search'].includes(field.kind) ? (field.kind === 'number' ? 'decimal' : field.kind) as HTMLInputElement['inputMode'] : 'text';
-  input.autocomplete = field.kind === 'one-time-code' ? 'one-time-code' : field.kind === 'password' ? 'current-password' : ['email', 'tel', 'url'].includes(field.kind) ? field.kind as AutoFill : 'off';
+  input.autocomplete = 'off';
   input.autocapitalize = 'off';
   input.setAttribute('autocorrect', 'off');
   input.spellcheck = false;

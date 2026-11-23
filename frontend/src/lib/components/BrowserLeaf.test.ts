@@ -154,7 +154,7 @@ describe('BrowserLeaf touch typing', () => {
 		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
 		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
 		const input = host.querySelector<HTMLInputElement>('[data-pane-field]')!;
-		expect(input.type).toBe('password');
+		expect([input.type, input.autocomplete]).toEqual(['text', 'off']);
 		input.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
 		input.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
 		expect(document.activeElement).toBe(input);

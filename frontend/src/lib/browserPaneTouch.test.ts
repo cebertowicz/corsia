@@ -6,9 +6,9 @@ afterEach(() => { document.body.innerHTML = ''; });
 
 describe('touch keyboard target', () => {
  it.each([
-  ['email', 'email', 'text', 'email'], ['tel', 'tel', 'text', 'tel'],
-  ['number', 'decimal', 'text', 'off'], ['one-time-code', 'numeric', 'text', 'one-time-code'],
-  ['password', 'text', 'password', 'current-password'],
+  ['email', 'email', 'text', 'off'], ['tel', 'tel', 'text', 'off'],
+  ['number', 'decimal', 'text', 'off'], ['one-time-code', 'numeric', 'text', 'off'],
+  ['password', 'text', 'text', 'off'],
  ] satisfies [TextFieldKind, string, string, string][])('sets the %s field attributes', (kind, mode, type, autocomplete) => {
   const wrapper = document.createElement('div');
   const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
@@ -19,6 +19,19 @@ describe('touch keyboard target', () => {
   expect(document.activeElement).toBe(input);
   expect([input.inputMode, input.type, input.autocomplete]).toEqual([mode, type, autocomplete]);
   expect(input.spellcheck).toBe(false);
+  touch.close();
+ });
+
+ it('never invites autofill on a page field, even a password one', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const touch = new BrowserPaneTouch(vi.fn());
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'password' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector<HTMLInputElement>('input')!;
+  // The input is CORSIA's own, so a password type or a saved-login hint would offer another site's secret.
+  expect([input.type, input.autocomplete, input.getAttribute('name')]).toEqual(['text', 'off', null]);
+  expect([input.autocapitalize, input.getAttribute('autocorrect'), input.spellcheck]).toEqual(['off', 'off', false]);
   touch.close();
  });
 
