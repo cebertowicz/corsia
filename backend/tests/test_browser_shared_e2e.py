@@ -449,6 +449,39 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option():
+    """With no pane open, a fill on a dropdown chooses the option by label or value, as the pane-open write does.
+
+    The native fill cleared the choice (no option selected) and still answered that it filled the target.
+    A fill on a text field still goes to the native fill.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"closed-fill-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-closed-fill", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/writes.html"), session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            found = re.search(r"combobox[^\[\n]*\[[^\]]*ref=(e\d+)\]", snapshot)
+            assert found, snapshot
+            ref = "@" + found[1]
+            by_label = await owner.run(thread_id, ("fill", "#choice", "Bee"), session="existing")
+            chosen_by_label = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            by_value = await owner.run(thread_id, ("fill", ref, "a"), session="existing")
+            chosen_by_value = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            text = await owner.run(thread_id, ("fill", "#user", "agent"), session="existing")
+            typed = await cdp_value(owner, thread_id, "document.querySelector('#user').value")
+        assert (chosen_by_label, chosen_by_value, typed) == ("b", "a", "agent")
+        assert "filled" not in by_label and "Bee" in by_label, by_label
+        assert "filled" not in by_value and "a" in by_value, by_value
+        assert "filled" in text, text
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through(monkeypatch):
     """With the pane open, a click by ref reaches a control under a pointer-events: none layer,
     as the person's click would, and a control under a layer that takes clicks is still refused."""

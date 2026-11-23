@@ -95,6 +95,32 @@ async def target_node(run: RunCommand, endpoint: str, selector: str) -> int | No
         return (await _locate(run, cdp, selector, scroll=False))[0]
 
 
+async def is_dropdown(run: RunCommand, endpoint: str, selector: str) -> bool:
+    """Whether an agent's ref or CSS selector names a native <select>, read through the DOM domain only.
+
+    It runs no page script and reads no value. A target it can't hit-test (no box, covered, or still off
+    screen after a scroll) is not reported as a dropdown, and neither is one it couldn't check.
+    """
+    box = await _box(run, selector)
+    if box is None or _is_empty(box):
+        return False
+    async with CdpClient(endpoint) as cdp:
+        try:
+            if not _in_viewport(await _viewport(cdp), box):
+                # With no pane open nobody sees the scroll, and the native fill scrolls its target the same way.
+                await run(("scrollintoview", selector), 10)
+                box = await _box(run, selector)
+                if box is None or _is_empty(box):
+                    return False
+            node = await _node_at_centre(cdp, box)
+            if not node or not await _box_matches(cdp, node, box):
+                return False
+            name = (await cdp.call("DOM.describeNode", backendNodeId=node)).get("node", {}).get("nodeName")
+        except BrowserSessionError:
+            return False
+    return name == "SELECT"
+
+
 async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: bool = True) -> tuple[int | None, str]:
     """Find the node at the centre of agent-browser's box for a ref or selector, and why not if absent."""
     box = await _box(run, selector)

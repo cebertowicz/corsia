@@ -25,6 +25,8 @@ _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream",
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
                    "Use the browser tools to navigate and interact with the page.")
+_SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
+                           "choose a dropdown's option. Nothing was changed. Ask the person in chat to choose it.")
 
 
 def raise_cleanup_failures(failures: Sequence[BaseException | None]) -> None:
@@ -197,6 +199,13 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
                                     properties={"command": args[0], "reason": exc.reason})
             raise
+    if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
+        # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
+        # chooses the option by value or label (browser_dom_write), so this route does the same.
+        if runtime.record.profile or runtime.record.copy_of:
+            # A saved sign-in admits only the shapes in _saved_command, and select is not one of them.
+            raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
+        args = ("select", args[1], args[2])
     browser_pane_state.page_command_starting(thread_id, tuple(args))
     try:
         result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
