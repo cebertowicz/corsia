@@ -48,7 +48,8 @@ REVIEW_DAYS = 7
 WAKE_REASON_BYTES = 60
 #: Rows one wake lists before it points at the section read instead. The wake
 #: needs no byte cap of its own: it is at most this many rows, each bounded by
-#: its title and reason cuts, plus the count and the moves.
+#: its title and reason cuts and its done-when line (``CRITERIA_MIN_BYTES``),
+#: plus the count and the moves.
 WAKE_ROWS = 8
 
 #: The latest move below the cut, including a move with no reason, per row.

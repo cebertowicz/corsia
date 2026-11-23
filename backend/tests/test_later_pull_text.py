@@ -95,7 +95,7 @@ FIT = (
     "If it fits, go ahead. If it doesn't, starting it is the person's call, not a detail "
     "you settle, whatever its size, cost, urgency or how easily it is undone: ask them now, "
     "put any urgency in your recommendation, and don't work it until they answer. "
-    "An approval that doesn't fit them doesn't count."
+    "An earlier approval that doesn't fit them doesn't count."
 )
 
 
@@ -115,7 +115,7 @@ def test_the_three_messages_are_the_approved_words():
         "means nothing fits. If one doesn't fit, promoting it is the person's call, not a "
         "detail you settle, whatever its size, cost, urgency or how easily it is undone: ask "
         "them now, put any urgency in your recommendation, and leave it in Later until they "
-        "answer. An approval that doesn't fit them doesn't count. Re-rank with reorder, and "
+        "answer. An earlier approval that doesn't fit them doesn't count. Re-rank with reorder, and "
         "leave the rest in Later."
     )
 
@@ -188,3 +188,26 @@ def test_the_added_reads_cost_the_same_whatever_the_plan_history(call):
 
     small, large = steps(SIZES[0]), steps(SIZES[-1])
     assert large <= max(small, SAMPLE_EVERY) * STEP_TOLERANCE, (small, large)
+
+
+def test_the_plan_tool_adds_the_line_when_its_call_takes_a_task_out_of_later(db, monkeypatch):
+    """The real wiring: the read runs before the mutation and the line is added after it."""
+    from tests.test_current_plan_bounded_read import _tool_env
+
+    plan, node, _watch = _task(db, later=True, watch=False)
+    tools = _tool_env(db, monkeypatch)
+    result = tools._mutation_operation(
+        "owner", {"user_id": "user", "project_id": "project"}, None, plan.id, "start",
+        {"node_id": node.id, "expected_revision": _rev(db, node.id)}, "wiring-start", {},
+    )
+    assert result.result["notice"].startswith('"Reprint the map" was in Later: before you work it,')
+
+
+def test_the_line_cuts_a_long_title_like_every_plan_surface(db):
+    from plans.close_next_bounds import TITLE_MAX_BYTES, json_bytes
+
+    plan, node, _watch = _task(db, later=True, watch=False)
+    db.execute("UPDATE plan_nodes SET title=? WHERE id=?", ('"Map" ' * 200, node.id))
+    db.commit()
+    title = later_pull.titles_in_later(db, plan.id, {"node_id": node.id})[node.id]
+    assert json_bytes(title) <= TITLE_MAX_BYTES

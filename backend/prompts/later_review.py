@@ -12,7 +12,7 @@ LATER_REVIEW_MOVES = (
     "priorities written means nothing fits. If one doesn't fit, promoting it is "
     "the person's call, not a detail you settle, whatever its size, cost, "
     "urgency or how easily it is undone: ask them now, put any urgency in your "
-    "recommendation, and leave it in Later until they answer. An approval that "
-    "doesn't fit them doesn't count. Re-rank with reorder, and leave the rest "
+    "recommendation, and leave it in Later until they answer. An earlier approval "
+    "that doesn't fit them doesn't count. Re-rank with reorder, and leave the rest "
     "in Later."
 )

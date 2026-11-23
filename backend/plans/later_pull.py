@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from plans.close_next_bounds import title as emitted_title
 from prompts.later_pull import LEFT_LATER
 
 
@@ -26,16 +27,24 @@ def titles_in_later(db, plan_id: str, params: dict) -> dict[str, str]:
         (json.dumps(ids),),
     ).fetchall()
     titles = {
-        str(row["id"]): str(row["title"]) for row in rows if row["plan_id"] == plan_id and row["later"]
+        str(row["id"]): emitted_title(str(row["title"]))
+        for row in rows if row["plan_id"] == plan_id and row["later"]
     }
     return {node_id: titles[node_id] for node_id in ids if node_id in titles}
 
 
 def tell_left_later(db, in_later: dict[str, str], result: dict) -> None:
     """Add the priorities line for each named task this call took out of Later."""
+    if not in_later:
+        return
+    left = {
+        str(row["id"]) for row in db.execute(
+            "SELECT id, later FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps(list(in_later)),),
+        ).fetchall() if not row["later"]
+    }
     for node_id, title in in_later.items():
-        row = db.execute("SELECT later FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
-        if row is not None and not row["later"]:
+        if node_id in left:
             line = LEFT_LATER.format(title=title)
             existing = result.get("notice")
             result["notice"] = f"{existing}\n{line}" if existing else line

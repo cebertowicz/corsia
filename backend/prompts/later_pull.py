@@ -11,8 +11,8 @@ FIT = (
     "fits). If it fits, go ahead. If it doesn't, starting it is the person's "
     "call, not a detail you settle, whatever its size, cost, urgency or how "
     "easily it is undone: ask them now, put any urgency in your recommendation, "
-    "and don't work it until they answer. An approval that doesn't fit them "
-    "doesn't count."
+    "and don't work it until they answer. An earlier approval that doesn't "
+    "fit them doesn't count."
 )
 
 #: What a Later task must deliver, shown where fit is judged, so it is judged
