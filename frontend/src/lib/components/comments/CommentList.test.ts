@@ -2,6 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, tick } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import CommentList from './CommentList.svelte';
+import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 let host: HTMLElement;
 let component: ReturnType<typeof createClassComponent> | null = null;
@@ -159,4 +163,41 @@ it('shows a deleted-text card its quote once, in the card, with no quote line ab
 	expect(card('a').querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 	// A card whose text only changed keeps the line that takes the reader to it.
 	expect(card('b').querySelector('[data-comment-jump]')?.textContent).toContain('Changed words');
+});
+
+it('typing in one reply re-reads no other card’s reply, on a list of 24 threads', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comments = Array.from({ length: 24 }, (_, index) => ({ id: `t${index}`, anchor: `t${index}`, author: 'you', text: `t${index}`, at: 'now', resolved: false, replies: [] }));
+	component = createClassComponent({ target: host, component: CommentList, props: { comments, documentOrder: true, draftScope: 'scope' } });
+	flushSync();
+	const reads = vi.spyOn(keptCommentDrafts, 'get');
+	try {
+		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="t0"] .ct-input')!;
+		// The first letter, each letter after it, and emptying the field.
+		for (const text of ['h', 'ha', 'hal', 'half', '']) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
+		const typed = replyDraftKey('scope', 't0');
+		expect(reads.mock.calls.filter(([key]) => key === typed).length).toBeGreaterThan(0);
+		expect(reads.mock.calls.filter(([key]) => key !== typed)).toEqual([]);
+	} finally { reads.mockRestore(); }
+});
+
+it('gives a margin card whose text is under the pointer the focused ring only: it stays a preview, reads nothing and holds no New mark', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const onViewed = vi.fn().mockResolvedValue(undefined);
+	const comment = { id: 's', anchor: 'line', author: 'agent', authorKind: 'agent' as const, text: 'A suggested wording.', at: 'now', resolved: false, newReplyIds: ['r2'],
+		replies: [{ id: 'r1', author: 'you', authorKind: 'user' as const, text: 'Why?', at: 'now' }, { id: 'r2', author: 'agent', authorKind: 'agent' as const, text: 'It reads better.', at: 'now' }] };
+	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment], documentOrder: true, restCards: true, scrollOnFocus: false, focusedId: null, ringId: 's', onViewed } });
+	flushSync();
+	const card = host.querySelector('.ct')!;
+	expect(card.classList.contains('ringed')).toBe(true);
+	expect(card.classList.contains('focused')).toBe(false);
+	expect(card.classList.contains('preview')).toBe(true);
+	expect(onViewed).not.toHaveBeenCalled();
+	// The pointer leaves: the ring goes and nothing was read.
+	component.$set({ ringId: null }); flushSync();
+	expect(card.classList.contains('ringed')).toBe(false);
+	expect(onViewed).not.toHaveBeenCalled();
+	// The pick, not the hover, opens the card.
+	component.$set({ focusedId: 's' }); flushSync();
+	expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(false);
 });

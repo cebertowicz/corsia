@@ -4,7 +4,7 @@
 	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+	import { clipChatSelection, chatTextPoint, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentHighlight, commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
@@ -68,9 +68,6 @@
 	$effect(() => { marginComposer = inMargin ? { id: 'composer', anchor: writingRect, body: marginBody } : null; });
 	$effect(() => { if (closing && inMargin) closed(); });
 
-	function bodyOf(row: Element | null): HTMLElement | null {
-		return messageBody(row);
-	}
 	function commentRect(commentId: string, messageId: string): DOMRect | null {
 		return commentLanding(document, messageId, { id: commentId })?.getBoundingClientRect() ?? null;
 	}
@@ -78,7 +75,7 @@
 	function writingRect(): DOMRect | null {
 		if (!draft) return null;
 		// The draft's highlight is not a control, so it carries no comment id: its wraps are the ones painted for it.
-		const body = bodyOf(document.querySelector(`[data-message-id="${CSS.escape(draft.messageId)}"]`));
+		const body = messageBody(document.querySelector(`[data-message-id="${CSS.escape(draft.messageId)}"]`));
 		const wraps = (body && painted.get(body)?.get('draft')?.wraps.filter(wrap => wrap.isConnected)) ?? [];
 		if (!wraps.length) return draft.rect;
 		const rects = wraps.map(wrap => wrap.getBoundingClientRect());
@@ -104,7 +101,7 @@
 		const element = start instanceof Element ? start : start.parentElement;
 		const row = element?.closest<HTMLElement>('.messages .message.assistant[data-message-id]');
 		const message = $messages.find(m => m.id === row?.dataset.messageId && m.thread_id === threadId);
-		const body = bodyOf(row ?? null);
+		const body = messageBody(row ?? null);
 		if (!body || !message || typeof message.seq !== 'number') { pick = null; return; }
 		const clipped = clipChatSelection(selection, body);
 		if (!clipped) { pick = null; return; }
@@ -118,16 +115,6 @@
 			left: Math.min(box.left, rect.left), right: Math.max(box.right, rect.right),
 		}), { top: Infinity, bottom: -Infinity, left: Infinity, right: -Infinity });
 		pick = { messageId: message.id, seq: message.seq, anchor: clipped.anchor, rect: new DOMRect(left, top, right - left, bottom - top) };
-	}
-	function point(body: HTMLElement, offset: number): [Node, number] {
-		const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-		let remaining = offset;
-		let last: Text | null = null;
-		for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-			if (remaining <= node.length) return [node, remaining];
-			remaining -= node.length; last = node;
-		}
-		return last ? [last, last.length] : [body, 0];
 	}
 	type PaintedMark = { from: number; to: number; quote: string; wraps: HTMLElement[]; labels: string[] };
 	const painted = new WeakMap<HTMLElement, Map<string, PaintedMark>>();
@@ -174,7 +161,7 @@
 			if (!byId.has(message.id)) byId.set(message.id, message);
 		}
 		for (const row of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
-			const body = bodyOf(row);
+			const body = messageBody(row);
 			// With no body to measure there is no surface for a thread under this message either: show nothing rather than what an earlier pass found.
 			if (!body) { recordUnplaced(row.dataset.messageId, [], []); continue; }
 			let previous = painted.get(body);
@@ -206,7 +193,7 @@
 				if (!current) {
 					const priorWraps = new Set(body.querySelectorAll<HTMLElement>('.cm-comment-wrap'));
 					const range = document.createRange();
-					range.setStart(...point(body, comment.from_off)); range.setEnd(...point(body, comment.to_off));
+					range.setStart(...chatTextPoint(body, comment.from_off)); range.setEnd(...chatTextPoint(body, comment.to_off));
 					keepingSelection(body, () => wrapRange(range, { from: comment.from_off, to: comment.to_off, id: comment.id, kind: comment.kind }, comment.id !== 'draft'));
 					const wraps = [...body.querySelectorAll<HTMLElement>('.cm-comment-wrap')].filter(wrap => !priorWraps.has(wrap));
 					current = { from: comment.from_off, to: comment.to_off, quote: comment.quote, wraps, labels: wraps.map(wrap => wrap.getAttribute('aria-label') ?? '') };
@@ -253,8 +240,9 @@
 		void tick().then(() => requestAnimationFrame(() => { queued = false; paint(); }));
 	}
 	$effect(() => { void draft; void $messages; void chatCommentDrafts.posting(); void marginComments; schedule(); });
-	// A picked card belongs to the transcript it was picked in, so changing thread drops the pick. Untracked: close() reads the open thread, and opening one must not close it.
-	$effect(() => { void threadId; untrack(() => { close(); selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
+	// Changing thread removes the open surface before its close callback can run, so discard that pending close along with the pick.
+	// Untracked: close() reads the open thread, and opening one must not close it.
+	$effect(() => { void threadId; untrack(() => { close(); afterClose = null; closing = false; selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
 	// The column coming up while a thread is open hands that thread to its card: picked there, with its unsent reply, so it is never open twice.
 	$effect(() => { if (marginComments) untrack(() => { if (viewing) { selectedCommentId = viewing.commentId; viewing = null; returnFocus = null; } }); });
 	onMount(() => {
@@ -290,10 +278,14 @@
 				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};
+		let pressedAt: Element | null = null; const press = (event: PointerEvent) => { pressedAt = event.target as Element | null; };
 		const click = (event: MouseEvent) => {
 			const root = messageRoot();
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
+			// A press that began on the transcript away from any highlight or card lets the picked card go, as Escape does. Read where the pointer went down: a click lands on what the press and its release share, the transcript when the card moved under a still pointer between them.
+			const from = event.detail > 0 ? pressedAt ?? target : target; pressedAt = null;
+			if (!hit && marginComments && selectedCommentId && !open && (document.getSelection()?.isCollapsed ?? true) && from && root?.contains(from) && !from.closest('.chat-margin, [data-comment-ids]')) { selectedCommentId = null; returnFocus = null; return; }
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
@@ -318,7 +310,7 @@
 				event.preventDefault(); (event.target as HTMLElement).click();
 			}
 		};
-		document.addEventListener('click', click);
+		document.addEventListener('pointerdown', press, true); document.addEventListener('click', click);
 		document.addEventListener('keydown', keydown);
 		document.addEventListener('chat-comment-reply', replyClick);
 		observer = new MutationObserver(records => {
@@ -326,7 +318,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('pointerdown', press, true); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	function replyInThread(note: string): Promise<void> {
 		// The row this thread opened on may have been replaced or removed while the reply was being typed.

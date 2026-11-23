@@ -414,6 +414,37 @@ async def test_unknown_caller_reads_no_row_from_an_unscoped_search(world):
     assert HISTORY_NOTICE in out
 
 
+async def test_search_finds_no_comment_words_of_a_fenced_thread(world):
+    """A person's chat-comment words are searched through their own index, behind the same wall."""
+    from infra.chat_comment_index import place_comments
+    from infra.db_fts import _init_comment_fts, _init_messages_fts
+
+    db = _db()
+    _init_messages_fts(db)
+    _init_comment_fts(db)
+    db.commit()
+    _sql(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,delivery_state,seq)"
+        " VALUES (?,?,'assistant','The release plan is ready.','{}','2026-11-01T00:00:00','delivered',1)",
+        (f"{T_SECRET}-m1", T_SECRET),
+    )
+    metadata = {"reply_context": {"comments": [
+        {"cid": "c2.1", "seq": 1, "quote": "release plan", "note": "pelican migration window"},
+    ]}}
+    _sql(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,delivery_state,seq)"
+        " VALUES (?,?,'user','',?,'2026-11-02T00:00:00','delivered',2)",
+        (f"{T_SECRET}-m2", T_SECRET, json.dumps(metadata)),
+    )
+    place_comments(db, T_SECRET, f"{T_SECRET}-m2", metadata, "2026-11-02T00:00:00")
+    db.commit()
+
+    # The same query from inside the project answers, so the empty result below is the wall.
+    assert "pelican migration window" in await _search("pelican", caller=CALLER_SECRET)
+    assert "pelican migration window" not in await _search("pelican", caller=CALLER_ALPHA)
+    assert "pelican migration window" not in await _search("pelican", caller="no-such-thread")
+
+
 async def test_unknown_caller_reads_no_checkpoint_by_search_list_or_id(world):
     """The checkpoint half fails closed the same way, by search, by list and by id."""
     cid = _checkpoint(T_BETA, narrative="We chose event routing.", continuity=["beta held the line"])

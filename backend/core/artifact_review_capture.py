@@ -110,7 +110,7 @@ async def preserve_on_shutdown(fork_id: str) -> None:
     """Leave request recovery to startup; shutdown must not wake the reviewer."""
 
 
-def provider_failure(harness: str, detail: str) -> None:
+def provider_failure(harness: str, detail: str, cause: str | None = None) -> None:
     """A review's provider error cannot count as its successful submission."""
     from core.fork_types import ProviderForkRejected
 

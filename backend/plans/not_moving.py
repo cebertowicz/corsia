@@ -36,7 +36,7 @@ OVERDUE_GRACE = timedelta(minutes=11)
 #: Overdue waits the note names, in plan order; the rest are counted. The agent
 #: settles a few a turn and the next note names the next, and three full ids
 #: with titles cut to ``close_next_bounds.TITLE_MAX_BYTES`` as emitted keep the
-#: names near 450 bytes of the 2 KiB checkpoint projection
+#: names near 300 bytes of the 2 KiB checkpoint projection
 #: (``status_context.CHECKPOINT_BYTES``), whatever script a title is in.
 NAMED_OVERDUE = 3
 

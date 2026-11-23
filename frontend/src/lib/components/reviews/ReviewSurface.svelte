@@ -36,7 +36,7 @@
 {#if narrow}
 	<AdaptiveDrawer fill within={anchor?.closest<HTMLElement>('.leaf-body') ?? null} ariaLabel="Document reviews" heading="Request review" doneLabel="Close" open={drawerOpen} onClose={close} onClosed={finishClose} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
 {:else}
-	<Popover fill {anchor} avoidRect={cleared} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
+	<Popover fill {anchor} bounds={anchor?.closest<HTMLElement>('.leaf-body') ?? null} avoidRect={cleared} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
 {/if}
 
 <style>

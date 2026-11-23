@@ -7,7 +7,11 @@
 	import { toasts } from '$lib/stores/toast';
 	import Avatar from './ui/Avatar.svelte';
 	import ReviewSurface from './reviews/ReviewSurface.svelte';
-	let { artifactId, viewingThreadId, targetKey }: { artifactId: string; viewingThreadId: string | null; targetKey: string | null } = $props();
+	let { artifactId, viewingThreadId, targetKey, restoreTo }: {
+		artifactId: string; viewingThreadId: string | null; targetKey: string | null;
+		/** Where focus goes when the control that opened the list is gone (the last request closed): the Details button. */
+		restoreTo?: () => HTMLElement | null | undefined;
+	} = $props();
 	const model = createDocumentReviewState();
 	const uniqueId = $props.id();
 	const id = `document-reviews-${uniqueId}`;
@@ -43,7 +47,7 @@
 	function show(trigger: HTMLElement) { anchor = trigger; open = true; }
 	function restoreFocus() {
 		// Capture the fallback before closing the last request removes this control's root.
-		const fallback = requestTrigger ?? root?.closest('.document-tools')?.querySelector<HTMLButtonElement>('.comment-status');
+		const fallback = requestTrigger ?? restoreTo?.() ?? undefined;
 		const trigger = anchor;
 		void tick().then(() => (trigger?.isConnected ? trigger : fallback)?.focus());
 	}

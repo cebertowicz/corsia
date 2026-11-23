@@ -8,7 +8,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { DocumentImageRequest } from '$lib/docViewerImages';
 import type { ServerComment } from '$lib/api/docs';
 import { connectionState } from '$lib/stores/connection';
-import { docComments } from '$lib/stores/docComments';
+import { commentLoads, docComments } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 
@@ -49,7 +49,7 @@ const PIN_ONE = root('pin-one', IMAGE, '![shot](shot.png)', ['pin-one-r1'], pin(
 const PIN_TWO = root('pin-two', IMAGE, '![shot](shot.png)', ['pin-two-r1', 'pin-two-r2'], pin(2));
 const BETA = root('beta', { from: BETA_AT, to: BETA_AT + 4 }, 'Beta', []);
 
-async function open(comments: ServerComment[], props: { onOpenImage?: (request: DocumentImageRequest) => void; covered?: boolean } = {}) {
+async function open(comments: ServerComment[], props: { onOpenImage?: (request: DocumentImageRequest) => void; covered?: boolean; target?: DocViewerTarget } = {}) {
 	api.fetchComments.mockResolvedValue({ comments, feedback: { open_count: comments.length, owner_label: null, undelivered_batches: [] } });
 	host = document.createElement('div');
 	document.body.appendChild(host);
@@ -85,6 +85,7 @@ afterEach(async () => {
 	host?.remove();
 	clearDraft(target);
 	docComments.set({});
+	commentLoads.set({});
 	focusedDocComment.set(null);
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
@@ -114,6 +115,28 @@ describe('the document jump control', () => {
 		control()!.click();
 		flushSync();
 		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
+	});
+
+	it('opens the Resolved view when the unread control points to a resolved thread', async () => {
+		await open([{ ...ALPHA, resolved: 1 }]);
+		await vi.waitFor(() => expect(control()).not.toBeNull());
+		control()!.click();
+		await vi.waitFor(() => expect(document.querySelector('[data-resolved-entry]')?.getAttribute('aria-pressed')).toBe('true'));
+		expect(document.querySelector('[data-resolved-column] [data-comment-id="alpha"]')).not.toBeNull();
+	});
+
+	it('opens Resolved when arriving on a resolved unread thread', async () => {
+		await open([{ ...ALPHA, resolved: 1 }], { target: { ...target, landOn: 'new-replies' } });
+		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
+		await vi.waitFor(() => expect(document.querySelector('[data-resolved-entry]')?.getAttribute('aria-pressed')).toBe('true'));
+		expect(document.querySelector('[data-resolved-column] [data-comment-id="alpha"]')).not.toBeNull();
+	});
+
+	it('opens Resolved when returning from an image to a resolved text thread', async () => {
+		await open([{ ...ALPHA, resolved: 1 }]);
+		(component as unknown as { jumpToUnread: (id: string) => void }).jumpToUnread('alpha');
+		await vi.waitFor(() => expect(document.querySelector('[data-resolved-entry]')?.getAttribute('aria-pressed')).toBe('true'));
+		expect(document.querySelector('[data-resolved-column] [data-comment-id="alpha"]')).not.toBeNull();
 	});
 
 	it('opens the image at its pin, then points at the next pin once that one is read', async () => {

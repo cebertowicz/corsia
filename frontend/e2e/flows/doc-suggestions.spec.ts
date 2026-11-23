@@ -31,7 +31,7 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	const refusedNote = "The text doesn't match this suggestion.";
 	await openComments();
 	for (const id of [loose, fine, stale]) await expect(accept(id)).toBeEnabled();
-	await expect(drawer.getByRole('button', { name: `Accept all from ${reviewerTitle}`, exact: true })).toBeEnabled();
+	await expect(drawer.getByRole('button', { name: 'Accept suggestions', exact: true })).toBeEnabled();
 
 	// The file changes on disk underneath the open canvas, the way another program edits it. The open
 	// document is live, so it neither refuses an HTTP save nor raises a banner: it takes the outside text
@@ -250,7 +250,7 @@ test('@flow:document-suggestions accept-all stays singular while its real reques
 	await setEvidenceViewport(page, testInfo);
 	const { accept, drawer, loose, openComments, reviewerTitle, row } = await openSuggestionFlow(page, request);
 	await openComments();
-	const acceptAll = drawer.getByRole('button', { name: new RegExp(`^(Accept all from ${reviewerTitle}|Accepting…)$`) });
+	const acceptAll = drawer.getByRole('button', { name: /^(Accept suggestions|Accepting…)$/ });
 	const delayed = await delayDecision(page, loose);
 	await acceptAll.click();
 	await delayed.arrived;
@@ -337,11 +337,11 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await inResolved(first.drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${first.fine}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 	const second = await openSuggestionFlow(page, request);
 	await second.openComments();
-	const acceptAll = second.drawer.getByRole('button', { name: `Accept all from ${second.reviewerTitle}`, exact: true });
+	const acceptAll = second.drawer.getByRole('button', { name: 'Accept suggestions', exact: true });
 	await failOneDecision(page, second.loose, 'accept');
 	await acceptAll.click();
 	await expect(second.drawer.getByRole('alert')).toHaveText('Synthetic accept failure');
-	await expect(acceptAll).toHaveText(`Accept all from ${second.reviewerTitle}`);
+	await expect(acceptAll).toHaveText('Accept suggestions');
 	await expect(second.drawer.getByText(/skipped$/)).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-failure', { failure: { target: second.drawer.getByRole('alert'), min: TEXT } });
 	await acceptAll.click();

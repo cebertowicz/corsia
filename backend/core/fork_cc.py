@@ -18,6 +18,7 @@ from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation
 from core.fork_runtime import ForkKind
 from core.fork_failures import ForkBinaryResolutionError
 from core.fork_types import (
+    ProviderForkRejected,
     ProviderForkRequest,
     ProviderForkResult,
 )
@@ -301,12 +302,21 @@ async def _invoke_fork(
             on_tool_executor=on_tool_executor,
             spawned_at=spawned_at,
         )
-        if output.truncated:
-            return fork_cc_result.result(output.stdout, truncated=True, kind=kind)
-        diagnostic = output.failure or fork_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
-        return fork_cc_result.result_after_process(
-            output.stdout, diagnostic, process.returncode, kind=kind, input_note=output.input_note,
-        )
+        from core.fork_cc_limit import record_fork_limit
+
+        # Recorded before the outcome is decided, so a held input finds its verdict.
+        unrecorded = await record_fork_limit(output.stdout, request.vendor_account_receipt)
+        try:
+            if output.truncated:
+                return fork_cc_result.result(output.stdout, truncated=True, kind=kind)
+            diagnostic = output.failure or fork_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
+            return fork_cc_result.result_after_process(
+                output.stdout, diagnostic, process.returncode, kind=kind, input_note=output.input_note,
+            )
+        except ProviderForkRejected as error:
+            if unrecorded is None or type(error) is not ProviderForkRejected:
+                raise
+            raise ProviderForkRejected(f"{error} ({unrecorded})") from error
     finally:
         if snapshot is not None:
             snapshot.unlink(missing_ok=True)

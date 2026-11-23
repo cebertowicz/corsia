@@ -1,7 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickedOpener, onSheetMoved, openerFocus, presence, scrollListToCard, writingField } from './docCommentDrawer';
+import { clickedOpener, listAnchorRect, onSheetMoved, openerFocus, presence, scrollListToCard, writingField } from './docCommentDrawer';
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+describe('listAnchorRect', () => {
+	it.each(['header', 'div'])('uses the marked %s row bottom and the entry width', (tag) => {
+		document.body.innerHTML = `<${tag} data-document-bar-row><span><button></button></span></${tag}>`;
+		const row = document.querySelector<HTMLElement>('[data-document-bar-row]')!;
+		const entry = row.querySelector('button')!;
+		row.getBoundingClientRect = () => new DOMRect(0, 0, 300, 60);
+		entry.getBoundingClientRect = () => new DOMRect(90, 12, 58, 36);
+		const anchor = listAnchorRect(entry)!;
+		expect([anchor.left, anchor.right, anchor.top, anchor.bottom]).toEqual([90, 148, 12, 60]);
+	});
+	it('retains an entry outside a marked row and handles a missing entry', () => {
+		const entry = document.createElement('button');
+		entry.getBoundingClientRect = () => new DOMRect(90, 12, 58, 36);
+		expect(listAnchorRect(entry)?.bottom).toBe(48);
+		expect(listAnchorRect(null)).toBeNull();
+	});
+});
 
 it('keeps a visible candidate in place while still scrolling ordinary or offscreen cards', () => {
 	document.body.innerHTML = '<section><div class="drawer-comments"><div><div data-comment-id="a"></div></div></div></section>';

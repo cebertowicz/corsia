@@ -16,13 +16,16 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+from api.comment_post_timing import COMMENT_TIMING_HEADER, log_comment_timing
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
+from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
@@ -53,10 +56,14 @@ router = APIRouter(prefix="/api", tags=["doc-comments"])
 
 
 @router.get("/artifacts/{artifact_id}/comments")
-async def list_comments(artifact_id: str, token: str):
+async def list_comments(
+    artifact_id: str, token: str,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
+):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "GET", artifact_id)
 
     def _list():
         db = get_db()
@@ -67,7 +74,8 @@ async def list_comments(artifact_id: str, token: str):
             comments, anchors_checked = anchored_threads(read_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
             feedback_state.annotate_thread_attention(db, user["id"], read_id, comments)
-            feedback = feedback_batches.user_feedback_for_document(db, read_id)
+            goes_to = comment_audience.annotate(db, artifact, comments)
+            feedback = {**feedback_batches.user_feedback_for_document(db, read_id), "goes_to": goes_to}
             return comments, anchors_checked, feedback
         finally:
             db.close()
@@ -79,11 +87,13 @@ async def list_comments(artifact_id: str, token: str):
 @router.post("/artifacts/{artifact_id}/comments")
 async def create_comment(
     artifact_id: str, token: str, body: CommentCreate,
+    timing: Annotated[str | None, Header(alias=COMMENT_TIMING_HEADER)] = None,
 ):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    log_comment_timing(timing, "POST", artifact_id)
     if body.replacement is None:
         text = body.body.strip()
         if not text:
@@ -221,13 +231,10 @@ def _person_writer(user: dict, saved: dict):
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
         _suggestion_author: str | None, accepted: tuple[str, ...],
     ) -> dict:
-        try:
-            receipt = await save_document_text(
-                DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-                expected_sha256=expected_sha256, accepted=accepted,
-            )
-        except DocumentSaveError as exc:
-            raise document_save_http_exception(exc) from exc
+        receipt = await save_document_text(
+            DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
+            expected_sha256=expected_sha256, accepted=accepted,
+        )
         saved.update(text=text, revision=receipt["revision"])
         return receipt
     return write
@@ -278,6 +285,8 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            return JSONResponse({"detail": exc.message, "kind": exc.kind}, status_code=404)
         raise document_save_http_exception(exc) from exc
     if body.all_from_author:
         return {**row, **saved}

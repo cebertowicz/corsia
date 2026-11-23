@@ -31,7 +31,7 @@ const texts: Record<string, string> = { notes: 'notes text', other: 'other text'
 const ownedBy = (name: string): DocOwnership => ({
 	owner: { kind: 'agent', id: 'a1', name, label: name },
 	supervisor: { id: 'a2', name: 'Research coordinator', source: 'picked', status: 'ready' },
-	can_act: true, multi_person: false, can_change: true, refusal: null, multi_person_refusal: null, scope: 'project',
+	can_act: true, multi_person: false, multi_person_refusal: null, scope: 'project',
 	choices: [{ id: 'a1', name, status: 'ready', responsibility: '' }, { id: 'a2', name: 'Research coordinator', status: 'ready', responsibility: '' }],
 });
 let component: ReturnType<typeof mount> | undefined;

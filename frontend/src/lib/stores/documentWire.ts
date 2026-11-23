@@ -1,5 +1,6 @@
 import type { FailureObservation } from './documentFailures';
 import type { EmailDraftInfo } from '$lib/emailDraft';
+import { sha256HexWithoutSubtle } from '$lib/sha256Software';
 
 export interface HeldDocument {
 	corsia_text: string;
@@ -73,8 +74,18 @@ export async function textDigest(text: string): Promise<string> {
 	return (await textSha256(text)).slice(0, 16);
 }
 
-/** Lowercase hex SHA-256 over UTF-8: the hash the server compares a document's text by. */
+const toHex = (digest: ArrayBuffer): string =>
+	Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+
+/** Lowercase hex SHA-256 over UTF-8: the hash the server compares a document's text by.
+ *
+ * WebCrypto is only offered in a secure context, so CORSIA reached over plain HTTP on a
+ * LAN address has no `crypto.subtle` at all; the software path is the same function over
+ * the same bytes. A digest WebCrypto itself refuses is left to the caller rather than
+ * silently recomputed. */
 export async function textSha256(text: string): Promise<string> {
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-	return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+	const bytes = new TextEncoder().encode(text);
+	const subtle = globalThis.crypto?.subtle;
+	if (!subtle) return sha256HexWithoutSubtle(bytes);
+	return toHex(await subtle.digest('SHA-256', bytes));
 }

@@ -1,8 +1,9 @@
 <script lang="ts">
-	// The comments pill, one for every review surface (RSR-4): the document's header and the image viewer's bar open the
-	// same drawer. It counts the comments shown by that surface's default list, never as a bare number: with their noun, or with
-	// the comment icon and number on a canvas up to 600px, or in an image bar while Send shows; while a reply is unread, up to 600px, the icon and "N unread" alone. It carries
-	// a dot while the person's comments and edits wait for Send. The host gives it its own button look through `class`.
+	// The image viewer's comments pill (RSR-4); the document's Comments button is drawn by DocViewerStatus and opens the same drawer.
+	// It counts the comments shown by the image's default list, never as a bare number: with their noun, or with the comment icon and
+	// number on a canvas up to 600px, or in an image bar while Send shows; while a reply is unread, up to 600px, the icon and "N unread"
+	// alone, the word the document's button uses. It carries a dot while the person's comments and edits wait for Send. The host gives
+	// it its own button look through `class`.
 	let { count, unread = 0, unsent = 0, loading = false, unknown = false, expanded = false, disabled = false, imageBadge = false, element = $bindable(), class: look = '', onOpen, ...data }: {
 		/** Comments (threads) in the default list. */
 		count: number;

@@ -14,7 +14,7 @@ for (const [width, height, mode, project] of [[1440, 900, 'default', 'chromium-d
   raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
   await open(page, doc, mode, theme);
   await page.setViewportSize({ width, height });
-  const bar = page.locator('.review-bar');
+  const bar = page.locator('[data-ask-card]');
   await bar.getByRole('button', { name: 'Send back', exact: true }).click();
   const note = bar.getByRole('textbox');
   for (let i = 0; i < 8; i++) {

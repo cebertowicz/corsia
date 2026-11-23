@@ -111,9 +111,14 @@ def _held_task(db, plan_id: str, node_id: str, place) -> str:
 def test_clearing_with_an_empty_slot_selects_the_first_task_in_plan_order(db, clearing):
     place, clear = CLEARINGS[clearing]
     plan = service.ensure_plan("thread", "owner", db=db)
-    first = add_task(db, plan.id, "First in plan order")
     target = add_task(db, plan.id, "Cleared later task")
     token = _held_task(db, plan.id, target.id, place)
+    # First in plan order only once the target holds its slot: an owner start
+    # never passes ready work ranked above it.
+    first = add_task(db, plan.id, "First in plan order")
+    plan_update(db, plan.id, "reorder", {
+        "node_id": first.id, "expected_revision": revision(db, first.id), "order_key": 0,
+    })
     service.transition_node(first.id, "active", db=db)
     assert open_attempt(db, first.id) is None
     assert open_attempt(db, target.id) is None

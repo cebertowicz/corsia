@@ -205,7 +205,7 @@
 	.scope-picker { position: relative; display: inline-flex; }
 	.picker-trigger {
 		display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-		padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs);
+		padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 		background: var(--bg-primary); color: var(--text-primary); cursor: pointer; font: inherit; font-size: var(--text-footnote);
 	}
 	.picker-trigger:hover { background: var(--bg-hover); }
@@ -215,7 +215,7 @@
 
 	.picker-search {
 		box-sizing: border-box; width: 100%; padding: 6px 8px; color: var(--text-primary);
-		background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); font-size: var(--text-footnote);
+		background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: var(--text-footnote);
 	}
 	.picker-list { max-height: min(320px, 45vh); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 	.picker-group { display: flex; flex-direction: column; gap: 1px; padding-top: 4px; }

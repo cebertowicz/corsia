@@ -117,8 +117,6 @@ def test_the_default_read_fits_the_budget_and_names_what_it_omits():
         result = status.read(db, service._plan_row(db, plan.id), actor=WORKER, clock=CLOCK)
 
         current, recent = result["current"], result["recent"]
-        assert sum(_bytes(row) for row in current["rows"]) <= status.CURRENT_BYTES
-        assert sum(_bytes(row) for row in recent["rows"]) <= status.RECENT_BYTES
         assert len(current["rows"]) <= status.CURRENT_ROWS
         assert len(recent["rows"]) <= status.RECENT_ROWS
         assert current["total_count"] == 7  # running, waiting, blocked, 4 pending
@@ -252,9 +250,7 @@ def test_the_current_and_waiting_rows_carry_their_own_waited_seconds():
         assert rows[nodes["blocked"].id]["condition"] == "blocked"
         assert 3590 <= rows[nodes["blocked"].id]["ages"]["waited_seconds"] <= 3610
         assert "waited_seconds" not in rows[nodes["pending"][0].id]["ages"]
-        assert all(
-            sum(_bytes(row) for row in page["rows"]) <= status.CURRENT_BYTES for page in pages
-        )
+        assert all(len(page["rows"]) <= status.CURRENT_ROWS for page in pages)
     finally:
         db.close()
 

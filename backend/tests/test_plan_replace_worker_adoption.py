@@ -60,7 +60,7 @@ def test_replace_tells_the_caller_to_stop_the_old_worker(db):
 
     assert reply["replaced_worker"] == "worker"
     assert "stranded_workers" not in reply
-    assert "delegate tools" in reply["notice"]
+    assert "delegate_stop" in reply["notice"]
 
 
 def test_replace_onto_an_empty_step_names_nobody(db):

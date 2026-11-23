@@ -3,6 +3,10 @@ import { flushSync, mount, unmount } from 'svelte';
 import CommentComposer from './CommentComposer.svelte';
 import { postDocumentComment, submitDocumentComment } from '$lib/docViewerOperations';
 import { toasts } from '$lib/stores/toast';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
+import { createMentionSelection } from './mentionSelection';
+import { get } from 'svelte/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -50,7 +54,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this draft');
 			expect(addComment).not.toHaveBeenCalled();
 		} finally {
@@ -70,7 +74,7 @@ describe('CommentComposer', () => {
 			flushSync();
 			host.querySelector<HTMLButtonElement>('.submit')!.click();
 
-			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith('Couldn’t post the comment. Your draft is kept. Try again.', 'error'));
 			expect(textarea.value).toBe('Keep this refused draft');
 			expect(post).toHaveBeenCalledOnce();
 		} finally {
@@ -103,5 +107,39 @@ describe('CommentComposer', () => {
 		expect(textarea.value).toBe('Kept to copy');
 		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
 		expect(onSubmit).not.toHaveBeenCalled();
+	});
+
+	it('says why a post failed as an error, and why the button is off as a note', () => {
+		// jsdom applies no stylesheet: the colour itself (the error token, as a reply's failure line) is proven in the browser by
+		// support/failureLook.ts in comment-failure-one-place and doc-reply-draft-kept.
+		render(async () => {}, { body: 'Kept', error: 'Couldn’t post the comment. Your draft is kept. Try again.', disabledReason: 'Select the text again' });
+		expect(host.querySelector('[role="alert"]')?.classList.contains('failed')).toBe(true);
+		expect(host.querySelector('.selection-reason:not([role="alert"])')?.classList.contains('failed')).toBe(false);
+	});
+
+	it('counts as the box that says why a post failed while it is mounted, under the key it is given', () => {
+		render(async () => {}, { shownKey: 'draft-key' });
+		host.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen('draft-key')).toBe(false);
+	});
+	it('says under the box, in the same line as a failure, that this device does not keep its draft, until a change is kept', () => {
+		user.set({ id: 'person-1', name: 'person-1' });
+		try {
+			render(async () => {}, { shownKey: 'draft-key', body: 'Kept', error: 'Couldn’t post the comment. Your draft is kept. Try again.' });
+			const huge = 'x'.repeat(200_001);
+			keptCommentDrafts.keep('draft-key', huge, createMentionSelection(huge));
+			flushSync();
+			const line = host.querySelector('[role="alert"]');
+			expect(line?.textContent).toBe('Couldn’t post the comment. Try again. Too long to keep on this device. Post it or copy it before you close CORSIA.');
+			expect(line?.classList.contains('failed')).toBe(true);
+			keptCommentDrafts.keep('draft-key', 'Kept', createMentionSelection('Kept'));
+			flushSync();
+			expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+		} finally {
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+			keptCommentDrafts.reset(); user.set(null); localStorage.clear();
+		}
 	});
 });

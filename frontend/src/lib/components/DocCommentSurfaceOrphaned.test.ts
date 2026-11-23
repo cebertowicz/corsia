@@ -20,6 +20,10 @@ import { canvasCommentHighlights, canvasCommentRange, commentsInDocumentOrder } 
 import { commentLoads, docComments, flushPositions, loadComments, remapComments, type DocComment } from '$lib/stores/docComments';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+
+// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+afterEach(() => keptCommentDrafts.reset());
 
 const ARTIFACT = 'artifact-1';
 const START = 'The quick brown fox.';
@@ -141,6 +145,18 @@ describe('a suggestion card and the text it replaces', () => {
 		const card = listed().find((comment) => comment.id === 'typed')!;
 		expect(canvasCommentHighlights(listed(), get(screenText), null, undefined).some((mark) => mark.id === 'typed')).toBe(true);
 		expect(canvasCommentRange(card, get(screenText))).toEqual({ from: 26, to: 29 });
+	});
+
+	it('disables accepting a missing document without claiming the quote is gone', async () => {
+		await serverAnswers(serverRow(false));
+		openCard();
+		mocks.flushDraft.mockResolvedValue(true);
+		mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('This document is deleted, so nothing changed.', 404, 'no_such_file'));
+		accept().click();
+		await vi.waitFor(() => expect(alert()).toBe('This document is deleted, so nothing changed.'));
+		expect(accept().disabled).toBe(true);
+		expect(document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
+		expect(document.body.querySelector('.ct-orphan')).toBeNull();
 	});
 
 	it('turns orphaned after a refused accept on a stale screen, with the reason and no reload', async () => {

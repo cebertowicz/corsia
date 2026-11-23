@@ -89,6 +89,13 @@ describe('canvas comment order and navigation', () => {
 
 describe('orphaned is the text on screen, plus a refused accept', () => {
 	it.each([
+		{ refusal: { message: 'Changed', kind: 'stale' as const }, kind: 'stale' },
+		{ refusal: { message: 'Missing', kind: 'no_such_file' as const }, kind: 'no_such_file' },
+	])('projects refusal kind $kind as a refused suggestion', ({ refusal, kind }) => {
+		const [row] = commentsInDocumentOrder([comment('card', 5, 'quote')], 'keep quote here', { card: refusal });
+		expect(row).toMatchObject({ orphaned: true, refusalKind: kind });
+	});
+	it.each([
 		{ server: false, onScreen: true, refused: false, orphaned: false },
 		{ server: false, onScreen: false, refused: false, orphaned: true },
 		// The server's answer from a load describes the saved file, which can lag unsaved typing: it is not an input.
@@ -99,7 +106,7 @@ describe('orphaned is the text on screen, plus a refused accept', () => {
 		{ server: false, onScreen: false, refused: true, orphaned: true },
 	])('server orphaned $server, quote on screen $onScreen, refused $refused: orphaned $orphaned', ({ server, onScreen, refused, orphaned }) => {
 		const text = onScreen ? 'keep quote here' : 'keep other here';
-		const rows = commentsInDocumentOrder([comment('card', 5, 'quote', { orphaned: server }), comment('located', 11, 'here')], text, refused ? { card: 'Refused' } : {});
+		const rows = commentsInDocumentOrder([comment('card', 5, 'quote', { orphaned: server }), comment('located', 11, 'here')], text, refused ? { card: { message: 'Refused', kind: 'stale' } } : {});
 		const row = rows.find((item) => item.id === 'card')!;
 		expect(row.orphaned).toBe(orphaned);
 		// The card, the mark, the jump and the order agree: an orphaned card has no place in the text.

@@ -87,7 +87,7 @@
 		width: calc(var(--space-8) + var(--space-3)); height: calc(var(--space-8) + var(--space-4)); padding: 0;
 		text-align: center; text-transform: uppercase; font-family: inherit;
 		font-size: var(--text-title1) !important; font-weight: var(--fw-semibold); color: var(--text-primary);
-		background: var(--glass-thin); border: 1px solid var(--border); border-radius: var(--radius-lg);
+		background: var(--glass-thin); border: 1px solid var(--border); border-radius: var(--radius-sm);
 		box-shadow: var(--glass-rim), var(--shadow-chip); caret-color: var(--accent-line);
 		transition: border-color var(--dur-tight);
 	}

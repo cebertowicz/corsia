@@ -75,13 +75,13 @@ for (const [width, height, project] of layouts) {
 				lost.release();
 
 				if (loss === 'request') {
-					await expect(reader.getByText("Couldn't post the comment — try again")).toBeVisible();
+					await expect(reader.getByText('Couldn’t post the comment. Your draft is kept. Try again.')).toBeVisible();
 					await expect(composer, 'a failed create keeps the draft').toHaveValue(draft);
 					expect(await storedWithBody(request, document, draft)).toEqual([]);
-					if (width <= 768) {
-						await reader.getByRole('status').filter({ hasText: "Couldn't post the comment" }).getByRole('button', { name: 'Dismiss' }).click();
-					}
-					await reader.getByRole('button', { name: 'Comment', exact: true }).last().click();
+					// The composer is on screen as the create fails, so it says why there and no toast says it again (or covers Comment).
+					await expect(reader.getByRole('status').filter({ hasText: /Couldn.t post the comment/ })).toHaveCount(0);
+					// The box that says why offers Retry in place of Comment.
+					await reader.getByRole('button', { name: 'Retry', exact: true }).last().click();
 				}
 				await expect.poll(() => storedWithBody(request, document, draft), { message: 'exactly one stored comment carries the draft' }).toHaveLength(1);
 				const [created] = await storedWithBody(request, document, draft);
@@ -89,7 +89,7 @@ for (const [width, height, project] of layouts) {
 					// The client reconciles by its own id; the real server's row is the one shown, never a second.
 					expect(lost.committed()).toBe(created);
 					expect(lost.clientId()).toBe(created);
-					await expect(reader.getByText("Couldn't post the comment — try again")).toHaveCount(0);
+					await expect(reader.getByText('Couldn’t post the comment. Your draft is kept. Try again.')).toHaveCount(0);
 				}
 				// Save opens the single thread; data-comment-id decorates only whole-document list cards.
 				await expect(reader.getByRole('region', { name: /^Comment by / }).filter({

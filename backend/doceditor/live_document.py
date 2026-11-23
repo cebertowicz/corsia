@@ -26,6 +26,9 @@ RESERVATION_LIMIT = 32
 class IdentityInUse(ValueError):
     """A comment id that another user's capture or an existing comment already holds."""
 
+    #: The ``doc_error`` kind a capture refused this way is answered with, so a retry can look for its stored comment.
+    kind = "identity_in_use"
+
 
 @dataclass
 class Reservation:

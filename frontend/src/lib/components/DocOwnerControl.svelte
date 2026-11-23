@@ -19,8 +19,19 @@
 	let pending = $state<{ role: Role; id: string; name: string } | null>(null);
 	let failed = $state<{ role: Role; message: string } | null>(null);
 	let group = $state<HTMLElement>();
-	// The picker opens below both items, so it never covers the other one when they wrap onto two lines.
+	let rowWidth = $state(0);
+	// The picker spans the Details content row, and opens below both items even when they wrap.
+	const rowRect = () => group?.parentElement?.getBoundingClientRect() ?? null;
 	const bothItems = () => group?.getBoundingClientRect() ?? null;
+	$effect(() => {
+		const row = group?.parentElement;
+		if (!row) return;
+		const measure = () => { rowWidth = row.getBoundingClientRect().width; };
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(row);
+		return () => observer.disconnect();
+	});
 
 	const ownerName = $derived(pending?.role === 'owner' ? pending.name : ownership.owner.label);
 	const ownerId = $derived(pending?.role === 'owner' ? pending.id : ownership.owner.kind === 'person' ? 'user' : ownership.owner.id);
@@ -34,8 +45,8 @@
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
 	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
-	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
-	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
+	// Every person may take ownership, including when another person is recorded.
+	const ownerChoices = $derived([{ id: 'user', name: 'You', responsibility: '', paused: false }, ...(ownership.multi_person_refusal ? [] : agents)]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
 
@@ -59,7 +70,8 @@
 		if (!role || saving || inert) return;
 		picker = null;
 		restoreFocus();
-		if (choice.id === (role === 'owner' ? ownerId : supervisorId)) return;
+		if (choice.id === (role === 'owner' ? ownerId : supervisorId)
+			&& !(role === 'owner' && choice.id === 'user' && !ownership.owner.recorded_viewer)) return;
 		const settle = onChange; // what the row on screen does with the answer is fixed when the pick starts
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;
@@ -98,20 +110,17 @@
 	{/if}
 </span>
 
-<Popover {anchor} avoidRect={bothItems} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width="min(320px, calc(100vw - 16px))" onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
+<Popover anchor={rowRect} avoidRect={bothItems} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width={`${rowWidth}px`} onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>
-			{#if !ownership.can_change}<p class="note">{ownership.refusal}</p>
-			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
-			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
+			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder={role === 'owner' ? 'Search' : 'Search agents'} autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
 			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
+			{#if role === 'owner' && ownership.multi_person_refusal}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if ownership.scope === null}<p class="note">Couldn’t load the agents for this document. Reload the page to try again.</p>
 			{:else if !options.length}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
-			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
-			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if role === 'supervisor' && supervisorPaused}<p class="note">This agent is paused. Comments wait until it resumes.</p>
 			{:else if role === 'supervisor' && !supervisorShown}<p class="note">No one gets comments on this document.</p>{/if}
 			{#if role === 'owner' && merged}<button type="button" class="link" onclick={pickSupervisor}>Choose a different supervisor</button>{/if}
@@ -137,7 +146,7 @@
 	@media (any-pointer: coarse) { .item { min-height: var(--touch-target); } }
 	.role-picker { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
 	label { color: var(--text-secondary); font-size: var(--text-footnote); }
-	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-lg); font: inherit; }
+	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; }
 	p { margin: 0; font-size: var(--text-footnote); }
 	p.note { color: var(--text-secondary); }
 	.link { align-self: flex-start; min-height: var(--touch-target); border: 0; padding: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); cursor: pointer; }

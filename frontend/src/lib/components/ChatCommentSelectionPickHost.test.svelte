@@ -7,14 +7,16 @@
 	let { onSendReply = () => Promise.resolve() }: { onSendReply?: (reply: ChatComment) => Promise<void> } = $props();
 	let selectedCommentId = $state<string | null>(null);
 	let margin = $state(true);
+	let threadId = $state('thread');
 	let marginComposer = $state<MarginComposer | null>(null);
 </script>
 
 <div data-picked={selectedCommentId ?? ''}></div>
 <div data-margin-composer={marginComposer?.id ?? ''}>{#if marginComposer}{@render marginComposer.body()}{/if}</div>
 <button data-toggle-margin onclick={() => { margin = !margin; }}>Toggle margin</button>
+<button data-toggle-thread onclick={() => { threadId = threadId === 'thread' ? 'other' : 'thread'; }}>Toggle thread</button>
 <ChatCommentSelection
-	threadId="thread"
+	{threadId}
 	marginComments={margin}
 	bind:selectedCommentId
 	bind:marginComposer

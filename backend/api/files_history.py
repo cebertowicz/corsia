@@ -17,7 +17,7 @@ from infra.guidance_git import GitFault
 # Each restore refusal's status and detail; the client words its line from ``kind``. Every refusal that
 # retrying cannot change carries its own kind, so the surface never offers a Retry that only repeats it.
 _REFUSED = {
-    "stale": (409, "The document changed after this version was opened. Nothing was restored."),
+    "stale": (409, "Couldn’t restore this version because this document has newer changes. Check the current document, then try again."),
     "history_off": (409, "This document has no recorded history. Nothing was restored."),
     "version_unavailable": (404, "This version is not in the document's history. Nothing was restored."),
     "failed": (503, "History could not be recorded. Nothing was restored."),
@@ -136,6 +136,10 @@ async def _restore_live(entry, text: str, reason: str, base_sha256: str, user_id
         result = await entry.lane.restore(Operation("replace", content=text, actor=actor, reason=reason, history_required=True), base_sha256)
         result.require_landed()
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            from api.files import document_save_http_exception
+
+            raise document_save_http_exception(exc) from exc
         return _refused(exc.kind if exc.kind in _REFUSED else "failed")
     except Exception:
         logger.opt(exception=True).warning("live restore of {} refused", entry.artifact_id)

@@ -56,11 +56,8 @@ def test_step3_ask_and_deferred_app(fresh_install, app_seed_facts, finish, web_r
         expected_next = "About you" if web_ready else "Web search"
         assert read_current_status(actor=actor, db=db)["next_step"]["title"] == expected_next
         if finish == "mark_done":
-            public.mutate(
-                plan_id, "start",
-                {"node_id": handoff["id"], "expected_revision": public.get_node(handoff["id"], db=db).revision},
-                actor=actor, provenance="test", mutation_id="start-handoff", db=db,
-            )
+            # The steps ranked above the hand-off are still ready, so plan order
+            # refuses a start; settling finished work with evidence is not a start.
             outcome = {"evidence": "Hand-off complete"}
         else:
             outcome = {"reason": "Not now"}

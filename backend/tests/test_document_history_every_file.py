@@ -357,6 +357,45 @@ async def test_a_save_past_a_busy_history_lock_is_written_and_kept_by_the_next(h
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['busy', 'fault'])
+async def test_conditional_save_uses_unrecorded_fallback_without_history_lock(history_scope, monkeypatch, failure):
+    from infra import guidance_git
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    path = placed(workspace / 'notes' / 'conditional.md', 'Original.\n')
+    await save_document_text(DocumentSave(path=str(path), text='Original.\n', thread_id=thread_id), user_id)
+    before = head(workspace)
+    error = guidance_git._LockBusy('busy') if failure == 'busy' else guidance_git.GitFault('lock unavailable')
+    monkeypatch.setattr(guidance_git, '_acquire', lambda *_a, **_k: (_ for _ in ()).throw(error))
+    saved = await save_document_text(DocumentSave(path=str(path), text='Saved.\n', thread_id=thread_id), user_id, expected_sha256=sha('Original.\n'))
+    assert path.read_text() == 'Saved.\n'
+    assert saved['version'] is None and head(workspace) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['busy', 'fault'])
+async def test_live_conditional_write_uses_unrecorded_fallback(history_scope, tmp_path, monkeypatch, failure):
+    from doceditor.live_lane import Operation, WriteActor
+    from infra import guidance_git
+    from tests.test_document_live_lane import insert
+
+    workspace, thread_id = history_scope
+    path = placed(workspace / 'notes' / 'live-conditional.md', 'Original.\n')
+    live, lane = await live_lane(path, tmp_path)
+    insert(live, 'typing', 'Unsaved ')
+    error = guidance_git._LockBusy('busy') if failure == 'busy' else guidance_git.GitFault('lock unavailable')
+    monkeypatch.setattr(guidance_git, '_acquire', lambda *_a, **_k: (_ for _ in ()).throw(error))
+    try:
+        result = await lane.submit(Operation('flush', actor=WriteActor(thread_id, None)))
+        result.require_landed()
+        assert path.read_text() == live.text == 'Unsaved Original.\n'
+    finally:
+        await lane.close()
+        live.close()
+
+
+@pytest.mark.asyncio
 async def test_a_save_held_in_its_owner_report_never_holds_another_documents_save(history_scope, monkeypatch):
     from doceditor import document_save
 

@@ -276,7 +276,8 @@ describe('Header title on the Measurement page', () => {
 
 describe('Header title overflow', () => {
 	it('lets a long scope title shrink and ellipsize before it displaces fixed controls', () => {
-		const start = headerSource.indexOf('.h-scope {');
+		// The base rule (a document's name is drawn by HeaderDocTitle, which cuts it in the middle).
+		const start = headerSource.indexOf('\t.h-scope {');
 		const rule = headerSource.slice(start, headerSource.indexOf('}', start));
 		expect(rule).toContain('min-width: 0;');
 		expect(rule).toContain('max-width: 24rem;');
