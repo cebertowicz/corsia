@@ -152,7 +152,7 @@ async def test_touch_field_boxes_contain_no_page_content_on_real_chrome():
                 <iframe style='position:absolute;left:10px;top:100px;width:200px;height:80px' srcdoc='<input type=tel>'></iframe>`;
                 document.getElementById('host').attachShadow({mode:'open'}).innerHTML='<input type=search>';""")
         await asyncio.sleep(0.2)
-        fields = await browser_text_fields.text_fields(endpoint, 800, 600)
+        fields = (await browser_text_fields.probe_fields(endpoint, 800, 600))[0]
         assert {field['kind'] for field in fields} == {'email', 'search', 'tel'}
         assert all(set(field) == {'x', 'y', 'width', 'height', 'kind'} for field in fields)
         assert all(value not in json.dumps(fields) for value in ('private-value', 'private-name', 'private-id', 'private-placeholder', 'private-label'))
@@ -169,7 +169,7 @@ async def test_touch_field_boxes_contain_no_page_content_on_real_chrome():
         assert (await browser_text_fields.probe_fields(endpoint, 800, 600))[1] is None
     with _sites('form') as url, _chrome(url) as endpoint:
         await asyncio.sleep(0.5)
-        fields = await browser_text_fields.text_fields(endpoint, 800, 600)
+        fields = (await browser_text_fields.probe_fields(endpoint, 800, 600))[0]
         assert {field['kind'] for field in fields} == {'text', 'password'}
         assert next(field for field in fields if field['kind'] == 'password')['y'] >= 60
 

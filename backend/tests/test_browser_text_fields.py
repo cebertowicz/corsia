@@ -192,3 +192,131 @@ async def test_a_failed_read_reports_nothing_and_keeps_the_page_state(monkeypatc
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
+
+@pytest.mark.asyncio
+async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
+    """A rich-text editor's centre lands on the child the caret sits in, so its box still counts."""
+    calls: list[tuple[str, object]] = []
+
+    class FakeCdp:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            calls.append((method, params.get('nodeId')))
+            if method == 'DOM.getDocument':
+                return {'root': {'nodeId': 1}}
+            if method == 'DOM.performSearch':
+                return {'searchId': 'search', 'resultCount': int('contenteditable' in params['query'])}
+            if method == 'DOM.getSearchResults':
+                return {'nodeIds': [7]}
+            if method == 'DOM.discardSearchResults':
+                return {}
+            if method == 'DOM.getBoxModel':
+                return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
+            if method == 'DOM.getNodeForLocation':
+                return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
+            if method == 'DOM.querySelectorAll':
+                assert params == {'nodeId': 7, 'selector': '*'}
+                return {'nodeIds': [8, 9]}
+            raise AssertionError(method)
+
+    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    async def no_frames(*_args):
+        return []
+    monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
+    fields, focused = await browser_text_fields.probe_fields('test', 200, 100)
+    assert fields == [{'x': 10, 'y': 20, 'width': 100, 'height': 20, 'kind': 'editable'}]
+    assert focused is None
+    assert [call for call in calls if call[0] == 'DOM.querySelectorAll'] == [('DOM.querySelectorAll', 7)]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_field_hit_on_another_node_is_still_dropped(monkeypatch):
+    """The exact-node rule holds for every kind but an editable, so a covered field gets no box."""
+    calls: list[str] = []
+
+    class FakeCdp:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            calls.append(method)
+            if method == 'DOM.getDocument':
+                return {'root': {'nodeId': 1}}
+            if method == 'DOM.performSearch':
+                return {'searchId': 'search', 'resultCount': int('type=email' in params['query'])}
+            if method == 'DOM.getSearchResults':
+                return {'nodeIds': [7]}
+            if method == 'DOM.discardSearchResults':
+                return {}
+            if method == 'DOM.getBoxModel':
+                return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
+            if method == 'DOM.getNodeForLocation':
+                return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
+            raise AssertionError(method)
+
+    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    async def no_frames(*_args):
+        return []
+    monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
+    fields, _focused = await browser_text_fields.probe_fields('test', 200, 100)
+    assert fields == []
+    assert 'DOM.querySelectorAll' not in calls
+
+
+@pytest.mark.asyncio
+async def test_one_read_probes_at_most_the_bounded_number_of_nodes(monkeypatch):
+    """A page of thousands of fields costs one bounded read, not thousands of serial round trips."""
+    limit = browser_text_fields._PROBED_NODE_LIMIT
+    matched = list(range(100, 100 + limit + 20))
+    calls: list[str] = []
+    probed: list[int] = []
+
+    class FakeCdp:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            calls.append(method)
+            if method == 'DOM.getDocument':
+                return {'root': {'nodeId': 1}}
+            if method == 'DOM.performSearch':
+                return {'searchId': 'search', 'resultCount': len(matched) if 'type=email' in params['query'] else 0}
+            if method == 'DOM.getSearchResults':
+                return {'nodeIds': matched}
+            if method == 'DOM.discardSearchResults':
+                return {}
+            if method == 'DOM.getBoxModel':
+                probed.append(params['nodeId'])
+                return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
+            if method == 'DOM.getNodeForLocation':
+                return {'nodeId': probed[-1], 'backendNodeId': probed[-1], 'frameId': 'frame'}
+            raise AssertionError(method)
+
+    monkeypatch.setattr(browser_text_fields, 'CdpClient', FakeCdp)
+    async def no_frames(*_args):
+        return []
+    monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
+    fields, _focused = await browser_text_fields.probe_fields('test', 200, 100)
+    assert len(fields) == limit
+    assert calls.count('DOM.getBoxModel') == limit
+    assert calls.count('DOM.getNodeForLocation') == limit
