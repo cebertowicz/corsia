@@ -310,6 +310,37 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pane", [False, True], ids=["pane-closed", "pane-open"])
+async def test_select_by_ref_and_visible_label_shows_the_option_chosen_in_the_next_snapshot(monkeypatch, pane):
+    """F1: the agent names a dropdown by its snapshot ref and an option by the label it reads there; the next
+    snapshot shows that option chosen, with or without the person watching."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"verbs-label-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-label", instance_key=uuid4().hex)
+    monkeypatch.setattr(browser_session_commands, "emit_product_event", lambda *_args, **_kwargs: None)
+    if pane:
+        browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"), show_window=pane,
+                                        session="new")).startswith("Error:")
+            before = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            ref = re.search(r"combobox \[[^\]]*ref=(e\d+)\]: Ay", before)
+            assert ref and re.search(r'option "Ay" \[selected', before), before
+            assert await owner.run(thread_id, ("select", f"@{ref[1]}", "Bee"), session="existing") == ("ok" if pane else '{"selected": ["Bee"]}')
+            after = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            assert re.search(r"combobox \[[^\]]*\]: Bee", after), after
+            assert re.search(r'option "Bee" \[selected', after) and not re.search(r'option "Ay" \[selected', after), after
+            assert await cdp_value(owner, thread_id, "document.querySelector('#choice').value") == "b"
+    finally:
+        if pane:
+            browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document(tmp_path, monkeypatch):
     """F1: going back to an address with a #fragment can't restore what was typed, once the session held a page."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":
