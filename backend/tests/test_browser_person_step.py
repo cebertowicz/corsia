@@ -73,6 +73,8 @@ async def plan(isolated_db, monkeypatch):
     step = lifecycle._steps.get(THREAD)
     reprobe = step.reprobe if step is not None else None
     browser_control.pane_disconnected(THREAD, "pane")
+    # A step the agent's own probe opened keeps re-probing with no pane; end it as a closed session would.
+    lifecycle.discard_session(THREAD)
     if reprobe is not None:
         await asyncio.gather(reprobe, return_exceptions=True)
     for registry in (lifecycle._steps, lifecycle._answers, lifecycle._sessions,
