@@ -86,6 +86,34 @@ export function drawShifted(context: CanvasRenderingContext2D, source: HTMLImage
 	context.restore();
 }
 
+export type PanePlace = { bounds: DOMRect; scale: number; left: number; top: number };
+
+/** Draws the page's part of the frame into the pane's canvas at its placement; false when there is no 2D context. */
+export function drawFrame(canvas: HTMLCanvasElement, image: HTMLImageElement, width: number, height: number, place: PanePlace, shift: PanePoint): boolean {
+	const { bounds, scale, left, top } = place;
+	const backingWidth = Math.round(bounds.width * devicePixelRatio);
+	const backingHeight = Math.round(bounds.height * devicePixelRatio);
+	// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
+	if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+		canvas.width = backingWidth;
+		canvas.height = backingHeight;
+	}
+	const context = canvas.getContext('2d');
+	if (!context) return false;
+	// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
+	// store so no strip of the earlier picture survives beside the new one.
+	// Predicted scroll also moves the visible rectangle, so it needs the same clear.
+	context.setTransform(1, 0, 0, 1, 0, 0);
+	context.clearRect(0, 0, canvas.width, canvas.height);
+	context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+	// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
+	// top-left corner with blank space beside it, so draw only the page's part of the frame.
+	// Frame pixels per page pixel; above 1 on a high-density pane.
+	const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
+	drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, shift, scale);
+	return true;
+}
+
 /**
  * Predicts the viewport's scroll position until a screencast frame confirms its real offset.
  * A prediction no frame confirms within SCROLL_CONFIRM_MS (an inner scroller or the page took the wheel) is
