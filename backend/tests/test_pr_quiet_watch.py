@@ -708,6 +708,104 @@ async def test_reads_are_conditional_and_a_304_reuses_the_cached_body(gh, monkey
     assert await watch._get(not_modified, "repos/o/r/pulls/13") == first
 
 
+# -- A PR GitHub cannot find is not asked every sweep, and is not lost --
+
+
+@pytest.mark.asyncio
+async def test_a_pr_github_cannot_find_is_asked_again_on_a_doubling_wait(gh, wakes, parked,
+                                                                         monkeypatch):
+    _webhook()
+    _owner(30)  # GitHub answers 404 for it
+
+    asked = []
+    for minutes in (0, 5, 10, 15, 20, 25, 30, 35, 65, 70):
+        gh.reads.clear()
+        await _sweep(gh, T0 + timedelta(minutes=minutes), monkeypatch)
+        if gh.reads:
+            assert gh.reads == ["repos/o/r/pulls/30"]
+            asked.append(minutes)
+        status = watch.quiet_watch_status()
+        assert (status["state"], status["reason"]) == ("enabled", None), minutes
+
+    assert asked == [0, 10, 30, 70], "waits of two, four, then eight sweep intervals"
+    assert get_setting("pr_quiet:o/r#30") == {
+        "unfound": 4, "unfound_until": (T0 + timedelta(minutes=70 + 80)).isoformat(),
+    }
+    assert wakes.await_count == 0
+
+    watch._etags.clear()  # a restart keeps the wait: it lives in the settings row
+    gh.pr(30)  # the PR becomes readable while its wait still runs
+    gh.runs(H)
+    gh.reads.clear()
+    await _sweep(gh, T0 + timedelta(minutes=145), monkeypatch)
+    assert gh.reads == []
+    await _sweep(gh, T0 + timedelta(minutes=150), monkeypatch)
+    assert gh.reads[0] == "repos/o/r/pulls/30"
+    row = get_setting("pr_quiet:o/r#30")
+    assert row["head"] == H and "unfound" not in row and "unfound_until" not in row
+
+
+@pytest.mark.asyncio
+async def test_a_pr_that_comes_back_is_swept_again_and_not_woken_twice(gh, wakes, parked,
+                                                                       monkeypatch):
+    _webhook()
+    _owner(31)
+    gh.pr(31)
+    gh.runs(H)  # CI never starts
+    await _sweep(gh, T0, monkeypatch)
+    await _sweep(gh, T0 + timedelta(minutes=31), monkeypatch)
+    assert _reasons(wakes) == [reasons.CI_NOT_STARTED]
+    fired = get_setting("pr_quiet:o/r#31")["fired"]
+
+    pull = gh.bodies.pop("repos/o/r/pulls/31")  # its repository goes out of reach
+    await _sweep(gh, T0 + timedelta(minutes=35), monkeypatch)
+    row = get_setting("pr_quiet:o/r#31")
+    assert (row["unfound"], row["head"], row["fired"]) == (1, H, fired)
+
+    gh.bodies["repos/o/r/pulls/31"] = pull  # and comes back on the same head
+    for minutes in (45, 50):
+        gh.reads.clear()
+        await _sweep(gh, T0 + timedelta(minutes=minutes), monkeypatch)
+        assert gh.reads[0] == "repos/o/r/pulls/31", "read every sweep again"
+    row = get_setting("pr_quiet:o/r#31")
+    assert "unfound" not in row and "unfound_until" not in row
+    assert row["fired"] == fired
+    assert _reasons(wakes) == [reasons.CI_NOT_STARTED], "no second wake for the same head"
+
+
+@pytest.mark.asyncio
+async def test_an_unfound_pr_leaves_a_readable_one_swept_every_time(gh, wakes, parked, monkeypatch):
+    _webhook()
+    _owner(32)  # GitHub answers 404 for it
+    owner = _owner(33)
+    gh.pr(33)
+    gh.runs(H, run("failure"))  # finished at T0, and no event reached the log
+
+    for minutes in (9, 11, 16, 21):
+        await _sweep(gh, T0 + timedelta(minutes=minutes), monkeypatch)
+        assert watch.quiet_watch_status()["state"] == "enabled"
+
+    assert gh.reads.count("repos/o/r/pulls/33") == 4
+    assert gh.reads.count("repos/o/r/pulls/32") == 2, "asked at 9 and, its wait over, at 21"
+    assert _reasons(wakes) == [reasons.CI_EVENT_MISSING]
+    assert wakes.await_args.args[0] == owner
+
+
+@pytest.mark.asyncio
+async def test_a_pr_read_that_fails_another_way_is_asked_next_sweep(gh, wakes, parked, monkeypatch):
+    _webhook()
+    _owner(34)
+    gh.pr(34)
+    gh.failures["repos/o/r/pulls/34"] = "502 Bad Gateway"
+
+    await _sweep(gh, T0, monkeypatch)
+    status = watch.quiet_watch_status()
+    assert (status["state"], status["reason"]) == ("degraded", "http_502")
+    assert get_setting("pr_quiet:o/r#34") is None
+    await _sweep(gh, T0 + timedelta(minutes=5), monkeypatch)
+    assert gh.reads == ["repos/o/r/pulls/34"] * 2
+
+
 # -- Test 9: one health report per 6 h, however many PRs --
 
 
