@@ -157,8 +157,13 @@ _probe_locks: dict[str, asyncio.Lock] = {}
 
 
 async def step_event(thread_id: str, event: Event, *,
-                     observer: browser_pane_state.Observer | None = None) -> Decision:
-    """Decide under the transition lock; notify the caller once before applying lifecycle effects."""
+                     observer: browser_pane_state.Observer | None = None,
+                     page: browser_pane_state.PaneProbe | None = None) -> Decision:
+    """Decide under the transition lock; notify the caller once before applying lifecycle effects.
+
+    ``page`` is the agent's own probe of the page this event observed; a step it opens keeps it to
+    re-probe its page while no pane can (AR6).
+    """
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
         step = _steps.get(thread_id)
         current_state = StepState(step, _answers.get(thread_id, {}), session=_sessions.get(thread_id))
@@ -195,15 +200,15 @@ async def step_event(thread_id: str, event: Event, *,
             if decision.open_kind == "password":
                 opened: BrowserStep = PasswordStep(result.visit, result.host, result.target,
                                                   session=event.session, occurrence=decision.occurrence,
-                                                  nodes=result.visible_nodes)
+                                                  nodes=result.visible_nodes, page=page)
             else:
                 opened = PersonStep(result.visit, result.host, result.target, instruction=event.instruction,
-                                    session=event.session, occurrence=decision.occurrence)
+                                    session=event.session, occurrence=decision.occurrence, page=page)
             await _open_step(thread_id, opened)
         if (current := _steps.get(thread_id)) is not None:
             if decision.step_nodes is not None and isinstance(current, PasswordStep):
                 current.nodes = decision.step_nodes
-            if decision.monitor is False:
+            if decision.monitor is False and current.page is None:
                 _stop_reprobe(current)
             elif decision.monitor is True and (current.reprobe is None or current.reprobe.done()):
                 _start_reprobe(thread_id, current)
@@ -240,8 +245,14 @@ def person_input(thread_id: str) -> None:
         step.input_seen.set()
 
 
+def _page_sources(thread_id: str, step: BrowserStep) -> list[browser_pane_state.PaneProbe]:
+    """Every connected pane's probe; with none, the agent's own probe of the step's page, so a sign-in the
+    person finishes with no pane open still ends its step."""
+    return browser_pane_state.pane_probes(thread_id) or ([step.page] if step.page is not None else [])
+
+
 def _start_reprobe(thread_id: str, step: BrowserStep) -> None:
-    if browser_pane_state.pane_probes(thread_id) and (step.reprobe is None or step.reprobe.done()):
+    if _page_sources(thread_id, step) and (step.reprobe is None or step.reprobe.done()):
         step.reprobe = asyncio.create_task(_reprobe_loop(thread_id, step))
 
 
@@ -273,7 +284,7 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
 
 async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
     """Deliver only this step's own target observations through the same transition."""
-    probes = browser_pane_state.pane_probes(thread_id)
+    probes = _page_sources(thread_id, step)
     current = _steps.get(thread_id)
     if current is None or current is not step or not probes:
         return False

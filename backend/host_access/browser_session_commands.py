@@ -185,7 +185,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if guarded:
         access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
-            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
+            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
+            current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit = access.note, access.filled_field_visit
     if not pane:
         # Only a command the guard let through puts the agent in the page.
@@ -278,6 +279,7 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(
         thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
+        current_session=partial(owner.session_identity, thread_id),
     )
     # Shared only once the step exists, so a refused declaration leaves the session as it was.
     await _share(runtime, thread_id, reveal=True)

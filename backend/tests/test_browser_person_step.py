@@ -124,6 +124,24 @@ async def test_a_person_step_stays_open_on_its_visit_settles_on_a_new_one_and_wa
 
 
 @pytest.mark.asyncio
+async def test_a_person_step_with_no_pane_open_settles_on_a_new_visit_and_wakes_the_task(plan):
+    """The person finishes the page in the browser window itself; the agent's own probe ends the step."""
+    page, db = Page(), plan["db"]
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
+    [step] = _steps(db)
+    reprobe = lifecycle._steps[THREAD].reprobe
+    assert reprobe is not None
+    page.show("visit-two")
+    await asyncio.wait_for(reprobe, 1)
+    assert row(db, step["id"])["state"] == "accepted" and page.pane_probes == 0
+    mine = plan["task"]
+    wake = db.execute("SELECT content FROM messages WHERE id=?",
+                      (f"plan-wake:work_selected:{mine.id}:{row(db, mine.id)['revision']}",)).fetchone()
+    assert "Read the page is now your current task" in wake["content"]
+    assert plan["events"] == ["person_step_opened", "person_step_settled"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["password", "person"])
 async def test_a_reprobe_on_another_target_settles_neither_kind(plan, kind):
     """Only the agent's own probe, or one of the step's target, can end a step; a popup comes back."""
