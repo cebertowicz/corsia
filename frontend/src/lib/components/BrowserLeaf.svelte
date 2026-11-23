@@ -3,10 +3,11 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { drawFrame, FrameScrollShift } from '$lib/browserPane';
 	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyMessage, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneTouch } from '$lib/browserPaneTouch';
 	import { BrowserPaneStats } from '$lib/browserPaneStats';
 	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
 	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
@@ -57,7 +58,9 @@
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const stats = new BrowserPaneStats(() => socket?.bufferedAmount ?? 0);
 	const send = (message: object) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(stats.stamp(message))); };
+	const touchInput = new BrowserPaneTouch(send, event => sendMouse(event, true));
 	const paneInput = new BrowserPaneInput(send, delta => {
+		touchInput.close();
 		frameScroll.shift(delta);
 		redraw();
 	});
@@ -67,6 +70,7 @@
 		clipboard?.dispose();
 		paneErrors.resetUndo();
 		paneInput.reset();
+		touchInput.clear();
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
 	}
@@ -129,7 +133,10 @@
 		}
 		if (paneErrors.handle(message)) return;
 		if (clipboardReply(message, clipboard)) return;
+		if (message.type === 'text_fields') { touchInput.setFields(message.fields); return; }
+		if (message.type === 'text_field_blurred') { touchInput.close(); return; }
 		if (message.type === 'browser_target_changed') {
+			touchInput.clear();
 			lastAppearance = '';
 			sendAppearance();
 			return;
@@ -205,28 +212,7 @@
 
 	function redraw() {
 		if (!canvas || !image || !width || !height) return;
-		const { bounds, scale, left, top } = placement();
-		const backingWidth = Math.round(bounds.width * devicePixelRatio);
-		const backingHeight = Math.round(bounds.height * devicePixelRatio);
-		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
-		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-			canvas.width = backingWidth;
-			canvas.height = backingHeight;
-		}
-		const context = canvas.getContext('2d');
-		if (!context) return;
-		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
-		// store so no strip of the earlier picture survives beside the new one.
-		// Predicted scroll also moves the visible rectangle, so it needs the same clear.
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, canvas.width, canvas.height);
-		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
-		// top-left corner with blank space beside it, so draw only the page's part of the frame.
-		// Frame pixels per page pixel; above 1 on a high-density pane.
-		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
-		drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, frameScroll.translation, scale);
-		placeMarker();
+		if (drawFrame(canvas, image, width, height, placement(), frameScroll.translation)) placeMarker();
 	}
 
 	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
@@ -234,7 +220,8 @@
 		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
 		const bounds = canvas.getBoundingClientRect();
 		if (bounds.width < 1 || bounds.height < 1) return;
-		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme) };
+		const touch = window.matchMedia?.('(pointer: coarse)').matches === true;
+		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme), ...(touch ? { touch: true } : {}) };
 		const key = JSON.stringify(appearance);
 		if (key === lastAppearance) return;
 		lastAppearance = key;
@@ -245,16 +232,16 @@
 		return paneCoordinates(event, canvas, width, height, clamp);
 	}
 
-	function sendMouse(event: PointerEvent) {
+	function sendMouse(event: PointerEvent, overlay = false) {
 		if (socket?.readyState !== WebSocket.OPEN || !width || !height) return;
 		if (!event.isPrimary) return;
 		const point = coordinates(event, event.type !== 'pointerdown' && (event.type !== 'pointermove' || activePointer !== null));
 		if (!point) return;
-		if (event.pointerType === 'touch') event.preventDefault();
+		if (event.pointerType === 'touch' && !overlay) event.preventDefault();
 		if (event.type === 'pointerdown') {
-			canvas.focus();
+			if (!overlay) canvas.focus();
 			activePointer = event.pointerId;
-			canvas.setPointerCapture(event.pointerId);
+			if (!overlay) canvas.setPointerCapture(event.pointerId);
 			// Move before pressing because Chrome may use the last cursor position for a press.
 			paneInput.press(event, point);
 		} else if (event.type === 'pointermove') {
@@ -262,8 +249,9 @@
 			if (event.pointerType === 'touch' && activePointer !== null) agent.clearMark();
 			paneInput.move(event, point, placement().scale);
 		} else {
-			paneInput.release(event, point, event.type === 'pointercancel');
-			if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+			const tapped = paneInput.release(event, point, event.type === 'pointercancel');
+			if (tapped && event.pointerType === 'touch' && !overlay) touchInput.tap(point, canvas, placement());
+			if (!overlay && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 			activePointer = null;
 		}
 	}

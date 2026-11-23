@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
+import phoneTyping from '../../../../backend/tests/fixtures/browser_phone_typing.json';
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { emit } from '$lib/ws/events';
 import { get } from 'svelte/store';
@@ -119,6 +120,65 @@ describe('BrowserLeaf drawing', () => {
 		drawing = [];
 		socket.receive({ type: 'frame', metadata: { deviceWidth: 50, deviceHeight: 50 }, data: '' });
 		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,0,100,100']));
+	});
+});
+
+describe('BrowserLeaf touch typing', () => {
+	it('focuses a field for touch typing and forwards its text without retaining it', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'email' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		flushSync();
+		const input = host.querySelector<HTMLInputElement>('input[data-pane-field]');
+		expect(input).not.toBeNull();
+		expect(document.activeElement).toBe(input);
+		expect(input?.inputMode).toBe('email');
+		input!.value = 'x';
+		input!.dispatchEvent(new Event('input', { bubbles: true }));
+		expect(input!.value).toBe('');
+		input!.value = 'yz';
+		input!.dispatchEvent(new Event('input', { bubbles: true }));
+		expect(input!.value).toBe('');
+		const typing = socket.sent.filter(message => message.type === 'input_keyboard' || message.type === 'clipboard_paste');
+		expect(typing.map(({ id: _id, ...message }) => message)).toEqual(phoneTyping);
+		canvas.dispatchEvent(pointer('pointerdown', 90, 65, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 90, 65, 'touch'));
+		expect(document.activeElement).not.toBe(input);
+	});
+	it('closes the keyboard target when the page moves focus away or the person drags', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'password' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		const input = host.querySelector<HTMLInputElement>('[data-pane-field]')!;
+		expect([input.type, input.autocomplete]).toEqual(['text', 'off']);
+		input.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		input.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		expect(document.activeElement).toBe(input);
+		expect(socket.sent.filter(message => message.type === 'input_mouse' && message.eventType === 'mousePressed')).toHaveLength(2);
+		input.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		window.dispatchEvent(pointer('pointermove', 35, 50, 'touch'));
+		window.dispatchEvent(pointer('pointerup', 35, 50, 'touch'));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		socket.receive({ type: 'text_field_blurred' });
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointermove', 35, 50, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 35, 50, 'touch'));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+	});
+	it('does not create a keyboard target on a mouse click', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'password' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
 	});
 });
 

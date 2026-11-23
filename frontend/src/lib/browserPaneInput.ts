@@ -84,22 +84,25 @@ export class BrowserPaneInput {
 		this.onScroll({ x: delta.deltaX, y: delta.deltaY });
 	}
 
-	release(event: PointerPosition, point: PanePoint, cancelled = false): void {
+	release(event: PointerPosition, point: PanePoint, cancelled = false): boolean {
 		this.flush();
 		const touch = this.touch;
 		if (event.pointerType === 'touch') {
-			if (!touch || event.pointerId !== touch.start.pointerId) return;
-			if (!touch.dragging && !cancelled) {
+			if (!touch || event.pointerId !== touch.start.pointerId) return false;
+			const tapped = !touch.dragging && !cancelled;
+			if (tapped) {
 				this.pressedButton = 'left';
 				this.mouse('mouseMoved', touch.point);
 				this.mouse('mousePressed', touch.point);
 				this.mouse('mouseReleased', point);
 			}
 			this.touch = null;
+			return tapped;
 		} else if (this.pressed === event.pointerId) {
 			this.mouse('mouseReleased', point);
 			this.pressed = null;
 		}
+		return false;
 	}
 
 

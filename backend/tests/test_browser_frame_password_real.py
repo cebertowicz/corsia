@@ -15,11 +15,13 @@ import urllib.request
 from contextlib import contextmanager
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_cdp_frames
+from host_access import browser_cdp, browser_control, browser_dom_write, browser_cdp_frames, browser_text_fields, browser_pane
+from ws import browser_clipboard
 from host_access.browser_session_state import BrowserSessionError
 from tests.test_browser_person_step import THREAD, _steps, plan  # noqa: F401 - plan is a fixture
 
@@ -49,7 +51,8 @@ def _page(frame_origin: str, shape: str) -> str:
 @contextmanager
 def _sites(shape: str):
     """The page on 127.0.0.1 and its sign-in frame on localhost: two sites, so Chrome runs the frame out of process."""
-    pages: dict[str, bytes] = {"/frame.html": _frame(shape).encode()}
+    pages: dict[str, bytes] = {"/frame.html": _frame(shape).encode(),
+                               "/phone.html": b'<form><input type=password style="position:absolute;left:10px;top:10px;width:120px;height:24px"><button>Sign in</button></form>'}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -135,6 +138,78 @@ def _resolver(endpoint: str, box: dict):
     async def resolve(_ref: str) -> int | None:
         return await _locate(endpoint, box)
     return resolve
+
+
+@pytest.mark.asyncio
+async def test_touch_field_boxes_contain_no_page_content_on_real_chrome():
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+                <input type=email value='private-value' name='private-name' id='private-id'
+                       placeholder='private-placeholder' aria-label='private-label'
+                       style='position:absolute;left:10px;top:10px;width:120px;height:24px'>
+                <div id=host style='position:absolute;left:10px;top:50px'></div>
+                <iframe style='position:absolute;left:10px;top:100px;width:200px;height:80px' srcdoc='<input type=tel>'></iframe>`;
+                document.getElementById('host').attachShadow({mode:'open'}).innerHTML='<input type=search>';""")
+        await asyncio.sleep(0.2)
+        fields = (await browser_text_fields.probe_fields(endpoint, 800, 600))[0]
+        assert {field['kind'] for field in fields} == {'email', 'search', 'tel'}
+        assert all(set(field) == {'x', 'y', 'width', 'height', 'kind'} for field in fields)
+        assert all(value not in json.dumps(fields) for value in ('private-value', 'private-name', 'private-id', 'private-placeholder', 'private-label'))
+        for event_type in ('mouseMoved', 'mousePressed', 'mouseReleased'):
+            await browser_cdp.dispatch_mouse_event(endpoint, {'eventType': event_type, 'x': 20, 'y': 20,
+                                                             'button': 'none' if event_type == 'mouseMoved' else 'left',
+                                                             'clickCount': 0 if event_type == 'mouseMoved' else 1})
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            focused = await cdp.call('Runtime.evaluate', expression="[document.activeElement.id, document.activeElement.matches(':focus'), document.hasFocus()]", returnByValue=True)
+            assert focused['result']['value'] == ['private-id', True, True]
+        assert (await browser_text_fields.probe_fields(endpoint, 800, 600))[1] is not None
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression='document.activeElement.blur()')
+        assert (await browser_text_fields.probe_fields(endpoint, 800, 600))[1] is None
+    with _sites('form') as url, _chrome(url) as endpoint:
+        await asyncio.sleep(0.5)
+        fields = (await browser_text_fields.probe_fields(endpoint, 800, 600))[0]
+        assert {field['kind'] for field in fields} == {'text', 'password'}
+        assert next(field for field in fields if field['kind'] == 'password')['y'] >= 60
+
+
+@pytest.mark.asyncio
+async def test_phone_typed_password_is_guarded_from_agent_reads(plan, monkeypatch):  # noqa: F811
+    with _sites('form') as url, _chrome(url.replace('/page.html', '/phone.html')) as endpoint:
+        probe = partial(browser_cdp.page_password_probe, endpoint)
+        browser_control.pane_connected(THREAD, 'pane')
+        browser_pane._page_endpoints[(THREAD, 'pane')] = endpoint
+        monkeypatch.setattr(browser_clipboard, 'emit_product_event', lambda *_args, **_kwargs: None)
+        try:
+            async def password_ready():
+                found = await probe({})
+                return found if found.visible_nodes else None
+            await _until(password_ready)
+            with pytest.raises(BrowserSessionError, match='asks for a password'):
+                await browser_control.require_page_access(THREAD, probe, ('snapshot',))
+            # The touch gesture forwards this same move/press/release sequence as a mouse.
+            for event_type in ('mouseMoved', 'mousePressed', 'mouseReleased'):
+                await browser_pane.mouse_event(THREAD, {'eventType': event_type, 'x': 20, 'y': 20,
+                                                       'button': 'none' if event_type == 'mouseMoved' else 'left',
+                                                       'clickCount': 0 if event_type == 'mouseMoved' else 1}, 'pane')
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                focused = await cdp.call('Runtime.evaluate', expression='document.activeElement.type', returnByValue=True)
+                assert focused['result']['value'] == 'password'
+            sequence = json.loads((Path(__file__).parent / 'fixtures/browser_phone_typing.json').read_text())
+            for message in sequence:
+                if message['type'] == 'input_keyboard':
+                    await browser_pane.key_event(THREAD, message, 'pane')
+                else:
+                    await browser_clipboard.handle(THREAD, 'pane', message, lambda _message: None)
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                length = await cdp.call('Runtime.evaluate', expression='document.activeElement.value.length', returnByValue=True)
+                assert length['result']['value'] == 3
+            for command in (('get', 'value', 'input'), ('eval', 'document.body.innerHTML'), ('snapshot',)):
+                with pytest.raises(BrowserSessionError, match='asks for a password'):
+                    await browser_control.require_page_access(THREAD, probe, command)
+        finally:
+            browser_pane.clear_page_endpoint(THREAD, 'pane')
 
 
 @pytest.mark.asyncio
