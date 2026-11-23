@@ -34,6 +34,9 @@ async def test_pane_navigation_cannot_overtake_guarded_command(monkeypatch):
         def _model_result(self, _result, _record):
             return "ok"
 
+        def session_identity(self, _thread_id):
+            return runtime.record.session
+
     async def endpoint(_command):
         return "ws://page"
 
