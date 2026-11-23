@@ -10,9 +10,10 @@ from typing import Any
 from host_access import browser_cdp, browser_control
 from host_access.browser_session_state import BrowserSessionError
 
-# The page's own request on a reload, held so a form's POST is never sent again.
+# Every frame's document request on a reload, held so a form's POST is never sent again.
 _DOCUMENT_REQUESTS = [{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}]
 RELOAD_SECONDS = 10.0
+STOP_SECONDS = 5.0
 COMMIT_READS = 50
 COMMIT_INTERVAL = 0.1
 
@@ -44,45 +45,74 @@ async def reopen_fresh(endpoint: str) -> None:
 async def _reload_sending_no_form(cdp: browser_cdp.CdpClient) -> None:
     """Reload the current entry in place, never sending a form again; raise unless a new document commits.
 
-    A reload repeats the request that made the entry, a form's POST included (Chrome's Page.reload asks no
-    one), so the page's own request is held: a GET goes on, anything else is stopped and Chrome shows its
-    blocked page in place of the entry. Other frames' document requests go on untouched.
+    A reload repeats the requests that made the entry and its frames, a form's POST included (Chrome's
+    Page.reload asks no one), so every document request is held until the page has loaded: a GET goes on,
+    anything else is stopped and Chrome shows its blocked page in that frame's place. The load event comes only
+    after every frame has loaded, so no frame's request is replayed unheld.
     """
-    frame = (await cdp.call("Page.getFrameTree")).get("frameTree", {}).get("frame", {})
-    main, before = frame.get("id"), frame.get("loaderId")
+    before = (await cdp.call("Page.getFrameTree")).get("frameTree", {}).get("frame", {}).get("loaderId")
+    await cdp.call("Page.enable")
     await cdp.call("Fetch.enable", patterns=_DOCUMENT_REQUESTS)
+    loaded = False
     try:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + RELOAD_SECONDS
         reload_id = await cdp.send("Page.reload")
-        acknowledged = decided = False
-        while not (acknowledged and decided):
+        acknowledged = False
+        while not (acknowledged and loaded):
             try:
                 message = json.loads(await asyncio.wait_for(cdp.socket.recv(), max(0.0, deadline - loop.time())))
-            except TimeoutError as exc:
-                raise BrowserSessionError("This page couldn't be loaded again") from exc
+            except TimeoutError:
+                # Still loading: stopped below; whether a new document committed decides the result.
+                break
             if message.get("id") == reload_id:
                 if "error" in message:
                     raise BrowserSessionError("This page couldn't be loaded again")
                 acknowledged = True
-            elif message.get("method") == "Fetch.requestPaused":
-                params = message.get("params") or {}
-                request_id = params.get("requestId")
-                if params.get("frameId") == main and not decided:
-                    decided = True
-                    if (params.get("request") or {}).get("method") != "GET":
-                        await cdp.send("Fetch.failRequest", requestId=request_id, errorReason="BlockedByClient")
-                        continue
-                await cdp.send("Fetch.continueRequest", requestId=request_id)
+            elif message.get("method") == "Page.loadEventFired":
+                loaded = True
+            else:
+                await _decide(cdp, message, get_goes_on=True)
     finally:
-        # Disabling lets any request still held go on, so no frame is left waiting.
-        await cdp.call("Fetch.disable")
+        await _release(cdp, loaded)
     for _ in range(COMMIT_READS):
         frame = (await cdp.call("Page.getFrameTree")).get("frameTree", {}).get("frame", {})
         if frame.get("loaderId") and frame.get("loaderId") != before:
             return
         await asyncio.sleep(COMMIT_INTERVAL)
     raise BrowserSessionError("This page couldn't be loaded again")
+
+
+async def _decide(cdp: browser_cdp.CdpClient, message: dict, *, get_goes_on: bool) -> None:
+    """A held document request goes on only if it is a GET and ``get_goes_on``; anything else is stopped."""
+    if message.get("method") != "Fetch.requestPaused":
+        return
+    params = message.get("params") or {}
+    if get_goes_on and (params.get("request") or {}).get("method") == "GET":
+        await cdp.send("Fetch.continueRequest", requestId=params.get("requestId"))
+    else:
+        await cdp.send("Fetch.failRequest", requestId=params.get("requestId"), errorReason="BlockedByClient")
+
+
+async def _release(cdp: browser_cdp.CdpClient, loaded: bool) -> None:
+    """Stop holding document requests without letting a held one go out unchecked.
+
+    Fetch.disable lets every request still held go on. Before the page has loaded, one may be held whose pause
+    is still unread, so the load is stopped first and every request paused up to Chrome's answer is stopped too
+    (Chrome sends events before the answer to a later command). A stopped load starts no new request. If Chrome
+    doesn't answer, this raises with requests still held rather than letting them go.
+    """
+    if not loaded:
+        stop_id = await cdp.send("Page.stopLoading")
+        while True:
+            try:
+                message = json.loads(await asyncio.wait_for(cdp.socket.recv(), STOP_SECONDS))
+            except TimeoutError as exc:
+                raise BrowserSessionError("This page couldn't be loaded again") from exc
+            if message.get("id") == stop_id:
+                break
+            await _decide(cdp, message, get_goes_on=False)
+    await cdp.call("Fetch.disable")
 
 
 async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:

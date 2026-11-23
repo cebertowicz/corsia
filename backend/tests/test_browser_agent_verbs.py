@@ -211,12 +211,21 @@ class _Socket:
         return json.dumps(self.messages.pop(0))
 
 
-class _ReloadCdp:
-    """A #fragment entry reloaded in place: scripted pauses on the page's requests, and loader ids read after."""
+RELOAD_ID, STOP_ID = 7, 8
+LOADED = {"method": "Page.loadEventFired", "params": {}}
 
-    def __init__(self, messages, loaders):
+
+class _ReloadCdp:
+    """A #fragment entry reloaded in place: scripted messages, loader ids read after, and one ordered log.
+
+    ``on_stop`` is what Chrome sends after Page.stopLoading and before answering it, such as a pause it had not
+    yet delivered; ``answers_stop`` False leaves the stop unanswered.
+    """
+
+    def __init__(self, messages, loaders, *, on_stop=(), answers_stop=True):
         self.socket, self.loaders = _Socket(messages), list(loaders)
-        self.calls, self.sent = [], []
+        self.on_stop, self.answers_stop = list(on_stop), answers_stop
+        self.log = []
 
     async def __aenter__(self):
         return self
@@ -225,7 +234,7 @@ class _ReloadCdp:
         return False
 
     async def call(self, method, **params):
-        self.calls.append(method)
+        self.log.append((method, None))
         if method == "Page.getNavigationHistory":
             return {"currentIndex": 0, "entries": [{"url": "https://bank.test/#/pay"}]}
         if method == "Page.getFrameTree":
@@ -233,48 +242,100 @@ class _ReloadCdp:
         return {}
 
     async def send(self, method, **params):
-        self.sent.append((method, params.get("requestId")))
-        return 7 if method == "Page.reload" else 100 + len(self.sent)
+        self.log.append((method, params.get("requestId")))
+        if method == "Page.stopLoading":
+            self.socket.messages += self.on_stop + ([{"id": STOP_ID, "result": {}}] if self.answers_stop else [])
+            return STOP_ID
+        return RELOAD_ID if method == "Page.reload" else 100 + len(self.log)
+
+    def decisions(self):
+        return [entry for entry in self.log if entry[0] in {"Fetch.continueRequest", "Fetch.failRequest"}]
+
+    def before(self, first, second):
+        """Whether ``first`` is logged, and before any ``second``."""
+        methods = [entry[0] for entry in self.log]
+        return first in methods and (second not in methods or methods.index(first) < methods.index(second))
 
 
 def _paused(request_id, frame, method="GET"):
     return {"method": "Fetch.requestPaused", "params": {"requestId": request_id, "frameId": frame, "request": {"method": method}}}
 
 
-async def test_a_fragment_entry_is_reloaded_in_place_and_its_get_goes_on(monkeypatch):
-    """No navigation (that would add an entry); the page's own GET and another frame's request go on."""
-    cdp = _ReloadCdp([_paused("child", "frame-2"), {"id": 7, "result": {}}, _paused("page", "main")], ["L1", "L2"])
-    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
-    await browser_history.reopen_fresh("ws://page")
-    assert "Page.navigate" not in cdp.calls and cdp.calls[-2:] == ["Fetch.disable", "Page.getFrameTree"]
-    assert cdp.sent == [("Page.reload", None), ("Fetch.continueRequest", "child"), ("Fetch.continueRequest", "page")]
-
-
-async def test_a_fragment_entry_a_form_posted_is_never_posted_again(monkeypatch):
-    """Chrome's reload repeats a form's POST without asking; it is stopped and Chrome's blocked page stands."""
-    cdp = _ReloadCdp([_paused("page", "main", "POST"), {"id": 7, "result": {}}], ["L1", "L2"])
-    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
-    await browser_history.reopen_fresh("ws://page")
-    assert cdp.sent == [("Page.reload", None), ("Fetch.failRequest", "page")] and "Fetch.disable" in cdp.calls
-
-
-@pytest.mark.parametrize(("messages", "loaders"), [
-    # The reload is refused.
-    ([{"id": 7, "error": {"code": -32000}}], ["L1"]),
-    # The page's request never comes.
-    ([{"id": 7, "result": {}}], ["L1"]),
-    # It goes on, but no new document commits.
-    ([{"id": 7, "result": {}}, _paused("page", "main")], ["L1"]),
-])
-async def test_a_fragment_entry_that_does_not_reload_raises_and_lets_requests_go(monkeypatch, messages, loaders):
-    cdp = _ReloadCdp(messages, loaders)
+def _reloading(monkeypatch, cdp):
     monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
     monkeypatch.setattr(browser_history, "RELOAD_SECONDS", 0.05)
+    monkeypatch.setattr(browser_history, "STOP_SECONDS", 0.05)
     monkeypatch.setattr(browser_history, "COMMIT_READS", 2)
     monkeypatch.setattr(browser_history, "COMMIT_INTERVAL", 0)
+    return cdp
+
+
+async def test_a_fragment_entry_is_reloaded_in_place_and_its_gets_go_on(monkeypatch):
+    """No navigation (that would add an entry); every frame's GET goes on, held until the page has loaded."""
+    cdp = _reloading(monkeypatch, _ReloadCdp(
+        [_paused("page", "main"), {"id": RELOAD_ID, "result": {}}, _paused("child", "frame-2"), LOADED], ["L1", "L2"]))
+    await browser_history.reopen_fresh("ws://page")
+    assert ("Page.navigate", None) not in cdp.log and ("Page.stopLoading", None) not in cdp.log
+    assert cdp.decisions() == [("Fetch.continueRequest", "page"), ("Fetch.continueRequest", "child")]
+    assert cdp.before("Fetch.continueRequest", "Fetch.disable")
+
+
+@pytest.mark.parametrize("posted", ["page", "child"])
+async def test_a_fragment_entry_a_form_posted_is_never_posted_again_in_any_frame(monkeypatch, posted):
+    """Chrome's reload repeats a form's POST, a frame's included, without asking; each is stopped."""
+    cdp = _reloading(monkeypatch, _ReloadCdp([
+        _paused("page", "main", "POST" if posted == "page" else "GET"), {"id": RELOAD_ID, "result": {}},
+        _paused("child", "frame-2", "POST" if posted == "child" else "GET"), LOADED], ["L1", "L2"]))
+    await browser_history.reopen_fresh("ws://page")
+    assert ("Fetch.failRequest", posted) in cdp.decisions()
+    assert ("Fetch.continueRequest", posted) not in cdp.decisions()
+    assert ("Fetch.disable", None) in cdp.log
+
+
+@pytest.mark.parametrize("messages", [
+    # The deadline passes with the page's pause still undelivered.
+    [{"id": RELOAD_ID, "result": {}}],
+    # The reload is refused before the pause is read.
+    [{"id": RELOAD_ID, "error": {"code": -32000}}],
+], ids=["deadline", "reload-error"])
+async def test_a_post_held_when_the_reload_fails_is_stopped_before_holding_ends(monkeypatch, messages):
+    """Fetch.disable lets held requests go, so the load is stopped and a late pause refused before it."""
+    cdp = _reloading(monkeypatch, _ReloadCdp(messages, ["L1"], on_stop=[_paused("page", "main", "POST")]))
     with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
         await browser_history.reopen_fresh("ws://page")
-    assert "Fetch.disable" in cdp.calls
+    assert cdp.decisions() == [("Fetch.failRequest", "page")]
+    assert cdp.before("Page.stopLoading", "Fetch.failRequest") and cdp.before("Fetch.failRequest", "Fetch.disable")
+
+
+async def test_once_the_reload_fails_even_a_late_get_is_stopped(monkeypatch):
+    cdp = _reloading(monkeypatch, _ReloadCdp([{"id": RELOAD_ID, "result": {}}], ["L1"], on_stop=[_paused("page", "main")]))
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await browser_history.reopen_fresh("ws://page")
+    assert cdp.decisions() == [("Fetch.failRequest", "page")]
+
+
+async def test_a_stop_chrome_never_answers_keeps_requests_held(monkeypatch):
+    """Holding never ends unchecked: with no answer to the stop, Fetch.disable is not sent."""
+    cdp = _reloading(monkeypatch, _ReloadCdp([{"id": RELOAD_ID, "result": {}}], ["L1"], answers_stop=False))
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await browser_history.reopen_fresh("ws://page")
+    assert ("Fetch.disable", None) not in cdp.log and not cdp.decisions()
+
+
+async def test_a_page_still_loading_at_the_deadline_is_stopped_and_counts_if_a_new_document_committed(monkeypatch):
+    """A slow frame keeps the load event away; the new document stands, and the frame's late request is stopped."""
+    cdp = _reloading(monkeypatch, _ReloadCdp(
+        [_paused("page", "main"), {"id": RELOAD_ID, "result": {}}], ["L1", "L2"], on_stop=[_paused("child", "frame-2")]))
+    await browser_history.reopen_fresh("ws://page")
+    assert cdp.decisions() == [("Fetch.continueRequest", "page"), ("Fetch.failRequest", "child")]
+    assert cdp.before("Page.stopLoading", "Fetch.disable")
+
+
+async def test_a_fragment_entry_where_no_new_document_commits_raises(monkeypatch):
+    cdp = _reloading(monkeypatch, _ReloadCdp([{"id": RELOAD_ID, "result": {}}, _paused("page", "main"), LOADED], ["L1"]))
+    with pytest.raises(BrowserSessionError, match="couldn't be loaded again"):
+        await browser_history.reopen_fresh("ws://page")
+    assert ("Fetch.disable", None) in cdp.log
 
 
 @pytest.mark.parametrize("owner_key", ["owner", None])
