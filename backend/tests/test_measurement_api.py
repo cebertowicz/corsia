@@ -1422,7 +1422,7 @@ async def test_first_try_misses_a_revision_of_a_sent_back_task(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_db):
+async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_db, monkeypatch):
     """A period the product could not observe is not served at all: each series starts at its first observed period.
 
     It is never drawn as zero, and no leading row stands for earlier time (weeks grain here; the Days grain has its own test).
@@ -1437,6 +1437,9 @@ async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_
     from api.measurement import measurement_series
     from infra.database import get_db
 
+    # The weeks range is the last 12 periods before now, so the seeded dates only fall inside
+    # it on a fixed clock. 2026-10-08 puts 08-17, 08-24 and 09-21 all inside that range.
+    _pin_series_now(monkeypatch, 2026, 10, 8, 12, 0)
     before, after = "2026-08-24", "2026-09-21"
     db = get_db()
     try:
