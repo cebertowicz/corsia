@@ -88,6 +88,19 @@ window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# Controls under a full-page layer that lets clicks through (pointer-events: none), as toast and
+# overlay containers do, and one control under a layer that really covers it.
+LAYER = """<!doctype html><title>Layer fixture</title>
+<nav><button id=nav>Menu</button></nav>
+<main><a id=card href="#card">Open the card</a></main>
+<div style="position:relative"><button id=blocked>Blocked</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="position:fixed;inset:0;z-index:10;pointer-events:none"></div>
+<script>
+window.clicks = {nav: 0, card: 0, blocked: 0};
+for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', event => {
+  event.preventDefault(); window.clicks[id]++; });
+</script>"""
+
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -121,7 +134,8 @@ def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
-             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
+             "/layer.html": LAYER.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -428,6 +442,34 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through(monkeypatch):
+    """With the pane open, a click by ref reaches a control under a pointer-events: none layer,
+    as the person's click would, and a control under a layer that takes clicks is still refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-layer-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-layer", instance_key=uuid4().hex)
+    monkeypatch.setattr(browser_session_commands, "emit_product_event", lambda *_args, **_kwargs: None)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/layer.html"), show_window=True, session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            refs = {name: re.search(rf'"{label}" \[ref=(e\d+)\]', snapshot) for name, label in
+                    (("nav", "Menu"), ("card", "Open the card"), ("blocked", "Blocked"))}
+            assert all(refs.values()), snapshot
+            assert await owner.run(thread_id, ("click", f"@{refs['nav'][1]}"), session="existing") == "ok"
+            assert await owner.run(thread_id, ("click", f"@{refs['card'][1]}"), session="existing") == "ok"
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", f"@{refs['blocked'][1]}"), session="existing")
+            assert await cdp_value(owner, thread_id, "window.clicks") == {"nav": 1, "card": 1, "blocked": 0}
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
