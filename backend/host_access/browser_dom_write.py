@@ -162,8 +162,10 @@ async def _locate(run: RunCommand, page: CdpClient, selector: str) -> tuple[Loca
         # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
         await run(("scrollintoview", selector), 10)
         deferred = True
-        walk = await moved(walk)
+        # The page's own box settles first; then the frame owners are read until they hold still too, since a
+        # target measured from its frame's corner doesn't move while the frame does.
         node, reason, box = await _settled_hit(run, page, selector, await _box(run, selector))
+        walk = await moved(walk)
     if framed:
         return None, reason, framed_cover
     return None, reason, await _cover(page, await _box(run, selector))
