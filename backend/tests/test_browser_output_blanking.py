@@ -209,7 +209,7 @@ async def test_a_saved_value_shown_on_a_real_page_comes_back_blanked_in_a_snapsh
 
 
 def _markup_value() -> str:
-    return f"Ab1&\"<>' {uuid.uuid4().hex}"
+    return f"Ab1&\"<>'\u00a0{uuid.uuid4().hex}"
 
 
 # Every way a browser writes a value into markup: Chrome 152's text and attribute serialisation (checked on a real
@@ -221,7 +221,7 @@ MARKUP_FORMS = {
     "xml_attribute": lambda value: (value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                                    .replace('"', "&quot;")),
     "attribute_before_lt_gt": lambda value: (value.replace("&", "&amp;").replace('"', "&quot;")
-                                            .replace(" ", "&nbsp;")),
+                                            .replace("\u00a0", "&nbsp;")),
 }
 
 
@@ -275,12 +275,12 @@ async def test_a_saved_value_in_a_real_pages_markup_comes_back_blanked_from_ever
 # and the form shown. A snapshot drops U+00A0 from page text; page text collapses a run of spaces and trims spaces
 # at either end; a snapshot -i line's end is trimmed of U+00A0 too.
 WHITESPACE_FORMS = {
-    "nbsp_dropped": ("Ab1 cd{m}", "Ab1cd{m}"),
+    "nbsp_dropped": ("Ab1\u00a0cd{m}", "Ab1cd{m}"),
     "spaces_collapsed": ("Ab1  cd{m}", "Ab1 cd{m}"),
     "leading_space_trimmed": (" Ab1cd{m}", "Ab1cd{m}"),
     "trailing_space_trimmed": ("Ab1cd{m} ", "Ab1cd{m}"),
-    "trailing_nbsp_trimmed": ("Ab1cd{m} ", "Ab1cd{m}"),
-    "all_at_once": ("  Ab1   cd{m} ", "Ab1 cd{m}"),
+    "trailing_nbsp_trimmed": ("Ab1cd{m}\u00a0", "Ab1cd{m}"),
+    "all_at_once": ("  Ab1 \u00a0 cd{m}\u00a0", "Ab1 cd{m}"),
 }
 
 
