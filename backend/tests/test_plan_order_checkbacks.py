@@ -94,6 +94,17 @@ def test_reorder_above_checkback_allows_start(db):
     assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
 
 
+@pytest.mark.parametrize("other_actor", ["conductor", "parent"])
+def test_other_thread_is_exempt_from_order_refusal(db, other_actor):
+    from plans import triage_lines
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Top check-back")
+    lower = task(db, plan.id, "Lower work")
+    _deadline(db, plan.id, top)
+    assert triage_lines.out_of_order(db, service._node_row(db, lower.id), actor_id=other_actor) is None
+
+
 def test_person_can_start_below_checkback(db):
     plan = owner_plan(db)
     top = task(db, plan.id, "Top check-back")

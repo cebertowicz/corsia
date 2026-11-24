@@ -2,8 +2,8 @@
 
 A named start (``activate``, ``start``, or a closing operation's
 ``next_node_id``) by the plan's owner is refused while a top-level item ranked
-above it is ready: neither started nor waiting. The refusal names that item and
-the two ways on: start it, or reorder this item above it so the plan says so.
+above it is ready or held only by its own deadline check-back. The refusal
+names the item, reordering, and naming a real wait as ways on.
 A user's write, a conductor's write to another agent's plan and a delegating
 parent's write are never refused here; the person can always override, by
 starting a task by name or moving it up. An add gets the top of the plan and a
@@ -19,8 +19,8 @@ Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
 each open leaf task, less a started task (one holding its slot, or delegated to
 a worker) and a Later task (below the cut, so never passed over), so this
-module holds no second readiness check: a top-level task is ready when it is,
-and a top-level phase when a task under it is. Nothing here writes.
+module counts a ready leaf or one held only by an unbound, non-blocking deadline
+watch. A top-level phase counts when a task under it does. Nothing here writes.
 """
 
 from __future__ import annotations
