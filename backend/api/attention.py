@@ -212,7 +212,7 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
     """Compose and rank one authorized view; return uncapped rows, ranker and scope."""
     from collections import Counter
     from loguru import logger
-    from infra.activity_queue_base import clip_title, shape
+    from infra.activity_queue_base import shape
     from infra.activity_rank_scope import ranker_for
     from infra.activity_ranking import apply_ranks
 
@@ -234,9 +234,6 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
     rows = apply_ranks(db, user_id, scope, rows)
     for row in rows:
         row.pop('priority', None)
-        if view == 'activity':
-            # Every Activity row's title is cut the same way, whichever kind built it.
-            row['title'] = clip_title(row['title'])
     counts = dict(Counter(row['kind'] for row in rows))
     ranked = sum(row['rank'] is not None for row in rows)
     logger.info('activity queue scope={} kinds={} ranked={} unranked={}', scope, counts, ranked, len(rows)-ranked)

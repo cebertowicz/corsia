@@ -294,17 +294,3 @@ def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_wakes_the_ranke
     db.commit()
     # Back in the queue unranked, it is new again.
     assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == ['root']
-
-
-def test_every_activity_title_is_clipped_whichever_kind_built_it(db):
-    from api.attention import activity_queue
-    from infra.activity_queue_base import ELLIPSIS, TITLE_MAX_CHARS
-    plan = service.ensure_plan('thread', 'root', db=db)
-    node = service.add_node(plan.id, kind='task', title='Step', acceptance_criteria='Done', assignee='user', db=db)
-    # A row older than the plan title limit, or a decision or held message, can carry a long title.
-    db.execute('UPDATE plan_nodes SET title=? WHERE id=?', ('Step ' * 80, node.id))
-    db.commit()
-    rows, _, _ = activity_queue(db, 'user-1', view='activity')
-    titles = [row['title'] for row in rows if row['kind'] == 'task']
-    assert titles and all(len(title) <= TITLE_MAX_CHARS for title in titles)
-    assert any(title.endswith(ELLIPSIS) for title in titles)
