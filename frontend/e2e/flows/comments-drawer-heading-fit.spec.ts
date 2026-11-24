@@ -2,7 +2,7 @@ import { type Page } from '@playwright/test';
 import { expect, test } from '../support/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { comment, open, seed } from '../support/reviewFixtures';
-import { settleMotion, settleRect } from '../support/touchProbe';
+import { settleMotion, settleRect } from '../support/sheetSettle';
 
 /**
  * The phone comment list keeps its Open and Resolved switch in the sheet heading, beside the title. The two labels never shrink

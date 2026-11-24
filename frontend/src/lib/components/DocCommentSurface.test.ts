@@ -848,25 +848,24 @@ describe('DocCommentSurface suggestions', () => {
 		expect(acceptAll().disabled).toBe(false);
 	});
 
-	it('moves the sheet footer and Accept all into the scroller while the keyboard is up, and back when it goes down', async () => {
-		// jsdom has no visual viewport: stand one in, which the page's own handler would resize when a keyboard opens.
-		const viewport = new EventTarget();
-		vi.stubGlobal('visualViewport', viewport);
-		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
-		const drawer = document.body.querySelector('[data-doc-comments-drawer]')!;
-		const keyboard = (shown: boolean) => {
-			document.documentElement.style.setProperty('--doc-visual-viewport-height', `${window.innerHeight - (shown ? 300 : 0)}px`);
-			viewport.dispatchEvent(new Event('resize'));
-		};
-		await vi.waitFor(() => expect(drawer.querySelector(':scope > .list-accept-all')).not.toBeNull());
-		expect(drawer.querySelector('.drawer-comments .list-accept-all')).toBeNull();
-		try {
-			keyboard(true);
-			await vi.waitFor(() => expect(drawer.querySelector(':scope > .drawer-comments > .list-accept-all')).not.toBeNull());
-			expect(drawer.querySelector(':scope > .list-accept-all')).toBeNull();
-			keyboard(false);
-			await vi.waitFor(() => expect(drawer.querySelector(':scope > .list-accept-all')).not.toBeNull());
-		} finally { document.documentElement.style.removeProperty('--doc-visual-viewport-height'); }
+	it('keeps the sheet\'s Accept suggestions row in one place, scrolling with the footer while a reply has focus and pinned otherwise', async () => {
+		// A touch screen: the soft keyboard is up while a text field in the sheet has focus.
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)', addEventListener() {}, removeEventListener() {} }));
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ narrow: true, state: { kind: 'list' }, focusedId: 'comment-1', comments: [suggestion, secondSuggestion] });
+		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		const row = await vi.waitFor(() => { const found = drawer.querySelector<HTMLElement>(':scope > .drawer-comments > .list-accept-all'); expect(found).not.toBeNull(); return found!; });
+		// At rest the row is pinned to the top of the scroller, and nothing sits above it.
+		expect(row.classList.contains('pinned')).toBe(true);
+		expect(drawer.querySelector(':scope > .list-accept-all')).toBeNull();
+		const field = drawer.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		// The sheet settles its own first focus a moment after opening; a tap on the field comes after it.
+		await vi.waitFor(() => { field.focus(); expect(row.classList.contains('pinned')).toBe(false); });
+		// The same row, not a rebuilt one: its open choice and selections survive the keyboard.
+		expect(drawer.querySelector(':scope > .drawer-comments > .list-accept-all')).toBe(row);
+		field.blur();
+		await vi.waitFor(() => expect(row.classList.contains('pinned')).toBe(true));
+		expect(drawer.querySelector(':scope > .drawer-comments > .list-accept-all')).toBe(row);
 	});
 
 	it.each([true, false])('hides accept-all from read-only viewers (sheet: %s)', (narrow) => {
