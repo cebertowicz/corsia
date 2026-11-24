@@ -13,6 +13,8 @@
 	let step = $state<Step>(untrack(() => initialState === 'sent' ? 'sent' : initialState === 'discarded' ? 'declined' : initialState === 'sending' ? 'unconfirmed' : 'draft'));
 	let message = $state('');
 	let notDeliveredTo = $state<string[]>([]);
+	// Don't send is on its way: the question stays on screen with its buttons held, never 'Sending…'.
+	let declining = $state(false);
 	const reasonId = $props.id();
 	const canSend = $derived(connected && !blocker && !readOnly);
 	$effect(() => { ended = step === 'sent' || step === 'declined'; });
@@ -38,9 +40,9 @@
 		try { apply(await sendEmailDraft(artifactId, text(), readAt)); } catch { step = 'failed'; }
 	}
 	async function decline() {
-		if (step !== 'confirm' || !connected || readOnly) return;
-		step = 'sending';
-		try { apply(await discardEmailDraft(artifactId)); } catch { step = 'failed'; }
+		if (step !== 'confirm' || declining || !connected || readOnly) return;
+		declining = true;
+		try { apply(await discardEmailDraft(artifactId)); } catch { step = 'draft'; } finally { declining = false; }
 	}
 </script>
 
@@ -60,7 +62,7 @@
 		</span>
 	{:else if step === 'confirm'}
 		<span class="bar-text" role="status">Don’t send this email?</span>
-		<span class="bar-actions"><Button size="sm" variant="ghost" onclick={() => (step = 'draft')}>Keep draft</Button><Button size="sm" variant="secondary" onclick={decline}>Don’t send</Button></span>
+		<span class="bar-actions"><Button size="sm" variant="ghost" disabled={declining} onclick={() => (step = 'draft')}>Keep draft</Button><Button size="sm" variant="secondary" disabled={declining} onclick={decline}>Don’t send</Button></span>
 	{:else if step === 'sending'}
 		<span class="bar-text" role="status">Sending…</span>
 	{:else if step === 'sent'}
