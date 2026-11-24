@@ -25,6 +25,8 @@ _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream",
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
                    "Use the browser tools to navigate and interact with the page.")
+_CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
+logger = logging.getLogger(__name__)
 _SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
                            "choose a dropdown's option. Nothing was changed. Ask the person in chat to choose it.")
 
@@ -68,11 +70,14 @@ async def preserve_cancelled(owner: Any, runtime: Any) -> None:
     await asyncio.shield(owner._close_one(runtime))
 
 
-def restart_notice(notices: set[str], thread_id: str, notice: str | None) -> str | None:
-    if thread_id not in notices:
+SESSION_RESTARTED = "The browser restarted; you may need to sign in again."
+
+
+def restart_notice(notices: dict[str, str], thread_id: str, notice: str | None) -> str | None:
+    """Prefix a fresh session's notice, once, with why its browser started again."""
+    restart = notices.pop(thread_id, None)
+    if restart is None:
         return notice
-    notices.discard(thread_id)
-    restart = "The browser restarted; you may need to sign in again."
     return f"{restart} {notice}" if notice else restart
 
 
@@ -147,6 +152,8 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
+    if not pane and runtime.chrome is not None and runtime.chrome.exited:
+        runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
     if runtime.record.profile or runtime.record.copy_of:
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
@@ -172,6 +179,27 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         return rendered
     finally:
         runtime.action_lock.release()
+
+
+async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_window: bool | None,
+                       session: str) -> Any:
+    """Close a session whose Chrome died or was quit, and admit a fresh one on the same saved sign-in.
+
+    Its agent-browser daemon outlives Chrome, so without this every later command fails its page check.
+    The first command to see the dead browser claims the restart: it alone queues the notice, which the
+    fresh record takes once, and reports it. Another command racing it only waits on the same close.
+    """
+    record = runtime.record
+    claimed = owner._sessions.get(record.thread_id) is runtime and record.thread_id not in owner._restart_notices
+    if claimed:
+        logger.info("managed Chrome exited outside a close; starting the browser again")
+        owner._restart_notices[record.thread_id] = _CHROME_RESTARTED
+    await owner._close_runtime(runtime)
+    fresh = await owner._admit(record.thread_id, lease_id=lease_id or record.lease_id,
+                               show_window=record.shared if show_window is None else show_window, session=session)
+    if claimed:
+        await asyncio.to_thread(emit_product_event, "browser_pane", "chrome_restarted", thread_id=record.thread_id)
+    return fresh
 
 
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],

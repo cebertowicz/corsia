@@ -55,7 +55,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
-        self._restart_notices: set[str] = set()
+        self._restart_notices: dict[str, str] = {}
         self._shutting_down = False
         self._active_commands = self._queued_actions = 0
 
@@ -296,7 +296,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         pending = draining or any(task is not None and not task.done() for task in (settlement, close))
         runtime.record = replace(runtime.record, terminal_state="resetting" if pending else "death_unverified")
         if not pending:
-            self._restart_notices.add(runtime.record.thread_id)
+            self._restart_notices[runtime.record.thread_id] = browser_session_commands.SESSION_RESTARTED
         if not pending and runtime.report is None:
             try:
                 if runtime.report_task is None or runtime.report_task.done() and (runtime.report_task.cancelled() or runtime.report_task.exception() is not None):
