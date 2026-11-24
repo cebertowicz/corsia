@@ -153,18 +153,19 @@ function frameItems(w: World) {
 	];
 }
 
-const BULK: Array<[Kind, string]> = [
-	['review', 'Approve the copy for the first-run screen that explains who owns which file.'],
-	['decision', 'Decide whether a failed sign-in retries once or asks you.'],
-	['task', 'Check the Linux install line in the README on a clean machine.'],
-	['review', 'Approve the change to how long kept files last.'],
-	['reply', 'Browser replied to your comment on the pane typing fix.'],
-	['decision', 'Decide which of two update messages a stranger sees.'],
-	['review', 'Approve the wording of the update notice in Settings.'],
-	['decision', 'Decide whether paused agents show in the left menu.'],
-	['task', 'Connect the CORSIA mailbox so agents can email you.'],
-	['reply', 'Quality Gate replied to your comment on review timing.'],
-	['review', 'Approve the empty state for a project with no agents.'],
+/** Kind, title, and the asking agent where frame i draws it (the rest rotate through LABELS). */
+const BULK: Array<[Kind, string, string?]> = [
+	['review', 'Approve the copy for the first-run screen that explains who owns which file.', 'Governance & Scopes'],
+	['decision', 'Decide whether a failed sign-in retries once or asks you.', 'CORSIA Conductor'],
+	['task', 'Check the Linux install line in the README on a clean machine.', 'Agent Substrate'],
+	['review', 'Approve the change to how long kept files last.', 'Ecosystem'],
+	['reply', 'Browser replied to your comment on the pane typing fix.', 'Browser'],
+	['decision', 'Decide which of two update messages a stranger sees.', 'Packaging & Onboarding'],
+	['review', 'Approve the wording of the update notice in Settings.', 'Structured Plans'],
+	['decision', 'Decide whether paused agents show in the left menu.', 'Quality Gate'],
+	['task', 'Connect the CORSIA mailbox so agents can email you.', 'Governance & Scopes'],
+	['reply', 'Quality Gate replied to your comment on review timing.', 'Quality Gate'],
+	['review', 'Approve the empty state for a project with no agents.', 'Agent Substrate'],
 	['decision', 'Decide how long a stopped worker’s files are kept.'],
 	['review', 'Approve the phone layout for the document pane.'],
 	['task', 'Choose the Mac that runs the local model.'],
@@ -181,8 +182,8 @@ function fortyItems(w: World) {
 		'Approve or change the wording every agent loads on each turn about when to ask you, when to decide and tell you afterwards, and when to leave it to the project’s conductor, including the three cases you corrected last week and the new line on dates.',
 		'Agent Substrate', 6, 4, 'Every agent loads this text.', { open: { artifact_id: w.docs.whenToAsk }, detail: { artifact_id: w.docs.whenToAsk } });
 	const rest = Array.from({ length: 36 }, (_, k) => {
-		const [kind, title] = BULK[k % BULK.length];
-		const label = kind === 'reply' ? title.split(' replied')[0] : LABELS[k % LABELS.length];
+		const [kind, title, drawn] = BULK[k % BULK.length];
+		const label = (k < BULK.length && drawn) || (kind === 'reply' ? title.split(' replied')[0] : LABELS[k % LABELS.length]);
 		return item(w, `bulk-${k}`, kind, title, label, 24 * (k + 1) + 1, k + 5, 'Ranked after the release items.',
 			{ open: { artifact_id: w.docs.readme }, detail: { artifact_id: w.docs.readme } });
 	});
