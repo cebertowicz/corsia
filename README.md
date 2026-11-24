@@ -1,52 +1,31 @@
-<h1 align="center">C.O.R.S.I.A.<br/><sub><sub>Community-Orchestrated Recursive Self-Improving Agents</sub></sub></h1>
+# C.O.R.S.I.A.: Community-Orchestrated Recursive Self-Improving Agents
 
-<h3 align="center">Give an agent a problem to own.<br/>CORSIA measures it on its results and on your attention.</h3>
+### Give an agent a problem to own. CORSIA measures it on its results and on your attention.
 
-<p align="center">CORSIA estimates the minutes each agent takes from you and how much of its work is accepted on the first try. It is built so agents learn from both and need less of your time; that they do is not yet proven.</p>
+CORSIA estimates the minutes each agent takes from you and how much of its work is accepted on the first try. It is built so agents learn from both and need less of your time; that they do is not yet proven.
 
-<p align="center"><a href="https://github.com/cebertowicz/corsia/releases/latest"><strong>Download CORSIA for Mac</strong></a><br/><sub>Apple Silicon, macOS 15 or later</sub></p>
+**[Download CORSIA for Mac](https://github.com/cebertowicz/corsia/releases/latest)** (Apple Silicon, macOS 15 or later)
 
-<p align="center"><strong>What it costs:</strong> CORSIA is free and open source. Its agents run on a model you bring: a Claude or ChatGPT subscription you already pay for, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. A team of agents uses far more of a subscription than one agent does, so start with one.</p>
+**What it costs:** CORSIA is free and open source. Its agents run on a model you bring: a Claude or ChatGPT subscription you already pay for, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. A team of agents uses far more of a subscription than one agent does, so start with one.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-kpis-dark.png">
-    <img alt="CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens" src="docs/measurement-kpis-light.png">
-  </picture>
-</p>
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-trend-dark.png">
-    <img width="49%" alt="Daily cost per hour of delivered work over two weeks on one install" src="docs/measurement-trend-light.png">
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-models-dark.png">
-    <img width="49%" alt="Cost per task and first-try rate for each model, by task size" src="docs/measurement-models-light.png">
-  </picture>
-</p>
-<p align="center"><sub>Screenshots of the Measurement screen on the install that builds CORSIA, showing September 25 to October 8, 2026. The figures further down come from other periods, and each gives its own dates.</sub></p>
+![CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens](docs/measurement-kpis-light.png)
 
-<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">1,069 pull requests in the 30 days to November 22, 2026</a>, under one maintainer.</p>
+![Daily cost per hour of delivered work over two weeks on one install](docs/measurement-trend-light.png)
+![Cost per task and first-try rate for each model, by task size](docs/measurement-models-light.png)
 
-<p align="center">
-  <img alt="macOS, Linux server" src="https://img.shields.io/badge/platform-macOS_·_Linux_server-000000?logo=apple&logoColor=white">
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-D97757?logo=claude&logoColor=white">
-  <img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-10a37f">
-  <img alt="Local models on Apple Silicon" src="https://img.shields.io/badge/local_models-Apple_Silicon-555555?logo=apple&logoColor=white">
-  <img alt="Self-hosted: plain files and SQLite" src="https://img.shields.io/badge/self--hosted-plain_files_+_SQLite-2ea44f?logo=sqlite&logoColor=white">
-  <img alt="Built by its own agents" src="https://img.shields.io/badge/built_by-its_own_agents-7c3aed">
-  <img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
-</p>
+*Screenshots of the Measurement screen on the install that builds CORSIA, showing September 25 to October 8, 2026. The figures further down come from other periods, and each gives its own dates.*
 
-<p align="center">
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#how-you-know-its-working">How you know it's working</a> ·
-  <a href="#what-it-asks-of-you">What it asks of you</a> ·
-  <a href="#getting-started">Getting started</a> ·
-  <a href="#built-by-its-own-agents">Built by its own agents</a> ·
-  <a href="#security">Security</a> ·
-  <a href="#questions">Questions</a>
-</p>
+**CORSIA is built by its own agents:** [1,069 pull requests in the 30 days to November 22, 2026](#built-by-its-own-agents), under one maintainer.
+
+![macOS, Linux server](https://img.shields.io/badge/platform-macOS_·_Linux_server-000000?logo=apple&logoColor=white)
+![Claude Code](https://img.shields.io/badge/Claude_Code-supported-D97757?logo=claude&logoColor=white)
+![Codex CLI](https://img.shields.io/badge/Codex_CLI-supported-10a37f)
+![Local models on Apple Silicon](https://img.shields.io/badge/local_models-Apple_Silicon-555555?logo=apple&logoColor=white)
+![Self-hosted: plain files and SQLite](https://img.shields.io/badge/self--hosted-plain_files_+_SQLite-2ea44f?logo=sqlite&logoColor=white)
+![Built by its own agents](https://img.shields.io/badge/built_by-its_own_agents-7c3aed)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
+
+[How it works](#how-it-works) · [How you know it's working](#how-you-know-its-working) · [What it asks of you](#what-it-asks-of-you) · [Getting started](#getting-started) · [Built by its own agents](#built-by-its-own-agents) · [Security](#security) · [Questions](#questions)
 
 ## How it works
 
@@ -106,11 +85,10 @@ A problem for each agent, and the authority to work on it. The agent sets its KP
 
 ![A user requests a review from three AI agents, who join the document and edit, comment and suggest changes live alongside the user](docs/live-review.gif)
 
-<p align="center">
-  <img src="docs/activity.png" width="71%" alt="CORSIA Activity view: agents in a project, each with its current work and the steps left in its plan">
-  <img src="docs/phone-plan.png" width="25%" alt="An agent's structured plan on the phone app: a parent step with its status, working and waiting time and tokens, and child steps that are working, awaiting review, or waiting on a dependency">
-</p>
-<p align="center"><sub>Every agent and its plan, on your Mac and on your phone.</sub></p>
+![CORSIA Activity view: agents in a project, each with its current work and the steps left in its plan](docs/activity.png)
+![An agent's structured plan on the phone app: a parent step with its status, working and waiting time and tokens, and child steps that are working, awaiting review, or waiting on a dependency](docs/phone-plan.png)
+
+*Every agent and its plan, on your Mac and on your phone.*
 
 CORSIA is for people willing to let agents make mistakes and learn from them, **not** for anyone who wants to approve every step.
 
@@ -135,7 +113,7 @@ xychart-beta
     bar [31, 59, 29, 56, 96, 125, 135, 236, 405, 302, 290, 364, 287, 265, 134]
 ```
 
-<sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. Weeks run Monday to Sunday, Pacific time; the last bar, November 16 to 22, is a full week. * Monday to Friday only. The week of October 5, when work moved to this repository, is not shown.</sub>
+*Work pull requests merged into the development branch or a team's integration branch, each counted once. Weeks run Monday to Sunday, Pacific time; the last bar, November 16 to 22, is a full week. * Monday to Friday only. The week of October 5, when work moved to this repository, is not shown.*
 
 Review at this volume is automated, so the reviewer is itself audited. The two checks below were each run once, on the dates given, and have not been repeated on newer work. Of the pull requests merged from October 1 to 9, 2026, about a third failed CI or review on their first push and were corrected before merging. Nightly audits on 14 days between September 10 and 27, 2026, confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
 
@@ -171,10 +149,9 @@ In the week to October 2, 2026, on the install building CORSIA, with automatic a
 
 ## Questions
 
-<details>
-<summary><strong>Will a team of agents cost more than Claude Code or Codex alone?</strong></summary>
+### Will a team of agents cost more than Claude Code or Codex alone?
 
-<br/>A team uses more tokens than one agent, because agents and their workers each run turns. CORSIA is built to make that spend pay: each delegated step goes to the least costly model that can do it, every step shows its tokens and time, and the conductor tunes the way of working to bring down the cost per accepted task. The install building CORSIA runs on top-tier Claude and Codex plans. On one SWE-bench task (`pylint-dev__pylint-7114`), each harness ran once on the same local model, with Claude Code and Codex pointed at it through their own endpoint settings:
+A team uses more tokens than one agent, because agents and their workers each run turns. CORSIA is built to make that spend pay: each delegated step goes to the least costly model that can do it, every step shows its tokens and time, and the conductor tunes the way of working to bring down the cost per accepted task. The install building CORSIA runs on top-tier Claude and Codex plans. On one SWE-bench task (`pylint-dev__pylint-7114`), each harness ran once on the same local model, with Claude Code and Codex pointed at it through their own endpoint settings:
 
 | Harness | Model calls | Cost if billed at Sonnet 4.5 prices | Minutes | Patch review score (of 5) |
 |---|--:|--:|--:|--:|
@@ -197,39 +174,27 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 
 These are rounded shares of actions, not of tokens or dollars, for one agent on one night. With 196 actions, the largest share is uncertain by about 6 points either way and the others by 3 to 4, and by more than that, because they were taken as ten runs of back-to-back actions rather than picked one by one. This one-off count will be replaced by figures CORSIA computes from its own records as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
 
-</details>
+### How do I give agents instructions?
 
-<details>
-<summary><strong>How do I give agents instructions?</strong></summary>
-
-<br/>Write each instruction once, at the [scope](#scopes) it applies to: **Settings → Context → New file**, in the top group for everything or in a project's group for that project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
+Write each instruction once, at the [scope](#scopes) it applies to: **Settings → Context → New file**, in the top group for everything or in a project's group for that project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
 **Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits and you've agreed to use community improvements, an agent can install one from the public [skill library](docs/skill-library.md) and keep it up to date.
 
 Every turn shows what the agent loaded, by source and size. A context file in that list opens straight from it, so you can read or change what an agent works from.
 
-<p align="center"><img src="docs/phone-context.png" width="460" alt="Next-turn context for an agent: estimated tokens against its checkpoint budget, attributed to system, workspace, project, agent, tools and history sources"></p>
+![Next-turn context for an agent: estimated tokens against its checkpoint budget, attributed to system, workspace, project, agent, tools and history sources](docs/phone-context.png)
 
-</details>
+### How do agents choose a model, and how do I restrict them?
 
-<details>
-<summary><strong>How do agents choose a model, and how do I restrict them?</strong></summary>
+The shipped spawn policy uses the least costly model that can reliably do the work, moves up for ambiguity, interacting systems or high stakes, and dispatches only to models shown as ready. Add `SPAWN-POLICY.md` at the workspace or project level to set your own allowed models, roles and budgets. For a hard stop, turn a model off under **Settings → Providers**. Claude Code and Codex models can only be hidden from the picker there, so sign out of that CLI to stop it entirely.
 
-<br/>The shipped spawn policy uses the least costly model that can reliably do the work, moves up for ambiguity, interacting systems or high stakes, and dispatches only to models shown as ready. Add `SPAWN-POLICY.md` at the workspace or project level to set your own allowed models, roles and budgets. For a hard stop, turn a model off under **Settings → Providers**. Claude Code and Codex models can only be hidden from the picker there, so sign out of that CLI to stop it entirely.
+### How should I shape the team?
 
-</details>
+Pick a problem and let an agent own it. Start with one agent, and add another when there is another outcome you can measure and want off your plate, when a problem crowds an existing agent's context, or when an agent's work needs a separate check. Keep one accountable agent per deliverable, even when others contribute. A common shape combines three kinds of agent: **domain agents**, one per lasting problem; an **independent reviewer**, which owns the quality of work it didn't produce; and a **coordinator**, which owns sequencing across agents and releases. Name each agent for the outcome it answers for, not a process stage. Merge or retire agents when coordinating costs more than it saves.
 
-<details>
-<summary><strong>How should I shape the team?</strong></summary>
+### What ships today and what's next
 
-<br/>Pick a problem and let an agent own it. Start with one agent, and add another when there is another outcome you can measure and want off your plate, when a problem crowds an existing agent's context, or when an agent's work needs a separate check. Keep one accountable agent per deliverable, even when others contribute. A common shape combines three kinds of agent: **domain agents**, one per lasting problem; an **independent reviewer**, which owns the quality of work it didn't produce; and a **coordinator**, which owns sequencing across agents and releases. Name each agent for the outcome it answers for, not a process stage. Merge or retire agents when coordinating costs more than it saves.
-
-</details>
-
-<details>
-<summary><strong>What ships today and what's next</strong></summary>
-
-<br/>The main capabilities in each area, with their status.
+The main capabilities in each area, with their status.
 
 **Agents and plans**
 - [x] Agents with their own notes, authority, success measures and plans
@@ -248,7 +213,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Layered context (workspace, project, agent), the same in every harness, with a per-turn record of what each turn received
 - [x] Sourced decisions and preferences carried across sessions and models
 - [x] CORSIA-written checkpoints that move with the work between models
-- [x] <img src="https://cdn.simpleicons.org/claude" width="14" alt=""> Claude Code and Codex logins, Anthropic, OpenAI and OpenAI-compatible APIs, and <img src="https://cdn.simpleicons.org/apple" width="14" alt=""> local models through oMLX, a model server for Apple Silicon
+- [x] Claude Code and Codex logins, Anthropic, OpenAI and OpenAI-compatible APIs, and local models through oMLX, a model server for Apple Silicon
 - [x] Subscription usage per account, shown in the model picker before you choose
 - [x] Optional account rollover on usage limits, set for the workspace or per project
 
@@ -257,14 +222,14 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
 - [x] Versioned guidance, and lesson trials that say when they apply and carry a review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*
-- [x] Agent KPIs: outcomes agents record for their problems, and <img src="https://cdn.simpleicons.org/opentelemetry" width="14" alt=""> OpenTelemetry logs from tools on the same computer
+- [x] Agent KPIs: outcomes agents record for their problems, and OpenTelemetry logs from tools on the same computer
 - [ ] Agent KPIs on the Measurement screen *(being added)*
 - [ ] Share and adopt coordination models with their evidence *(in progress)*
 - [ ] Anonymous aggregate results across installs *(planned; opt-in)*
 - [ ] Remote analytics API and per-provider tuning from your data *(planned)*
 
 **Control and safety**
-- [x] Plain Markdown files and <img src="https://cdn.simpleicons.org/sqlite" width="14" alt=""> SQLite on your machine
+- [x] Plain Markdown files and SQLite on your machine
 - [x] Agent Safehouse sandbox, allowed-path file tools, reviewed host-access leases and credential masking
 - [ ] Scoped permissions for agent and API tokens *(planned)*
 - [ ] Signed maintainer notices *(once release signing keys are configured)*
@@ -273,10 +238,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Web app and an installable phone app
 - [x] macOS desktop app that updates itself
 
-</details>
-
-<details>
-<summary><strong>Architecture at a glance</strong></summary>
+### Architecture at a glance
 
 ```mermaid
 flowchart TB
@@ -289,8 +251,6 @@ flowchart TB
 ```
 
 **Execution** is which harness carries a turn: CORSIA's native loop, Claude Code or Codex. **Inference** is which model serves a native turn. The two are independent. A workspace holds `context/`, `skills/`, `shared/`, `projects/` and `.threads/`; operational state lives under Application Support on a Mac, `~/.local/state/corsia` on Linux, or `CORSIA_STATE_DIR`.
-
-</details>
 
 ## Documentation
 
