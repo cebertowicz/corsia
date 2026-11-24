@@ -1,5 +1,10 @@
+<script lang="ts" module>
+	/** Context key: a surface that sets it true keeps the asker's name on a docked card's resting line (Activity). */
+	export const ASKER_AT_REST = Symbol('askerAtRest');
+</script>
+
 <script lang="ts">
-	import { tick, type Snippet } from 'svelte';
+	import { getContext, tick, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
 	import { cubicIn } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -42,6 +47,7 @@
 		actions: Snippet;
 	} = $props();
 
+	const askerAtRest = getContext<boolean | undefined>(ASKER_AT_REST) === true;
 	const expandable = $derived(ask !== '');
 	let expanded = $state(false);
 	/** The docked card, opened by a tap on its question. A new ask starts it closed. */
@@ -116,7 +122,7 @@
 <!-- Docked to the document canvas's left, right and bottom edges. A review ask cuts one thing per line: at rest the question alone, then the answers; opened, the asker takes its own line above the full question. -->
 <div class="rb-dock-slot" bind:this={slotEl}>
 {#if view === 'ask' && who}
-	<section class="rb-dock" class:suppressed class:noting class:named class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+	<section class="rb-dock" class:suppressed class:noting class:named class:asker={askerAtRest} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
 		<button type="button" class="rb-dock-ask" title={full || ask} aria-expanded={cardOpen} aria-label={lineLabel || `${who.name}${plus ? ` +${plus}` : ''}: ${full || ask}`} onclick={() => (cardOpen = !cardOpen)}>
 			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen && !named}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
 		</button>
@@ -219,6 +225,8 @@
 	.rb-dock-sep { margin-inline: var(--space-1); color: var(--text-tertiary); }
 	.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by { display: none; }
 	.rb-dock.open:not(.named) .rb-dock-by { display: flex; min-width: 0; white-space: normal; }
+	/* Activity: at rest the asker leads the question on its one line. */
+	.rb-dock.asker:not(.open) .rb-dock-by, .rb-dock.asker:not(.open) .rb-dock-sep { display: inline; }
 	.rb-dock.open:not(.named) .rb-dock-who { display: block; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 	/* A comment task holds one line: Dismiss all ends it where the card is wide enough, else wraps to its own row. */
 	.rb-dock.named .rb-dock-ask { flex: 1 1 auto; }
