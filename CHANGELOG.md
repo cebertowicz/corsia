@@ -9,7 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A host access approval now shows in chat as Host access with its time left, in plain text, and Revoke host access in its drawer is a text button; before, it was a shield icon and a countdown in an amber outline, and Revoke was a red button.
-- A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and one red line with Retry when it can't be approved, kept in the footer above the buttons; Reject stays available when CORSIA couldn’t check the request is current. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
+- A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
