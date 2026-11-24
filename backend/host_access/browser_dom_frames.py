@@ -2,9 +2,12 @@
 
 One action walks at most FRAME_LIMIT documents once and scans each document at most once for a box:
 64 documents × 25,000 elements × 1 scan, plus at most two frame hit-test passes, each walking at
-most 25,000 ancestors per frame. A scan over the cap counts as a possible match.
+most 25,000 ancestors per frame. A scan over the cap counts as a possible match. After a scroll, each
+frame owner's box is read at most SETTLE_READS times while waiting for the owners to hold still.
 """
 from __future__ import annotations
+
+import asyncio
 
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -12,7 +15,7 @@ from math import isfinite
 
 from websockets.exceptions import WebSocketException
 
-from host_access import browser_cdp_frames
+from host_access import browser_cdp_frames, browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, protocol_int
 from host_access.browser_cdp_frames import PAGE_CHECK_FAILED, Session
 from host_access.browser_dom_hit import (
@@ -126,16 +129,26 @@ async def _walk_frames(page: CdpClient) -> FrameWalk:
 
 
 async def moved(walk: FrameWalk) -> FrameWalk:
-    """The same documents at their places now, after the page scrolled.
+    """The same documents at their places once the page stops scrolling.
 
-    The walk itself is kept: a cross-site frame attaches once per connection, so a second walk would not see
-    it again. A frame that came or went since is caught by the walk's own stability check.
+    scrollintoview returns while a smooth scroll is still moving, so the owners' boxes are read until two reads
+    in a row agree. Owners still moving after the last read keep that read, and the walk's own stability
+    check then refuses the write. The walk itself is kept: a cross-site frame attaches once per connection,
+    so a second walk would not see it again. A frame that came or went since is caught by the same check.
     """
+    if not walk.frames:
+        return walk
     try:
-        frames = [replace(frame, viewport=await _owner_viewport(frame.parent, frame.owner)) for frame in walk.frames]
+        views = [await _owner_viewport(frame.parent, frame.owner) for frame in walk.frames]
+        for _ in range(browser_dom_hit.SETTLE_READS - 1):
+            await asyncio.sleep(browser_dom_hit.SETTLE_INTERVAL)
+            again = [await _owner_viewport(frame.parent, frame.owner) for frame in walk.frames]
+            if again == views:
+                break
+            views = again
     except (OSError, TimeoutError, WebSocketException, AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
         raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
-    return replace(walk, frames=frames)
+    return replace(walk, frames=[replace(frame, viewport=view) for frame, view in zip(walk.frames, views)])
 
 
 async def locate_in_frames(run: RunCommand, page: CdpClient, selector: str, box: dict | None,
