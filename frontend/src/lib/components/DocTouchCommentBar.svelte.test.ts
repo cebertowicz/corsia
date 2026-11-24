@@ -12,7 +12,8 @@ it.each([320, 393, 768])('follows the visible viewport above keyboard/accessory 
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(12, 80, width - 24, 750));
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-		return this.classList.contains('touch-comment-bar') ? new DOMRect(12, 791, width - 24, 60) : new DOMRect();
+		// Where a browser has the bar: its top follows the `bottom` the page has written so far, which is the value before a move until the next flush.
+		return this.classList.contains('touch-comment-bar') ? new DOMRect(12, 851 - (parseFloat(this.style.bottom) || 0) - 60, width - 24, 60) : new DOMRect();
 	});
 	const onComment = vi.fn();
 	const props = $state({ column: host, offered: true, onComment });
@@ -27,9 +28,17 @@ it.each([320, 393, 768])('follows the visible viewport above keyboard/accessory 
 	viewport.height = 450; viewport.offsetTop = 30;
 	viewport.dispatchEvent(new Event('resize')); flushSync();
 	expect(bar.style.bottom).toBe('371px');
+	// The keyboard is open: the bar sits above it, wholly over the column, so it covers its whole 60 px, not the 39 px it covered at the page's foot.
+	expect(host.style.getPropertyValue('--document-comment-room'), 'the room after the bar moved up').toBe('60px');
 	viewport.offsetTop = 45; viewport.dispatchEvent(new Event('scroll')); flushSync();
 	expect(bar.style.bottom).toBe('356px');
+	expect(host.style.getPropertyValue('--document-comment-room')).toBe('60px');
 	button.click(); expect(onComment).toHaveBeenCalledOnce();
+	// The keyboard closes: the bar is back at the page's foot and covers 39 px again, not the 60 it covered above the keyboard.
+	viewport.height = 851; viewport.offsetTop = 0;
+	viewport.dispatchEvent(new Event('resize')); flushSync();
+	expect(bar.style.bottom).toBe('0px');
+	expect(host.style.getPropertyValue('--document-comment-room'), 'the room after the bar moved down').toBe('39px');
 	props.offered = false; flushSync();
 	expect(bar.querySelector('button')).toBeNull();
 	expect(bar.getAttribute('aria-hidden')).toBe('true');
