@@ -55,6 +55,10 @@ async def test_long_unterminated_line_flushes_safely_and_drains(capfd):
 
 @pytest.mark.asyncio
 async def test_mask_failure_drops_output_and_keeps_draining(monkeypatch, capfd):
+    from tools import mcp_stdio_launch
+
+    warnings = []
+    monkeypatch.setattr(mcp_stdio_launch.logger, "warning", lambda *args: warnings.append(args))
     tail = StderrTail("test", [])
     monkeypatch.setattr(tail, "mask", lambda _text: (_ for _ in ()).throw(RuntimeError("failed")))
     source = "import os\nfor _ in range(256): os.write(2, b'x' * 1024 + b'\\n')\n"
@@ -62,6 +66,7 @@ async def test_mask_failure_drops_output_and_keeps_draining(monkeypatch, capfd):
     await tail.close(None, None, None)
     assert not tail._reader.is_alive()
     assert tail.lines() == ["[REDACTED]"]
+    assert tail._dropped_lines == 256 and warnings
     assert capfd.readouterr().err == ""
 
 

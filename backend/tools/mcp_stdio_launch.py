@@ -36,6 +36,7 @@ class StderrTail:
         self._lock = threading.Lock()
         self._forward_queue: Queue[bytes] = Queue(maxsize=128)
         self._reader_done = threading.Event()
+        self._dropped_lines = 0
         read_fd, write_fd = os.pipe()
         self.file = open(write_fd, "w", encoding="utf-8", closefd=True)
         try:
@@ -81,7 +82,7 @@ class StderrTail:
                 self._forward_queue.put_nowait((safe + ("\n" if newline else "")).encode("utf-8"))
             except Exception:
                 # A broken sanitizer or full queue drops this output, never the child.
-                return
+                self._dropped_lines += 1
 
         try:
             with open(read_fd, "rb", buffering=0, closefd=True) as pipe:
@@ -142,6 +143,8 @@ class StderrTail:
         # started still holds the pipe; never wait long for that.
         await asyncio.to_thread(self._reader.join, 1.0)
         await asyncio.to_thread(self._writer.join, 1.0)
+        if self._dropped_lines:
+            logger.warning("MCP server '{}' stderr relay dropped {} lines", self.name, self._dropped_lines)
         if exc_type is not None:
             # Name what ended the connection: it may be CORSIA rejecting a healthy app or
             # cancelling its start, not the app failing.
