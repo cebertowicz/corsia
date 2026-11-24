@@ -397,6 +397,42 @@ async def test_an_element_covered_inside_a_same_origin_frame_is_still_refused_na
 
 
 @pytest.mark.asyncio
+async def test_a_frame_target_under_the_pages_header_is_written_where_the_scroll_moved_its_frame(monkeypatch):
+    """The scroll that clears a cover moves the frame too, so the frames are walked again at their new place."""
+    page = _page(hit=TOP, frames=("child",), owners={"child": OWNER}, holds={"child"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    rise = 40
+    moved_hit = (FRAMED_HIT[0], FRAMED_HIT[1] - rise)
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            page.boxes[OWNER] = {"content": [8, 68 - rise, 608, 68 - rise, 608, 368 - rise, 8, 368 - rise]}
+            page.boxes[LINK] = {"border": [56, 102 - rise, 156, 102 - rise, 156, 122 - rise, 56, 122 - rise]}
+            page.hits[moved_hit] = LINK
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.resolved[-1] == LINK and page.worlds[-1] == "child" and page.written == ["field"]
+
+
+@pytest.mark.asyncio
+async def test_a_page_element_under_a_header_is_written_after_the_scroll_with_an_embed_in_view(monkeypatch):
+    """An embed the box lands in moves with the scroll; that is not a page that changed under the check."""
+    page = _page(frames=("child",), owners={"child": OWNER})
+    _connect(monkeypatch, **{PAGE_URL: page})
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            page.boxes[OWNER] = {"content": [8, 28, 608, 28, 608, 328, 8, 328]}
+            page.boxes[LINK] = {"border": RAW}
+            page.hits[TOP_HIT] = LINK
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.resolved[-1] == LINK and page.written == ["field"]
+
+
+@pytest.mark.asyncio
 async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_written_there(monkeypatch):
     # The frame attaches through the page's session.
     page = _page(hit=OWNER, owners={"oopif": OWNER})

@@ -8,7 +8,7 @@ from typing import Callable, Sequence
 
 from host_access import browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, border_rect, protocol_int
-from host_access.browser_dom_frames import locate_in_frames, shifted, walk_frames
+from host_access.browser_dom_frames import locate_in_frames, moved, shifted, walk_frames
 from host_access.browser_dom_hit import (
     Located, box_matches as _box_matches, cover_tag as _cover, in_viewport as _in_viewport,
     is_empty as _is_empty, isolated_context as _isolated_context, node_at_centre as _node_at_centre,
@@ -134,7 +134,8 @@ async def _locate(run: RunCommand, page: CdpClient, selector: str) -> tuple[Loca
     The main page is tried first. Only when it fails is the target looked for in a frame, because
     agent-browser measures an element inside a frame from that frame's own corner. Frames are searched
     before the page is scrolled to clear a cover, since a target in a frame always misses the page's hit
-    test and would otherwise scroll the person's page on every write into a frame.
+    test and would otherwise scroll the person's page on every write into a frame. That scroll moves the
+    frames too, so their places are read again after it.
     """
     node, reason, box = await _locate_in_page(run, page, selector)
     walk = None
@@ -161,6 +162,7 @@ async def _locate(run: RunCommand, page: CdpClient, selector: str) -> tuple[Loca
         # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
         await run(("scrollintoview", selector), 10)
         deferred = True
+        walk = await moved(walk)
         node, reason, box = await _settled_hit(run, page, selector, await _box(run, selector))
     if framed:
         return None, reason, framed_cover

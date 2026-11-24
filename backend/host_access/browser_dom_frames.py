@@ -7,7 +7,7 @@ most 25,000 ancestors per frame. A scan over the cap counts as a possible match.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import isfinite
 
 from websockets.exceptions import WebSocketException
@@ -123,6 +123,19 @@ async def _walk_frames(page: CdpClient) -> FrameWalk:
         if info["type"] == "iframe" and target.get("sessionId") not in processed:
             raise BrowserSessionError(PAGE_CHECK_FAILED)
     return FrameWalk(frames, len(page.attached), trees)
+
+
+async def moved(walk: FrameWalk) -> FrameWalk:
+    """The same documents at their places now, after the page scrolled.
+
+    The walk itself is kept: a cross-site frame attaches once per connection, so a second walk would not see
+    it again. A frame that came or went since is caught by the walk's own stability check.
+    """
+    try:
+        frames = [replace(frame, viewport=await _owner_viewport(frame.parent, frame.owner)) for frame in walk.frames]
+    except (OSError, TimeoutError, WebSocketException, AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+    return replace(walk, frames=frames)
 
 
 async def locate_in_frames(run: RunCommand, page: CdpClient, selector: str, box: dict | None,
