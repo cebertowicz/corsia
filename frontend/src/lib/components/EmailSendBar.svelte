@@ -26,7 +26,8 @@
 	$effect(() => { ended = step === 'sending' || step === 'sent' || step === 'declined' || step === 'unconfirmed'; });
 	onDestroy(() => { ended = false; });
 
-	function apply(result: DraftActionResult) {
+	type Action = 'send' | 'discard';
+	function apply(result: DraftActionResult, action: Action) {
 		switch (result.state) {
 			case 'sent': notDeliveredTo = result.not_delivered_to ?? []; step = 'sent'; break;
 			case 'discarded': step = 'declined'; break;
@@ -38,15 +39,21 @@
 				break;
 			case 'signin': case 'missing':
 				step = 'draft'; onRefused(result.state); break;
-			case 'unknown': return settleFromServer();
+			case 'unknown': return settleFromServer(action);
 		}
 	}
 	/**
 	 * The server didn't give an answer (an error status, or the connection dropped): only the draft's stored state says
-	 * whether the email left. Open means no send holds it, so it didn't leave; sending means it may have.
+	 * what happened. After Send now, open means no send holds it, so it didn't leave; sending means it may have.
+	 * After Don't send, an open draft goes back to the draft, never to a send failure whose Retry would send it.
 	 */
-	async function settleFromServer() {
+	async function settleFromServer(action: Action) {
 		const state = await readState().catch(() => null);
+		if (action === 'discard' && (state === null || state === 'open')) {
+			step = 'draft';
+			message = state === null ? 'Couldn’t confirm Don’t send went through. Press it again if you still don’t want to send it.' : 'Don’t send didn’t go through. The draft is still open.';
+			return;
+		}
 		step = state === null ? 'unconfirmed' : state === 'open' ? 'failed' : fromState(state);
 	}
 	async function startSend() {
@@ -55,12 +62,12 @@
 		if (!await flush().catch(() => false)) {
 			step = 'draft'; message = 'Couldn’t save your last edit, so nothing was sent. Press Send now again.'; return;
 		}
-		try { await apply(await sendEmailDraft(artifactId, text(), readAt)); } catch { await settleFromServer(); }
+		try { await apply(await sendEmailDraft(artifactId, text(), readAt), 'send'); } catch { await settleFromServer('send'); }
 	}
 	async function decline() {
 		if (step !== 'confirm' || declining || !connected || readOnly) return;
-		declining = true;
-		try { await apply(await discardEmailDraft(artifactId)); } catch { await settleFromServer(); } finally { declining = false; }
+		declining = true; message = '';
+		try { await apply(await discardEmailDraft(artifactId), 'discard'); } catch { await settleFromServer('discard'); } finally { declining = false; }
 	}
 </script>
 

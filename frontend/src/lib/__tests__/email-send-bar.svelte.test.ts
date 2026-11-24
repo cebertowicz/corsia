@@ -56,6 +56,24 @@ describe('email send bar', () => {
 		render({ readState: vi.fn().mockResolvedValue(null) }); press('Send now'); await settle();
 		expect(host.textContent).not.toContain('didn’t leave'); expect(host.textContent).toContain('Couldn’t confirm the email left.'); expect(host.querySelectorAll('button')).toHaveLength(0);
 	});
+	const noAnswer = { 500: () => apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }), thrown: () => apiFetch.mockRejectedValue(new Error('offline')) };
+	it.each(['500', 'thrown'] as const)('after a Don’t send with no answer (%s), an open draft goes back to the draft with no Retry and nothing sent', async (how) => {
+		noAnswer[how](); const readState = vi.fn().mockResolvedValue('open');
+		render({ readState }); press('Don’t send'); press('Don’t send'); await settle();
+		expect(readState).toHaveBeenCalledTimes(1);
+		expect(host.textContent).toContain('Don’t send didn’t go through. The draft is still open.');
+		expect(host.textContent).not.toContain('Couldn’t send'); expect(button('Retry')).toBeUndefined();
+		expect(apiFetch).toHaveBeenCalledTimes(1); expect(apiFetch).toHaveBeenCalledWith('/api/email-drafts/a%2F1/discard', expect.anything());
+	});
+	it.each(['500', 'thrown'] as const)('after a Don’t send with no answer (%s), a stored discard shows Not sent and an unread state claims nothing about the email', async (how) => {
+		noAnswer[how](); render({ readState: vi.fn().mockResolvedValue('discarded') }); press('Don’t send'); press('Don’t send'); await settle();
+		expect(host.textContent).toContain('Not sent. This draft is marked as not to send.');
+		unmount(component!); host.replaceChildren();
+		noAnswer[how](); render({ readState: vi.fn().mockResolvedValue(null) }); press('Don’t send'); press('Don’t send'); await settle();
+		expect(host.textContent).toContain('Couldn’t confirm Don’t send went through.');
+		expect(host.textContent).not.toContain('email left'); expect(host.textContent).not.toContain('Couldn’t send'); expect(button('Retry')).toBeUndefined();
+		expect(apiFetch.mock.calls.every(([url]) => String(url).endsWith('/discard'))).toBe(true);
+	});
 	it('saves the last edit before it sends, and sends nothing when that save fails', async () => {
 		let saved!: (ok: boolean) => void;
 		const flush = vi.fn(() => new Promise<boolean>((r) => { saved = r; }));
