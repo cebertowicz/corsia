@@ -58,7 +58,7 @@ describe('unchecked setup accounts', () => {
 	it('keeps fresh-install copy with no account lines', () => {
 		const source = { source: 'claude-code', name: 'Claude Code', state: 'not_installed' as const, accounts: [] };
 		const flow = createSetupConnect({ token: () => null, sources: () => [source], refreshSources: async () => undefined });
-		expect(flow.row(source).meta).toBe('Uses your Claude subscription.');
+		expect(flow.row(source).meta).toBe('Uses your Claude account.');
 	});
 	it('keeps unverified reinstall and checking copy with no account lines', () => {
 		const source = { source: 'claude-code', name: 'Claude Code', state: 'unverified' as const, accounts: [] };
