@@ -92,7 +92,7 @@ def _reduce_plan(
     # The rows are the open work; the settled leaves are the plan's stored counters (#731 S2-2).
     counts = {**counts, "done": counts["done"] + plan["top_done"], "failed": counts["failed"] + plan["top_failed"]}
     user_ready = sum(
-        reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user"
+        reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user" and not row["later"]
         for row in leaves
     )
     user_blocked = sum(
