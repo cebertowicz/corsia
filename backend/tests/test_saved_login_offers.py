@@ -10,6 +10,7 @@ allowlist pins which modules may make or confirm an offer.
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -88,7 +89,7 @@ def test_an_unconfirmed_offer_is_not_shown_or_saved(sessions):
     key = _key(sessions)
     assert offers.offer_login(key, SITE, "me", "pw one 1") is True
     assert offers.pending_offer(key) is None
-    with pytest.raises(KeyStoreError, match="There's no sign-in to save here"):
+    with pytest.raises(KeyStoreError, match="There’s no sign-in to save here"):
         offers.save_offer(key, saved_by=OWNER_USER)
     assert saved_logins.list_logins() == []
     offers.confirm_offer(key)
@@ -359,6 +360,35 @@ async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    offers.NO_OFFER, offers._SESSION_REFUSAL, offers._OWN_SITE_REFUSAL, saved_logins._SITE_REFUSAL,
+])
+async def test_a_refusal_the_person_can_act_on_answers_409_with_its_text(client, sessions, monkeypatch, text):
+    def refuse(*_args, **_kwargs):
+        raise KeyStoreError(text)
+
+    monkeypatch.setattr(offers, "save_offer", refuse)
+    refused = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
+    assert refused.status_code == 409
+    assert refused.json() == {"detail": text}
+
+
+@pytest.mark.asyncio
+async def test_any_other_save_failure_answers_500_with_fixed_text(client, sessions, monkeypatch, caplog):
+    def fail(*_args, **_kwargs):
+        raise KeyStoreError("internal x")
+
+    monkeypatch.setattr(offers, "save_offer", fail)
+    with caplog.at_level(logging.ERROR, logger=saved_logins_api.__name__):
+        failed = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
+    assert failed.status_code == 500
+    assert failed.json() == {"detail": "Couldn’t save the login. Try again."}
+    assert "internal x" not in failed.text
+    [record] = [record for record in caplog.records if record.name == saved_logins_api.__name__]
+    assert record.levelno == logging.ERROR and record.getMessage() == "Saving a login for thread t-mine failed: KeyStoreError"
+
+
+@pytest.mark.asyncio
 async def test_another_persons_thread_is_not_found(client, sessions):
     sessions["t-other"] = "s9"
     _confirmed(_key(sessions, "t-other"))
@@ -388,7 +418,7 @@ async def test_list_and_delete(client, sessions):
 async def test_deleting_a_login_that_is_not_there_says_so(client, sessions, login_id):
     missing = await client.delete(f"/api/saved-logins/{login_id}", headers=_person())
     assert missing.status_code == 404
-    assert missing.json() == {"detail": "There's no saved login to delete."}
+    assert missing.json() == {"detail": "There’s no saved login to delete."}
 
 
 _ROUTES = [

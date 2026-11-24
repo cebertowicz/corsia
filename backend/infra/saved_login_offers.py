@@ -36,11 +36,11 @@ from infra.saved_logins import (
 )
 
 _SESSION_REFUSAL = (
-    "The shared browser this sign-in came from has closed, so it can't be saved. "
-    "It's offered again the next time you sign in."
+    "The shared browser this sign-in came from has closed, so it can’t be saved. "
+    "It’s offered again the next time you sign in."
 )
-_OWN_SITE_REFUSAL = "CORSIA doesn't save a login for CORSIA itself."
-NO_OFFER = "There's no sign-in to save here. It's offered again the next time you sign in."
+_OWN_SITE_REFUSAL = "CORSIA doesn’t save a login for CORSIA itself."
+NO_OFFER = "There’s no sign-in to save here. It’s offered again the next time you sign in."
 
 
 @dataclass(frozen=True)
