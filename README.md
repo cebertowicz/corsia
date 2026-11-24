@@ -59,13 +59,13 @@ xychart-beta
     bar [31, 59, 29, 56, 96, 125, 135, 236, 405, 302, 290, 364, 287, 265, 134]
 ```
 
-Weeks run Monday to Sunday, Pacific time. The September 28 week counts Monday to Friday only.
+Weeks run Monday to Sunday, Pacific time. The September 28 week counts Monday to Friday only. From late October the count falls as the project's owner spent more of their time on other projects.
 
 ## Runs on the models you already have
 
 Agents run on a Claude Code or Codex subscription, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. Every model gets the same instructions, skills and tools. Changing an agent's model or account keeps its plan and documents, and when an account reaches its usage limit, the agent can move to another account you allow. CORSIA itself is free; model use is billed by whoever provides the model: your subscription's usage limits, your API bill, or nothing per use with a local model.
 
-A team of agents uses far more of a subscription than one agent does, so start with one. For scale: over one week in November 2026, the install that builds CORSIA averaged about 21 agents at work in any given hour and used about 4.5 billion tokens a day, 97% of them context the model had already read (cache reads).
+A team of agents uses far more of a subscription than one agent does, so start with one. For scale: over one week in November 2026, the install that builds CORSIA averaged about 22 agents at work in any given hour and used about 4.5 billion tokens a day, with a 97% cache hit rate. Each hour of agent work used 20% fewer tokens than in the same week a month earlier, and 12% fewer uncached tokens.
 
 ## Getting started
 
