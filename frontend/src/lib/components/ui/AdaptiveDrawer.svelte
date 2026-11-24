@@ -201,7 +201,7 @@
 				<div class="drawer-drag-region" aria-hidden="true" data-drawer-handle>
 					<span class="drawer-grabber"></span>
 				</div>
-				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
+				{#if !headless}<div class="drawer-head" class:centered={!!leading} class:has-actions={!!actions} class:icon-done={doneIcon}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}{#if actions}<span class="drawer-actions">{@render actions()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
 					{#if doneIcon}<span class="drawer-done-icon"><CloseButton label={doneLabel} onclick={onClose} /></span>{:else}<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>{/if}
@@ -346,6 +346,10 @@
 	.drawer-lead { justify-self: start; }
 	/* 44px between neighbouring targets and before Close (the head's 8px gap is part of it), so a thumb aimed at one does not land on the next. */ .drawer-actions { display: inline-flex; align-items: center; gap: var(--touch-target); margin-right: calc(var(--space-7) + var(--space-1)); } .drawer-done-icon { display: inline-flex; margin-right: calc(var(--space-1) / -2); }
 	.drawer-head.centered .drawer-done { justify-self: end; }
+	/* The word control shares the content edge and leaves 44px between targets. */
+	.drawer-head.has-actions:not(.icon-done) { padding-right: calc(var(--space-3) - var(--space-1) / 2); }
+	.drawer-head.has-actions:not(.icon-done) .drawer-actions { margin-right: calc(var(--space-7) - var(--space-1)); }
+	.drawer-head.has-actions:not(.icon-done) .drawer-done { padding-inline: calc(var(--space-1) / 2); }
 	/* Holds Done at the trailing edge when the content owns the title. */
 	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
 	.drawer-context { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
