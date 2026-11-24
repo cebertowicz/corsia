@@ -18,7 +18,7 @@ function comment(id: string) {
 	return { id, cid: id, user_message_id: 'u1', quote: 'text', note: `note ${id}`, from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] };
 }
 
-async function open(listed: boolean): Promise<void> {
+async function open(listed: boolean, narrow = false): Promise<void> {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
 	vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -27,7 +27,7 @@ async function open(listed: boolean): Promise<void> {
 	component = mount(ChatThreadSheet, {
 		target: document.body,
 		props: {
-			messageId: 'm1', threadId: 't1', comments: listed ? [comment('a'), comment('b')] : [comment('a')], listed, fromList: false, closing: false, narrow: false,
+			messageId: 'm1', threadId: 't1', comments: listed ? [comment('a'), comment('b')] : [comment('a')], listed, fromList: false, closing: false, narrow,
 			anchor, bounds: null, onReply: async () => {}, onBack: () => {}, onClose: () => {}, onClosed: () => {},
 		} as never,
 	});
@@ -44,4 +44,11 @@ it('focuses the list title, not the first Reply, when a list opens in a popover'
 it('leaves a single thread opening on its reply box', async () => {
 	await open(false);
 	expect(document.activeElement?.tagName).toBe('TEXTAREA');
+});
+
+it('shows Close on the rounded phone sheet', async () => {
+	await open(false, true);
+	const panel = document.querySelector('.drawer-panel')!;
+	expect(panel.classList.contains('compact')).toBe(false);
+	expect(panel.querySelector('.drawer-done')?.textContent).toBe('Close');
 });

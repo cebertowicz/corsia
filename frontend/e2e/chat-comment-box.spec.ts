@@ -111,6 +111,8 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await page.locator('.sel-comment').click();
   await commentEditor(page).fill('Refused once');
   if (width === 393) {
+    await expect(box.locator('.drawer-done')).toHaveText('Close');
+    await expect(box).toHaveCSS('border-top-left-radius', '28px');
     // A phone's buttons are full touch targets, a target apart, and the passage stays in view between the header and the sheet.
     const [cancel, post] = [await box.getByRole('button', { name: 'Cancel' }).boundingBox(), await box.getByRole('button', { name: 'Comment', exact: true }).boundingBox()];
     expect(cancel!.height).toBeGreaterThanOrEqual(44);

@@ -1,12 +1,28 @@
-/** Keep the footer fixed unless a thread's fixed rows leave less than one reply target. */
-export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls: boolean) => void) {
+import { coarsePointer } from '$lib/selectionButtonPlace';
+import { isEditableTarget } from '$lib/editableTarget';
+
+/**
+ * The soft keyboard is up while a text field in the drawer has focus on a touch screen: the page's own keyboard handling
+ * (`homeLifecycle`) uses the same test. It reads no viewport size, so it holds whether the browser resizes the layout for the keyboard or not.
+ */
+function keyboardUp(drawer: HTMLElement) {
+	const focused = document.activeElement;
+	return coarsePointer() && !!focused && drawer.contains(focused) && isEditableTarget(focused);
+}
+
+/**
+ * Keep the footer fixed unless it takes room a reader needs. A thread's footer scrolls when its fixed rows leave less than one
+ * reply target. The list's footer scrolls while the keyboard is up, so the list keeps that room.
+ */
+export function documentFooterRoom(drawer: HTMLElement, onChange: (scrolls: boolean) => void) {
 	let frame = 0;
 	const resize = new ResizeObserver(schedule);
 	function measure() {
 		const list = drawer.querySelector<HTMLElement>(':scope > .drawer-comments');
 		const footer = drawer.querySelector<HTMLElement>('.drawer-foot');
 		const back = drawer.querySelector<HTMLElement>(':scope > .thread-back');
-		if (!list || !footer || !back) { onChange(false); return; }
+		if (!list || !footer) { onChange(false); return; }
+		if (!back) { onChange(keyboardUp(drawer)); return; }
 		// Back is out of the flow on a short sheet (documentThreadChromeRoom), so it takes no row.
 		const fixed = [...drawer.children].filter((child) => child !== list && child !== footer && getComputedStyle(child).position !== 'absolute');
 		const style = getComputedStyle(drawer);
@@ -17,6 +33,9 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 			+ footer.getBoundingClientRect().height + gap * (fixed.length + 1) + target;
 		onChange(required > drawer.clientHeight);
 	}
+	// Focus moves first and the element it lands on is read a frame later, so leaving one field for another never reads as the keyboard going down.
+	drawer.addEventListener('focusin', schedule);
+	drawer.addEventListener('focusout', schedule);
 	function schedule() {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(measure);
@@ -34,5 +53,5 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 	});
 	mutation.observe(drawer, { childList: true, subtree: true });
 	observeRows();
-	return { destroy() { cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect(); onChange(false); } };
+	return { destroy() { drawer.removeEventListener('focusin', schedule); drawer.removeEventListener('focusout', schedule); cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect(); onChange(false); } };
 }
