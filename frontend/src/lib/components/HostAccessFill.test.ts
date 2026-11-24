@@ -50,7 +50,7 @@ it('names the agent, site and username, and approves for the duration the person
 	expect(text).toContain('https://example.com');
 	expect(text).toContain('me@example.com');
 	expect(text).toContain('Needs approval');
-	expect(text).toContain('The agent never sees it');
+	expect(text).toContain('The agent never sees it, and you can revoke this approval at any time.');
 	const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
 	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes']);
 	expect(radios[0].getAttribute('aria-checked')).toBe('true');
@@ -93,8 +93,9 @@ it('offers nothing above the cap the server sends', () => {
 
 it('cannot be approved when stale or incomplete, and says why', async () => {
 	const stale = pending(fill(), { stale: true, approveDisabled: true });
-	expect(stale.host.textContent).toContain('Not current');
-	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current');
+	expect(stale.host.querySelector('.decision-head .status')?.textContent?.trim()).toBe('Couldn’t check');
+	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current, so you can’t approve it yet.');
+	expect(stale.host.textContent).not.toContain('Retry to check again');
 	await unmount(stale.component);
 	const incomplete = pending(fill({ decision_capability: '' }));
 	expect(incomplete.host.textContent).toContain('This request arrived without everything needed to approve it.');

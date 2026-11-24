@@ -49,10 +49,10 @@
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div><div class="section-label">Sign in with a saved login</div><h2 title={owner(request)}>{owner(request)}</h2></div>
-		<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
 	</header>
 	<div class="decision-body fill-body">
-		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke it at any time.</p>
+		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke this approval at any time.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
 		<section><span class="section-label">Username</span><p>{request.username}</p></section>
 		<section>
@@ -76,7 +76,7 @@
 		{#if stale || !ready}
 			<div class="blocked-line" role="status">
 				<span>{stale
-					? 'Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.'
+					? 'Couldn’t check that this request is still current, so you can’t approve it yet.'
 					: 'This request arrived without everything needed to approve it. Retry to load it again.'}</span>
 				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
 			</div>
@@ -110,7 +110,8 @@
 	}
 	.status.stale, .blocked-line { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
-	@media (pointer: coarse) {
+	/* A finger-sized target on a phone-width sheet or any touch pointer. */
+	@media (max-width: 720px), (pointer: coarse) {
 		.durations .segment { min-height: var(--touch-target); }
 	}
 	.blocked-line {

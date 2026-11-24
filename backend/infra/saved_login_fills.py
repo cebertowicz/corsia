@@ -52,9 +52,9 @@ MIN_GRANT_SECONDS = 1
 AWAITING_USER = "awaiting_user"
 ACTIVE = "active"
 
-_NO_REQUEST = "That fill request is no longer waiting."
-_NO_GRANT = "That fill approval has already ended."
-_NOT_CURRENT = "That fill request changed; look at it again."
+_NO_REQUEST = "This sign-in request is closed. Ask the agent to try again if it still needs to sign in."
+_NO_GRANT = "This approval has ended."
+_NOT_CURRENT = "This request has new details. Review them before you approve."
 _NO_THREAD = "A fill request needs the agent's own thread."
 _OTHER_THREAD = "A fill request can only be made for the agent's own thread."
 _DURATION = f"Pick a duration from {MIN_GRANT_SECONDS} to {MAX_GRANT_SECONDS} seconds."

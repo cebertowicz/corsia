@@ -148,7 +148,8 @@ def test_deny_and_revoke_end_it(world):
                              application_hash=row["application_hash"])
     assert denied["state"] == "denied"
     assert fills.may_fill(AGENT_THREAD, login) is False
-    with pytest.raises(fills.FillApprovalNotFound):
+    with pytest.raises(fills.FillApprovalNotFound, match="^This sign-in request is closed. Ask the agent to try "
+                       "again if it still needs to sign in.$"):
         _approve(row)  # a denied request can't be approved afterwards
     granted = _approve(fills.request_fill(AGENT_THREAD, login))
     assert fills.may_fill(AGENT_THREAD, login) is True
@@ -156,15 +157,21 @@ def test_deny_and_revoke_end_it(world):
                                 application_hash=granted["application_hash"])
     assert revoked["state"] == "revoked"
     assert fills.may_fill(AGENT_THREAD, login) is False
+    with pytest.raises(fills.FillApprovalNotFound, match="^This approval has ended.$"):
+        fills.revoke_fill(granted["id"], user_id=PERSON, revision=granted["revision"],
+                          application_hash=granted["application_hash"])
 
 
 def test_decisions_need_the_current_request_of_the_same_person(world):
     row = fills.request_fill(AGENT_THREAD, world["login"])
     with pytest.raises(fills.FillApprovalNotFound):
         _approve(row, user_id=OTHER_PERSON)
-    with pytest.raises(fills.FillApprovalError):
+    with pytest.raises(fills.FillApprovalError, match="^This request has new details. Review them before you approve.$"):
         fills.approve_fill(row["id"], user_id=PERSON, revision=row["revision"] + 1,
                            application_hash=row["application_hash"], duration_seconds=60)
+    with pytest.raises(fills.FillApprovalError):
+        fills.deny_fill(row["id"], user_id=PERSON, revision=row["revision"] + 1,
+                        application_hash=row["application_hash"])  # a reject on an old view is refused too
     with pytest.raises(fills.FillApprovalNotFound):
         fills.revoke_fill(row["id"], user_id=PERSON, revision=row["revision"],
                           application_hash=row["application_hash"])  # not granted yet
