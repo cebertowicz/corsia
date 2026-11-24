@@ -172,7 +172,8 @@ it('shows a live grant with its time left and revokes it', async () => {
 	} });
 	flushSync();
 	const text = host.textContent ?? '';
-	expect(text).toContain('Bookkeeper can sign in to https://example.com as me@example.com.');
+	expect(text).toContain('CORSIA types the password into this site for the agent. The agent never sees it.');
+	expect(text).not.toContain('can sign in to');
 	expect(text).toContain('15 minutes');
 	expect(text).toContain('10:00');
 	expect(text).not.toContain('Reviewer');

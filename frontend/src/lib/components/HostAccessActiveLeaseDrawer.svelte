@@ -31,7 +31,7 @@
 	</header>
 	<div class="active-drawer-body">
 		{#if lease.kind === 'fill'}
-			<p>{owner(lease)} can sign in to {lease.site} as {lease.username}. CORSIA types the password; the agent never sees it.</p>
+			<p>CORSIA types the password into this site for the agent. The agent never sees it.</p>
 			<dl>
 				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
 				<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>
