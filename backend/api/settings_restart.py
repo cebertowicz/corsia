@@ -21,6 +21,7 @@ from api.update_preflight import check_update_backup_room as _check_update_backu
 from api.update_preflight import fresh_update_target
 from api.update_preflight import restamp_staged_target
 from api.update_preflight import with_failure_code as _with_failure_code
+from infra.log_files import nofollow_log_opener
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -74,9 +75,8 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
     log_path = _update_log_path(restart_env.get("CORSIA_RESTART_OPERATION_ID"))
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text(
-            "\n".join(part.rstrip() for part in (stdout, stderr) if part.strip()) + "\n"
-        )
+        with open(log_path, "w", encoding="utf-8", opener=nofollow_log_opener) as log:
+            log.write("\n".join(part.rstrip() for part in (stdout, stderr) if part.strip()) + "\n")
     except OSError as exc:
         if result.returncode != 0:
             raise _with_failure_code(
@@ -262,7 +262,7 @@ async def _launch_settings_restart(
     log_path: Path | None = None
     try:
         log_path = _update_log_path(operation_id) if prepared else restart_log_path("restart.log")
-        with log_path.open("a" if prepared else "w") as log_fh:
+        with open(log_path, "a" if prepared else "w", opener=nofollow_log_opener) as log_fh:
             if prepared:
                 from automation.self_restart import record_update_log
                 from infra.db_async import run_in_db

@@ -286,7 +286,7 @@ def _build_app(bundle: Path) -> None:
     infra = resources / "backend" / "infra"
     infra.mkdir(parents=True)
     (infra / "__init__.py").write_text("")
-    for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
+    for module in ("platform_paths.py", "service_file.py", "fs_durability.py", "log_files.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
     # Read by the rollback's schema check, which never imports it.
     (infra / "schema.py").write_text(f"SCHEMA_VERSION = {APP_SCHEMA_VERSION}\n")
@@ -634,8 +634,9 @@ def test_logs_read_the_file_the_launcher_writes(app, override):
     result = app.run("logs", **extra)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    # The launcher's service_log_path(): <state root>/logs/service.log.
-    assert result.stdout.strip() == f"-f {state / 'logs' / 'service.log'}"
+    from infra.log_files import logs_dir
+
+    assert result.stdout.strip() == f"-f {logs_dir(state, home=app.home) / 'service.log'}"
 
 
 @pytest.mark.parametrize("foreign", ["another_copy", "another_version"])

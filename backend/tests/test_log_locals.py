@@ -37,7 +37,7 @@ elif sys.argv[1] in ("server", "installer"):
     else:
         from cli_local_before_start import _quiet_logs
         log_file = _quiet_logs()
-        assert log_file.resolve().is_relative_to(config.STATE_ROOT.resolve())
+        assert log_file.resolve().parent == config.LOGS_DIR.resolve()
 
 
 def handle(held):
@@ -61,7 +61,7 @@ def _log_exception(tmp_path: Path, mode: str) -> str:
     workspace, state = tmp_path / "workspace", tmp_path / "state"
     workspace.mkdir()
     state.mkdir()
-    env = {**os.environ, "PYTHONPATH": str(BACKEND), "CORSIA_WORKSPACE": str(workspace),
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONPATH": str(BACKEND), "CORSIA_WORKSPACE": str(workspace),
            "CORSIA_STATE_DIR": str(state), "CORSIA_TEST_MODE": "1", "CORSIA_ANALYTICS_DISABLE": "1"}
     result = subprocess.run(
         [sys.executable, str(script), mode, MARKER], cwd=BACKEND, env=env,

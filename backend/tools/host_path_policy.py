@@ -120,8 +120,6 @@ class ProtectedHostPathPolicy:
             for path in (
                 *_CONTROL_FILES,
                 self.state_root / "runtime" / "corsia-restart.signal",
-                self.state_root / "logs" / "restart.log",
-                self.state_root / "logs" / "self-restart.log",
             )
         )
 
