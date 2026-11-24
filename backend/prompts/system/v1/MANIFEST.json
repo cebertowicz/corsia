@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3718,
+      "bytes": 3614,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "1960c2cef1b721115396df517e7c00af9052d5f0d840add4e7ee99d04b932208"
+      "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
     },
     {
       "bytes": 389,
@@ -103,7 +103,7 @@
       "bytes": 5877,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "894ef3337e62c5a8e96821087b3b572fbeca604f55c4c133409da08377748a4b"
+      "sha256": "6d0c301659f1f9142eddd37b6f8ff936f85dbf23cde8e9e9de8479c2fbc1a1ff"
     },
     {
       "bytes": 3474,
@@ -112,10 +112,10 @@
       "sha256": "caaa0dc5c2b8b14eb9412538d1800c7deef7286e84c6ffd3324d4d1d1c5be020"
     },
     {
-      "bytes": 663,
+      "bytes": 734,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/templates/PRIORITIES.md",
-      "sha256": "00e28f56aacc64e75b7b9dde38bfcf61e6ff80a34de3ec9b9be144ff10f6b795"
+      "sha256": "cf690841e372fa1f8591c43125f5c00453b4a72c3929aa0c320037baf8ad731d"
     },
     {
       "bytes": 4409,
@@ -232,10 +232,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 2323,
+      "bytes": 2586,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/priorities-files.md",
-      "sha256": "bbbeb31af6209d5c5393a7303e6a7cbe0162b34f3a0058e29e068e50662b57b8"
+      "sha256": "60278fc6590dfa1585339bae03725ae4c4f73a258799f036b0cea5490d9ce33a"
     },
     {
       "bytes": 7206,

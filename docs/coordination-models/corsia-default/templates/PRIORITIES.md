@@ -1,10 +1,11 @@
 # <Contributor agent name> — priorities
 
+*Use: when two pieces of work compete, the one higher under Now goes first. <Person's name> owns this file; agents suggest changes and never edit it.*
+
 <!-- Example agent priorities file. Shape: skill conductor-bootstrap,
-references/priorities-files.md. The person owns this file; agents suggest
-changes. Every line traces to the person's words or reads "Not set yet".
-Only lines that differ from the project's file. Replace every <…>, then
-delete these comments. -->
+references/priorities-files.md. Every line traces to the person's words or
+reads "Not set yet". Only lines that differ from the project's file.
+Replace every <…>, then delete this comment; keep the Use line. -->
 
 ## Now
 
@@ -13,8 +14,8 @@ delete these comments. -->
 
 ## Always
 
-- Work eligible upstream issues in the `corsia-contrib` project, up to <N>
-  tokens per week, during <hours/days>, until the person revokes it.
+- Fix a contribution of its own that upstream reports broken, before new
+  work, without asking.
 
 ## Dates
 

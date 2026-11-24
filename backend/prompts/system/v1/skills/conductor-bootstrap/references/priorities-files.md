@@ -10,6 +10,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 
 ## What a file holds
 
+- **Use line:** the file opens with this line, in italics, and keeps it: `*Use: when two pieces of work compete, the one higher under Now goes first. The person owns this file; agents suggest changes and never edit it.*` Name the person in place of "the person".
 - **Now:** the problems to solve, in order. A line names a problem, never a task: tasks stay in plans.
 - **Always:** kinds of work this agent may start without asking, only where that differs from the project's file.
 - **Dates:** only dates the person set.
