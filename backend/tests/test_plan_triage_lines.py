@@ -9,8 +9,6 @@ add returns is `test_plan_top.py`'s.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 import plans.selection_validity as validity
@@ -74,27 +72,12 @@ def _phase(db, plan_id: str, title: str):
     return node
 
 
-def _watch(db, plan_id: str, node_id: str) -> None:
-    """Park one task on a deadline wait three days out."""
-    queue_active(db, node_id)
-    deadline = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
-    plan_update(db, plan_id, "arm_watch", {
-        "node_id": node_id, "expected_revision": revision(db, node_id),
-        "condition": {"type": "deadline", "value": deadline},
-        "expected_event": f"proof.{node_id[:8]}",
-    })
-
-
 def _activations(db, node_id: str) -> int:
     return int(db.execute(
         "SELECT COUNT(*) FROM plan_node_events "
         "WHERE node_id=? AND event='state_transition' AND new_state='active'",
         (node_id,),
     ).fetchone()[0])
-
-
-def _waiting(db, plan_id: str) -> None:
-    _watch(db, plan_id, task(db, plan_id, "Waiting work").id)
 
 
 def _held(db, plan_id: str) -> None:
