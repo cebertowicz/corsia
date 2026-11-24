@@ -128,9 +128,6 @@ SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
 document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
-REMEMBER = """<!doctype html><title>Remember</title><script>
-document.cookie = 'remember=1; path=/; max-age=86400'; document.title = document.cookie;
-</script>"""
 
 
 @contextmanager
@@ -139,7 +136,7 @@ def fixture_server():
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
-             "/layer.html": LAYER.encode(), "/remember.html": REMEMBER.encode()}
+             "/layer.html": LAYER.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -288,7 +285,7 @@ async def test_an_agents_next_command_after_its_chrome_ends_gets_a_working_signe
     owner = BrowserSessionOwner(namespace="corsia-restart-e2e", instance_key=uuid4().hex)
     try:
         with fixture_server() as origin:
-            assert "remember=1" in await owner.run(thread, ("open", f"{origin}/remember.html"))
+            assert (await owner.run(thread, ("open", f"{origin}/holder.html"))).startswith("holder=1")
             # Chrome writes a new cookie to the profile some seconds after it is set; a close writes it at once.
             await owner.close_thread(thread)
             await owner.run(thread, ("open", f"{origin}/plain.html"))
@@ -298,10 +295,10 @@ async def test_an_agents_next_command_after_its_chrome_ends_gets_a_working_signe
             os.kill(chrome.process.pid, ending)
             await asyncio.wait_for(chrome.process.wait(), 10)
             first = await owner.run(thread, ("open", f"{origin}/cookies.html"))
-            assert "remember=1" in first, first
+            assert first.startswith("holder=1"), first
             assert "started again" in first, first
             assert owner._sessions[thread].chrome is not chrome and owner._sessions[thread].record.profile == profile
-            assert "remember=1" in await owner.run(thread, ("open", f"{origin}/cookies.html"))
+            assert (await owner.run(thread, ("open", f"{origin}/cookies.html"))).startswith("holder=1")
     finally:
         await owner.shutdown()
         profile = browser_launch.profile_dir(thread)
