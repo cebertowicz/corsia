@@ -284,14 +284,30 @@ async def test_an_agent_network_route_makes_the_sign_in_the_persons(browser, mon
             await browser.owner.shutdown()
 
 
+async def _browser_open(run, monkeypatch, url: str) -> str:
+    """The browser_open tool, as an agent calls it: it navigates with its own server-built eval."""
+    from host_access.processes import PROCESS_OWNER
+    from tools.browser import BrowserOpenTool
+
+    monkeypatch.setattr(PROCESS_OWNER, "browser_sessions", lambda: run.owner)
+    text = await BrowserOpenTool().execute(url, _thread_id=run.thread)
+    run.outputs.append(text)
+    return text
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_clean_sign_in_fills_submits_and_reports_success(browser, monkeypatch):
+@pytest.mark.parametrize("opened_by", ["open_command", "browser_open_tool"])
+async def test_a_clean_sign_in_fills_submits_and_reports_success(browser, monkeypatch, opened_by):
     with site(browser.sentinel) as (origin, posts):
         site_origin = _admit_fixture(monkeypatch, origin)
         login_id = _save(browser, site_origin)
         try:
-            await _agent(browser, "open", f"{origin}/login.html")
+            if opened_by == "open_command":
+                await _agent(browser, "open", f"{origin}/login.html")
+            else:
+                opened = await _browser_open(browser, monkeypatch, f"{origin}/login.html")
+                assert not opened.startswith("Error"), opened
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
             assert text == f"Signed in to {site_origin} as {USER} with the saved login.", text

@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from host_access import browser_cdp, browser_fill_marks as marks
+from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 
 THREAD = "thread-marks"
 
@@ -161,3 +162,83 @@ def test_an_unread_document_counts_as_scripted():
 
 def test_a_fill_without_a_session_id_counts_as_marked():
     assert marks.session_marked(THREAD, None)
+
+
+# browser_open's own navigation, through the real tool and session-command path on a synthetic browser.
+NAVIGATION = "location.href = \"https://example.com/login\"; 'navigating'"
+
+
+@pytest.fixture
+def tool_path(synthetic_browser, monkeypatch, on_page):
+    """The browser tools wired to a synthetic browser in a disposable session; records each mark call."""
+    from host_access import browser_launch
+    from host_access.processes import ProcessOwner
+    from tools import browser_runtime
+
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda _: None)
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    process_owner = ProcessOwner.__new__(ProcessOwner)
+    process_owner._browser_owner = synthetic_browser.owner
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", process_owner)
+    calls: list[tuple] = []
+    real = marks.before_agent_command
+
+    async def recording(thread_id, session, endpoint, args, *, navigation=False):
+        calls.append((session, tuple(args), navigation))
+        await real(thread_id, session, endpoint, args, navigation=navigation)
+
+    monkeypatch.setattr(marks, "before_agent_command", recording)
+    return calls
+
+
+def _clean(calls) -> bool:
+    """What browser_login_fill._clean asks of the marks, for the session the commands ran in."""
+    session = calls[-1][0]
+    assert session is not None
+    return not (marks.scripted(THREAD, "L1") or marks.site_marked(THREAD, session, "example.com")
+                or marks.session_marked(THREAD, session))
+
+
+@pytest.mark.asyncio
+async def test_browser_open_navigates_without_marking_the_page_it_leaves(tool_path, synthetic_browser):
+    from tools.browser import BrowserOpenTool
+
+    try:
+        opened = await BrowserOpenTool().execute("https://example.com/login", wait_for_load=False, _thread_id=THREAD)
+        assert opened.startswith("ok"), opened
+        assert tool_path[-1][1:] == (("eval", NAVIGATION), True)
+        assert _clean(tool_path)
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_eval_of_the_same_navigation_text_still_marks(tool_path, synthetic_browser):
+    from tools import browser_runtime
+
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        assert await browser_runtime._run(["eval", NAVIGATION], thread_id=THREAD) == "ok"
+        assert tool_path[-1][1:] == (("eval", NAVIGATION), False)
+        assert not _clean(tool_path) and marks.scripted(THREAD, "L1")
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_javascript_navigation_url_still_marks(tool_path, synthetic_browser, monkeypatch):
+    # The address check refuses a javascript: URL before anything runs; with it out of the way, the
+    # navigation test refuses it too, so its eval marks like any agent script.
+    from host_access import browser_navigation
+    from tools import browser_runtime
+
+    script_url = "javascript:alert(1)"
+    script_navigation = f"location.href = \"{script_url}\"; 'navigating'"
+    monkeypatch.setattr(browser_navigation, "normalize_url", lambda value: value)
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        await browser_runtime._run(["eval", script_navigation], thread_id=THREAD, navigation_url=script_url)
+        assert tool_path[-1][1:] == (("eval", script_navigation), False)
+        assert not _clean(tool_path) and marks.scripted(THREAD, "L1")
+    finally:
+        await synthetic_browser.owner.shutdown()

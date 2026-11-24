@@ -127,19 +127,19 @@ def mark_saved_fill(thread_id: str, session: str | None, document: str | None) -
     _saved_fills.setdefault(thread_id, set()).add((session, document or None))
 
 
-def _same_session(marked: str | None, session: str | None) -> bool:
-    # A mark or a command with no session id can't be told apart from the filled session, so it counts as it.
+def same_session(marked: str | None, session: str | None) -> bool:
+    # A mark or a command with no session id can't be told apart from any session, so it counts as the same one.
     return marked is None or session is None or marked == session
 
 
 def saved_fill_session(thread_id: str, session: str | None) -> bool:
     """Whether a saved login was filled in this session, which then runs only _saved_command shapes until it ends."""
-    return any(_same_session(marked, session) for marked, _ in _saved_fills.get(thread_id, ()))
+    return any(same_session(marked, session) for marked, _ in _saved_fills.get(thread_id, ()))
 
 
 def _saved_fill_document(thread_id: str, session: str | None, visit: str) -> bool:
     # A document id that wasn't read, on either side, counts as the filled document.
-    return any(_same_session(marked, session) and (document is None or not visit or document == visit)
+    return any(same_session(marked, session) and (document is None or not visit or document == visit)
                for marked, document in _saved_fills.get(thread_id, ()))
 
 

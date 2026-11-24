@@ -25,6 +25,7 @@ from typing import Sequence
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_cdp
+from host_access.browser_control import same_session
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 
@@ -76,8 +77,16 @@ def outlives_document(args: Sequence[str]) -> bool:
     return args[0] not in _DOCUMENT_SCRIPT_COMMANDS
 
 
-async def before_agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str]) -> None:
-    """Mark the session, or the page's document and site, before an agent command that can reach them."""
+async def before_agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str], *,
+                               navigation: bool = False) -> None:
+    """Mark the session, or the page's document and site, before an agent command that can reach them.
+
+    `navigation` is browser_open's own navigation (browser_session_commands.run's trusted_navigation): a
+    server-built eval that only sets the address, so it runs no script of the agent's and marks nothing. The
+    same text sent by an agent has no navigation and marks as any eval does.
+    """
+    if navigation:
+        return
     if outlives_document(args) or (bool(args) and args[0] == "batch" and runs_script(args)):
         _session_marks.add((thread_id, session))
     elif runs_script(args):
@@ -105,11 +114,6 @@ async def _page(endpoint: str) -> tuple[str, str] | None:
     return None
 
 
-def _same_session(marked: str | None, session: str | None) -> bool:
-    # A mark or a fill with no session id can't be told apart from any session, so it counts as the same one.
-    return marked is None or session is None or marked == session
-
-
 def scripted(thread_id: str, loader: str) -> bool:
     """Whether an agent may have run a script in this document since it loaded; an unread document counts."""
     return not loader or loader in _scripted.get(thread_id, ())
@@ -117,13 +121,13 @@ def scripted(thread_id: str, loader: str) -> bool:
 
 def session_marked(thread_id: str, session: str | None) -> bool:
     """Whether an agent may have changed this session past a document, or ran script it can't place."""
-    return session is None or any(thread == thread_id and _same_session(marked, session)
+    return session is None or any(thread == thread_id and same_session(marked, session)
                                   for thread, marked in _session_marks)
 
 
 def site_marked(thread_id: str, session: str | None, domain: str) -> bool:
     """Whether an agent ran script on a page of this site (registrable domain) in this session."""
-    return any(thread == thread_id and _same_session(marked, session) and site == domain
+    return any(thread == thread_id and same_session(marked, session) and site == domain
                for thread, marked, site in _site_marks)
 
 

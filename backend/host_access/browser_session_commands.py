@@ -164,11 +164,11 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if not pane and runtime.chrome is not None and runtime.chrome.exited:
         runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
     saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+    # browser_open's own navigation: the server-built eval for the address it passed, never a pane's or a script URL.
+    trusted_navigation = (navigation_url is not None and not pane and not _javascript_url(navigation_url) and
+                          tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'"))
     if saved_sign_in or browser_control.saved_fill_session(thread_id, runtime.record.session):
-        trusted_navigation = (navigation_url is not None and
-                              tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
-                              not _javascript_url(navigation_url))
-        if _script_config(config) or not (trusted_navigation and not pane or
+        if _script_config(config) or not (trusted_navigation or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(_SCRIPT_REFUSAL if saved_sign_in else SAVED_FILL_SESSION_REFUSED)
     # Pane and agent commands share this lock, but direct person interaction and
@@ -179,7 +179,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     finally:
         owner._queued_actions -= 1
     try:
-        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane, trusted_navigation)
         if (show_window or pane) and not rendered.startswith("Error:"):
             # A connected pane already shows the page, so only an agent's share reveals it.
             await _share(runtime, thread_id, reveal=not pane)
@@ -213,7 +213,7 @@ async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_w
 
 
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],
-                      lease_id: str | None, timeout: float, pane: bool) -> str:
+                      lease_id: str | None, timeout: float, pane: bool, navigation: bool = False) -> str:
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
@@ -230,7 +230,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     if not pane:
         # Only a command the guard let through puts the agent in the page, and marks it against a saved-login fill.
-        await browser_fill_marks.before_agent_command(thread_id, runtime.record.session, endpoint, args)
+        await browser_fill_marks.before_agent_command(thread_id, runtime.record.session, endpoint, args, navigation=navigation)
         browser_pane_state.agent_acted(thread_id)
     if shared_write:
         try:
