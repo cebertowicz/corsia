@@ -8,6 +8,7 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, labelLines, leaveUnsent, shownHeaderSend } from '../support/heldComments';
 import { closeDetails, expectTouchTargets, openDetails } from '../support/documentBar';
+import { type AskForm, askFormOf, expectAskPlacement } from '../support/askPlacement';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled, type JourneySetup } from '../support/reviewFixtures';
 
 /**
@@ -61,13 +62,28 @@ function orphanComments(artifactId: string): void {
 	].join('\n'), path.join(state, 'corsia.db'), artifactId], { cwd: backendDir, encoding: 'utf8' });
 }
 
-/** The ask: on a document, the card docked to the canvas's bottom edge; on an image, its row in the image header. */
+/** The ask: on a phone, the card docked to the document canvas's bottom edge; on a larger screen, and on an image, its row in the header. */
 const bar = (page: Page) => page.locator('.review-bar, .rb-dock');
-/** The document's docked ask card. */
+/** The document's docked ask card: only on a phone (the header's row is `.review-bar`). */
 const card = (page: Page) => page.locator('[data-ask-card]');
-/** Opens or closes the docked card with a press on its question, as a person does. */
-async function setCardOpen(page: Page, open: boolean) {
-	const question = card(page).locator('.rb-dock-ask');
+/** The ask's own box in the form a case expects: the docked card, or the header row. The form comes from the case's mode or viewport, never from what the page drew, so a wrong placement fails. */
+const askOf = (page: Page, form: AskForm) => form === 'docked' ? card(page) : page.locator('.review-bar.ask');
+/** The asker's name and the question in the form a case expects. The header row shows the `.rb-ask` line at rest, the whole `.rb-ask-full` once opened, and always for a person step. */
+const askerOf = (page: Page, form: AskForm) => form === 'docked' ? page.locator('.rb-dock-who') : page.locator('.review-bar.ask .rb-who strong');
+const questionOf = (page: Page, form: AskForm) => form === 'docked' ? page.locator('.rb-dock-q')
+	: page.locator('.review-bar.ask:not(.expanded):not(.static) .rb-ask, .review-bar.ask .rb-ask-full');
+/**
+ * Opens or closes the ask with a press on its question, as a person does: the docked card's question, or the header row's line.
+ * The one exception is a person step in the header: its row has no toggle (its whole text is always shown), so the helper asserts that instead of pressing.
+ */
+async function setCardOpen(page: Page, open: boolean, form: AskForm, opts: { personStep?: boolean } = {}) {
+	if (form === 'header' && opts.personStep) {
+		await expect(page.locator('.review-bar.ask.static button.rb-line'), 'a person step in the header has no toggle').toHaveCount(0);
+		await expect(page.locator('.review-bar.ask.static .rb-ask-full'), 'a person step in the header always shows its whole text').toBeVisible();
+		return;
+	}
+	const question = form === 'docked' ? card(page).locator('.rb-dock-ask') : page.locator('.review-bar.ask button.rb-line');
+	await expect(question, 'the ask\'s question is there to press').toHaveCount(1);
 	if ((await question.getAttribute('aria-expanded')) !== String(open)) await question.click();
 	await expect(question).toHaveAttribute('aria-expanded', String(open));
 }
@@ -84,13 +100,15 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		addPersonStep(doc.threadId, doc.artifactId);
 		await open(page, doc, width === 1440 ? 'closed' : width === 393 ? 'phone' : 'default', theme);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 }); await settled(page);
+		const form: AskForm = width === 393 ? 'docked' : 'header';
+		await expectAskPlacement(page, form);
 		// The plan pane takes the overlay layout once the resize reaches it; measure only after it has.
 		if (width === 1280) await expect(page.locator('.pane.overlay')).toHaveCount(1);
 		// Opened, the person step's card gives who asks its own line above the question; the document's controls are Comments and
 		// Details in the bar.
-		await setCardOpen(page, true);
-		const geometry = await card(page).evaluate((element) => {
-			const who = element.querySelector('.rb-dock-who')!, range = document.createRange(); range.selectNodeContents(who);
+		await setCardOpen(page, true, form, { personStep: true });
+		const geometry = await askOf(page, form).evaluate((element) => {
+			const who = element.querySelector('.rb-dock-who, .rb-who strong')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = element.getBoundingClientRect(), style = getComputedStyle(element);
 			const tools = [...document.querySelectorAll('[data-comments-entry], [data-document-details]')].map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0);
 			return { text: text.toJSON(), contentRight: box.right - parseFloat(style.paddingRight), toolsLeft: Math.min(...tools.map((rect) => rect.left)),
@@ -99,11 +117,11 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		});
 		console.info('Delivery header geometry:', JSON.stringify({ width, theme, ...geometry }));
 		expect(geometry.name).toBe(doc.title);
-		expect(geometry.text.right, 'full name stays inside the card').toBeLessThanOrEqual(geometry.contentRight + 0.5);
+		expect(geometry.text.right, 'full name stays inside the ask').toBeLessThanOrEqual(geometry.contentRight + 0.5);
 		expect(geometry.tools, 'Comments and Details are in the bar').toBe(2);
 		expect(geometry.toolsLeft, 'every bar tool starts inside the screen').toBeGreaterThanOrEqual(0);
 		expect(geometry.toolsRight, 'every bar tool ends inside the screen').toBeLessThanOrEqual(width + 0.5);
-		for (const button of await page.locator('[data-comments-entry], [data-document-details], [data-ask-card] button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
+		for (const button of await page.locator('[data-comments-entry], [data-document-details], [data-ask-card] button:visible, .review-bar.ask button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
 		expect(await hitAtCentre(bar(page).getByRole('button', { name: 'Done', exact: true }))).toBe(true);
 		if (width === 1280) expect(geometry.paneOverlay).toBe(true);
 		const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
@@ -122,6 +140,8 @@ for (const [width, height, mode] of [[852, 393, 'closed'], [852, 393, 'phone'], 
 		await open(page, doc, mode, 'light');
 		await page.setViewportSize({ width, height }); await settled(page);
 		await page.waitForTimeout(500);
+		// A touch screen at or under the phone width, or a short one held sideways, docks its ask.
+		await expectAskPlacement(page, 'docked');
 		const header = await card(page).evaluate((el) => {
 			const text = el.querySelector<HTMLElement>('.rb-dock-text')!;
 			const canvas = el.closest<HTMLElement>('.document-canvas')?.getBoundingClientRect();
@@ -135,11 +155,12 @@ for (const [width, height, mode] of [[852, 393, 'closed'], [852, 393, 'phone'], 
 	});
 });
 /**
- * The ask's geometry per surface. A document's card is docked across the canvas's bottom edge at every width, its question one
- * line at rest above the answers; an image's ask keeps its row in the image header. Answers are compact and right-aligned at a
- * fine pointer and 44px touch targets on a phone.
+ * The ask's geometry per surface. On a phone a document's card is docked across the canvas's bottom edge, its question one
+ * line at rest above the answers; on a larger screen, and on an image, the ask is its row in the header. Answers are compact and
+ * right-aligned at a fine pointer and 44px touch targets on a phone.
  */
-async function expectLayout(page: Page, mode: Mode) {
+async function expectLayout(page: Page, mode: Mode, form: AskForm = askFormOf(mode)) {
+	await expectAskPlacement(page, form);
 	const canvas = () => page.locator('.document-canvas, .image-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
 	if (mode === 'closed') {
 		// The pane's width transition resizes the canvas: measure only once the transition has finished, never mid-way.
@@ -147,7 +168,7 @@ async function expectLayout(page: Page, mode: Mode) {
 		await expect.poll(canvas).toBeGreaterThan(600);
 	}
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
-	const docked = (await card(page).count()) > 0;
+	const docked = form === 'docked';
 	let paddingRight = 24;
 	if (docked) {
 		const measured = await card(page).evaluate((el) => {
@@ -196,7 +217,8 @@ test('@surface:review-bar person-step and document-review bars render at 1280px'
 	addPersonStep(person.threadId, person.artifactId);
 	await open(page, person, 'default', 'light');
 	await page.setViewportSize({ width: 1280, height: 900 });
-	await expect(bar(page).locator('.rb-dock-q')).toHaveText('Needs you to do this: Set up the workspace');
+	await expectAskPlacement(page, 'header');
+	await expect(questionOf(page, 'header')).toHaveText('Needs you to do this: Set up the workspace');
 	await expect(bar(page).getByRole('button', { name: 'Done', exact: true })).toBeVisible();
 	await page.screenshot({ path: info.outputPath('person-step-instructions.png'), animations: 'disabled' });
 
@@ -204,6 +226,7 @@ test('@surface:review-bar person-step and document-review bars render at 1280px'
 	raiseAsk(review.threadId, review.artifactId, 'Is the rollout plan right?');
 	await open(page, review, 'default', 'light');
 	await page.setViewportSize({ width: 1280, height: 900 });
+	await expectAskPlacement(page, 'header');
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	await page.screenshot({ path: info.outputPath('document-review.png'), animations: 'disabled' });
 });
@@ -223,17 +246,19 @@ const personStepStart = (name: string): JourneySetup<Doc> => async ({ request, m
 async function personStep(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'dark') {
 	await open(page, doc, mode, theme);
 	if (mode === 'default') await page.setViewportSize({ width: 1280, height: 900 });
-	const who = bar(page).locator('.rb-dock-who');
+	const form = askFormOf(mode);
+	await expectAskPlacement(page, form);
+	const who = askerOf(page, form);
 	await expect(who).toHaveText(doc.title);
-	await expect(bar(page).locator('.rb-dock-q')).toHaveText('Needs you to do this: Set up the workspace');
+	await expect(questionOf(page, form)).toHaveText('Needs you to do this: Set up the workspace');
 	// The pane and the bar animate in after the resize; measure the layout they land in.
 	await settled(page);
-	// At rest the card shows the question alone; opened, the asker has its own line. MiddleName's head is the innermost element
-	// that ellipsizes, so it is the one to measure.
-	await setCardOpen(page, true);
+	// On a phone at rest the card shows the question alone; opened, the asker has its own line. In the header the asker is always on the row.
+	// MiddleName's head is the innermost element that ellipsizes, so it is the one to measure.
+	await setCardOpen(page, true, form, { personStep: true });
 	await expect(who).toBeVisible();
 	expect(await nameWhole(who), 'the owner’s name is never truncated').toBe(true);
-	await setCardOpen(page, false);
+	await setCardOpen(page, false, form, { personStep: true });
 	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
 }
 
@@ -251,15 +276,18 @@ journey('mark a person step done from its instructions', PERSON_STEP, async ({ p
 // A name too long for the narrow canvas (1280 with the pane open) shows whole on its own line when the card is opened.
 journey('a long agent name on a person step shows whole', PERSON_STEP, async ({ page, value: doc, info, mode, theme }) => {
 	await personStep(page, doc, mode, theme);
-	const who = bar(page).locator('.rb-dock-who');
-	await setCardOpen(page, true);
+	const form = askFormOf(mode);
+	const who = askerOf(page, form);
+	await setCardOpen(page, true, form, { personStep: true });
 	if (mode === 'default') {
 		// The split keeps re-laying out for a few hundred ms after the resize to 1280, starting after `settled` has looked for
 		// running animations, so the canvas reaches its narrow width a little later: poll rather than read it once.
 		await expect.poll(() => nameWhole(who), { message: 'the long name shows whole in the narrow canvas' }).toBe(true);
-		// Its own line: the question starts below the name, not beside it.
-		const below = await card(page).evaluate((el) => el.querySelector('.rb-dock-q')!.getBoundingClientRect().top >= el.querySelector('.rb-dock-who')!.getBoundingClientRect().bottom - 0.5);
-		expect(below, 'the question starts below the asker’s line').toBe(true);
+		// A phone's opened card gives the name its own line: the question starts below the name, not beside it. The header's row wraps the name instead.
+		if (form === 'docked') {
+			const below = await card(page).evaluate((el) => el.querySelector('.rb-dock-q')!.getBoundingClientRect().top >= el.querySelector('.rb-dock-who')!.getBoundingClientRect().bottom - 0.5);
+			expect(below, 'the question starts below the asker’s line').toBe(true);
+		}
 	}
 	await shot(page, 'person-step-long-name', info);
 }, personStepStart('Person with a very long agent name'));
@@ -302,16 +330,16 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 	await expectLayout(page, mode);
 	if (mode === 'phone') {
 		// At rest the card shows the question alone; opened, the requester has its own line, whole.
-		const leadAsk = bar(page).locator('.rb-dock-q');
-		const requester = bar(page).locator('.rb-dock-who');
+		const leadAsk = questionOf(page, 'docked');
+		const requester = askerOf(page, 'docked');
 		await expect(leadAsk).toBeVisible();
 		await expect(leadAsk).toHaveText('Is the rollout plan right?');
 		await expect(requester).toBeHidden();
-		await setCardOpen(page, true);
+		await setCardOpen(page, true, 'docked');
 		await expect(requester).toHaveText(doc.title);
 		await expect(requester).toBeVisible();
 		expect(await nameWhole(requester), 'the short ask leaves its requester untruncated').toBe(true);
-		await setCardOpen(page, false);
+		await setCardOpen(page, false, 'docked');
 	}
 	await shot(page, 'ask', info);
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
@@ -401,7 +429,8 @@ journey('answer a plain ask on an image', [['1440 light', 'default', 'light'], [
 	// An image takes no comments, so Approve is always plain and Send back always needs a note.
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	await expect(bar(page).getByRole('button', { name: 'Send back', exact: true })).toBeVisible();
-	await expectLayout(page, mode);
+	// An image's ask is its row in the image header at every width, phone included.
+	await expectLayout(page, mode, 'header');
 	await shot(page, 'image-ask', info);
 	await bar(page).getByRole('button', { name: 'Send back', exact: true }).click();
 	const send = bar(page).getByRole('button', { name: 'Send back', exact: true });
@@ -684,17 +713,19 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	raiseAsk(doc.threadId, doc.artifactId, reason);
 	await open(page, doc, mode, theme);
 	await expectLayout(page, mode);
-	// At rest the card shows the question alone, on one line; the asker waits for the card to open.
-	await expect(card(page).locator('.rb-dock-q')).toContainText('Is the rollout plan right for every region');
-	await expect(card(page).locator('.rb-dock-who')).toBeHidden();
+	// On a phone at rest the card shows the question alone, on one line; the asker waits for the card to open. In the header the asker is on the row.
+	const form = askFormOf(mode);
+	const ask = askOf(page, form);
+	await expect(questionOf(page, form)).toContainText('Is the rollout plan right for every region');
+	if (form === 'docked') await expect(askerOf(page, form)).toBeHidden();
 	await shot(page, 'long-name-collapsed', info);
 
-	// Opened, the card grows to give the asker its own line above the whole question, and its answers stay where they were.
-	const collapsedHeight = (await card(page).boundingBox())!.height;
-	await setCardOpen(page, true);
-	await expect(card(page).locator('.rb-dock-q')).toHaveText(reason);
-	expect((await card(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
-	await expectNameClearOfControls(page, doc.title);
+	// Opened, the ask grows to show the whole question (on a phone, with the asker on its own line above it), and its answers stay where they were.
+	const collapsedHeight = (await ask.boundingBox())!.height;
+	await setCardOpen(page, true, form);
+	await expect(questionOf(page, form)).toHaveText(reason);
+	expect((await ask.boundingBox())!.height).toBeGreaterThan(collapsedHeight);
+	await expectNameClearOfControls(page, doc.title, form);
 	await shot(page, 'long-name-expanded', info);
 });
 
@@ -717,10 +748,12 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 ], async ({ page, value: doc, info, mode, theme }) => {
 	await open(page, doc, mode, theme);
 	await settled(page);
-	const measurements = await page.locator('.doc').evaluate((root) => {
+	const form = askFormOf(mode);
+	await expectAskPlacement(page, form);
+	const measurements = await page.locator('.doc').evaluate((root, form) => {
 		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
-		const askCard = root.querySelector<HTMLElement>('[data-ask-card]')!.getBoundingClientRect();
-		const question = root.querySelector<HTMLElement>('.rb-dock-q')!.getBoundingClientRect();
+		const askCard = root.querySelector<HTMLElement>(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask')!.getBoundingClientRect();
+		const question = root.querySelector<HTMLElement>(form === 'docked' ? '.rb-dock-q' : '.rb-ask')!.getBoundingClientRect();
 		const comments = document.querySelector<HTMLElement>('[data-comments-entry]')!;
 		return {
 			firstBodyY: firstLine.top,
@@ -728,7 +761,7 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 			questionWidth: question.width,
 			commentsPillName: comments.getAttribute('aria-label'),
 		};
-	});
+	}, form);
 	if (mode === 'phone') {
 		// No header rows above the document: the first line sits within the old title-and-owner allowance (240px + one 56px touch row).
 		expect(measurements.firstBodyY, 'the first document line sits near the top, with no header rows above it').toBeLessThanOrEqual(240 + 56);
@@ -744,14 +777,14 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	}
 	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
 	if (mode === 'phone') {
-		await setCardOpen(page, true);
+		await setCardOpen(page, true, 'docked');
 		await expect(card(page).locator('.rb-dock-q')).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
 		const requester = card(page).locator('.rb-dock-who');
 		await expect(requester).toBeVisible();
 		await expect(requester).toHaveText(doc.title);
 		expect(await nameWhole(requester), 'the long ask leaves its requester untruncated').toBe(true);
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
-		await setCardOpen(page, false);
+		await setCardOpen(page, false, 'docked');
 		// The owner and the status live in Details: the owner and supervisor stay one touch row, and the status keeps its as-of date.
 		const panel = await openDetails(page);
 		const ownership = page.locator('[data-ownership-row]');
@@ -776,34 +809,34 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 }, orphanHeavyStart);
 
 /**
- * The opened card shows the whole asker on its own line, clear of its answers and the bar's Comments and Details.
+ * The opened ask shows the whole asker, clear of its answers and the bar's Comments and Details: on a phone's card, on its own line; in the header, on the row.
  */
-async function expectNameClearOfControls(page: Page, title: string) {
-	const name = card(page).locator('.rb-dock-who');
+async function expectNameClearOfControls(page: Page, title: string, form: AskForm) {
+	const name = askerOf(page, form);
 	await expect(name).toHaveText(title);
 	await expect(name).toBeVisible();
-	const boxes = await card(page).evaluate((element) => {
+	const boxes = await askOf(page, form).evaluate((element) => {
 		const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, label: (node.getAttribute('aria-label') ?? node.textContent ?? '').slice(0, 40) }; };
-		const who = element.querySelector<HTMLElement>('.rb-dock-who')!;
+		const who = element.querySelector<HTMLElement>('.rb-dock-who, .rb-who strong')!;
 		// A touch control's 44px hit area is held to what is drawn, as the review answers' rows are.
 		const controls = [...element.querySelectorAll('.rb-actions .btn'), ...document.querySelectorAll('[data-comments-entry], [data-document-details]')]
 			.map(rect).filter((r) => r.right > r.left);
 		return { who: rect(who), scrollWidth: who.scrollWidth, clientWidth: who.clientWidth, controls };
 	});
-	expect(boxes.scrollWidth, 'the whole asker fits in the opened card').toBeLessThanOrEqual(boxes.clientWidth);
+	expect(boxes.scrollWidth, 'the whole asker fits in the opened ask').toBeLessThanOrEqual(boxes.clientWidth);
 	expect(boxes.controls.length).toBeGreaterThan(0);
 	for (const control of boxes.controls) {
 		const apart = boxes.who.right <= control.left || control.right <= boxes.who.left || boxes.who.bottom <= control.top || control.bottom <= boxes.who.top;
 		expect(apart, `the name's box ${JSON.stringify(boxes.who)} intersects a control ${JSON.stringify(control)}`).toBe(true);
 	}
-	// Reachable once the card is open: on screen, and nothing drawn over it.
+	// Reachable once the ask is open: on screen, and nothing drawn over it.
 	await expect(name).toBeInViewport({ ratio: 1 });
-	expect(await hitAtCentre(name), 'the asker is not covered once the card is open').toBe(true);
+	expect(await hitAtCentre(name), 'the asker is not covered once the ask is open').toBe(true);
 }
 
 
 /** At 1280 the open plan pane overlays the canvas instead of docking beside it. The document is then the one visible surface and ends at the pane's edge,
-    so the whole header (tools, identity and the ask) sits beside the pane, never under it, and the ask lays itself out for the width that is left. */
+    so the whole header (the bar's tools and the ask) sits beside the pane, never under it, and the ask lays itself out for the width that is left. */
 for (const theme of ['light', 'dark'] as const) {
 	test(`@surface:review-bar the header and its ask stay clear of the overlaid plan pane (1280 ${theme})`, async ({ page, request }, info) => {
 		test.setTimeout(120_000);
@@ -856,39 +889,34 @@ for (const theme of ['light', 'dark'] as const) {
 		expect(await hitAtCentre(requestReview), 'Request review not covered').toBe(true);
 		await closeDetails(page);
 
-		// At rest the card's question is one uncovered line left of the pane; opened, the full name has its own line, whole.
-		const question = card(page).locator('.rb-dock-q');
-		const atRest = await card(page).evaluate((element) => {
-			const text = element.querySelector<HTMLElement>('.rb-dock-text')!;
-			return { lines: Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)), card: element.getBoundingClientRect().toJSON(), ask: element.querySelector('.rb-dock-q')!.getBoundingClientRect().toJSON() };
-		});
-		expect(atRest.lines, 'the question is one line at rest').toBe(1);
-		expect(atRest.ask.right, 'question clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
-		expect(atRest.ask.width, 'question retains a visible row').toBeGreaterThan(0);
-		expect(atRest.card.right, 'card clear of the overlaid pane').toBeLessThanOrEqual(paneLeft + 0.5);
-		expect(await hitAtCentre(question), 'question not covered').toBe(true);
-		await setCardOpen(page, true);
-		const who = card(page).locator('.rb-dock-who');
+		// The ask is the row in the header: the full name keeps its chevron and the question keeps a visible, uncovered row, all left of the pane.
+		await expectAskPlacement(page, 'header');
+		const who = askerOf(page, 'header');
+		const question = page.locator('.review-bar.ask .rb-ask');
 		await expect(who).toHaveText(doc.title);
 		const geometry = await page.evaluate(() => {
 			const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON();
-			const askCard = document.querySelector<HTMLElement>('[data-ask-card]')!, style = getComputedStyle(askCard);
 			const tools = [...document.querySelectorAll('[data-comments-entry], [data-document-details]')].map((el) => el.getBoundingClientRect()).filter((rect) => rect.width > 0);
 			return {
-				who: box('.rb-dock-who'), ask: box('.rb-dock-q'), contentRight: askCard.getBoundingClientRect().right - parseFloat(style.paddingRight),
+				line: getComputedStyle(document.querySelector('.review-bar.ask .rb-line')!).display,
+				who: box('.review-bar.ask .rb-who'),
+				lineBox: box('.review-bar.ask .rb-line'), ask: box('.review-bar.ask .rb-ask'), chevron: box('.review-bar.ask .rb-chev'),
 				tools: { left: Math.min(...tools.map((rect) => rect.left)), right: Math.max(...tools.map((rect) => rect.right)) },
 			};
 		});
 		await info.attach(`geometry-1280-${theme}`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+		expect(geometry.chevron.top, 'chevron stays beside the asker name').toBeLessThanOrEqual(geometry.who.bottom);
 		expect(geometry.tools.right, 'tools clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(geometry.ask.right, 'question clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(await nameWhole(who), 'asker name not clipped').toBe(true);
-		expect(geometry.who.right, 'asker name inside the card').toBeLessThanOrEqual(geometry.contentRight + 0.5);
-		expect(geometry.who.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
-		expect(geometry.ask.top, 'the question starts below the asker').toBeGreaterThanOrEqual(geometry.who.bottom - 0.5);
+		// The ask's line box, not `.rb-lead`: the lead is a layout-less wrapper when the line stays on one row.
+		expect(geometry.who.right, 'asker name inside its row').toBeLessThanOrEqual(geometry.lineBox.right + 0.5);
+		expect(geometry.lineBox.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(await hitAtCentre(who), 'asker name not covered').toBe(true);
+		expect(await hitAtCentre(page.locator('.review-bar.ask .rb-chev')), 'chevron not covered').toBe(true);
+		expect(geometry.ask.width, 'question retains a visible row').toBeGreaterThan(0);
+		expect(await hitAtCentre(question), 'question not covered').toBe(true);
 		await shot(page, `overlay-1280-${theme}-pane-open`, info);
-		await setCardOpen(page, false);
 
 		await openDetails(page);
 		await requestReview.click();
@@ -911,7 +939,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect(page.locator('.pane.collapsed')).toBeAttached();
 		await settled(page);
 		await expect.poll(() => split.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'pane closed').toBe('0px');
-		expect(await card(page).locator('.rb-dock-text').evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))), 'the question is one whole line with the pane closed').toBe(1);
+		expect(await page.locator('.review-bar.ask .rb-line').evaluate((el) => getComputedStyle(el).display), 'line 1 whole with the pane closed').toBe('flex');
 		await shot(page, `overlay-1280-${theme}-pane-closed`, info);
 		await page.keyboard.press('ControlOrMeta+Backslash');
 		await expect(pane).toHaveClass(/\boverlay\b/);

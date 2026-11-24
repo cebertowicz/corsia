@@ -6,6 +6,7 @@ import { test } from '../support/test';
 import { openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { raiseAsk } from '../support/reviewAsk';
+import { expectAskPlacement, type AskForm } from '../support/askPlacement';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { syntheticPng } from '../support/syntheticImages';
@@ -143,6 +144,10 @@ const cases: Array<{ name: string; edit: Parameters<typeof writerEdits>[1] }> = 
 	{ name: 'insert in view', edit: { find: '## Section 31\n', offset: '## Section 31\n\n'.length, insert: BLOCK(3) } },
 	{ name: 'insert below', edit: { find: '## Section 50\n', insert: BLOCK(5) } },
 ];
+
+/** The ask's form by layout: a phone (768px or under) docks it as a card; a larger screen shows its row in the document header. */
+const askForm = (width: number): AskForm => (width <= 768 ? 'docked' : 'header');
+const askAt = (page: Page, width: number) => page.locator(askForm(width) === 'docked' ? '[data-ask-card]' : '.review-bar.ask');
 
 async function pair(browser: Browser, document: LiveDocument, width: number, height: number) {
 	const writerContext = await browser.newContext({ viewport: { width, height } });
@@ -294,7 +299,8 @@ for (const [width, height] of LAYOUTS) {
 			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-before.png`) });
 			raiseAsk(document.threadId, document.artifactId, 'Is this right?');
 			await writerEdits(live.writer, { find: '## Section 55\n', insert: 'A late line far below.\n\n' });
-			await expect(live.reader.locator('[data-ask-card]')).toBeVisible({ timeout: 4_000 });
+			await expect(askAt(live.reader, width)).toBeVisible({ timeout: 4_000 });
+			await expectAskPlacement(live.reader, askForm(width));
 			const result = await drift(live.reader, 'review ask raised', anchor);
 			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-after.png`) });
 			results.push(result);
@@ -418,13 +424,14 @@ for (const [width, height] of LAYOUTS) {
 			});
 			await openLiveDocument(reader, document, '# Anchor document');
 			await installPaintedFrames(reader);
-			await expect(reader.locator('[data-ask-card]')).toHaveCount(0);
+			await expect(askAt(reader, width)).toHaveCount(0);
 			const opened = await firstLine(reader);
 			expect(opened.text).toBe('Anchor document');
 			expect(opened.scrollTop).toBe(0);
 			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-before-ask.png`) });
 			answer();
-			await expect(reader.locator('[data-ask-card]')).toBeVisible({ timeout: 10_000 });
+			await expect(askAt(reader, width)).toBeVisible({ timeout: 10_000 });
+			await expectAskPlacement(reader, askForm(width));
 			await reader.waitForTimeout(800);
 			const shown = await firstLine(reader);
 			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-ask-shown.png`) });

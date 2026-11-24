@@ -5,6 +5,7 @@ import { expect, type Page, type Route } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { closeDetails, documentBarHost, expectBarHitAreas, expectOneRow, expectTouchTargets, openDetails, paintedBoxes, type Box } from '../support/documentBar';
 import { raiseAsk } from '../support/reviewAsk';
+import { expectAskPlacement } from '../support/askPlacement';
 import { closeComments, openComments } from '../support/commentDrawer';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
@@ -448,7 +449,9 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		await expect.poll(() => canvasCompactNow(page), { message: `the canvas ${split ? 'splits' : 'is compact'}` }).toBe(!split);
 		expect(await commentsInSheet(page), `comments ${sheet ? 'open' : 'do not open'} in the sheet on this screen`).toBe(sheet);
 		const details = page.locator('[data-document-details]');
-		const card = page.locator('[data-ask-card]');
+		// A touch screen that opens comments in a sheet docks its ask as a card; a desktop window shows it as the row in the document header.
+		const form = sheet ? 'docked' : 'header';
+		const card = page.locator(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask');
 		const frame = async (state: string) => { if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `needs-${width}x${height}-${state}.png`), fullPage: false }); } };
 		const expectNeeds = async (needs: number, state: string) => {
 			// Overdue is always one; the ask joins by its own words when its card is hidden (needs reaches the case's max).
@@ -460,7 +463,7 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		};
 
 		// Overdue alone; the ask's card is on screen, so the ask is not counted.
-		await expect(card).toBeVisible();
+		await expectAskPlacement(page, form);
 		await expectNeeds(1, 'overdue, ask on its card');
 
 		// A second writer saves the file. File changed is in the bar at every width and does not join the count.
