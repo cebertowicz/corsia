@@ -49,14 +49,15 @@ class CdpClient:
 
     def __init__(self, endpoint: str, *, max_size: int | None = 2**20, logger: logging.Logger | None = None) -> None:
         self.endpoint = endpoint
-        self._max_size, self._logger = max_size, logger
+        self._max_size = max_size
+        # Silent unless a caller passes a logger, so websocket frame contents never reach a log.
+        self._logger = logger or SILENT
         self._next_id = 0
         self.session_id: str | None = None
         self.parents: dict[int, int] = {}
         self._session_parents: dict[str, dict[int, int]] = {}
         # Every Target.attachedToTarget seen, with the session it attached under (parentSessionId).
         self.attached: list[dict] = []
-        self._logger = self._logger or SILENT
 
     def session_parents(self, session_id: str) -> dict[int, int]:
         return self._session_parents.setdefault(session_id, {})
@@ -107,7 +108,7 @@ class CdpClient:
                         parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, **cast(dict[str, Any], {"logger": self._logger} if self._logger is not None else {}))
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, logger=self._logger)
         return self
 
     async def __aexit__(self, *_: object) -> None:
