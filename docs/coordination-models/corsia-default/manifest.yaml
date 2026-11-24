@@ -41,16 +41,16 @@ files:
     sha256: 3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f
   - kind: responsibility-template
     path: templates/RESPONSIBILITY.md
-    bytes: 3899
-    sha256: 913d22db1a331a84338f7a9eefab0eafd3c92a943cc59d483325982029d0100e
+    bytes: 4409
+    sha256: 573be7b1036f53f05e60af73d9f7d547eafb3402052304f856a6d3f43fa696c3
   - kind: priorities-template
     path: templates/PRIORITIES.md
-    bytes: 1096
-    sha256: be41fb9fb1c766a956db26f8095a1cc9daedfc4adeddcd6c59e33cffae0672be
+    bytes: 663
+    sha256: 00e28f56aacc64e75b7b9dde38bfcf61e6ff80a34de3ec9b9be144ff10f6b795
   - kind: responsibility-standard
     path: standards/RESPONSIBILITY-STANDARD.md
-    bytes: 3410
-    sha256: df0694e874b23544c1be09002634e489fcac94130d462d24d655d300b130be63
+    bytes: 3474
+    sha256: caaa0dc5c2b8b14eb9412538d1800c7deef7286e84c6ffd3324d4d1d1c5be020
   - kind: routing
     path: context/SPAWN-POLICY.md
     bytes: 4584

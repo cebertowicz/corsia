@@ -7,16 +7,17 @@
 ## Required sections, in this order
 
 1. **Mission.** One sentence: the outcome you own and for whom.
-2. **Authority.** Two lists: *may decide* and *must bring to the owner or the conductor*. Nothing implied. Work you may start without asking goes under Always in your `PRIORITIES.md`.
-3. **Principles and invariants.** The five to ten rules specific to your domain that a change must not break, each tagged `[invariant]` when it is non-negotiable, with a pointer to the standard or contract that states it fully.
-4. **Domain map.** The concepts you own, one line each: name, what it is, its canonical state owner, and where its full definition lives. Then the boundaries: which adjacent domain owns each neighboring concept.
-5. **Canonical knowledge.** The path of your `shared/<domain>/` directory and what its `INDEX.md` covers: requirements and constraints, concept model and data structures, state matrices, data flows, decision log, failure catalog, quality signals, debt ledger.
-6. **Quality signals.** The metrics, logs, or checks you watch, the target for each, and where the current value is read.
-7. **Recurring workflows.** Cadence, trigger or wake mechanism, what is done, where the result lands, and the date of the last run.
-8. **Does not own.** The adjacent responsibilities that look like yours and whose they are.
-9. **Lessons.** At most five dated one-liners that changed how you work, each pointing at the fuller record in your decision log.
+2. **OKRs and purpose.** Two to four objectives with a measurable key result each and its current value or "unmeasured, first measurement due <date>".
+3. **Authority.** Two lists: *may decide* and *must bring to the owner or the conductor*. Nothing implied. Work you may start without asking goes under Always in your `PRIORITIES.md`.
+4. **Principles and invariants.** The five to ten rules specific to your domain that a change must not break, each tagged `[invariant]` when it is non-negotiable, with a pointer to the standard or contract that states it fully.
+5. **Domain map.** The concepts you own, one line each: name, what it is, its canonical state owner, and where its full definition lives. Then the boundaries: which adjacent domain owns each neighboring concept.
+6. **Canonical knowledge.** The path of your `shared/<domain>/` directory and what its `INDEX.md` covers: requirements and constraints, concept model and data structures, state matrices, data flows, decision log, failure catalog, quality signals, debt ledger.
+7. **Quality signals.** The metrics, logs, or checks you watch, the target for each, and where the current value is read.
+8. **Recurring workflows.** Cadence, trigger or wake mechanism, what is done, where the result lands, and the date of the last run.
+9. **Does not own.** The adjacent responsibilities that look like yours and whose they are.
+10. **Lessons.** At most five dated one-liners that changed how you work, each pointing at the fuller record in your decision log.
 
-Your goals (each with a measure and a counter-measure, or a named counterweight agent) and your priorities are not here: they live in your `PRIORITIES.md`, which the person owns (skill `conductor-bootstrap` › `references/priorities-files.md`).
+What comes first now is not here: it lives in your `PRIORITIES.md`, which the person owns (skill `conductor-bootstrap` › `references/priorities-files.md`).
 
 ## Not allowed in the bootloader
 

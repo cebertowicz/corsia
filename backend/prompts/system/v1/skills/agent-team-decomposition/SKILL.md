@@ -51,4 +51,4 @@ A child inherits System, workspace, and selected-project context and the base sk
 
 ## Improvement boundary
 
-Each agent maintains its own responsibility-local sources and lessons inside its mission. Structural change (mission, boundaries, authority, grants, core skills) is proposed to the conductor and user, never self-applied. Its goals and priorities live in its `PRIORITIES.md`, which the person owns; it suggests changes there (skill `conductor-bootstrap` › `references/priorities-files.md`). A recurring improvement loop needs durable history, a narrow external success measure, and an independent check; never create one that grades itself.
+Each agent maintains its own responsibility-local sources and lessons inside its mission. Structural change (mission, boundaries, authority, grants, core skills) is proposed to the conductor and user, never self-applied. Its priorities live in its `PRIORITIES.md`, which the person owns; it suggests changes there (skill `conductor-bootstrap` › `references/priorities-files.md`). A recurring improvement loop needs durable history, a narrow external success measure, and an independent check; never create one that grades itself.
