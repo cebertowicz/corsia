@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,7 +21,9 @@ def _run(thread_id: str, actor: dict, operation: str, items: list | None) -> str
     db = get_db()
     try:
         project_id = actor['project_id']
-        with write_transaction(db, scope='attention_rank') as connection:
+        # A read takes no write lock; set validates and replaces in one write transaction.
+        lock = nullcontext(db) if operation == 'read' else write_transaction(db, scope='attention_rank')
+        with lock as connection:
             scope, ranker = ranker_for(connection, actor['user_id'], project_id)
             if not ranker or ranker['thread_id'] != thread_id:
                 label = ranker['label'] if ranker else 'No ranker is assigned'
