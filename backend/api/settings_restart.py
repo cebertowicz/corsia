@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 import uuid
 from collections.abc import Callable
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 from api.restart_compensation import (
     compensate_cancelled_acquire as _compensate_cancelled_acquire,
     compensate_preparation_failure as _compensate_preparation_failure,
+    discard_prepared_release as _discard_prepared_release,
     failure_detail as _failure_detail,
 )
 from api.restart_shell import spawn_restart_lifecycle
@@ -23,6 +25,7 @@ from api.update_preflight import restamp_staged_target
 from api.update_preflight import with_failure_code as _with_failure_code
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
+logger = logging.getLogger(__name__)
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
 _RELEASE_FAILURE_NOTE = (
     "Restart control could not be released automatically; "
@@ -98,22 +101,6 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
     _with_failure_code(failure, _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"))
     setattr(failure, "update_log_path", log_path)
     raise failure
-
-
-def _discard_prepared_release(
-    corsia_script: Path, restart_env: dict[str, str]
-) -> None:
-    """Ask the management script to remove one validated, unactivated build."""
-    result = subprocess.run(
-        [str(corsia_script), "discard-prepared"],
-        capture_output=True,
-        text=True,
-        env=restart_env,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError("prepared frontend cleanup failed")
 
 
 def _packaged_previous_version(mode: str) -> str | None:
@@ -226,7 +213,10 @@ async def _prepare_owned_release(
         raise
 
 
-async def _check_room_or_compensate(operation_id: str, acquired_ids: list[str]) -> None:
+async def _check_room_or_compensate(
+    operation_id: str, acquired_ids: list[str],
+    *, prepared: tuple[Path, dict[str, str]] | None = None,
+) -> None:
     """Refuse an update without backup room, releasing the hold on any failure."""
     try:
         await _check_update_backup_room()
@@ -237,11 +227,26 @@ async def _check_room_or_compensate(operation_id: str, acquired_ids: list[str]) 
         from infra.database_migrations import BackupRoomError
 
         room = {"needed_bytes": error.needed_bytes, "free_bytes": error.free_bytes} if isinstance(error, BackupRoomError) else None
+        detail: dict[str, object] = dict(room) if room else {}
+        if room and prepared:
+            try:
+                cleanup = asyncio.create_task(asyncio.to_thread(
+                    _discard_prepared_release, prepared[0], prepared[1]
+                ))
+                await _await_preparation(cleanup)
+            except asyncio.CancelledError as cancellation:
+                await _compensate_cancelled_acquire(acquired_ids, cancellation)
+                raise
+            except Exception:
+                logger.exception("Could not discard the prepared update after disk-space refusal")
+            log_path = _update_log_path(operation_id)
+            if log_path.is_file():
+                detail["log_path"] = str(log_path)
         await _compensate_preparation_failure(
             operation_id,
             error,
             failure_code="disk_space" if room else getattr(error, "update_failure_code", None),
-            failure_detail=json.dumps(room) if room else _failure_detail(error),
+            failure_detail=json.dumps(detail) if room else _failure_detail(error),
         )
         if room:
             raise HTTPException(409, {"code": "disk_space", **room}) from error
@@ -355,6 +360,9 @@ async def prelaunch_settings_restart(
             await _check_room_or_compensate(operation_id, acquired_ids)
             await _prepare_owned_release(
                 operation_id, acquired_ids, corsia_script, restart_env
+            )
+            await _check_room_or_compensate(
+                operation_id, acquired_ids, prepared=(corsia_script, restart_env)
             )
             script_args = ["restart-prepared"]
             if caller_token is None:
