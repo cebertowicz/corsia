@@ -1,6 +1,8 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReviewBar from './ReviewBar.svelte';
+import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
+import { createReviewBarState } from '$lib/reviewBarState.svelte';
 import type { ReviewBarRead } from '$lib/api/reviewBar';
 
 // The room the review bar reports for its floating phone capsule (`capsuleClearance`), which the image viewer
@@ -127,30 +129,32 @@ describe('comment task bar on a comment sheet', () => {
 		},
 	};
 
-	it('tucks the Dismiss all capsule away while a comment sheet is up, so it cannot float over the first card', async () => {
+	it('does not float a comment-task capsule with the sheet open or closed', async () => {
 		api.fetchReviewBar.mockResolvedValue(COMMENT_TASK);
 		suppressed = true;
-		const capsule = await render();
-		// The person-step variant passes `suppressed` through to the shell, the same as the agent review bar.
-		expect(capsule.classList.contains('suppressed')).toBe(true);
-		expect(container.querySelector('.review-bar.ask')!.classList.contains('suppressed')).toBe(true);
-		expect(capsule.textContent).toContain('Dismiss all');
+		component = mount(ReviewBar, { target: container, props: { artifactId: 'doc-1', get suppressed() { return suppressed; }, get capsuleClearance() { return clearance; }, set capsuleClearance(value: number) { clearance = value; } } });
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalled());
+		flushSync();
+		expect(container.querySelector('.rb-capsule')).toBeNull();
+		expect(container.querySelector('.review-bar')).toBeNull();
 		expect(clearance).toBe(0);
-		// It is a class on the capsule and the bar, not a state of the sheet: the capsule returns with the sheet closed.
 		suppressed = false;
 		flushSync();
-		expect(capsule.classList.contains('suppressed')).toBe(false);
-		expect(container.querySelector('.review-bar.ask')!.classList.contains('suppressed')).toBe(false);
+		expect(container.querySelector('.rb-capsule')).toBeNull();
+		expect(container.querySelector('.review-bar')).toBeNull();
 	});
 
-	it('keeps the "N comments to review" line in the header row, never inside the floating capsule', async () => {
+	it('shows the count once with Dismiss all instead of in a floating capsule', async () => {
 		api.fetchReviewBar.mockResolvedValue(COMMENT_TASK);
-		suppressed = true;
-		const capsule = await render();
-		const line = [...container.querySelectorAll('.review-bar.ask .rb-head p')].find((p) => p.textContent === '2 comments to review');
-		expect(line).toBeTruthy();
-		expect(capsule.contains(line!)).toBe(false);
-		expect(capsule.textContent).not.toContain('comments to review');
+		const bar = createReviewBarState();
+		bar.setTarget('doc-1');
+		await bar.load();
+		component = mount(CommentTaskDismiss, { target: container, props: { bar } });
+		flushSync();
+		const button = container.querySelector('button')!;
+		expect(container.textContent).toContain('2 comments to review');
+		expect(button.textContent).toContain('Dismiss all');
+		expect(container.querySelector('.rb-capsule')).toBeNull();
 		expect([...container.querySelectorAll('*')].filter((el) => el.children.length === 0 && el.textContent?.includes('comments to review'))).toHaveLength(1);
 	});
 });
