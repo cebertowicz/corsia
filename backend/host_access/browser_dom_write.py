@@ -4,12 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from contextlib import AsyncExitStack
 from typing import Callable, Sequence
 
 from host_access import browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, border_rect, protocol_int
-from host_access.browser_dom_frames import FrameTargets, locate_in_frames, shifted
+from host_access.browser_dom_frames import locate_in_frames, shifted, walk_frames
 from host_access.browser_dom_hit import (
     Located, box_matches as _box_matches, cover_tag as _cover, in_viewport as _in_viewport,
     is_empty as _is_empty, isolated_context as _isolated_context, node_at_centre as _node_at_centre,
@@ -65,9 +64,9 @@ async def shared_action(run: RunCommand, endpoint: str, args: Sequence[str],
     DomWriteRefused; it never falls back to agent-browser's native input, which moves the person's
     focus, caret and pointer. After a fill or type, ``on_field`` receives the written field's place.
     """
-    async with CdpClient(endpoint) as page, AsyncExitStack() as frame_clients:
+    async with CdpClient(endpoint) as page:
         try:
-            found, unresolved, cover = await _locate(run, page, endpoint, args[1], FrameTargets(frame_clients))
+            found, unresolved, cover = await _locate(run, page, args[1])
             if found is None:
                 raise DomWriteRefused(unresolved, cover)
             cdp = found.cdp
@@ -129,8 +128,7 @@ async def is_dropdown(run: RunCommand, endpoint: str, selector: str) -> bool:
     return name == "SELECT"
 
 
-async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str,
-                  frame_targets: FrameTargets) -> tuple[Located | None, str, str | None]:
+async def _locate(run: RunCommand, page: CdpClient, selector: str) -> tuple[Located | None, str, str | None]:
     """Find the node a write acts on, why not if absent, and the tag of what covers it.
 
     The main page is tried first. Only when it fails is the target looked for in a frame, because
@@ -139,14 +137,22 @@ async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str
     test and would otherwise scroll the person's page on every write into a frame.
     """
     node, reason, box = await _locate_in_page(run, page, selector)
+    walk = None
+    deferred = False
     for retry in (False, True):
-        if node is not None:
+        if node is not None and not deferred:
             return Located(node, page), reason, None
-        found, framed, framed_cover = await locate_in_frames(run, page, endpoint, selector, box, frame_targets)
-        if found is not None:
-            return found, "covered", None
+        if walk is None:
+            walk = await walk_frames(page)
+        found, framed, framed_cover = await locate_in_frames(
+            run, page, selector, box, walk, defer_when_missed=not retry and reason == "covered")
         if framed == "ambiguous":
             return None, framed, None
+        if node is not None:
+            return Located(node, page), reason, None
+        if found is not None:
+            return found, "covered", None
+        deferred = framed == "retry"
         if reason != "covered":
             return None, reason, None
         if retry:
@@ -154,6 +160,7 @@ async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str
         # A sticky header or a bottom bar covers part of the viewport, so a target in view can sit under
         # it. scrollintoview centres the target, as a person scrolls a link clear of a banner to click it.
         await run(("scrollintoview", selector), 10)
+        deferred = True
         node, reason, box = await _settled_hit(run, page, selector, await _box(run, selector))
     if framed:
         return None, reason, framed_cover

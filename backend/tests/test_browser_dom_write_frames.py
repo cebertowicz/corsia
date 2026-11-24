@@ -1,9 +1,10 @@
 """A write on an element inside a frame: agent-browser measures it from the frame's corner, so it is moved onto the page."""
+import copy
 import json
 
 import pytest
 
-from host_access import browser_cdp, browser_dom_frames, browser_dom_hit, browser_dom_write
+from host_access import browser_dom_frames, browser_dom_hit, browser_dom_write
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserSessionError
 
@@ -31,6 +32,19 @@ class Target:
         self.worlds = []
         self.resolved = []
         self.written = []
+        self.hold_reads = 0
+        self.session_id = None
+        self.parents = {}
+        self.attached = []
+        self.targets = {}
+        self.root = self
+        self.attach_enabled = False
+
+    def session_parents(self, _session_id):
+        return {}
+
+    async def call_in(self, session_id, method, **params):
+        return await self.targets[session_id].call(method, **params)
 
     async def __aenter__(self):
         return self
@@ -40,10 +54,24 @@ class Target:
 
     async def call(self, method, **params):
         self.calls.append(method)
+        if method == "Target.setAutoAttach":
+            if not self.attach_enabled:
+                self.attach_enabled = True
+                for frame_id in self.owners:
+                    if frame_id in self.root.targets:
+                        self.root.attached.append({"sessionId": frame_id, "parentSessionId": self.session_id,
+                                                   "targetInfo": {"type": "iframe", "targetId": frame_id}})
+            return {}
         if method == "Page.getLayoutMetrics":
             return {"cssVisualViewport": {"clientWidth": 800, "clientHeight": 600, "pageX": 0, "pageY": 0}}
         if method == "Page.getFrameTree":
-            return {"frameTree": self.frame_tree}
+            tree = copy.deepcopy(self.frame_tree)
+            pending = [tree]
+            while pending:
+                current = pending.pop()
+                current["frame"].setdefault("loaderId", "fixture-loader")
+                pending.extend(current.get("childFrames", []))
+            return {"frameTree": tree}
         if method == "DOM.getFrameOwner":
             if params["frameId"] not in self.owners:
                 raise BrowserSessionError("This page couldn't be checked")
@@ -64,6 +92,7 @@ class Target:
             self.worlds.append(params["frameId"])
             return {"executionContextId": len(self.worlds)}
         if method == "Runtime.callFunctionOn" and "querySelectorAll" in params["functionDeclaration"]:
+            self.hold_reads += 1
             frame = self.worlds[params["executionContextId"] - 1]
             return {"result": {"type": "boolean", "value": frame in self.holds}}
         if method == "DOM.resolveNode":
@@ -104,7 +133,6 @@ async def _run(args, _timeout):
 
 @pytest.fixture(autouse=True)
 def _no_frame_targets(monkeypatch):
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {})
     monkeypatch.setattr(browser_dom_hit, "SETTLE_INTERVAL", 0)
 
 
@@ -115,9 +143,22 @@ def _connect(monkeypatch, **targets):
         opened.append(endpoint)
         return targets[endpoint]
 
-    # The page is opened by the write path; a cross-site frame's own target by the frame search.
+    page = targets[PAGE_URL]
+    for endpoint, target in targets.items():
+        if endpoint == PAGE_URL:
+            continue
+        if isinstance(target, _GoneFrame):
+            frame_id = "twin"
+            target = Target({}, {}, {"frame": {"id": frame_id}})
+            async def gone(_method, **_params):
+                raise OSError("frame session disconnected")
+            target.call = gone
+        else:
+            frame_id = target.frame_tree["frame"]["id"]
+        target.session_id = frame_id
+        target.root = page
+        page.targets[frame_id] = target
     monkeypatch.setattr(browser_dom_write, "CdpClient", client)
-    monkeypatch.setattr(browser_dom_frames, "CdpClient", client)
     return opened
 
 
@@ -253,7 +294,7 @@ async def test_a_frame_below_the_fold_that_keeps_moving_does_not_stop_a_write_to
 
 
 class _GoneFrame:
-    """A cross-site frame's target that went away between being listed and being opened."""
+    """A cross-site frame session that cannot be read."""
 
     async def __aenter__(self):
         raise OSError("connection refused")
@@ -263,16 +304,16 @@ class _GoneFrame:
 
 
 @pytest.mark.asyncio
-async def test_a_cross_site_frame_off_screen_that_cannot_be_opened_counts_as_holding_it_so_nothing_is_written(
+async def test_a_cross_site_frame_that_cannot_be_opened_refuses_the_write(
         monkeypatch):
     """A doubt refuses: the frame that went away may have held the element the agent named."""
     page = _twin_off_screen(BELOW_THE_FOLD, holds={"child"})
     page.frame_tree = {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}]}
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"twin": FRAME_URL})
     _connect(monkeypatch, **{PAGE_URL: page, FRAME_URL: _GoneFrame()})
-    with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame") as refused:
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="page refused the change") as refused:
         await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
-    assert refused.value.reason == "ambiguous" and page.written == []
+    assert str(refused.value.__cause__) == "This page couldn't be checked"
+    assert refused.value.reason == "page_error" and page.written == []
 
 
 DEEP_URL = "ws://deep.test/devtools/page/deep"
@@ -286,14 +327,12 @@ def _wrapped(monkeypatch, *, inner_holds, deep_holds=None):
     """
     page = _twin_off_screen(BELOW_THE_FOLD, holds={"child"})
     page.frame_tree = {"frame": {"id": "main"}, "childFrames": [{"frame": {"id": "child"}}]}
-    wrapper = Target({}, {}, {"frame": {"id": "twin"}, "childFrames": [{"frame": {"id": "inner"}}]},
-                     owners={"deep": 60}, holds={"inner"} if inner_holds else ())
-    listed = {"twin": FRAME_URL}
+    wrapper = Target({}, {60: {"content": FRAME_CONTENT}, 61: {"content": FRAME_CONTENT}},
+                     {"frame": {"id": "twin"}, "childFrames": [{"frame": {"id": "inner"}}]},
+                     owners={"deep": 60, "inner": 61}, holds={"inner"} if inner_holds else ())
     targets = {PAGE_URL: page, FRAME_URL: wrapper}
     if deep_holds is not None:
-        listed["deep"] = DEEP_URL
         targets[DEEP_URL] = Target({}, {}, {"frame": {"id": "deep"}}, holds={"deep"} if deep_holds else ())
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: listed)
     _connect(monkeypatch, **targets)
     return page
 
@@ -359,14 +398,14 @@ async def test_an_element_covered_inside_a_same_origin_frame_is_still_refused_na
 
 @pytest.mark.asyncio
 async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_written_there(monkeypatch):
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
+    # The frame attaches through the page's session.
     page = _page(hit=OWNER, owners={"oopif": OWNER})
     frame = _frame()
     opened = _connect(monkeypatch, **{PAGE_URL: page, FRAME_URL: frame})
     marked = []
     assert await browser_dom_write.shared_action(_run, PAGE_URL, ("fill", "@e2", "text"),
                                                  lambda field, label: marked.append((field, label))) == "ok"
-    assert opened == [PAGE_URL, FRAME_URL]
+    assert opened == [PAGE_URL] and frame.hold_reads == 1
     assert frame.resolved == [LINK] and frame.written == ["field"] and frame.worlds[-1] == "oopif"
     assert LINK not in page.resolved and page.written == []
     # The frame's target measures from its own corner, so the field is moved onto the page.
@@ -376,7 +415,7 @@ async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("overlay_on_page", [False, True])
 async def test_an_element_covered_inside_a_cross_site_frame_is_still_refused(monkeypatch, overlay_on_page):
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {"oopif": FRAME_URL})
+    # The frame attaches through the page's session.
     # Either the frame's own page covers the link, or something on the top page covers the whole frame.
     page = _page(hit=COVER if overlay_on_page else OWNER, owners={"oopif": OWNER})
     frame = _frame(hit=COVER, holds={"oopif"})
@@ -385,17 +424,17 @@ async def test_an_element_covered_inside_a_cross_site_frame_is_still_refused(mon
         await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
     assert refused.value.reason == "covered" and frame.written == [] and page.written == []
     # The frame's own target is read for whether it holds the link, once per write, though the page is read twice.
-    assert opened.count(FRAME_URL) == 1
+    assert opened == [PAGE_URL] and frame.hold_reads == 1
 
 
 @pytest.mark.asyncio
 async def test_a_target_the_page_itself_holds_never_looks_for_frames(monkeypatch):
     page = Target({TOP_HIT: LINK}, {LINK: {"border": RAW}}, {"frame": {"id": "main"}})
 
-    def not_listed(_endpoint):
+    async def not_listed(_page):
         raise AssertionError("the page's own target does not list frames")
 
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", not_listed)
+    monkeypatch.setattr(browser_dom_write, "walk_frames", not_listed)
     _connect(monkeypatch, **{PAGE_URL: page})
     assert await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2")) == "ok"
     assert page.worlds == ["main"] and "DOM.getFrameOwner" not in page.calls
@@ -418,23 +457,65 @@ async def test_a_box_that_falls_outside_the_frame_is_not_looked_for_in_it(monkey
 
 
 @pytest.mark.asyncio
+async def test_attach_failure_refuses_even_with_a_same_process_match(monkeypatch):
+    page = _page(frames=("child",), owners={"child": OWNER})
+    original = page.call
+
+    async def fail_attach(method, **params):
+        if method == "Target.setAutoAttach":
+            raise BrowserSessionError("This page couldn't be checked")
+        return await original(method, **params)
+
+    page.call = fail_attach
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "page_error" and page.written == []
+    assert str(refused.value.__cause__) == "This page couldn't be checked"
+
+
+@pytest.mark.asyncio
+async def test_exactly_the_frame_limit_is_allowed():
+    frames = tuple(f"frame-{number}" for number in range(browser_dom_frames.browser_cdp_frames.FRAME_LIMIT - 1))
+    page = _page(frames=frames, owners={name: OWNER for name in frames})
+    walk = await browser_dom_frames.walk_frames(page)
+    assert len(walk.frames) + 1 == browser_dom_frames.browser_cdp_frames.FRAME_LIMIT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["same-process", "attachment"])
+async def test_frame_arriving_after_the_walk_refuses_without_writing(monkeypatch, kind):
+    page = _page()
+    _connect(monkeypatch, **{PAGE_URL: page})
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            if kind == "same-process":
+                page.frame_tree["childFrames"] = [{"frame": {"id": "late"}}]
+            else:
+                page.attached.append({"sessionId": "late", "parentSessionId": None,
+                                      "targetInfo": {"type": "iframe", "targetId": "late"}})
+        return await _run(args, timeout)
+
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "page_error" and page.written == []
+
+
+@pytest.mark.asyncio
+async def test_more_than_the_frame_limit_refuses_without_writing(monkeypatch):
+    frames = tuple(f"frame-{number}" for number in range(browser_dom_frames.browser_cdp_frames.FRAME_LIMIT))
+    page = _page(frames=frames, owners={name: OWNER for name in frames})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(_run, PAGE_URL, ("click", "@e2"))
+    assert refused.value.reason == "page_error" and page.written == []
+    assert str(refused.value.__cause__) == "This page couldn't be checked"
+
+
+@pytest.mark.asyncio
 async def test_a_read_target_in_a_frame_is_not_located_so_the_password_guard_keeps_refusing_it(monkeypatch):
     page = _page(frames=("child",), owners={"child": OWNER})
     _connect(monkeypatch, **{PAGE_URL: page})
     assert await browser_dom_write.target_node(_run, PAGE_URL, "@e2") is None
     assert "DOM.getFrameOwner" not in page.calls
-
-
-def test_frame_targets_are_the_listed_iframe_targets_by_frame_id(monkeypatch):
-    monkeypatch.undo()
-    targets = [{"type": "page", "id": "p", "webSocketDebuggerUrl": "ws://x/page"},
-               {"type": "iframe", "id": "oopif", "webSocketDebuggerUrl": "ws://x/frame"},
-               {"type": "iframe", "webSocketDebuggerUrl": "ws://x/no-id"}]
-    monkeypatch.setattr(browser_cdp, "list_targets", lambda _endpoint: targets)
-    assert browser_dom_frames.frame_targets("ws://x/devtools/page/p") == {"oopif": "ws://x/frame"}
-
-    def unreachable(_endpoint):
-        raise BrowserSessionError("This page couldn't be checked")
-
-    monkeypatch.setattr(browser_cdp, "list_targets", unreachable)
-    assert browser_dom_frames.frame_targets("ws://x/devtools/page/p") == {}

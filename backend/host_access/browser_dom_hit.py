@@ -5,7 +5,8 @@ import re
 from dataclasses import dataclass
 
 from host_access import browser_cli
-from host_access.browser_cdp import CdpClient, RunCommand, border_rect, protocol_int
+from host_access.browser_cdp import RunCommand, border_rect, protocol_int
+from host_access.browser_cdp_frames import PAGE_CHECK_FAILED, Session
 from host_access.browser_session_state import BrowserSessionError
 
 # A page that is still moving (a smooth scroll that scrollintoview started and did not wait for)
@@ -25,7 +26,7 @@ class Located:
     """
 
     node: int
-    cdp: CdpClient
+    cdp: Session
     frame_id: str | None = None
     shift: tuple[float, float] = (0, 0)
 
@@ -41,7 +42,7 @@ async def read_box(run: RunCommand, selector: str) -> dict | None:
     return box
 
 
-async def page_viewport(cdp: CdpClient) -> dict:
+async def page_viewport(cdp: Session) -> dict:
     return (await cdp.call("Page.getLayoutMetrics")).get("cssVisualViewport", {})
 
 
@@ -58,16 +59,18 @@ def in_viewport(viewport: dict, box: dict) -> bool:
     return 0 <= x < width and 0 <= y < height
 
 
-async def node_for_box(cdp: CdpClient, box: dict) -> int | None:
-    node = await node_at_centre(cdp, box)
-    return await matching_ancestor(cdp, node, box) if node else None
+async def node_for_box(cdp: Session, box: dict, *, strict: bool = False, max_ancestors: int | None = None) -> int | None:
+    node = await node_at_centre(cdp, box, strict=strict)
+    return await matching_ancestor(cdp, node, box, strict=strict, max_ancestors=max_ancestors) if node else None
 
 
-async def node_at_centre(cdp: CdpClient, box: dict) -> int | None:
+async def node_at_centre(cdp: Session, box: dict, *, strict: bool = False) -> int | None:
     # The box is in viewport pixels, but the hit test takes document pixels: add the scroll offset.
     viewport = await page_viewport(cdp)
     scroll_x, scroll_y = viewport.get("pageX"), viewport.get("pageY")
     if not isinstance(scroll_x, (int, float)) or not isinstance(scroll_y, (int, float)):
+        if strict:
+            raise BrowserSessionError(PAGE_CHECK_FAILED)
         return None
     try:
         # Hit-test as a real click does: a layer with pointer-events: none (a toast or overlay container
@@ -77,31 +80,44 @@ async def node_at_centre(cdp: CdpClient, box: dict) -> int | None:
                                   ignorePointerEventsNone=False)
     except BrowserSessionError:
         # Chrome reports no node at a point nothing hit-tests at.
+        if strict:
+            raise
         return None
-    return protocol_int(location.get("backendNodeId"))
+    raw_node = location.get("backendNodeId")
+    node = protocol_int(raw_node)
+    if strict and (isinstance(raw_node, bool) or node <= 0):
+        raise BrowserSessionError(PAGE_CHECK_FAILED)
+    return node
 
 
-async def cover_tag(cdp: CdpClient, box: dict | None) -> str | None:
+async def cover_tag(cdp: Session, box: dict | None, *, strict: bool = False) -> str | None:
     """The tag of the element at the target's centre, so the agent can dismiss or scroll past it."""
-    node = await node_at_centre(cdp, box) if box is not None and not is_empty(box) else None
+    node = await node_at_centre(cdp, box, strict=strict) if box is not None and not is_empty(box) else None
     if not node:
         return None
     try:
         name = (await cdp.call("DOM.describeNode", backendNodeId=node)).get("node", {}).get("nodeName")
     except BrowserSessionError:
+        if strict:
+            raise
         return None
     # Only a tag name: page text, ids and classes stay out of the agent's error.
     return name.lower() if isinstance(name, str) and re.fullmatch(r"[A-Za-z][\w-]*", name) else None
 
 
-async def matching_ancestor(cdp: CdpClient, node: int, expected: dict) -> int | None:
+async def matching_ancestor(cdp: Session, node: int, expected: dict, *, strict: bool = False,
+                            max_ancestors: int | None = None) -> int | None:
     """Walk from the hit to a matching ancestor, including shadow hosts.
 
     Refs expose geometry but not identity; a same-sized overlay can still match.
     """
     context = None
+    steps = 0
     while node:
-        if await box_matches(cdp, node, expected):
+        steps += 1
+        if max_ancestors is not None and steps > max_ancestors:
+            raise BrowserSessionError(PAGE_CHECK_FAILED)
+        if await box_matches(cdp, node, expected, strict=strict):
             return node
         try:
             if context is None:
@@ -118,16 +134,18 @@ async def matching_ancestor(cdp: CdpClient, node: int, expected: dict) -> int | 
             node = protocol_int(description.get("node", {}).get("backendNodeId"))
         except BrowserSessionError:
             # An inaccessible frame kept the old refusal when its hit box did not match.
+            if strict:
+                raise
             return None
     return None
 
 
-async def box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
-    rect = await border_rect(cdp, backendNodeId=node)
+async def box_matches(cdp: Session, node: int, expected: dict, *, strict: bool = False) -> bool:
+    rect = await border_rect(cdp, backendNodeId=node, strict=strict)
     return rect is not None and all(abs(rect[key] - expected[key]) <= 1 for key in ("x", "y", "width", "height"))
 
 
-async def isolated_context(cdp: CdpClient, frame_id: str | None = None) -> int:
+async def isolated_context(cdp: Session, frame_id: str | None = None) -> int:
     """A world of ours in a frame: the target's main frame, or the in-page frame named."""
     if frame_id is None:
         tree = await cdp.call("Page.getFrameTree")

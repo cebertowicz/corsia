@@ -24,7 +24,7 @@ import pytest
 import websockets
 
 from host_access import (
-    browser_cdp, browser_control, browser_dom_frames, browser_dom_write, browser_pane_state, browser_screencast,
+    browser_cdp, browser_cdp_frames, browser_control, browser_dom_frames, browser_dom_write, browser_pane_state, browser_screencast,
     browser_session_commands, browser_steps,
     browser_step_lifecycle as lifecycle,
 )
@@ -613,15 +613,18 @@ async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site
     """How many times the page inside the frame saw its link clicked."""
     if not cross_site:
         return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
-    # A cross-site frame's document is in another process: read it through the frame's own target.
-    listed = await asyncio.to_thread(browser_dom_frames.frame_targets, await owner.page_endpoint(thread_id))
+    # Cross-site frames are flattened sessions on the page connection.
     seen = []
-    for frame_endpoint in listed.values():
-        async with browser_cdp.CdpClient(frame_endpoint) as cdp:
-            href = (await cdp.call("Runtime.evaluate", expression="location.href", returnByValue=True))["result"].get("value")
-            seen.append(href)
-            if isinstance(href, str) and href.endswith("/frame-link.html"):
-                return (await cdp.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+    async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+        pending = [cdp]
+        while pending:
+            parent = pending.pop()
+            for child, _owner, _loader in await browser_cdp_frames.child_frames(cdp, parent):
+                href = (await child.call("Runtime.evaluate", expression="location.href", returnByValue=True))["result"].get("value")
+                seen.append(href)
+                if isinstance(href, str) and href.endswith("/frame-link.html"):
+                    return (await child.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+                pending.append(child)
     raise AssertionError(f"no frame target shows the fixture's frame: {seen}")
 
 
@@ -724,6 +727,68 @@ async def test_a_click_on_a_link_inside_a_frame_applies_to_that_link(page, cross
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_probe_and_write_walk_find_the_same_documents():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-walk-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-walk", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/frame-cross.html"), session="new")).startswith("Error:")
+            await frame_link_ref(owner, thread)
+            endpoint = await owner.page_endpoint(thread)
+            async with browser_cdp.CdpClient(endpoint) as page:
+                _, documents = await browser_cdp_frames.search_page(page, browser_cdp._password_inputs, browser_cdp._visible)
+                probe_ids = set()
+                for session, _shown in documents.values():
+                    tree = (await session.call("Page.getFrameTree"))["frameTree"]
+                    probe_ids.add(tree["frame"]["id"])
+                    probe_ids.update(browser_dom_frames._descendants(tree))
+            async with browser_cdp.CdpClient(endpoint) as page:
+                tree = (await page.call("Page.getFrameTree"))["frameTree"]
+                walk = await browser_dom_frames.walk_frames(page)
+                write_ids = {tree["frame"]["id"]}
+                cross_owner = None
+                for frame in walk.frames:
+                    if frame.cross_process:
+                        cross_owner = frame.owner
+                        await frame.session.call(
+                            "Runtime.evaluate", expression="document.body.insertAdjacentHTML('beforeend', '<input type=password>')")
+                    frame_id = frame.frame_id
+                    if frame_id is None:
+                        frame_id = (await frame.session.call("Page.getFrameTree"))["frameTree"]["frame"]["id"]
+                    write_ids.add(frame_id)
+            assert len(probe_ids) >= 2 and probe_ids == write_ids
+            probe = await browser_cdp.page_password_probe(endpoint, {})
+            assert cross_owner is not None
+            assert any(browser_cdp_frames.frame_owner(key) == cross_owner for key in probe.present_nodes)
+    finally:
+        await owner.close_thread(thread)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_holds_cap_counts_an_unchecked_document_as_a_match(monkeypatch):
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-cap-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-cap", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/plain.html"), session="new")).startswith("Error:")
+            await cdp_value(owner, thread, "document.body.insertAdjacentHTML('beforeend', '<div></div>'.repeat(20)); null")
+            box = {"x": 900000, "y": 900000, "width": 11, "height": 13}
+            async with browser_cdp.CdpClient(await owner.page_endpoint(thread)) as page:
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 100)
+                assert await browser_dom_frames._holds(page, None, box) is False
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 5)
+                assert await browser_dom_frames._holds(page, None, box) is True
+    finally:
+        await owner.close_thread(thread)
 
 
 @pytest.mark.integration

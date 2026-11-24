@@ -22,8 +22,12 @@ def _no_presence_state():
 
 @pytest.fixture(autouse=True)
 def _no_frame_listing(monkeypatch):
-    # A refused write also looks for frames; the listing is a request to the browser, which these fakes lack.
-    monkeypatch.setattr(browser_dom_frames, "frame_targets", lambda _endpoint: {})
+    # These page fakes contain no frames and do not implement flattened CDP sessions.
+    async def empty_walk(page):
+        page.attached = []
+        return browser_dom_frames.FrameWalk([], 0)
+
+    monkeypatch.setattr(browser_dom_write, "walk_frames", empty_walk)
 
 
 def _owner(monkeypatch, password_page):

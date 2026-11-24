@@ -345,36 +345,40 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
     return value if not result.returncode and isinstance(value, str) else None
 
 
-def list_targets(browser_endpoint: str) -> list[dict]:
-    """The targets of any type with a socket that Chrome lists beside the endpoint; none if the reply isn't a list."""
-    listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
+def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
+    """Resolve agent-browser's browser endpoint to the page its session currently displays."""
+    parsed = urlparse(browser_endpoint)
+    listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
     try:
         with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
             targets = json.load(response)
     except (OSError, ValueError) as exc:
         raise BrowserSessionError("This page couldn't be checked") from exc
-    return [target for target in (targets if isinstance(targets, list) else ()) if isinstance(target, dict)
-            and isinstance(target.get("webSocketDebuggerUrl"), str) and target["webSocketDebuggerUrl"].startswith("ws")]
-
-
-def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
-    """Resolve agent-browser's browser endpoint to the page its session currently displays."""
-    pages = [target for target in list_targets(browser_endpoint) if target.get("type") == "page"]
-    if expected_url:
-        pages.sort(key=lambda page: (page.get("url") != expected_url, expected_title not in (None, page.get("title"))))
-    if not pages:
+    if not isinstance(targets, list):
         raise BrowserSessionError("This page couldn't be checked")
-    return pages[0]["webSocketDebuggerUrl"]
+    pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
+    if expected_url:
+        pages.sort(key=lambda target: (target.get("url") != expected_url,
+                                       expected_title is not None and target.get("title") != expected_title))
+    for target in pages:
+        endpoint = target.get("webSocketDebuggerUrl")
+        if isinstance(endpoint, str) and endpoint.startswith("ws"):
+            return endpoint
+    raise BrowserSessionError("This page couldn't be checked")
 
 
-async def border_rect(cdp: browser_cdp_frames.Session, **node: object) -> Rect | None:
+async def border_rect(cdp: browser_cdp_frames.Session, *, strict: bool = False, **node: object) -> Rect | None:
     """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
         model = await cdp.call("DOM.getBoxModel", **node)
     except BrowserSessionError:
+        if strict:
+            raise
         return None
     border = model.get("model", {}).get("border")
     if not isinstance(border, list) or len(border) < 8:
+        if strict:
+            raise BrowserSessionError(browser_cdp_frames.PAGE_CHECK_FAILED)
         return None
     x, y = border[0], border[1]
     return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
