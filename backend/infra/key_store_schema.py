@@ -52,7 +52,6 @@ KEY_STORE_SCHEMA_SQL = """
         created_at TEXT NOT NULL,
         login_id TEXT NOT NULL,
         site TEXT NOT NULL,
-        username TEXT NOT NULL,
         thread_id TEXT NOT NULL,
         result TEXT NOT NULL CHECK (result IN ('filled', 'rejected', 'unknown'))
     );
