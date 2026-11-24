@@ -5,4 +5,4 @@
  */
 export const USAGE_SHARING_LABEL = 'Share usage counts';
 export const USAGE_SHARING_LINE =
-	'Nothing is sent yet. Once sharing starts, CORSIA will send counts of what you use, tagged with a random number that changes every week, to help improve it. It never sends your name, email or anything you write.';
+	'Sharing lets CORSIA send counts of what you use, tagged with a random number that changes every week, to help improve it. It never sends your name, email or anything you write.';
