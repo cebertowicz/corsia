@@ -22,13 +22,13 @@ export function keyText(event: KeyboardEvent) {
 	return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 }
 
-/** The keyboard message the shared page receives for one key event. */
 /** A message that carries what the person typed or pasted, as opposed to a pointer move or a page command. */
 export function isPersonText(message: object): boolean {
 	const { type } = message as { type?: unknown };
 	return type === 'input_keyboard' || type === 'clipboard_paste';
 }
 
+/** The keyboard message the shared page receives for one key event. */
 export function keyMessage(event: KeyboardEvent) {
 	return {
 		type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',

@@ -12,7 +12,7 @@ export const SAVE_OFFER_TEXT = {
 	question: (offer: SaveOffer, domain: string) => offer.update ? `Update the saved ${domain} login with this password?` : `Save the ${domain} login for agents?`,
 } as const;
 
-/** A domain or username is cut in the middle, keeping both ends, only when the pane measures that it would not fit. */
+/** The username is cut in the middle, keeping both ends, only when the pane measures that it would not fit. The domain is never cut. */
 export function shortenMiddle(text: string, max: number): string {
 	if (text.length <= max) return text;
 	const keep = max - 1;

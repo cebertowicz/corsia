@@ -3,6 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { declineOffer, fetchSaveOffer, saveOffer, type SaveOffer } from '$lib/api/savedLoginOffer';
+	import { hostInDomain } from '$lib/browserAddress';
 	import { SAVE_OFFER_TEXT as text, shortenMiddle } from '$lib/browserSaveOfferText';
 	import { CONFIRMATION_HOLD_MS } from '$lib/confirmationHold';
 	import { ms } from '$lib/popoverMotion';
@@ -120,9 +121,12 @@
 		if (passwordPage) typedInPasswordPage = true;
 	}
 
-	/** A navigation settled; a page on another site ends the offer, and an earlier empty answer is asked once more. */
+	/**
+	 * A navigation settled; a page on another site ends the offer, and an earlier empty answer is asked once more.
+	 * The pane names the registrable domain, the offer the full host it saves for (a subdomain, perhaps a port).
+	 */
 	export function navigated(nextDomain: string | null) {
-		if (offer && nextDomain !== null && nextDomain !== offer.domain) { close(); return; }
+		if (offer && nextDomain !== null && !hostInDomain(offer.domain, nextDomain)) { close(); return; }
 		if (!offer && askAgain && nextDomain !== null) { askAgain = false; void ask(true); }
 	}
 

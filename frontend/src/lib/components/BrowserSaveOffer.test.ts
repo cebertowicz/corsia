@@ -186,6 +186,20 @@ describe('save-login offer: a page that navigates by itself', () => {
 		expect(dock()).toBeNull();
 	});
 
+	it('stays when the pane names the registrable domain of an offer made at a subdomain', async () => {
+		// The pane names a page by its registrable domain; the offer names the full host it saves for.
+		offers = [{ ...OFFER, site: 'https://accounts.github.com:8443', domain: 'accounts.github.com:8443' }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		metadata(socket, 'github.com');
+		socket.receive({ type: 'navigate_result', url: 'https://github.com/home', title: 'Home', domain: 'github.com' });
+		await settle();
+		expect(dock()).not.toBeNull();
+		metadata(socket, 'notgithub.com');
+		await settle();
+		expect(dock()).toBeNull();
+	});
+
 	it('asks the one retry on the next browser_metadata that carries a domain, and not again', async () => {
 		offers = [null, OFFER];
 		const { socket, canvas } = render();

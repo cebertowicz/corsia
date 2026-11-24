@@ -27,8 +27,14 @@ export function browserAddressLabel(raw: string, domain?: string | null): string
  * named it) the whole host stands as itself: only the Public Suffix List knows where a site's domain starts.
  */
 export function hostLabelParts(host: string, domain?: string | null): { lead: string; rest: string | null } {
-	if (!domain || !(host === domain || host.endsWith(`.${domain}`))) return { lead: host, rest: null };
+	if (!domain || !hostInDomain(host, domain)) return { lead: host, rest: null };
 	return { lead: domain, rest: host.slice(0, host.length - domain.length).replace(/\.$/, '') || null };
+}
+
+/** Whether a host (a port after it is ignored) sits inside the backend-named registrable domain. */
+export function hostInDomain(host: string, domain: string): boolean {
+	const bare = host.toLowerCase().replace(/:\d+$/, '');
+	return bare === domain || bare.endsWith(`.${domain}`);
 }
 
 export function browserTabLabel(title: string | null | undefined, url: string, domain?: string | null): string {
