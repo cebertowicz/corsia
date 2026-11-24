@@ -9,7 +9,7 @@ CORSIA is a persistent context-and-coordination layer: it carries intent, knowle
 | **Thread** | One conversation with one execution owner, on the `native`, `cc` (Claude Code), or `codex` backend; all share one history. A thread may spawn hidden subagent children. Working files live in `<scope>/.threads/<id>/`. |
 | **Workspace** | The root for global context, skills, shared documents, and projects. One per instance. |
 | **Project** | A scoped sub-workspace at `<workspace>/projects/<slug>/` with `context/`, `skills/`, `shared/`, `.threads/`, `source/`. Threads attached to a project receive its context. Only projects register repositories (protected base checkouts, branch pinning, `worktree_create`). |
-| **Agent** | A thread promoted to durable owner of one domain. It receives the agent role contract and its `RESPONSIBILITY.md` at `.threads/<id>/context/`. |
+| **Agent** | A thread promoted to durable owner of one domain. It receives the agent role contract, its `RESPONSIBILITY.md` and its `PRIORITIES.md` (goals and its own lines, owned by the person) at `.threads/<id>/context/`. |
 | **Conductor** | The agent whose domain is the other agents: roster, context, skills, coordination. One per scope (workspace, or a project). |
 | **Structured plan** | Each thread's live work state, read and changed with `plan_read`, `plan_update`, `plan_decision`. The status surface. |
 | **Artifact** | A registered durable object (document, pull request, external record) owned by a thread. |

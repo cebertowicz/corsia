@@ -27,12 +27,12 @@ Use `project_create`, not hand-made directories; it creates `context/`, `skills/
 
 ## 2. Interview, then write the charter
 
-Check published coordination models first: only the read under "Published coordination models" in step 3; that step's question and the drafting come after the interview. A fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` from the answers.
+Check published coordination models first: only the read under "Published coordination models" in step 3; that step's question and the drafting come after the interview. A fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` and `context/PRIORITIES.md` from the answers.
 
 | Ask | Becomes |
 |---|---|
 | Outcome, for whom, why now? | Purpose and long-horizon goals |
-| The two or three objectives for the next horizon, and how we would know? | Objectives with success evidence and a review date |
+| What comes first now, and is there a date you have set? | `context/PRIORITIES.md`: Now and Dates, per `references/priorities-files.md` |
 | What does the owner decide, and what may agents decide alone? | Owner's position and boundaries |
 | What must never happen? | Standing risks with counterweights; safety invariants |
 | What is explicitly not this? | Non-goals |
@@ -52,7 +52,7 @@ Published coordination models: read-only `.corsia/coordination-models/INDEX.md`;
 
 Before writing it, break the work down: list the roles and recurring tasks. The sources and standing risks are already in the charter; use them from there. Write `context/COORDINATION-MODEL.md`, only what the project needs: who owns which class of work; the conductor owns cross-agent patterns, which include a failure in one workflow that a cheaper, earlier check in another agent's workflow would have caught, unless this file gives them to another owner, who then acts instead of the conductor; roster rules; the path for changes affecting the owner's commitments; work intake (inputs and cadences, standing grants, approval gate); context and memory layers (project-specific preferences live in project `context/`, written by the conductor, and never override System rules); routing defaults only where tolerance differs from the workspace spawn policy; a table of work or state to canonical route to owner and closure. Mark what is generic and what is project-specific. Keep a **Cross-thread notices** section only you write, each entry dated with an expiry.
 
-Give each owner an outcome, a measure, and a guardrail. Prefer deterministic scripts and source evidence over self-grading, add a countermetric so a measure cannot be gamed, and record failed or reworked attempts. Track a whole-result measure for outcomes no single owner owns; the conductor keeps that accountability until it is explicitly delegated.
+Give each owner goals, each with a measure and a counter-measure or a named counterweight agent, in its priorities file (`references/priorities-files.md`). Prefer deterministic scripts and source evidence over self-grading, and record failed or reworked attempts. Track a whole-result measure for outcomes no single owner owns; the conductor keeps that accountability until it is explicitly delegated.
 
 ## 4. Shared structure
 
@@ -60,7 +60,7 @@ Create `shared/INDEX.md` listing the categories the project will use, each with 
 
 ## 5. Team
 
-Apply skill `agent-team-decomposition` to the roles the breakdown named: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
+Apply skill `agent-team-decomposition` to the roles the breakdown named: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, and sources; a `PRIORITIES.md` with its goals and any lines of its own (`references/priorities-files.md`), which the person approves before it counts; and its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility, priorities and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
 
 Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. The CORSIA agent and every project conductor can change authorized model profiles and setup through `corsia_api` (skill `coordination-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
 

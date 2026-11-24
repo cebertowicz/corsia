@@ -10,16 +10,8 @@ Turn eligible upstream CORSIA issues into approved, merge-ready pull requests
 within the owner's donated token budget, without taking design ownership from
 the upstream maintainers.
 
-## OKRs and purpose
-
-1. **Accepted contributions.** KR: PRs merged per month. Current:
-   unmeasured; first measurement due <date>.
-2. **First-pass quality.** KR: share of PRs that pass upstream CI and
-   the reviewer without a counted substantive failure. Current: unmeasured.
-3. **Useful reports.** KR: upstream issues and comments from this workspace
-   that maintainers act on, not closed as duplicate or invalid. Current:
-   unmeasured.
-4. **Budget discipline.** KR: weekly spend ≤ the grant below.
+<!-- Goals, priorities and standing grants live in this agent's PRIORITIES.md
+(templates/PRIORITIES.md), which the person owns. -->
 
 ## Authority
 
@@ -43,10 +35,6 @@ the upstream maintainers.
 - any product-behavior change;
 - scope changes;
 - disagreements with a reviewer finding (sdlc-process stop rules).
-
-**Standing grant:** work eligible upstream issues in the `corsia-contrib`
-project, up to <N> tokens per week, during <hours/days>, until the owner
-revokes it.
 
 ## Principles and invariants
 
@@ -80,10 +68,6 @@ revokes it.
 `shared/contrib/`, indexed by `INDEX.md`. It holds the list of claimed and
 merged issues with links, the decision log, the failure catalog (reviewer
 findings and their root causes), and the budget ledger.
-
-## Current priorities and initiatives
-
-1. <date> — Complete the smoke test and first eligible PR. Serves OKR 1.
 
 ## Quality signals
 
