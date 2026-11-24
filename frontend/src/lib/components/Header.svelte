@@ -159,7 +159,7 @@
 		<div use:inlineReach={{ shell: headerEl, report: onRightControlsWidth }} class="h-zone h-right" data-document-bar-tools>
 			{#if isTakeover && h?.actions?.length}
 				{#each h.actions as a (a.id)}
-					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
+					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} disabled={a.disabled} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
 				{/each}
 			{/if}
 			{#if showMeasures}
@@ -307,7 +307,8 @@
 		font-size: var(--text-footnote); font-weight: var(--fw-medium);
 		white-space: nowrap; transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.h-act:hover { background: var(--bg-hover); color: var(--text-primary); }
+	.h-act:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+	.h-act:disabled { color: var(--text-tertiary); cursor: default; }
 	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent-text); }
 
 	.h-overflow { display: none; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }

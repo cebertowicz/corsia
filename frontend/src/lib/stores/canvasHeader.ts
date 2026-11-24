@@ -8,6 +8,8 @@ export type CanvasHeaderAction = {
 	primary?: boolean;
 	title?: string;
 	wideOnly?: boolean;
+	/** Shown but not pressable (Activity's Next on the last item). */
+	disabled?: boolean;
 };
 
 /** The title as a control: a document's name opens its open-files list. */
