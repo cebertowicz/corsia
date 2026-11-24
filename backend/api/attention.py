@@ -157,10 +157,10 @@ def _summarize_raised(thread_id: str | None, user_id: str, *, db=None) -> list[d
 
 
 # Upper bound on the ordered `items` the queue response carries.
-QUEUE_ITEMS_CAP = 50
+QUEUE_ITEMS_CAP = 300
 
 
-def _queue_for(user_id: str, *, db=None) -> list[dict]:
+def _queue_for(user_id: str, *, db=None, raw: bool = False, annotated=None) -> list[dict]:
     """The one queue, user-global: it names no plan target, by design.
 
     A decision is listed only where Activity would count it, so the dock and
@@ -171,20 +171,21 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
     """
     _db = db or get_db()
     try:
-        annotated = public.annotate_attention(
-            _authorized_raised(None, user_id, db=_db), db=_db,
-        )
+        if annotated is None:
+            annotated = public.annotate_attention(
+                _authorized_raised(None, user_id, db=_db), db=_db,
+            )
         ordered = public.attention_queue([*annotated, *public.held_reply_queue_rows(_db, user_id)])
         counted = public.activity_counted_plan_ids(
             {row["detail"]["plan_id"] for row in ordered if row["renderer"] == "decision"},
             actor=public.PlanActor(None, user_id, None, kind="user"), db=_db,
         )
-        return [
-            {"external_id": row["external_id"], "renderer": row["renderer"],
-             "detail": row["detail"]}
-            for row in ordered
-            if row["renderer"] != "decision" or row["detail"]["plan_id"] in counted
-        ]
+        rows = [row for row in ordered
+                if row["renderer"] != "decision" or row["detail"]["plan_id"] in counted]
+        if raw:
+            return rows
+        return [{"external_id": row["external_id"], "renderer": row["renderer"],
+                 "detail": row["detail"]} for row in rows]
     finally:
         if not db:
             _db.close()
@@ -202,22 +203,59 @@ async def get_raised(user: dict = Depends(require_user), thread_id: str | None =
     return {"items": rows}
 
 
-@router.get("/queue")
-async def get_queue(user: dict = Depends(require_user)):
-    """The one queue the user works through — head item plus how many wait.
+def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+    """Compose and rank one authorized view; return uncapped rows, ranker and scope."""
+    from collections import Counter
+    from loguru import logger
+    from infra.activity_queue_base import shape
+    from infra.activity_rank_scope import ranker_for
+    from infra.activity_ranking import apply_ranks
+    from plans import operator_projection
 
-    User-global on purpose: it takes no plan id, so a decision raised by a
-    subagent two levels down is reachable from wherever the user already is.
-    One item at a time (PRD-PLANS E8). `items` is the same ordered read, capped,
-    so the user can choose which waiting item to answer next; `current` is
-    always `items[0]`.
-    """
-    rows = await run_in_db(lambda: _queue_for(user["id"]))
-    return {
-        "current": rows[0] if rows else None,
-        "count": len(rows),
-        "items": rows[:QUEUE_ITEMS_CAP],
-    }
+    if project_id:
+        operator_projection._project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
+    annotated = public.annotate_attention(_authorized_raised(None, user_id, db=db), db=db)
+    rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
+    if view == 'activity':
+        from plans.activity_rows import rows as plan_rows, dedupe_comment_tasks
+        from doceditor.activity_reply_rows import reply_rows
+        projected = plan_rows(db, user_id, annotated)
+        reviews = {r['detail']['artifact_id'] for r in projected if r['kind'] == 'review'}
+        replies = reply_rows(db, user_id, reviewed_artifact_ids=reviews)
+        rows.extend(dedupe_comment_tasks(db, user_id, projected, replies))
+        rows.extend(replies)
+    if project_id:
+        rows = [r for r in rows if r['source'].get('project_id') == project_id]
+    rows.sort(key=lambda r: (r.get('priority', 0), r.get('raised_at') or '', r['key']))
+    scope, ranker = ranker_for(db, user_id, project_id)
+    rows = apply_ranks(db, user_id, scope, rows)
+    for row in rows:
+        row.pop('priority', None)
+    counts = dict(Counter(row['kind'] for row in rows))
+    ranked = sum(row['rank'] is not None for row in rows)
+    logger.info('activity queue scope={} kinds={} ranked={} unranked={}', scope, counts, ranked, len(rows)-ranked)
+    return rows, ranker, scope
+
+
+def _queue_response(user_id: str, project_id: str | None, view: str | None):
+    from plans.operator_projection import OperatorNotFound
+    db = get_db()
+    try:
+        try:
+            rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view=view)
+        except OperatorNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {'current': rows[0] if rows else None, 'count': len(rows),
+                'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}
+    finally:
+        db.close()
+
+
+@router.get("/queue")
+async def get_queue(user: dict = Depends(require_user), project_id: str | None = None,
+                    view: str | None = None):
+    """Read the selected view of the person's ordered queue."""
+    return await run_in_db(lambda: _queue_response(user['id'], project_id, view))
 
 
 @router.get("/rollup")

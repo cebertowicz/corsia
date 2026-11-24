@@ -1,0 +1,49 @@
+"""Persist and apply a person's ordering for one activity scope."""
+
+from __future__ import annotations
+
+
+def validate_order(items: list[dict], current_keys: set[str]) -> None:
+    """Refuse stale, duplicate or overlong items before replacing an order."""
+    seen: set[str] = set()
+    for item in items:
+        key = item.get("key")
+        if not isinstance(key, str) or key not in current_keys:
+            raise ValueError(f"Unknown key {key!r}; re-read the queue and try again.")
+        if key in seen:
+            raise ValueError(f"Key {key!r} appears twice; list each item once.")
+        reason = item.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"Give {key!r} a reason written for the person.")
+        if len(reason) > 90:
+            raise ValueError(f"Reason for {key!r} exceeds 90 characters; shorten it.")
+        if "\n" in reason or "\r" in reason:
+            raise ValueError(f"Reason for {key!r} must be one line.")
+        seen.add(key)
+
+
+def replace_ranks(db, user_id: str, scope: str, ranker: str, items: list[dict], now: str) -> None:
+    """Replace a scope inside the caller's transaction after the caller validates the list."""
+    db.execute("DELETE FROM activity_ranks WHERE user_id=? AND scope=?", (user_id, scope))
+    db.executemany(
+        "INSERT INTO activity_ranks (user_id, scope, item_key, position, reason, ranked_by, ranked_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(user_id, scope, item["key"], position, item["reason"], ranker, now)
+         for position, item in enumerate(items, start=1)],
+    )
+
+
+def apply_ranks(db, user_id: str, scope: str, items: list[dict]) -> list[dict]:
+    """Put ranked current items first, preserving canonical order for unranked items."""
+    ranks = {
+        row["item_key"]: {"position": row["position"], "reason": row["reason"],
+                          "ranked_by": row["ranked_by"], "ranked_at": row["ranked_at"]}
+        for row in db.execute(
+            "SELECT item_key, position, reason, ranked_by, ranked_at FROM activity_ranks "
+            "WHERE user_id=? AND scope=?", (user_id, scope),
+        )
+    }
+    annotated = [{**item, "rank": ranks.get(item["key"])} for item in items]
+    return sorted(annotated, key=lambda item: (
+        item["rank"] is None, item["rank"]["position"] if item["rank"] is not None else 0,
+    ))
