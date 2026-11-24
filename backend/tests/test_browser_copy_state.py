@@ -109,5 +109,5 @@ async def test_a_programming_error_reading_a_tab_is_not_swallowed(cdp, monkeypat
 
 
 def test_the_whole_read_fits_inside_the_copy_limit():
-    worst = 2 * browser_copy_state._COOKIE_TIMEOUT + browser_copy_state._PAGES_BUDGET
+    worst = 2 * browser_cdp.BROWSER_CALL_TIMEOUT + browser_copy_state._PAGES_BUDGET
     assert worst < browser_session_launch._COPY_READ_TIMEOUT

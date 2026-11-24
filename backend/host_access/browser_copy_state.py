@@ -19,20 +19,22 @@ from host_access import browser_cdp
 from host_access.browser_session_state import BrowserSessionError
 
 log = logging.getLogger(__name__)
-_COOKIE_TIMEOUT = 5.0
 # A live tab answers a storage read in milliseconds; a stuck one (a busy script, an open dialog) never does.
 # 2 s is far above a live answer on a loaded machine, so only a stuck tab is left out.
 _PAGE_TIMEOUT = 2.0
-# Tabs are read one after another and share this budget, so the whole read ends inside the copy's own
-# limit (browser_session_launch._COPY_READ_TIMEOUT, 30 s) and the cookies already read are always kept.
+# Tabs are read one after another and share this budget, so the whole read (two browser-wide calls of
+# browser_cdp.BROWSER_CALL_TIMEOUT, then this) ends inside the copy's own limit
+# (browser_session_launch._COPY_READ_TIMEOUT, 30 s) and the cookies already read are always kept.
 _PAGES_BUDGET = 12.0
 
 
 async def read(endpoint: str) -> dict[str, list[dict[str, Any]]]:
     """The browser's cookies, and the storage of each open web page; a page that doesn't answer is left out."""
     async with browser_cdp.CdpClient(endpoint, max_size=None) as cdp:
-        cookies = (await asyncio.wait_for(cdp.call("Storage.getCookies"), _COOKIE_TIMEOUT)).get("cookies")
-        targets = (await asyncio.wait_for(cdp.call("Target.getTargets"), _COOKIE_TIMEOUT)).get("targetInfos")
+        cookies = (await asyncio.wait_for(
+            cdp.call("Storage.getCookies"), browser_cdp.BROWSER_CALL_TIMEOUT)).get("cookies")
+        targets = (await asyncio.wait_for(
+            cdp.call("Target.getTargets"), browser_cdp.BROWSER_CALL_TIMEOUT)).get("targetInfos")
         pages = [(str(target.get("targetId")), origin) for target in targets or ()
                  if (origin := _page_origin(target)) is not None]
         origins: dict[str, dict[str, Any]] = {}

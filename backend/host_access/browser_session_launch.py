@@ -20,14 +20,17 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from host_access import (browser_cli, browser_copy_state, browser_executables, browser_identity as identity,
-                         browser_launch)
+from host_access import (browser_cdp, browser_cli, browser_copy_state, browser_executables,
+                         browser_identity as identity, browser_launch)
 
 logger = logging.getLogger(__name__)
+# Restoring the copied sign-in into the copy's browser before its first action; past this the copy's launch
+# fails as "saved sign-in could not be restored" instead of hanging. 30 s is the limit the state step has
+# had since sign-in copies began (#1546).
 _STATE_LOAD_TIMEOUT = 30.0
-# Reading the holder's sign-in for a copy; browser_copy_state keeps its page reads inside this.
+# Reading the holder's sign-in for a copy, while the holder's own commands wait on its lock; past this the
+# copy starts signed out and the holder is freed. browser_copy_state keeps its reads inside this.
 _COPY_READ_TIMEOUT = 30.0
-_COOKIE_TIMEOUT = 5.0
 # The Network.Cookie fields Storage.setCookies accepts back as a CookieParam.
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
                   "priority", "sourceScheme", "sourcePort", "partitionKey")
@@ -307,7 +310,7 @@ async def keep_copy_signins(owner: Any, runtime: Any) -> None:
         if profile is None:
             return
         async with CdpClient(runtime.chrome.endpoint, max_size=None) as cdp:
-            current = (await asyncio.wait_for(cdp.call("Storage.getCookies"), _COOKIE_TIMEOUT)).get("cookies")
+            current = (await asyncio.wait_for(cdp.call("Storage.getCookies"), browser_cdp.BROWSER_CALL_TIMEOUT)).get("cookies")
         seeded = {_cookie_key(cookie): cookie.get("value")
                   for cookie in await asyncio.to_thread(_read_cookies, browser_launch.copy_path(record.session))}
         gained = [cookie for cookie in current or () if isinstance(cookie, dict)
@@ -338,7 +341,7 @@ async def apply_kept_signins(runtime: Any) -> None:
                and not (key == "expires" and cookie.get("session"))} for cookie in cookies]
     try:
         async with CdpClient(runtime.chrome.endpoint, max_size=None) as cdp:
-            await asyncio.wait_for(cdp.call("Storage.setCookies", cookies=params), _COOKIE_TIMEOUT)
+            await asyncio.wait_for(cdp.call("Storage.setCookies", cookies=params), browser_cdp.BROWSER_CALL_TIMEOUT)
     except Exception:
         logger.warning("kept browser sign-ins could not be written yet; they wait for the next launch", exc_info=True)
         return
