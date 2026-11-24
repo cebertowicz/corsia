@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
@@ -253,6 +254,24 @@ def test_this_computers_name_and_the_outside_address_are_refused(sessions):
     assert offers.offer_login(key, "https://localhost:8443", "me", "pw one 1") is True
 
 
+@pytest.mark.parametrize(
+    "stored,site", [("home.example.net.", "https://home.example.net"), ("home.example.net.:8443", "https://home.example.net:8443")],
+)
+def test_an_outside_address_saved_with_a_trailing_dot_is_refused(sessions, stored, site):
+    set_devices_outside_address(stored)
+    with pytest.raises(KeyStoreError, match="CORSIA itself"):
+        offers.offer_login(_key(sessions), site, "me", "pw one 1")
+    assert offers.pending_offer(_key(sessions)) is None
+
+
+def test_an_outside_address_that_is_not_a_site_refuses_the_offer(sessions):
+    set_devices_outside_address("not a host!")
+    with pytest.raises(KeyStoreError):
+        offers.offer_login(_key(sessions), SITE, "me", "pw one 1")
+    offers.confirm_offer(_key(sessions))
+    assert offers.pending_offer(_key(sessions)) is None
+
+
 def test_a_malformed_session_key_is_refused(sessions):
     for key in ("", "t-mine", ":s1", None):
         with pytest.raises(KeyStoreError):
@@ -337,7 +356,7 @@ async def test_not_now_drops_the_offer_and_is_safe_to_repeat(client, sessions):
 async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "This request needs the conversation it's for."}
+    assert refused.json() == {"detail": "This request needs the chat it's for."}
 
 
 @pytest.mark.asyncio
@@ -387,10 +406,24 @@ async def test_an_agent_token_is_refused_on_every_route(client, sessions, method
     assert [login.id for login in saved_logins.list_logins()] == [login_id]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path,body", _ROUTES)
+async def test_a_session_in_the_url_reads_but_changes_nothing(client, sessions, method, path, body):
+    _confirmed(_key(sessions))
+    login_id = saved_logins.save_login(site=SITE, username="kept", password="pw two 2", saved_by=OWNER_USER)
+    route, _, query = path.replace("0" * 32, login_id).partition("?")
+    url_session = dict(parse_qsl(query)) | {"token": OWNER_SESSION_TOKEN}
+    answered = await client.request(method, route, json=body, params=url_session)
+    assert answered.status_code == (200 if method == "GET" else 401), (method, path, answered.status_code)
+    assert offers.pending_offer(_key(sessions)) is not None
+    assert [login.id for login in saved_logins.list_logins()] == [login_id]
+
+
 def test_every_route_is_the_persons_alone():
     from infra.auth import require_human_user
 
     routes = [route for route in saved_logins_api.router.routes if route.path.startswith("/api/saved-logins")]
     assert len(routes) == len(_ROUTES)
     for route in routes:
-        assert any(dep.call is require_human_user for dep in route.dependant.dependencies), route.path
+        expected = require_human_user if route.methods == {"GET"} else saved_logins_api.require_person_write
+        assert any(dep.call is expected for dep in route.dependant.dependencies), route.path
