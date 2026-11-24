@@ -13,8 +13,11 @@ from plans.operator_display_state import (
     ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
     review_deferred, row_asks_user,
 )
-#: Leaves whose primary condition opens their path by default. Paused work
-#: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
+#: Leaves whose shown condition makes them current work. Being current does
+#: not open a path by itself: the sheet opens a current leaf's path only while
+#: it reads Working or its timed wait ends soon, and ``attention_path`` opens a
+#: shown block or an ask owed to the person. Paused work (a whole-plan pause or
+#: a node pause hold) is "Collapsed by default" in the
 #: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a pause
 #: stays current while a plan or item pause defers its ask (``ask_deferred``).
 CURRENT_CONDITIONS = frozenset({"running", "waiting", "blocked", "review"})

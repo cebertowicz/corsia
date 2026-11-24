@@ -207,7 +207,7 @@ def test_node_pause_is_not_current_and_keeps_its_blocker_as_detail():
 
 
 def test_failed_node_keeps_its_blocker_as_detail_without_opening_its_path():
-    """PLANS-ACCEPTANCE.md:36 and the state matrix:250 open red blocked paths."""
+    """PLANS-AC19 and the state matrix's Blocked row open only shown blocked paths."""
     db = _db()
     try:
         plan = service.ensure_plan("thread", "owner", db=db)

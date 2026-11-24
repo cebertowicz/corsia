@@ -605,8 +605,8 @@ def test_cross_operation_parameters_are_rejected(db, operation):
 # --- 8. the projection the block finally reaches ----------------------------
 
 
-def test_the_operator_projection_shows_the_blocked_path_from_canonical_state(db):
-    """PLANS-ACCEPTANCE.md:36 opens blocks; state matrix:249 collapses waits."""
+def test_the_operator_projection_keeps_a_dependency_wait_path_closed(db):
+    """PLANS-AC19 opens shown blocks; the state matrix keeps a quiet wait collapsed."""
     from plans import operator_projection
 
     plan = _plan(db)
