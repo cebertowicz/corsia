@@ -605,8 +605,8 @@ def test_cross_operation_parameters_are_rejected(db, operation):
 # --- 8. the projection the block finally reaches ----------------------------
 
 
-def test_the_operator_projection_shows_the_blocked_path_from_canonical_state(db):
-    """PLANS-AC19: the blocked path stops being an always-empty set."""
+def test_the_operator_projection_keeps_a_dependency_wait_path_closed(db):
+    """PLANS-AC19 opens shown blocks; the state matrix keeps a quiet wait collapsed."""
     from plans import operator_projection
 
     plan = _plan(db)
@@ -626,4 +626,4 @@ def test_the_operator_projection_shows_the_blocked_path_from_canonical_state(db)
 
     presented = {item["id"]: item for item in envelope["plans"][0]["nodes"]}
     assert list(presented[node.id]["unmet_dependencies"]) == [prerequisite.id]
-    assert presented[node.id]["attention_path"] == [parent.id, node.id]
+    assert presented[node.id]["attention_path"] == []
