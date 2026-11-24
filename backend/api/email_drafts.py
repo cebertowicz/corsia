@@ -2,8 +2,10 @@
 
 - ``GET /api/email-drafts/{artifact_id}/context`` — the conversation the draft replies into (newest first),
   which email it answers and that email's addresses, the files it attaches and its quiet notes
+- ``POST /api/email-drafts/{artifact_id}/send`` — Send now: send the exact text on the person's screen
+- ``POST /api/email-drafts/{artifact_id}/discard`` — Don't send: mark the draft not to send
 
-Only the signed-in person reads it, and only for a draft in a thread they own; anything else is a 404. The
+Only the signed-in person reads or acts, and only on a draft in a thread they own; anything else is a 404. The
 account is the one the draft was saved with, never one the request names. Which recipients the send refuses rides
 on the document's load and live frames (``email_document.read_header``); whether a recipient was added and whether
 newer emails arrived the view works out from this data and that reading.
@@ -13,14 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 from connections.account_errors import AccountError
-from connections.mail.email_document import DraftRefused
+from connections.mail.email_document import DraftRefused, parse_document
 from connections.mail_accounts import resolve_for_thread
 from infra.auth import owns_thread, require_human_user
 from infra.database import get_db
@@ -28,7 +32,11 @@ from infra.db_async import run_in_db
 from infra.failure_reference import new_error_reference
 from registry import artifact_record
 from tools.mail_backends import MailBackend, backend_for
-from tools.reviewed_drafts import draft_at, draft_target, working_root
+from doceditor.document_scope import revision as document_revision
+from tools.action_drafts import DraftError, discard_draft, record_draft
+from tools.action_gate import _read_bytes
+from tools.email_send_approved import IN_FLIGHT, NEWER, SENT, UNCONFIRMED, SendResult, send_approved
+from tools.reviewed_drafts import draft_record_at, draft_target, working_root
 
 router = APIRouter(prefix="/api/email-drafts", tags=["email-drafts"])
 
@@ -38,13 +46,13 @@ ACCOUNT, UNREADABLE = "account", "unreadable"
 
 
 def _draft_for(artifact_id: str, user_id: str) -> dict[str, Any] | None:
-    """The email draft record of this artifact's file, when its thread is the person's own."""
+    """The email draft record of this artifact's file, in any state, when its thread is the person's own."""
     db = get_db()
     try:
         identity = artifact_record.identity_row_for(artifact_id, db=db)
         if identity is None or (identity["integration"], identity["type"]) != ("workspace", "document") or not identity["path"]:
             return None
-        row = draft_at(Path(identity["path"]), "email", db=db)
+        row = draft_record_at(Path(identity["path"]), "email", db=db)
         return row if row is not None and owns_thread(row["thread_id"], user_id, db=db) else None
     finally:
         db.close()
@@ -81,8 +89,10 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     if draft is None:
         raise HTTPException(404, "Email draft not found")
     target = draft_target(draft)
-    # The draft's own chat opens its attachments, whichever chat is on screen.
-    base = {"thread_id": draft["thread_id"],
+    # The draft's own chat opens its attachments, whichever chat is on screen. ``read_at`` is when this read ran: a
+    # Send now that carries it doesn't count the emails this view showed as newer.
+    base = {"thread_id": draft["thread_id"], "state": draft["state"],
+            "read_at": datetime.now(timezone.utc).isoformat(),
             "attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target.get("attachments") or []),
             "notes": [str(note) for note in target.get("notes") or [] if isinstance(note, str)]}
     reply_to = target.get("reply_to")
@@ -115,3 +125,133 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     except Exception:  # noqa: BLE001 - any other read failure is the same named state, logged with its cause
         logger.exception("A draft's conversation could not be read (reference {})", reference)
     return {**failed, "reason": UNREADABLE, "reference": reference}
+
+
+#: What the person reads when the click didn't send. The text on their screen isn't what the draft holds now.
+CHANGED = "The draft changed; review it again."
+NEWER_LINE = "A newer email arrived in this conversation; review it again."
+
+
+class SendNow(BaseModel):
+    """The draft's text as the person's screen shows it, and when their view last read the conversation."""
+
+    text: str
+    read_at: str | None = None
+
+
+def _read_at(value: str | None) -> datetime | None:
+    """The view's read time, never later than now: a clock the client sets can't move the newer-email cut-off ahead."""
+    try:
+        parsed = datetime.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+    if parsed is None:
+        return None
+    parsed = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return min(parsed, datetime.now(timezone.utc))
+
+
+def _first_recipient(data: bytes) -> str:
+    parsed = parse_document(data.decode("utf-8", errors="replace"))
+    return parsed["to"][0] if parsed and parsed["to"] else "the recipient"
+
+
+_AGENT = {
+    SENT: "The person sent email draft {id} with Send now (revision {revision}, {at}). It has gone out; there is "
+          "nothing more to send. Settle any review you asked for on it.",
+    "failed": "The person pressed Send now on email draft {id} from {account}, but it wasn't sent: {reason}. The "
+              "draft is still open, and they can press Send now again once it's fixed.",
+    UNCONFIRMED: "The person pressed Send now on email draft {id} from {account}, but the mail service didn't "
+                 "confirm it, so it may have gone out. Don't resend it; ask them to check their Sent mail.",
+    "discarded": "The person chose Don't send on email draft {id}. It won't be sent. Save a new draft only if they "
+                 "ask for another version.",
+}
+_PERSON = {
+    SENT: "You sent the email to {to}.",
+    "failed": "The email to {to} wasn't sent.",
+    UNCONFIRMED: "The email to {to} may have gone out. Check your Sent mail.",
+    "discarded": "You chose not to send the email to {to}.",
+}
+
+
+async def _tell_agent(draft: dict[str, Any], outcome: str, *, revision: str, to: str, account: str | None,
+                      reason: str | None = None) -> None:
+    """The draft's own agent learns each outcome, and the row it reads is the send's record: draft, revision,
+    outcome and time, never the body. Best-effort: the draft's state is already stored."""
+    from events.delivery import deliver_to_thread
+
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    logger.info("draft-send draft={} revision={} outcome={} at={}", draft["id"], revision, outcome, at)
+    summary = _AGENT[outcome].format(id=draft["id"], revision=revision, at=at, account=account or "its account",
+                                     reason=reason or "the mail service refused it")
+    try:
+        delivered = await deliver_to_thread(
+            str(draft["thread_id"]), f"email_draft.{outcome}", summary,
+            {"draft_id": draft["id"], "revision": revision, "outcome": outcome, "at": at},
+            delivery_id=f"draft-send:{draft['id']}:{outcome}:{revision}", chip=_PERSON[outcome].format(to=to),
+        )
+        if not delivered:
+            logger.warning("draft-send draft={}: telling the agent {} failed", draft["id"], outcome)
+    except Exception:  # noqa: BLE001 - the send already happened or provably didn't; only the notice failed
+        logger.exception("draft-send draft={}: telling the agent {} failed", draft["id"], outcome)
+
+
+def _settled(draft: dict[str, Any]) -> dict[str, Any] | None:
+    """The answer for a draft that is no longer open: a second click, or another tab, finds it settled."""
+    state = draft["state"]
+    if state == "open":
+        return None
+    return {"state": state}
+
+
+async def _now_settled(artifact_id: str, user_id: str, draft: dict[str, Any]) -> dict[str, Any]:
+    """Where a draft stands after another request moved it first (a second tab, a double click)."""
+    current = await run_in_db(_draft_for, artifact_id, user_id) or draft
+    return _settled(current) or {"state": IN_FLIGHT}
+
+
+@router.post("/{artifact_id}/send")
+async def send_now(artifact_id: str, body: SendNow, user: dict = Depends(require_human_user)) -> dict[str, Any]:
+    """Send the draft as the person sees it, with no model turn: the click is their approval of these exact bytes."""
+    draft = await run_in_db(_draft_for, artifact_id, user["id"])
+    if draft is None:
+        raise HTTPException(404, "Email draft not found")
+    if (settled := _settled(draft)) is not None:
+        return settled
+    live = await asyncio.to_thread(_read_bytes, str(draft["path"]))
+    shown = body.text.encode("utf-8")
+    if live is None or live != shown:
+        raise HTTPException(409, {"state": "changed", "message": CHANGED})
+    revision = document_revision(live)
+    if revision != draft["recorded_revision"]:
+        # The person edited the draft: record what they approved, so the record names exactly what is sent.
+        try:
+            await run_in_db(record_draft, str(draft["id"]), live)
+        except DraftError:
+            return await _now_settled(artifact_id, user["id"], draft)
+    result: SendResult = await send_approved(draft, live, read_at=_read_at(body.read_at))
+    if result.state == NEWER:
+        raise HTTPException(409, {"state": NEWER, "message": NEWER_LINE})
+    if result.state == IN_FLIGHT:
+        # Another click or tab claimed it first; answer where that one stands now.
+        return await _now_settled(artifact_id, user["id"], draft)
+    await _tell_agent(draft, result.state, revision=revision, to=_first_recipient(live), account=result.account,
+                      reason=result.reason)
+    return {"state": result.state, "reason": result.reason} if result.state == "failed" else {"state": result.state}
+
+
+@router.post("/{artifact_id}/discard")
+async def dont_send(artifact_id: str, user: dict = Depends(require_human_user)) -> dict[str, Any]:
+    """Don't send: the draft is marked not to send, once, and its agent is told."""
+    draft = await run_in_db(_draft_for, artifact_id, user["id"])
+    if draft is None:
+        raise HTTPException(404, "Email draft not found")
+    if (settled := _settled(draft)) is not None:
+        return settled
+    try:
+        await run_in_db(discard_draft, str(draft["id"]))
+    except DraftError:
+        return await _now_settled(artifact_id, user["id"], draft)
+    live = await asyncio.to_thread(_read_bytes, str(draft["path"])) or b""
+    await _tell_agent(draft, "discarded", revision=document_revision(live), to=_first_recipient(live), account=None)
+    return {"state": "discarded"}

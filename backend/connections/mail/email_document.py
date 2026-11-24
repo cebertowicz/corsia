@@ -169,9 +169,11 @@ def read_header(text: str) -> dict:
     return {"text": head, "recipients": recipients}
 
 
-def email_draft_view(draft_id: str, text: str) -> dict:
-    """What a document load or live frame tells the view about an email draft: its record and its header."""
-    return {"id": draft_id, "header": read_header(text)}
+def email_draft_view(draft_id: str, text: str, state: str | None = None) -> dict:
+    """What a document load or live frame tells the view about an email draft: its record, its header and, on a
+    load, whether it is still open or was sent or declined (a live frame leaves the state to the load)."""
+    view = {"id": draft_id, "header": read_header(text)}
+    return {**view, "state": state} if state else view
 
 
 def parse_document(text: str) -> dict | None:
