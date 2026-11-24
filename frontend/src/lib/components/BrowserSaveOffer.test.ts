@@ -446,7 +446,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	};
 	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
 
-	it.each([[409, 'There is no sign-in to save here.'], [404, 'The chat this login is for can’t be found.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
+	it.each([[409, 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
 		await refuse(status, { detail });
 		expect(dock()!.querySelector('.question')!.textContent).toBe(detail);
 		expect(dock()!.textContent).not.toContain('Save the');
@@ -460,7 +460,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	it('moves focus to Close when Save had it, and never fades by itself', async () => {
 		vi.useFakeTimers();
 		saveStatus = 409;
-		saveBody = { detail: 'There is no sign-in to save here.' };
+		saveBody = { detail: 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.' };
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		button('Save').focus();
@@ -476,7 +476,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	});
 
 	it('Close dismisses as Not now does: it posts not-now, closes, and leaves focus on the page', async () => {
-		await refuse(409, { detail: 'There is no sign-in to save here.' });
+		await refuse(409, { detail: 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.' });
 		button('Close').focus();
 		button('Close').click();
 		await settle();
