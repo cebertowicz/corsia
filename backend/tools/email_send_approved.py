@@ -49,6 +49,10 @@ class SendResult:
     account: str | None = None
     reason: str | None = None
     newer: str | None = None
+    #: On a send that went out: addresses the mail host refused, and the provider's note for the agent (for example
+    #: Gmail filing the email under another conversation than the reply target).
+    not_delivered_to: tuple[str, ...] = ()
+    note: str | None = None
 
 
 def _provider(account_id: str) -> str | None:
@@ -86,13 +90,30 @@ def _error_text(result: str) -> str | None:
     return result.removeprefix("Error: ").removeprefix("Not sent: ")
 
 
+def _sent(account: str, result: str) -> SendResult:
+    """A send that went out, with what the delivery said about it beyond 'sent'."""
+    try:
+        body = json.loads(result)
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return SendResult(SENT, account)
+    refused = body.get("not_delivered_to")
+    note = body.get("note")
+    return SendResult(
+        SENT, account,
+        not_delivered_to=tuple(str(address) for address in refused) if isinstance(refused, list) else (),
+        note=note if isinstance(note, str) else None,
+    )
+
+
 async def _outcome(draft_id: str, account: str, result: str) -> SendResult:
     if result == f"Error: {STILL_SENDING}":
         # Another click claimed this draft first; its own request reports what happened.
         return SendResult(IN_FLIGHT, account)
     state = await run_in_db(_draft_state, draft_id)
     if state == "sent":
-        return SendResult(SENT, account)
+        return _sent(account, result)
     if state == "sending":
         return SendResult(UNCONFIRMED, account, _error_text(result))
     return SendResult(FAILED, account, _error_text(result) or UNEXPECTED)

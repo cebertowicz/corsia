@@ -158,7 +158,7 @@ def _first_recipient(data: bytes) -> str:
 
 _AGENT = {
     SENT: "The person sent email draft {id} with its Send button (revision {revision}, {at}). It has gone out; there is "
-          "nothing more to send. Settle any review you asked for on it.",
+          "nothing more to send. Settle any review you asked for on it.{extra}",
     "failed": "The person pressed Send on email draft {id} from {account}, but it wasn't sent: {reason}. The "
               "draft is still open, and they can press Send again once it's fixed.",
     UNCONFIRMED: "The person pressed Send on email draft {id} from {account}, but the mail service didn't "
@@ -167,7 +167,7 @@ _AGENT = {
                  "ask for another version.",
 }
 _PERSON = {
-    SENT: "You sent the email to {to}.",
+    SENT: "You sent the email to {to}.{extra}",
     "failed": "The email to {to} wasn't sent.",
     UNCONFIRMED: "The email to {to} may have gone out. Check your Sent mail.",
     "discarded": "You chose not to send the email to {to}.",
@@ -175,20 +175,23 @@ _PERSON = {
 
 
 async def _tell_agent(draft: dict[str, Any], outcome: str, *, revision: str, to: str, account: str | None,
-                      reason: str | None = None) -> None:
+                      reason: str | None = None, refused: tuple[str, ...] = (), note: str | None = None) -> None:
     """The draft's own agent learns each outcome, and the row it reads is the send's record: draft, revision,
     outcome and time, never the body. Best-effort: the draft's state is already stored."""
     from events.delivery import deliver_to_thread
 
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     logger.info("draft-send draft={} revision={} outcome={} at={}", draft["id"], revision, outcome, at)
+    missed = f" These addresses did not get it: {', '.join(refused)}." if refused else ""
     summary = _AGENT[outcome].format(id=draft["id"], revision=revision, at=at, account=account or "its account",
-                                     reason=reason or "the mail service refused it")
+                                     reason=reason or "the mail service refused it",
+                                     extra=missed + (f" {note}" if note else ""))
     try:
         delivered = await deliver_to_thread(
             str(draft["thread_id"]), f"email_draft.{outcome}", summary,
-            {"draft_id": draft["id"], "revision": revision, "outcome": outcome, "at": at},
-            delivery_id=f"draft-send:{draft['id']}:{outcome}:{revision}", chip=_PERSON[outcome].format(to=to),
+            {"draft_id": draft["id"], "revision": revision, "outcome": outcome, "at": at,
+             **({"not_delivered_to": list(refused)} if refused else {})},
+            delivery_id=f"draft-send:{draft['id']}:{outcome}:{revision}", chip=_PERSON[outcome].format(to=to, extra=f" {', '.join(refused)} didn't get it." if refused else ""),
         )
         if not delivered:
             logger.warning("draft-send draft={}: telling the agent {} failed", draft["id"], outcome)
@@ -236,8 +239,11 @@ async def send_now(artifact_id: str, body: SendNow, user: dict = Depends(require
         # Another click or tab claimed it first; answer where that one stands now.
         return await _now_settled(artifact_id, user["id"], draft)
     await _tell_agent(draft, result.state, revision=revision, to=_first_recipient(live), account=result.account,
-                      reason=result.reason)
-    return {"state": result.state, "reason": result.reason} if result.state == "failed" else {"state": result.state}
+                      reason=result.reason, refused=result.not_delivered_to, note=result.note)
+    if result.state == "failed":
+        return {"state": result.state, "reason": result.reason}
+    # The person must not read 'Sent' as 'everyone got it' when the mail host refused some addresses.
+    return {"state": result.state, **({"not_delivered_to": list(result.not_delivered_to)} if result.not_delivered_to else {})}
 
 
 @router.post("/{artifact_id}/discard")
