@@ -1,7 +1,5 @@
 # C.O.R.S.I.A.
 
-<sub>Community-Orchestrated Recursive Self-Improving Agents</sub>
-
 ### A team of AI agents that organizes itself, checks its own work, and measures what it delivers per hour of your attention.
 
 CORSIA is a free, open-source app that runs on your own computer. The agents run on the Claude or Codex subscription you already pay for, an API key, or a local model.
@@ -34,7 +32,7 @@ Each agent works toward a goal you can measure, such as how much of your time a 
 
 ![A user requests a review from three AI agents, who join the document and edit, comment and suggest changes live alongside the user](docs/live-review.gif)
 
-For every agent, CORSIA records the minutes you spent in the app on each finished result, the share of results accepted without being sent back, and what they cost; the numbers fill in as work is finished. When you correct an agent, the lesson can be tried on some of its later tasks and compared with tasks done without it, and it is kept on that comparison, not on the agent's say-so. Agents can also install reviewed workflows and skills from a shared library.
+For every agent, CORSIA records the minutes you spent in the app on each finished result, the share of results accepted without being sent back, and what they cost; the numbers fill in as work is finished. When you correct an agent, the lesson can be tried on some of its later tasks and compared with tasks done without it before it becomes part of the agent's instructions. Agents can also install reviewed workflows and skills from a shared library.
 
 ![CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens](docs/measurement-kpis-light.png)
 
