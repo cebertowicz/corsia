@@ -170,6 +170,21 @@ def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
     return leaves, parents, counts
 
 
+def _parked_commitments(plan: dict, leaves: list[dict]) -> frozenset[str]:
+    """The full projection's parked read, over the same causes it sees.
+
+    A compact row carries only its stored causes; the plan pause is intrinsic,
+    so it is added here as ``_execution_facts`` adds it.
+    """
+    open_leaves = [row for row in leaves if row["state"] not in service._TERMINAL_STATES]
+    return projections._parked_commitments(open_leaves, {
+        str(row["id"]): {
+            "causes": [*admission_projection.intrinsic_cause_facts(row, plan), *row["causes"]],
+        }
+        for row in open_leaves
+    })
+
+
 def plan_state(
     plan: dict, rows: list[dict], reduced: dict[str, ReducedNode], *,
     leaves: list[dict] | None = None, parents: set[str] | None = None,
@@ -201,10 +216,7 @@ def plan_state(
         ),
         moving=moving,
         delegated_moving=delegated_moving,
-        parked_commitments=projections._parked_commitments(
-            [row for row in leaves if row["state"] not in service._TERMINAL_STATES],
-            {str(row["id"]): row for row in leaves},
-        ),
+        parked_commitments=_parked_commitments(plan, leaves),
     )
 
 
