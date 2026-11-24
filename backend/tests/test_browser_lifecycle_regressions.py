@@ -167,3 +167,28 @@ sys.exit(1)
                 await asyncio.to_thread(process.wait, EXIT_TIMEOUT)
             except (identity.BrowserPidAbsent, psutil.NoSuchProcess):
                 pass
+
+
+async def test_an_agent_command_after_chrome_exits_starts_a_fresh_browser_and_says_so_once(synthetic_browser, monkeypatch):
+    from host_access import browser_session_commands
+    events = []
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event',
+                        lambda *args, **kwargs: events.append((args, kwargs)))
+    owner = synthetic_browser.owner
+    await owner.run('thread', ['open', 'about:blank'])
+    first = owner._sessions['thread']
+    dead = first.chrome
+    dead.exited = True
+    # The person's pane command leaves the session as it is.
+    await owner.run('thread', ['get', 'url'], pane=True)
+    assert owner._sessions['thread'] is first
+    # Two agent commands that both find the dead browser restart it once and say so once.
+    replies = await asyncio.gather(owner.run('thread', ['snapshot']), owner.run('thread', ['get', 'url']))
+    assert sum('The browser had closed, so it was started again.' in reply for reply in replies) == 1
+    fresh = owner._sessions['thread']
+    assert fresh is not first and first.record.terminal_state == 'closed'
+    assert dead.close.await_count == 1 and len(synthetic_browser.chrome_calls) == 2
+    assert events == [(('browser_pane', 'chrome_restarted'), {'thread_id': 'thread'})]
+    assert owner._restart_notices == {}
+    assert 'started again' not in await owner.run('thread', ['snapshot'])
+    await owner.shutdown()
