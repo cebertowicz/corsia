@@ -156,9 +156,11 @@
 		const result = await saveOffer(threadId);
 		if (mine !== generation || !offer) return;
 		saving = false;
+		// Save was disabled while it ran, so focus may have dropped to the document. Focus moves only if it is still in the
+		// dock or on the document: a person who went on to type somewhere else (the chat, say) keeps their place.
+		const focusWasHere = !document.activeElement || document.activeElement === document.body || !!dock?.contains(document.activeElement);
 		if (!result.saved && result.message) {
-			// Save is about to go: if focus was on it (or dropped to the page while it was busy), it moves to Close.
-			const focusWasHere = !document.activeElement || document.activeElement === document.body || !!dock?.contains(document.activeElement);
+			// Save is about to go, so focus moves to Close.
 			showRefusal(result.message);
 			announcement = result.message;
 			if (focusWasHere) void tick().then(() => closeButton?.focus());
@@ -167,12 +169,11 @@
 		if (!result.saved) {
 			failure = text.error;
 			announcement = failure;
-			// The button was disabled while saving; keyboard focus comes back to it.
-			void tick().then(() => saveButton?.focus());
+			if (focusWasHere) void tick().then(() => saveButton?.focus());
 			return;
 		}
 		// The buttons are about to go, so focus moves to the page first.
-		onrestorefocus();
+		if (focusWasHere) onrestorefocus();
 		holdHeight();
 		phase = 'saved';
 		announcement = offer.update ? text.updated : text.saved;

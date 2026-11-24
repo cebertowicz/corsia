@@ -445,6 +445,23 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(document.activeElement).not.toBe(document.body);
 	});
 
+	it.each([['a save that works', 200, { saved: true }], ['a save that fails', 500, {}], ['a refused save', 409, { detail: 'Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in.' }]])('leaves focus where the person moved it while the save ran: %s', async (_name, status, body) => {
+		saveStatus = status;
+		saveBody = body;
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		// The person clicked Save, then went on to type in the chat before the answer came back.
+		const composer = document.createElement('textarea');
+		document.body.append(composer);
+		button('Save').click();
+		composer.focus();
+		await settle();
+		await new Promise(resolve => setTimeout(resolve, 0));
+		flushSync();
+		expect(document.activeElement).toBe(composer);
+		composer.remove();
+	});
+
 	it('Not now posts, closes, and leaves focus on the page, not on a removed button', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
@@ -468,7 +485,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	};
 	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
 
-	it.each([[409, 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
+	it.each([[409, 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
 		await refuse(status, { detail });
 		expect(dock()!.querySelector('.question')!.textContent).toBe(detail);
 		expect(dock()!.textContent).not.toContain('Save the');
@@ -485,8 +502,8 @@ describe('save-login offer: Save, Not now and closing', () => {
 
 	it('keeps the asking height as the dock’s floor when a refusal takes the question’s place', async () => {
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 96));
-		await refuse(409, { detail: 'This login can’t be saved from here anymore. Unless it’s already saved, it’s offered again the next time you sign in.' });
-		expect(dock()!.querySelector('.question')!.textContent).toContain('can’t be saved from here anymore');
+		await refuse(409, { detail: 'Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in.' });
+		expect(dock()!.querySelector('.question')!.textContent).toContain('Saving isn’t available for this sign-in');
 		expect(dock()!.style.minHeight).toBe('96px');
 		expect(dock()!.style.height).toBe('');
 	});
@@ -494,7 +511,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	it('moves focus to Close when Save had it, and never fades by itself', async () => {
 		vi.useFakeTimers();
 		saveStatus = 409;
-		saveBody = { detail: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' };
+		saveBody = { detail: 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.' };
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		button('Save').focus();
@@ -510,7 +527,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	});
 
 	it('Close dismisses as Not now does: it posts not-now, closes, and leaves focus on the page', async () => {
-		await refuse(409, { detail: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' });
+		await refuse(409, { detail: 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.' });
 		button('Close').focus();
 		button('Close').click();
 		await settle();

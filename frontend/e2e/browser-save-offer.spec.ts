@@ -21,7 +21,7 @@ const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holding
 const view = { width: 900, height: 600 };
 const server = { offer: null as Offer | null, save: 200, saveBody: {} as unknown, saves: 0, notNows: 0, gets: 0 };
 
-const SERVER_TEXT = 'This login can’t be saved from here anymore. Unless it’s already saved, it’s offered again the next time you sign in.';
+const SERVER_TEXT = 'Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in.';
 // The longest refusal the server sends: the sign-in's browser closed before Save.
 const CLOSED_TEXT = 'The shared browser this sign-in came from has closed, so it can’t be saved. It’s offered again the next time you sign in.';
 const PAGE_TITLE = 'Sign in';

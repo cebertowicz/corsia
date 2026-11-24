@@ -16,8 +16,8 @@ describe('saveOffer: whose words the person reads', () => {
 
 	it.each([404, 409])('passes the server’s sentence through for a %i', async (status) => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
-		answer(status, { detail: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' });
-		expect(await saveOffer('thread')).toEqual({ saved: false, message: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' });
+		answer(status, { detail: 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.' });
+		expect(await saveOffer('thread')).toEqual({ saved: false, message: 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.' });
 	});
 
 	it.each([400, 401, 403, 422, 500, 503])('gives no message for a %i, whatever its body says, so the pane says its own line', async (status) => {
