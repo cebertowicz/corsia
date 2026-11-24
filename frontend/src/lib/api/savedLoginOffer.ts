@@ -40,7 +40,7 @@ export async function fetchSaveOffer(threadId: string): Promise<SaveOffer | null
 
 /**
  * Saved, or refused. Only a 404 or a 409 carries the server's own sentence in the body's `detail`, which is what the
- * person reads: Product Experience approved those two. Any other failure (400, 401, 403, 422, a 5xx, a network one)
+ * person reads. Any other failure (400, 401, 403, 422, a 5xx, a network one)
  * has no message here, since its text is written for agents or the session, not for the pane, and the pane says its
  * own line. Every failure is also reported to the console.
  */

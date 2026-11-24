@@ -226,12 +226,27 @@ test.describe('the pane save-login offer', () => {
 				await expect(dock(page).getByRole('button', { name: 'Not now' })).toBeVisible();
 				await shot(page, size.name, scheme, '2-error');
 
-				// A save that works says Saved, holds, fades, and closes. The page's clock is stopped here so the fade can be caught part-way.
+				// A save that works says Saved, holds, fades, and closes. The offer is asked for again first, so the
+				// swap is framed on the plain question rather than on an error line that is still collapsing.
 				server.save = 200;
+				await dock(page).getByRole('button', { name: 'Not now' }).click();
+				await expect(dock(page)).toHaveCount(0);
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page)).toBeVisible();
+				await page.waitForTimeout(400);
+				// A content swap has no size jump (motion.md): the dock keeps the height it had while it asked.
+				const askingHeight = (await dock(page).boundingBox())!.height;
+				// The page's clock is stopped here so the fade can be caught part-way.
 				await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
 				await dock(page).getByRole('button', { name: 'Save' }).click();
 				await expect(dock(page)).toContainText('Saved');
 				await expect(page.locator('[aria-live="polite"]', { hasText: 'Saved' }).first()).toBeAttached();
+				const savedHeight = (await dock(page).boundingBox())!.height;
+				expect(Math.abs(savedHeight - askingHeight)).toBeLessThanOrEqual(1);
+				// The measured pair goes in the report, so the design review can read the swap's size at each width.
+				test.info().annotations.push({ type: 'dock height', description: `${size.name} ${scheme}: asking ${askingHeight.toFixed(1)} px, Saved ${savedHeight.toFixed(1)} px` });
+				// The line at full opacity, before the fade starts: the state the fading frames never showed.
+				await shot(page, size.name, scheme, '3-saved-held');
 				await page.clock.runFor(CONFIRMATION_HOLD_MS);
 				await expect(dock(page)).toHaveClass(/fading/);
 				// Hold the fade 100 ms in, so the frame shows it part-way.
@@ -257,7 +272,7 @@ test.describe('the pane save-login offer', () => {
 				await shot(page, size.name, scheme, '4-update');
 				await dock(page).getByRole('button', { name: 'Not now' }).click();
 				await expect(dock(page)).toHaveCount(0);
-				expect(server.notNows).toBe(1);
+				expect(server.notNows).toBe(2);
 
 				// A 409 (or a 404) puts the server's sentence in the question's place, removes Save and Not now, leaves Close with focus, and never fades by itself.
 				server.offer = EXAMPLE;
@@ -272,6 +287,8 @@ test.describe('the pane save-login offer', () => {
 				await expect(dock(page).getByRole('button', { name: 'Save' })).toHaveCount(0);
 				await expect(dock(page).getByRole('button', { name: 'Not now' })).toHaveCount(0);
 				await expect(dock(page).getByRole('button', { name: 'Close' })).toBeFocused();
+				// The sentence stands on its own: the username line is gone with the offer it named.
+				await expect(dock(page).locator('.username')).toHaveCount(0);
 				expect(server.saves).toBe(savesBefore + 1);
 				if (size.name !== '768') await shot(page, size.name, scheme, '8-refused');
 				await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
@@ -282,7 +299,7 @@ test.describe('the pane save-login offer', () => {
 				// Close dismisses as Not now does, and focus lands back on the page.
 				await dock(page).getByRole('button', { name: 'Close' }).click();
 				await expect(dock(page)).toHaveCount(0);
-				expect(server.notNows).toBe(2);
+				expect(server.notNows).toBe(3);
 				server.save = 200;
 
 				// A domain is never cut, however long: the question wraps around it and nothing runs past the dock.
@@ -393,6 +410,25 @@ test.describe('the pane save-login offer', () => {
 		expect(during.notNow.x).toBeCloseTo(before.notNow.x, 0);
 		release();
 		await expect(dock(page)).toContainText('Saved');
+	});
+
+	test('a window that narrows while Saved shows grows the dock instead of clipping the line', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own viewport; the phone walks run on both projects.');
+		await page.setViewportSize({ width: 393, height: 852 });
+		const { canvas, send } = await openPane(page, request, 'light');
+		server.offer = { ...EXAMPLE, domain: LONG_DOMAIN, site: `https://${LONG_DOMAIN}` };
+		await signIn(page, canvas, send);
+		await expect(dock(page)).toBeVisible();
+		await page.waitForTimeout(400);
+		await dock(page).getByRole('button', { name: 'Save' }).click();
+		await expect(dock(page)).toContainText('Saved');
+		// The held height is a floor, not a fixed box: a narrower window takes more room for the line and gets it.
+		await page.setViewportSize({ width: 320, height: 852 });
+		await page.waitForTimeout(400);
+		const [dockBox, doneBox] = await Promise.all([dock(page).boundingBox(), dock(page).locator('.done').boundingBox()]);
+		expect(doneBox!.y).toBeGreaterThanOrEqual(dockBox!.y - 1);
+		expect(doneBox!.y + doneBox!.height).toBeLessThanOrEqual(dockBox!.y + dockBox!.height + 1);
+		expect(doneBox!.x + doneBox!.width).toBeLessThanOrEqual(dockBox!.x + dockBox!.width + 1);
 	});
 
 	test('the dock slides and fades in, fades out, and the error line grows in, never popping', async ({ page, request }, testInfo) => {

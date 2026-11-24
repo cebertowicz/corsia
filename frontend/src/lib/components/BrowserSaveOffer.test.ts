@@ -296,6 +296,15 @@ describe('save-login offer: what it shows', () => {
 		expect(dock()!.contains(document.activeElement)).toBe(false);
 	});
 
+	it('names the dock with its question, so a Tab-reached button is announced with it', async () => {
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		const named = () => host.querySelector(`[id="${dock()!.getAttribute('aria-labelledby')}"]`);
+		expect(dock()!.getAttribute('role')).toBe('group');
+		expect(named()).toBe(dock()!.querySelector('.question'));
+		expect(named()!.textContent).toBe('Save the example.com login for agents?');
+	});
+
 	// jsdom has no layout, so the hidden copy of the username "overflows" by its text length: 20 characters fit its line.
 	function widthByLength() {
 		vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(() => 20);
@@ -387,6 +396,17 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()).toBeNull();
 	});
 
+	it('holds the dock at the height it had while it asked, so the Saved line changes no size', async () => {
+		// The dock measures itself through the same rect a browser lays out, so the test hands it a real asking height.
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 96));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()!.style.minHeight).toBe('');
+		button('Save').click();
+		await settle();
+		expect(dock()!.style.minHeight).toBe('96px');
+	});
+
 	it('says Updated for an update offer', async () => {
 		offers = [{ ...OFFER, update: true }];
 		const { socket, canvas } = render();
@@ -455,6 +475,10 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()!.textContent).not.toContain('Couldn’t save');
 		const names = [...dock()!.querySelectorAll('button')].map(node => node.textContent?.trim());
 		expect(names).toEqual(['Close']);
+		// The sentence stands alone: no username above Close, and it is still the dock's accessible name.
+		expect(dock()!.querySelector('.username')).toBeNull();
+		expect(dock()!.textContent).not.toContain('sam@example.com');
+		expect(host.querySelector(`[id="${dock()!.getAttribute('aria-labelledby')}"]`)!.textContent).toBe(detail);
 	});
 
 	it('moves focus to Close when Save had it, and never fades by itself', async () => {

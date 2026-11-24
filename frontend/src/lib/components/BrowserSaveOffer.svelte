@@ -27,6 +27,12 @@
 
 	let offer = $state<SaveOffer | null>(null);
 	let phase = $state<'asking' | 'saved' | 'fading'>('asking');
+	// The dock keeps the height it had while it asked, so swapping the question for "Saved" changes no size (motion.md: a content swap has no size jump).
+	// It is a floor and not a fixed height: a pane that narrows while "Saved" shows grows the box instead of clipping the line.
+	let heldHeight = $state<string | null>(null);
+	// The question is the dock's accessible name, so a Tab-reached button is announced with it. One id per instance, as every named region in the app has.
+	const instanceId = $props.id();
+	const labelId = `save-offer-${instanceId}`;
 	// The pane's own error line, for a failure the person can retry.
 	let failure = $state<string | null>(null);
 	// The server's sentence for a refusal that cannot succeed (a 404 or a 409): it takes the question's place, Save goes, and Close stays.
@@ -83,6 +89,7 @@
 		offer = next;
 		username = next.username;
 		phase = 'asking';
+		heldHeight = null;
 		failure = null;
 		refusal = null;
 		saving = false;
@@ -166,9 +173,16 @@
 		}
 		// The buttons are about to go, so focus moves to the page first.
 		onrestorefocus();
+		holdHeight();
 		phase = 'saved';
 		announcement = offer.update ? text.updated : text.saved;
 		finishAfterHold();
+	}
+
+	/** Reads the dock's rendered height while it still asks, and keeps it as the dock's floor for the confirmation and its fade. */
+	function holdHeight() {
+		const measured = dock?.getBoundingClientRect().height ?? 0;
+		heldHeight = measured > 0 ? `${measured}px` : null;
 	}
 
 	function finishAfterHold() {
@@ -204,14 +218,19 @@
 		class="save-offer"
 		class:fading={phase === 'fading'}
 		aria-busy={saving || undefined}
+		role="group"
+		aria-labelledby={phase === 'asking' ? labelId : undefined}
+		style:min-height={heldHeight}
 		out:leave
 	>
 		{#if phase === 'asking'}
 			<div class="body">
 				<div class="copy">
-					<p class="question">{refusal ?? text.question(offer, offer.domain)}</p>
-					<p class="username probe" aria-hidden="true" bind:this={nameProbe}><span bind:this={nameProbeText}></span></p>
-					<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
+					<p class="question" id={labelId}>{refusal ?? text.question(offer, offer.domain)}</p>
+					{#if !refusal}
+						<p class="username probe" aria-hidden="true" bind:this={nameProbe}><span bind:this={nameProbeText}></span></p>
+						<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
+					{/if}
 					{#if failure}<p class="error" in:blockSlot out:blockSlot>{failure}</p>{/if}
 				</div>
 				<div class="actions">
@@ -231,7 +250,7 @@
 
 <style>
 	/* The docked card of the document review bar (.rb-dock): over the page's bottom edge, solid, top corners rounded, no divider line. */
-	.save-offer { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; container-type: inline-size; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); animation: dock-in var(--dur-standard) var(--ease-entrance) backwards; transition: opacity var(--dur-standard) var(--ease-snap); }
+	.save-offer { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; container-type: inline-size; display: flex; flex-direction: column; justify-content: center; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); animation: dock-in var(--dur-standard) var(--ease-entrance) backwards; transition: opacity var(--dur-standard) var(--ease-snap); }
 	.save-offer.fading { opacity: 0; }
 	@keyframes dock-in { from { opacity: 0; transform: translateY(var(--space-4)); } }
 	@keyframes dock-fade { from { opacity: 0; } }
@@ -249,6 +268,7 @@
 	.save :global(.btn.loading) { color: transparent; }
 	.save :global(.spinner) { position: absolute; inset: 0; margin: auto; border-color: var(--accent-on-fill); border-right-color: transparent; }
 	.actions :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* The confirmation line takes the body's padding, and the dock holds it in the middle of the height the question had. */
 	.done { padding: var(--space-3) var(--space-4) calc(var(--space-3) + var(--safe-bottom, 0px)); font-size: var(--text-subhead); color: var(--text-secondary); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 	/* Wide enough, the pair sits on the right of the question and username; narrower, it takes its own row, still on the right. */
@@ -258,6 +278,6 @@
 		.actions { flex: none; }
 	}
 	@media (max-width: 48em), (pointer: coarse) { .actions :global(.btn) { height: var(--touch-target); } }
-	/* The app's reduced-motion reset sets every animation to 0.01ms with !important; the crossfade keeps its tight duration by out-ranking it. */
+	/* Reduced motion keeps a crossfade rather than an instant swap, which is what motion.md asks for a content change. The app's reset sets every animation to 0.01ms with !important, so the tight duration has to out-rank it. */
 	@media (prefers-reduced-motion: reduce) { .save-offer { animation-name: dock-fade; animation-duration: var(--dur-tight) !important; animation-timing-function: var(--ease-snap); } }
 </style>
