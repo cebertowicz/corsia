@@ -288,7 +288,78 @@ const SCENARIOS: Scenario[] = [
 		await expect(page.locator('.email-attachments .attachment')).toHaveCount(3);
 		await toChips(page);
 	} },
+	// Send and Don't send on the draft: the bar before the click and each answer the server gives after it.
+	{ name: '20a-send-ready', doc: 'reply', context: reply(), act: async (page) => {
+		await expect(sendBar(page).getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+		await expect(sendBar(page).getByRole('button', { name: 'Don’t send', exact: true })).toBeEnabled();
+	} },
+	{ name: '20b-sending', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		const sent = await answerDraftAction(page, 'send', 'hold');
+		await clickSend(page);
+		await expect(sendBar(page)).toHaveText('Sending…');
+		expect(sent.bodies[0]).toMatchObject({ text: DOCS.reply });
+	} },
+	{ name: '20c-sent', doc: 'reply', context: reply(), act: async (page) => {
+		const sent = await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } });
+		await clickSend(page);
+		await expect(sendBar(page)).toHaveText('Sent');
+		await expect(sendBar(page).getByRole('button')).toHaveCount(0);
+		await expect(page.locator('.cm-content')).toHaveAttribute('aria-readonly', 'true');
+		expect(sent.bodies).toHaveLength(1);
+	} },
+	{ name: '20d-sent-partly', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent', not_delivered_to: ['priya.raman@example.com'] } });
+		await clickSend(page);
+		await expect(sendBar(page)).toHaveText('Sent. priya.raman@example.com didn’t get it.');
+	} },
+	{ name: '20e-send-failed', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await answerDraftAction(page, 'send', { status: 200, body: { state: 'failed', reason: 'Gmail is signed out.' } });
+		await clickSend(page);
+		await expect(sendBar(page).getByRole('alert')).toHaveText('Couldn’t send. The email didn’t leave, and the draft is kept.');
+		await expect(sendBar(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
+	} },
+	{ name: '20f-send-unconfirmed', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await answerDraftAction(page, 'send', { status: 200, body: { state: 'unconfirmed' } });
+		await clickSend(page);
+		await expect(sendBar(page)).toHaveText('Couldn’t confirm the email left. Check your Sent mail before sending again.');
+		await expect(sendBar(page).getByRole('button')).toHaveCount(0);
+	} },
+	{ name: '20g-send-changed', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await answerDraftAction(page, 'send', { status: 409, body: { detail: { state: 'changed', message: 'The draft changed; review it again.' } } });
+		await clickSend(page);
+		await expect(sendBar(page).getByRole('status')).toHaveText('The draft changed; review it again.');
+		await expect(sendBar(page).getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+	} },
+	{ name: '20h-dont-send-asks', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
+		await expect(sendBar(page).getByRole('status')).toHaveText('Don’t send this email?');
+	} },
+	{ name: '20i-not-sent', doc: 'reply', context: reply(), act: async (page) => {
+		const discarded = await answerDraftAction(page, 'discard', { status: 200, body: { state: 'discarded' } });
+		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
+		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
+		await expect(sendBar(page)).toHaveText('Not sent. This draft is marked as not to send.');
+		await expect(page.locator('.cm-content')).toHaveAttribute('aria-readonly', 'true');
+		expect(discarded.bodies).toHaveLength(1);
+	} },
 ];
+
+const sendBar = (page: Page) => page.locator('.email-send-bar');
+const clickSend = (page: Page) => sendBar(page).getByRole('button', { name: 'Send', exact: true }).click();
+/**
+ * Answers `POST /api/email-drafts/{id}/{action}` the way backend/api/email_drafts.py does (a 409 carries its answer in `detail`),
+ * or holds it unanswered; returns the request bodies the bar sent.
+ */
+async function answerDraftAction(page: Page, action: 'send' | 'discard', answer: { status: number; body: unknown } | 'hold') {
+	const seen = { bodies: [] as unknown[] };
+	await page.route((url) => new RegExp(`^/api/email-drafts/[^/]+/${action}$`).test(url.pathname), async (route) => {
+		if (route.request().method() !== 'POST') return route.fallback();
+		seen.bodies.push(route.request().postDataJSON() ?? {});
+		if (answer === 'hold') return;
+		await route.fulfill({ status: answer.status, contentType: 'application/json', body: JSON.stringify(answer.body) });
+	});
+	return seen;
+}
 
 /** Seeds the scenario's chat and draft, opens it beside a real chat turn, and returns the page with the draft showing. */
 async function seedAndOpen(request: APIRequestContext, browser: Browser, testInfo: TestInfo, scenario: Scenario, workspace: string, stamp: number, vp: typeof VIEWPORTS[number], theme: typeof THEMES[number]) {
