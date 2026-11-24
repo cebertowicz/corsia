@@ -155,7 +155,7 @@ print("returned")
 
 
 def test_the_recount_does_not_wait_on_a_connection_mid_statement_on_another_thread(tmp_path):
-    env = {**os.environ, "PYTHONPATH": str(BACKEND)}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, (str(BACKEND), os.environ.get("PYTHONPATH"))))}
     done = subprocess.run([sys.executable, "-c", _MID_STATEMENT, str(tmp_path / "busy.db")], cwd=BACKEND,
                           env=env, capture_output=True, text=True, timeout=30, check=True)
     assert done.stdout.strip() == "returned"
