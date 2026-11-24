@@ -89,7 +89,19 @@ def record_event(
         later_review.arm_node(connection, node_id)
 
 
-def refuse_live_helper(connection, node, *, actor_id: str | None) -> None:
+def validate_later_edit(connection, node, later: object, *, actor_id: str | None) -> None:
+    """Check an edit that names the cut before anything is written.
+
+    Only a task carries the flag, and a running row never sits inside Later
+    (Later design, 2026-11-07): an agent moving delegated work below the cut
+    stops its helper first.
+    """
+    validate_carries_later(node["kind"])
+    if later and not node["later"]:
+        _refuse_live_helper(connection, node, actor_id=actor_id)
+
+
+def _refuse_live_helper(connection, node, *, actor_id: str | None) -> None:
     """Refuse an agent's move while the canonical delegated wait is still live."""
     from plans import wait_causes
     from plans.boundary import is_user_audit_id
