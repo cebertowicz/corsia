@@ -34,11 +34,14 @@ from infra.time import utc_now_iso
 
 STATUS_OK = "ok"
 STATUS_OUT_OF_DATE = "out_of_date"
-#: Longest username kept. Generous for any email address.
+#: Longest username kept: the longest email address, a 64-character local part, "@" and a
+#: 255-character domain (RFC 3696 section 3), since a username is most often an email address.
 USERNAME_MAX = 320
-#: Longest site address read.
-SITE_MAX = 300
-#: Shorter saved passwords are not blanked: they would match ordinary text.
+#: Longest host name as text: 255 octets on the wire (RFC 1035 section 2.3.4). With the shape check and a port of at most five
+#: digits, it also bounds the whole site address.
+_HOST_MAX = 253
+#: Set by the output-blanking requirement (C6): saved values under 8 characters are not blanked,
+#: since they would match ordinary text in what the browser returns.
 BLANKING_MIN = 8
 
 #: ``https://host`` with an optional port and an optional trailing slash, and nothing else:
@@ -95,7 +98,7 @@ def _host(raw: str) -> str:
             raise KeyStoreError(_SITE_REFUSAL) from None
     host = raw.lower()
     labels = host.split(".")
-    if len(host) > 253 or not all(_HOST_LABEL.fullmatch(label) for label in labels):
+    if len(host) > _HOST_MAX or not all(_HOST_LABEL.fullmatch(label) for label in labels):
         raise KeyStoreError(_SITE_REFUSAL)
     if all(label.isdigit() for label in labels):
         try:
@@ -107,9 +110,7 @@ def _host(raw: str) -> str:
 
 def normalized_site(site: object) -> str:
     """The https origin a login is saved for: lowercase host, and a port only when it isn't 443."""
-    if not isinstance(site, str) or len(site) > SITE_MAX:
-        raise KeyStoreError(_SITE_REFUSAL)
-    match = _ORIGIN.fullmatch(site)
+    match = _ORIGIN.fullmatch(site) if isinstance(site, str) else None
     if match is None:
         raise KeyStoreError(_SITE_REFUSAL)
     host = _host(match["host"])

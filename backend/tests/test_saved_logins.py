@@ -86,6 +86,14 @@ def test_anything_but_an_https_origin_is_refused(given):
     assert str(refused.value) == "A saved login's site is an https address, such as https://example.com."
 
 
+def test_the_longest_host_name_is_kept():
+    host = ".".join(["a" * 63] * 3 + ["b" * 61])
+    assert len(host) == 253
+    assert saved_logins.normalized_site(f"https://{host}:8443") == f"https://{host}:8443"
+    with pytest.raises(KeyStoreError):
+        saved_logins.normalized_site(f"https://{host}b")
+
+
 @pytest.mark.parametrize(
     "password",
     [
