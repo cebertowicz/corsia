@@ -115,10 +115,12 @@
 		font-weight: var(--fw-medium);
 	}
 
-	/* On a phone the agent and the site stack, so the site keeps a line of its own. */
+	/* On a phone the agent and the site stack, so the site keeps a line of its own. One column, not wrapped: a
+	   wrapping column sizes each line to its widest item, which would let the site run past the status. */
 	@media (max-width: 45rem) {
 		.pending-what {
 			flex-direction: column;
+			flex-wrap: nowrap;
 			align-items: stretch;
 			gap: 0;
 		}

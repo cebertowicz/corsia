@@ -550,6 +550,19 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		}));
 	}
 
+	/** The entry's row: the site ends before the status, and the status and Review stay inside the entry and the screen. */
+	async function expectRowFits(page: Page) {
+		const row = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
+			const entry = button.getBoundingClientRect();
+			return { siteRight: box('.pending-site').right, statusLeft: box('.pending-status').left,
+				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth };
+		});
+		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.statusLeft);
+		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
+		expect(row.entryRight, JSON.stringify(row)).toBeLessThanOrEqual(row.screen);
+	}
+
 	test('fits a long saved-login site on one line on a phone, cut from the front between whole labels with the domain whole', async ({ page, request }, testInfo) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		const title = `Saved login entry ${testInfo.project.name}-${Date.now()}`;
@@ -580,6 +593,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(box.fits, JSON.stringify(box)).toBe(true);
 		expect(box.lines).toBe(1);
 		if (box.lineHeight) expect(box.height).toBeLessThanOrEqual(box.lineHeight + 1);
+		await expectRowFits(page);
 	});
 
 	test('stacks a long agent name over the site on a wide screen, so the site stays whole', async ({ page, request }, testInfo) => {
@@ -610,6 +624,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
 		expect(siteBox!.y, 'the site sits under the name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
 		expect(siteBox!.width).toBeGreaterThan(0);
+		await expectRowFits(page);
 	});
 
 	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {
@@ -633,6 +648,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
 		expect(Math.abs(siteBox!.y - nameBox!.y), 'one row').toBeLessThan(nameBox!.height);
 		expect(siteBox!.x).toBeGreaterThan(nameBox!.x + nameBox!.width - 1);
+		await expectRowFits(page);
 	});
 
 	test('shows the next waiting request in the entry as soon as the first is decided', async ({ page, request }, testInfo) => {
