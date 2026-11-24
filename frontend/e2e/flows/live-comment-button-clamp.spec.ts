@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createComment, openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { routeDocumentSaves } from '../support/docSaveCue';
+import { enterDocumentEdit } from '../support/documentReading';
 import type { Page } from '@playwright/test';
 
 /** Whether the Comment button's box overlaps any rectangle the selected text is drawn in. */
@@ -29,6 +30,8 @@ for (const width of [1440, 393]) {
 		const commentsPill = page.getByRole('button', { name: /^1 comment\b/ });
 		// The pill mounts after the comment thread loads; start the held save only once it is there, or the cue can end first.
 		await expect(commentsPill).toBeVisible();
+		// This journey types and saves; a touch project opens the document in Reading, so choose Edit first (a no-op with a mouse).
+		await enterDocumentEdit(page);
 		const editor = page.locator('.cm-content');
 		await editor.click();
 		await page.keyboard.press('End');

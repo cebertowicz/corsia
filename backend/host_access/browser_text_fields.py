@@ -89,6 +89,22 @@ def _inside(parents: dict[int, int], hit: object, node: int) -> bool:
     return False
 
 
+def _scroll_and_clip(metrics: dict, clip: tuple[float, float, float, float]) -> tuple[float, float, tuple[float, float, float, float]]:
+    """A document's scroll offset from its layout metrics, and `clip` cut to the viewport those metrics report.
+
+    Without these numbers no point can be placed, so the read fails rather than guess an unscrolled page.
+    """
+    viewport = metrics.get('cssVisualViewport')
+    values: list[float] = []
+    for key in ('pageX', 'pageY', 'clientWidth', 'clientHeight'):
+        value = viewport.get(key) if isinstance(viewport, dict) else None
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise BrowserSessionError("This page couldn't be checked")
+        values.append(float(value))
+    page_x, page_y, width, height = values
+    return page_x, page_y, (clip[0], clip[1], min(clip[2], width), min(clip[3], height))
+
+
 def _border(model: dict | None) -> Rect | None:
     """A batched DOM.getBoxModel reply as border_rect reads one; None when the node renders no box."""
     border = (model or {}).get('model', {}).get('border')
@@ -115,6 +131,10 @@ async def _document_fields(client: BatchingCdpClient, cdp: browser_cdp_frames.Se
                 matched.append((node, kind))
     matched = matched[:budget]
     budget -= len(matched)
+    # Boxes come in this document's viewport pixels, but the hit test takes document pixels, so each point
+    # adds the document's scroll. A pane can report a larger size than the page shows (another pane on the
+    # thread sized it last), so the clip also ends where this document's viewport does.
+    scroll_x, scroll_y, clip = _scroll_and_clip(await cdp.call('Page.getLayoutMetrics'), clip)
     # Every box, then every in-view hit, goes out as one batch, so the whole document costs two round trips.
     models = await client.call_many(cdp.session_id, 'DOM.getBoxModel', [{'nodeId': node} for node, _kind in matched])
     in_view: list[tuple[int, str, float, float, float, float]] = []
@@ -128,7 +148,7 @@ async def _document_fields(client: BatchingCdpClient, cdp: browser_cdp_frames.Se
         if right > left and bottom > top:
             in_view.append((node, kind, left, top, right, bottom))
     hits = await client.call_many(cdp.session_id, 'DOM.getNodeForLocation', [
-        {'x': int((left + right) / 2), 'y': int((top + bottom) / 2), 'includeUserAgentShadowDOM': False}
+        {'x': int(scroll_x + (left + right) / 2), 'y': int(scroll_y + (top + bottom) / 2), 'includeUserAgentShadowDOM': False}
         for _node, _kind, left, top, right, bottom in in_view])
     fields: list[dict] = []
     focused: tuple[object, object] | None = None
