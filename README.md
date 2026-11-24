@@ -2,7 +2,7 @@
 
 <h3 align="center">Give an agent a problem to own.<br/>CORSIA measures it on its results and on your attention.</h3>
 
-<p align="center">CORSIA counts every minute an agent takes from you and how much of its work you accept on the first try. It is built so agents learn from both and need less of your time; that they do is not yet proven.</p>
+<p align="center">CORSIA estimates the minutes each agent takes from you and how much of its work is accepted on the first try. It is built so agents learn from both and need less of your time; that they do is not yet proven.</p>
 
 <p align="center"><a href="https://github.com/cebertowicz/corsia/releases/latest"><strong>Download CORSIA for Mac</strong></a><br/><sub>Apple Silicon, macOS 15 or later</sub></p>
 
@@ -17,7 +17,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-trend-dark.png">
-    <img width="49%" alt="Daily cost per hour of delivered work falling over two weeks" src="docs/measurement-trend-light.png">
+    <img width="49%" alt="Daily cost per hour of delivered work over two weeks on one install" src="docs/measurement-trend-light.png">
   </picture>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-models-dark.png">
@@ -26,10 +26,10 @@
 </p>
 <p align="center"><sub>Measured on the install that builds CORSIA, September 25 to October 8.</sub></p>
 
-<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">962 pull requests in 30 days</a>, under one maintainer.</p>
+<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">962 pull requests in the 30 days to October 2, 2026</a>, under one maintainer.</p>
 
 <p align="center">
-  <img alt="macOS only" src="https://img.shields.io/badge/platform-macOS_only-000000?logo=apple&logoColor=white">
+  <img alt="macOS, Linux server" src="https://img.shields.io/badge/platform-macOS_·_Linux_server-000000?logo=apple&logoColor=white">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-D97757?logo=claude&logoColor=white">
   <img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-10a37f">
   <img alt="Local models: oMLX on Apple Silicon" src="https://img.shields.io/badge/local_models-oMLX_·_Apple_Silicon-555555?logo=apple&logoColor=white">
@@ -90,7 +90,7 @@ Asking for less of your attention is only safe with proof that the work is getti
 - **Your minutes per result.** The time you spend with an agent's conversations or project open in CORSIA, split evenly across what you have open, divided by the results you accept. Every agent works to bring it down.
 - **Quality and cost per result.** The first-try rate counts tasks accepted without being sent back or corrected. Cost counts the tokens of each accepted task, including every worker it used, and their dollars at API list prices where a model has them.
 - **Each agent against its own past.** Measurement compares each agent with its previous weeks and flags one that moved the wrong way. Models compete on your work: each gets one row of accepted tasks and cost per accepted task, against the week before.
-- **Each agent on its own KPIs** (being added). Every agent keeps KPIs for the problem it owns, such as bugs that reach users, for an agent that owns release quality, or hours of your week spent on email and meetings, for an assistant. Agents record those outcomes as they happen, and any project can send its own OpenTelemetry events, so a problem's progress sits beside the built-in measures.
+- **Each agent on its own KPIs.** Every agent keeps KPIs for the problem it owns, such as bugs that reach users, for an agent that owns release quality, or hours of your week spent on email and meetings, for an assistant. Agents record those outcomes as they happen, a tool on the same computer can send them as OpenTelemetry logs, and the agent is told when a KPI lands on the wrong side of its line. Being added: showing them on the Measurement screen beside the built-in measures.
 - **Lessons expire unless the agent renews them.** Most agent memory only grows. When a CORSIA agent learns from a correction or a failure, it writes a short trial: the evidence, when the lesson applies and when it doesn't, and a review date. The trial loads until that date. Then the agent keeps, revises or retires it, with a report of which turns received and read each version. Being added: a comparison of tasks that received the lesson with similar tasks that didn't, so the review sees whether it helped, not only who saw it (the dashed line above). A retired lesson stops loading and keeps its history. Your own instructions are never trials and never expire.
 - **The conductor acts on what moved.** It revises the coordination model, context and skills from what the measurements show, and recommends a new agent when a problem outgrows the one that has it. Each change is versioned with its reason. Being added: the trends mark when guidance changed, so a shift in the numbers lines up with its cause.
 
@@ -123,7 +123,7 @@ Usage limits, outages and model regressions shouldn't take your work with them.
 
 ## Built by its own agents
 
-Most open-source projects move at the pace of their maintainers' spare time. CORSIA tests what happens when agents do the maintaining and, in time, the community sets the direction. It is built and maintained by agents running on CORSIA, under the conductors that ship with it. Each agent watches the health and KPIs of its own problem, follows recent trends, and tries changes on itself before rolling them out. The agents write the issues, pull requests and reviews, merge their own work after CI and an independent LLM reviewer pass on the exact commit, and prepare each release.
+Most open-source projects move at the pace of their maintainers' spare time. CORSIA tests what happens when agents do the maintaining and, in time, the community sets the direction. It is built and maintained by agents running on CORSIA, under the conductors that ship with it. Each agent watches the health and KPIs of its own problem, follows recent trends, and holds each lesson as a trial with a review date before keeping it. The agents write the issues, pull requests and reviews, merge their own work after CI and an independent LLM reviewer pass on the exact commit, and prepare each release.
 
 Under one maintainer, the team merged 962 pull requests in the 30 days to 2026-10-02 ([how this is counted](docs/readme-evidence.md)).
 
@@ -161,10 +161,10 @@ The installer opens CORSIA at `http://localhost:1956`, where setup continues in 
 
 An agent you don't watch needs real capabilities, or it stops to ask you at every step. So CORSIA lets agents get the work done and limits what a mistake can reach, in layers, rather than taking away tools and routing every action back to you.
 
-- **Sandboxed by default.** Shell commands run inside Agent Safehouse, and file tools reach only allowed paths.
+- **Sandboxed by default.** Shell commands run inside Agent Safehouse on a Mac and bubblewrap on Linux, and file tools reach only allowed paths.
 - **Leases for anything outside.** To reach beyond the workspace, an agent applies for a short **host-access lease** that states the purpose, the exact resources and the effects. A reviewer model checks the request, then every command run under it. It is instructed to block secret exposure, changes to access controls, needless destruction, and commands clearly unrelated to that purpose; as a model, it can miss them. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
 - **Some things no lease opens:** the keys CORSIA stores, the agents' browser sign-ins, and the sandbox itself.
-- **Agents can't approve their own access.** A lease is approved by a signed-in person or, if you turn it on, by the automatic reviewer. A lease that launches an outside agent always needs a person.
+- **Agents can't approve their own access.** A lease is approved by a signed-in person or by the automatic reviewer, which is on for new installs and can be turned off. A lease that launches an outside agent always needs a person.
 - **Recognized credentials are masked.** Values with a credential-looking name or a known key shape are masked in tool results before they reach a model; other values aren't.
 
 In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. How each control works, what it doesn't stop, and every known limit: [security documentation](docs/security/README.md).
@@ -174,7 +174,7 @@ In one week on the install building CORSIA, with automatic approval on, 471 of 5
 <details>
 <summary><strong>Will a team of agents cost more than Claude Code or Codex alone?</strong></summary>
 
-<br/>A team uses more tokens than one agent, because agents and their workers each run turns. CORSIA is built to make that spend pay: each delegated step goes to the least costly model that can do it, every step shows its tokens and time, and the conductor tunes the way of working to bring down the cost per accepted task. The install building CORSIA runs on three max-tier plans: Claude, Codex and Alibaba. On one SWE-bench task (`pylint-dev__pylint-7114`), each harness ran once on the same local model, with Claude Code and Codex pointed at it through their own endpoint settings:
+<br/>A team uses more tokens than one agent, because agents and their workers each run turns. CORSIA is built to make that spend pay: each delegated step goes to the least costly model that can do it, every step shows its tokens and time, and the conductor tunes the way of working to bring down the cost per accepted task. The install building CORSIA runs on top-tier Claude and Codex plans. On one SWE-bench task (`pylint-dev__pylint-7114`), each harness ran once on the same local model, with Claude Code and Codex pointed at it through their own endpoint settings:
 
 | Harness | Model calls | Cost if billed at Sonnet 4.5 prices | Minutes | Patch review score (of 5) |
 |---|--:|--:|--:|--:|
@@ -202,7 +202,7 @@ These are rounded shares of actions, not of tokens or dollars, for one agent on 
 <details>
 <summary><strong>How do I give agents instructions?</strong></summary>
 
-<br/>Write each instruction once, at the [scope](#scopes) it applies to: **Workspace settings → Create new context file** for everything, **Project settings → Create new context file** for one project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
+<br/>Write each instruction once, at the [scope](#scopes) it applies to: **Settings → Context → New file**, in the top group for everything or in a project's group for that project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
 **Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits and you've agreed to use community improvements, an agent can install one from the public [skill library](docs/skill-library.md) and keep it up to date.
 
@@ -257,7 +257,8 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
 - [x] Versioned guidance and lesson trials with a boundary and review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*
-- [ ] Agent KPIs: outcomes agents record for their problems, and <img src="https://cdn.simpleicons.org/opentelemetry" width="14" alt=""> OpenTelemetry events from your projects *(being added)*
+- [x] Agent KPIs: outcomes agents record for their problems, and <img src="https://cdn.simpleicons.org/opentelemetry" width="14" alt=""> OpenTelemetry logs from tools on the same computer
+- [ ] Agent KPIs on the Measurement screen *(being added)*
 - [ ] Share and adopt coordination models with their evidence *(in progress)*
 - [ ] Anonymous aggregate results across installs *(planned; opt-in)*
 - [ ] Remote analytics API and per-provider tuning from your data *(planned)*
@@ -287,7 +288,7 @@ flowchart TB
     DB --- S[context · skills · plans · documents · events · memory]
 ```
 
-**Execution** is which harness carries a turn: CORSIA's native loop, Claude Code or Codex. **Inference** is which model serves a native turn. The two are independent. A workspace holds `context/`, `skills/`, `shared/`, `projects/` and `.threads/`; operational state lives under Application Support or `CORSIA_STATE_DIR`.
+**Execution** is which harness carries a turn: CORSIA's native loop, Claude Code or Codex. **Inference** is which model serves a native turn. The two are independent. A workspace holds `context/`, `skills/`, `shared/`, `projects/` and `.threads/`; operational state lives under Application Support on a Mac, `~/.local/state/corsia` on Linux, or `CORSIA_STATE_DIR`.
 
 </details>
 
