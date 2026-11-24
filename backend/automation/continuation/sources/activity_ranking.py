@@ -8,7 +8,7 @@ from uuid import uuid4
 from loguru import logger
 from events.delivery import enqueue_event_wake
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
-from infra.database import write_transaction
+from infra.database import get_db, write_transaction
 from infra.product_events import emit_product_event
 from infra.thread_input_rows import event_wake_queued
 from plans.public import thread_paused_since
@@ -17,7 +17,9 @@ from plans.public import thread_paused_since
 # in its queue, so items that arrive meanwhile are ranked by that one turn. Each wake records the
 # keys then in the queue; once it is read, the next sweep that finds an unranked key missing from
 # that record wakes it again. A key counts from when it entered the queue, not when its item was
-# created, so a person task created early that falls due later still wakes the ranker. Until
+# created, so a person task created early that falls due later still wakes the ranker. A set
+# forgets the seen keys missing from the queue it read, so an item that leaves and comes back
+# unranked is new again (infra/activity_ranking.replace_ranks). Until
 # ranked, an item shows in Activity below the ranked ones, marked 'Not ranked yet'.
 WAKE_EVENT = 'activity.unranked'
 
@@ -67,17 +69,17 @@ def _new_unranked(rows, seen) -> int:
     return sum(row['rank'] is None and row['key'] not in seen for row in rows)
 
 
-def _enqueue_if_due(db, user_id: str, project_id: str | None, thread_id: str, now: str) -> bool:
+def _enqueue_if_due(read_db, db, user_id: str, project_id: str | None, thread_id: str, now: str) -> bool:
     from api.attention import activity_queue
 
     scope = project_id or WORKSPACE_SCOPE
     current = _instant(now)
     if current is None:
         raise ValueError('invalid activity sweep timestamp')
-    if event_wake_queued(db, thread_id, WAKE_EVENT):
+    if event_wake_queued(read_db, thread_id, WAKE_EVENT):
         return False
-    last, seen = _last_nudge(db, user_id, scope)
-    rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view='activity')
+    last, seen = _last_nudge(read_db, user_id, scope)
+    rows, ranker, _ = activity_queue(read_db, user_id, project_id=project_id, view='activity')
     unranked = sum(row['rank'] is None for row in rows)
     new = _new_unranked(rows, seen)
     if not ranker or ranker['thread_id'] != thread_id or not new:
@@ -105,16 +107,22 @@ class ActivityRankingSource:
     kind = 'activity_ranking'
 
     def prepare(self, now: str, *, db) -> list[str]:
+        """Return the rankers woken, for the runner to drive.
+
+        The runner's own sweep passes ``db=None``: reads take the pooled connection, and each
+        scope's write owns its transaction.
+        """
+        read_db = db if db is not None else get_db()
         woken = []
-        for user_id, project_id, thread_id in _scopes(db):
+        for user_id, project_id, thread_id in list(_scopes(read_db)):
             scope = project_id or WORKSPACE_SCOPE
             # Nothing wakes a paused lane (the same read rule evaluation uses, R7). No nudge is
-            # stamped, so after the unpause the first sweep that finds an item raised since the
-            # last nudge wakes the ranker once; nothing is replayed.
-            if thread_paused_since(db, thread_id) is not None:
+            # stamped, so after the unpause the first sweep that finds an unranked key missing
+            # from the last wake's seen keys wakes the ranker once; nothing is replayed.
+            if thread_paused_since(read_db, thread_id) is not None:
                 continue
             try:
-                if _enqueue_if_due(db, user_id, project_id, thread_id, now):
+                if _enqueue_if_due(read_db, db, user_id, project_id, thread_id, now):
                     woken.append(thread_id)
             except Exception as exc:  # A failed scope retries on the next sweep; other scopes still drive.
                 failure = f'{type(exc).__name__}: {exc}'
