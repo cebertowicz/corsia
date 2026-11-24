@@ -40,7 +40,7 @@ EXPECTED_COMMUNITY = {
     "title": "Use and share improvements with the CORSIA community?",
     "context": ("An improvement is a change to a workflow or skill that tested better. If one would "
                 "replace something you already use, you can turn it down and keep yours. Nothing "
-                "from this computer is shared yet."),
+                "from this computer is shared with the community until you choose Use and share."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
                  "share leads to GitHub next."),
     "recommendation": "A",
