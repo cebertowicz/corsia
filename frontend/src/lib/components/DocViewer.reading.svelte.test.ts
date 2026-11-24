@@ -129,7 +129,7 @@ describe('actual touch mode producer and document/cell consumers', () => {
 		await open();
 		expect(view().state.readOnly).toBe(false);
 		expect(view().state.facet(EditorView.editable)).toBe(true);
-		expect(host.querySelector('.p-edit, .bar-done, .touch-comment-bar')).toBeNull();
+		expect(host.querySelector('.p-edit, .bar-done')).toBeNull();
 	});
 	it('keeps the opening mode across media/width changes and uses explicit Edit/Done', async () => {
 		await open(); primaryTouch = false; window.dispatchEvent(new Event('resize')); flushSync(); assertReading();
@@ -248,7 +248,7 @@ describe('actual touch mode producer and document/cell consumers', () => {
 	});
 	it.each(['cancel', 'outside', 'focus-moved'] as const)('keeps Reading protected after actual comment %s and clears the old selection on next Edit', async close => {
 		await open(); view().dispatch({ selection: { anchor: 0, head: 5 } }); flushSync();
-		host.querySelector<HTMLButtonElement>('.touch-comment-bar button')!.click(); flushSync();
+		host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
 		await vi.waitFor(() => expect(document.querySelector('.composer textarea')).not.toBeNull());
 		if (close === 'cancel') document.querySelector<HTMLButtonElement>('.composer .cancel')!.click();
 		else {
@@ -262,7 +262,7 @@ describe('actual touch mode producer and document/cell consumers', () => {
 	it('preserves the real comment draft quote, source range, body and focused field across Edit and Done', async () => {
 		await open();
 		view().dispatch({ selection: { anchor: 0, head: 5 } }); flushSync();
-		const offer = host.querySelector<HTMLButtonElement>('.touch-comment-bar button')!;
+		const offer = host.querySelector<HTMLButtonElement>('.sel-comment')!;
 		expect(offer.disabled).toBe(false); offer.click(); flushSync();
 		const input = await vi.waitFor(() => {
 			const field = document.querySelector<HTMLTextAreaElement>('.composer textarea'); if (!field) throw new Error('no draft field'); return field;

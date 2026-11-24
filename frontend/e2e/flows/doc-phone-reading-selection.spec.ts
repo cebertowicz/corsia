@@ -24,7 +24,7 @@ for (const width of [320, 393, 768]) {
 			await expect(cell.locator('.cm-comment-pending')).toBeVisible();
 			expect(await page.evaluate(() => document.getSelection()?.toString())).toBe('Cell passage');
 			await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
-			await page.locator('.touch-comment-bar').getByRole('button', { name: 'Comment', exact: true }).click();
+			await page.locator('.sel-comment').click();
 			const sheet = page.getByRole('dialog', { name: 'Document comments' });
 			await sheet.locator('.composer textarea').fill('Keep the cell note');
 			// The draft sheet is modal and Edit is not offered while drafting: close it as a person would, then use the menu.
@@ -37,33 +37,8 @@ for (const width of [320, 393, 768]) {
 			await settled(page);
 			await selectCell();
 			await expect(cell.locator('.cm-comment-pending')).toBeVisible();
-			await page.locator('.touch-comment-bar').getByRole('button', { name: 'Comment', exact: true }).click();
+			await page.locator('.sel-comment').click();
 			await expect(sheet.locator('.composer textarea'), 'reopening the comment shows the kept draft').toHaveValue('Keep the cell note');
-		});
-		test('Comment stays above a controlled keyboard/accessory viewport in both modes', async ({ page }, info) => {
-			await page.addInitScript(() => Object.defineProperty(window, 'visualViewport', { configurable: true,
-				value: Object.assign(new EventTarget(), { offsetTop: 0, offsetLeft: 0, height: 851, width: innerWidth, scale: 1 }) }));
-			await openReadingDocument(page, width);
-			for (const editing of [false, true]) {
-				if (editing) await enterDocumentEdit(page);
-				await inEditorView(page, view => {
-					const at = view.state.doc.toString().indexOf('Final passage');
-					view.dispatch({ selection: { anchor: at, head: at + 13 }, effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
-				}, null);
-				await page.evaluate(() => {
-					const viewport = window.visualViewport!;
-					Object.assign(viewport, { offsetTop: 20, height: 451 });
-					window.dispatchEvent(new Event('resize')); viewport.dispatchEvent(new Event('resize'));
-					const keyboard = document.createElement('div'); keyboard.dataset.keyboardStandIn = '';
-					keyboard.textContent = 'Keyboard and accessory stand-in';
-					keyboard.style.cssText = 'position:fixed;top:471px;bottom:0;left:0;right:0;background:#666;color:white;z-index:100';
-					document.body.appendChild(keyboard);
-				});
-				await expect(page.locator('.touch-comment-bar.offered')).toBeVisible();
-				await expect.poll(async () => (await page.locator('.touch-comment-bar').boundingBox())!.y + (await page.locator('.touch-comment-bar').boundingBox())!.height).toBe(471);
-				await page.screenshot({ path: info.outputPath(editing ? 'edit-keyboard-stand-in.png' : 'reading-keyboard-stand-in.png') });
-				await page.locator('[data-keyboard-stand-in]').evaluateAll(els => els.forEach(el => el.remove()));
-			}
 		});
 		test('image open/back keeps Edit, while a real tab departure under the image ends it', async ({ page }) => {
 			const seeded = await openReadingDocument(page, width);

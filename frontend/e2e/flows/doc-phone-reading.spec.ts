@@ -41,29 +41,25 @@ for (const width of [320, 393, 768, 1440]) {
 				await expect(content).toHaveAttribute('contenteditable', 'false');
 				await page.screenshot({ path: info.outputPath('reading-return.png') });
 			});
-			test('fixed Comment offer and selected endpoint scroll room in Reading and Edit', async ({ page }, info) => {
+			test('selected passage offers a tappable Comment in Reading and Edit', async ({ page }, info) => {
 				await openReadingDocument(page, width, theme);
 				if (width === 1440) {
 					await selectReadingPassage(page, 'Opening passage');
-					await expect(page.locator('.touch-comment-bar')).toHaveCount(0);
+					await expect(page.locator('.sel-comment')).toHaveCount(1);
 					return;
 				}
 				for (const editing of [false, true]) {
 					if (editing) await enterDocumentEdit(page);
 					await selectReadingPassage(page, 'Final passage and selection endpoints.');
-					const offer = page.locator('.touch-comment-bar.offered');
+					const offer = page.locator('.sel-comment');
+					await expect(offer).toHaveCount(1);
 					await expect(offer).toBeVisible();
-					await expect(page.locator('.sel-comment')).toHaveCount(1);
-					const target = await offer.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
-					expect(target!.height).toBeGreaterThanOrEqual(44);
-					expect(target!.width).toBeGreaterThanOrEqual(44);
-					const geometry = await offer.evaluate(el => {
-						const bar = el.getBoundingClientRect(), viewport = window.visualViewport!;
-						const scroller = document.querySelector<HTMLElement>('.doc .cm-scroller')!;
-						return { bottom: bar.bottom, visibleBottom: viewport.offsetTop + viewport.height, reserve: parseFloat(getComputedStyle(scroller.querySelector('.cm-content')!).paddingBottom), height: bar.height };
-					});
-					expect(Math.abs(geometry.bottom - geometry.visibleBottom)).toBeLessThanOrEqual(1);
-					expect(geometry.reserve).toBeGreaterThan(geometry.height);
+					const box = (await offer.boundingBox())!;
+					const viewport = page.viewportSize()!;
+					expect(box.x).toBeGreaterThanOrEqual(0);
+					expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+					expect(box.y).toBeGreaterThanOrEqual(0);
+					expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
 					await page.screenshot({ path: info.outputPath(editing ? 'edit-selection.png' : 'reading-selection.png') });
 				}
 			});
