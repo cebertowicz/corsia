@@ -167,3 +167,21 @@ sys.exit(1)
                 await asyncio.to_thread(process.wait, EXIT_TIMEOUT)
             except (identity.BrowserPidAbsent, psutil.NoSuchProcess):
                 pass
+
+
+async def test_an_agent_command_after_chrome_exits_starts_a_fresh_browser_and_says_so_once(synthetic_browser):
+    owner = synthetic_browser.owner
+    await owner.run('thread', ['open', 'about:blank'])
+    first = owner._sessions['thread']
+    dead = first.chrome
+    dead.exited = True
+    # The person's pane command leaves the session as it is.
+    await owner.run('thread', ['get', 'url'], pane=True)
+    assert owner._sessions['thread'] is first
+    rendered = await owner.run('thread', ['snapshot'])
+    assert 'The browser had closed, so it was started again.' in rendered
+    fresh = owner._sessions['thread']
+    assert fresh is not first and first.record.terminal_state == 'closed'
+    assert dead.close.await_count == 1 and len(synthetic_browser.chrome_calls) == 2
+    assert 'started again' not in await owner.run('thread', ['snapshot'])
+    await owner.shutdown()

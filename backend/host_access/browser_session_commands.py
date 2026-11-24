@@ -25,6 +25,8 @@ _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream",
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
                    "Use the browser tools to navigate and interact with the page.")
+_CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
+logger = logging.getLogger(__name__)
 _SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
                            "choose a dropdown's option. Nothing was changed. Ask the person in chat to choose it.")
 
@@ -147,6 +149,8 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
+    if not pane and runtime.chrome is not None and runtime.chrome.exited:
+        runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
     if runtime.record.profile or runtime.record.copy_of:
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
@@ -172,6 +176,22 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         return rendered
     finally:
         runtime.action_lock.release()
+
+
+async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_window: bool | None,
+                       session: str) -> Any:
+    """Close a session whose Chrome died or was quit, and admit a fresh one on the same saved sign-in.
+
+    Its agent-browser daemon outlives Chrome, so without this every later command fails its page check.
+    """
+    record = runtime.record
+    logger.info("managed Chrome exited outside a close; starting the browser again")
+    await owner._close_runtime(runtime)
+    fresh = await owner._admit(record.thread_id, lease_id=lease_id or record.lease_id,
+                               show_window=record.shared if show_window is None else show_window, session=session)
+    notice = fresh.record.profile_notice
+    fresh.record = replace(fresh.record, profile_notice=f"{_CHROME_RESTARTED} {notice}" if notice else _CHROME_RESTARTED)
+    return fresh
 
 
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],

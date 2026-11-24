@@ -12,6 +12,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import signal
 import statistics
 from threading import Thread
 import tempfile
@@ -127,6 +128,9 @@ SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
 document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
+REMEMBER = """<!doctype html><title>Remember</title><script>
+document.cookie = 'remember=1; path=/; max-age=86400'; document.title = document.cookie;
+</script>"""
 
 
 @contextmanager
@@ -135,7 +139,7 @@ def fixture_server():
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
-             "/layer.html": LAYER.encode()}
+             "/layer.html": LAYER.encode(), "/remember.html": REMEMBER.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -264,6 +268,43 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
     finally:
         await owner.shutdown()
         profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", [signal.SIGKILL, signal.SIGTERM])
+async def test_an_agents_next_command_after_its_chrome_ends_gets_a_working_signed_in_browser(monkeypatch, ending):
+    """Chrome crashing (SIGKILL) or being quit (SIGTERM) leaves the next command a fresh browser, still signed in."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"restart-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    thread = f"restart-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-restart-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert "remember=1" in await owner.run(thread, ("open", f"{origin}/remember.html"))
+            # Chrome writes a new cookie to the profile some seconds after it is set; a close writes it at once.
+            await owner.close_thread(thread)
+            await owner.run(thread, ("open", f"{origin}/plain.html"))
+            profile = owner._sessions[thread].record.profile
+            assert profile is not None
+            chrome = owner._sessions[thread].chrome
+            os.kill(chrome.process.pid, ending)
+            await asyncio.wait_for(chrome.process.wait(), 10)
+            first = await owner.run(thread, ("open", f"{origin}/cookies.html"))
+            assert "remember=1" in first, first
+            assert "started again" in first, first
+            assert owner._sessions[thread].chrome is not chrome and owner._sessions[thread].record.profile == profile
+            assert "remember=1" in await owner.run(thread, ("open", f"{origin}/cookies.html"))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(thread)
         assert profile is not None
         browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
         import shutil
