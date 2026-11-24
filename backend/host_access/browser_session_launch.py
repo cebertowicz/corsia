@@ -2,7 +2,7 @@
 
 Chrome locks a profile to one running browser. The first session of an owner holds the shared profile; a
 session that starts while it is held launches on a throwaway profile seeded with a copy of the holder's
-sign-in (agent-browser's private ``state save`` / ``state load``), kept in private state and removed on close.
+sign-in (read over CDP, restored with agent-browser's ``state load``), kept in private state and removed on close.
 Cookies a copy gains are written back to the profile's browser when the copy closes, or kept until it next runs.
 A session whose owning user cannot be resolved receives neither the profile nor a copy.
 """
@@ -20,7 +20,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from host_access import browser_cli, browser_executables, browser_identity as identity, browser_launch
+from host_access import (browser_cli, browser_copy_state, browser_executables, browser_identity as identity,
+                         browser_launch)
 
 logger = logging.getLogger(__name__)
 _STATE_SAVE_TIMEOUT = 30.0
@@ -233,18 +234,15 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
     target = browser_launch.copy_path(record.session)
     try:
         async with holder.command_lock:
-            if holder.record.binding is None or holder.record.terminal_state != "running":
+            if (holder.record.binding is None or holder.record.terminal_state != "running"
+                    or holder.chrome is None or not holder.chrome.endpoint):
                 logger.warning("browser sign-in copy unavailable: holder not running")
                 runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
                 return
-            result = await owner._invoke(
-                owner._session_argv(holder, ("state", "save", str(target))), timeout=_STATE_SAVE_TIMEOUT)
-        if result.returncode == 0 and not result.timed_out and result.completion == "exited" and target.is_file():
-            os.chmod(target, 0o600)
-        else:
-            logger.warning("browser sign-in copy was not saved: exit=%s", result.returncode)
-            target.unlink(missing_ok=True)
-            runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
+            # Read in place, never agent-browser's `state save`: it loads each visited site in a new tab of
+            # the holder's browser and can stall there past its limit.
+            state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _STATE_SAVE_TIMEOUT)
+        await asyncio.to_thread(_write_private_json, target, state)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
         with contextlib.suppress(OSError):
@@ -281,10 +279,14 @@ def _write_cookies(path: Path, cookies: Sequence[Mapping[str, Any]]) -> None:
     if not cookies:
         path.unlink(missing_ok=True)
         return
+    _write_private_json(path, {"cookies": list(cookies)})
+
+
+def _write_private_json(path: Path, data: Mapping[str, Any]) -> None:
     temporary = path.with_name(f"{path.name}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump({"cookies": list(cookies)}, handle)
+        json.dump(data, handle)
     os.replace(temporary, path)
 
 
