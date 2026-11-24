@@ -25,12 +25,10 @@
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	// A plan whose work has all folded reads 0/0 but still has steps to open.
 	const visible = $derived($isMobile && !!plan && (plan.nodes.length > 0 || hasFolded(plan.folds)));
-	// The phone hides the menu, so this chip shows the menu row's own needs-you mark:
-	// the same rule on the same row state, so pausing the item lifts both together.
 	const needsYou = $derived(isYourMove($threadPlanStates[threadId]));
-	const chipLabel = $derived(plan && plan.progress.open > 0
-		? `Open plan — ${plan.progress.open} left`
-		: 'Open plan — all work complete');
+	const aboveCut = $derived(plan ? (plan.progress.above_cut ?? plan.progress.open) : 0);
+	const laterOnly = $derived(!!plan && aboveCut === 0 && plan.progress.open > 0);
+	const chipLabel = $derived(aboveCut > 0 ? `Open plan — ${aboveCut} left` : laterOnly ? `Open plan — ${plan?.progress.open} later tasks` : 'Open plan — all work complete');
 	let open = $state(false);
 	let openedFor = $state<string | null>(null);
 
@@ -82,14 +80,14 @@
 		onclick={() => (open = true)}
 	>
 		<span aria-hidden="true" class="progress-mark"></span>
-		<b>{plan.progress.open > 0 ? `${plan.progress.open} left` : '✓'}</b>
+		<b>{aboveCut > 0 ? `${aboveCut} left` : laterOnly ? `${plan.progress.open} later` : '✓'}</b>
 	</button>
 {/if}
 {#if open}
 	<AdaptiveDrawer
-		ariaLabel={!plan ? 'Plan' : plan.progress.open > 0 ? `Plan — ${plan.progress.open} left` : 'Plan — all work complete'}
+		ariaLabel={!plan ? 'Plan' : aboveCut > 0 ? `Plan — ${aboveCut} left` : laterOnly ? `Plan — ${plan.progress.open} later tasks` : 'Plan — all work complete'}
 		heading="Plan"
-		headingMeta={plan && plan.progress.open > 0 ? `${plan.progress.open} left` : null}
+		headingMeta={plan && aboveCut > 0 ? `${aboveCut} left` : null}
 		onClose={() => (open = false)}
 	>
 		{#snippet leading()}<span class="drawer-pause"><PlanHeadControls {threadId} show="pause" /></span>{/snippet}

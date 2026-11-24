@@ -1,7 +1,6 @@
 import type { OperatorNode } from '$lib/api/plans';
-import { isScheduledMember, scheduledClusters } from './planScheduled';
+import { isLaterMember, isScheduledMember, scheduledClusters } from './planScheduled';
 import type { ScheduledView } from './planDisplay';
-import { waitEndsAtMs } from './planWaits';
 import type { FoldLevelView } from './planFoldLevels';
 
 /**
@@ -27,16 +26,18 @@ import type { FoldLevelView } from './planFoldLevels';
 
 /** Folded rows one "Show more" press reveals at a level. */
 export const FOLD_PAGE = 5;
+export const LATER_PAGE = 50;
 
 /** The level of a node whose parent is not in this tree (the plan's roots). */
 export const ROOT_LEVEL = '';
 
 export type PlanTreeItem =
 	/** `nest` indents a row under its level's Scheduled row; `view` says how it words its time. */
-	| { kind: 'node'; key: string; node: OperatorNode; nest?: number; view?: ScheduledView }
+	| { kind: 'node'; key: string; node: OperatorNode; nest?: number; view?: ScheduledView; rank?: { n: number } }
 	| { kind: 'fold'; key: string; level: string; depth: number; view: FoldLevelView; shown: number }
 	/** A level's quietly scheduled tasks (one or more), opened or closed as one. */
 	| { kind: 'scheduled'; key: string; level: string; depth: number; members: OperatorNode[]; open: boolean }
+	| { kind: 'later-page'; key: string; level: string; depth: number; shown: number; total: number }
 	/** Members of an open Scheduled row that share one moment, under one time line. */
 	| { kind: 'cluster'; key: string; depth: number; at: number; members: OperatorNode[] };
 
@@ -73,18 +74,21 @@ export function isRunLevel(level: string, byId: Map<string, OperatorNode>): bool
 }
 
 /**
- * The rows a row moves among, each group shown together. A run's unfolded steps are one sequence in plan
- * order, so every one of them is a slot (`inRun`); elsewhere only the two open groups that keep their server
- * order, since timed and scheduled rows do not.
+ * Whether a row sits in its level's plan-order list: open and outside Later.
+ * `arrangeItems` shows exactly these rows, in plan order, above the finished
+ * rows and the Later row, so a drag or a Move reorders among them and nothing else.
  */
-export function planOrderGroup(node: OperatorNode, now: number, openBlocked: ReadonlySet<string>, inRun = false): 'run' | 'work' | 'untimed' | null {
-	if (inRun) return node.folded ? null : 'run';
-	if (isVisibleFinished(node, openBlocked) || isScheduledMember(node, now) || waitEndsAtMs(node) !== null) return null;
-	return waitsWithoutEnd(node) ? 'untimed' : 'work';
+export function inPlanOrder(node: OperatorNode, now: number, openBlocked: ReadonlySet<string>): boolean {
+	return !isVisibleFinished(node, openBlocked) && !isLaterMember(node, now);
 }
 
-function waitsWithoutEnd(node: OperatorNode): boolean {
-	return node.display.tone_key === 'waiting' && node.execution.condition !== 'ready' && waitEndsAtMs(node) === null;
+/**
+ * The rows a row moves among. A run's unfolded steps are one sequence in plan order, so every one of them is
+ * a slot (`inRun`); elsewhere the level's plan-order list (`inPlanOrder`).
+ */
+export function planOrderGroup(node: OperatorNode, now: number, openBlocked: ReadonlySet<string>, inRun = false): 'run' | 'work' | null {
+	if (inRun) return node.folded ? null : 'run';
+	return inPlanOrder(node, now, openBlocked) ? 'work' : null;
 }
 
 /**
@@ -168,6 +172,7 @@ export interface ArrangeInput {
 	now?: number;
 	/** Whether a level's Scheduled row is open. */
 	isScheduledOpen?: (level: string) => boolean;
+	laterShown?: (level: string) => number;
 }
 
 /**
@@ -193,7 +198,7 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 	// Everything beneath a parent that sits in a group shows under it, never in a group of its own.
 	const grouped = new Set<string>();
 	const quietIn = (level: string) => (node: OperatorNode) =>
-		input.now !== undefined && !grouped.has(level) && isScheduledMember(node, input.now);
+		input.now !== undefined && !grouped.has(level) && isLaterMember(node, input.now);
 	const tuckAway = (id: string) => {
 		for (const child of children.get(id) ?? []) {
 			emitted.add(child.id);
@@ -206,21 +211,10 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 		const order = new Map((levels.get(level)?.rows ?? []).map((node, index) => [node.id, index]));
 		const unfolded = rows.filter((node) => !order.has(node.id));
 		const settled = (node: OperatorNode) => isFinished(node) && !openBlocked.has(node.id);
-		const byEnd = (a: OperatorNode, b: OperatorNode) => (waitEndsAtMs(a) ?? Infinity) - (waitEndsAtMs(b) ?? Infinity);
-		// A parent can read finished from its children yet hold scheduled work of its own: that decides.
+		// Keep every open row in the order supplied by the plan.
 		const open = unfolded.filter((node) => !settled(node) || quiet(node));
-		// Open work first, then timed waits soonest first, then waits with no end
-		// time: a wait ending in minutes never sits below one that may never end.
-		// A row reads by its tone: a task behind an unfinished prerequisite projects as
-		// blocked yet reads "Waiting · After …", and sits with the other waits. Ready
-		// work nobody is moving also reads Waiting ("Not started") but stays with the
-		// open work: nothing but the agent's turn holds it.
-		// This same predicate identifies the untimed group eligible for manual ordering.
 		const scheduled = open.filter(quiet);
 		const ordinary = open.filter((node) => !quiet(node));
-		const timed = ordinary.filter((node) => waitEndsAtMs(node) !== null).sort(byEnd);
-		const work = ordinary.filter((node) => waitEndsAtMs(node) === null && !waitsWithoutEnd(node));
-		const untimed = ordinary.filter(waitsWithoutEnd);
 		const finished = unfolded.filter((node) => settled(node) && !quiet(node))
 			.sort((a, b) => settledAt(b) - settledAt(a));
 		const revealed = rows.filter((node) => order.has(node.id))
@@ -229,39 +223,50 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 			if (emitted.has(node.id)) return;
 			emitted.add(node.id);
 			if (grouped.has(level)) grouped.add(node.id);
-			items.push({ kind: 'node', key: node.id, node, ...extra });
+			items.push({ kind: 'node', key: node.id, node, nest: grouped.has(level) ? 1 : 0, ...extra });
 			emit(node.id);
 		};
 		// A workflow run's steps are a sequence: they show in the run's own order (plan order), each row with its own
 		// state and time, nested runs included; its folded steps page open at its fold row as at any level.
-		// The sort below is for a level of separate pieces of work.
-		if (isRunLevel(level, byId)) {
+		const runLevel = isRunLevel(level, byId);
+		if (runLevel) {
 			for (const node of [...unfolded, ...revealed]) push(node);
 		} else {
-			for (const node of [...work, ...timed, ...untimed]) push(node);
-			// Quiet scheduled work: one group row, from the first member. A member's children follow its row (or its cluster) once the group is open.
-			if (scheduled.length >= 1) {
-				for (const node of scheduled) {
-					emitted.add(node.id);
-					grouped.add(node.id);
-				}
-				// A closed group hides its members' subtrees too, so the stray-row sweep below must not surface them.
-				if (!(input.isScheduledOpen?.(level) ?? false)) for (const node of scheduled) tuckAway(node.id);
-				const isOpen = input.isScheduledOpen?.(level) ?? false;
-				const depth = scheduled[0].depth;
-				items.push({ kind: 'scheduled', key: `scheduled:${level}`, level, depth, members: scheduled, open: isOpen });
-				for (const cluster of isOpen ? scheduledClusters(scheduled) : []) {
-					const [only] = cluster.members;
-					if (cluster.members.length === 1) items.push({ kind: 'node', key: only.id, node: only, nest: 1, view: 'clock' });
-					else items.push({ kind: 'cluster', key: `cluster:${level}:${Math.floor(cluster.at / 60_000)}`, depth, at: cluster.at, members: cluster.members });
-					for (const member of cluster.members) emit(member.id);
-				}
-			}
+			for (const node of ordinary) push(node);
 			for (const node of [...finished, ...revealed]) push(node);
 		}
 		const view = levels.get(level);
 		if (view && input.isLevelOpen(level)) {
 			items.push({ kind: 'fold', key: `fold:${level}`, level, depth: view.depth, view, shown: revealed.length });
+		}
+		// Quiet scheduled work: one group row, from the first member. A member's children follow its row (or its cluster) once the group is open.
+		if (!runLevel && scheduled.length >= 1) {
+			for (const node of scheduled) {
+				emitted.add(node.id);
+				grouped.add(node.id);
+			}
+			const isOpen = input.isScheduledOpen?.(level) ?? false;
+			const depth = scheduled[0].depth;
+			items.push({ kind: 'scheduled', key: `scheduled:${level}`, level, depth, members: scheduled, open: isOpen });
+			const now = input.now!;
+			const undated = scheduled.filter((node) => !isScheduledMember(node, now));
+			const dated = scheduledClusters(scheduled.filter((node) => isScheduledMember(node, now))).flatMap((cluster) => cluster.members);
+			// Dated first, soonest first: they are few and come back on their own, so a
+			// long undated pile never pages them out of sight (J3).
+			const ordered = [...dated, ...undated];
+			const count = isOpen ? Math.min(ordered.length, input.laterShown?.(level) ?? ordered.length) : 0;
+			for (const node of ordered.slice(count)) tuckAway(node.id);
+			for (const cluster of scheduledClusters(ordered.slice(0, Math.min(count, dated.length)))) {
+				const [only] = cluster.members;
+				if (cluster.members.length === 1) items.push({ kind: 'node', key: only.id, node: only, nest: 1, view: 'clock' });
+				else items.push({ kind: 'cluster', key: `cluster:${level}:${Math.floor(cluster.at / 60_000)}`, depth, at: cluster.at, members: cluster.members });
+				for (const member of cluster.members) emit(member.id);
+			}
+			undated.slice(0, Math.max(0, count - dated.length)).forEach((node, index) => {
+				items.push({ kind: 'node', key: node.id, node, nest: 1, rank: { n: index + 1 } });
+				emit(node.id);
+			});
+			if (isOpen && scheduled.length > LATER_PAGE) items.push({ kind: 'later-page', key: `later-page:${level}`, level, depth, shown: count, total: scheduled.length });
 		}
 	};
 	emit(ROOT_LEVEL);

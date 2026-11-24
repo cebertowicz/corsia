@@ -541,3 +541,21 @@ def test_the_upkeep_line_says_nothing_about_an_empty_pile(db):
     owner_plan(db)
 
     assert notice_for(db, "owner", "bash").endswith("plan_update add, then start it.")
+
+
+def test_the_pane_reads_which_rows_sit_below_the_cut(db):
+    """The sheet's Later row reads ``later`` off each operator node; the server is its one source."""
+    from plans import operator_projection
+    from tests.plan_close_next_helpers import HUMAN
+
+    plan = owner_plan(db)
+    now = task(db, plan.id, "Do it now")
+    someday = task(db, plan.id, "Someday", later=True)
+
+    nodes = {
+        node["id"]: node
+        for node in operator_projection.read_thread("owner", actor=HUMAN, db=db)["plans"][0]["nodes"]
+    }
+
+    assert nodes[someday.id]["later"] is True
+    assert nodes[now.id]["later"] is False

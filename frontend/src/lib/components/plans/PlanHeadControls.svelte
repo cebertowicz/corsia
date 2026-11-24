@@ -15,7 +15,7 @@
 	const query = planQuery(() => ({ kind: 'thread', id: threadId }));
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const offline = $derived($connectionState !== 'connected' && query.payload != null);
-	const open = $derived(plan?.progress.open ?? 0);
+	const open = $derived(plan?.progress.above_cut ?? plan?.progress.open ?? 0);
 	const operation = $derived(plan?.plan.state === 'paused' ? 'resume' : 'pause');
 
 	let busy = $state(false);
@@ -48,12 +48,8 @@
 {#if plan}
 	<span class="plan-head-controls">
 		{#if show === 'both' && open > 0}
-			<!-- One count of unfinished work; the agent-read budget is a hint on it, never a second number. -->
-			<span
-				class="progress"
-				class:oversize={!!plan.oversize}
-				title={plan.oversize ? `This plan has more than ${plan.oversize.budget} open tasks. Use Mark done or Won’t do on any that don’t need doing.` : undefined}
-			>{open} left</span>
+			<!-- One count: unfinished work above the cut. Later's own count is on its row in the tree. -->
+			<span class="progress">{open} left</span>
 		{/if}
 		{#if error}<span class="lifecycle-error" role="alert" title={error}>{error}</span>{/if}
 		<Button
@@ -75,7 +71,6 @@
 	.plan-head-controls :global(.btn.ghost) { padding: 0 2px 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-regular, 400); }
 	@media (hover: hover) { .plan-head-controls :global(.btn.ghost:hover:not(:disabled)) { color: var(--text-primary); } }
 	.progress { color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
-	.progress.oversize { text-decoration: underline dotted; cursor: help; }
 	.lifecycle-error {
 		min-width: 0; overflow: hidden; color: var(--red); font-size: var(--text-caption);
 		text-overflow: ellipsis; white-space: nowrap;

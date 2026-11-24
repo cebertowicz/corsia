@@ -39,9 +39,9 @@
 	{#if single}
 		<button
 			class="details-toggle" type="button" aria-expanded={expanded} aria-controls={owned}
-			aria-label={expanded ? `Collapse ${noun}` : `Show ${total} ${noun}`} aria-busy={pending || undefined} disabled={pending}
+			aria-label={expanded ? `Collapse ${noun}` : total > page ? `Show ${step} of ${total} ${noun}` : `Show ${total} ${noun}`} aria-busy={pending || undefined} disabled={pending}
 			onclick={expanded ? collapse : onShow}
-		>{#if pending}<span class="spinner" aria-hidden="true"></span>{/if}{expanded ? 'Collapse' : `Show ${total}`}</button>
+		>{#if pending}<span class="spinner" aria-hidden="true"></span>{/if}{expanded ? 'Collapse' : total > page ? `Show ${step} of ${total}` : `Show ${total}`}</button>
 	{:else}
 		{#if remaining > 0}
 			<button

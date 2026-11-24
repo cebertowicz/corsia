@@ -2,7 +2,7 @@
 	import type { OperatorNode } from '$lib/api/plans';
 	import type { PlanTreeProps } from './planTreeProps';
 	import { buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
-	import { isVisibleFinished, levelOf } from './planTreeFold';
+	import { isVisibleFinished, levelOf, LATER_PAGE } from './planTreeFold';
 	import { createPlanTreeReorder } from './planTreeReorder.svelte';
 	import { buildFoldLevels, foldRemaining } from './planFoldLevels';
 	import { createFoldHistory } from './foldHistory.svelte';
@@ -94,7 +94,7 @@
 	// hides finished work; there is no separate plan-wide toggle.
 	const view = $derived(buildPlanTreeView({
 		nodes: treeNodes, index, maxDepth, isBranchExpanded, levels: foldView.levels, revealed: reveal.revealed,
-		now: now.getTime(), isScheduledOpen: reveal.isScheduledOpen,
+		now: now.getTime(), isScheduledOpen: reveal.isScheduledOpen, laterShown: reveal.laterShown,
 	}));
 	const { visibleNodes, items, branchParents } = $derived(view);
 	const boundaryParents = $derived(index.boundaryParents);
@@ -161,13 +161,14 @@
 		items: () => items,
 		element: () => treeElement,
 		isFinished: (node) => isVisibleFinished(node, index.openBlocked),
+		isHidden: (node) => node.later === true && !(reveal.isScheduledOpen(levelOf(node, index.byId)) ?? false),
 		keyOf: (node) => ({ id: `${scope}${node.id}`, level: `${scope}${levelOf(node, index.byId)}` }),
 	});
 
 </script>
 
 <!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
-{#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
+{#snippet row(node: OperatorNode, nest: number, view?: ScheduledView, rank?: { n: number })}
 		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
 		{@const step = doTarget(node)}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -204,7 +205,7 @@
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
-					scheduledView={view} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} owners={live.owners} carriedBelow={carriedUnder(node.id)}
+					scheduledView={view} {rank} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} owners={live.owners} carriedBelow={carriedUnder(node.id)}
 				/>
 			</button>
 			<PlanRowActions
@@ -303,17 +304,20 @@
 		{:else if item.kind === 'scheduled'}
 			<!-- A level's quietly scheduled tasks, gathered after its open rows: opened all at once. -->
 			<div
-				class="tree-row scheduled-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} data-flip-key={`${scope}${item.key}`}
+				class="tree-row scheduled-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} data-flip-key={`${scope}${item.key}`} data-fold-level={`${scope}${item.level}:later`}
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
 			>
-				<span class="row-body"><PlanGroupFace /></span>
-				<PlanLevelToggle
-					single shown={item.open ? item.members.length : 0} total={item.members.length} noun="scheduled tasks"
-					controls={item.members.map((member) => rowControls.rowId(member.id)).join(' ')}
-					onShow={() => reveal.openScheduled(item.level)}
-					onCollapse={() => reveal.collapseScheduled(item.level)}
-				/>
+				<button class="later-toggle" type="button" aria-expanded={item.open} aria-label={`Later, ${item.members.length} tasks`}
+					aria-controls={item.open ? item.members.map((member) => rowControls.rowId(member.id)).join(' ') : undefined}
+					onclick={() => item.open ? reveal.collapseScheduled(item.level) : reveal.openScheduled(item.level)}>
+					<span class="row-body"><PlanGroupFace /></span>
+					<span class="later-action">{item.open ? 'Collapse' : item.members.length > LATER_PAGE ? `Show ${LATER_PAGE} of ${item.members.length}` : `Show ${item.members.length}`}</span>
+				</button>
+			</div>
+		{:else if item.kind === 'later-page'}
+			<div class="tree-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} style={depthStyle(depthOffset + item.depth + 1)}>
+				<PlanLevelToggle shown={item.shown} total={item.total} page={LATER_PAGE} noun="later tasks" onShow={() => reveal.pageLater(item.level)} onCollapse={() => reveal.collapseScheduled(item.level)} />
 			</div>
 		{:else if item.kind === 'cluster'}
 			<!-- Tasks sharing one moment: one time line, their rows listed beneath it. -->
@@ -326,7 +330,7 @@
 				</div>
 			</div>
 		{:else}
-			{@render row(item.node, item.nest ?? 0, item.view)}
+			{@render row(item.node, item.nest ?? 0, item.view, item.rank)}
 		{/if}
 	{/each}
 </div>
@@ -338,6 +342,11 @@
 	/* The reserve tracks the same <=620px breakpoint as the 44px chevron and chips: desktop furniture is measured at 110px plus a two-digit count margin; touch keeps its 148px reserve. */
 	.plan-tree { --plan-indent-reserve: 122px; position: relative; display: flex; flex-direction: column; }
 	@media (max-width: 620px) { .plan-tree { --plan-indent-reserve: 148px; } }
+	.tree-row.scheduled-row { padding: 0; }
+	.later-toggle { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 38px; padding: 6px 8px 6px calc(8px + var(--indent)); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	.later-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.later-action { margin-left: auto; padding: var(--space-1) 2px var(--space-1) var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); }
+	@media (max-width: 620px) { .later-toggle { min-height: 44px; } }
 	.tree-row.can-drag { touch-action: pan-y; }
 	.tree-row.dragging { position: relative; z-index: 3; background: var(--bg-primary); box-shadow: var(--shadow-chip); }
 	/* Rows ease aside only while a drag is live. On drop the offsets clear in the same render as the DOM reorder, so the swap must be instant: a transition there slides the dropped row in from a slot past its place. */
@@ -375,6 +384,8 @@
 	}
 	@media (hover: hover) {
 		button.row-body:hover { background: var(--bg-hover); }
+		/* A lifted row is one surface, and rows easing aside take no hover. */
+		.tree-row.drag-live button.row-body:hover { background: transparent; }
 	}
 	button.row-body:focus-visible, .drill-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The one line above tasks that share a moment, at their left edge. */

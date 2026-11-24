@@ -94,5 +94,8 @@ export function scheduledLine(node: OperatorNode, now: Date, running: boolean, c
 	const why = timedWait(node)?.scheduled_reason;
 	const when = endMoment(node, now, clock);
 	if (!why || when === null) return null;
-	return running ? why : `${when} · ${why}`;
+	if (running) return why;
+	// A plain return-day reason repeats the day already named by the date.
+	const day = when.match(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/)?.[1];
+	return day && why.trim().toLowerCase() === `return ${day.toLowerCase()}` ? when : `${when} · ${why}`;
 }

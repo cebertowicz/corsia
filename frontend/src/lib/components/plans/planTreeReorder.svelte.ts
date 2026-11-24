@@ -69,6 +69,7 @@ export function createPlanTreeReorder(options: Options) {
 	function hasMenu(node: OperatorNode): boolean {
 		return node.user_actions.some((action) => action !== 'reorder') || eligible(node) || !!node.comment_attention;
 	}
+	/** The rows the sheet shows in plan order at this row's level: what a drag or Move counts and passes. */
 	function peers(node: OperatorNode): OperatorNode[] {
 		const own = orderGroup(node);
 		return own ? siblings(node).filter((candidate) => orderGroup(candidate) === own) : [];
@@ -124,8 +125,10 @@ export function createPlanTreeReorder(options: Options) {
 		if (!drag || !scroller) return;
 		const box = scroller.getBoundingClientRect();
 		const edge = parseFloat(getComputedStyle(scroller).getPropertyValue('--space-6')) || box.height / 20;
+		const previousTop = scroller.scrollTop;
 		if (dragCursorY < box.top + edge) scroller.scrollTop -= edge / 4;
 		if (dragCursorY > box.bottom - edge) scroller.scrollTop += edge / 4;
+		if (scroller.scrollTop !== previousTop && press) updateDrag(press.node, dragCursorY);
 		scrollFrame = requestAnimationFrame(scrollWhileDragging);
 	}
 	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); });
@@ -146,9 +149,28 @@ export function createPlanTreeReorder(options: Options) {
 	});
 	function updateDrag(node: OperatorNode, y: number) {
 		const group = peers(node);
-		const slots = group.map((candidate) => ({ node: candidate, element: options.element()?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(candidate.id)}"]`) }))
-			.filter((entry): entry is { node: OperatorNode; element: HTMLElement } => !!entry.element)
-			.map(({ node: candidate, element }) => { const box = element.getBoundingClientRect(); return { id: candidate.id, top: box.top - new DOMMatrixReadOnly(getComputedStyle(element).transform).m42, height: box.height }; }).sort((a, b) => a.top - b.top);
+		const all = options.nodes();
+		const byId = new Map(all.map((item) => [item.id, item]));
+		const belongsTo = (candidate: OperatorNode, ancestor: string) => {
+			const seen = new Set<string>();
+			for (let current: OperatorNode | undefined = candidate; current && !seen.has(current.id); current = current.parent_id ? byId.get(current.parent_id) : undefined) {
+				if (current.id === ancestor) return true;
+				seen.add(current.id);
+			}
+			return false;
+		};
+		const slots = group.flatMap((candidate) => {
+			const rows = all.filter((item) => belongsTo(item, candidate.id)).flatMap((item) => {
+				const element = options.element()?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(item.id)}"]`);
+				if (!element) return [];
+				const box = element.getBoundingClientRect();
+				const top = box.top - new DOMMatrixReadOnly(getComputedStyle(element).transform).m42;
+				return [{ id: item.id, top, bottom: top + box.height }];
+			});
+			if (!rows.some((row) => row.id === candidate.id)) return [];
+			const top = Math.min(...rows.map((row) => row.top));
+			return [{ id: candidate.id, top, height: Math.max(...rows.map((row) => row.bottom)) - top, rows }];
+		}).sort((a, b) => a.top - b.top);
 		const nearest = slots.reduce<typeof slots[number] | null>((best, slot) => !best || Math.abs(y - (slot.top + slot.height / 2)) < Math.abs(y - (best.top + best.height / 2)) ? slot : best, null);
 		const from = slots.findIndex((slot) => slot.id === node.id);
 		const to = slots.findIndex((slot) => slot.id === nearest?.id);
@@ -156,13 +178,16 @@ export function createPlanTreeReorder(options: Options) {
 		const before = y < nearest.top + nearest.height / 2;
 		const position = positionBeside(siblings(node), node.id, nearest.id, before);
 		const visualPosition = from === to ? from : to - (from < to ? 1 : 0) + (before ? 0 : 1);
-		if (position === null || visualPosition === from) { draft = null; drag = { id: node.id, offsets: {}, position: from, count: group.length }; return; }
+		if (position === null || visualPosition === from) { draft = null; drag = { id: node.id, offsets: {}, position: from, count: slots.length }; return; }
 		draft = { id: node.id, targetId: nearest.id, position, before };
 		const offsets: Record<string, number> = {};
 		const source = slots[from];
-		offsets[node.id] = visualPosition < from ? slots[visualPosition].top - source.top : slots[visualPosition].top + slots[visualPosition].height - source.top - source.height;
-		for (let i = Math.min(from, visualPosition); i <= Math.max(from, visualPosition); i++) if (i !== from) offsets[slots[i].id] = visualPosition < from ? source.height : -source.height;
-		drag = { id: node.id, offsets, position: visualPosition, count: group.length };
+		const sourceOffset = visualPosition < from ? slots[visualPosition].top - source.top : slots[visualPosition].top + slots[visualPosition].height - source.top - source.height;
+		for (const row of source.rows) offsets[row.id] = sourceOffset;
+		for (let i = Math.min(from, visualPosition); i <= Math.max(from, visualPosition); i++) {
+			if (i !== from) for (const row of slots[i].rows) offsets[row.id] = visualPosition < from ? source.height : -source.height;
+		}
+		drag = { id: node.id, offsets, position: visualPosition, count: slots.length };
 	}
 	function rowHandlers(node: OperatorNode) {
 		const menu = options.menu.rowHandlers(node);
@@ -206,7 +231,12 @@ export function createPlanTreeReorder(options: Options) {
 				if (!drag) return;
 				const next = draft, count = drag.count, visualPosition = drag.position;
 				drag = null;
-				if (!next || next.id === next.targetId) { draft = null; return; }
+				if (!next || next.id === next.targetId) {
+					// The row gliding back is the visible answer; only a reader needs words.
+					announcement = 'Not moved: it went back to its place.';
+					clearDraftWithGlide();
+					return;
+				}
 				await tick();
 				if (!(await saveMove(current.node, next.position, false))) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
 			},

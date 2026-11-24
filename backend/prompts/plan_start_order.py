@@ -16,7 +16,7 @@ START_OUT_OF_ORDER = (
     "something, set a wait that names it: block_node with an owner, a dependency, or a watch "
     "on the PR or event. Scheduling never puts off work you could move now. Reorder only if "
     "your priorities and the project's, read now, rank this higher. Otherwise start the "
-    "item above, or ask the person."
+    "item above."
 )
 #: A top-level task is the node the reorder moves, so its revision changes; a
 #: step inside a phase is not moved, so its own revision still holds.

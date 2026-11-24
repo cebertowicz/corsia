@@ -145,7 +145,10 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	// A countdown already says when a plain deadline ends; don't say it twice.
 	const saysDeadline = node.status_reason?.startsWith('Waiting until ')
 		&& (running || (countdown !== null && node.status_reason === timedWait(node)?.reason));
-	if (node.status_reason && !saysDeadline) parts.push(localizeInstants(node.status_reason, now));
+	if (node.status_reason && !saysDeadline) {
+		const reason = localizeInstants(node.status_reason, now);
+		parts.push(node.child && !running ? reason.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase()) : reason);
+	}
 	if (!parts.length && node.review) parts.push(node.review.label);
 	if (!parts.length && node.requires_user_action) {
 		const ask = node.artifacts.find((artifact) => artifact.role === 'attention');
@@ -156,6 +159,12 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 
 /** Scheduled-row time: `clock` keeps a far-date clock; `reason` leaves its cluster line to name the moment. */
 export type ScheduledView = 'clock' | 'reason';
+
+/** A place in line as bare English: 1st, 2nd, 3rd, 11th, 21st, 111th. */
+export function ordinal(n: number): string {
+	const teens = n % 100 >= 11 && n % 100 <= 13;
+	return `${n}${teens ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
 
 /** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
 export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: ScheduledView): string | null {
@@ -168,9 +177,14 @@ export function nodeSublineParts(
 	node: OperatorNode,
 	now: Date = new Date(),
 	view?: ScheduledView,
+	rank?: { n: number },
 ): { lead: string | null; moment: string | null } {
 	const parts: string[] = [];
-	if (node.display.label_key === 'finished') {
+	if (rank) {
+		// A Later member's place in the set-aside line leads, so a narrow row cuts the reason first.
+		parts.push(ordinal(rank.n));
+		if (node.later_reason) parts.push(node.later_reason);
+	} else if (node.display.label_key === 'finished') {
 		parts.push(finishedOutcome(node));
 	} else {
 		// The round or attempt leads: a long reason is what a narrow row cuts.

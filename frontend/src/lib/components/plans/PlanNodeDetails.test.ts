@@ -105,3 +105,29 @@ describe('selected child account details', () => {
 		);
 	});
 });
+
+describe('a Later member’s reason', () => {
+	const LONG = 'Waiting on the design review of the mapping rules, the security sign-off for the new bucket, '
+		+ 'and the pilot customer’s confirmation that the legacy encoding can be dropped.';
+
+	it('reads whole below the status for a member with no date', () => {
+		render(operatorNode({ later: true, later_reason: LONG }));
+		expect(host.querySelector('.later-reason')?.textContent).toBe(`Later: ${LONG}`);
+	});
+
+	it('reads whole for a dated member as well, whose row subline carries only its date', () => {
+		const due = new Date(Date.now() + 48 * 3_600_000).toISOString();
+		render(operatorNode({ scheduled_until: due, later_reason: LONG }));
+		expect(host.querySelector('.later-reason')?.textContent).toBe(`Later: ${LONG}`);
+	});
+
+	it('is not raised for work that is not Later', () => {
+		render(operatorNode({ later: false, later_reason: LONG }));
+		expect(host.querySelector('.later-reason')).toBeNull();
+	});
+
+	it('is left out when the agent gave no reason', () => {
+		render(operatorNode({ later: true, later_reason: null }));
+		expect(host.querySelector('.later-reason')).toBeNull();
+	});
+});

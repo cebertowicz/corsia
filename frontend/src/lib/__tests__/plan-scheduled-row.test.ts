@@ -7,7 +7,7 @@ import { withFolds } from './fixtures/planFolds';
 
 /**
  * S1-S3: leaf tasks whose own agent scheduled a wait ending more than 24 hours
- * out, that need no one, gather into one quiet "Scheduled" row per level.
+ * out, that need no one, gather into one quiet "Later" row per level.
  * Everything else about a row keeps it where it was.
  */
 
@@ -84,10 +84,34 @@ async function mountTree(nodes: OperatorNode[]) {
 	await settle();
 }
 
-describe('who gathers into the Scheduled row', () => {
+describe('Later paging', () => {
+	it('pages dated members before ranked members and leaves no trailing row at 50', async () => {
+		const ranked = Array.from({ length: 49 }, (_, i) => node({ id: `r${i}`, title: `Ranked ${i}`, later: true }));
+		await mountTree([...ranked, waiting('Dated', 48)]);
+		await press('Show 50');
+		expect(titles().slice(1)).toEqual(['Dated', ...ranked.map((n) => n.title)]);
+		expect(host.querySelector('[aria-label^="Show 50 of"]')).toBeNull();
+	});
+
+	it('opens 50 at a time and collapses from the trailing controls', async () => {
+		await mountTree(Array.from({ length: 101 }, (_, i) => node({ id: `later-${i}`, title: `Later ${i}`, later: true, later_reason: 'After launch' })));
+		await press('Show 50 of 101');
+		expect(host.querySelectorAll('.tree-row[id]')).toHaveLength(50);
+		expect(host.querySelector('[aria-label="Show 50 of 51 later tasks"]')).toBeTruthy();
+		await press('Show 50 more');
+		expect(host.querySelectorAll('.tree-row[id]')).toHaveLength(100);
+		expect(host.querySelector('[aria-label="Show 1 of 1 later tasks"]')).toBeTruthy();
+		const trailing = host.querySelector('[aria-label="Show 1 of 1 later tasks"]')!.parentElement!;
+		(trailing.querySelectorAll('button')[1] as HTMLButtonElement).click();
+		await settle();
+		expect(host.querySelectorAll('.tree-row[id]')).toHaveLength(0);
+	});
+});
+
+describe('who gathers into the Later row', () => {
 	it('gathers far-off scheduled tasks into one row, closed', async () => {
 		await mountTree([waiting('A', 48), waiting('B', 72), waiting('C', 96)]);
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		expect(group()?.querySelector('svg.snooze-clock')).toBeTruthy();
 		expect(group()?.textContent).not.toContain('✓');
 		expect(host.querySelector('.fold-mark')).toBeNull();
@@ -103,19 +127,19 @@ describe('who gathers into the Scheduled row', () => {
 		];
 		await mountTree(nodes);
 		const rows = titles();
-		expect(rows).toContain('{Scheduled}');
+		expect(rows).toContain('{Later}');
 		for (const id of ['PR wait', 'After the build', 'Needs you', 'Paused', 'Within a day', 'Overdue']) {
 			expect(rows, id).toContain(id);
 		}
 		expect(rows).not.toContain('Q1');
-		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 2 scheduled tasks');
+		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 2 later tasks');
 	});
 
-	it('titles the row Scheduled with the count only on the Show control', async () => {
+	it('titles the row Later with the count only on the Show control', async () => {
 		await mountTree([waiting('A', 48), waiting('B', 72)]);
-		expect(text(group()?.querySelector('.row-title'))).toBe('Scheduled');
-		expect(text(group())).not.toMatch(/Scheduled\s*·/);
-		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 2 scheduled tasks');
+		expect(text(group()?.querySelector('.row-title'))).toBe('Later');
+		expect(text(group())).not.toMatch(/Later\s*·/);
+		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 2 later tasks');
 	});
 
 	describe('a parent the server marks scheduled', () => {
@@ -133,18 +157,21 @@ describe('who gathers into the Scheduled row', () => {
 		it('joins the top-level group, with its subtree beneath once the group opens', async () => {
 			const kids = [done('d1', 'P'), done('d2', 'P'), waiting('Monday', 72, 'Revisit Monday', { parent_id: 'P', depth: 1 })];
 			await mountOpen([phase('P', 72), ...kids]);
-			expect(titles()).toEqual(['{Scheduled}']);
-			expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 scheduled tasks');
+			expect(titles()).toEqual(['{Later}']);
+			expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 later tasks');
 			await press('Show 1');
-			expect(titles()).toEqual(['{Scheduled}', 'P', 'Monday', 'd1', 'd2']);
+			expect(titles()).toEqual(['{Later}', 'P', 'Monday', 'd1', 'd2']);
+			const parent = host.querySelector('[id="plan-row-P"]')!;
+			const child = host.querySelector('[id="plan-row-Monday"]')!;
+			expect(Number(child.getAttribute('data-depth'))).toBe(Number(parent.getAttribute('data-depth')) + 1);
 		});
 
 		it('reads as done from its children yet still groups by its own scheduled work', async () => {
 			const parent = phase('Phase', 48, { display: { label_key: 'finished', tone_key: 'complete' } });
 			await mountOpen([parent, done('Kid1', 'Phase'), done('Kid2', 'Phase')]);
-			expect(titles()).toEqual(['{Scheduled}']);
+			expect(titles()).toEqual(['{Later}']);
 			await press('Show 1');
-			expect(titles()).toEqual(['{Scheduled}', 'Phase', 'Kid1', 'Kid2']);
+			expect(titles()).toEqual(['{Later}', 'Phase', 'Kid1', 'Kid2']);
 		});
 
 		it('collapses three nested levels to the top one', async () => {
@@ -152,36 +179,36 @@ describe('who gathers into the Scheduled row', () => {
 				phase('P1', 72), phase('P2', 72, { parent_id: 'P1', depth: 1 }), phase('P3', 72, { parent_id: 'P2', depth: 2 }),
 				waiting('Leaf', 72, 'why', { parent_id: 'P3', depth: 3 }),
 			]);
-			expect(titles()).toEqual(['{Scheduled}']);
+			expect(titles()).toEqual(['{Later}']);
 			await press('Show 1');
-			expect(titles()).toEqual(['{Scheduled}', 'P1', 'P2', 'P3', 'Leaf']);
+			expect(titles()).toEqual(['{Later}', 'P1', 'P2', 'P3', 'Leaf']);
 		});
 
 		it('sorts by the soonest end beneath it', async () => {
 			await mountOpen([phase('Late', 120), phase('Soonest', 30), waiting('Mid', 72)]);
 			await press('Show 3');
-			expect(titles()).toEqual(['{Scheduled}', 'Soonest', 'Mid', 'Late']);
+			expect(titles()).toEqual(['{Later}', 'Soonest', 'Mid', 'Late']);
 		});
 
 		it('stays an ordinary row when the server sends none, its scheduled children grouped beneath it', async () => {
 			await mountOpen([
 				phase('Q', null), waiting('Far2', 72, 'why', { parent_id: 'Q', depth: 1 }), node({ id: 'Busy', title: 'Busy', parent_id: 'Q', depth: 1 }),
 			]);
-			expect(titles()).toEqual(['Q', 'Busy', '{Scheduled}']);
+			expect(titles()).toEqual(['Q', 'Busy', '{Later}']);
 		});
 	});
 
 	it('sits after the open rows and before finished work', async () => {
 		await mountTree([finished('Old'), waiting('A', 48), waiting('B', 72), node({ id: 'plain', title: 'Plain' }), waiting('Imminent', 3)]);
-		expect(titles()).toEqual(['Plain', 'Imminent', '{Scheduled}', '[1 done]']);
+		expect(titles()).toEqual(['Plain', 'Imminent', '{Later}', '[1 done]']);
 	});
 
 	it('gathers a single qualifying row into the same group, toggle "Show 1"', async () => {
 		await mountTree([waiting('Only', 48, 'First weekly read'), node({ id: 'plain', title: 'Plain' })]);
-		expect(titles()).toEqual(['Plain', '{Scheduled}']);
-		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 scheduled tasks');
+		expect(titles()).toEqual(['Plain', '{Later}']);
+		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 later tasks');
 		await press('Show 1');
-		expect(titles()).toEqual(['Plain', '{Scheduled}', 'Only']);
+		expect(titles()).toEqual(['Plain', '{Later}', 'Only']);
 		expect(text([...host.querySelectorAll('.tree-row')][2].querySelector('.row-subline'))).toMatch(/ · First weekly read$/);
 	});
 });
@@ -196,9 +223,9 @@ describe('the opened group', () => {
 			waiting('Early', at(30), 'reason early'),
 		];
 		await mountTree(nodes);
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		await press('Show 4');
-		expect(titles()).toEqual(['{Scheduled}', 'Early', 'Nine a', 'Nine b', 'Late']);
+		expect(titles()).toEqual(['{Later}', 'Early', 'Nine a', 'Nine b', 'Late']);
 		expect(lines()).toHaveLength(1);
 		expect(lines()[0]).toMatch(/^2 at .+/);
 		// A member in a cluster says only why; one alone keeps its moment.
@@ -222,7 +249,7 @@ describe('the opened group', () => {
 	it('names its toggle, reports its state, and keeps focus-stable "Collapse"', async () => {
 		await mountTree([waiting('A', 48), waiting('B', 72)]);
 		const toggle = () => group()!.querySelector('button')!;
-		expect(toggle().getAttribute('aria-label')).toBe('Show 2 scheduled tasks');
+		expect(toggle().getAttribute('aria-label')).toBe('Show 2 later tasks');
 		expect(toggle().getAttribute('aria-expanded')).toBe('false');
 		const before = toggle();
 		await press('Show 2');
@@ -231,7 +258,7 @@ describe('the opened group', () => {
 		expect(toggle().getAttribute('aria-expanded')).toBe('true');
 		expect(toggle().getAttribute('aria-controls')?.split(' ')).toHaveLength(2);
 		await press('Collapse');
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 	});
 
 	it('shows a far moment with its clock and no zone', async () => {
@@ -246,22 +273,22 @@ describe('the opened group', () => {
 describe('leaving the group on the minute tick', () => {
 	it('moves a row out when its end comes within 24 hours, and the count drops', async () => {
 		await mountTree([waiting('Soon', 24 + 2 / 60, 'r'), waiting('B', 72), waiting('C', 80)]);
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		vi.advanceTimersByTime(MIN);
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		vi.advanceTimersByTime(2 * MIN);
 		await settle();
-		expect(titles()).toEqual(['Soon', '{Scheduled}']);
+		expect(titles()).toEqual(['Soon', '{Later}']);
 	});
 
 	it('keeps the last remaining row in the group when it falls to one', async () => {
 		await mountTree([waiting('Soon', 24 + 1 / 60, 'r'), waiting('Other', 72)]);
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		vi.advanceTimersByTime(3 * MIN);
 		await settle();
-		expect(titles()).toEqual(['Soon', '{Scheduled}']);
-		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 scheduled tasks');
+		expect(titles()).toEqual(['Soon', '{Later}']);
+		expect(group()?.querySelector('button')?.getAttribute('aria-label')).toBe('Show 1 later tasks');
 	});
 });
 
@@ -291,6 +318,6 @@ describe('the finished-work row adopts the shared toggle', () => {
 
 	it('never takes a scheduled task behind its check', async () => {
 		await mountTree([...many(3), waiting('A', 48), waiting('B', 72)]);
-		expect(titles()).toEqual(['{Scheduled}', '[3 done]']);
+		expect(titles()).toEqual(['{Later}', '[3 done]']);
 	});
 });

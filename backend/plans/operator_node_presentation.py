@@ -82,6 +82,8 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "initiative": state["initiative"],
         "branch_progress": None,
         "scheduled_until": None,
+        # The sheet's Later row gathers the tasks set below the cut; this flag is its one source.
+        "later": bool(node.get("later")),
         "attention_path": attention_path,
         "completion": completion,
         "child": plan_header.child_summary(node["child_plan"], node["spawned_thread_id"]),

@@ -1,6 +1,6 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { nodeStateTone } from './planDisplay';
-import { isScheduledMember, SCHEDULE_HORIZON_MS } from './planScheduled';
+import { isLaterMember, isScheduledMember, SCHEDULE_HORIZON_MS } from './planScheduled';
 import { waitEndsAtMs } from './planWaits';
 import type { OperatorFoldLevel } from '$lib/api/plans';
 import type { FoldedWork, FoldLevelView } from './planFoldLevels';
@@ -38,6 +38,7 @@ export interface PlanTreeViewInput {
 	/** The clock the Scheduled rows are read against, and which levels have theirs open (`planScheduled`). */
 	now?: number;
 	isScheduledOpen?: (level: string) => boolean;
+	laterShown?: (level: string) => number;
 }
 
 export interface PlanTreeView {
@@ -139,7 +140,7 @@ export function indexPlanNodes(
 	};
 	for (const id of currentNodeIds) {
 		const node = byId.get(id);
-		if (!node) continue;
+		if (!node || (now !== undefined && isLaterMember(node, now))) continue;
 		const end = waitEndsAtMs(node);
 		const imminent = now !== undefined && end !== null && end - now <= SCHEDULE_HORIZON_MS;
 		if ((node.display.label_key === 'working' && (now === undefined || !isScheduledMember(node, now))) || imminent) revealAncestors(id);
@@ -209,7 +210,7 @@ export function buildPlanTreeView(input: PlanTreeViewInput): PlanTreeView {
 	const shown = new Set(visibleNodes.map((node) => node.id));
 	const items = arrangeItems({
 		visible: visibleNodes, byId: index.byId, levels, openBlocked: index.openBlocked,
-		now: input.now, isScheduledOpen: input.isScheduledOpen,
+		now: input.now, isScheduledOpen: input.isScheduledOpen, laterShown: input.laterShown,
 		isLevelOpen: (level) => level === ROOT_LEVEL
 			|| (shown.has(level) && branchParents.has(level) && input.isBranchExpanded(level)),
 	});

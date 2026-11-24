@@ -45,7 +45,7 @@ def _refusal(title: str, node_id: str, top_id: str, key: int, *, nested: bool = 
         "something, set a wait that names it: block_node with an owner, a dependency, or a watch "
         "on the PR or event. Scheduling never puts off work you could move now. Reorder only if "
         "your priorities and the project's, read now, rank this higher. Otherwise start the "
-        "item above, or ask the person."
+        "item above."
     )
 
 
