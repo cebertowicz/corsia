@@ -67,6 +67,7 @@ import os
 import re
 import shutil
 import sqlite3
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1207,18 +1208,22 @@ def _changed_tables(
 ForeignKeyViolation = tuple[str, int | None, str, int]
 
 
-def _foreign_key_violations(conn: sqlite3.Connection) -> set[ForeignKeyViolation]:
-    """Every row whose foreign key points at a missing parent row."""
-    return {
+def _foreign_key_violations(conn: sqlite3.Connection) -> Counter[ForeignKeyViolation]:
+    """Every row whose foreign key points at a missing parent row, counted.
+
+    Counted, not a set: a WITHOUT ROWID table reports rowid NULL, so two
+    orphans in it share one key and only the count tells a new one apart.
+    """
+    return Counter(
         (row[0], row[1], row[2], row[3])
         for row in conn.execute("PRAGMA foreign_key_check")
-    }
+    )
 
 
 def _validate(
     conn: sqlite3.Connection,
     changed_tables: list[str],
-    violations_before: set[ForeignKeyViolation],
+    violations_before: Counter[ForeignKeyViolation],
 ) -> None:
     """Check the migrated database inside the transaction, before commit.
 
@@ -1238,13 +1243,14 @@ def _validate(
     on a 25 GB database it ran 61 s without a progress callback, past the
     desktop's 60 s startup stall, while checking pages no step touched.
     """
-    broken = sorted(_foreign_key_violations(conn) - violations_before, key=repr)
+    # Counter subtraction keeps only keys whose count rose.
+    broken = sorted((_foreign_key_violations(conn) - violations_before).elements(), key=repr)
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
     if violations_before:
         log.warning(
             "Migration kept %d foreign key violations that predate it, e.g. %s",
-            len(violations_before), sorted(violations_before, key=repr)[:5],
+            violations_before.total(), sorted(violations_before, key=repr)[:5],
         )
     for table in changed_tables:
         quoted_table = table.replace('"', '""')

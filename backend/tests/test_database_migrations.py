@@ -176,6 +176,40 @@ def test_an_orphan_the_migration_creates_still_fails_beside_an_old_one(tmp_path,
     assert _digest(path) == before
 
 
+def test_a_new_orphan_in_a_without_rowid_table_is_not_hidden_by_an_old_one(
+    tmp_path, ladder
+):
+    """WITHOUT ROWID orphans all report rowid NULL; the count still tells."""
+    path = _database(tmp_path, 1)
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE tag (
+            name TEXT PRIMARY KEY,
+            parent_id INTEGER REFERENCES parent(id)
+        ) WITHOUT ROWID;
+        INSERT INTO tag (name, parent_id) VALUES ('old', 99);
+        """
+    )
+    conn.commit()
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == [("tag", None, "parent", 0)]
+    conn.close()
+
+    ladder[1] = lambda conn: conn.execute(
+        "INSERT INTO tag (name, parent_id) VALUES ('new', 98)"
+    )
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
 def test_a_rebuilt_table_that_drops_parent_rows_still_fails(tmp_path, ladder):
     """A changed table's new orphan in a referencing table raises."""
     def rebuilds_parent_without_rows(conn: sqlite3.Connection) -> None:
