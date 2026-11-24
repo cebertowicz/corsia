@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat comment thread you left to switch conversations reopens with the reply you were writing when you return; before, it did not reopen.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat comment's quote and note now reach the agent as one escaped line; before, text inside a comment could pass for a line CORSIA wrote.
+- A chat comment you start typing right after closing another comment's popover keeps your text; before, the closing popover could clear it when the margin card took its place.
 - A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat comment's answer now comes only from what the agent sent you when Focus is on, so a comment answered with an update and again in the agent's closing words shows one reply; before, it showed both. With Focus off, every step you see still answers.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
@@ -89,6 +90,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A table cell in a document that holds only an image, such as a status badge, now takes a comment: click beside the image, or select across the cell, and Comment appears as it does for a cell's text. Before, nothing was offered; clicking the image itself still opens it larger.
 - A task assigned to you keeps its Needs you look when its agent sets its own check-back, and a check-back no longer counts as waiting time on it. Dependencies, blockers and other holds still defer it; while a plan is paused, the task still reads Needs you, but what it asks of you waits for the plan to resume.
 - A task for a document's comments now closes once its plan or the task itself resumes, when the document was deleted or its comments were left behind while it was paused; before, the task stayed open for comments that no longer had a place.
+- Tasks an agent has parked in Later no longer show as needing you.
 - After a restart, CORSIA records the actions it interrupted as unfinished, so they no longer stop a later checkpoint.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
 - An agent's browser that crashed or was quit now starts again on the agent's next browser action, with your saved sign-ins, and the agent is told to open its page again; before, every action failed with "This page couldn't be checked" until the agent closed the browser itself.
@@ -192,6 +194,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Sending a message to a working agent, and an agent's scheduled wake, no longer fail while a long chat saves a checkpoint; before, they could wait 30 seconds and fail.
 - Several new comments you leave on a document before an agent starts on it now reach the agent as one task, instead of one task for each.
+- Setup and Settings describe Claude Code and Codex as using your Claude or ChatGPT account, including accounts billed per use.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - Switching models now shows progress as soon as you choose in all chats. Sending a new message to a chat held by a Claude Code or Codex usage limit checks that account again; if usage has reset, queued messages resume in order.

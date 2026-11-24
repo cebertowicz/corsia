@@ -84,7 +84,7 @@ def distribution_from_buckets(
 
 
 def _branch_summary(
-    nodes: list[dict], tree: open_tree.OpenTree | None = None,
+    nodes: list[dict], tree: open_tree.OpenTree | None = None, *, later: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool], dict[str, bool], dict[str, str | None]]:
     """Count every presented node's leaves once, bottom-up in canonical order.
 
@@ -118,7 +118,7 @@ def _branch_summary(
         loose = False
         ends: list[datetime] = []
         if not child_ids and node["id"] in work:
-            bucket = node_state.leaf_bucket(node)
+            bucket = node_state.leaf_bucket(node, later=node["id"] in later)
             if tree is None or node["id"] not in tree.shape.parents:
                 own[bucket] = 1
             if bucket in node_state.OPEN_KEYS:
@@ -189,7 +189,8 @@ def _apply_branches(
     Given the open ``tree``, the fold and the parents are the stored aggregates' and the
     plan's counts add the settled leaves no listed row stands for.
     """
-    counts, needs_user, asks_user, working, scheduled = _branch_summary(nodes, tree)
+    later = frozenset(str(row["id"]) for row in raw if row.get("later"))
+    counts, needs_user, asks_user, working, scheduled = _branch_summary(nodes, tree, later=later)
     fold = tree.shape.folded if tree is not None else folded_ids(raw)
     parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     ids = {node["id"] for node in nodes}

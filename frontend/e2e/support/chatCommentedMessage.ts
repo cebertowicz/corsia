@@ -41,5 +41,5 @@ export async function commentedMessage(page: Page, request: APIRequestContext, w
 	await commentOnMessage(row, QUOTE);
 	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 	await waitForThreadReply(request, thread, 'Received comment');
-	return { row, narrow, thread };
+	return { row, narrow, thread, title };
 }
