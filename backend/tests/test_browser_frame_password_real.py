@@ -111,11 +111,19 @@ def _chrome(url: str):
 
 async def _until(check, seconds: float = 15):
     deadline = time.monotonic() + seconds
+    last_error = None
     while True:
-        if (result := await check()) is not None:
-            return result
+        try:
+            if (result := await check()) is not None:
+                return result
+        except BrowserSessionError as exc:
+            # A page still loading can replace a node between the probe's search and its read of that node;
+            # the probe then refuses with this error, and the next poll reads the settled page.
+            if "couldn't be checked" not in str(exc):
+                raise
+            last_error = exc
         if time.monotonic() > deadline:
-            raise AssertionError("condition not reached on the live page")
+            raise AssertionError("condition not reached on the live page") from last_error
         await asyncio.sleep(0.2)
 
 
