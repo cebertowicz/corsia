@@ -874,6 +874,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 203 -> 204 adds the chat-comment search index and its two triggers.
         from infra.migration_203_to_204_comment_search import migrate_203_to_204
         migrate_203_to_204(db)
+        # 204 -> 205 adds the Activity rank and nudge tables.
+        from infra.migration_204_to_205_activity_ranking import migrate_204_to_205
+        migrate_204_to_205(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -1007,7 +1010,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 204
+    assert SCHEMA_VERSION == 205
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
