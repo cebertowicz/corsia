@@ -159,7 +159,7 @@
 		}
 		if (message.type === 'browser_metadata') {
 			pageConfirmed();
-			applyPageMetadata(message.url, message.title, message.domain);
+			applyPageMetadata(message.url, message.title, message.domain); saveOffer?.navigated(domain);
 			return;
 		}
 		if (message.type === 'navigate_result') {

@@ -157,7 +157,72 @@ describe('save-login offer: when it asks', () => {
 	});
 });
 
+describe('save-login offer: a page that navigates by itself', () => {
+	const metadata = (socket: FakeSocket, domain: string) => socket.receive({ type: 'browser_metadata', url: `https://${domain}/x`, title: 'T', domain });
+
+	it('closes when browser_metadata names another site, and stays for the same one', async () => {
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		metadata(socket, 'github.com');
+		await settle();
+		expect(dock()).not.toBeNull();
+		metadata(socket, 'example.org');
+		await settle();
+		expect(dock()).toBeNull();
+	});
+
+	it('asks the one retry on the next browser_metadata that carries a domain, and not again', async () => {
+		offers = [null, OFFER];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(gets()).toHaveLength(1);
+		socket.receive({ type: 'browser_metadata', url: 'https://github.com/x', title: 'T' });
+		await settle();
+		expect(gets()).toHaveLength(1);
+		metadata(socket, 'github.com');
+		await settle();
+		expect(gets()).toHaveLength(2);
+		expect(dock()).not.toBeNull();
+	});
+
+	it('spends the retry once across browser_metadata and navigate_result together', async () => {
+		offers = [null];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		metadata(socket, 'github.com');
+		await settle();
+		socket.receive({ type: 'navigate_result', url: 'https://github.com/y', title: 'Y', domain: 'github.com' });
+		await settle();
+		metadata(socket, 'github.com');
+		await settle();
+		expect(gets()).toHaveLength(2);
+	});
+});
+
 describe('save-login offer: what it shows', () => {
+	it('shows the whole domain, however long, when the question is not measured to need more than two lines', async () => {
+		const long = `${'x'.repeat(60)}.example.com`;
+		offers = [{ ...OFFER, domain: long }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()!.querySelector('.question')!.textContent).toContain(long);
+	});
+
+	it('shows Save in its loading state while the POST runs', async () => {
+		let release: (value: unknown) => void = () => {};
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.endsWith('/save') ? new Promise((resolve) => { release = resolve; }) : base(input, init)));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		expect(button('Save').disabled).toBe(true);
+		expect(button('Save').classList.contains('loading')).toBe(true);
+		release({ ok: true, status: 200, json: async () => ({}) });
+		await settle();
+		expect(dock()!.textContent).toContain('Saved');
+	});
+
 	it('words the update offer', async () => {
 		offers = [{ ...OFFER, update: true }];
 		const { socket, canvas } = render();

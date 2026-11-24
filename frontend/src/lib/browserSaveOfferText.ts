@@ -12,8 +12,7 @@ export const SAVE_OFFER_TEXT = {
 	question: (offer: SaveOffer, domain: string) => offer.update ? `Update the saved ${domain} login?` : `Save the ${domain} login for agents?`,
 } as const;
 
-/** Past this many characters a name is cut in the middle, keeping both ends. A domain gets two lines of the question, so it gets more than a username. */
-export const MAX_DOMAIN = 48;
+/** Past this many characters a username is cut in the middle, keeping both ends. A domain is cut only to keep the question to two lines, so the pane measures it. */
 export const MAX_USERNAME = 32;
 
 export function shortenMiddle(text: string, max: number): string {

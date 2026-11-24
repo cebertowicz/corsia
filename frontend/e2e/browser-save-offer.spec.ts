@@ -10,7 +10,9 @@ const SIZES = [{ name: '1440', width: 1440, height: 1000 }, { name: '768', width
 
 type Offer = { site: string; domain: string; username: string; update: boolean };
 const GITHUB: Offer = { site: 'https://github.com', domain: 'github.com', username: 'jordan@example.com', update: false };
-const LONG_DOMAIN = `${'a-very-long-subdomain-name'.repeat(2)}.${'another-long-label'.repeat(2)}.example.org`;
+// Fits in two lines of the question at every width, so it is shown whole; the long one needs more than two even in the widest pane, so it is cut.
+const TWO_LINE_DOMAIN = 'login.accounts.my-example-company.co.uk';
+const LONG_DOMAIN = `${'a-very-long-subdomain-name'.repeat(8)}.example.org`;
 
 /** What the server answers; the spec changes these between steps. */
 const server = { offer: null as Offer | null, save: 200, saves: 0, notNows: 0, gets: 0 };
@@ -38,6 +40,7 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 	await page.routeWebSocket((url) => /\/api\/browser\/[^/]+\/stream/.test(url.pathname), (ws) => {
 		stream = ws;
 		ws.onMessage((raw) => { try { const message = JSON.parse(String(raw)); if (message.type === 'appearance') resizes.push(message); } catch { /* the token frame */ } });
+		ws.onMessage((raw) => { try { const message = JSON.parse(String(raw)); if (message.type === 'navigate') ws.send(JSON.stringify({ type: 'navigate_result', url: message.url, title: 'Login', domain: 'github.com' })); } catch { /* the token frame */ } });
 		ws.send(JSON.stringify({ type: 'browser_metadata', url: 'https://github.com/dashboard', title: 'Dashboard', domain: 'github.com' }));
 		ws.send(JSON.stringify({ type: 'frame', metadata: { deviceWidth: 900, deviceHeight: 600 }, data }));
 	});
@@ -71,6 +74,8 @@ async function signIn(page: Page, canvas: ReturnType<Page['locator']>, send: (me
 	await canvas.click({ position: { x: 40, y: 40 } });
 	await page.keyboard.type('x');
 	send({ type: 'browser_password_page', visible: false });
+	// The your-step notice fades out before anything is framed.
+	await expect(page.locator('.password-notice')).toHaveCount(0);
 }
 
 const dock = (page: Page) => page.locator('.save-offer');
@@ -101,7 +106,16 @@ test.describe('the pane save-login offer', () => {
 			// Docked below the page: its top edge is at or under the canvas's bottom edge, and it never covers the page.
 			const [dockBox, canvasBox] = await Promise.all([dock(page).boundingBox(), canvas.boundingBox()]);
 			expect(dockBox!.y).toBeGreaterThanOrEqual(canvasBox!.y + canvasBox!.height - 1);
-			if (size.width <= 768) expect(dockBox!.height).toBeGreaterThanOrEqual(44);
+			// Wide enough, the actions sit to the right of the question; narrower, they stack below it.
+			const [saveBox, notNowBox, copyBox] = await Promise.all([
+				dock(page).getByRole('button', { name: 'Save' }).boundingBox(),
+				dock(page).getByRole('button', { name: 'Not now' }).boundingBox(),
+				dock(page).locator('.copy').boundingBox(),
+			]);
+			if (dockBox!.width >= 576) expect(saveBox!.x).toBeGreaterThanOrEqual(copyBox!.x + copyBox!.width - 1);
+			else expect(saveBox!.y).toBeGreaterThanOrEqual(copyBox!.y + copyBox!.height - 1);
+			// Each button is a touch target at 768 and under.
+			if (size.width <= 768) for (const box of [saveBox!, notNowBox!]) expect(box.height).toBeGreaterThanOrEqual(43.5);
 			// The agent's viewport did not resize because the dock appeared.
 			await page.waitForTimeout(400);
 			expect(resizes.length).toBe(settled);
@@ -148,18 +162,29 @@ test.describe('the pane save-login offer', () => {
 			await expect(dock(page)).toHaveCount(0);
 			expect(server.notNows).toBe(1);
 
-			// A long site wraps its question onto a second line.
+			// A domain that fits in two lines is shown whole; one that does not is cut in the middle and holds exactly two.
+			const lines = async () => dock(page).locator('.question').evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)));
+			server.offer = { ...GITHUB, domain: TWO_LINE_DOMAIN, site: `https://${TWO_LINE_DOMAIN}` };
+			await signIn(page, canvas, send);
+			await expect(dock(page).locator('.question')).toContainText(TWO_LINE_DOMAIN);
+			expect(await dock(page).locator('.question').textContent()).not.toContain('…');
+			expect(await lines()).toBeLessThanOrEqual(2);
+			await dock(page).getByRole('button', { name: 'Not now' }).click();
+			await expect(dock(page)).toHaveCount(0);
 			server.offer = { ...GITHUB, domain: LONG_DOMAIN, site: `https://${LONG_DOMAIN}` };
 			await signIn(page, canvas, send);
-			await expect(dock(page)).toBeVisible();
-			const question = dock(page).locator('.question');
-			const lineHeight = Number(await question.evaluate((node) => parseFloat(getComputedStyle(node).lineHeight) || parseFloat(getComputedStyle(node).fontSize) * 1.3));
-			const height = (await question.boundingBox())!.height;
-			// The question never takes more than two lines; on the phone's narrow pane it takes two.
-			if (size.width <= 393) expect(height).toBeGreaterThan(lineHeight * 1.5);
-			expect(height).toBeLessThan(lineHeight * 2.6);
+			await expect(dock(page).locator('.question')).toContainText('…');
+			expect(await lines()).toBe(2);
 			await shot(page, size.name, scheme, '5-long-site');
 			await dock(page).getByRole('button', { name: 'Not now' }).click();
+			await expect(dock(page)).toHaveCount(0);
+
+			// A page that moves to another site by itself (a link, a form submit, an agent) closes the offer.
+			server.offer = GITHUB;
+			await signIn(page, canvas, send);
+			await expect(dock(page)).toBeVisible();
+			send({ type: 'browser_metadata', url: 'https://example.org/next', title: 'Next', domain: 'example.org' });
+			await expect(dock(page)).toHaveCount(0);
 
 			// Nothing asked when the agent signed in alone.
 			const asked = server.gets;
