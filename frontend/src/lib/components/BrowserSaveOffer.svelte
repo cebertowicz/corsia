@@ -27,12 +27,15 @@
 
 	let offer = $state<SaveOffer | null>(null);
 	let phase = $state<'asking' | 'saved' | 'fading'>('asking');
-	// What the error line says: the server's own words for a refusal that is not a bad request, else the pane's line.
+	// The pane's own error line, for a failure the person can retry.
 	let failure = $state<string | null>(null);
+	// The server's sentence for a refusal that cannot succeed (a 404 or a 409): it takes the question's place, Save goes, and Close stays.
+	let refusal = $state<string | null>(null);
 	let saving = $state(false);
 	let announcement = $state('');
 	let dock = $state<HTMLElement | undefined>();
 	let saveButton = $state<HTMLButtonElement | undefined>();
+	let closeButton = $state<HTMLButtonElement | undefined>();
 	let typedInPasswordPage = false;
 	// The server's confirmation can land a moment after the page settles, so one empty answer earns one more ask.
 	let askAgain = false;
@@ -81,6 +84,7 @@
 		username = next.username;
 		phase = 'asking';
 		failure = null;
+		refusal = null;
 		saving = false;
 		announcement = text.announce(next);
 	}
@@ -92,6 +96,7 @@
 		offer = null;
 		saving = false;
 		failure = null;
+		refusal = null;
 	}
 
 	/** Forget everything about this stream: a new thread, a reconnect or a closed pane starts clean. */
@@ -144,8 +149,16 @@
 		const result = await saveOffer(threadId);
 		if (mine !== generation || !offer) return;
 		saving = false;
+		if (!result.saved && result.message) {
+			// Save is about to go: if focus was on it (or dropped to the page while it was busy), it moves to Close.
+			const focusWasHere = !document.activeElement || document.activeElement === document.body || !!dock?.contains(document.activeElement);
+			refusal = result.message;
+			announcement = result.message;
+			if (focusWasHere) void tick().then(() => closeButton?.focus());
+			return;
+		}
 		if (!result.saved) {
-			failure = result.message ?? text.error;
+			failure = text.error;
 			announcement = failure;
 			// The button was disabled while saving; keyboard focus comes back to it.
 			void tick().then(() => saveButton?.focus());
@@ -170,7 +183,9 @@
 	/** On leaving the dock only fades, at 0.7 of the standard duration (the reduced-motion crossfade runs over the tight one); its arrival is the stylesheet's. */
 	function leave(node: Element) {
 		const duration = ms($prefersReducedMotion ? '--dur-tight' : '--dur-standard') * 0.7;
-		const from = Number.parseFloat(getComputedStyle(node).opacity) || 1;
+		// A real 0 stays 0: the Saved line has already faded out by the time it closes, so it must not fade a second time from full.
+		const parsed = Number.parseFloat(getComputedStyle(node).opacity);
+		const from = Number.isFinite(parsed) ? parsed : 1;
 		return { duration, css: (t: number) => `opacity: ${t * from}` };
 	}
 
@@ -194,14 +209,18 @@
 		{#if phase === 'asking'}
 			<div class="body">
 				<div class="copy">
-					<p class="question">{text.question(offer, offer.domain)}</p>
+					<p class="question">{refusal ?? text.question(offer, offer.domain)}</p>
 					<p class="username probe" aria-hidden="true" bind:this={nameProbe}><span bind:this={nameProbeText}></span></p>
 					<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
 					{#if failure}<p class="error" in:blockSlot out:blockSlot>{failure}</p>{/if}
 				</div>
 				<div class="actions">
-					<span class="save"><Button variant="primary" loading={saving} bind:el={saveButton} onclick={() => void save()}>{offer.update ? text.update : text.save}</Button></span>
-					<Button variant="ghost" onclick={notNow}>{text.notNow}</Button>
+					{#if refusal}
+						<Button variant="ghost" bind:el={closeButton} onclick={notNow}>{text.close}</Button>
+					{:else}
+						<span class="save"><Button variant="primary" loading={saving} bind:el={saveButton} onclick={() => void save()}>{offer.update ? text.update : text.save}</Button></span>
+						<Button variant="ghost" onclick={notNow}>{text.notNow}</Button>
+					{/if}
 				</div>
 			</div>
 		{:else}

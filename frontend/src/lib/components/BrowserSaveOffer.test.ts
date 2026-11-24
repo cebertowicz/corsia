@@ -42,7 +42,7 @@ class FakeSocket {
 	receive(message: Record<string, unknown>) { this.onmessage?.({ data: JSON.stringify(message) }); }
 }
 
-const OFFER = { site: 'https://github.com', domain: 'github.com', username: 'jordan@example.com', update: false };
+const OFFER = { site: 'https://example.com', domain: 'example.com', username: 'sam@example.com', update: false };
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let offers: Array<typeof OFFER | null>;
@@ -139,8 +139,8 @@ describe('save-login offer: when it asks', () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		expect(gets()).toEqual(['GET /api/saved-logins/offer?thread_id=thread']);
-		expect(dock()!.textContent).toContain('Save the github.com login for agents?');
-		expect(dock()!.textContent).toContain('jordan@example.com');
+		expect(dock()!.textContent).toContain('Save the example.com login for agents?');
+		expect(dock()!.textContent).toContain('sam@example.com');
 		expect(button('Save')).toBeTruthy();
 		expect(button('Not now')).toBeTruthy();
 	});
@@ -161,11 +161,11 @@ describe('save-login offer: when it asks', () => {
 		await signIn(socket, canvas);
 		expect(dock()).toBeNull();
 		expect(gets()).toHaveLength(1);
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/home', title: 'Home', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/home', title: 'Home', domain: 'example.com' });
 		await settle();
 		expect(gets()).toHaveLength(2);
 		expect(dock()).not.toBeNull();
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/other', title: 'Other', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/other', title: 'Other', domain: 'example.com' });
 		await settle();
 		expect(gets()).toHaveLength(2);
 	});
@@ -174,9 +174,9 @@ describe('save-login offer: when it asks', () => {
 		offers = [null];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/a', title: 'A', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/a', title: 'A', domain: 'example.com' });
 		await settle();
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/b', title: 'B', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/b', title: 'B', domain: 'example.com' });
 		await settle();
 		expect(gets()).toHaveLength(2);
 	});
@@ -188,7 +188,7 @@ describe('save-login offer: a page that navigates by itself', () => {
 	it('closes when browser_metadata names another site, and stays for the same one', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		metadata(socket, 'github.com');
+		metadata(socket, 'example.com');
 		await settle();
 		expect(dock()).not.toBeNull();
 		metadata(socket, 'example.org');
@@ -198,14 +198,14 @@ describe('save-login offer: a page that navigates by itself', () => {
 
 	it('stays when the pane names the registrable domain of an offer made at a subdomain', async () => {
 		// The pane names a page by its registrable domain; the offer names the full host it saves for.
-		offers = [{ ...OFFER, site: 'https://accounts.github.com:8443', domain: 'accounts.github.com:8443' }];
+		offers = [{ ...OFFER, site: 'https://accounts.example.com:8443', domain: 'accounts.example.com:8443' }];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		metadata(socket, 'github.com');
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/home', title: 'Home', domain: 'github.com' });
+		metadata(socket, 'example.com');
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/home', title: 'Home', domain: 'example.com' });
 		await settle();
 		expect(dock()).not.toBeNull();
-		metadata(socket, 'notgithub.com');
+		metadata(socket, 'notexample.com');
 		await settle();
 		expect(dock()).toBeNull();
 	});
@@ -215,10 +215,10 @@ describe('save-login offer: a page that navigates by itself', () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		expect(gets()).toHaveLength(1);
-		socket.receive({ type: 'browser_metadata', url: 'https://github.com/x', title: 'T' });
+		socket.receive({ type: 'browser_metadata', url: 'https://example.com/x', title: 'T' });
 		await settle();
 		expect(gets()).toHaveLength(1);
-		metadata(socket, 'github.com');
+		metadata(socket, 'example.com');
 		await settle();
 		expect(gets()).toHaveLength(2);
 		expect(dock()).not.toBeNull();
@@ -228,11 +228,11 @@ describe('save-login offer: a page that navigates by itself', () => {
 		offers = [null];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		metadata(socket, 'github.com');
+		metadata(socket, 'example.com');
 		await settle();
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/y', title: 'Y', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/y', title: 'Y', domain: 'example.com' });
 		await settle();
-		metadata(socket, 'github.com');
+		metadata(socket, 'example.com');
 		await settle();
 		expect(gets()).toHaveLength(2);
 	});
@@ -270,7 +270,7 @@ describe('save-login offer: what it shows', () => {
 		offers = [{ ...OFFER, update: true }];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		expect(dock()!.textContent).toContain('Update the saved github.com login with this password?');
+		expect(dock()!.textContent).toContain('Update the saved example.com login with this password?');
 		expect(button('Update')).toBeTruthy();
 		expect(button('Not now')).toBeTruthy();
 		expect(button('Save')).toBeUndefined();
@@ -289,8 +289,8 @@ describe('save-login offer: what it shows', () => {
 		const before = document.activeElement;
 		await signIn(socket, canvas);
 		// What the screen shows: the question with the site, then the username.
-		expect(liveText()).toContain('Save the github.com login for agents? jordan@example.com');
-		expect(liveText().split('jordan@example.com')).toHaveLength(2);
+		expect(liveText()).toContain('Save the example.com login for agents? sam@example.com');
+		expect(liveText().split('sam@example.com')).toHaveLength(2);
 		expect(liveText()).not.toContain('CORSIA can save');
 		expect(document.activeElement).toBe(before);
 		expect(dock()!.contains(document.activeElement)).toBe(false);
@@ -339,7 +339,7 @@ describe('save-login offer: what it shows', () => {
 	});
 
 	it('shortenMiddle keeps both ends of a long text and leaves a short one alone', () => {
-		expect(shortenMiddle('github.com', 48)).toBe('github.com');
+		expect(shortenMiddle('example.com', 48)).toBe('example.com');
 		const long = `${'x'.repeat(70)}.example.com`;
 		const short = shortenMiddle(long, 48);
 		expect(short).toHaveLength(48);
@@ -446,19 +446,61 @@ describe('save-login offer: Save, Not now and closing', () => {
 	};
 	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
 
-	it.each([[409, 'There is no sign-in to save here.'], [404, 'The chat this login is for can\u2019t be found.'], [403, 'Only the person can save a login.']])('shows the server\u2019s own text for a %i refusal, in the error line and the live region, and keeps Not now', async (status, detail) => {
+	it.each([[409, 'There is no sign-in to save here.'], [404, 'The chat this login is for can’t be found.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
 		await refuse(status, { detail });
-		expect(dock()!.querySelector('.error')!.textContent).toBe(detail);
+		expect(dock()!.querySelector('.question')!.textContent).toBe(detail);
+		expect(dock()!.textContent).not.toContain('Save the');
+		expect(dock()!.querySelector('.error')).toBeNull();
 		expect(liveText()).toContain(detail);
-		expect(dock()!.textContent).not.toContain('Couldn\u2019t save');
-		expect(button('Not now')).toBeTruthy();
+		expect(dock()!.textContent).not.toContain('Couldn’t save');
+		const names = [...dock()!.querySelectorAll('button')].map(node => node.textContent?.trim());
+		expect(names).toEqual(['Close']);
 	});
 
-	it.each([[400, { detail: 'Couldn\u2019t do that: the request didn\u2019t name a valid chat. Send it again with the chat\u2019s id.' }], [500, { detail: 'internal' }], [503, {}]])('shows the pane\u2019s own line for a %i, whatever the body says', async (status, body) => {
+	it('moves focus to Close when Save had it, and never fades by itself', async () => {
+		vi.useFakeTimers();
+		saveStatus = 409;
+		saveBody = { detail: 'There is no sign-in to save here.' };
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').focus();
+		button('Save').click();
+		await settle();
+		await vi.advanceTimersByTimeAsync(0);
+		flushSync();
+		expect(document.activeElement).toBe(button('Close'));
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS * 3);
+		flushSync();
+		expect(dock()).not.toBeNull();
+		expect(dock()!.classList.contains('fading')).toBe(false);
+	});
+
+	it('Close dismisses as Not now does: it posts not-now, closes, and leaves focus on the page', async () => {
+		await refuse(409, { detail: 'There is no sign-in to save here.' });
+		button('Close').focus();
+		button('Close').click();
+		await settle();
+		expect(calls).toContain('POST /api/saved-logins/offer/not-now {"thread_id":"thread"}');
+		expect(dock()).toBeNull();
+		expect(host.querySelector('.browser-page')!.contains(document.activeElement)).toBe(true);
+	});
+
+	it.each([
+		[400, { detail: 'Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id.' }],
+		[401, { detail: 'Sign in again to continue.' }],
+		[403, { detail: 'Only the person can save a login.' }],
+		[422, { detail: [{ msg: 'field required' }] }],
+		[500, { detail: 'internal' }],
+		[503, {}],
+	])('shows the pane’s own line for a %i, whatever the body says, and keeps Save and Not now', async (status, body) => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		await refuse(status, body);
 		expect(dock()!.querySelector('.error')!.textContent).toBe(PANE_LINE);
 		expect(liveText()).toContain(PANE_LINE);
+		expect(dock()!.querySelector('.question')!.textContent).toContain('Save the example.com login');
+		expect(button('Save')).toBeTruthy();
+		expect(button('Not now')).toBeTruthy();
+		expect(button('Close')).toBeUndefined();
 	});
 
 	it('shows the pane\u2019s own line when the save request throws', async () => {
@@ -475,6 +517,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	it('shows the pane\u2019s own line for a refusal whose body has no text', async () => {
 		await refuse(409, 'gone');
 		expect(dock()!.querySelector('.error')!.textContent).toBe(PANE_LINE);
+		expect(button('Save')).toBeTruthy();
 	});
 
 	it('shows the error line, announces it, keeps Save and Not now, and allows another try', async () => {
@@ -496,7 +539,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	it('closes when the tab moves to another site, and stays for the same site', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		socket.receive({ type: 'navigate_result', url: 'https://github.com/x', title: 'X', domain: 'github.com' });
+		socket.receive({ type: 'navigate_result', url: 'https://example.com/x', title: 'X', domain: 'example.com' });
 		await settle();
 		expect(dock()).not.toBeNull();
 		socket.receive({ type: 'navigate_result', url: 'https://example.org', title: 'Y', domain: 'example.org' });
@@ -556,7 +599,7 @@ describe('save-login offer: touch typing and failures', () => {
 		passwordPage(socket, false);
 		await settle();
 		expect(gets()).toEqual(['GET /api/saved-logins/offer?thread_id=thread']);
-		expect(dock()!.textContent).toContain('Save the github.com login for agents?');
+		expect(dock()!.textContent).toContain('Save the example.com login for agents?');
 	});
 
 	it('does not count a tap on the overlay when nothing was typed', async () => {
@@ -667,6 +710,21 @@ describe('save-login offer: motion', () => {
 		expect(dock()).not.toBeNull();
 		await wait(300);
 		expect(dock()).toBeNull();
+	});
+
+	it('after Saved, the exit starts from the dock’s real opacity of 0 and never rises', async () => {
+		vi.useFakeTimers();
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		// jsdom runs no stylesheet: the finished fade is stood in for by the opacity it would have reached.
+		dock()!.style.opacity = '0';
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS + 230);
+		flushSync();
+		const exit = forDock().at(-1)!;
+		expect(exit.keyframes.length).toBeGreaterThan(0);
+		expect(exit.keyframes.every(frame => Number(frame.opacity) === 0)).toBe(true);
 	});
 
 	it('animates the error line in the same way', async () => {

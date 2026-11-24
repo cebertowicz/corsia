@@ -11,10 +11,10 @@ const OUT = process.env.OFFER_RENDER_DIR;
 const SIZES = [{ name: '1440', width: 1440, height: 1000 }, { name: '768', width: 768, height: 1000 }, { name: '393', width: 393, height: 852 }];
 
 type Offer = { site: string; domain: string; username: string; update: boolean };
-const GITHUB: Offer = { site: 'https://github.com', domain: 'github.com', username: 'jordan@example.com', update: false };
+const EXAMPLE: Offer = { site: 'https://example.com', domain: 'example.com', username: 'sam@example.com', update: false };
 // A domain is never cut: the question wraps around it, over two lines or over more.
-const TWO_LINE_DOMAIN = 'login.accounts.my-example-company.co.uk';
-const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holdings-international.co.uk';
+const TWO_LINE_DOMAIN = 'login.accounts.my-example-company.example.com';
+const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holdings-international.example.com';
 
 /** What the server answers; the spec changes these between steps. */
 /** The size of the page the agent's viewport shows, set when the pane opens. */
@@ -22,18 +22,18 @@ const view = { width: 900, height: 600 };
 const server = { offer: null as Offer | null, save: 200, saveBody: {} as unknown, saves: 0, notNows: 0, gets: 0 };
 
 const SERVER_TEXT = 'There’s no sign-in to save here. It’s offered again the next time you sign in.';
-const PAGE_TITLE = 'Sign in to GitHub';
-const GITHUB_PAGE = { heading: PAGE_TITLE, footer: 'New to GitHub? Create an account' };
+const PAGE_TITLE = 'Sign in';
+const EXAMPLE_PAGE = { heading: PAGE_TITLE, footer: 'Create an account' };
 // A company's own sign-in page, for the long site names: the tab, the address and the page itself belong to that site.
 const COMPANY_PAGE = { heading: 'Sign in to Regional Operations', footer: 'Need access? Ask your administrator' };
 
 /** A sign-in page drawn at the size the agent's viewport has, so it fills the pane edge to edge in the person's colours. */
-async function pageImage(page: Page, width: number, height: number, scheme: 'light' | 'dark', copy: { heading: string; footer: string } = GITHUB_PAGE) {
+async function pageImage(page: Page, width: number, height: number, scheme: 'light' | 'dark', copy: { heading: string; footer: string } = EXAMPLE_PAGE) {
 	const palette = scheme === 'dark' ? { page: '#0d1117', card: '#161b22', line: '#30363d', text: '#e6edf3', quiet: '#8b949e', field: '#0d1117' } : { page: '#ffffff', card: '#f6f8fa', line: '#d0d7de', text: '#1f2328', quiet: '#59636e', field: '#ffffff' };
 	const field = (label: string, value: string) => `<label style="display:block;margin:16px 0 4px;font-weight:600">${label}</label><div style="padding:6px 12px;height:32px;box-sizing:border-box;border:1px solid ${palette.line};border-radius:6px;background:${palette.field};line-height:18px">${value}</div>`;
 	const shot = await page.context().newPage();
 	await shot.setViewportSize({ width, height });
-	await shot.setContent(`<body style="margin:0;height:100vh;background:${palette.page};color:${palette.text};font:14px -apple-system,'Segoe UI',Helvetica,Arial,sans-serif"><main style="width:min(308px,calc(100% - 32px));margin:0 auto;padding-top:${Math.round(height * 0.12)}px"><h1 style="margin:0 0 16px;font-size:24px;font-weight:300;text-align:center">${copy.heading}</h1><form style="padding:16px;border:1px solid ${palette.line};border-radius:6px;background:${palette.card}">${field('Username or email address', 'jordan@example.com')}${field('Password', '••••••••••••')}<div style="margin-top:16px;padding:6px 12px;border-radius:6px;background:#1f883d;color:#fff;font-weight:600;text-align:center">Sign in</div></form><p style="margin:16px 0 0;padding:16px;border:1px solid ${palette.line};border-radius:6px;text-align:center;color:${palette.quiet}">${copy.footer}</p></main></body>`);
+	await shot.setContent(`<body style="margin:0;height:100vh;background:${palette.page};color:${palette.text};font:14px -apple-system,'Segoe UI',Helvetica,Arial,sans-serif"><main style="width:min(308px,calc(100% - 32px));margin:0 auto;padding-top:${Math.round(height * 0.12)}px"><h1 style="margin:0 0 16px;font-size:24px;font-weight:300;text-align:center">${copy.heading}</h1><form style="padding:16px;border:1px solid ${palette.line};border-radius:6px;background:${palette.card}">${field('Username or email address', 'sam@example.com')}${field('Password', '••••••••••••')}<div style="margin-top:16px;padding:6px 12px;border-radius:6px;background:#4a5a78;color:#fff;font-weight:600;text-align:center">Sign in</div></form><p style="margin:16px 0 0;padding:16px;border:1px solid ${palette.line};border-radius:6px;text-align:center;color:${palette.quiet}">${copy.footer}</p></main></body>`);
 	const data = (await shot.screenshot({ type: 'jpeg', quality: 85 })).toString('base64');
 	await shot.close();
 	return data;
@@ -48,7 +48,7 @@ async function cleanData(page: Page, request: Parameters<typeof createSession>[0
 		server.onMessage((message) => {
 			if (typeof message !== 'string') return socket.send(message);
 			const payload = JSON.parse(message);
-			if (payload.type === 'auth_ok' && payload.user) payload.user.name = 'Jordan';
+			if (payload.type === 'auth_ok' && payload.user) payload.user.name = 'Sam';
 			socket.send(JSON.stringify(payload));
 		});
 	});
@@ -65,14 +65,14 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 	await page.routeWebSocket((url) => /\/api\/browser\/[^/]+\/stream/.test(url.pathname), (ws) => {
 		stream = ws;
 		ws.onMessage((raw) => { try { const message = JSON.parse(String(raw)); if (message.type === 'appearance') resizes.push(message); } catch { /* the token frame */ } });
-		ws.onMessage((raw) => { try { const message = JSON.parse(String(raw)); if (message.type === 'navigate') ws.send(JSON.stringify({ type: 'navigate_result', url: message.url, title: PAGE_TITLE, domain: 'github.com' })); } catch { /* the token frame */ } });
-		ws.send(JSON.stringify({ type: 'browser_metadata', url: 'https://github.com/login', title: PAGE_TITLE, domain: 'github.com' }));
+		ws.onMessage((raw) => { try { const message = JSON.parse(String(raw)); if (message.type === 'navigate') ws.send(JSON.stringify({ type: 'navigate_result', url: message.url, title: PAGE_TITLE, domain: 'example.com' })); } catch { /* the token frame */ } });
+		ws.send(JSON.stringify({ type: 'browser_metadata', url: 'https://example.com/login', title: PAGE_TITLE, domain: 'example.com' }));
 	});
 	await page.route(/\/api\/browser\/[^/]+\/open/, (route: Route) => route.fulfill({ status: 200, json: {} }));
 	await page.route(/\/api\/saved-logins\/offer(\?|$)/, (route: Route) => { server.gets++; return route.fulfill({ status: 200, json: { offer: server.offer } }); });
 	await page.route(/\/api\/saved-logins\/offer\/save/, (route: Route) => { server.saves++; return route.fulfill({ status: server.save, json: server.save === 200 ? { saved: true } : server.saveBody }); });
 	await page.route(/\/api\/saved-logins\/offer\/not-now/, (route: Route) => { server.notNows++; return route.fulfill({ status: 200, json: {} }); });
-	const title = 'Sign in to GitHub for me';
+	const title = 'Sign in to the example site for me';
 	await replacePreviousFixtureThread(request, await createSession(request, title));
 	await loginByUrl(page);
 	// The rail sits behind the main surface, which slides right to open it; wide windows start with it open, so toggle only a closed one.
@@ -89,7 +89,7 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 		await openBrowser.click();
 	}
 	const address = page.getByRole('textbox', { name: 'Browser address' });
-	await address.fill('https://github.com/login');
+	await address.fill('https://example.com/login');
 	await address.press('Enter');
 	const canvas = page.locator('canvas[aria-label="Shared browser"]');
 	await expect(canvas).toBeVisible();
@@ -166,11 +166,11 @@ test.describe('the pane save-login offer', () => {
 				await page.waitForTimeout(800);
 				const settled = resizes.length;
 
-				server.offer = GITHUB;
+				server.offer = EXAMPLE;
 				await signIn(page, canvas, send, touch);
 				await expect(dock(page)).toBeVisible();
-				await expect(dock(page)).toContainText('Save the github.com login for agents?');
-				await expect(dock(page)).toContainText('jordan@example.com');
+				await expect(dock(page)).toContainText('Save the example.com login for agents?');
+				await expect(dock(page)).toContainText('sam@example.com');
 				await expect(dock(page).locator('input, textarea')).toHaveCount(0);
 				// It lies over the page's bottom edge: flush with it, over the canvas, which keeps its size.
 				await page.waitForTimeout(400);
@@ -208,16 +208,15 @@ test.describe('the pane save-login offer', () => {
 				expect(notNowBox!.x - (saveBox!.x + saveBox!.width)).toBeGreaterThanOrEqual(Math.max(saveBox!.width, notNowBox!.width));
 				// The agent's viewport did not resize because the dock appeared, and the screen reader hears what the screen shows.
 				expect(resizes.length).toBe(settled);
-				await expect(page.locator('[aria-live="polite"]', { hasText: 'Save the github.com login for agents? jordan@example.com' }).first()).toBeAttached();
+				await expect(page.locator('[aria-live="polite"]', { hasText: 'Save the example.com login for agents? sam@example.com' }).first()).toBeAttached();
 				await shot(page, size.name, scheme, '1-ideal');
 
-				// A refusal other than a bad request or a server fault says what the server said, in its own words.
-				server.save = 409;
+				// Only a 404 or a 409 shows the server's words; any other failure says the pane's own line, and keeps the offer, with Save and Not now still there.
+				server.save = 403;
 				server.saveBody = { detail: SERVER_TEXT };
 				await dock(page).getByRole('button', { name: 'Save' }).click();
-				await expect(dock(page).locator('.error')).toHaveText(SERVER_TEXT);
-				await expect(page.locator('[aria-live="polite"]', { hasText: SERVER_TEXT }).first()).toBeAttached();
-				// Any other failure says the pane's own line, and keeps the offer, with Save and Not now still there.
+				await expect(dock(page)).toContainText('Couldn’t save the login. Try again.');
+				await expect(dock(page)).not.toContainText(SERVER_TEXT);
 				server.save = 500;
 				server.saveBody = { detail: 'internal' };
 				await dock(page).getByRole('button', { name: 'Save' }).click();
@@ -251,20 +250,46 @@ test.describe('the pane save-login offer', () => {
 				await page.clock.resume();
 
 				// An update offer.
-				server.offer = { ...GITHUB, update: true };
+				server.offer = { ...EXAMPLE, update: true };
 				await signIn(page, canvas, send, touch);
-				await expect(dock(page)).toContainText('Update the saved github.com login with this password?');
+				await expect(dock(page)).toContainText('Update the saved example.com login with this password?');
 				await expect(dock(page).getByRole('button', { name: 'Update' })).toBeVisible();
 				await shot(page, size.name, scheme, '4-update');
 				await dock(page).getByRole('button', { name: 'Not now' }).click();
 				await expect(dock(page)).toHaveCount(0);
 				expect(server.notNows).toBe(1);
 
+				// A 409 (or a 404) puts the server's sentence in the question's place, removes Save and Not now, leaves Close with focus, and never fades by itself.
+				server.offer = EXAMPLE;
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page)).toContainText('Save the example.com login for agents?');
+				server.save = 409;
+				server.saveBody = { detail: SERVER_TEXT };
+				const savesBefore = server.saves;
+				await dock(page).getByRole('button', { name: 'Save' }).click();
+				await expect(dock(page).locator('.question')).toHaveText(SERVER_TEXT);
+				await expect(page.locator('[aria-live="polite"]', { hasText: SERVER_TEXT }).first()).toBeAttached();
+				await expect(dock(page).getByRole('button', { name: 'Save' })).toHaveCount(0);
+				await expect(dock(page).getByRole('button', { name: 'Not now' })).toHaveCount(0);
+				await expect(dock(page).getByRole('button', { name: 'Close' })).toBeFocused();
+				expect(server.saves).toBe(savesBefore + 1);
+				if (size.name !== '768') await shot(page, size.name, scheme, '8-refused');
+				await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+				await page.clock.runFor(CONFIRMATION_HOLD_MS * 3);
+				await expect(dock(page)).toBeVisible();
+				await expect(dock(page)).not.toHaveClass(/fading/);
+				await page.clock.resume();
+				// Close dismisses as Not now does, and focus lands back on the page.
+				await dock(page).getByRole('button', { name: 'Close' }).click();
+				await expect(dock(page)).toHaveCount(0);
+				expect(server.notNows).toBe(2);
+				server.save = 200;
+
 				// A domain is never cut, however long: the question wraps around it and nothing runs past the dock.
 				const wholeInside = () => dock(page).locator('.question').evaluate((node) => node.scrollWidth <= node.clientWidth && (node.closest('.save-offer') as HTMLElement).scrollWidth <= (node.closest('.save-offer') as HTMLElement).clientWidth);
 				for (const domain of [TWO_LINE_DOMAIN, LONG_DOMAIN]) {
 					await showSite(page, send, scheme, domain, 'Sign in · Regional Operations', COMPANY_PAGE);
-					server.offer = { ...GITHUB, domain, site: `https://${domain}` };
+					server.offer = { ...EXAMPLE, domain, site: `https://${domain}` };
 					await signIn(page, canvas, send, touch);
 					await expect(dock(page).locator('.question')).toContainText(domain);
 					expect(await dock(page).locator('.question').textContent()).not.toContain('…');
@@ -275,8 +300,8 @@ test.describe('the pane save-login offer', () => {
 				}
 
 				// A page that moves to another site by itself (a link, a form submit, an agent) closes the offer.
-				await showSite(page, send, scheme, 'github.com', PAGE_TITLE, GITHUB_PAGE);
-				server.offer = GITHUB;
+				await showSite(page, send, scheme, 'example.com', PAGE_TITLE, EXAMPLE_PAGE);
+				server.offer = EXAMPLE;
 				await signIn(page, canvas, send, touch);
 				await expect(dock(page)).toBeVisible();
 				send({ type: 'browser_metadata', url: 'https://example.org/next', title: 'Next', domain: 'example.org' });
@@ -297,7 +322,7 @@ test.describe('the pane save-login offer', () => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		// The offer did not take focus when it appeared.
@@ -332,7 +357,7 @@ test.describe('the pane save-login offer', () => {
 		expect(await page.evaluate(() => document.activeElement !== document.body && !!document.activeElement?.closest('.browser-page'))).toBe(true);
 
 		// Save by keyboard: focus is on the page before the Save button is removed.
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		await enterDockBackwards();
@@ -349,7 +374,7 @@ test.describe('the pane save-login offer', () => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 393, height: 852 });
 		const { canvas, send } = await openPane(page, request, 'light');
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		await page.waitForTimeout(350);
@@ -392,7 +417,7 @@ test.describe('the pane save-login offer', () => {
 		const between = (samples: number[], from: number, low: number, high: number) => samples.slice(from).some((value) => value > low && value < high);
 
 		let from = await mark();
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		await page.waitForTimeout(400);
@@ -430,7 +455,7 @@ test.describe('the pane save-login offer', () => {
 				node.getAnimations().forEach((animation) => { animation.pause(); animation.currentTime = 40; });
 			}).observe(document.body, { childList: true, subtree: true });
 		});
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		const midway = await dock(page).evaluate((node) => ({ opacity: Number(getComputedStyle(node).opacity), offset: new DOMMatrixReadOnly(getComputedStyle(node).transform).m42 }));
@@ -453,7 +478,7 @@ test.describe('the pane save-login offer', () => {
 		const touchScreen = await page.context().newCDPSession(page);
 		await touchScreen.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 		expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		for (const name of ['Save', 'Not now']) expect((await dock(page).getByRole('button', { name }).boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
 	});
@@ -463,7 +488,7 @@ test.describe('the pane save-login offer', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
-		server.offer = GITHUB;
+		server.offer = EXAMPLE;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		// The arrival is a crossfade over the tight duration, with no slide.
@@ -482,7 +507,7 @@ test.describe('the pane save-login offer', () => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own viewport; the phone walks run on both projects.');
 			await page.setViewportSize({ width: 393, height: 852 });
 			const { canvas, send } = await openPane(page, request, 'light');
-			server.offer = GITHUB;
+			server.offer = EXAMPLE;
 			await signIn(page, canvas, send, true);
 			await expect(dock(page)).toBeVisible();
 			await page.setViewportSize({ width: 393, height: 516 });

@@ -39,9 +39,10 @@ export async function fetchSaveOffer(threadId: string): Promise<SaveOffer | null
 }
 
 /**
- * Saved, or refused. A refusal other than a bad request (400) or a server fault (5xx) carries the server's own
- * sentence in the body's `detail`, which is what the person reads; any other failure, a network one included, has
- * no message here, and the pane says its own line. Every failure is also reported to the console.
+ * Saved, or refused. Only a 404 or a 409 carries the server's own sentence in the body's `detail`, which is what the
+ * person reads: Product Experience approved those two. Any other failure (400, 401, 403, 422, a 5xx, a network one)
+ * has no message here, since its text is written for agents or the session, not for the pane, and the pane says its
+ * own line. Every failure is also reported to the console.
  */
 export type SaveResult = { saved: true } | { saved: false; message: string | null };
 
@@ -50,7 +51,7 @@ export async function saveOffer(threadId: string): Promise<SaveResult> {
 		const response = await post('save', threadId);
 		if (response.ok) return { saved: true };
 		console.error('[saved login offer] save rejected', threadId, response.status);
-		if (response.status === 400 || response.status >= 500) return { saved: false, message: null };
+		if (response.status !== 404 && response.status !== 409) return { saved: false, message: null };
 		return { saved: false, message: await serverText(response) };
 	} catch (error) {
 		console.error('[saved login offer] save failed', threadId, error);

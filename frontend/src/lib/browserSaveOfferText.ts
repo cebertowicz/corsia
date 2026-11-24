@@ -7,6 +7,7 @@ export const SAVE_OFFER_TEXT = {
 	save: 'Save',
 	update: 'Update',
 	notNow: 'Not now',
+	close: 'Close',
 	saved: 'Saved',
 	updated: 'Updated',
 	error: 'Couldn’t save the login. Try again.',
