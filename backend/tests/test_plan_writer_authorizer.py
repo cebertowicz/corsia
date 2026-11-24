@@ -95,6 +95,51 @@ def test_the_recount_names_drift_a_still_open_connection_on_another_thread_wrote
     try:
         assert opened.wait(10)
         assert plan_writer_authorizer.recount_changed_plans() != []
+        assert plan_writer_authorizer.recount_changed_plans() == []  # judged until the file changes
+    finally:
+        done.set()
+        worker.join()
+
+
+class _OwnerOnly(sqlite3.Connection):
+    """Records any ``total_changes`` read from a thread other than the one that opened it."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.owner = threading.get_ident()
+        self.foreign_reads = 0
+
+    @property
+    def total_changes(self):
+        if threading.get_ident() != self.owner:
+            self.foreign_reads += 1
+        return super().total_changes
+
+
+def test_the_recount_never_touches_a_connection_another_thread_opened(world, tmp_path):
+    """#3292: that thread may hold the connection's mutex mid-statement while its progress
+    handler waits for the GIL, and ``total_changes`` waits for the mutex holding the GIL."""
+    world.add(None)
+    path = tmp_path / "busy.db"
+    _file_copy(world, path).close()
+    opened, done = threading.Event(), threading.Event()
+    held: list[_OwnerOnly] = []
+
+    def other_thread():
+        copy = sqlite3.connect(path, factory=_OwnerOnly)
+        copy.execute("UPDATE plan_nodes SET sub_open = sub_open + 5")
+        copy.commit()
+        held.append(copy)
+        opened.set()
+        done.wait(10)
+        copy.close()
+
+    worker = threading.Thread(target=other_thread)
+    worker.start()
+    try:
+        assert opened.wait(10)
+        assert plan_writer_authorizer.recount_changed_plans() != []
+        assert held[0].foreign_reads == 0
     finally:
         done.set()
         worker.join()
