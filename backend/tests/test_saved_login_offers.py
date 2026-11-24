@@ -120,11 +120,45 @@ def test_a_two_page_sign_in_uses_the_noted_username_once(sessions):
     key = _key(sessions)
     offers.note_username(key, SITE, "me@example.com")
     assert offers.offer_login(key, "https://elsewhere.example", "", "pw one 1") is False
-    offers.note_username(key, SITE, "me@example.com")
-    assert offers.offer_login(key, SITE, None, "pw one 1") is True
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True  # still noted for this site
     offers.confirm_offer(key)
     assert offers.pending_offer(key).username == "me@example.com"
     assert offers.offer_login(key, SITE, None, "pw one 1") is False  # used up
+
+
+def test_a_click_or_failed_attempt_before_the_real_submit_keeps_the_noted_username(sessions):
+    key = _key(sessions)
+    saved_logins.save_login(site=SITE, username="me@example.com", password="pw old 0", saved_by=OWNER_USER)
+    offers.note_username(key, SITE, "me@example.com")
+    with pytest.raises(KeyStoreError):
+        offers.offer_login(key, SITE, None, "")  # a show-password click with the field still empty
+    assert offers.offer_login(key, SITE, None, "pw old 0") is False  # the saved password: no offer
+    assert offers.offer_login(key, SITE, None, "pw wrong 9") is True  # a failed attempt, never confirmed
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True  # the real submit
+    assert offers.confirm_offer(key) is True
+    assert offers.pending_offer(key) == offers.OfferView(SITE, "example.com", "me@example.com", True)
+
+
+def test_confirming_or_saving_uses_up_the_noted_username(sessions):
+    key = _key(sessions)
+    offers.note_username(key, SITE, "me@example.com")
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True
+    assert offers._usernames  # kept until the sign-in is confirmed
+    offers.confirm_offer(key)
+    assert offers._usernames == {}
+    offers.note_username(key, SITE, "me@example.com")  # noted again after the confirm
+    offers.save_offer(key, saved_by=OWNER_USER)
+    assert offers._usernames == {}
+    assert offers.offer_login(key, SITE, None, "pw two 2") is False
+
+
+def test_a_username_noted_for_one_site_is_never_used_on_another(sessions):
+    key = _key(sessions)
+    offers.note_username(key, SITE, "me@example.com")
+    assert offers.offer_login(key, "https://other.example", None, "pw one 1") is False
+    assert offers.offer_login(key, "https://other.example", "someone", "pw one 1") is True
+    offers.confirm_offer(key)
+    assert offers.pending_offer(key) == offers.OfferView("https://other.example", "other.example", "someone", False)
 
 
 def test_a_login_already_saved_with_this_password_gets_no_offer(sessions):
