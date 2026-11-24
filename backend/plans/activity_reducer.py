@@ -105,7 +105,7 @@ def reduce_node(
         causes=causes,
     )
     needs_user = asks_user and not operator_display_state.ask_deferred(
-        plan_paused=paused, node_paused=node_paused,
+        plan_paused=paused, node_paused=node_paused, later=bool(row["later"]),
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,
@@ -119,6 +119,7 @@ def reduce_node(
         condition,
         review_kind,
         asks_user=asks_user,
+        later=bool(row["later"]),
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
     )
@@ -136,6 +137,7 @@ def reduce_node(
         unactionable_user_block=bool(row["has_user_block"]) and not needs_user,
         plan_paused=paused,
         node_paused=node_paused,
+        later=bool(row["later"]),
     )
     return ReducedNode(
         condition=condition,

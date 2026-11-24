@@ -30,8 +30,8 @@ pytestmark = pytest.mark.integration
 
 ADAPTERS = ("http", "native", "doc-cli")
 CHANGED_MESSAGE = (
-    "The document changed while these suggestions were being applied. "
-    "Nothing was changed; try again."
+    "Couldn’t accept these suggestions because this document changed while they were being accepted. "
+    "Try again."
 )
 
 

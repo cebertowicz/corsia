@@ -12,6 +12,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import signal
 import statistics
 from threading import Thread
 import tempfile
@@ -20,6 +21,7 @@ import time
 from uuid import uuid4
 
 import pytest
+import websockets
 
 from host_access import (
     browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
@@ -88,6 +90,19 @@ window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# Controls under a full-page layer that lets clicks through (pointer-events: none), as toast and
+# overlay containers do, and one control under a layer that really covers it.
+LAYER = """<!doctype html><title>Layer fixture</title>
+<nav><button id=nav>Menu</button></nav>
+<main><a id=card href="#card">Open the card</a></main>
+<div style="position:relative"><button id=blocked>Blocked</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="position:fixed;inset:0;z-index:10;pointer-events:none"></div>
+<script>
+window.clicks = {nav: 0, card: 0, blocked: 0};
+for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', event => {
+  event.preventDefault(); window.clicks[id]++; });
+</script>"""
+
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -114,6 +129,8 @@ SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
 document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
+KEEP = """<!doctype html><title>Kept</title><script>localStorage.setItem('kept', '1');</script>"""
+STORAGE = """<!doctype html><title>Storage</title><script>document.title = 'kept=' + localStorage.getItem('kept');</script>"""
 
 
 @contextmanager
@@ -121,7 +138,8 @@ def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
-             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
+             "/layer.html": LAYER.encode(), "/keep.html": KEEP.encode(), "/storage.html": STORAGE.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -250,6 +268,96 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
     finally:
         await owner.shutdown()
         profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_copy_starts_signed_in_without_opening_a_tab_in_the_holders_browser(monkeypatch):
+    """A second agent starts from the holder's sign-in right after the holder's browser relaunches on another site.
+
+    Reading the sign-in must not open a tab or load a page in the holder's browser: that is what stalled the
+    copy past its limit and started it signed out.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"copy-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    holder, other = f"copy-holder-{uuid4().hex}", f"copy-copy-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-copy-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            other_site = origin.replace("127.0.0.1", "localhost")
+            assert (await owner.run(holder, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            await owner.close_thread(holder)
+            for attempt in range(3):
+                # The holder's agent was on the signed-in site, then moved to another one.
+                await owner.run(holder, ("open", f"{origin}/cookies.html"))
+                await owner.run(holder, ("open", f"{other_site}/keep.html"))
+                async with websockets.connect(owner._sessions[holder].chrome.endpoint, max_size=None) as watch:
+                    await watch.send(json.dumps({"id": 1, "method": "Target.setDiscoverTargets", "params": {"discover": True}}))
+                    while json.loads(await asyncio.wait_for(watch.recv(), 5)).get("id") != 1:
+                        pass  # The tabs already open are announced before the answer.
+                    started = time.monotonic()
+                    assert (await owner.run(other, ("open", f"{origin}/cookies.html"))).startswith("holder=1"), attempt
+                    seconds = time.monotonic() - started
+                    opened = []
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        while True:
+                            event = json.loads(await asyncio.wait_for(watch.recv(), 0.5))
+                            info = event.get("params", {}).get("targetInfo", {})
+                            if event.get("method") == "Target.targetCreated" and info.get("type") == "page":
+                                opened.append(info.get("url"))
+                assert opened == [], (attempt, opened)
+                assert owner._sessions[other].record.copy_of == holder
+                assert owner._sessions[other].record.profile_notice is None, attempt
+                assert seconds < 20, (attempt, seconds)
+                assert "kept=1" in await owner.run(other, ("open", f"{other_site}/storage.html")), attempt
+                await asyncio.gather(owner.close_thread(other), owner.close_thread(holder))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", [signal.SIGKILL, signal.SIGTERM])
+async def test_an_agents_next_command_after_its_chrome_ends_gets_a_working_signed_in_browser(monkeypatch, ending):
+    """Chrome crashing (SIGKILL) or being quit (SIGTERM) leaves the next command a fresh browser, still signed in."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"restart-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    thread = f"restart-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-restart-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert (await owner.run(thread, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            # Chrome writes a new cookie to the profile some seconds after it is set; a close writes it at once.
+            await owner.close_thread(thread)
+            await owner.run(thread, ("open", f"{origin}/plain.html"))
+            profile = owner._sessions[thread].record.profile
+            assert profile is not None
+            chrome = owner._sessions[thread].chrome
+            os.kill(chrome.process.pid, ending)
+            await asyncio.wait_for(chrome.process.wait(), 10)
+            first = await owner.run(thread, ("open", f"{origin}/cookies.html"))
+            assert first.startswith("holder=1"), first
+            assert "started again" in first, first
+            assert owner._sessions[thread].chrome is not chrome and owner._sessions[thread].record.profile == profile
+            assert (await owner.run(thread, ("open", f"{origin}/cookies.html"))).startswith("holder=1")
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(thread)
         assert profile is not None
         browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
         import shutil
@@ -428,6 +536,67 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option():
+    """With no pane open, a fill on a dropdown chooses the option by label or value, as the pane-open write does.
+
+    The native fill cleared the choice (no option selected) and still answered that it filled the target.
+    A fill on a text field still goes to the native fill.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"closed-fill-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-closed-fill", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/writes.html"), session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            found = re.search(r"combobox[^\[\n]*\[[^\]]*ref=(e\d+)\]", snapshot)
+            assert found, snapshot
+            ref = "@" + found[1]
+            by_label = await owner.run(thread_id, ("fill", "#choice", "Bee"), session="existing")
+            chosen_by_label = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            by_value = await owner.run(thread_id, ("fill", ref, "a"), session="existing")
+            chosen_by_value = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            text = await owner.run(thread_id, ("fill", "#user", "agent"), session="existing")
+            typed = await cdp_value(owner, thread_id, "document.querySelector('#user').value")
+        assert (chosen_by_label, chosen_by_value, typed) == ("b", "a", "agent")
+        assert "filled" not in by_label and "Bee" in by_label, by_label
+        assert "filled" not in by_value and "a" in by_value, by_value
+        assert "filled" in text, text
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through(monkeypatch):
+    """With the pane open, a click by ref reaches a control under a pointer-events: none layer,
+    as the person's click would, and a control under a layer that takes clicks is still refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-layer-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-layer", instance_key=uuid4().hex)
+    monkeypatch.setattr(browser_session_commands, "emit_product_event", lambda *_args, **_kwargs: None)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/layer.html"), show_window=True, session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            refs = {name: re.search(rf'"{label}" \[ref=(e\d+)\]', snapshot) for name, label in
+                    (("nav", "Menu"), ("card", "Open the card"), ("blocked", "Blocked"))}
+            assert all(refs.values()), snapshot
+            assert await owner.run(thread_id, ("click", f"@{refs['nav'][1]}"), session="existing") == "ok"
+            assert await owner.run(thread_id, ("click", f"@{refs['card'][1]}"), session="existing") == "ok"
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", f"@{refs['blocked'][1]}"), session="existing")
+            assert await cdp_value(owner, thread_id, "window.clicks") == {"nav": 1, "card": 1, "blocked": 0}
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

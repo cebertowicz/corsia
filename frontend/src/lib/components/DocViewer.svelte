@@ -209,11 +209,10 @@
 	}
 	reloadAfterLegacySave(() => legacyAwaitingSave, () => save.draft?.status === 'saved', () => { legacyAwaitingSave = false; }, () => { reloadNonce += 1; });
 	reopenOnReconnect(() => $connectionState === 'connected', () => openRefusal?.code === 'not_connected', () => { reloadNonce += 1; });
+	const applyLoaded = (content: ViewerContent) => { if (target && !liveSession) applyViewerContent(target, content, ++loadSeq); };
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
-		const d = target;
-		if (!d || liveSession) return Promise.resolve(null);
 		const seq = loadSeq;
-		return prepareDocumentReload(d, () => seq === loadSeq, (content) => applyViewerContent(d, content, ++loadSeq));
+		return target && !liveSession ? prepareDocumentReload(target, () => seq === loadSeq, applyLoaded) : Promise.resolve(null);
 	}
 	$effect(() => {
 		const key = targetKey;
@@ -329,6 +328,7 @@
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
 		saveError={save.error}
+		onUseFile={applyLoaded}
 		pendingSel={draftController.pending}
 		{listOverText}
 		onStartComment={draftController.start}

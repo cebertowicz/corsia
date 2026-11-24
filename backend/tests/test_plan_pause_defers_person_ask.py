@@ -83,7 +83,7 @@ def test_ask_deferred_sql_matches_projected_pause_facts(db):
 
     def sql(plan_state: str) -> bool:
         return bool(db.execute(
-            f"SELECT {operator_display_state.ask_deferred_sql('?', plan_state_sql='?')}",
+            f"SELECT {operator_display_state.ask_deferred_sql('?2', plan_state_sql='?1')}",
             (plan_state, node.id),
         ).fetchone()[0])
 
@@ -421,3 +421,120 @@ def test_a_settled_link_in_a_paused_plan_never_hides_a_live_ask(db):
     assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
     _node_lifecycle(db, live_plan.id, live.id, "pause_node")
     assert attention._summarize_raised(None, "user-1", db=db) == []
+
+
+def _set_later(db, plan_id, node_id, later):
+    _node_lifecycle(db, plan_id, node_id, "edit", later=later)
+
+
+def test_later_user_task_is_absent_from_activity_and_returns(db):
+    from plans import activity_facts, activity_reducer
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "User task", assignee="user", db=db)
+    db.commit()
+    for later in (True, False):
+        _set_later(db, plan.id, node.id, later)
+        row = _pane_row(db, node.id)
+        assert row["display"]["label_key"] == ("waiting" if later else "needs_you")
+        assert row["requires_user_action"] is not later
+        compact = activity_facts.compact_nodes([plan.id], db=db)[plan.id][0]
+        assert bool(compact["later"]) is later
+        reduced = activity_reducer.reduce_node(
+            compact, dict(service._plan_row(db, plan.id)), review_kind=None,
+            decision_wait=False, child_cause=None, executor_stop_fact=None,
+        )
+        assert reduced.requires_user_action is not later
+        index = activity_projection.read_workspace(actor=_human(), db=db)
+        plan_row = next(item for item in index["plans"] if item["plan"]["id"] == plan.id)
+        full = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]
+        assert plan_row["display"]["label_key"] == full["display"]["label_key"] == ("waiting" if later else "needs_you")
+
+
+def test_later_user_task_leaves_activity_stillness_equal_to_the_full_read(db, monkeypatch):
+    from tests.test_plan_decisions import _task
+
+    displays: dict[str, dict] = {}
+    reduce_plan = activity_projection._reduce_plan
+
+    def spy(plan, rows, **facts):
+        result = reduce_plan(plan, rows, **facts)
+        displays[str(plan["id"])] = result[2]
+        return result
+
+    monkeypatch.setattr(activity_projection, "_reduce_plan", spy)
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    parked = _task(plan.id, "User task", assignee="user", db=db)
+    waiting = _task(plan.id, "Agent wait", db=db)
+    db.execute(
+        """INSERT INTO expected_event_watches
+           (id,owner_thread_id,plan_id,plan_node_id,condition_type,condition_value,
+            status,armed_at,created_at,updated_at)
+           VALUES ('overdue', 'owner', ?, ?, 'deadline', '2026-09-30T08:00:00+00:00', 'armed', 't', 't', 't')""",
+        (plan.id, waiting.id),
+    )
+    db.commit()
+    _set_later(db, plan.id, parked.id, True)
+    activity_projection.read_workspace(actor=_human(), db=db)
+    compact = displays[plan.id].get("not_moving")
+    full = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]["display"].get("not_moving")
+    assert compact is not None and full is not None
+    assert compact["overdue_waits"] == full["overdue_waits"] == 1
+    assert compact["need_you"] == full["need_you"] == 0
+    for key in ("next_wait_ends_at", "next_overdue_at", "paused_by_you"):
+        assert compact[key] == full[key]
+
+
+def test_later_document_ask_preserves_hold_and_restores_attention(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Review document", db=db)
+    artifact_id = document_ask(db, "owner")
+    db.commit()
+    boundary.mutate(
+        plan.id, "block_node",
+        {"node_id": node.id, "owner_kind": "user", "ask_artifact_id": artifact_id,
+         "reason": "Review", "reason_key": "document_review", "expected_revision": node.revision},
+        actor=_thread_actor("owner"), provenance="test", mutation_id=_mid(), db=db,
+    )
+    db.commit()
+    for later in (True, False):
+        _set_later(db, plan.id, node.id, later)
+        row = _pane_row(db, node.id)
+        assert row["display"]["label_key"] == ("waiting" if later else "needs_you")
+        assert row["requires_user_action"] is not later
+        assert user_ask.ask_attention_state(db, artifact_id) == ("deferred" if later else "raised")
+        assert db.execute("SELECT count(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,)).fetchone()[0] == 1
+        assert len(attention._summarize_raised(None, "user-1", db=db)) == (0 if later else 1)
+
+
+def test_later_running_node_keeps_working_label():
+    assert operator_display_state.display_from_facts("active", "running", later=True) == {
+        "label_key": "working", "tone_key": "active",
+    }
+    assert operator_display_state.display_from_facts("active", "waiting", later=True, child_working=True) == {
+        "label_key": "working", "tone_key": "active",
+    }
+
+
+def test_later_human_review_is_waiting(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Review", assignee="user", db=db)
+    db.commit()
+    _node_lifecycle(db, plan.id, node.id, "activate")
+    _node_lifecycle(db, plan.id, node.id, "request_review", evidence="Ready")
+    for later in (True, False):
+        _set_later(db, plan.id, node.id, later)
+        row = _pane_row(db, node.id)
+        assert row["display"]["label_key"] == ("waiting" if later else "needs_you")
+        assert row["requires_user_action"] is not later
+        state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]["state"]
+        assert (state == "blocked_on_you") is not later
+        index = activity_projection.read_workspace(actor=_human(), db=db)
+        plan_row = next(item for item in index["plans"] if item["plan"]["id"] == plan.id)
+        assert plan_row["display"]["label_key"] == ("waiting" if later else "needs_you")

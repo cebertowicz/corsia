@@ -21,7 +21,7 @@ test('save after deletion keeps typed text and explains the refusal', async ({ p
 	await page.keyboard.type('\nUnsaved writing.');
 	await expect(doc.editor).toContainText('Unsaved writing.');
 	const status = page.locator('.save-error[role="alert"]');
-	await expect(status).toHaveText('This file no longer exists, so your changes weren’t saved. They’re still here; copy them before you close.');
+	await expect(status).toHaveText('Couldn’t save because this document was deleted. Your text stays here until you close it, so copy it to keep it.');
 	await expect(status).toBeVisible();
 	await page.screenshot({ path: info.outputPath('missing-save.png') });
 });
@@ -35,12 +35,12 @@ test('a deleted file refusal disables Accept and leaves Reject available', async
 	await showAllThreads(doc.drawer);
 	fs.unlinkSync(doc.docPath);
 	await doc.accept(doc.ids[0]).click();
-	await expect(doc.row(doc.ids[0]).getByRole('alert')).toHaveText('This file no longer exists, so nothing was changed. You can close it.');
+	await expect(doc.row(doc.ids[0]).getByRole('alert')).toHaveText('This document is deleted, so nothing changed.');
 	await expect(doc.accept(doc.ids[0])).toBeDisabled();
 	await expect(doc.reject(doc.ids[0])).toBeEnabled();
 	await expect(doc.row(doc.ids[0]).getByText("The text this suggestion replaces isn't in the document.")).toHaveCount(0);
 	await expect(doc.row(doc.ids[0])).not.toContainText('Text changed');
-	await expect(doc.row(doc.ids[0]).getByRole('button', { name: 'Show comment: file deleted' })).toContainText('File deleted');
+	await expect(doc.row(doc.ids[0]).getByRole('button', { name: 'Show comment: document deleted' })).toContainText('Document deleted');
 	await page.screenshot({ path: info.outputPath('missing-suggestion.png') });
 });
 
