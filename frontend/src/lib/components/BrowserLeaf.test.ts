@@ -236,6 +236,36 @@ describe('BrowserLeaf clipboard shortcuts', () => {
   canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true }));
   expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a', modifiers: 2 }));
  });
+ it('leaves a pointer paste to the native paste and forwards its text without reading the clipboard', async () => {
+  const readText = vi.fn();
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(), readText } });
+  const { canvas, socket } = render();
+  await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+  canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'mouse'));
+  canvas.dispatchEvent(pointer('pointerup', 20, 35, 'mouse'));
+  const keys = host.querySelector<HTMLTextAreaElement>('textarea.pane-keys')!;
+  expect(document.activeElement).toBe(keys);
+  const shortcut = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true });
+  keys.dispatchEvent(shortcut);
+  expect(shortcut.defaultPrevented).toBe(false);
+  const paste = Object.assign(new Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { getData: (type: string) => type === 'text/plain' ? 'from a password manager' : '' } });
+  keys.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  expect(socket.sent).toContainEqual({ type: 'clipboard_paste', text: 'from a password manager' });
+  expect(readText).not.toHaveBeenCalled();
+  expect(keys.value).toBe('');
+  const typed = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true });
+  keys.dispatchEvent(typed);
+  expect(typed.defaultPrevented).toBe(true);
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a' }));
+ });
+ it('keeps keyboard focus on the canvas after a touch, so no phone keyboard opens', async () => {
+  const { canvas } = render();
+  await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+  canvas.dispatchEvent(pointer('pointerdown', 90, 65, 'touch'));
+  canvas.dispatchEvent(pointer('pointerup', 90, 65, 'touch'));
+  expect(document.activeElement).toBe(canvas);
+ });
 });
 
 describe('BrowserLeaf navigation metadata', () => {
