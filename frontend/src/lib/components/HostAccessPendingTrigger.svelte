@@ -98,6 +98,8 @@
 	/* One line, never wrapped. Its whole width (--label-full, set by fitLabel) decides whether it fits beside
 	   the agent; on a line of its own it is shortened from the front only when the whole row is too narrow. */
 	.pending-site {
+		/* No value until fitLabel measures the label, so the fallbacks below apply until then. */
+		--label-full: initial;
 		flex: 1 1 var(--label-full, auto);
 		min-width: min(100%, var(--label-full, 0px));
 		overflow: hidden;
