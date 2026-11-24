@@ -34,7 +34,7 @@ A separately sourced weekly ledger sample recorded 27.65 billion tokens. It is a
 
 ## Merged pull requests
 
-Work pull requests are counted once each when merged into the development branch or into a team's integration branch (`train/*`). Merges of an integration branch into the development branch, and promotions of the development branch to the release branch, are excluded. Counts include the project's earlier repository as well as the current one. Dates are merge times in Pacific time; weeks start on Monday. The 30-day figure covers 2026-09-03 through 2026-10-02, from data exported on 2026-10-02. The count shows throughput, not quality.
+Work pull requests are counted once each when merged into the development branch or into a team's integration branch (`train/*`). Merges of an integration branch into the development branch, and promotions of the development branch to the release branch, are excluded. Counts include the project's earlier repository as well as the current one. Dates are merge times in Pacific time; weeks start on Monday. The 30-day figure covers 2026-10-24 through 2026-11-22, counted from the repository's Git history on 2026-11-23. A pull request is identified by the number in its merge or squash commit; commits pushed without a pull request are not counted. Weekly bars through the week of September 28 (Monday to Friday) come from data exported from the earlier repository on 2026-10-02; bars from the week of October 12 come from this repository's history. The week of October 5 is left out because the move between repositories left no complete record of it. The count shows throughput, not quality.
 
 ## Review and quality
 

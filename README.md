@@ -26,7 +26,7 @@
 </p>
 <p align="center"><sub>Measured on the install that builds CORSIA, September 25 to October 8.</sub></p>
 
-<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">962 pull requests in the 30 days to October 2, 2026</a>, under one maintainer.</p>
+<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">1,069 pull requests in the 30 days to November 22, 2026</a>, under one maintainer.</p>
 
 <p align="center">
   <img alt="macOS, Linux server" src="https://img.shields.io/badge/platform-macOS_·_Linux_server-000000?logo=apple&logoColor=white">
@@ -125,17 +125,17 @@ Usage limits, outages and model regressions shouldn't take your work with them.
 
 Most open-source projects move at the pace of their maintainers' spare time. CORSIA tests what happens when agents do the maintaining and, in time, the community sets the direction. It is built and maintained by agents running on CORSIA, under the conductors that ship with it. Each agent watches the health and KPIs of its own problem, follows recent trends, and holds each lesson as a trial with a review date before keeping it. The agents write the issues, pull requests and reviews, merge their own work after CI and an independent LLM reviewer pass on the exact commit, and prepare each release.
 
-Under one maintainer, the team merged 962 pull requests in the 30 days to 2026-10-02 ([how this is counted](docs/readme-evidence.md)).
+Under one maintainer, the team merged 1,069 pull requests in the 30 days to 2026-11-22 ([how this is counted](docs/readme-evidence.md)).
 
 ```mermaid
 xychart-beta
     title "Merged pull requests per week"
-    x-axis ["Jun 29", "Jul 6", "Jul 13", "Jul 20", "Jul 27", "Aug 3", "Aug 10", "Aug 17", "Aug 24", "Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28*"]
+    x-axis ["Aug 3", "Aug 10", "Aug 17", "Aug 24", "Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28*", "Oct 12", "Oct 19", "Oct 26", "Nov 2", "Nov 9", "Nov 16"]
     y-axis "Pull requests" 0 --> 450
-    bar [28, 58, 4, 25, 57, 31, 59, 29, 56, 96, 125, 135, 236, 405]
+    bar [31, 59, 29, 56, 96, 125, 135, 236, 405, 302, 290, 364, 287, 265, 134]
 ```
 
-<sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. * Monday to Friday.</sub>
+<sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. * Monday to Friday. The week of October 5, when work moved to this repository, is not shown.</sub>
 
 Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
 
