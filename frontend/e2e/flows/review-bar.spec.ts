@@ -76,7 +76,7 @@ const questionOf = (page: Page, form: AskForm) => form === 'docked' ? page.locat
  * Opens or closes the ask with a press on its question, as a person does: the docked card's question, or the header row's line.
  * The one exception is a person step in the header: its row has no toggle (its whole text is always shown), so the helper asserts that instead of pressing.
  */
-async function setCardOpen(page: Page, open: boolean, form: AskForm, opts: { personStep?: boolean } = {}) {
+async function setAskOpen(page: Page, open: boolean, form: AskForm, opts: { personStep?: boolean } = {}) {
 	if (form === 'header' && opts.personStep) {
 		await expect(page.locator('.review-bar.ask.static button.rb-line'), 'a person step in the header has no toggle').toHaveCount(0);
 		await expect(page.locator('.review-bar.ask.static .rb-ask-full'), 'a person step in the header always shows its whole text').toBeVisible();
@@ -106,7 +106,7 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		if (width === 1280) await expect(page.locator('.pane.overlay')).toHaveCount(1);
 		// Opened, the person step's card gives who asks its own line above the question; the document's controls are Comments and
 		// Details in the bar.
-		await setCardOpen(page, true, form, { personStep: true });
+		await setAskOpen(page, true, form, { personStep: true });
 		const geometry = await askOf(page, form).evaluate((element) => {
 			const who = element.querySelector('.rb-dock-who, .rb-who strong')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = element.getBoundingClientRect(), style = getComputedStyle(element);
@@ -255,10 +255,10 @@ async function personStep(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'da
 	await settled(page);
 	// On a phone at rest the card shows the question alone; opened, the asker has its own line. In the header the asker is always on the row.
 	// MiddleName's head is the innermost element that ellipsizes, so it is the one to measure.
-	await setCardOpen(page, true, form, { personStep: true });
+	await setAskOpen(page, true, form, { personStep: true });
 	await expect(who).toBeVisible();
 	expect(await nameWhole(who), 'the owner’s name is never truncated').toBe(true);
-	await setCardOpen(page, false, form, { personStep: true });
+	await setAskOpen(page, false, form, { personStep: true });
 	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
 }
 
@@ -278,7 +278,7 @@ journey('a long agent name on a person step shows whole', PERSON_STEP, async ({ 
 	await personStep(page, doc, mode, theme);
 	const form = askFormOf(mode);
 	const who = askerOf(page, form);
-	await setCardOpen(page, true, form, { personStep: true });
+	await setAskOpen(page, true, form, { personStep: true });
 	if (mode === 'default') {
 		// The split keeps re-laying out for a few hundred ms after the resize to 1280, starting after `settled` has looked for
 		// running animations, so the canvas reaches its narrow width a little later: poll rather than read it once.
@@ -335,11 +335,11 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 		await expect(leadAsk).toBeVisible();
 		await expect(leadAsk).toHaveText('Is the rollout plan right?');
 		await expect(requester).toBeHidden();
-		await setCardOpen(page, true, 'docked');
+		await setAskOpen(page, true, 'docked');
 		await expect(requester).toHaveText(doc.title);
 		await expect(requester).toBeVisible();
 		expect(await nameWhole(requester), 'the short ask leaves its requester untruncated').toBe(true);
-		await setCardOpen(page, false, 'docked');
+		await setAskOpen(page, false, 'docked');
 	}
 	await shot(page, 'ask', info);
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
@@ -722,7 +722,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 
 	// Opened, the ask grows to show the whole question (on a phone, with the asker on its own line above it), and its answers stay where they were.
 	const collapsedHeight = (await ask.boundingBox())!.height;
-	await setCardOpen(page, true, form);
+	await setAskOpen(page, true, form);
 	await expect(questionOf(page, form)).toHaveText(reason);
 	expect((await ask.boundingBox())!.height).toBeGreaterThan(collapsedHeight);
 	await expectNameClearOfControls(page, doc.title, form);
@@ -752,12 +752,12 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	await expectAskPlacement(page, form);
 	const measurements = await page.locator('.doc').evaluate((root, form) => {
 		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
-		const askCard = root.querySelector<HTMLElement>(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask')!.getBoundingClientRect();
+		const askRow = root.querySelector<HTMLElement>(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask')!.getBoundingClientRect();
 		const question = root.querySelector<HTMLElement>(form === 'docked' ? '.rb-dock-q' : '.rb-ask')!.getBoundingClientRect();
 		const comments = document.querySelector<HTMLElement>('[data-comments-entry]')!;
 		return {
 			firstBodyY: firstLine.top,
-			cardHeight: askCard.height,
+			cardHeight: askRow.height,
 			questionWidth: question.width,
 			commentsPillName: comments.getAttribute('aria-label'),
 		};
@@ -777,14 +777,14 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	}
 	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
 	if (mode === 'phone') {
-		await setCardOpen(page, true, 'docked');
+		await setAskOpen(page, true, 'docked');
 		await expect(card(page).locator('.rb-dock-q')).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
 		const requester = card(page).locator('.rb-dock-who');
 		await expect(requester).toBeVisible();
 		await expect(requester).toHaveText(doc.title);
 		expect(await nameWhole(requester), 'the long ask leaves its requester untruncated').toBe(true);
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
-		await setCardOpen(page, false, 'docked');
+		await setAskOpen(page, false, 'docked');
 		// The owner and the status live in Details: the owner and supervisor stay one touch row, and the status keeps its as-of date.
 		const panel = await openDetails(page);
 		const ownership = page.locator('[data-ownership-row]');

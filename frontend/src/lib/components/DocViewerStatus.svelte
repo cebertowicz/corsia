@@ -111,8 +111,8 @@
 	let panelEl = $state<HTMLElement | null>(null);
 	let panelOpen = $state(false);
 	let panelMax = $state<number | null>(null);
-	/** The open panel would reach down over the ask's card, so the card steps aside until it closes; Details then carries the ask. */
-	let cardCovered = $state(false);
+	/** The open panel would reach down over the ask (its card on a phone, its row in the header), so the ask steps aside until it closes; Details then carries it. */
+	let askCovered = $state(false);
 
 	$effect(() => {
 		artifactId;
@@ -125,7 +125,7 @@
 	// The panel takes the height left below its top, so it reaches its last row without scrolling wherever that fits.
 	$effect(() => {
 		const panel = panelEl;
-		if (!panelOpen || !panel) { cardCovered = false; return; }
+		if (!panelOpen || !panel) { askCovered = false; return; }
 		const fit = () => {
 			// The document can sit beside the bar entry; keep its panel within the window in either position.
 			panel.style.removeProperty('--panel-shift');
@@ -134,8 +134,8 @@
 			panel.style.setProperty('--panel-shift', `${shift}px`);
 			const top = rect.top;
 			panelMax = Math.floor(window.innerHeight - top - 8);
-			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card]')?.getBoundingClientRect();
-			cardCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
+			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card], .review-bar.ask')?.getBoundingClientRect();
+			askCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
 		};
 		fit();
 		window.addEventListener('resize', fit);
@@ -259,12 +259,12 @@
 {/snippet}
 
 {#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
-<header class="document-header" class:card-covered={cardCovered} bind:this={headerEl}>
+<header class="document-header" class:ask-covered={askCovered} bind:this={headerEl}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
-			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
+			{#if ask && (!ask.onCard || askCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
 				{#each ask.others as other (other.name)}<span class="p-full"><strong>{other.name}</strong>: {other.reason}</span>{/each}

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import DocViewer from './DocViewer.svelte';
+import DocumentBarTestHost from './DocumentBarTestHost.test.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { ReviewBarRead } from '$lib/api/reviewBar';
 import { connectionState } from '$lib/stores/connection';
@@ -32,6 +33,7 @@ const ASK: ReviewBarRead = {
 
 let host: HTMLElement;
 let component: ReturnType<typeof mount> | undefined;
+let bar: ReturnType<typeof mount> | undefined;
 let target: DocViewerTarget;
 
 async function open(width: number) {
@@ -40,6 +42,8 @@ async function open(width: number) {
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	component = mount(DocViewer, { target: host, props: { target } });
+	// Comments and Details are drawn by the bar that holds the canvas; a stand-in draws them here.
+	bar = mount(DocumentBarTestHost, { target: host });
 	flushSync();
 	await vi.waitFor(() => expect(host.querySelector('[aria-label="Review request"]')).not.toBeNull());
 }
@@ -61,7 +65,9 @@ beforeEach(() => {
 	connectionState.set('connected');
 });
 afterEach(async () => {
+	if (bar) await unmount(bar);
 	if (component) await unmount(component);
+	bar = undefined;
 	component = undefined;
 	host?.remove();
 	clearDraft(target);
@@ -92,5 +98,43 @@ describe('where an open document shows the review ask', () => {
 		phone.isShortTouch.set(true);
 		await open(852);
 		expect(host.querySelector('[data-ask-card]')).toBe(ask());
+	});
+
+	// The open Details panel drops over the top of the document, where the header's ask row sits, as it reaches the phone card
+	// at the bottom: either way the ask steps aside and Details carries it. A rendered layout is not available here, so the
+	// boxes are set to the geometry the real page has: the panel from the top, the ask's own box under it.
+	describe('while Details is open', () => {
+		const detailsAsk = () => host.querySelector('[data-details-ask]');
+		const press = () => { host.querySelector<HTMLButtonElement>('[data-document-details]')!.click(); flushSync(); };
+		function layOut(form: 'header' | 'docked') {
+			// On a phone the panel is tall enough to reach the card at the bottom; in the header it starts on the row.
+			const panelHeight = form === 'docked' ? 700 : 300;
+			const box = (top: number, height: number) => ({ x: 0, y: top, top, height, bottom: top + height, left: 0, right: 600, width: 600, toJSON() {} }) as DOMRect;
+			vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+				if (this.classList.contains('doc-panel')) return box(4, panelHeight);
+				if (this.hasAttribute('data-ask-card')) return box(640, 80);
+				return form === 'header' && this.classList.contains('review-bar') && this.classList.contains('ask') ? box(40, 60) : box(0, 0);
+			});
+			vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('doc-panel') ? panelHeight : 0; });
+		}
+
+		it('carries the header ask, which the panel covers, and hands it back when it closes', async () => {
+			await open(1440);
+			layOut('header');
+			expect(detailsAsk()).toBeNull();
+			press();
+			await vi.waitFor(() => expect(detailsAsk()?.textContent).toContain('Is the rollout plan right?'));
+			expect(host.querySelector('header.document-header')!.classList.contains('ask-covered')).toBe(true);
+			press();
+			await vi.waitFor(() => expect(detailsAsk()).toBeNull());
+			expect(host.querySelector('header.document-header')!.classList.contains('ask-covered')).toBe(false);
+		});
+
+		it('carries the docked ask the same way on a phone', async () => {
+			await open(393);
+			layOut('docked');
+			press();
+			await vi.waitFor(() => expect(detailsAsk()?.textContent).toContain('Is the rollout plan right?'));
+		});
 	});
 });

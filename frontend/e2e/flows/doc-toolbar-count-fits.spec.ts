@@ -451,7 +451,7 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 		const details = page.locator('[data-document-details]');
 		// A touch screen that opens comments in a sheet docks its ask as a card; a desktop window shows it as the row in the document header.
 		const form = sheet ? 'docked' : 'header';
-		const card = page.locator(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask');
+		const askRow = page.locator(form === 'docked' ? '[data-ask-card]' : '.review-bar.ask');
 		const frame = async (state: string) => { if (FRAMES) { mkdirSync(FRAMES, { recursive: true }); await page.screenshot({ path: path.join(FRAMES, `needs-${width}x${height}-${state}.png`), fullPage: false }); } };
 		const expectNeeds = async (needs: number, state: string) => {
 			// Overdue is always one; the ask joins by its own words when its card is hidden (needs reaches the case's max).
@@ -480,7 +480,7 @@ for (const { name, project, width, height, split, sheet, max } of NEEDS_CASES) {
 			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 			await expectNeeds(max, 'overdue, file changed in the bar, ask under the comment sheet');
 		} else {
-			await expect(card, 'without a sheet the ask keeps its card').toBeVisible();
+			await expect(askRow, 'without a sheet the ask keeps its card').toBeVisible();
 			await expectNeeds(max, 'overdue, file changed, comments open beside the text');
 		}
 		await page.unrouteAll({ behavior: 'ignoreErrors' });
