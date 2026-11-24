@@ -22,8 +22,7 @@ PASSWORD_PAGE = (
 )
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
-    "This page has shown a password field, so running scripts on it and reading that field stay refused. "
-    "Other commands still work."
+    "This page has shown a password field, so running scripts on it and reading that field stay refused."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
 # A failed plan write loses at most the person's task for the page, never the browser itself. What became of
