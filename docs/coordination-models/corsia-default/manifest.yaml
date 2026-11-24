@@ -45,8 +45,8 @@ files:
     sha256: 573be7b1036f53f05e60af73d9f7d547eafb3402052304f856a6d3f43fa696c3
   - kind: priorities-template
     path: templates/PRIORITIES.md
-    bytes: 734
-    sha256: cf690841e372fa1f8591c43125f5c00453b4a72c3929aa0c320037baf8ad731d
+    bytes: 758
+    sha256: ba93e92ea536dd6cea8db147c79a1adbe5bbeaffc385f9b683503ded1927ca90
   - kind: responsibility-standard
     path: standards/RESPONSIBILITY-STANDARD.md
     bytes: 3474

@@ -103,7 +103,7 @@
       "bytes": 5877,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "6d0c301659f1f9142eddd37b6f8ff936f85dbf23cde8e9e9de8479c2fbc1a1ff"
+      "sha256": "91633d41cbdcdca6f37349e7c114a3c53ec755a605d77aa79214de6f576dd7d9"
     },
     {
       "bytes": 3474,
@@ -112,10 +112,10 @@
       "sha256": "caaa0dc5c2b8b14eb9412538d1800c7deef7286e84c6ffd3324d4d1d1c5be020"
     },
     {
-      "bytes": 732,
+      "bytes": 758,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/templates/PRIORITIES.md",
-      "sha256": "febcaaa2122355c556e0636532e6d061192b0b6061b9c1194d003bddb72c2df6"
+      "sha256": "ba93e92ea536dd6cea8db147c79a1adbe5bbeaffc385f9b683503ded1927ca90"
     },
     {
       "bytes": 4409,
@@ -166,10 +166,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 10034,
+      "bytes": 10112,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "2027d2637b5070ce1bcbddae97ecc587d27925079a806ca21b4457c2ce9e592d"
+      "sha256": "2e261502d2ba0aaec6f1eef464600a974ab961676ebfdae76755984b8ae7cf77"
     },
     {
       "bytes": 6186,
@@ -232,10 +232,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 2883,
+      "bytes": 3107,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/priorities-files.md",
-      "sha256": "a066d36a3726ba39173fa786da6b380150b5c895debbaa12131217e040f44102"
+      "sha256": "74b783613cec2dc2a74499ec0b4ae76630f74ee631a4190effba7f55e808a564"
     },
     {
       "bytes": 7206,

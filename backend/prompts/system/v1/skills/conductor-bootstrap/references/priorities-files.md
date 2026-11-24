@@ -5,7 +5,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 ## Two levels
 
 - **The project's file:** `context/PRIORITIES.md`. What the whole team puts first.
-- **Each agent's file:** `PRIORITIES.md` in that agent's own `context/` folder (`.threads/<agent id>/context/`). It never repeats a line from the project's file: when the agent's work serves one of the project's Now lines, its own Now reads `Not set yet`, unless the person gave that agent a different order.
+- **Each agent's file:** `PRIORITIES.md` in that agent's own `context/` folder (`.threads/<agent id>/context/`). Its Now is the problems that agent is there to solve, in order. A project line the agent serves may be one of them.
 - Every agent loads both on every turn, so keep each to a few short lines. On an install with no project, an agent's own file is its only one.
 
 ## What a file holds
@@ -21,6 +21,8 @@ Use this when you write, review or suggest a change to a priorities file: at set
 
 - Every line traces to the person's words or a decision they made, or reads `Not set yet`. Never fill a gap with what seems likely.
 - Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. No platform terms or jargon.
+- For each new agent, ask the person what that agent should solve first. Its Now holds what they name, in their order, or reads `Not set yet` if they name nothing.
+- Each Now line serves a goal of the project or of the agent. When a line serves none, ask the person about it; never write it in silently.
 - The person approves each file. A file they have not approved does not count.
 
 ## What it starts
