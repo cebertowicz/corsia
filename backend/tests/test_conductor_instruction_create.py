@@ -119,6 +119,42 @@ async def test_create_attach_idempotent_retry_and_revision(isolated_db, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_priorities_create_delivers_and_rejects_extra_paths(isolated_db, tmp_path, monkeypatch):
+    from core.dynamic_context_registry import _thread_bootloader_sources
+
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    tool = ConductorInstructionFileCreateTool()
+    for extra in ({"name": "bad"}, {"supporting_files": {"scripts/x": "bad"}}):
+        result = await tool.execute(target, "priorities", "absent", "# Priorities\n", _thread_id=actor, **extra)
+        assert result.startswith("Error:"), result
+    receipt = json.loads(await tool.execute(target, "priorities", "absent", "# Priorities\n", _thread_id=actor))
+    path = workspace / ".threads" / target / "context" / "PRIORITIES.md"
+    assert receipt["delivery"] == {"next_turn": True, "surface": "bootloader"}
+    assert Path(receipt["path"]) == path and path.read_text() == "# Priorities\n"
+    db = get_db()
+    try:
+        sources = _thread_bootloader_sources(target, None, workspace, db)
+        assert any(row.stable_reference == str(path) and row.inclusion == "included" for row in sources)
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_priorities_symlink_cannot_escape_tray(isolated_db, tmp_path, monkeypatch):
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    tray = workspace / ".threads" / target
+    tray.mkdir(parents=True)
+    (tray / "context").symlink_to(outside, target_is_directory=True)
+    result = await ConductorInstructionFileCreateTool().execute(
+        target, "priorities", "absent", "# Priorities\n", _thread_id=actor,
+    )
+    assert result.startswith("Error:")
+    assert not (outside / "PRIORITIES.md").exists()
+
+
+@pytest.mark.asyncio
 async def test_skill_and_script_install_reaches_effective_next_turn_list(isolated_db, tmp_path, monkeypatch):
     workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
     receipt = json.loads(await ConductorInstructionFileCreateTool().execute(
