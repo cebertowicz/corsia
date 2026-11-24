@@ -12,7 +12,7 @@ import pytest
 
 import infra.sqlite_clone as sqlite_clone
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.sqlite_clone import CloneUnsupported, clone_database
+from infra.sqlite_clone import CloneInconsistent, CloneUnsupported, clone_database
 
 
 @pytest.fixture
@@ -117,7 +117,7 @@ def test_a_clone_reading_the_wrong_version_leaves_nothing_behind(tmp_path):
     _wal_database(source, 7).close()
     target = tmp_path / "live.db.bak"
 
-    with pytest.raises(RuntimeError, match="user_version 7"):
+    with pytest.raises(CloneInconsistent, match="user_version 7"):
         clone_database(source, target, expected_user_version=8)
 
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("live.db.bak")) == []
@@ -148,7 +148,7 @@ def test_without_a_clone_the_migration_still_backs_up_by_copying_pages(tmp_path,
         backup.close()
 
 
-@pytest.mark.parametrize("error_type", [RuntimeError, sqlite3.OperationalError, OSError])
+@pytest.mark.parametrize("error_type", [sqlite3.OperationalError, OSError])
 def test_clone_failure_falls_back_to_readable_backup(tmp_path, ladder, monkeypatch, caplog, error_type):
     import infra.database_migrations as migrations
 
@@ -193,7 +193,8 @@ def test_clone_keyboard_interrupt_propagates(tmp_path, ladder, monkeypatch):
         conn.close()
 
 
-def test_fold_failure_cleans_clone_before_page_copy(tmp_path, ladder, monkeypatch):
+def test_an_inconsistent_clone_stops_the_migration(tmp_path, ladder, monkeypatch):
+    """A clone that misses the locked state breaks the snapshot reasoning; it must not pass as a warning."""
     import infra.database_migrations as migrations
 
     real_clone = sqlite_clone.clone_database
@@ -208,10 +209,45 @@ def test_fold_failure_cleans_clone_before_page_copy(tmp_path, ladder, monkeypatc
     writer = _wal_database(source, 3)
     conn = sqlite3.connect(source)
     try:
-        result = migrate_to_current(conn, 4)
+        with pytest.raises(migrations.MigrationError, match="rolled back") as stopped:
+            migrate_to_current(conn, 4)
+        assert isinstance(stopped.value.__cause__, CloneInconsistent)
     finally:
         conn.close()
         writer.close()
+    assert [p.name for p in tmp_path.iterdir() if ".pre-migration-" in p.name] == []
+    with sqlite3.connect(source) as live:
+        assert live.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_fold_failure_cleans_clone_before_page_copy(tmp_path, ladder, monkeypatch, caplog):
+    import infra.database_migrations as migrations
+
+    readers: list[sqlite3.Connection] = []
+
+    def copy_then_hold_a_reader(source, target):
+        # A reader open on the clone when it is folded makes wal_checkpoint(TRUNCATE) report busy.
+        shutil.copyfile(source, target)
+        if str(target).endswith("-wal"):
+            reader = sqlite3.connect(str(target)[: -len("-wal")], isolation_level=None)
+            reader.execute("BEGIN")
+            reader.execute("SELECT count(*) FROM t").fetchone()
+            readers.append(reader)
+
+    monkeypatch.setattr(sqlite_clone, "_clone_file", copy_then_hold_a_reader)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 3)
+    conn = sqlite3.connect(source)
+    try:
+        with caplog.at_level(logging.WARNING, logger=migrations.__name__):
+            result = migrate_to_current(conn, 4)
+    finally:
+        for open_conn in (*readers, conn, writer):
+            open_conn.close()
+    assert readers, "the fold must have run against a cloned WAL"
+    assert any(record.exc_info and "could not fold" in str(record.exc_info[1])
+               for record in caplog.records)
     assert result.backup_path is not None and result.backup_path.exists()
     assert not Path(f"{result.backup_path}-wal").exists()
     assert not Path(f"{result.backup_path}-shm").exists()
