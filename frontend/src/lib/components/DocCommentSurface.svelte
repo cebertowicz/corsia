@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { loadMentionRoster } from './comments/mentionRoster.svelte';
 	import { documentHalfSheetRoom } from '$lib/actions/documentHalfSheetRoom';
-	import { documentThreadFooterRoom } from '$lib/actions/documentThreadFooterRoom';
+	import { documentFooterRoom } from '$lib/actions/documentFooterRoom';
 	import { documentThreadChromeRoom } from '$lib/actions/documentThreadChromeRoom';
 	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
@@ -56,7 +56,7 @@
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let filterOpen = $state(false);
 	let drawer = $state<HTMLElement>();
-	let scrollThreadFooter = $state(false);
+	let footerScrolls = $state(false);
 	const canvasWidth = settledCanvasWidth(() => bounds, () => form.note());
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it the list is a popover from the comments control, and only a phone dims the document with a sheet. Image viewers already decide whether their canvas is a sheet.
 	const roomForMargin = $derived(hasRoomForMargin(canvasWidth.value));
@@ -144,6 +144,8 @@
 	const resolvedList = $derived(comments.filter((comment) => comment.resolved && !held.kept(comment) && !held.leaving.has(comment.id) && !comment.review).sort(byNewest));
 	/** The count the drawer's Resolved answer shows. Nothing outside the surface reads it, so it stays here. */
 	const resolvedCount = $derived(image ? 0 : resolvedList.length);
+	/** The phone sheet's switch is the heading's meta, beside the title, so it takes no row of its own; the popover and the margin column keep the row. */
+	const switchInHeading = $derived(!margin && !isImage && !openedComment && sheet.state?.kind === 'list' && !!sheetDrawer);
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
 		if (showing?.kind === 'thread') return comments.filter((comment) => showing.ids ? showing.ids.includes(comment.id) : comment.id === showing.id);
@@ -255,6 +257,10 @@
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
 		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
+	/** On the phone sheet the Accept suggestions row sits inside the scroller (pinned to its top at rest); every other list form keeps it above the scroller. It is in one place for the life of the sheet, so the keyboard never rebuilds it. */
+	const acceptInScroller = $derived(!margin && sheet.state?.kind === 'list' && sheetDrawer);
+	/** Accept suggestions shows in every list form outside the margin, when there is something to say. */
+	const acceptAllShown = $derived((!margin || resolvedOpen || !isImage) && !readOnly && !openedComment && !!(decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError));
 	// Stale and missing-file accept refusals go to `suggestionRefusals`, which also shows the card as orphaned.
 	const cardErrors = $derived({
 		...Object.fromEntries(Object.entries(artifactId ? $suggestionRefusals[artifactId] ?? {} : {}).map(([id, refusal]) => [id, refusalMessage(refusal)])),
@@ -268,6 +274,7 @@
 {/snippet}
 {#snippet threadActions()}{#if threadHead}<ThreadSheetActions head={threadHead} onAgree={onAgree} onResolve={(id) => ownClose.resolving(id, resolveThread(id, true))} />{/if}{/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
+{#snippet statusSwitch()}<div class="drawer-switch" class:in-heading={switchInHeading} role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedCount}</button></div>{/snippet}
 {#snippet acceptAllBar()}
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
 {/snippet}
@@ -281,23 +288,24 @@
 {/snippet}
 {#snippet listBody()}
 	<!-- On the canvas the open threads are cards beside their text, with no heading or close around them: the column closes with the comments control. -->
-	{#if !margin}<DocCommentDrawerHeading count={headerCount} filtered={!!image} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
-	{#if !isImage && !openedComment}<div class="drawer-switch" role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedCount}</button></div>{/if}
+	{#if !margin}<DocCommentDrawerHeading count={headerCount} meta={switchInHeading ? statusSwitch : undefined} filtered={!!image} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
+	{#if !isImage && !openedComment && !switchInHeading}{@render statusSwitch()}{/if}
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
-	<!-- Accept all sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. The thread view gives that room to its one thread; Back returns to the list's Accept all. -->
-	{#if (!margin || resolvedOpen || !isImage) && !readOnly && !openedComment && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
+	<!-- Accept suggestions sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. On the phone sheet it is the scroller's first row, pinned to its top, so it looks and stays where it was; under the keyboard the footer scrolls to give the list room (documentFooterRoom) and the row scrolls with it. The thread view gives that room to its one thread. -->
+	{#if acceptAllShown && !acceptInScroller}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
 	{#if openedComment}<DocCommentThreadBack onBack={threadView.back} />{/if}
 	{#if margin && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
+		{#if acceptAllShown && acceptInScroller}<div class="list-accept-all in-scroller" class:pinned={!footerScrolls}>{@render acceptAllBar()}</div>{/if}
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
 		{#if !isImage && resolvedOpen}<DocResolvedComments>{#snippet list()}{#if resolvedList.length}{@render threadList(resolvedList, true, true, false, true)}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">No resolved comments.</p>{/if}{/snippet}</DocResolvedComments>{:else if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} focusComposer={!form.redrawn} head={isImage && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError) ? acceptAllBar : null}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if openedComment}{@render threadList([openedComment], true, false, false, true, 'all')}{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
-		{#if scrollThreadFooter && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
+		{#if footerScrolls && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
 	</div>
-	{#if !margin && !isImage && artifactId && !scrollThreadFooter}<DocCommentDrawerFoot {feedback} />{/if}
+	{#if !margin && !isImage && artifactId && !footerScrolls}<DocCommentDrawerFoot {feedback} />{/if}
 {/snippet}
 {#snippet cardPopover()}<Popover fill anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={form.handoff ?? (image && !readOnly ? '.ct-input' : undefined)} takeFocus={form.redrawn ? !!form.handoff : !(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => isShellControl(target) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
 
@@ -305,7 +313,7 @@
 	{#if margin && surfaceState}
 		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:documentThreadFooterRoom={(scrolls) => scrollThreadFooter = scrolls} use:documentThreadChromeRoom use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:documentHalfSheetRoom use:documentFooterRoom={(scrolls) => footerScrolls = scrolls} use:documentThreadChromeRoom use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list' && !image && !columnFits}
 		<!-- Below the column's threshold on a desktop canvas: a popover from the comments control, so nothing is dimmed or covered but the list itself. -->
 		<Popover anchor={listAnchor} placement="bottom-end" bounds={listBounds} fill {covered} initialFocus={form.handoff ?? undefined} takeFocus={!form.redrawn || !!form.handoff} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isShellControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
@@ -318,6 +326,9 @@
 	.drawer-switch { display: flex; gap: var(--space-1); }
 	.drawer-switch button { min-height: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; cursor: pointer; }
 	.drawer-switch button[aria-pressed="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
+	/* In the sheet's heading the switch reads as the title's meta, in the Plan view's meta type, and takes no more room than its two targets, which never shrink below their text (the heading wraps the switch under the title instead). */
+	.drawer-switch.in-heading { gap: 0; flex: none; }
+	.drawer-switch.in-heading button { min-width: var(--touch-target); padding: 0 var(--space-1); flex: none; font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
 	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
@@ -350,4 +361,8 @@
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
 	.list-accept-all { flex: none; padding: 0 0 var(--space-1) var(--space-1); }
+	/* In the scroller the row stays at its top at rest, where it sat above it; the drawer's row gap above the scroller is now this padding. */
+	.list-accept-all.in-scroller { padding-bottom: calc(var(--space-1) * 2); }
+	/* Pinned, the row has its own ground and nothing past its box, so the list never gains sideways room. In a classic-scrollbar browser a selected card scrolled under it can show its 3px ring in the gutter beside the row. */
+	.list-accept-all.in-scroller.pinned { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); }
 </style>

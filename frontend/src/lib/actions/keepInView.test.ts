@@ -100,6 +100,32 @@ describe('keepInView', () => {
 		action.destroy();
 	});
 
+	// A scroll the browser makes on its own after a sheet's last shrink reads the field as below the end (the sheet is
+	// 290 tall, the field's end is at 490), and the resize that follows is the last one: the reveal that would correct it
+	// must still run when the field has focus, and must not when the person is reading elsewhere.
+	const scrolledByTheBrowserThenResized = (focused: boolean) => {
+		height = 290;
+		const { owner, card, field, reveals, shrink } = sheet();
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card });
+		expect(reveals).toHaveBeenCalledTimes(1);
+		if (focused) field.focus();
+		expect(document.activeElement === field).toBe(focused);
+		scrollTop = 0;
+		owner.dispatchEvent(new Event('scroll'));
+		shrink(290);
+		action.destroy();
+		return reveals;
+	};
+
+	it('brings a focused field back on a resize even after a scroll of the browser\'s own read it as out of view', () => {
+		expect(scrolledByTheBrowserThenResized(true)).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not bring an unfocused field back on that same resize', () => {
+		expect(scrolledByTheBrowserThenResized(false)).toHaveBeenCalledTimes(1);
+	});
+
 	it('brings the field back when the person types at its end, and not when they type inside it', () => {
 		height = 290;
 		const { owner, card, field, reveals } = sheet();
