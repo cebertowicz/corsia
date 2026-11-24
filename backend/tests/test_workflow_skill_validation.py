@@ -81,3 +81,25 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
         "difficulty_rerated",
     ):
         assert contract in task.body
+
+
+@pytest.mark.parametrize(("skill", "titles"), [
+    ("general-work", {
+        "ground": "Groundwork",
+        "premortem": "Risks",
+        "work": "Draft",
+        "review": "Fresh review",
+        "handover": "Delivery",
+    }),
+    ("review-work", {
+        "brief": "Brief",
+        "check": "Check",
+        "weigh": "Fixes",
+    }),
+])
+def test_shipped_general_workflow_step_titles_name_what_the_person_gets(skill, titles):
+    """A person reads these titles in their plan, Activity and Measurement; the step ids stay fixed."""
+    result = validate_skill_file(system_package_dir() / f"skills/{skill}/SKILL.md")
+
+    assert result.ok, result.errors
+    assert {step["id"]: step["title"] for step in result.corsia["workflow"]["steps"]} == titles
