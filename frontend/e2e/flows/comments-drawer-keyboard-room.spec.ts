@@ -45,3 +45,31 @@ test(`${TAG} the list's footer scrolls with it while a Reply has focus, with a l
 	await settleRect(page, SHEET);
 	await expect.poll(footerScrolls, 'with no field focused the footer is fixed again').toBe(false);
 });
+
+test(`${TAG} a tap on the last Reply, then the keyboard, leaves the whole field above the keyboard`, async ({ page, request }) => {
+	const doc = await seed(request, 'Keyboard reveal');
+	for (let i = 0; i < 12; i += 1) await comment(request, doc, `Note ${i + 1}: check this step.`, (i % 12) + 1);
+	await open(page, doc, 'phone', 'light');
+	await page.setViewportSize({ width: 393, height: FULL });
+	await settleMotion(page);
+	await page.locator('[data-comments-entry]').tap();
+	await expect(page.locator(SHEET)).toHaveCount(1);
+	await settleRect(page, SHEET);
+	await page.waitForTimeout(500);
+	// A real tap (pointerdown, as a person does), then the layout shrinks for the keyboard while the sheet's own height transition runs.
+	await page.locator(SHEET).getByPlaceholder('Reply…').last().tap();
+	await page.setViewportSize({ width: 393, height: FULL - KEYBOARD });
+	await settleRect(page, SHEET);
+	await page.waitForTimeout(800);
+	const reading = () => page.evaluate(() => {
+		const field = document.activeElement as HTMLElement | null;
+		const list = document.querySelector<HTMLElement>('[data-adaptive-drawer] .drawer-panel .drawer-comments');
+		if (!field || field.tagName !== 'TEXTAREA' || !list) return null;
+		const box = field.getBoundingClientRect(), view = list.getBoundingClientRect();
+		return { fieldTop: box.top, fieldBottom: box.bottom, viewTop: view.top, viewBottom: Math.min(view.bottom, window.innerHeight) };
+	});
+	const seen = await reading();
+	expect(seen, 'the tapped Reply keeps focus').not.toBeNull();
+	expect(seen!.fieldTop, 'the field starts inside the list').toBeGreaterThanOrEqual(seen!.viewTop - 0.5);
+	expect(seen!.fieldBottom, 'the field ends above the keyboard and the list end').toBeLessThanOrEqual(seen!.viewBottom + 0.5);
+});

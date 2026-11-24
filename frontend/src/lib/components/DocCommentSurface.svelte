@@ -357,5 +357,7 @@
 	.list-accept-all { flex: none; padding: 0 0 var(--space-1) var(--space-1); }
 	/* In the scroller the row stays at its top at rest, where it sat above it; the drawer's row gap above the scroller is now this padding. */
 	.list-accept-all.in-scroller { padding-bottom: calc(var(--space-1) * 2); }
+	/* The row's ground also covers the scroller's right gutter: a selected card scrolled under the row wears a 3px ring outside its box, which would show there. */
 	.list-accept-all.in-scroller.pinned { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); }
+	.list-accept-all.in-scroller.pinned::after { content: ''; position: absolute; top: 0; bottom: 0; left: 100%; width: var(--space-1); background: var(--bg-secondary); }
 </style>
