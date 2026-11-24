@@ -325,11 +325,46 @@ describe('DocCommentSurface suggestions', () => {
 		render(Object.defineProperties({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] }, open.props));
 		const ids = (selector: string) => [...document.body.querySelectorAll(`${selector} [data-comment-id]`)].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids('[data-doc-comments-drawer]')).toEqual(['comment-1']);
-		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('Comments 1');
+		// The sheet's heading carries the counts on its switch, so the title has none.
+		const heading = document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')!;
+		expect(heading.querySelector('h2')?.textContent).toBe('Comments');
+		expect(heading.querySelector('.drawer-switch button[aria-pressed="true"]')?.textContent).toBe('Open · 1');
 		expect(open.count()).toBe(2);
 		open.set(true); flushSync(); await tick();
 		expect(ids('[data-resolved-column]')).toEqual(['new', 'old']);
 		expect(document.body.querySelector('[data-doc-comments-drawer] [data-resolved-column]')).not.toBeNull();
+	});
+
+	it('holds the Open and Resolved switch in the sheet heading, and keeps no row of its own under it', () => {
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ narrow: true, state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		const drawer = document.body.querySelector('[data-doc-comments-drawer]')!;
+		const heading = drawer.querySelector('.drawer-heading')!;
+		expect([...heading.querySelectorAll('.drawer-switch button')].map((button) => button.textContent)).toEqual(['Open · 1', 'Resolved · 1']);
+		expect(heading.querySelector('.drawer-switch')?.getAttribute('aria-label')).toBe('Comment status');
+		expect(heading.querySelector('h2 span')).toBeNull();
+		expect(drawer.querySelectorAll('.drawer-switch')).toHaveLength(1);
+		expect(drawer.querySelector(':scope > .drawer-switch')).toBeNull();
+		// The title and the switch sit in one wrapping group beside Close, so a switch too wide for the row drops under the title, not onto Close or into a clipped label.
+		expect(heading.classList.contains('has-meta')).toBe(true);
+		expect([...heading.querySelectorAll(':scope > .heading-main > *')].map((el) => el.tagName + (el.classList.contains('drawer-switch') ? '.drawer-switch' : ''))).toEqual(['H2', 'DIV.drawer-switch']);
+		expect(heading.querySelector(':scope > .drawer-tools [aria-label="Close comments"]')).not.toBeNull();
+		expect(heading.querySelector('.heading-main .drawer-tools')).toBeNull();
+		const resolved = heading.querySelector<HTMLButtonElement>('[data-resolved-entry]')!;
+		resolved.click(); flushSync();
+		expect(resolved.getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('keeps the switch row and the count in the title of the popover, which has no sheet heading to hold them', () => {
+		const bounds = noRoomCanvas();
+		const pill = bounds.appendChild(document.createElement('button'));
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ bounds, anchor: pill, state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		const pop = document.body.querySelector('[data-popover]')!;
+		expect(pop.querySelector('.drawer-heading .drawer-switch')).toBeNull();
+		expect(pop.querySelector('.drawer-heading h2')?.textContent).toBe('Comments 1');
+		expect(pop.querySelector('.drawer-heading .heading-main')).toBeNull();
+		expect([...pop.querySelectorAll('[data-doc-comments-drawer] > .drawer-switch button')].map((button) => button.textContent)).toEqual(['Open · 1', 'Resolved · 1']);
 	});
 
 	it('shows resolved comments in the sheet after the comments surface opens', async () => {
@@ -811,6 +846,27 @@ describe('DocCommentSurface suggestions', () => {
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		expect(acceptAll().textContent).toBe('Accept suggestions');
 		expect(acceptAll().disabled).toBe(false);
+	});
+
+	it('moves the sheet footer and Accept all into the scroller while the keyboard is up, and back when it goes down', async () => {
+		// jsdom has no visual viewport: stand one in, which the page's own handler would resize when a keyboard opens.
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
+		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
+		const drawer = document.body.querySelector('[data-doc-comments-drawer]')!;
+		const keyboard = (shown: boolean) => {
+			document.documentElement.style.setProperty('--doc-visual-viewport-height', `${window.innerHeight - (shown ? 300 : 0)}px`);
+			viewport.dispatchEvent(new Event('resize'));
+		};
+		await vi.waitFor(() => expect(drawer.querySelector(':scope > .list-accept-all')).not.toBeNull());
+		expect(drawer.querySelector('.drawer-comments .list-accept-all')).toBeNull();
+		try {
+			keyboard(true);
+			await vi.waitFor(() => expect(drawer.querySelector(':scope > .drawer-comments > .list-accept-all')).not.toBeNull());
+			expect(drawer.querySelector(':scope > .list-accept-all')).toBeNull();
+			keyboard(false);
+			await vi.waitFor(() => expect(drawer.querySelector(':scope > .list-accept-all')).not.toBeNull());
+		} finally { document.documentElement.style.removeProperty('--doc-visual-viewport-height'); }
 	});
 
 	it.each([true, false])('hides accept-all from read-only viewers (sheet: %s)', (narrow) => {

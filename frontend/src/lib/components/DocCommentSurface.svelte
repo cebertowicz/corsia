@@ -144,6 +144,8 @@
 	const resolvedList = $derived(comments.filter((comment) => comment.resolved && !held.kept(comment) && !held.leaving.has(comment.id) && !comment.review).sort(byNewest));
 	/** The count the drawer's Resolved answer shows. Nothing outside the surface reads it, so it stays here. */
 	const resolvedCount = $derived(image ? 0 : resolvedList.length);
+	/** The phone sheet's switch is the heading's meta, beside the title, so it takes no row of its own; the popover and the margin column keep the row. */
+	const switchInHeading = $derived(!margin && !isImage && !openedComment && sheet.state?.kind === 'list' && !!sheetDrawer);
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
 		if (showing?.kind === 'thread') return comments.filter((comment) => showing.ids ? showing.ids.includes(comment.id) : comment.id === showing.id);
@@ -249,6 +251,8 @@
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
 		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
+	/** Accept all shows in every list form outside the margin, when there is something to say. */
+	const acceptAllShown = $derived((!margin || resolvedOpen || !isImage) && !readOnly && !openedComment && !!(decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError));
 	// Stale and missing-file accept refusals go to `suggestionRefusals`, which also shows the card as orphaned.
 	const cardErrors = $derived({
 		...Object.fromEntries(Object.entries(artifactId ? $suggestionRefusals[artifactId] ?? {} : {}).map(([id, refusal]) => [id, refusalMessage(refusal)])),
@@ -262,6 +266,7 @@
 {/snippet}
 {#snippet threadActions()}{#if threadHead}<ThreadSheetActions head={threadHead} onAgree={onAgree} onResolve={(id) => ownClose.resolving(id, resolveThread(id, true))} />{/if}{/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
+{#snippet statusSwitch()}<div class="drawer-switch" class:in-heading={switchInHeading} role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedCount}</button></div>{/snippet}
 {#snippet acceptAllBar()}
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
 {/snippet}
@@ -275,16 +280,17 @@
 {/snippet}
 {#snippet listBody()}
 	<!-- On the canvas the open threads are cards beside their text, with no heading or close around them: the column closes with the comments control. -->
-	{#if !margin}<DocCommentDrawerHeading count={headerCount} filtered={!!image} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
-	{#if !isImage && !openedComment}<div class="drawer-switch" role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedCount}</button></div>{/if}
+	{#if !margin}<DocCommentDrawerHeading count={headerCount} meta={switchInHeading ? statusSwitch : undefined} filtered={!!image} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
+	{#if !isImage && !openedComment && !switchInHeading}{@render statusSwitch()}{/if}
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
-	<!-- Accept all sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. The thread view gives that room to its one thread; Back returns to the list's Accept all. -->
-	{#if (!margin || resolvedOpen || !isImage) && !readOnly && !openedComment && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
+	<!-- Accept all sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. Under a phone's keyboard the footer scrolls to give the list room (documentThreadFooterRoom), and Accept all goes with it, into the scroller. The thread view gives that room to its one thread; Back returns to the list's Accept all. -->
+	{#if acceptAllShown && !scrollThreadFooter}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
 	{#if openedComment}<DocCommentThreadBack onBack={threadView.back} />{/if}
 	{#if margin && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
+		{#if acceptAllShown && scrollThreadFooter}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
 		{#if !isImage && resolvedOpen}<DocResolvedComments>{#snippet list()}{#if resolvedList.length}{@render threadList(resolvedList, true, true, false, true)}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">No resolved comments.</p>{/if}{/snippet}</DocResolvedComments>{:else if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} focusComposer={!form.redrawn} head={isImage && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError) ? acceptAllBar : null}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if openedComment}{@render threadList([openedComment], true, false, false, true, 'all')}{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
@@ -312,6 +318,9 @@
 	.drawer-switch { display: flex; gap: var(--space-1); }
 	.drawer-switch button { min-height: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; cursor: pointer; }
 	.drawer-switch button[aria-pressed="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
+	/* In the sheet's heading the switch reads as the title's meta, in the Plan view's meta type, and takes no more room than its two targets, which never shrink below their text (the heading wraps the switch under the title instead). */
+	.drawer-switch.in-heading { gap: 0; flex: none; }
+	.drawer-switch.in-heading button { min-width: var(--touch-target); padding: 0 var(--space-1); flex: none; font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
 	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }

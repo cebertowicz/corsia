@@ -1,11 +1,11 @@
-/** Give the document's half sheet the room its fixed status and delivery rows add to the list. */
+/** Give the document's half sheet the room its fixed delivery row adds to the list. */
 export function documentHalfSheetRoom(drawer: HTMLElement) {
 	const panel = drawer.closest<HTMLElement>('.drawer-panel');
 	if (!panel) return;
 	let frame = 0;
 	const resize = new ResizeObserver(schedule);
 	function measure() {
-		const rows = Array.from(drawer.children).filter((child) => child.matches('.drawer-switch, .drawer-foot'));
+		const rows = Array.from(drawer.children).filter((child) => child.matches('.drawer-foot'));
 		const nestedFooter = drawer.querySelector('.drawer-comments > .drawer-foot');
 		if (nestedFooter) rows.push(nestedFooter);
 		const gap = parseFloat(getComputedStyle(drawer).rowGap) || 0;
@@ -18,7 +18,7 @@ export function documentHalfSheetRoom(drawer: HTMLElement) {
 	}
 	function observeRows() {
 		resize.disconnect();
-		for (const row of drawer.children) if (row.matches('.drawer-switch, .drawer-foot')) resize.observe(row);
+		for (const row of drawer.children) if (row.matches('.drawer-foot')) resize.observe(row);
 		const nestedFooter = drawer.querySelector('.drawer-comments > .drawer-foot');
 		if (nestedFooter) resize.observe(nestedFooter);
 		schedule();

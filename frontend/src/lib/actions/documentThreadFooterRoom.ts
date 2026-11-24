@@ -1,4 +1,14 @@
-/** Keep the footer fixed unless a thread's fixed rows leave less than one reply target. */
+/** The soft keyboard is up when the visual viewport (`--doc-visual-viewport-height`, kept by the page) is well short of the layout viewport. No keyboard is shorter than this. */
+const KEYBOARD_MIN = 120;
+function keyboardUp() {
+	const seen = parseFloat(document.documentElement.style.getPropertyValue('--doc-visual-viewport-height'));
+	return Number.isFinite(seen) && window.innerHeight - seen >= KEYBOARD_MIN;
+}
+
+/**
+ * Keep the footer fixed unless it takes room a reader needs. A thread's footer scrolls when its fixed rows leave less than one
+ * reply target. The list's footer, and its Accept all, scroll while the keyboard is up, so the list keeps that room.
+ */
 export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls: boolean) => void) {
 	let frame = 0;
 	const resize = new ResizeObserver(schedule);
@@ -6,7 +16,8 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 		const list = drawer.querySelector<HTMLElement>(':scope > .drawer-comments');
 		const footer = drawer.querySelector<HTMLElement>('.drawer-foot');
 		const back = drawer.querySelector<HTMLElement>(':scope > .thread-back');
-		if (!list || !footer || !back) { onChange(false); return; }
+		if (!list || !footer) { onChange(false); return; }
+		if (!back) { onChange(keyboardUp()); return; }
 		// Back is out of the flow on a short sheet (documentThreadChromeRoom), so it takes no row.
 		const fixed = [...drawer.children].filter((child) => child !== list && child !== footer && getComputedStyle(child).position !== 'absolute');
 		const style = getComputedStyle(drawer);
@@ -17,6 +28,8 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 			+ footer.getBoundingClientRect().height + gap * (fixed.length + 1) + target;
 		onChange(required > drawer.clientHeight);
 	}
+	// The page publishes the visual viewport on its own resize handler; measuring a frame later reads what it set.
+	window.visualViewport?.addEventListener('resize', schedule);
 	function schedule() {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(measure);
@@ -34,5 +47,5 @@ export function documentThreadFooterRoom(drawer: HTMLElement, onChange: (scrolls
 	});
 	mutation.observe(drawer, { childList: true, subtree: true });
 	observeRows();
-	return { destroy() { cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect(); onChange(false); } };
+	return { destroy() { window.visualViewport?.removeEventListener('resize', schedule); cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect(); onChange(false); } };
 }
