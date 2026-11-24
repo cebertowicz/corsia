@@ -34,7 +34,7 @@ ASKED = ("The person has been asked to approve filling the saved login for {site
          "filled; try again once they approve it.")
 NO_BROWSER = "No browser is open for this thread, so nothing was filled. Open the sign-in page first."
 NOT_CLEAN = ("The saved login for {site} wasn't filled: an agent's script or browser change, or another open window, "
-             "could reach the sign-in page, even after reloading it.")
+             "could reach the sign-in page.")
 UNKNOWN = ("The saved login for {site} ({username}) was filled and sent, but the page didn't show whether the sign-in "
            "worked. Take a snapshot to see where the page is.")
 # Every other status's line; each is formatted with the login's site and username.
