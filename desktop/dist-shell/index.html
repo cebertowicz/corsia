@@ -354,7 +354,7 @@
 			// failed attempt to set this computer up. Null is the plain "start the local service" retry.
 			let retryAction = null;
 			let approvalPoll;
-			let approvalPollInFlight = false;
+			let approvalCheckInFlight = null;
 			let continuationStarted = false;
 
 			function showStarting() {
@@ -599,11 +599,25 @@
 				window.location.replace(startup.url);
 			}
 
-			async function checkBackgroundApproval() {
+			function checkBackgroundApproval() {
+				if (approvalCheckInFlight) return approvalCheckInFlight;
+				if (continuationStarted) return Promise.resolve();
+				approvalCheckInFlight = (async () => {
+					try {
+						const startup = await invoke('start_local_service');
+						if (startup.state === 'ready') continueToService(startup, true);
+					} catch (_) {
+					}
+				})().finally(() => { approvalCheckInFlight = null; });
+				return approvalCheckInFlight;
+			}
+
+			async function checkApprovalAgain() {
+				retry.disabled = true;
 				try {
-					const startup = await invoke('start_local_service');
-					if (startup.state === 'ready') continueToService(startup, true);
-				} catch (_) {
+					await checkBackgroundApproval();
+				} finally {
+					if (retryAction === checkApprovalAgain) retry.disabled = false;
 				}
 			}
 
@@ -614,7 +628,7 @@
 				freshAction = null;
 				startFreshButton.hidden = true;
 				freshList.hidden = true;
-				retryAction = checkBackgroundApproval;
+				retryAction = checkApprovalAgain;
 				note.hidden = true;
 				details.hidden = true;
 				line.textContent = 'Turn this on so your agents keep working when you close this window.';
@@ -635,15 +649,7 @@
 				approvalCheck.dataset.state = 'off';
 				approvalState.textContent = 'Off';
 				clearInterval(approvalPoll);
-				approvalPoll = setInterval(async () => {
-					if (approvalPollInFlight || continuationStarted) return;
-					approvalPollInFlight = true;
-					try {
-						await checkBackgroundApproval();
-					} finally {
-						approvalPollInFlight = false;
-					}
-				}, 1000);
+				approvalPoll = setInterval(checkBackgroundApproval, 1000);
 			}
 
 			// Runs a command that answers like start_local_service: the local service is ready, or needs approval.

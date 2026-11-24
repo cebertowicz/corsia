@@ -32,6 +32,7 @@ async function open(url) {
 			window.__calls.push(command);
 			if (command === 'start_local_service') {
 				if (window.__approvalResult === 'error') throw new Error('unavailable');
+				if (window.__approvalResult === 'pending') return new Promise((resolve) => { window.__releaseApproval = resolve; });
 				return window.__approvalResult;
 			}
 			return null;
@@ -69,15 +70,34 @@ try {
 		await forged.locator('#retry').click();
 		if ((await starts(forged)) !== before + 1) fail(`Check again did not immediately check once for ${result}`);
 		if (!(await approvalShown(forged)) || (await forged.locator('#status').textContent()) !== 'Keep CORSIA running') fail(`${result} changed the approval screen`);
+		await forged.waitForFunction(() => !document.getElementById('retry').disabled);
 	}
-	await forged.evaluate(() => { window.__approvalResult = { state: 'ready', url: '#approved' }; });
 	const beforeReady = await starts(forged);
-	await forged.locator('#retry').click();
+	await forged.evaluate(() => {
+		window.__approvalResult = { state: 'ready', url: '#approved' };
+		document.getElementById('retry').click();
+	});
 	if ((await starts(forged)) !== beforeReady + 1) fail('Check again did not immediately check once for ready');
 	if ((await forged.locator('#approval-check').getAttribute('data-state')) !== 'on') fail('ready did not show approval');
 	if (await forged.locator('#actions').isVisible()) fail('approval actions stayed visible while starting');
 	await forged.clock.runFor(600);
 	if (new URL(forged.url()).hash !== '#approved') fail('ready did not continue to the service');
+
+	// A click joins the in-flight poll, and later ticks cannot launch overlapping starts.
+	const concurrent = await open(shellUrl);
+	await concurrent.evaluate(() => {
+		window.__approvalResult = 'pending';
+		window.__corsiaShowStartup({ state: 'requires_approval' });
+	});
+	await concurrent.clock.runFor(1000);
+	await concurrent.locator('#retry').click();
+	if (!(await concurrent.locator('#retry').isDisabled())) fail('Check again did not show the pending check');
+	await concurrent.clock.runFor(2000);
+	if ((await starts(concurrent)) !== 1) fail('poll and click started overlapping service checks');
+	await concurrent.evaluate(() => window.__releaseApproval({ state: 'ready', url: '#approved' }));
+	await concurrent.clock.runFor(600);
+	if (new URL(concurrent.url()).hash !== '#approved') fail('joined check did not continue on ready');
+	if (await concurrent.locator('#retry').isDisabled()) fail('Check again remained disabled after the check finished');
 } finally {
 	await browser.close();
 }
