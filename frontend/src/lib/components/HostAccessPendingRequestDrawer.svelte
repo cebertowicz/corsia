@@ -253,6 +253,10 @@
 		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
 		border-top: 1px solid var(--border-subtle);
 		background: var(--bg-secondary);
+		/* Its own paint layer: without it Chromium leaves the footer's lowest strip unpainted when a tall
+		   footer (the incomplete request's line) is pinned near the top of the scroll, and the body text
+		   scrolls visibly through it. Unlike paint containment, this does not clip the buttons' focus rings. */
+		will-change: transform;
 	}
 	/* A finger's width between Reject and Approve at every width, so one is never pressed for the other. */
 	:global(.pending-drawer .decision-buttons) {
