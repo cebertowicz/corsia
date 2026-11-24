@@ -94,7 +94,7 @@ it('offers nothing above the cap the server sends', () => {
 it('cannot be approved when stale or incomplete, and says why', async () => {
 	const stale = pending(fill(), { stale: true, approveDisabled: true });
 	expect(stale.host.querySelector('.decision-head .status')?.textContent?.trim()).toBe('Couldn’t check');
-	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current, so you can’t approve it yet.');
+	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current, so you can’t approve it.');
 	expect(stale.host.textContent).not.toContain('Retry to check again');
 	await unmount(stale.component);
 	const incomplete = pending(fill({ decision_capability: '' }));

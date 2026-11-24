@@ -76,7 +76,7 @@
 		{#if stale || !ready}
 			<div class="blocked-line" role="status">
 				<span>{stale
-					? 'Couldn’t check that this request is still current, so you can’t approve it yet.'
+					? 'Couldn’t check that this request is still current, so you can’t approve it.'
 					: 'This request arrived without everything needed to approve it. Retry to load it again.'}</span>
 				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
 			</div>
