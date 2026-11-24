@@ -36,7 +36,7 @@ from doceditor.document_scope import revision as document_revision
 from tools.action_drafts import DraftError, discard_draft, record_draft
 from tools.action_gate import _read_bytes
 from tools.email_send_approved import IN_FLIGHT, NEWER, SENT, UNCONFIRMED, SendResult, send_approved
-from tools.reviewed_drafts import draft_record_at, draft_target, working_root
+from tools.reviewed_drafts import draft_lock, draft_record_at, draft_target, working_root
 
 router = APIRouter(prefix="/api/email-drafts", tags=["email-drafts"])
 
@@ -89,10 +89,11 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     if draft is None:
         raise HTTPException(404, "Email draft not found")
     target = draft_target(draft)
-    # The draft's own chat opens its attachments, whichever chat is on screen. ``read_at`` is when this read ran: a
-    # Send now that carries it doesn't count the emails this view showed as newer.
-    base = {"thread_id": draft["thread_id"], "state": draft["state"],
-            "read_at": datetime.now(timezone.utc).isoformat(),
+    # ``read_at`` is when this read began, and only a read that returned the conversation carries it: a Send now that
+    # carries it doesn't count the emails this view showed as newer, and a failed read showed none.
+    read_at = datetime.now(timezone.utc).isoformat()
+    # The draft's own chat opens its attachments, whichever chat is on screen.
+    base = {"thread_id": draft["thread_id"], "state": draft["state"], "read_at": None,
             "attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target.get("attachments") or []),
             "notes": [str(note) for note in target.get("notes") or [] if isinstance(note, str)]}
     reply_to = target.get("reply_to")
@@ -115,7 +116,8 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
         logger.warning("A draft's account isn't usable right now (reference {}): {}", reference, type(exc).__name__)
         return {**failed, "reason": UNREADABLE, "reference": reference}
     try:
-        return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)})}
+        return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)}),
+                "read_at": read_at}
     except (AccountError, DraftRefused) as exc:
         # The same rule as finding the account: only a refusal marked as the person's to fix is ACCOUNT.
         if isinstance(exc, AccountError) and exc.person_fixes:
@@ -257,23 +259,26 @@ async def _now_settled(artifact_id: str, user_id: str, draft: dict[str, Any]) ->
 @router.post("/{artifact_id}/send")
 async def send_now(artifact_id: str, body: SendNow, user: dict = Depends(require_human_user)) -> dict[str, Any]:
     """Send the draft as the person sees it, with no model turn: the click is their approval of these exact bytes."""
-    draft = await run_in_db(_draft_for, artifact_id, user["id"])
-    if draft is None:
+    found = await run_in_db(_draft_for, artifact_id, user["id"])
+    if found is None:
         raise HTTPException(404, "Email draft not found")
-    if (settled := _settled(draft)) is not None:
-        return settled
-    live = await asyncio.to_thread(_read_bytes, str(draft["path"]))
-    shown = body.text.encode("utf-8")
-    if live is None or live != shown:
-        raise HTTPException(409, {"state": "changed", "message": CHANGED})
-    revision = document_revision(live)
-    if revision != draft["recorded_revision"]:
-        # The person edited the draft: record what they approved, so the record names exactly what is sent.
-        try:
-            await run_in_db(record_draft, str(draft["id"]), live)
-        except DraftError:
-            return await _now_settled(artifact_id, user["id"], draft)
-    result: SendResult = await send_approved(draft, live, read_at=_read_at(body.read_at))
+    # An agent's save of this draft waits for the send to settle, and a save already under way finishes first, so the
+    # bytes compared here are the bytes that go out and the bytes the record names.
+    async with draft_lock(str(found["id"])):
+        draft = await run_in_db(_draft_for, artifact_id, user["id"]) or found
+        if (settled := _settled(draft)) is not None:
+            return settled
+        live = await asyncio.to_thread(_read_bytes, str(draft["path"]))
+        if live is None or live != body.text.encode("utf-8"):
+            raise HTTPException(409, {"state": "changed", "message": CHANGED})
+        revision = document_revision(live)
+        if revision != draft["recorded_revision"]:
+            # The person edited the draft: record what they approved, so the record names exactly what is sent.
+            try:
+                await run_in_db(record_draft, str(draft["id"]), live)
+            except DraftError:
+                return await _now_settled(artifact_id, user["id"], draft)
+        result: SendResult = await send_approved(draft, live, read_at=_read_at(body.read_at))
     if result.state == NEWER:
         raise HTTPException(409, {"state": NEWER, "message": NEWER_LINE})
     if result.state == IN_FLIGHT:

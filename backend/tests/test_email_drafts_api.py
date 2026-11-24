@@ -93,6 +93,7 @@ async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answer
     [read] = seen
     assert str(read.url).split("?")[0] == f"{GMAIL}/threads/t-9" and read.url.params["format"] == "full"
     assert context["status"] == "ready" and context["reason"] is None and "unreadable" not in context
+    assert isinstance(context["read_at"], str)
     assert [m["id"] for m in context["conversation"]] == ["m-110", "m-100", "m-090"]
     assert context["replied_to"] == "m-100"
     assert [m["body"] for m in context["conversation"]] == ["I can come too.", "Noon or one?", "Lunch this week?"]
@@ -114,6 +115,8 @@ async def test_a_failed_thread_read_is_the_named_unreadable_state(mail):
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert (context["status"], context["reason"], context["conversation"]) == ("error", "unreadable", [])
     assert context["replied_to"] == "m-100"
+    # A read that showed the person nothing must not let Send now skip emails newer than the agent's own read.
+    assert context["read_at"] is None
     assert REFERENCE.match(context["reference"])
 
 

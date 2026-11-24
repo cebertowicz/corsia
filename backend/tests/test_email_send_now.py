@@ -104,6 +104,39 @@ async def test_two_clicks_send_once(mail, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_an_agent_save_during_a_send_waits_and_the_file_stays_what_was_sent(mail, monkeypatch):
+    from tools.google_email import EmailDraftTool
+    import api.email_drafts as route
+
+    monkeypatch.setattr("events.delivery.deliver_to_thread", AsyncMock(return_value=True))
+    saved = await _draft(mail)
+    path = mail.workspace / saved["path"]
+    shown = path.read_text()
+    sending, release, real = asyncio.Event(), asyncio.Event(), route.send_approved
+
+    async def held(*args, **kwargs):
+        sending.set()
+        await release.wait()
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(route, "send_approved", held)
+    send = asyncio.create_task(send_now(_artifact(saved), SendNow(text=shown), _owner(mail.thread)))
+    await sending.wait()
+    save = asyncio.create_task(EmailDraftTool().execute(
+        _thread_id=mail.thread, account_id=mail.account, draft_id=saved["draft_id"],
+        to=["sam@example.com"], subject="Lunch", body="A late change."))
+    await asyncio.sleep(0.05)
+    # The save is held at the lock while the send is under way; it has not touched the file.
+    assert not save.done() and path.read_text() == shown
+    release.set()
+    assert await send == {"state": "sent"}
+    refused = await save
+    assert refused.startswith("Error") and "A late change." not in path.read_text()
+    assert path.read_text() == shown and len(mail.sends) == 1
+    assert "Noon works?" in _mime(mail.sends[0]).get_body(preferencelist=("plain",)).get_content()
+
+
+@pytest.mark.asyncio
 async def test_another_person_cannot_send(mail):
     saved = await _draft(mail)
     with pytest.raises(HTTPException) as caught:
