@@ -257,6 +257,23 @@ Source: `backend/infra/key_store_schema.py`.
 
 Indexes: `sqlite_autoindex_key_write_attempts_1` (token_hash, unique).
 
+### `saved_logins`
+
+Source: `backend/infra/key_store_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `site` | TEXT | No | Yes | — | — |
+| `username` | TEXT | No | Yes | — | — |
+| `status` | TEXT | No | Yes | 'ok' | — |
+| `saved_by` | TEXT | No | Yes | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+| `last_used_at` | TEXT | No | No | — | — |
+| `last_used_by_thread_id` | TEXT | No | No | — | — |
+
+Indexes: `sqlite_autoindex_saved_logins_1` (id, unique), `sqlite_autoindex_saved_logins_2` (site, username, unique).
+
 ### `thread_vendor_accounts`
 
 Source: `backend/infra/vendor_account_schema.py`.

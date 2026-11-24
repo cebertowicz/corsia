@@ -18,8 +18,11 @@
  *    a whole-field rewrite is left alone).
  *
  * `prose` (default true) also gives the field the chat input's typing hints, unless the field sets them itself: no
- * autocomplete, autocorrect on, sentence capitals, spellcheck. Name and title fields pass `{ prose: false }` for the
- * repair alone.
+ * autocomplete, autocorrect on, sentence capitals, spellcheck, and the name "search". Safari ignores `autocomplete="off"`,
+ * and its AutoFill keyword data lists "search" among the field labels it ignores, so naming a prose field "search" is
+ * meant to keep the Contact strip off it. This is a reasoned workaround: it has not been tried on a textarea or on a
+ * device, so recheck it if Safari changes.
+ * Name and title fields pass `{ prose: false }` for the repair alone.
  *
  * The inserted text is cut to fit the field's `maxlength`, as the browser cuts an insertion, since a value written from
  * script is not held to it.
@@ -27,7 +30,7 @@
 type TextField = HTMLTextAreaElement | HTMLInputElement;
 type Snapshot = { value: string; start: number; end: number };
 
-const PROSE_HINTS: [string, string][] = [['autocomplete', 'off'], ['autocorrect', 'on'], ['autocapitalize', 'sentences'], ['spellcheck', 'true']];
+const PROSE_HINTS: [string, string][] = [['autocomplete', 'off'], ['name', 'search'], ['autocorrect', 'on'], ['autocapitalize', 'sentences'], ['spellcheck', 'true']];
 const REPAIRED_TYPES = new Set(['', 'insertText', 'insertReplacementText']);
 const CONTACT_MAX = 120;
 

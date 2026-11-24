@@ -264,7 +264,7 @@ describe('SettingsSystem', () => {
 
 		const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Share usage counts"]');
 		expect(toggle?.getAttribute('aria-pressed')).toBe('true');
-		expect(host.textContent).toContain('Nothing is sent yet. Once sharing starts, CORSIA will send counts of what you use, tagged with a random number that changes every week, to help improve it. It never sends your name, email or anything you write.');
+		expect(host.textContent).toContain('Sharing lets CORSIA send counts of what you use, tagged with a random number that changes every week, to help improve it. It never sends your name, email or anything you write.');
 
 		toggle!.click();
 		await tick();
