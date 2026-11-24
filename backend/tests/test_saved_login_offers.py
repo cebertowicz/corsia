@@ -10,6 +10,7 @@ allowlist pins which modules may make or confirm an offer.
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -356,6 +357,35 @@ async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
     assert refused.json() == {"detail": "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    offers.NO_OFFER, offers._SESSION_REFUSAL, offers._OWN_SITE_REFUSAL, saved_logins._SITE_REFUSAL,
+])
+async def test_a_refusal_the_person_can_act_on_answers_409_with_its_text(client, sessions, monkeypatch, text):
+    def refuse(*_args, **_kwargs):
+        raise KeyStoreError(text)
+
+    monkeypatch.setattr(offers, "save_offer", refuse)
+    refused = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
+    assert refused.status_code == 409
+    assert refused.json() == {"detail": text}
+
+
+@pytest.mark.asyncio
+async def test_any_other_save_failure_answers_500_with_fixed_text(client, sessions, monkeypatch, caplog):
+    def fail(*_args, **_kwargs):
+        raise KeyStoreError("internal x")
+
+    monkeypatch.setattr(offers, "save_offer", fail)
+    with caplog.at_level(logging.ERROR, logger=saved_logins_api.__name__):
+        failed = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
+    assert failed.status_code == 500
+    assert failed.json() == {"detail": "Couldn’t save the login. Try again."}
+    assert "internal x" not in failed.text
+    [record] = [record for record in caplog.records if record.name == saved_logins_api.__name__]
+    assert record.levelno == logging.ERROR and record.getMessage() == "Saving a login for thread t-mine failed: KeyStoreError"
 
 
 @pytest.mark.asyncio
