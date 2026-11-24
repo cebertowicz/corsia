@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_login_capture, browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -221,6 +221,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
+        if browser_login_capture.writes_value(args):
+            await browser_login_capture.agent_writing(thread_id, endpoint)
     if shared_write:
         try:
             return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
@@ -362,6 +364,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
+        browser_login_capture.session_ended(thread_id)
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

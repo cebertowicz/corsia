@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_pane_state, browser_screencast, browser_text_fields
+from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_login_capture, browser_pane_state, browser_screencast, browser_text_fields
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "clipboard_undo", "clipboard_paste", "clipboard_selection", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "before_person_input", "clear_page_endpoint", "clipboard_undo", "clipboard_paste", "clipboard_selection", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
+log = logging.getLogger(__name__)
 _page_endpoints: dict[tuple[str, str], str] = {}
 
 
@@ -129,6 +131,21 @@ async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> s
         raise browser_cdp.BrowserSessionError(error) from exc
     _page_endpoints[(thread_id, connection_token)] = page_endpoint
     return page_endpoint
+
+
+async def before_person_input(thread_id: str, kind: object, event: dict, connection_token: str) -> None:
+    """Hand the login the person is submitting to the offer holder before their input reaches the page."""
+    if not browser_login_capture.is_submit(kind, event):
+        return
+    try:
+        if (identity := session_identity(thread_id)) is None:
+            return
+        endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PAGE_CHECK_FAILED)
+    except Exception:
+        # The capture never stops the person's input; the input's own delivery reports an unreachable page.
+        log.info("saved-login capture couldn't find the pane's page")
+        return
+    await browser_login_capture.person_submit(thread_id, f"{thread_id}:{identity}", endpoint)
 
 
 async def mouse_event(thread_id: str, event: dict, connection_token: str) -> None:
