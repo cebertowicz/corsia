@@ -86,7 +86,7 @@ The floor binds the leased command and what it starts, nothing else. A leased co
 
 ## How often it says yes and no
 
-The repository README reports one week on the install that builds CORSIA, published on 2026-10-09, with Auto-approve on: 471 of 519 reviewed applications (91%) were approved automatically, 34 rejected and 14 went to a person; of 1,586 commands run under leases, 48 were blocked. Those figures don't say how many of the approvals were right. No measurement of wrong approvals or wrong blocks is published.
+[README evidence and limits](../readme-evidence.md#operational-aggregates) reports one week on the install that builds CORSIA, published on 2026-10-09, with Auto-approve on: 471 of 519 reviewed applications (91%) were approved automatically, 34 rejected and 14 went to a person; of 1,586 commands run under leases, 48 were blocked. Those figures don't say how many of the approvals were right. No measurement of wrong approvals or wrong blocks is published.
 
 ## Check it yourself
 
