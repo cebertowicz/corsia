@@ -259,11 +259,11 @@ describe('BrowserLeaf clipboard shortcuts', () => {
   expect(typed.defaultPrevented).toBe(true);
   expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a' }));
  });
- it('keeps keyboard focus on the canvas after a touch, so no phone keyboard opens', async () => {
+ it.each(['touch', 'pen'])('keeps keyboard focus on the canvas after a %s press, so no on-screen keyboard opens', async pointerType => {
   const { canvas } = render();
   await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
-  canvas.dispatchEvent(pointer('pointerdown', 90, 65, 'touch'));
-  canvas.dispatchEvent(pointer('pointerup', 90, 65, 'touch'));
+  canvas.dispatchEvent(pointer('pointerdown', 90, 65, pointerType));
+  canvas.dispatchEvent(pointer('pointerup', 90, 65, pointerType));
   expect(document.activeElement).toBe(canvas);
  });
 });

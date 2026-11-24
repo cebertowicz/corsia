@@ -26,7 +26,7 @@
 
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
-	// An editable key target lets the platform paste run natively; after a touch the canvas keeps focus, so no phone keyboard opens.
+	// An editable key target lets the platform paste run natively; after a finger or pen press the canvas keeps focus, so no on-screen keyboard opens.
 	let keyTarget: HTMLTextAreaElement;
 	let touchFocus = false;
 	let socket: WebSocket | null = null;
@@ -242,7 +242,7 @@
 		if (!point) return;
 		if (event.pointerType === 'touch' && !overlay) event.preventDefault();
 		if (event.type === 'pointerdown') {
-			if (!overlay) { touchFocus = event.pointerType === 'touch'; canvas.focus(); }
+			if (!overlay) { touchFocus = event.pointerType === 'touch' || event.pointerType === 'pen'; canvas.focus(); }
 			activePointer = event.pointerId;
 			if (!overlay) canvas.setPointerCapture(event.pointerId);
 			// Move before pressing because Chrome may use the last cursor position for a press.
