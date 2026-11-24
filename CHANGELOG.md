@@ -57,6 +57,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A file you own stays yours even if its Owner line names an agent.
 - A folder you choose in oMLX for its SSD cache is kept across CORSIA's restarts, crash recovery and updates; before, CORSIA replaced it with its own folder at the next launch.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
+- The Keep CORSIA running screen now offers Quit and Check again alongside Open Login Items.
 - A lesson an agent saves is no longer lost in a workspace with a long history of guidance changes; before, the save could time out after 30 seconds and drop the lesson.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A long chat now loads in full; before, a very long one could fail to load its messages.
