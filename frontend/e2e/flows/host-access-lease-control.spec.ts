@@ -609,7 +609,9 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
 			const entry = button.getBoundingClientRect();
 			return { siteRight: box('.pending-site').right, statusLeft: box('.pending-status').left,
-				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth };
+				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth,
+				ownerWidth: box('.pending-owner').width, whatWidth: box('.pending-what').width,
+				entryWidth: entry.width, parentWidth: button.parentElement!.getBoundingClientRect().width };
 		});
 		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.statusLeft);
 		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
@@ -677,6 +679,26 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
 		expect(siteBox!.y, 'the site sits under the name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
 		expect(siteBox!.width).toBeGreaterThan(0);
+		await expectRowFits(page);
+	});
+
+	test('keeps Review on screen on a phone when the agent name is long', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login long name phone ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+		const fill = fillRequest(threadId, 1, { agent });
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
 		await expectRowFits(page);
 	});
 
