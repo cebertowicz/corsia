@@ -13,9 +13,9 @@ class TextIndex:
 
     def __init__(self, text: str):
         self.text = text
-        self._encoded = None
-        self._positions = {}
-        self._newlines = None
+        self._encoded: bytes | None = None
+        self._positions: dict[int, int | None] = {}
+        self._newlines: list[int] | None = None
 
     def cp_at_u16(self, offset: object) -> int | None:
         if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
@@ -119,7 +119,7 @@ def evaluate(old: str, new: str, old_span: tuple[int, int], new_span: tuple[int,
     new_index = new_index or TextIndex(new)
     a, b = (old_index.cp_at_u16(pos) for pos in old_span)
     c, d = (new_index.cp_at_u16(pos) for pos in new_span)
-    if None in (a, b, c, d) or b < a or d <= c:
+    if a is None or b is None or c is None or d is None or b < a or d <= c:
         return False, False, 'invalid_or_collapsed'
     if _ambiguous_duplicate(old, new, a, b, quote, line_counts=line_counts):
         return False, True, 'duplicate_ambiguous'

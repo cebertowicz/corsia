@@ -6,7 +6,7 @@ from threading import Lock
 # Conservative accounting assumes four bytes per character plus entry overhead.
 MAX_BYTES = 64 * 1024 * 1024
 MAX_ENTRIES = 128
-_cache = OrderedDict()
+_cache: OrderedDict[tuple[int, tuple[tuple[int, int], ...], bytes], tuple[str, str, tuple[tuple[int, int], ...], int]] = OrderedDict()
 _bytes = 0
 _lock = Lock()
 

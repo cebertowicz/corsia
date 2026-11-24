@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+from typing import cast
 
 from doceditor.quote_anchor import _cp_at_u16
 from infra.write_effects import after_commit
@@ -54,7 +55,7 @@ def intern(db: sqlite3.Connection, text: str) -> int:
     for row in db.execute("SELECT id, text FROM doc_comment_snapshots WHERE digest=?", (digest,)):
         if row[1] == data:
             return row[0]
-    return db.execute("INSERT INTO doc_comment_snapshots (digest, text) VALUES (?, ?)", (digest, data)).lastrowid
+    return cast(int, db.execute("INSERT INTO doc_comment_snapshots (digest, text) VALUES (?, ?)", (digest, data)).lastrowid)
 
 
 def read_many(db: sqlite3.Connection, snapshot_ids) -> dict[int, str]:

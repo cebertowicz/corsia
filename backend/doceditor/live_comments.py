@@ -31,15 +31,11 @@ def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
 
 def _rows_and_versions(artifact_id: str):
     """Read rows and referenced versions in one SQLite read snapshot."""
-    from infra.database import get_db
-    db = get_db()
-    try:
-        db.execute('BEGIN')
+    from infra.database import write_transaction
+    with write_transaction(None, scope='comment_versions_read') as db:
         rows = comments.list_for_artifact(artifact_id, db=db)
         versions = comment_snapshots.read_many(db, (row['snapshot_id'] for row in rows if row.get('snapshot_id') is not None))
         return rows, versions
-    finally:
-        db.close()
 
 
 async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:

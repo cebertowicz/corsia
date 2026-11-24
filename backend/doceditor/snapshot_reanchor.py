@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 import json
 import logging
+from typing import cast
 
 from doceditor import comment_anchoring, comment_snapshots, live_diff, live_text, snapshot_mapping_cache, snapshot_showing
 
@@ -71,7 +72,7 @@ def persist_client_positions(db, artifact_id: str, text: str | None, requested: 
             reason = comment_snapshots.invalid_reason(text, start, end, quote) if text is not None else 'text_unavailable'
             if reason is None:
                 candidate = dict(comment)
-                _, _, invalid_source = resolve_versioned([candidate], text, connection)
+                _, _, invalid_source = resolve_versioned([candidate], cast(str, text), connection)
                 if (invalid_source or candidate.get('orphaned') or
                         (candidate.get('from_off'), candidate.get('to_off'), candidate.get('anchor_text')) !=
                         (start, end, quote)):
@@ -82,13 +83,13 @@ def persist_client_positions(db, artifact_id: str, text: str | None, requested: 
                 invalid.append(expected)
             else:
                 versioned.append({**prepared, **expected})
-        return persist_updates(connection, artifact_id, text, versioned, legacy_updates=legacy, invalid=invalid)
+        return persist_updates(connection, artifact_id, cast(str, text), versioned, legacy_updates=legacy, invalid=invalid)
 
 
 def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None,
                       detached_point=False) -> tuple[list[dict], list[dict], list[dict]]:
     """Resolve each persisted source once; NULL source keeps the legacy rule."""
-    groups = {}
+    groups: dict[int, list[dict]] = {}
     legacy = []
     invalid = []
     for comment in threads:
@@ -103,7 +104,7 @@ def resolve_versioned(threads: list[dict], text: str, db=None, *, versions=None,
     new_index = snapshot_showing.TextIndex(text)
     digest = snapshot_mapping_cache.destination_digest(text) if any(
         versions[snapshot_id] != text for snapshot_id in groups) else None
-    line_context = []
+    line_context: list[tuple[list[str], dict[str, int]]] = []
     for snapshot_id, comments in groups.items():
         valid = []
         for comment in comments:
