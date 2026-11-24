@@ -324,7 +324,7 @@
 {/if}
 <style>
 	.drawer-switch { display: flex; gap: var(--space-1); }
-	.drawer-switch button { min-height: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; cursor: pointer; }
+	.drawer-switch button { min-height: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
 	.drawer-switch button[aria-pressed="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
 	/* In the sheet's heading the switch reads as the title's meta, in the Plan view's meta type, and takes no more room than its two targets, which never shrink below their text (the heading wraps the switch under the title instead). */
 	.drawer-switch.in-heading { gap: 0; flex: none; }

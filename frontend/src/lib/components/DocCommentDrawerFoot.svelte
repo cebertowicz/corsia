@@ -22,7 +22,7 @@
 	.drawer-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--border-subtle); font-size: var(--text-footnote); }
 	.send { min-width: 0; order: 1; margin-left: auto; }
 	.send:not(:has(*)) { display: none; }
-	.send :global(button) { min-height: var(--touch-target); font-weight: 500; }
+	.send :global(button) { min-height: var(--touch-target); font-weight: var(--fw-medium); }
 	.send :global(button.btn.sm)::after { inset: 0; }
 	.send :global(.send-full) { display: none; }
 	.send :global(.send-short) { display: inline; }
