@@ -26,6 +26,12 @@ import threading
 _LIVE_PORTS = {1956, 3000, 3001}
 
 
+def _refuse_unless(ok: bool, why: str) -> None:
+    """Stop before serving; a real check, kept under ``python -O`` where ``assert`` is stripped."""
+    if not ok:
+        raise SystemExit(f"FILL_PROOF_REFUSED {why}")
+
+
 def _commands(fills, saved_logins) -> None:
     for line in sys.stdin:
         words = line.split()
@@ -53,13 +59,13 @@ def main() -> None:
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
     root = Path(args.root).resolve()
-    assert root.is_relative_to(Path("/tmp").resolve()), "proof root must be under /tmp"
-    assert args.port not in _LIVE_PORTS, "live port refused"
+    _refuse_unless(root.is_relative_to(Path("/tmp").resolve()), "proof root must be under /tmp")
+    _refuse_unless(args.port not in _LIVE_PORTS, "live port refused")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
     from infra import config, database
     paths = {"state_root": str(config.STATE_ROOT.resolve()), "database": str(Path(database.DB_PATH).resolve()),
              "workspace": str(config.WORKSPACE.resolve())}
-    assert all(Path(value).is_relative_to(root) for value in paths.values()), "runtime isolation failed"
+    _refuse_unless(all(Path(value).is_relative_to(root) for value in paths.values()), "runtime isolation failed")
     print("FILL_PROOF_RUNTIME " + json.dumps(paths), flush=True)
 
     import uvicorn
