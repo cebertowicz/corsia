@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { history } from '@codemirror/commands';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { acceptedSuggestion, suggestionHistory } from './suggestionHistory';
 import { suggestionHistoryKeys } from './suggestionHistoryKeys';
@@ -53,6 +54,25 @@ describe('suggestion history keys', () => {
 		expect(view.state.doc.toString()).toBe('new');
 		press(view, 'z');
 		await vi.waitFor(() => expect(transition).toHaveBeenCalledTimes(2));
+		view.destroy();
+	});
+
+	it('makes no change and no server write in a read-only editor, such as phone Reading', async () => {
+		const transition = vi.fn().mockResolvedValue(true);
+		const lock = new Compartment();
+		const view = new EditorView({ doc: 'old', parent: document.body, extensions: [history(), suggestionHistory, suggestionHistoryKeys(transition, vi.fn()), lock.of([])] });
+		view.dispatch({ changes: { from: 0, to: 3, insert: 'new' }, ...acceptedSuggestion('event', ['s']) });
+		view.dispatch({ effects: lock.reconfigure(EditorState.readOnly.of(true)) });
+		press(view, 'z');
+		expect(view.state.doc.toString()).toBe('new');
+		view.dispatch({ effects: lock.reconfigure([]) });
+		press(view, 'z');
+		await vi.waitFor(() => expect(view.state.doc.toString()).toBe('old'));
+		expect(transition).toHaveBeenCalledTimes(1);
+		view.dispatch({ effects: lock.reconfigure(EditorState.readOnly.of(true)) });
+		press(view, mod === 'metaKey' ? 'z' : 'y', mod === 'metaKey');
+		expect(view.state.doc.toString()).toBe('old');
+		expect(transition).toHaveBeenCalledTimes(1);
 		view.destroy();
 	});
 });
