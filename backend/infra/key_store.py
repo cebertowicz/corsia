@@ -16,6 +16,10 @@ key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
 built-in, a cloud-provider, a connected account or a server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
+A saved website login's password is an entry too, but none of this module's
+routes or readers reach it: it is never listed, set, cleared, removed or
+resolved here. ``infra.saved_logins`` owns it alone.
+
 Errors raised here carry fixed text and never a value.
 """
 
@@ -54,7 +58,13 @@ GOOGLE_PREFIX = "google-"
 CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
 #: A mail-host account's app password; the suffix is the account's id.
 MAILHOST_PREFIX = "connected-account--mailhost--"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX)
+#: A saved website login's password; the suffix is the login's id (``infra.saved_logins``).
+LOGIN_PREFIX = "saved-login-"
+RESERVED_PREFIXES = (
+    PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX, LOGIN_PREFIX,
+)
+#: A login entry's full name. Longer than ``NAME_PATTERN`` allows, so no added entry can ever match it.
+_LOGIN_ENTRY_PATTERN = re.compile(rf"{re.escape(LOGIN_PREFIX)}[0-9a-f]{{32}}")
 ACCOUNT_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 #: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
 GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
@@ -112,6 +122,11 @@ def is_managed_name(name: str) -> bool:
     )
 
 
+def is_login_entry_name(name: str) -> bool:
+    """Whether this entry holds a saved website login's password, which only ``infra.saved_logins`` touches."""
+    return bool(_LOGIN_ENTRY_PATTERN.fullmatch(name))
+
+
 def _row(name: str, db: sqlite3.Connection) -> sqlite3.Row | None:
     return db.execute(
         "SELECT name, label, description, added_by_thread_id, added_by_name,"
@@ -123,6 +138,8 @@ def _row(name: str, db: sqlite3.Connection) -> sqlite3.Row | None:
 def _require_entry(name: str, db: sqlite3.Connection) -> None:
     if name in BUILTINS:
         return
+    if is_login_entry_name(name):
+        raise KeyStoreError("No key has that name.")
     row = _row(name, db)
     if row is None or row["label"] is None:
         raise KeyStoreError("No key has that name.")
@@ -298,9 +315,10 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:
     """The value each named entry's committed row references, for those that have one. Server code only.
 
-    Inside a transaction on ``db`` it reads that transaction's own rows.
+    Inside a transaction on ``db`` it reads that transaction's own rows. A saved
+    login's password is never among them: ``infra.saved_logins`` is its one reader.
     """
-    return key_store_values.resolve(_db(db), names)
+    return key_store_values.resolve(_db(db), [name for name in names if not is_login_entry_name(name)])
 
 
 def _metadata(name: str, row: sqlite3.Row | None, is_set: bool) -> dict:
@@ -334,6 +352,7 @@ def list_entries(db: sqlite3.Connection | None = None) -> list[dict]:
             "SELECT name, label, description, added_by_thread_id, added_by_name,"
             " created_at, set_at FROM key_store_entries ORDER BY created_at, name"
         ).fetchall()
+        if not is_login_entry_name(row["name"])
     }
     stored_names = set(key_store_values.resolve(conn, [*BUILTINS, *rows]))
     entries = [
