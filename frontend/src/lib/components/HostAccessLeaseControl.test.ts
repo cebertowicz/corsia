@@ -838,6 +838,14 @@ describe('HostAccessLeaseControl', () => {
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(approve?.disabled).toBe(true);
+		// The drawer's status is coloured text, not a pill, and its Retry is a text action.
+		const status = dialog.querySelector('.decision-head .status');
+		expect(status?.textContent?.trim()).toBe('Not current');
+		expect(status?.classList.contains('stale')).toBe(true);
+		expect(dialog.querySelector('.pill')).toBeNull();
+		const retry = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Retry');
+		expect(retry?.className).toContain('ghost');
 	});
 
 	it('takes the full mobile band for the stale notice, not the narrow chip slot', async () => {

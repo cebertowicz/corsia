@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, StatePill } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
 	import HostAccessFillRequestDrawer from './HostAccessFillRequestDrawer.svelte';
 	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
@@ -83,7 +83,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(lease.requested_duration_seconds)} />
+		<span class="status" class:stale>{stale ? 'Not current' : duration(lease.requested_duration_seconds)}</span>
 	</header>
 
 	<div class="decision-body">
@@ -172,7 +172,7 @@
 				<span>{stale
 					? 'Refresh authoritative state before deciding.'
 					: 'The request, independent attestation, or decision identity is incomplete or malformed.'}</span>
-				<Button size="sm" onclick={onRetry}>Retry</Button>
+				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
 			</div>
 		{/if}
 	</div>
@@ -277,6 +277,13 @@
 		font-weight: 650;
 	}
 	.decision-body .explainer { margin: 0; }
+	.status {
+		flex: none;
+		color: var(--amber-text);
+		font-size: var(--text-footnote);
+		font-weight: var(--fw-medium);
+	}
+	.status.stale { color: var(--red-text); }
 	ol {
 		margin: 7px 0 0;
 		padding-left: 22px;
@@ -336,6 +343,7 @@
 		padding: 8px;
 		border-radius: var(--radius-sm);
 		background: var(--bg-secondary);
+		font-family: var(--font-mono);
 		font-size: var(--text-footnote);
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;

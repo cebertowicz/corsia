@@ -52,7 +52,7 @@
 		<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
 	</header>
 	<div class="decision-body">
-		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can stop this at any time.</p>
+		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke it at any time.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
 		<section><span class="section-label">Username</span><p>{request.username}</p></section>
 		<section>
