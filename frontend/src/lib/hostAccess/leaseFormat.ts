@@ -4,6 +4,7 @@ import type {
 	HostAccessTimed,
 	HostAccessPolicyException,
 	HostAccessRepoPolicy,
+	HostAccessLeaseDecision,
 } from '$lib/api/hostAccess';
 
 export function text(value: unknown): value is string {
@@ -103,6 +104,15 @@ export function decisionBlocked(
 	blockingLeaseId: string | null,
 ): boolean {
 	return stale || blockingLeaseId !== null || !casReady(lease);
+}
+
+/**
+ * Whether a failed read blocks this decision: Approve and Revoke, never Reject. Every reject route checks
+ * the request's revision and hash on the server, so a Reject sent from the last view either ends that same
+ * request or is refused as changed, and the person can always say no.
+ */
+export function staleBlocks(stale: boolean, decision: HostAccessLeaseDecision): boolean {
+	return stale && decision !== 'reject';
 }
 
 export function approvalReady(lease: HostAccessItem | null): boolean {

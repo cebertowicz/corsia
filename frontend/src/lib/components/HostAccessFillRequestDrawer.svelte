@@ -110,8 +110,8 @@
 	}
 	.status.stale, .blocked-line { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
-	/* A finger-sized target on a phone-width sheet or any touch pointer. */
-	@media (max-width: 720px), (pointer: coarse) {
+	/* A finger-sized target on any touch pointer; the sheet sets it on a phone-width sheet too. */
+	@media (pointer: coarse) {
 		.durations .segment { min-height: var(--touch-target); }
 	}
 	.blocked-line {

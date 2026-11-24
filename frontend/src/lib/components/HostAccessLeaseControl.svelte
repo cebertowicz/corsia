@@ -46,7 +46,7 @@
 	import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
 	import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
 	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
-	import { decisionBlocked, owner, pendingLabel, text } from '$lib/hostAccess/leaseFormat';
+	import { decisionBlocked, owner, pendingLabel, staleBlocks, text } from '$lib/hostAccess/leaseFormat';
 	import {
 		focusRestoreIntentForDecision,
 		restoreComposerFocusAfterLeaseRemoval,
@@ -238,22 +238,13 @@
 		}
 	}
 
-	/**
-	 * A failed read blocks Approve and Revoke, but never Reject: the server checks every decision
-	 * against the request's current revision and hash, so a Reject sent from the last view either
-	 * ends that same request or is refused as changed, and the person can always say no.
-	 */
-	function staleBlocks(decision: HostAccessLeaseDecision): boolean {
-		return stale && decision !== 'reject';
-	}
-
 	async function decide(
 		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
 		decisionControl: Element | null = null, durationSeconds?: number,
 	): Promise<void> {
 		const currentToken = get(token);
-		if (!currentToken || decisionBlocked(lease, staleBlocks(decision), decidingLeaseId)) return;
+		if (!currentToken || decisionBlocked(lease, staleBlocks(stale, decision), decidingLeaseId)) return;
 		const decisionThreadId = lease.root_thread_id;
 		const decisionAttempt = claimDecision(lease.id);
 		if (!decisionAttempt) return;
@@ -421,7 +412,7 @@
 						lease={currentPending}
 						{stale}
 						deciding={decidingLeaseId === currentPending.id}
-						rejectDisabled={decisionBlocked(currentPending, staleBlocks('reject'), decidingLeaseId)}
+						rejectDisabled={decisionBlocked(currentPending, staleBlocks(stale, 'reject'), decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
 						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
 						onReject={(event) => { void decide(
