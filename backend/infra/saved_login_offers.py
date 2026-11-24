@@ -40,7 +40,7 @@ _SESSION_REFUSAL = (
     "It’s offered again the next time you sign in."
 )
 _OWN_SITE_REFUSAL = "CORSIA doesn’t save a login for CORSIA itself."
-NO_OFFER = "There’s no sign-in to save here. It’s offered again the next time you sign in."
+NO_OFFER = "This login can’t be saved from here anymore. Unless it’s already saved, it’s offered again the next time you sign in."
 
 
 @dataclass(frozen=True)
