@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A host access approval now shows in chat as Host access with its time left, in plain text, and Revoke host access in its drawer is a text button; before, it was a shield icon and a countdown in an amber outline, and Revoke was a red button.
 - A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
+- Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
 
@@ -119,7 +120,7 @@ Released 2026-11-24.
 ### Documents
 
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
-- A document on a touch screen opens for reading and commenting, with Edit in its menu and Done to end typing. Selecting text offers Comment as it does on a computer, and changing modes keeps your writing and unfinished comments.
+- A document on a touch screen opens for reading and commenting, with Edit in its menu and Done to end typing. Selecting text offers Comment in a bar fixed at the bottom of the screen, above the keyboard when it is open, instead of next to the selection where it covers the phone's own handles and menu; the document leaves room so a selected line never sits under the bar. Changing modes keeps your writing and unfinished comments.
 - A document promoted to a new place keeps its comments, and the task that held them for you follows it; before, it opened with no comments and the task closed saying they couldn't be shown.
 - A document that is open live no longer refuses other reads and writes of it while a save is in progress on a busy disk; before, they could fail with a database error.
 - A document with no owner shows Owner: None.
