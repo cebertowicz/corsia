@@ -93,8 +93,8 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option" \
             backend/tests/test_browser_login_fill_e2e.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all six, and the saved-login fill's eight, must actually run.
-          grep -q " 14 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all six, and the saved-login fill's nine, must actually run.
+          grep -q " 15 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Verify saved logins stay out of agent output and logs on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'
