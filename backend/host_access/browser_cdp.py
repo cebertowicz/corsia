@@ -22,6 +22,10 @@ log = logging.getLogger(__name__)
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
 _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
+# One browser-wide call (Storage.getCookies/setCookies, Target.getTargets) is answered by the browser
+# process, not a page, so a stuck tab can't hold it; a live browser answers in milliseconds even with
+# thousands of cookies. Past 5 s the browser itself isn't answering and the caller gives up on it.
+BROWSER_CALL_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ import time
 from uuid import uuid4
 
 import pytest
+import websockets
 
 from host_access import (
     browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
@@ -128,6 +129,8 @@ SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
 document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
+KEEP = """<!doctype html><title>Kept</title><script>localStorage.setItem('kept', '1');</script>"""
+STORAGE = """<!doctype html><title>Storage</title><script>document.title = 'kept=' + localStorage.getItem('kept');</script>"""
 
 
 @contextmanager
@@ -136,7 +139,7 @@ def fixture_server():
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
-             "/layer.html": LAYER.encode()}
+             "/layer.html": LAYER.encode(), "/keep.html": KEEP.encode(), "/storage.html": STORAGE.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -262,6 +265,59 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
             await owner.close_thread(other)
             assert json.loads(await owner.run(holder, ("get", "url"), session="existing"))["url"] == f"{origin}/plain.html"
             assert "copy=1" in await owner.run(holder, ("open", f"{origin}/cookies.html"))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_copy_starts_signed_in_without_opening_a_tab_in_the_holders_browser(monkeypatch):
+    """A second agent starts from the holder's sign-in right after the holder's browser relaunches on another site.
+
+    Reading the sign-in must not open a tab or load a page in the holder's browser: that is what stalled the
+    copy past its limit and started it signed out.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"copy-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    holder, other = f"copy-holder-{uuid4().hex}", f"copy-copy-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-copy-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            other_site = origin.replace("127.0.0.1", "localhost")
+            assert (await owner.run(holder, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            await owner.close_thread(holder)
+            for attempt in range(3):
+                # The holder's agent was on the signed-in site, then moved to another one.
+                await owner.run(holder, ("open", f"{origin}/cookies.html"))
+                await owner.run(holder, ("open", f"{other_site}/keep.html"))
+                async with websockets.connect(owner._sessions[holder].chrome.endpoint, max_size=None) as watch:
+                    await watch.send(json.dumps({"id": 1, "method": "Target.setDiscoverTargets", "params": {"discover": True}}))
+                    while json.loads(await asyncio.wait_for(watch.recv(), 5)).get("id") != 1:
+                        pass  # The tabs already open are announced before the answer.
+                    started = time.monotonic()
+                    assert (await owner.run(other, ("open", f"{origin}/cookies.html"))).startswith("holder=1"), attempt
+                    seconds = time.monotonic() - started
+                    opened = []
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        while True:
+                            event = json.loads(await asyncio.wait_for(watch.recv(), 0.5))
+                            info = event.get("params", {}).get("targetInfo", {})
+                            if event.get("method") == "Target.targetCreated" and info.get("type") == "page":
+                                opened.append(info.get("url"))
+                assert opened == [], (attempt, opened)
+                assert owner._sessions[other].record.copy_of == holder
+                assert owner._sessions[other].record.profile_notice is None, attempt
+                assert seconds < 20, (attempt, seconds)
+                assert "kept=1" in await owner.run(other, ("open", f"{other_site}/storage.html")), attempt
+                await asyncio.gather(owner.close_thread(other), owner.close_thread(holder))
     finally:
         await owner.shutdown()
         profile = browser_launch.profile_dir(holder)

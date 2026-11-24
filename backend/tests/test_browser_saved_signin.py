@@ -30,16 +30,17 @@ def _value(call, flag):
     return call[call.index(flag) + 1]
 
 
-def _saving_state(fake, monkeypatch):
-    """A `state save` that writes the file agent-browser would, so the next session can start from it."""
-    original = fake.invoke
+def _saving_state(fake, monkeypatch, cookies=()):
+    """The holder's sign-in, as read over CDP, so the next session can start from it; returns the endpoints read."""
+    from host_access import browser_copy_state
+    reads = []
 
-    async def invoke(argv, *, timeout):
-        if "state" in argv and "save" in argv:
-            Path(argv[-1]).write_text("{}")
-        return await original(argv, timeout=timeout)
+    async def read(endpoint):
+        reads.append(endpoint)
+        return {"cookies": list(cookies), "origins": []}
 
-    monkeypatch.setattr(fake.owner, "_invoke", invoke)
+    monkeypatch.setattr(browser_copy_state, "read", read)
+    return reads
 
 
 def test_the_profile_is_one_per_owning_user_under_the_state_root(monkeypatch):
@@ -97,12 +98,13 @@ async def test_the_environments_own_launch_args_survive(synthetic_browser, chrom
 
 async def test_a_second_concurrent_session_starts_from_a_private_copy_of_the_sign_in(synthetic_browser, chrome154, monkeypatch):
     fake = synthetic_browser
-    _saving_state(fake, monkeypatch)
+    reads = _saving_state(fake, monkeypatch)
     await fake.owner.run("a", ["open", "about:blank"])
     await fake.owner.run("b", ["open", "about:blank"])
-    save = next(call for call in fake.calls if "state" in call)
-    copy = Path(save[-1])
-    assert _value(save, "--session") == fake.owner._sessions["a"].record.session
+    copy = browser_launch.copy_path(fake.owner._sessions["b"].record.session)
+    assert reads == [fake.owner._sessions["a"].chrome.endpoint]
+    # Read in place: agent-browser's `state save` loads pages in the holder's browser.
+    assert not any("state" in call and "save" in call for call in fake.calls)
     assert copy.parent == browser_launch.profile_root() / "copies" and oct(copy.stat().st_mode & 0o777) == "0o600"
     second = _launches(fake)[1]
     restored = next(call for call in fake.calls if "state" in call and "load" in call)
@@ -146,7 +148,13 @@ async def test_a_failed_copy_restore_closes_the_copy_before_its_first_navigation
     await fake.owner.shutdown()
 
 
-async def test_a_missed_copy_starts_the_second_session_signed_out_without_failing_it(synthetic_browser, chrome154):
+async def test_a_missed_copy_starts_the_second_session_signed_out_without_failing_it(synthetic_browser, chrome154, monkeypatch):
+    from host_access import browser_copy_state
+
+    async def unreadable(endpoint):
+        raise OSError("fixture holder unreachable")
+
+    monkeypatch.setattr(browser_copy_state, "read", unreadable)
     fake = synthetic_browser
     await fake.owner.run("a", ["open", "about:blank"])
     rendered = await fake.owner.run("b", ["open", "about:blank"])
@@ -237,16 +245,8 @@ def _cdp_browsers(monkeypatch, cookies_by_endpoint):
 
 
 def _seeding(fake, monkeypatch, cookies):
-    """A `state save` that writes the holder's cookies, as agent-browser's state file holds them."""
-    import json
-    original = fake.owner._invoke
-
-    async def invoke(argv, *, timeout):
-        if "state" in argv and "save" in argv:
-            Path(argv[-1]).write_text(json.dumps({"cookies": cookies, "origins": []}))
-        return await original(argv, timeout=timeout)
-
-    monkeypatch.setattr(fake.owner, "_invoke", invoke)
+    """The holder's cookies as its copy starts from them."""
+    _saving_state(fake, monkeypatch, cookies)
 
 
 _HOLDER_SIGNIN = {"name": "sid", "value": "holder", "domain": "example.com", "path": "/", "expires": -1, "session": True}
