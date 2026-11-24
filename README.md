@@ -26,13 +26,13 @@ Each agent works toward a goal you can measure, such as how much of your time a 
 
 **Every piece of work has one accountable agent, and agents check each other.** Agents message each other and hand smaller tasks to helper agents, but one agent answers for each result. When two goals pull in different directions, such as shipping fast and shipping without bugs, separate agents hold each one and review each other's work.
 
-**You steer from one ranked list, and changes have to prove themselves.** You set the plans and priorities. The Activity screen lists what is waiting on you in one list, ranked by your agents, each item with a one-line reason; it works on your Mac, and in your phone's browser once you connect it. The agents' working detail stays folded unless you open it. You and your agents can edit the same document, and each comment goes to the agent responsible for that part.
+**You steer from one ranked list, and changes have to prove themselves.** You set the plans and priorities. The Activity screen lists what is waiting on you in one list, ranked by your agents against the priorities you set, each item with a one-line reason; it works on your Mac, and in your phone's browser once you connect it. The agents' working detail stays folded unless you open it. You and your agents can edit the same document, and each comment goes to the agent responsible for that part.
 
 ![An agent's plan on a phone: a task with its status, working and waiting time and tokens, and the smaller tasks under it that are working, awaiting review, or waiting on another task](docs/phone-plan.png)
 
 ![A user requests a review from three AI agents, who join the document and edit, comment and suggest changes live alongside the user](docs/live-review.gif)
 
-For every agent, CORSIA records the minutes you spent in the app on each finished result, the share of results accepted without being sent back, and what they cost; the numbers fill in as work is finished. When you correct an agent, the lesson can be tried on some of its later tasks and compared with tasks done without it before it becomes part of the agent's instructions. Agents can also install reviewed workflows and skills from a shared library.
+For every agent, CORSIA records the minutes you spent in the app on each finished result, the share of results accepted without being sent back, and what they cost; the numbers fill in as work is finished. When you correct an agent, the lesson can be tried on some of its later tasks and compared with tasks done without it before it becomes part of the agent's permanent instructions. Agents can also install reviewed workflows and skills from a shared library.
 
 ![CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens](docs/measurement-kpis-light.png)
 
@@ -65,7 +65,7 @@ Weeks run Monday to Sunday, Pacific time. The September 28 week counts Monday to
 
 Agents run on a Claude Code or Codex subscription, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. Every model gets the same instructions, skills and tools. Changing an agent's model or account keeps its plan and documents, and when an account reaches its usage limit, the agent can move to another account you allow. CORSIA itself is free; model use is billed by whoever provides the model: your subscription's usage limits, your API bill, or nothing per use with a local model.
 
-A team of agents uses far more of a subscription than one agent does, so start with one.
+A team of agents uses far more of a subscription than one agent does, so start with one. For scale: over one week in November 2026, the install that builds CORSIA averaged about 21 agents at work in any given hour and used about 4.5 billion tokens a day, 97% of them context the model had already read (cache reads).
 
 ## Getting started
 
