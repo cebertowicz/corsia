@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test } from './support/test';
 import { expect, type Page, type Route, type WebSocketRoute } from '@playwright/test';
 import { createSession, loginByUrl, sidebarThread } from './support/corsia';
+import { CONFIRMATION_HOLD_MS } from '../src/lib/confirmationHold';
 
 /** Set to a folder to save a screenshot of each state; unset, the spec only asserts. */
 const OUT = process.env.OFFER_RENDER_DIR;
@@ -29,11 +30,8 @@ async function pageImage(page: Page) {
 async function openPane(page: Page, request: Parameters<typeof createSession>[0], scheme: 'light' | 'dark') {
 	Object.assign(server, { offer: null, save: 200, saves: 0, notNows: 0, gets: 0 });
 	await page.addInitScript((value) => localStorage.setItem('corsia_theme', value), scheme);
-	// The dock closes 200 ms after its fade starts; a spec that wants to look at the fade stretches that one timer.
-	await page.addInitScript(() => {
-		const timeout = window.setTimeout.bind(window);
-		window.setTimeout = ((handler: TimerHandler, ms?: number, ...rest: unknown[]) => timeout(handler, ms === 200 && (window as { slowClose?: boolean }).slowClose ? 8000 : ms, ...rest)) as typeof window.setTimeout;
-	});
+	// The Saved line's hold and fade run on the page's clock, so a spec that wants to look at the fade steps that clock itself.
+	await page.clock.install();
 	const data = await pageImage(page);
 	let stream: WebSocketRoute | null = null;
 	const resizes: unknown[] = [];
@@ -67,12 +65,29 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 	return { canvas, send, resizes };
 }
 
-/** The person signs in themselves: a password page opens, they type, the page settles. */
-async function signIn(page: Page, canvas: ReturnType<Page['locator']>, send: (message: object) => void) {
+/**
+ * The person signs in themselves: a password page opens, they type, the page settles.
+ * On a phone they tap the field, which opens the pane's own text input, and type into that; otherwise they type on the keyboard.
+ */
+async function signIn(page: Page, canvas: ReturnType<Page['locator']>, send: (message: object) => void, touch = false) {
 	send({ type: 'browser_password_page', visible: true });
 	await expect(page.locator('.password-notice')).toBeVisible();
-	await canvas.click({ position: { x: 40, y: 40 } });
-	await page.keyboard.type('x');
+	if (touch) {
+		// One field covering the whole page, so a tap in the middle of the canvas, where the page is drawn, lands in it.
+		send({ type: 'text_fields', fields: [{ x: 0, y: 0, width: 900, height: 600, kind: 'password' }] });
+		const box = (await canvas.boundingBox())!;
+		const field = page.locator('input[data-pane-field]');
+		// The field list arrives over the stream, so a tap that beats it is repeated.
+		await expect(async () => {
+			// A finger lands on whatever is on top there: the canvas the first time, the pane's own input after that.
+			await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+			await expect(field).toBeFocused({ timeout: 1000 });
+		}).toPass();
+		await field.pressSequentially('x');
+	} else {
+		await canvas.click({ position: { x: 40, y: 40 } });
+		await page.keyboard.type('x');
+	}
 	send({ type: 'browser_password_page', visible: false });
 	// The your-step notice fades out before anything is framed.
 	await expect(page.locator('.password-notice')).toHaveCount(0);
@@ -90,111 +105,117 @@ async function shot(page: Page, size: string, scheme: string, state: string) {
 test.describe('the pane save-login offer', () => {
 	test.describe.configure({ timeout: 120_000 });
 
-	for (const size of SIZES) for (const scheme of ['light', 'dark'] as const) {
-		test(`walks every state at ${size.name}, ${scheme}`, async ({ page, request }) => {
-			await page.setViewportSize({ width: size.width, height: size.height });
-			const { canvas, send, resizes } = await openPane(page, request, scheme);
-			await page.waitForTimeout(800);
-			const settled = resizes.length;
+	for (const size of SIZES) test.describe(`at ${size.name}`, () => {
+		// The phone is a touch device: its person taps the field and types into the pane's own input.
+		const touch = size.width === 393;
+		test.use({ hasTouch: touch });
 
-			server.offer = GITHUB;
-			await signIn(page, canvas, send);
-			await expect(dock(page)).toBeVisible();
-			await expect(dock(page)).toContainText('Save the github.com login for agents?');
-			await expect(dock(page)).toContainText('jordan@example.com');
-			await expect(dock(page).locator('input, textarea')).toHaveCount(0);
-			// Docked below the page: its top edge is at or under the canvas's bottom edge, and it never covers the page.
-			const [dockBox, canvasBox] = await Promise.all([dock(page).boundingBox(), canvas.boundingBox()]);
-			expect(dockBox!.y).toBeGreaterThanOrEqual(canvasBox!.y + canvasBox!.height - 1);
-			// Wide enough, the actions sit to the right of the question; narrower, they stack below it.
-			const [saveBox, notNowBox, copyBox] = await Promise.all([
-				dock(page).getByRole('button', { name: 'Save' }).boundingBox(),
-				dock(page).getByRole('button', { name: 'Not now' }).boundingBox(),
-				dock(page).locator('.copy').boundingBox(),
-			]);
-			if (dockBox!.width >= 576) expect(saveBox!.x).toBeGreaterThanOrEqual(copyBox!.x + copyBox!.width - 1);
-			else expect(saveBox!.y).toBeGreaterThanOrEqual(copyBox!.y + copyBox!.height - 1);
-			// Each button is a touch target at 768 and under.
-			if (size.width <= 768) for (const box of [saveBox!, notNowBox!]) expect(box.height).toBeGreaterThanOrEqual(43.5);
-			// The agent's viewport did not resize because the dock appeared.
-			await page.waitForTimeout(400);
-			expect(resizes.length).toBe(settled);
-			await shot(page, size.name, scheme, '1-ideal');
+		for (const scheme of ['light', 'dark'] as const) {
+			test(`walks every state at ${size.name}, ${scheme}`, async ({ page, request }) => {
+				await page.setViewportSize({ width: size.width, height: size.height });
+				const { canvas, send, resizes } = await openPane(page, request, scheme);
+				await page.waitForTimeout(800);
+				const settled = resizes.length;
 
-			// A failed save keeps the offer, with Save and Not now still there.
-			server.save = 500;
-			await dock(page).getByRole('button', { name: 'Save' }).click();
-			await expect(dock(page)).toContainText('Couldn’t save the login. Try again.');
-			await expect(dock(page).getByRole('button', { name: 'Save' })).toBeVisible();
-			await expect(dock(page).getByRole('button', { name: 'Not now' })).toBeVisible();
-			await shot(page, size.name, scheme, '2-error');
+				server.offer = GITHUB;
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page)).toBeVisible();
+				await expect(dock(page)).toContainText('Save the github.com login for agents?');
+				await expect(dock(page)).toContainText('jordan@example.com');
+				await expect(dock(page).locator('input, textarea')).toHaveCount(0);
+				// Docked below the page: its top edge is at or under the canvas's bottom edge, and it never covers the page.
+				const [dockBox, canvasBox] = await Promise.all([dock(page).boundingBox(), canvas.boundingBox()]);
+				expect(dockBox!.y).toBeGreaterThanOrEqual(canvasBox!.y + canvasBox!.height - 1);
+				// Wide enough, the actions sit to the right of the question; narrower, they stack below it.
+				const [saveBox, notNowBox, copyBox] = await Promise.all([
+					dock(page).getByRole('button', { name: 'Save' }).boundingBox(),
+					dock(page).getByRole('button', { name: 'Not now' }).boundingBox(),
+					dock(page).locator('.copy').boundingBox(),
+				]);
+				if (dockBox!.width >= 576) expect(saveBox!.x).toBeGreaterThanOrEqual(copyBox!.x + copyBox!.width - 1);
+				else expect(saveBox!.y).toBeGreaterThanOrEqual(copyBox!.y + copyBox!.height - 1);
+				// Each button is a touch target at 768 and under.
+				if (size.width <= 768) for (const box of [saveBox!, notNowBox!]) expect(box.height).toBeGreaterThanOrEqual(43.5);
+				// The agent's viewport did not resize because the dock appeared.
+				await page.waitForTimeout(400);
+				expect(resizes.length).toBe(settled);
+				await shot(page, size.name, scheme, '1-ideal');
 
-			// A save that works says Saved, fades, and closes; the fade is caught part-way by slowing the page's animations.
-			server.save = 200;
-			await page.evaluate(() => { (window as { slowClose?: boolean }).slowClose = true; });
-			await dock(page).getByRole('button', { name: 'Save' }).click();
-			await expect(dock(page)).toContainText('Saved');
-			await expect(page.locator('[aria-live="polite"]', { hasText: 'Saved' }).first()).toBeAttached();
-			// Pause the fade 100 ms in, so the frame shows it part-way.
-			await page.evaluate(() => new Promise<void>((resolve) => {
-				const node = document.querySelector('.save-offer')!;
-				const look = () => {
-					if (!node.classList.contains('fading')) return requestAnimationFrame(look);
-					node.getAnimations().forEach((animation) => { animation.pause(); animation.currentTime = 100; });
-					resolve();
-				};
-				look();
-			}));
-			const opacity = Number(await dock(page).evaluate((node) => getComputedStyle(node).opacity));
-			expect(opacity).toBeGreaterThan(0);
-			expect(opacity).toBeLessThan(1);
-			await shot(page, size.name, scheme, '3-saved-fading');
-			await page.evaluate(() => { (window as { slowClose?: boolean }).slowClose = false; document.querySelector('.save-offer')?.getAnimations().forEach((animation) => animation.play()); });
-			await expect(dock(page)).toHaveCount(0, { timeout: 15_000 });
+				// A failed save keeps the offer, with Save and Not now still there.
+				server.save = 500;
+				await dock(page).getByRole('button', { name: 'Save' }).click();
+				await expect(dock(page)).toContainText('Couldn’t save the login. Try again.');
+				await expect(dock(page).getByRole('button', { name: 'Save' })).toBeVisible();
+				await expect(dock(page).getByRole('button', { name: 'Not now' })).toBeVisible();
+				await shot(page, size.name, scheme, '2-error');
 
-			// An update offer.
-			server.offer = { ...GITHUB, update: true };
-			await signIn(page, canvas, send);
-			await expect(dock(page)).toContainText('Update the saved github.com login?');
-			await expect(dock(page).getByRole('button', { name: 'Update' })).toBeVisible();
-			await shot(page, size.name, scheme, '4-update');
-			await dock(page).getByRole('button', { name: 'Not now' }).click();
-			await expect(dock(page)).toHaveCount(0);
-			expect(server.notNows).toBe(1);
+				// A save that works says Saved, holds, fades, and closes. The page's clock is stopped here so the fade can be caught part-way.
+				server.save = 200;
+				await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+				await dock(page).getByRole('button', { name: 'Save' }).click();
+				await expect(dock(page)).toContainText('Saved');
+				await expect(page.locator('[aria-live="polite"]', { hasText: 'Saved' }).first()).toBeAttached();
+				await page.clock.runFor(CONFIRMATION_HOLD_MS);
+				await expect(dock(page)).toHaveClass(/fading/);
+				// Hold the fade 100 ms in, so the frame shows it part-way.
+				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().forEach((animation) => { animation.pause(); animation.currentTime = 100; }));
+				const opacity = Number(await dock(page).evaluate((node) => getComputedStyle(node).opacity));
+				expect(opacity).toBeGreaterThan(0);
+				expect(opacity).toBeLessThan(1);
+				await shot(page, size.name, scheme, '3-saved-fading');
+				// The close timer waits exactly as long as the fade the stylesheet runs: the motion token.
+				const fadeMs = Number.parseFloat(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dur-standard')));
+				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().forEach((animation) => animation.play()));
+				await page.clock.runFor(fadeMs - 1);
+				await expect(dock(page)).toHaveCount(1);
+				await page.clock.runFor(1);
+				await expect(dock(page)).toHaveCount(0);
+				await page.clock.resume();
 
-			// A domain that fits in two lines is shown whole; one that does not is cut in the middle and holds exactly two.
-			const lines = async () => dock(page).locator('.question').evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)));
-			server.offer = { ...GITHUB, domain: TWO_LINE_DOMAIN, site: `https://${TWO_LINE_DOMAIN}` };
-			await signIn(page, canvas, send);
-			await expect(dock(page).locator('.question')).toContainText(TWO_LINE_DOMAIN);
-			expect(await dock(page).locator('.question').textContent()).not.toContain('…');
-			expect(await lines()).toBeLessThanOrEqual(2);
-			await dock(page).getByRole('button', { name: 'Not now' }).click();
-			await expect(dock(page)).toHaveCount(0);
-			server.offer = { ...GITHUB, domain: LONG_DOMAIN, site: `https://${LONG_DOMAIN}` };
-			await signIn(page, canvas, send);
-			await expect(dock(page).locator('.question')).toContainText('…');
-			expect(await lines()).toBe(2);
-			await shot(page, size.name, scheme, '5-long-site');
-			await dock(page).getByRole('button', { name: 'Not now' }).click();
-			await expect(dock(page)).toHaveCount(0);
+				// An update offer.
+				server.offer = { ...GITHUB, update: true };
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page)).toContainText('Update the saved github.com login?');
+				await expect(dock(page).getByRole('button', { name: 'Update' })).toBeVisible();
+				await shot(page, size.name, scheme, '4-update');
+				await dock(page).getByRole('button', { name: 'Not now' }).click();
+				await expect(dock(page)).toHaveCount(0);
+				expect(server.notNows).toBe(1);
 
-			// A page that moves to another site by itself (a link, a form submit, an agent) closes the offer.
-			server.offer = GITHUB;
-			await signIn(page, canvas, send);
-			await expect(dock(page)).toBeVisible();
-			send({ type: 'browser_metadata', url: 'https://example.org/next', title: 'Next', domain: 'example.org' });
-			await expect(dock(page)).toHaveCount(0);
+				// A domain that fits in two lines is shown whole; one that does not is cut in the middle and holds exactly two.
+				const lines = async () => dock(page).locator('.question').evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)));
+				server.offer = { ...GITHUB, domain: TWO_LINE_DOMAIN, site: `https://${TWO_LINE_DOMAIN}` };
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page).locator('.question')).toContainText(TWO_LINE_DOMAIN);
+				expect(await dock(page).locator('.question').textContent()).not.toContain('…');
+				expect(await lines()).toBeLessThanOrEqual(2);
+				await dock(page).getByRole('button', { name: 'Not now' }).click();
+				await expect(dock(page)).toHaveCount(0);
+				server.offer = { ...GITHUB, domain: LONG_DOMAIN, site: `https://${LONG_DOMAIN}` };
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page).locator('.question')).toContainText('…');
+				expect(await lines()).toBe(2);
+				await shot(page, size.name, scheme, '5-long-site');
+				await dock(page).getByRole('button', { name: 'Not now' }).click();
+				await expect(dock(page)).toHaveCount(0);
 
-			// Nothing asked when the agent signed in alone.
-			const asked = server.gets;
-			send({ type: 'browser_password_page', visible: true });
-			send({ type: 'browser_password_page', visible: false });
-			await page.waitForTimeout(300);
-			expect(server.gets).toBe(asked);
-			await expect(dock(page)).toHaveCount(0);
-		});
-	}
+				// A page that moves to another site by itself (a link, a form submit, an agent) closes the offer.
+				server.offer = GITHUB;
+				await signIn(page, canvas, send, touch);
+				await expect(dock(page)).toBeVisible();
+				send({ type: 'browser_metadata', url: 'https://example.org/next', title: 'Next', domain: 'example.org' });
+				await expect(dock(page)).toHaveCount(0);
+
+				// Nothing asked when the agent signed in alone.
+				const asked = server.gets;
+				send({ type: 'browser_password_page', visible: true });
+				send({ type: 'browser_password_page', visible: false });
+				await page.waitForTimeout(300);
+				expect(server.gets).toBe(asked);
+				await expect(dock(page)).toHaveCount(0);
+			});
+		}
+	});
 
 	test('works by keyboard alone: Tab order is Save then Not now, and focus lands on the page when it closes', async ({ page, request }) => {
 		await page.setViewportSize({ width: 1440, height: 1000 });

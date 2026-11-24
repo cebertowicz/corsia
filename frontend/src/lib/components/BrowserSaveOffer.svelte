@@ -3,7 +3,9 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { declineOffer, fetchSaveOffer, saveOffer, type SaveOffer } from '$lib/api/savedLoginOffer';
-	import { MAX_USERNAME, SAVE_OFFER_TEXT as text, shortenMiddle } from '$lib/browserSaveOfferText';
+	import { SAVE_OFFER_TEXT as text, shortenMiddle } from '$lib/browserSaveOfferText';
+	import { CONFIRMATION_HOLD_MS } from '$lib/confirmationHold';
+	import { ms } from '$lib/popoverMotion';
 
 	/**
 	 * The offer to save a login the person just made in this pane, docked below the page.
@@ -19,8 +21,9 @@
 		onrestorefocus: () => void;
 	} = $props();
 
-	const HOLD_MS = 1200;
-	const FADE_MS = 200;
+	// The "Saved" line stays as long as the app's other confirmations ("Copied") do, then fades over the standard motion duration.
+	// The close timer reads that token from the document, the same one the stylesheet's transition uses, so the two cannot drift apart.
+	const FADE_DURATION_VAR = '--dur-standard';
 
 	let offer = $state<SaveOffer | null>(null);
 	let phase = $state<'asking' | 'saved' | 'fading'>('asking');
@@ -37,41 +40,48 @@
 	let timers: ReturnType<typeof setTimeout>[] = [];
 	let wasPasswordPage = false;
 
-	// The whole domain, until the question would need more than two lines at the dock's width.
+	// The whole domain and username, until they would not fit: the question in two lines, the username in one.
+	// Each is measured in a hidden copy with the same width and type, so the visible one is set once.
 	let domain = $state('');
+	let username = $state('');
 	let probe = $state<HTMLElement | undefined>();
 	let probeDomain = $state<HTMLElement | undefined>();
+	let nameProbe = $state<HTMLElement | undefined>();
+	let nameProbeText = $state<HTMLElement | undefined>();
 	const probeParts = $derived(offer ? text.question(offer, '\u0001').split('\u0001') : ['', '']);
-	const username = $derived(offer ? shortenMiddle(offer.username, MAX_USERNAME) : '');
 
 	function lineCount(node: HTMLElement) {
 		const style = getComputedStyle(node);
 		return Math.round(node.getBoundingClientRect().height / (parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4 || 20));
 	}
 
-	/** Measures the question in a hidden copy with the same width and type, so the visible one is set once. */
-	function fitDomain() {
-		if (!offer || !probe || !probeDomain) return;
-		const whole = offer.domain;
-		const fits = (shown: string) => { probeDomain!.textContent = shown; return lineCount(probe!) <= 2; };
-		if (fits(whole)) { domain = whole; return; }
+	/** The longest middle-shortened form of `whole` whose probe holds at most `lines` lines. */
+	function fit(whole: string, probeBox: HTMLElement, probeText: HTMLElement, lines: number) {
+		const fits = (shown: string) => { probeText.textContent = shown; return lineCount(probeBox) <= lines; };
+		if (fits(whole)) return whole;
 		let low = 1, high = whole.length - 1;
 		while (low < high) {
 			const mid = Math.ceil((low + high) / 2);
 			if (fits(shortenMiddle(whole, mid))) low = mid; else high = mid - 1;
 		}
-		domain = shortenMiddle(whole, low);
+		return shortenMiddle(whole, low);
+	}
+
+	function fitText() {
+		if (!offer || !probe || !probeDomain || !nameProbe || !nameProbeText) return;
+		domain = fit(offer.domain, probe, probeDomain, 2);
+		username = fit(offer.username, nameProbe, nameProbeText, 1);
 	}
 
 	$effect(() => {
-		if (!dock || !probe || !probeDomain || !offer) return;
+		if (!dock || !probe || !probeDomain || !nameProbe || !nameProbeText || !offer) return;
 		let width = -1;
 		const observer = new ResizeObserver((entries) => {
 			const next = Math.round(entries[0]?.contentRect.width ?? 0);
-			if (next !== width) { width = next; fitDomain(); }
+			if (next !== width) { width = next; fitText(); }
 		});
 		observer.observe(dock);
-		untrack(fitDomain);
+		untrack(fitText);
 		return () => observer.disconnect();
 	});
 
@@ -83,6 +93,7 @@
 		if (!next || offer) return;
 		offer = next;
 		domain = next.domain;
+		username = next.username;
 		phase = 'asking';
 		failed = false;
 		saving = false;
@@ -170,8 +181,8 @@
 		timers.push(setTimeout(() => {
 			if (reduced) { close(); return; }
 			phase = 'fading';
-			timers.push(setTimeout(close, FADE_MS));
-		}, HOLD_MS));
+			timers.push(setTimeout(close, ms(FADE_DURATION_VAR)));
+		}, CONFIRMATION_HOLD_MS));
 	}
 
 	function notNow() {
@@ -191,6 +202,7 @@
 				<p class="probe" aria-hidden="true" bind:this={probe}>{probeParts[0]}<span bind:this={probeDomain}></span>{probeParts[1]}</p>
 				<p class="question" aria-hidden="true">{text.question(offer, domain)}</p>
 				<p class="sr-only">{text.question(offer, offer.domain)}</p>
+				<p class="username probe" aria-hidden="true" bind:this={nameProbe}><span bind:this={nameProbeText}></span></p>
 				<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
 				{#if failed}<p class="error">{text.error}</p>{/if}
 			</div>
@@ -206,14 +218,14 @@
 {/if}
 
 <style>
-	.save-offer { container-type: inline-size; flex: none; border-top: 1px solid var(--border-subtle); background: var(--bg-primary); transition: opacity 200ms ease; }
+	.save-offer { container-type: inline-size; flex: none; border-top: 1px solid var(--border-subtle); background: var(--bg-primary); transition: opacity var(--dur-standard) ease; }
 	.save-offer.fading { opacity: 0; }
 	.body { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
 	.copy { position: relative; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 	p { margin: 0; }
 	.question, .probe { overflow-wrap: anywhere; font-size: var(--text-subhead); line-height: 1.4; color: var(--text-primary); }
 	.probe { position: absolute; inset-inline: 0; top: 0; visibility: hidden; pointer-events: none; }
-	.username { overflow-wrap: anywhere; font-size: var(--text-footnote); color: var(--text-secondary); }
+	.username { overflow-wrap: anywhere; font-size: var(--text-footnote); line-height: 1.4; color: var(--text-secondary); }
 	.error { font-size: var(--text-footnote); color: var(--red-text); }
 	.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 	.done { padding: var(--space-3) var(--space-4); font-size: var(--text-subhead); color: var(--text-secondary); }

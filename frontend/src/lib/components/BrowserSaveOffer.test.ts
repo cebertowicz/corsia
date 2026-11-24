@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
 import { shortenMiddle } from '$lib/browserSaveOfferText';
+import { CONFIRMATION_HOLD_MS } from '$lib/confirmationHold';
+import { theme } from '$lib/stores/theme';
 
 const reducedMotion = vi.hoisted(() => ({ value: null as null | { set(value: boolean): void } }));
 vi.mock('$lib/stores/viewport', async (importOriginal) => {
@@ -11,6 +13,17 @@ vi.mock('$lib/stores/viewport', async (importOriginal) => {
 	return { ...(await importOriginal<object>()), prefersReducedMotion };
 });
 
+
+class TestPointerEvent extends MouseEvent {
+	pointerId: number;
+	pointerType: string;
+	isPrimary = true;
+	constructor(type: string, init: PointerEventInit = {}) {
+		super(type, init);
+		this.pointerId = init.pointerId ?? 1;
+		this.pointerType = init.pointerType ?? 'touch';
+	}
+}
 
 class FakeSocket {
 	static CONNECTING = 0;
@@ -67,6 +80,7 @@ beforeEach(() => {
 	offers = [OFFER];
 	saveStatus = 200;
 	calls = [];
+	document.documentElement.style.setProperty('--dur-standard', '220ms');
 	vi.stubGlobal('WebSocket', FakeSocket);
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	vi.stubGlobal('Image', class { src = ''; decode() { return Promise.resolve(); } });
@@ -81,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	document.documentElement.style.removeProperty('--dur-standard');
 	vi.useRealTimers();
 	if (component) unmount(component);
 	component = null;
@@ -251,18 +266,53 @@ describe('save-login offer: what it shows', () => {
 		expect(dock()!.contains(document.activeElement)).toBe(false);
 	});
 
-	it('shortens a long username in the middle and keeps the whole one for hover and screen readers', async () => {
+	// jsdom has no layout, so a hidden copy "wraps" by its text length: 30 characters to a line of the question, 20 to the username's.
+	function wrapByLength() {
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			if (!this.classList.contains('probe')) return new DOMRect(0, 0, 100, 20);
+			const style = getComputedStyle(this);
+			const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4 || 20;
+			const perLine = this.classList.contains('username') ? 20 : 30;
+			return new DOMRect(0, 0, 100, line * Math.max(1, Math.ceil((this.textContent ?? '').length / perLine)));
+		});
+	}
+
+	it('shortens a username in the middle only when it overflows its line, keeping the whole one for hover and screen readers', async () => {
+		wrapByLength();
 		const long = `${'a'.repeat(30)}@${'b'.repeat(30)}.example.com`;
 		offers = [{ ...OFFER, username: long }];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		const name = dock()!.querySelector<HTMLElement>('.username')!;
+		const name = dock()!.querySelector<HTMLElement>('.username:not(.probe)')!;
 		expect(name.title).toBe(long);
-		expect(name.querySelector('[aria-hidden="true"]')!.textContent).toBe(shortenMiddle(long, 32));
+		const cut = name.querySelector('[aria-hidden="true"]')!.textContent!;
+		expect(cut).toContain('…');
+		expect(cut.length).toBeLessThanOrEqual(20);
+		expect(cut.startsWith('aaa') && cut.endsWith('.com')).toBe(true);
 		expect(name.querySelector('.sr-only')!.textContent).toBe(long);
 	});
 
-	it('shortens a domain only past what two lines hold', () => {
+	it('shows a username that fits its line whole, however many characters it has', async () => {
+		wrapByLength();
+		const fits = 'a-name-of-20-chars!!';
+		offers = [{ ...OFFER, username: fits }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()!.querySelector('.username:not(.probe) [aria-hidden="true"]')!.textContent).toBe(fits);
+	});
+
+	it('cuts a domain in the middle once the question would need a third line', async () => {
+		wrapByLength();
+		const long = `${'x'.repeat(70)}.example.com`;
+		offers = [{ ...OFFER, domain: long }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		const question = dock()!.querySelector('.question')!.textContent!;
+		expect(question).toContain('…');
+		expect(question.length).toBeLessThanOrEqual(60);
+	});
+
+	it('shortenMiddle keeps both ends of a long text and leaves a short one alone', () => {
 		expect(shortenMiddle('github.com', 48)).toBe('github.com');
 		const long = `${'x'.repeat(70)}.example.com`;
 		const short = shortenMiddle(long, 48);
@@ -282,10 +332,31 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(calls).toContain('POST /api/saved-logins/offer/save {"thread_id":"thread"}');
 		expect(dock()!.textContent).toContain('Saved');
 		expect(liveText()).toContain('Saved');
-		await vi.advanceTimersByTimeAsync(1200);
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS);
 		flushSync();
 		expect(dock()!.classList.contains('fading')).toBe(true);
 		await vi.advanceTimersByTimeAsync(250);
+		flushSync();
+		expect(dock()).toBeNull();
+	});
+
+	it('holds the Saved line for the app confirmation hold and fades for exactly the motion token', async () => {
+		document.documentElement.style.setProperty('--dur-standard', '400ms');
+		vi.useFakeTimers();
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS - 1);
+		flushSync();
+		expect(dock()!.classList.contains('fading')).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		flushSync();
+		expect(dock()!.classList.contains('fading')).toBe(true);
+		await vi.advanceTimersByTimeAsync(399);
+		flushSync();
+		expect(dock()).not.toBeNull();
+		await vi.advanceTimersByTimeAsync(1);
 		flushSync();
 		expect(dock()).toBeNull();
 	});
@@ -307,7 +378,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 		await signIn(socket, canvas);
 		button('Save').click();
 		await settle();
-		await vi.advanceTimersByTimeAsync(1200);
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS);
 		flushSync();
 		reducedMotion.value!.set(false);
 		expect(dock()).toBeNull();
@@ -384,16 +455,115 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()).toBeNull();
 	});
 
-	it('keeps the agent viewport still while the dock is up, and sends nothing new after it closes', async () => {
+	it('keeps the agent viewport at its pre-dock size while the dock is up, and still sends a new target, density and theme', async () => {
 		const { socket, canvas } = render();
-		const appearances = () => socket.sent.filter(message => message.type === 'appearance').length;
-		const before = appearances();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		expect(appearances()).toEqual([{ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' }]);
 		await signIn(socket, canvas);
+		// The dock takes the bottom of the pane, so the canvas is shorter now.
 		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 60));
 		socket.receive({ type: 'browser_target_changed' });
-		expect(appearances()).toBe(before);
+		expect(appearances()).toHaveLength(2);
+		expect(appearances()[1]).toEqual({ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' });
+		vi.stubGlobal('devicePixelRatio', 2);
+		theme.set('light');
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect(appearances()).toHaveLength(3);
+		expect(appearances()[2]).toEqual({ type: 'appearance', width: 100, height: 100, scale: 2, scheme: 'light' });
 		button('Not now').click();
 		await settle();
 		expect(dock()).toBeNull();
+		theme.set('dark');
+	});
+});
+
+describe('save-login offer: touch typing and failures', () => {
+	// A tap on a password field opens the touch overlay's own input; what it types goes to the server through the leaf's send.
+	async function touchTyping(socket: FakeSocket, canvas: HTMLCanvasElement, text: string) {
+		Object.defineProperties(HTMLCanvasElement.prototype, {
+			setPointerCapture: { configurable: true, value() {} },
+			releasePointerCapture: { configurable: true, value() {} },
+			hasPointerCapture: { configurable: true, value: () => true },
+		});
+		await settle();
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'password' }] });
+		for (const type of ['pointerdown', 'pointerup']) canvas.dispatchEvent(new TestPointerEvent(type, { bubbles: true, cancelable: true, clientX: 20, clientY: 35, pointerType: 'touch' }));
+		flushSync();
+		const input = host.querySelector<HTMLInputElement>('input[data-pane-field]')!;
+		input.value = text;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
+	it.each([['one character', 'x'], ['a pasted run', 'xyz']])('counts the touch overlay\'s typing (%s) as the person typing, and asks once', async (_name, text) => {
+		const { socket, canvas } = render();
+		passwordPage(socket, true);
+		await touchTyping(socket, canvas, text);
+		passwordPage(socket, false);
+		await settle();
+		expect(gets()).toEqual(['GET /api/saved-logins/offer?thread_id=thread']);
+		expect(dock()!.textContent).toContain('Save the github.com login for agents?');
+	});
+
+	it('does not count a tap on the overlay when nothing was typed', async () => {
+		const { socket, canvas } = render();
+		passwordPage(socket, true);
+		await touchTyping(socket, canvas, '');
+		passwordPage(socket, false);
+		await settle();
+		expect(gets()).toEqual([]);
+	});
+
+	it('reports a refused read to the console and shows nothing', async () => {
+		const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => input.startsWith('/api/saved-logins/offer?') ? { ok: false, status: 500, json: async () => ({}) } : base(input, init)));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()).toBeNull();
+		expect(report).toHaveBeenCalledWith('[saved login offer] read rejected', 'thread', 500);
+	});
+
+	it('reports a read that throws to the console and shows nothing', async () => {
+		const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const failure = new Error('offline');
+		vi.stubGlobal('fetch', vi.fn(async () => { throw failure; }));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()).toBeNull();
+		expect(report).toHaveBeenCalledWith('[saved login offer] read failed', 'thread', failure);
+	});
+
+	it('does not report a 200 with no offer', async () => {
+		const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+		offers = [null];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()).toBeNull();
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it('closes on Not now even when the server refuses it, and reports the refusal', async () => {
+		const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => input.endsWith('/not-now') ? { ok: false, status: 503, json: async () => ({}) } : base(input, init)));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Not now').click();
+		await settle();
+		expect(dock()).toBeNull();
+		expect(report).toHaveBeenCalledWith('[saved login offer] not-now rejected', 'thread', 503);
+	});
+
+	it('closes on Not now when the request throws, and reports it', async () => {
+		const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		const failure = new Error('offline');
+		vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => { if (input.endsWith('/not-now')) throw failure; return base(input, init); }));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Not now').click();
+		await settle();
+		expect(dock()).toBeNull();
+		expect(report).toHaveBeenCalledWith('[saved login offer] not-now failed', 'thread', failure);
 	});
 });

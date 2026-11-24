@@ -13,10 +13,16 @@ export function paneCoordinates(event: PointerEvent | WheelEvent, canvas: HTMLCa
 	return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
 }
 
-/** The size, pixel density and theme the pane asks the page to take, or null while the canvas has no size. */
-export function paneAppearance(canvas: HTMLCanvasElement, scheme: string) {
+export type PaneSize = { width: number; height: number };
+
+export function paneSize(canvas: HTMLCanvasElement): PaneSize {
 	const bounds = canvas.getBoundingClientRect();
-	if (bounds.width < 1 || bounds.height < 1) return null;
+	return { width: Math.round(bounds.width), height: Math.round(bounds.height) };
+}
+
+/** The size, pixel density and theme the pane asks the page to take, or null while the canvas has no size. `size` overrides the canvas's current one. */
+export function paneAppearance(canvas: HTMLCanvasElement, scheme: string, size: PaneSize = paneSize(canvas)) {
+	if (size.width < 1 || size.height < 1) return null;
 	const touch = window.matchMedia?.('(pointer: coarse)').matches === true;
-	return { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme, ...(touch ? { touch: true } : {}) };
+	return { type: 'appearance', ...size, scale: devicePixelRatio, scheme, ...(touch ? { touch: true } : {}) };
 }
