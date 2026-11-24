@@ -47,3 +47,43 @@ def test_scope_owned_tasks_have_no_user_settlement_route(isolated_db):
         assert projection.rows(db, 'owner-token', []) == []
     finally:
         db.close()
+
+
+def _task_keys(db):
+    return [r['detail']['node_id'] for r in projection.rows(db, 'owner-token', []) if r['kind'] == 'task']
+
+
+def test_later_person_task_has_no_row(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        with write_transaction(db, scope='later_task') as conn:
+            plan = service.ensure_plan('thread', 'owner', db=conn)
+            node = service.add_node(plan.id, kind='task', title='Person task', acceptance_criteria='Done',
+                                    assignee='user', actor_id=None, provenance='test', db=conn)
+        assert _task_keys(db) == [node.id]
+        with write_transaction(db, scope='later_task_set') as conn:
+            conn.execute("UPDATE plan_nodes SET later=1 WHERE id=?", (node.id,))
+        assert _task_keys(db) == []
+    finally:
+        db.close()
+
+
+def test_ask_from_later_node_has_no_review_row(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc = seed_document(db, 'owner')
+        with write_transaction(db, scope='later_ask') as conn:
+            node = _ask_node(conn, 'owner')
+            _raise(conn, node.id, doc, 'owner')
+
+        def reviews():
+            annotated = public.annotate_attention(_authorized_raised(None, 'owner-token', db=db), db=db)
+            return [r for r in projection.rows(db, 'owner-token', annotated) if r['kind'] == 'review']
+        assert len(reviews()) == 1
+        with write_transaction(db, scope='later_ask_set') as conn:
+            conn.execute("UPDATE plan_nodes SET later=1 WHERE id=?", (node.id,))
+        assert reviews() == []
+    finally:
+        db.close()

@@ -5,21 +5,52 @@ No writes are made. The document and chat reads reuse their canonical unread SQL
 """
 from __future__ import annotations
 
+import json
+
 from doceditor.feedback_state import unread_comment_rows
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
-from plans.attention_detail import _sources
+from plans.attention_detail import _UNKNOWN_SOURCE, _sources
+
+# Activity rows share one title cap with review rows (plans/activity_rows.py).
+_TITLE_CAP = 160
 
 
-def _title(text: str | None, fallback: str) -> str:
-    return " ".join((text or "").split())[:160] or fallback
+def _flat(text: str | None) -> str:
+    return " ".join((text or "").split())
 
 
-def _reply_title(agent: str | None, row) -> str:
+def _agent(source: dict) -> str:
+    """An untitled or unknown thread is still an agent; never call it 'Untitled thread replied'."""
+    label = source.get('thread_label')
+    return 'An agent' if not source.get('thread_id') or label in (None, '', 'Untitled thread', _UNKNOWN_SOURCE['thread_label']) else label
+
+
+def _quoted(prefix: str, text: str | None) -> str | None:
+    """Quote the person's comment, shortening the quote so the closing mark always shows."""
+    text = _flat(text)
+    if not text:
+        return None
+    room = _TITLE_CAP - len(prefix) - 2
+    if room < 2:
+        return None
+    if len(text) > room:
+        text = text[:room - 1].rstrip() + '…'
+    return f'{prefix}“{text}”'
+
+
+def _reply_title(agent: str, row) -> str:
     """Say who answered which of the person's comments; a document's file name is not that."""
-    agent = agent or 'An agent'
-    if row['root_kind'] == 'user' and _title(row['root_body'], ''):
-        return _title(f"{agent} replied to your comment “{_title(row['root_body'], '')}”", '')
-    return _title(f"{agent} replied in your comment thread on {_title(row['artifact_title'], 'a document')}", '')
+    quoted = _quoted(f'{agent} replied to your comment ', row['root_body']) if row['root_kind'] == 'user' else None
+    return quoted or _flat(f"{agent} replied in your comment thread on {_flat(row['artifact_title']) or 'a document'}")[:_TITLE_CAP]
+
+
+def _chat_note(metadata: str | None, cid: str) -> str | None:
+    """The person's own words for one chat comment, from the input that carried it."""
+    try:
+        comments = (json.loads(metadata or '{}').get('reply_context') or {}).get('comments') or []
+    except (ValueError, AttributeError):
+        return None
+    return next((c.get('note') for c in comments if isinstance(c, dict) and c.get('cid') == cid), None)
 
 
 def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dict]:
@@ -64,7 +95,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
     chats = db.execute(f"""
       WITH unread AS (
         SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id,
-               a.answered_at, c.target_message_id,
+               a.answered_at, c.target_message_id, u.metadata AS user_metadata,
                COALESCE(c.root_user_message_id,a.user_message_id) AS root_user_message_id,
                COALESCE(c.root_cid,a.cid) AS root_cid,
                ROW_NUMBER() OVER (PARTITION BY a.thread_id,a.user_message_id,a.cid
@@ -82,7 +113,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
         result.append({
             'renderer': 'reply', 'kind': 'reply', 'key': f'doc-reply:{artifact}:{root}',
             'external_id': f'doc-reply:{artifact}:{root}',
-            'title': _reply_title(sources[row['author_thread_id']]['thread_label'], row), 'raised_at': row['created_at'],
+            'title': _reply_title(_agent(sources[row['author_thread_id']]), row), 'raised_at': row['created_at'],
             'source': sources[row['author_thread_id']], 'open': {'artifact_id': artifact, 'comment_id': root},
             'detail': {'artifact_id': artifact, 'root_id': root, 'reply_id': reply}, 'priority': 0,
         })
@@ -90,9 +121,11 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
         thread, message, cid = row['thread_id'], row['user_message_id'], row['cid']
         key = f'chat-reply:{thread}:{message}:{cid}'
         source = sources[thread]
+        agent = _agent(source)
+        title = _quoted(f'{agent} replied to your comment ', _chat_note(row['user_metadata'], cid))
         result.append({
             'renderer': 'reply', 'kind': 'reply', 'key': key, 'external_id': key,
-            'title': f"{source['thread_label'] or 'An agent'} replied to your comment in chat", 'raised_at': row['answered_at'],
+            'title': title or f'{agent} replied to your comment in chat', 'raised_at': row['answered_at'],
             'source': source, 'open': {'thread_id': thread, 'message_id': row['target_message_id']},
             'detail': {'thread_id': thread, 'message_id': message, 'cid': cid,
                        'assistant_message_id': row['assistant_message_id'],

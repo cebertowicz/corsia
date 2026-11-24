@@ -7,7 +7,18 @@ from uuid import uuid4
 from loguru import logger
 from events.delivery import enqueue_event_wake
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
-from infra.database import get_db, write_transaction
+from infra.database import write_transaction
+from plans.public import thread_paused_since
+
+# Cost budget, not a measurement: at most 4 ranking wakes an hour per scope (96 a day) while new
+# items keep arriving. A new item waits at most this long for a rank, and meanwhile shows in
+# Activity below the ranked items, marked 'Not ranked yet'. The sweep itself runs every
+# automation.continuation.cadence.CONTINUATION_SWEEP_INTERVAL seconds.
+NUDGE_FLOOR = timedelta(minutes=15)
+
+# Scope -> the last failure logged for it, so a scope that keeps failing logs once until its
+# failure changes or it recovers, not once a sweep.
+_failing: dict[str, str] = {}
 
 
 def _scopes(db):
@@ -58,7 +69,7 @@ def _enqueue_if_due(db, user_id: str, project_id: str | None, thread_id: str, no
     if current is None:
         raise ValueError('invalid activity sweep timestamp')
     last = _last_nudge(db, user_id, scope)
-    if last and current - last < timedelta(minutes=15):
+    if last and current - last < NUDGE_FLOOR:
         return False
     rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view='activity')
     unranked = sum(row['rank'] is None for row in rows)
@@ -67,7 +78,7 @@ def _enqueue_if_due(db, user_id: str, project_id: str | None, thread_id: str, no
     with write_transaction(db, scope='activity_rank_nudge') as tx:
         # Another sweep may have nudged this scope while the queue was read.
         locked_last = _last_nudge(tx, user_id, scope)
-        if locked_last != last or (locked_last and current - locked_last < timedelta(minutes=15)):
+        if locked_last != last or (locked_last and current - locked_last < NUDGE_FLOOR):
             return False
         summary = (f'{unranked} items waiting on the person are not ranked. '
                    'Load attention_rank (tools_load names=["attention_rank"]), '
@@ -84,14 +95,25 @@ class ActivityRankingSource:
     kind = 'activity_ranking'
 
     def prepare(self, now: str, *, db) -> list[str]:
-        connection = db or get_db()
         woken = []
-        for user_id, project_id, thread_id in _scopes(connection):
+        for user_id, project_id, thread_id in _scopes(db):
+            scope = project_id or WORKSPACE_SCOPE
+            # Nothing wakes a paused lane (the same read rule evaluation uses, R7). No nudge is
+            # stamped, so after the unpause the first sweep that finds an item raised since the
+            # last nudge wakes the ranker once; nothing is replayed.
+            if thread_paused_since(db, thread_id) is not None:
+                continue
             try:
-                if _enqueue_if_due(connection, user_id, project_id, thread_id, now):
+                if _enqueue_if_due(db, user_id, project_id, thread_id, now):
                     woken.append(thread_id)
-            except Exception:  # A failed scope retries on the next sweep; other scopes still drive.
-                logger.exception('activity ranking wake failed for scope {}', project_id or WORKSPACE_SCOPE)
+            except Exception as exc:  # A failed scope retries on the next sweep; other scopes still drive.
+                failure = f'{type(exc).__name__}: {exc}'
+                if _failing.get(scope) != failure:
+                    logger.exception('activity ranking wake failed for scope {}; logged once until it changes', scope)
+                    _failing[scope] = failure
+                continue
+            if _failing.pop(scope, None) is not None:
+                logger.info('activity ranking wake recovered for scope {}', scope)
         return woken
 
     def due(self, _now: str, *, db) -> list:

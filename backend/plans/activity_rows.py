@@ -103,7 +103,7 @@ def rows(db, user_id, annotated):
         artifact_id = links.get(node["id"])
         if artifact_id and artifact_id not in authorized_artifacts:
             continue
-        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":node["order_key"]})
+        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
     return out
 
 

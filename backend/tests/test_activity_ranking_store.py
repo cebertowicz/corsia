@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from infra.activity_ranking import apply_ranks, replace_ranks, validate_order
+from infra.activity_ranking import REASON_MAX_CHARS, apply_ranks, replace_ranks, validate_order
 from infra.activity_ranking_schema import ACTIVITY_RANKING_SQL
 
 
@@ -37,9 +37,9 @@ def test_replace_scopes_are_independent(db):
 def test_validation_names_stale_and_overlong_items():
     with pytest.raises(ValueError, match="Unknown key.*re-read"):
         validate_order([{"key": "gone", "reason": "Needed"}], {"a"})
-    with pytest.raises(ValueError, match="a.*90"):
-        validate_order([{"key": "a", "reason": "x" * 91}], {"a"})
-    validate_order([{"key": "a", "reason": "x" * 90}], {"a", "b"})
+    with pytest.raises(ValueError, match=f"a.*{REASON_MAX_CHARS}"):
+        validate_order([{"key": "a", "reason": "x" * (REASON_MAX_CHARS + 1)}], {"a"})
+    validate_order([{"key": "a", "reason": "x" * REASON_MAX_CHARS}], {"a", "b"})
 
 
 def test_failed_replacement_rolls_back_to_previous_order(db):

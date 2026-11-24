@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# The approved Activity design shows each reason on one line under its item. At the list's
+# widest (455 px, a window 1,264 px or wider), after the 'Why it's here: ' prefix, one line of
+# 11.5 px system font holds 63-73 characters of ordinary text (measured with SF Pro; Fortissimo's
+# real reasons fit up to 66). 64 keeps a reason to one line there; narrower lists wrap it.
+REASON_MAX_CHARS = 64
+
 
 def validate_order(items: list[dict], current_keys: set[str]) -> None:
     """Refuse stale, duplicate or overlong items before replacing an order."""
@@ -15,8 +21,8 @@ def validate_order(items: list[dict], current_keys: set[str]) -> None:
         reason = item.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError(f"Give {key!r} a reason written for the person.")
-        if len(reason) > 90:
-            raise ValueError(f"Reason for {key!r} exceeds 90 characters; shorten it.")
+        if len(reason) > REASON_MAX_CHARS:
+            raise ValueError(f"Reason for {key!r} exceeds {REASON_MAX_CHARS} characters; shorten it.")
         if "\n" in reason or "\r" in reason:
             raise ValueError(f"Reason for {key!r} must be one line.")
         seen.add(key)

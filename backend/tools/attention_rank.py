@@ -10,7 +10,7 @@ from loguru import logger
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.activity_rank_scope import ranker_for
-from infra.activity_ranking import replace_ranks, validate_order
+from infra.activity_ranking import REASON_MAX_CHARS, replace_ranks, validate_order
 from tools.base import Tool
 from tools.delegation import _require_context
 
@@ -75,7 +75,7 @@ class AttentionRankTool(Tool):
         return ('Set the order the person works through Activity. Read the items, then set '
                 'items [{key, reason}] in order. Rank by the scope priorities, putting what '
                 'blocks agents or a date the person set first. Write each reason for the '
-                'person in one line, at most 90 characters. State only what the item or '
+                f'person in one line, at most {REASON_MAX_CHARS} characters. State only what the item or '
                 'priorities show; if unsure, say what it waits for. Unlisted items stay '
                 'below ranked items; set replaces the previous order. Call on a ranking '
                 'wake and when your scope priorities change.')
@@ -85,7 +85,7 @@ class AttentionRankTool(Tool):
         return {'type': 'object', 'additionalProperties': False, 'properties': {
             'operation': {'type': 'string', 'enum': ['read', 'set']},
             'items': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
-                'properties': {'key': {'type': 'string'}, 'reason': {'type': 'string', 'maxLength': 90}},
+                'properties': {'key': {'type': 'string'}, 'reason': {'type': 'string', 'maxLength': REASON_MAX_CHARS}},
                 'required': ['key', 'reason']}},
         }, 'required': ['operation']}
 

@@ -30,7 +30,8 @@ def test_ranker_set_is_authorized_atomic_and_replaces(db, monkeypatch):
     monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
     actor = {'user_id':'user-1', 'project_id':'project-1'}
     assert 'Parent work ranks' in attention_rank._run('child', actor, 'set', [{'key':key,'reason':'Ready'}])
-    assert 'exceeds 90' in attention_rank._run('root', actor, 'set', [{'key':key,'reason':'x'*91}])
+    from infra.activity_ranking import REASON_MAX_CHARS
+    assert f'exceeds {REASON_MAX_CHARS}' in attention_rank._run('root', actor, 'set', [{'key':key,'reason':'x'*(REASON_MAX_CHARS + 1)}])
     assert 'Ranked 1' in attention_rank._run('root', actor, 'set', [{'key':key,'reason':'Ready'}])
     assert 'Unknown key' in attention_rank._run('root', actor, 'set', [{'key':'stale','reason':'Wrong'}])
     assert db.execute('SELECT item_key, reason FROM activity_ranks').fetchone()[:] == (key, 'Ready')
@@ -129,3 +130,45 @@ def test_one_failed_scope_does_not_skip_the_next(db, monkeypatch):
         return True
     monkeypatch.setattr(activity_ranking, '_enqueue_if_due', enqueue)
     assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == ['second']
+
+
+def test_paused_ranker_is_not_woken_and_wakes_once_after_unpause(db, monkeypatch):
+    from automation.continuation.sources import activity_ranking
+    seed(db)
+    paused = {'root': '2026-01-01T00:00:00+00:00'}
+    monkeypatch.setattr(activity_ranking, 'thread_paused_since', lambda _db, thread: paused.get(thread))
+    wakes = []
+    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
+    source = activity_ranking.ActivityRankingSource()
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert source.prepare('2026-01-01T01:00:00+00:00', db=db) == []
+    assert db.execute('SELECT count(*) FROM activity_rank_nudges').fetchone()[0] == 0
+    paused.clear()
+    assert source.prepare('2026-01-01T02:00:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T02:01:00+00:00', db=db) == []
+    assert len(wakes) == 1
+
+
+def test_a_scope_that_keeps_failing_logs_once_until_it_changes(db, monkeypatch):
+    from automation.continuation.sources import activity_ranking
+    monkeypatch.setattr(activity_ranking, '_failing', {})
+    monkeypatch.setattr(activity_ranking, '_scopes', lambda db: [('user-1', 'bad', 'first')])
+    errors, infos = [], []
+    monkeypatch.setattr(activity_ranking.logger, 'exception', lambda *a, **k: errors.append(a))
+    monkeypatch.setattr(activity_ranking.logger, 'info', lambda *a, **k: infos.append(a))
+    failure = {'text': 'scope failed'}
+    def enqueue(*_args):
+        if failure['text']:
+            raise RuntimeError(failure['text'])
+        return False
+    monkeypatch.setattr(activity_ranking, '_enqueue_if_due', enqueue)
+    source = activity_ranking.ActivityRankingSource()
+    for _ in range(3):
+        source.prepare('2026-01-01T00:00:00+00:00', db=db)
+    assert len(errors) == 1
+    failure['text'] = 'another failure'
+    source.prepare('2026-01-01T00:01:00+00:00', db=db)
+    assert len(errors) == 2
+    failure['text'] = ''
+    source.prepare('2026-01-01T00:02:00+00:00', db=db)
+    assert len(infos) == 1 and activity_ranking._failing == {}

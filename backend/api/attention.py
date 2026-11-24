@@ -156,7 +156,11 @@ def _summarize_raised(thread_id: str | None, user_id: str, *, db=None) -> list[d
             _db.close()
 
 
-# Upper bound on the ordered `items` the queue response carries.
+# Upper bound on the ordered `items` the queue response carries. The approved Activity design
+# shows the whole list, not the first few (its frames draw forty items). Expected volume is tens
+# of items waiting on a person; 300 is ten times that, and 300 task rows read at p95 6.8 ms in memory
+# (test_activity_queue_timing.py).
+# `count` stays uncapped, so anything past the cap is still counted.
 QUEUE_ITEMS_CAP = 300
 
 
