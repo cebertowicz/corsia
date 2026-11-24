@@ -220,15 +220,12 @@ async def _check_room_or_compensate(
     """Refuse an update without backup room, releasing the hold on any failure."""
     try:
         await _check_update_backup_room()
-    except asyncio.CancelledError as error:
-        await _compensate_cancelled_acquire(acquired_ids, error)
-        raise
     except BaseException as error:
         from infra.database_migrations import BackupRoomError
 
         room = {"needed_bytes": error.needed_bytes, "free_bytes": error.free_bytes} if isinstance(error, BackupRoomError) else None
         detail: dict[str, object] = dict(room) if room else {}
-        if room and prepared:
+        if prepared:
             try:
                 cleanup = asyncio.create_task(asyncio.to_thread(
                     _discard_prepared_release, prepared[0], prepared[1]
@@ -238,10 +235,14 @@ async def _check_room_or_compensate(
                 await _compensate_cancelled_acquire(acquired_ids, cancellation)
                 raise
             except Exception:
-                logger.exception("Could not discard the prepared update after disk-space refusal")
-            log_path = _update_log_path(operation_id)
-            if log_path.is_file():
-                detail["log_path"] = str(log_path)
+                logger.exception("Could not discard the prepared update after the room check failed")
+            if room:
+                log_path = _update_log_path(operation_id)
+                if log_path.is_file():
+                    detail["log_path"] = str(log_path)
+        if isinstance(error, asyncio.CancelledError):
+            await _compensate_cancelled_acquire(acquired_ids, error)
+            raise
         await _compensate_preparation_failure(
             operation_id,
             error,

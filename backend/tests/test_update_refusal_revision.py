@@ -1,5 +1,6 @@
 """Evidence for operation log ownership and early refusal boundaries."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -71,6 +72,48 @@ async def test_disk_space_after_staging_discards_bundle_before_drain(isolated_db
     assert detail == {"needed_bytes": 100, "free_bytes": 25, "log_path": str(settings_restart._update_log_path(row["id"]))}
     assert not stage.exists()
     assert check.await_count == 2
+    drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [OSError("stat failed"), asyncio.CancelledError()])
+async def test_post_stage_check_error_discards_source_marker(isolated_db, tmp_path, monkeypatch, error):
+    import shlex
+    from pathlib import Path
+    from api import settings_restart
+    from automation import self_restart
+    from infra import config
+
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path / "logs")
+    monkeypatch.setattr("infra.drain.cancel_drain_projection", lambda: None)
+    monkeypatch.setattr("automation.restart_settlement.resume_threads_detached", lambda *_args: None)
+    monkeypatch.setattr("automation.update_failure_notice.tell_conductor_detached", lambda *_args: None)
+    checkout = tmp_path / "checkout"
+    stage = checkout / "frontend" / "node_modules" / ".corsia-dist-stage"
+    marker = stage.with_name(stage.name + ".prepared")
+    runtime = Path(__file__).resolve().parents[2] / "scripts" / "corsia.d" / "runtime.sh"
+    script = tmp_path / "discard"
+    script.write_text(f'#!/bin/bash\nsource {shlex.quote(str(runtime))}\ndiscard_redeploy_build {shlex.quote(str(checkout))}\n')
+    script.chmod(0o755)
+
+    async def prepare(*_args):
+        stage.mkdir(parents=True)
+        marker.touch()
+
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", prepare)
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock(side_effect=[None, error]))
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    env = {}
+    with pytest.raises(type(error)):
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "owner"}, "update", script, env, ["restart"],
+            lambda name: tmp_path / name, caller_token="test",
+        )
+    row = self_restart.operation_by_id(env["CORSIA_RESTART_OPERATION_ID"])
+    assert row["status"] == ("cancelled" if isinstance(error, asyncio.CancelledError) else "failed")
+    assert not stage.exists()
+    assert not marker.exists()
     drain.assert_not_awaited()
 
 
