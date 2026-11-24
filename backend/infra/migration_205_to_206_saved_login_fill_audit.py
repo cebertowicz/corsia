@@ -17,7 +17,7 @@ def migrate_205_to_206(conn: sqlite3.Connection) -> None:
             site TEXT NOT NULL,
             username TEXT NOT NULL,
             thread_id TEXT NOT NULL,
-            result TEXT NOT NULL CHECK (result IN ('filled', 'rejected'))
+            result TEXT NOT NULL CHECK (result IN ('filled', 'rejected', 'unknown'))
         )
     """)
     conn.execute("""

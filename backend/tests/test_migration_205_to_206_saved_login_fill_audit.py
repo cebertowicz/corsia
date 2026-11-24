@@ -31,3 +31,9 @@ def test_upgrade_from_205_matches_fresh_database():
         assert shape(old) == shape(fresh)
         assert [row[2] for row in shape(old)[1]] == ["login_id", "created_at"]
         assert shape(old)[2] == []
+        for db in (old, fresh):
+            db.execute(
+                "INSERT INTO saved_login_fill_audit (created_at, login_id, site, username, thread_id, result) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("now", "login", "https://example.com", "alice", "agent", "unknown"),
+            )
