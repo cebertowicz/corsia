@@ -214,19 +214,17 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
     from infra.activity_queue_base import shape
     from infra.activity_rank_scope import ranker_for
     from infra.activity_ranking import apply_ranks
-    from plans import operator_projection
 
     if project_id:
-        operator_projection._project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
+        public.check_operator_project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
     annotated = public.annotate_attention(_authorized_raised(None, user_id, db=db), db=db)
     rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
     if view == 'activity':
-        from plans.activity_rows import rows as plan_rows, dedupe_comment_tasks
         from doceditor.activity_reply_rows import reply_rows
-        projected = plan_rows(db, user_id, annotated)
+        projected = public.activity_plan_rows(db, user_id, annotated)
         reviews = {r['detail']['artifact_id'] for r in projected if r['kind'] == 'review'}
         replies = reply_rows(db, user_id, reviewed_artifact_ids=reviews)
-        rows.extend(dedupe_comment_tasks(db, user_id, projected, replies))
+        rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, replies))
         rows.extend(replies)
     if project_id:
         rows = [r for r in rows if r['source'].get('project_id') == project_id]
@@ -242,12 +240,11 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
 
 
 def _queue_response(user_id: str, project_id: str | None, view: str | None):
-    from plans.operator_projection import OperatorNotFound
     db = get_db()
     try:
         try:
             rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view=view)
-        except OperatorNotFound as exc:
+        except public.OperatorNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {'current': rows[0] if rows else None, 'count': len(rows),
                 'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}

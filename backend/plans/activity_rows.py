@@ -65,7 +65,7 @@ def rows(db, user_id, annotated):
         "SELECT DISTINCT p.id FROM plans p JOIN threads t ON t.id=p.owner_id "
         "JOIN plan_nodes n ON n.plan_id=p.id WHERE p.owner_kind='thread' AND t.user_id=? "
         "AND n.assignee='user' AND n.kind='task' AND n.state IN ('pending','active') "
-        "AND n.archived_at IS NULL", (user_id,))]
+        "AND " + node_states.in_work_sql("n"), (user_id,))]
     allowed = activity_projection.counted_plan_ids(candidate_plans, actor=actor, db=db)
     plans = {r["id"]: dict(r) for r in db.execute("SELECT * FROM plans WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(sorted(allowed)),))}
     task_nodes = _due_person_tasks(db, plans)

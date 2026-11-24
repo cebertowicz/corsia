@@ -9,7 +9,7 @@ import json
 
 from doceditor.feedback_state import unread_comment_rows
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
-from plans.attention_detail import _UNKNOWN_SOURCE, _sources
+from plans.public import UNKNOWN_THREAD_SOURCE, thread_sources
 
 # Activity rows share one title cap with review rows (plans/activity_rows.py).
 _TITLE_CAP = 160
@@ -22,7 +22,7 @@ def _flat(text: str | None) -> str:
 def _agent(source: dict) -> str:
     """An untitled or unknown thread is still an agent; never call it 'Untitled thread replied'."""
     label = source.get('thread_label')
-    return 'An agent' if not source.get('thread_id') or label in (None, '', 'Untitled thread', _UNKNOWN_SOURCE['thread_label']) else label
+    return 'An agent' if not source.get('thread_id') or label in (None, '', 'Untitled thread', UNKNOWN_THREAD_SOURCE['thread_label']) else label
 
 
 def _quoted(prefix: str, text: str | None) -> str | None:
@@ -104,7 +104,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
         WHERE {UNREAD_WHERE}
       ) SELECT * FROM unread WHERE pos=1
     """, (user_id, user_id)).fetchall()
-    sources = _sources(db, {str(r['author_thread_id']) for r in documents} | {str(r['thread_id']) for r in chats})
+    sources = thread_sources(db, {str(r['author_thread_id']) for r in documents} | {str(r['thread_id']) for r in chats})
     result = []
     for row in documents:
         artifact, root, reply = row['artifact_id'], row['root_id'], row['reply_id']
