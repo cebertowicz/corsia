@@ -17,7 +17,7 @@ from fastapi import FastAPI
 
 from api import key_write_guard
 from api import keys as keys_api
-from infra import saved_logins
+import infra.saved_logins as saved_logins
 from infra.db_async import run_in_db
 
 PASSWORD = "a login password with spaces ü 0123456789"

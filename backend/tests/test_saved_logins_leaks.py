@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from infra import key_store, saved_logins
+import infra.saved_logins as saved_logins
+from infra import key_store
 from infra.database import get_db
 from infra.key_store_values import KeyStoreError
 

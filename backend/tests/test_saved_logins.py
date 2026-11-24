@@ -12,7 +12,8 @@ import dataclasses
 
 import pytest
 
-from infra import key_store, saved_logins
+import infra.saved_logins as saved_logins
+from infra import key_store
 from infra.key_store_values import KeyStoreError
 
 PASSWORD = "correct horse battery staple ü"
