@@ -157,11 +157,11 @@ def _first_recipient(data: bytes) -> str:
 
 
 _AGENT = {
-    SENT: "The person sent email draft {id} with Send now (revision {revision}, {at}). It has gone out; there is "
+    SENT: "The person sent email draft {id} with its Send button (revision {revision}, {at}). It has gone out; there is "
           "nothing more to send. Settle any review you asked for on it.",
-    "failed": "The person pressed Send now on email draft {id} from {account}, but it wasn't sent: {reason}. The "
-              "draft is still open, and they can press Send now again once it's fixed.",
-    UNCONFIRMED: "The person pressed Send now on email draft {id} from {account}, but the mail service didn't "
+    "failed": "The person pressed Send on email draft {id} from {account}, but it wasn't sent: {reason}. The "
+              "draft is still open, and they can press Send again once it's fixed.",
+    UNCONFIRMED: "The person pressed Send on email draft {id} from {account}, but the mail service didn't "
                  "confirm it, so it may have gone out. Don't resend it; ask them to check their Sent mail.",
     "discarded": "The person chose Don't send on email draft {id}. It won't be sent. Save a new draft only if they "
                  "ask for another version.",
