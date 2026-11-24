@@ -193,6 +193,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Sending a message to a working agent, and an agent's scheduled wake, no longer fail while a long chat saves a checkpoint; before, they could wait 30 seconds and fail.
 - Several new comments you leave on a document before an agent starts on it now reach the agent as one task, instead of one task for each.
+- Setup and Settings describe Claude Code and Codex as using your Claude or ChatGPT account, including accounts billed per use.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - Switching models now shows progress as soon as you choose in all chats. Sending a new message to a chat held by a Claude Code or Codex usage limit checks that account again; if usage has reset, queued messages resume in order.
