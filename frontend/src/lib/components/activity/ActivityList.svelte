@@ -157,7 +157,7 @@
 		flex: none; width: var(--rank-col); text-align: right; color: var(--text-tertiary);
 		font-size: var(--text-footnote); font-variant-numeric: tabular-nums;
 	}
-	.itemtop strong { min-width: 0; font-size: var(--text-subhead); line-height: 1.28; font-weight: var(--fw-medium); }
+	.itemtop strong { min-width: 0; overflow-wrap: anywhere; font-size: var(--text-subhead); line-height: 1.28; font-weight: var(--fw-medium); }
 	.itemtop strong.one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.sub { display: block; padding: var(--space-px-3) 0 0 var(--title-indent); color: var(--text-tertiary); font-size: var(--text-caption); }
 	.why { display: block; padding: var(--space-2) 0 var(--space-px-2) var(--title-indent); color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.4; }

@@ -165,7 +165,7 @@ describe('actual posted comment after Done', () => {
 		click('Done');
 		const status = { status: existingDraft(target)?.status, error: existingDraft(target)?.error };
 		view().dispatch({ selection: { anchor: 0, head: 5 } }); flushSync();
-		host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
+		host.querySelector<HTMLButtonElement>('.touch-comment-bar button')!.click(); flushSync();
 		const field = await vi.waitFor(() => { const el = document.querySelector<HTMLTextAreaElement>('.composer textarea'); if (!el) throw new Error('no composer'); return el; });
 		field.value = 'A posted thought'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		document.querySelector<HTMLButtonElement>('.composer .submit')!.click(); flushSync();
@@ -189,7 +189,7 @@ describe('actual comment closes after Done, crossed with save state', () => {
 		click('Done');
 		const status = { status: existingDraft(target)?.status, error: existingDraft(target)?.error };
 		view().dispatch({ selection: { anchor: 0, head: 5 } }); flushSync();
-		host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
+		host.querySelector<HTMLButtonElement>('.touch-comment-bar button')!.click(); flushSync();
 		await vi.waitFor(() => expect(document.querySelector('.composer textarea')).not.toBeNull());
 		if (close === 'cancel') document.querySelector<HTMLButtonElement>('.composer .cancel')!.click();
 		else {
