@@ -59,7 +59,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A file you own stays yours even if its Owner line names an agent.
 - A folder you choose in oMLX for its SSD cache is kept across CORSIA's restarts, crash recovery and updates; before, CORSIA replaced it with its own folder at the next launch.
 - A host access approval now shows in chat as Host access with its time left, in plain text, and Revoke host access in its drawer is a text button; before, it was a shield icon and a countdown in an amber outline, and Revoke was a red button.
-- A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and one red line with Retry when it can't be approved; before, each detail sat in its own box and Reject was a red button across from Approve.
+- A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and one red line with Retry when it can't be approved, kept in the footer above the buttons; Reject stays available when CORSIA couldn’t check the request is current. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - The Keep CORSIA running screen now offers Quit and Check again alongside Open Login Items.
 - A lesson an agent saves is no longer lost in a workspace with a long history of guidance changes; before, the save could time out after 30 seconds and drop the lesson.

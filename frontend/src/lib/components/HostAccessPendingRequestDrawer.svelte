@@ -36,7 +36,7 @@
 
 {#snippet policyExceptions()}
 	<section class="policy-exceptions" aria-label="Beyond the usual rules">
-		<span class="label">Beyond the usual rules</span>
+		<span class="label exceptions-label">Beyond the usual rules</span>
 		{#if external}
 			<p class="external-warning">This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.</p>
 		{/if}
@@ -46,13 +46,13 @@
 					{#if exception.policy === 'external_agent'}
 						<strong>External agent</strong>
 						<p>{exception.reason}</p>
-						<div class="launch-label">Command</div>
+						<div class="label launch-label">Command</div>
 						{#if text(exception.command)}
 							<code>{exception.command}</code>
 						{:else}
 							<p class="launch-missing">Command missing</p>
 						{/if}
-						<div class="launch-label">Working folder</div>
+						<div class="label launch-label">Working folder</div>
 						{#if text(exception.working_directory)}
 							<code>{exception.working_directory}</code>
 						{:else}
@@ -84,7 +84,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<span class="status" class:stale>{stale ? 'Not current' : duration(lease.requested_duration_seconds)}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
 	</header>
 
 	<div class="decision-body">
@@ -117,6 +117,7 @@
 		</section>
 
 		<div class="risk-grid">
+			<section><span class="label">Duration</span><p>{duration(lease.requested_duration_seconds)}</p></section>
 			{#if text(lease.expected_resources)}
 				<section><span class="label">Resources</span><p>{lease.expected_resources}</p></section>
 			{/if}
@@ -167,13 +168,14 @@
 			{/if}
 		</section>
 
+	</div>
+
+	<footer class="decision-actions">
 		{#if stale || !ready}
 			<HostAccessBlockedLine {stale} {onRetry}
 				incomplete="The request, independent attestation, or decision identity is incomplete or malformed." />
 		{/if}
-	</div>
-
-	<footer class="decision-actions">
+		<div class="decision-buttons">
 		<span class="decision-spacer"></span>
 		<Button
 			variant="ghost"
@@ -193,6 +195,7 @@
 				Approve
 			</Button>
 		{/if}
+		</div>
 	</footer>
 </div>
 {/if}
@@ -220,9 +223,9 @@
 		justify-content: space-between;
 		gap: 18px;
 		padding: 8px 0 14px;
-		background: var(--glass-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
+		/* The sheet is opaque and so are its strips, in the sheet's own fill: no lighter inset
+		   band, and nothing scrolled shows behind the title or the decision. */
+		background: var(--bg-secondary);
 	}
 	:global(.pending-drawer .decision-head > div) { min-width: 0; }
 	:global(.pending-drawer .decision-head h2) {
@@ -248,20 +251,24 @@
 		overflow-wrap: anywhere;
 	}
 	:global(.pending-drawer .purpose p) { color: var(--text-primary); font-size: var(--text-body); }
+	/* The footer holds why Approve is off (when it is) above the decision, so a disabled or
+	   missing Approve always shows its reason at every width without scrolling. */
 	:global(.pending-drawer .decision-actions) {
 		position: sticky;
 		bottom: 0;
 		z-index: 2;
-		display: flex;
-		align-items: center;
-		gap: 8px;
+		display: grid;
+		gap: var(--space-2);
 		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
 		   and sits on the scroller's edge instead of above a strip of padding the
 		   content scrolls through. */
 		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
-		background: var(--glass-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
+		background: var(--bg-secondary);
+	}
+	:global(.pending-drawer .decision-buttons) {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 	:global(.pending-drawer .decision-spacer) { flex: 1; }
 
@@ -309,18 +316,20 @@
 	.repo-policy-context li strong { color: var(--text-primary); }
 	.project-id { font-size: var(--text-footnote); }
 	/* No box, but the label keeps its warning colour: it is the drawer's one risk signal. */
-	.policy-exceptions .label { color: var(--amber-text); }
+	.policy-exceptions .exceptions-label { color: var(--amber-text); }
 	.policy-exceptions .external-warning {
 		color: var(--text-primary);
 		margin: 8px 0 16px;
 	}
-	.launch-label { margin-top: 9px; font-size: var(--text-footnote); color: var(--text-tertiary); }
+	.launch-label { margin-top: 9px; }
+	/* The exact launch reads as a text field's value: its outline, no fill. */
 	.policy-exceptions code {
 		display: block;
 		margin-top: 4px;
 		padding: 8px;
+		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
-		background: var(--bg-secondary);
+		background: none;
 		font-family: var(--font-mono);
 		font-size: var(--text-footnote);
 		white-space: pre-wrap;
@@ -347,6 +356,8 @@
 		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
+		/* A finger's width between Reject and Approve, so one is never pressed for the other. */
+		:global(.pending-drawer .decision-buttons) { gap: var(--touch-target); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);

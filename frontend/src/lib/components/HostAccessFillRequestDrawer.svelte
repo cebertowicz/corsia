@@ -74,17 +74,19 @@
 				{/each}
 			</div>
 		</section>
+	</div>
+	<footer class="decision-actions">
 		{#if stale || !ready}
 			<HostAccessBlockedLine {stale} {onRetry} />
 		{/if}
-	</div>
-	<footer class="decision-actions">
-		<span class="decision-spacer"></span>
-		<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
-		{#if ready}
-			<Button variant="primary" loading={deciding} disabled={approveDisabled}
-				onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
-		{/if}
+		<div class="decision-buttons">
+			<span class="decision-spacer"></span>
+			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+			{#if ready}
+				<Button variant="primary" loading={deciding} disabled={approveDisabled}
+					onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
+			{/if}
+		</div>
 	</footer>
 </div>
 

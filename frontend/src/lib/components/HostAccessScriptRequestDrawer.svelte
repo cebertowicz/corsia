@@ -35,7 +35,7 @@
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div><div class="section-label">Allow this script to act as your agent and use the agents’ GitHub account</div><h2 title={request.script_name}>{request.script_name}</h2></div>
-		<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
 	</header>
 	<div class="decision-body">
 		<section><span class="section-label">File</span><p>{request.script_path}</p></section>
@@ -43,14 +43,16 @@
 		<section class="purpose"><span class="section-label">Purpose</span><p>{request.purpose}</p></section>
 		<section><span class="section-label">Request (as the agent quoted it)</span><p>{request.user_request}</p></section>
 		<section><span class="section-label">Reviewer’s reason</span><p>{request.reviewer_reason}</p></section>
+	</div>
+	<footer class="decision-actions">
 		{#if stale || !ready}
 			<HostAccessBlockedLine {stale} {onRetry} />
 		{/if}
-	</div>
-	<footer class="decision-actions">
-		<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
-		<span class="decision-spacer"></span>
-		{#if ready}<Button variant="primary" loading={deciding} disabled={approveDisabled} onclick={onApprove}>Approve</Button>{/if}
+		<div class="decision-buttons">
+			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
+			<span class="decision-spacer"></span>
+			{#if ready}<Button variant="primary" loading={deciding} disabled={approveDisabled} onclick={onApprove}>Approve</Button>{/if}
+		</div>
 	</footer>
 </div>
 

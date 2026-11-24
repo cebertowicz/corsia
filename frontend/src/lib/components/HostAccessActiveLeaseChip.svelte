@@ -46,7 +46,7 @@
 		<span class="chip-text">{fill ? 'Saved login' : 'Host access'} <span class="countdown">{remaining(lease, nowMs)}</span></span>
 	</button>
 	{#key lease.id}
-		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
+		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom opaque {open} onClose={onClose}>
 			<HostAccessActiveLeaseDrawer
 				{lease}
 				{nowMs}

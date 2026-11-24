@@ -254,6 +254,11 @@ describe('HostAccessLeaseControl', () => {
 		flushSync();
 		await tick();
 		const activeDialog = host.querySelector('[role="dialog"]')!;
+		// The pending sheet's head (kind label over the agent's name) and its section-label rows.
+		expect(activeDialog.querySelector('.active-drawer-head .section-label')?.textContent).toBe('Sign in with a saved login');
+		expect(activeDialog.querySelector('.active-drawer-head h2')?.textContent).toBe('Bookkeeper');
+		expect([...activeDialog.querySelectorAll('dt.section-label')].map((label) => label.textContent))
+			.toEqual(['Approved duration', 'Time remaining']);
 		Array.from(activeDialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Revoke approval')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeNull());
@@ -840,14 +845,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(approve?.disabled).toBe(true);
 		// The drawer's status is coloured text, not a pill, and its Retry is a text action.
 		const status = dialog.querySelector('.decision-head .status');
-		expect(status?.textContent?.trim()).toBe('Not current');
+		expect(status?.textContent?.trim()).toBe('Couldn’t check');
 		expect(status?.classList.contains('stale')).toBe(true);
 		expect(dialog.querySelector('.pill')).toBeNull();
 		const retry = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
@@ -871,7 +876,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 
 		expect(host.querySelector('.thread-host-access')!.classList).toContain('wide');
 	});
@@ -1139,7 +1144,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
 		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
 		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);

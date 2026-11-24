@@ -371,7 +371,7 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="Not current" size="sm" />
+						<StatePill state="error" label="Couldn’t check" size="sm" />
 						<span>{staleNotice}</span>
 						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
 					</div>
@@ -413,7 +413,7 @@
 			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel={pendingLabel(currentPending)} flushBottom
+					ariaLabel={pendingLabel(currentPending)} flushBottom opaque
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>

@@ -382,7 +382,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		}
 		// With no box, the exceptions label keeps the warning colour the pending status uses.
 		const warningColor = await dialog.locator('.decision-head .status').evaluate((element) => getComputedStyle(element).color);
-		await expect(dialog.locator('.policy-exceptions .label')).toHaveCSS('color', warningColor);
+		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
+		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
+		// The header carries the state; the asked duration is body text, not a second amber.
+		await expect(dialog.locator('.risk-grid section').first()).toContainText('Duration');
+		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
 		// The sheet slides up from below on open; its bounds are read where it comes to rest.
@@ -418,10 +422,15 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
-		// Reject sits directly beside Approve, not across the footer from it.
+		// Reject sits beside Approve, not across the footer from it; on a phone a finger's width apart.
 		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
-		expect(besideGap).toBeGreaterThanOrEqual(0);
-		expect(besideGap).toBeLessThanOrEqual(16);
+		if (viewport!.width <= 720) {
+			expect(besideGap).toBeGreaterThanOrEqual(44);
+			expect(besideGap).toBeLessThanOrEqual(48);
+		} else {
+			expect(besideGap).toBeGreaterThanOrEqual(0);
+			expect(besideGap).toBeLessThanOrEqual(16);
+		}
 
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 

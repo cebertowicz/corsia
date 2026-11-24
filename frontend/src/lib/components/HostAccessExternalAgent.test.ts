@@ -158,4 +158,22 @@ it('preserves the stale Approve guard for an otherwise complete external request
 	expect(blocked.querySelector('button')!.textContent?.trim()).toBe('Retry');
 	expect(blocked.querySelector('button')!.classList.contains('ghost')).toBe(true);
 	expect(host.textContent).not.toContain('Approval is blocked');
+	// Pinned in the footer, above the decision, so a disabled Approve always shows why.
+	expect(blocked.parentElement!.classList.contains('decision-actions')).toBe(true);
+	expect(blocked.nextElementSibling!.classList.contains('decision-buttons')).toBe(true);
+	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Couldn’t check');
+});
+
+it('names the state in the header and the asked duration in the body', () => {
+	show(externalLease());
+	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Needs approval');
+	const durationSection = host.querySelector('.risk-grid section')!;
+	expect(durationSection.querySelector('.label')!.textContent).toBe('Duration');
+	expect(durationSection.querySelector('p')!.textContent).toBe(duration(externalLease().requested_duration_seconds));
+	expect(host.querySelector('.decision-body .blocked-line')).toBeNull();
+	// Command and Working folder are section labels; only the exceptions heading is amber.
+	const labels = [...host.querySelectorAll('.policy-exceptions .launch-label')];
+	expect(labels.map((label) => label.textContent)).toEqual(['Command', 'Working folder']);
+	expect(labels.every((label) => label.classList.contains('label'))).toBe(true);
+	expect(host.querySelectorAll('.policy-exceptions .exceptions-label')).toHaveLength(1);
 });

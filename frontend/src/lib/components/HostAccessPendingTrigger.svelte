@@ -36,11 +36,11 @@
 	{#if request.kind === 'script' || request.kind === 'fill'}
 		<span class="eyebrow sentence">{request.kind === 'script' ? 'Script approval' : 'Saved login'}</span>
 		<span class="pending-owner">{request.kind === 'script' ? request.script_name : `${owner(request)} · ${request.site}`}</span>
-		<span class="pending-status" class:stale class:deciding>{stale ? 'Not current' : deciding ? 'Saving…' : 'Needs approval'}</span>
+		<span class="pending-status" class:stale class:deciding>{stale ? 'Couldn’t check' : deciding ? 'Saving…' : 'Needs approval'}</span>
 	{:else}
 		<span class="eyebrow">Temporary host access</span>
 		<span class="pending-owner">{owner(request)}</span>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(request.requested_duration_seconds)} size="sm" />
+		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Couldn’t check' : duration(request.requested_duration_seconds)} size="sm" />
 	{/if}
 	<span class="pending-action">Review →</span>
 </button>
