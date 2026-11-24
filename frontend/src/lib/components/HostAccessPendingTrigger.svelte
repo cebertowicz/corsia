@@ -110,7 +110,7 @@
 	}
 
 	/* On a phone the agent and the site stack, so the site keeps a line of its own. */
-	@media (max-width: 720px) {
+	@media (max-width: 45rem) {
 		.pending-what {
 			flex-direction: column;
 			align-items: stretch;
