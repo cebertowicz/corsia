@@ -9,7 +9,7 @@
 	import { BrowserPaneInput, keyMessage, wheelPixels } from '$lib/browserPaneInput';
 	import { BrowserPaneTouch } from '$lib/browserPaneTouch';
 	import { BrowserPaneStats } from '$lib/browserPaneStats';
-	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
+	import { BrowserPaneClipboard, clipboardKey, clipboardReply, isPasteKey } from '$lib/browserPaneClipboard';
 	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
@@ -26,6 +26,9 @@
 
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
+	// An editable key target lets the platform paste run natively; after a finger or pen press the canvas keeps focus, so no on-screen keyboard opens.
+	let keyTarget: HTMLTextAreaElement;
+	let touchFocus = false;
 	let socket: WebSocket | null = null;
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
@@ -239,7 +242,7 @@
 		if (!point) return;
 		if (event.pointerType === 'touch' && !overlay) event.preventDefault();
 		if (event.type === 'pointerdown') {
-			if (!overlay) canvas.focus();
+			if (!overlay) { touchFocus = event.pointerType === 'touch' || event.pointerType === 'pen'; canvas.focus(); }
 			activePointer = event.pointerId;
 			if (!overlay) canvas.setPointerCapture(event.pointerId);
 			// Move before pressing because Chrome may use the last cursor position for a press.
@@ -267,15 +270,23 @@
 		paneInput.wheel(point, wheelPixels(event, height));
 	}
 
-	function sendKey(event: KeyboardEvent) {
+	/** `editable` is true for the key target, where the native paste that follows fires pastePage with the text. */
+	function sendKey(event: KeyboardEvent, editable = false) {
 		if (socket?.readyState !== WebSocket.OPEN) return;
-		event.preventDefault();
 		paneInput.flush();
+		if (editable && isPasteKey(event)) return;
+		event.preventDefault();
 		if (clipboardKey(event, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
 		), (error, cut) => paneErrors.set('clipboard', error, cut), () => paneErrors.set('clipboard', null))) return;
 		send(keyMessage(event));
+	}
+
+	function pastePage(event: ClipboardEvent) {
+		event.preventDefault();
+		const text = event.clipboardData?.getData('text/plain');
+		if (text && socket?.readyState === WebSocket.OPEN) { paneErrors.set('clipboard', null); socket.send(JSON.stringify({ type: 'clipboard_paste', text })); }
 	}
 
 	async function go(targetUrl = url) {
@@ -363,7 +374,8 @@
 			</span>
 		{/if}
 		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
-		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		<textarea bind:this={keyTarget} class="pane-keys" aria-label="Type into the shared browser" autocomplete="off" autocapitalize="off" spellcheck="false" onkeydown={event => sendKey(event, true)} onkeyup={event => sendKey(event, true)} onpaste={pastePage} oninput={() => { keyTarget.value = ''; }}></textarea>
+		<canvas bind:this={canvas} tabindex="-1" aria-label="Shared browser" onfocus={() => { if (!touchFocus) keyTarget.focus({ preventScroll: true }); }} onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={event => sendKey(event)} onkeyup={event => sendKey(event)}></canvas>
 		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
@@ -381,6 +393,7 @@
 	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
 	.password-notice.top { top: 10px; bottom: auto; }
 	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+	.pane-keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; color: transparent; caret-color: transparent; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; transition: opacity 160ms ease; }
 	.browser-page.ended canvas { opacity: 0.4; }
 	@media (prefers-reduced-motion: reduce) { canvas, .browser-page::after, .agent-field-marker, .agent-field-marker.shown { transition: none; } }

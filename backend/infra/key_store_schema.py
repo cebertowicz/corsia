@@ -1,6 +1,6 @@
-"""Key store DDL: entry metadata and the per-session wrong-password count.
+"""Key store DDL: entry metadata, saved website logins and the per-session wrong-password count.
 
-Neither table ever holds a key value. Values live in their own file in
+No table ever holds a key value. Values live in their own file in
 CORSIA's private state (``infra.key_store``), so nothing that reads, backs up
 or exports the database can carry one.
 
@@ -14,6 +14,11 @@ carry that date; its label and use are fixed in code.
 by the session token's digest, so a restart does not reset it. It is separate
 from sign-in's throttle on purpose: wrong passwords here must never lock the
 owner out of sign-in.
+
+``saved_logins`` holds what may be shown about a saved website login: its
+site (an https origin), the username, whether it is out of date, who saved it
+and when it was last used. One site and username is one login. Its password
+is the value of the key store entry ``saved-login-<id>`` (``infra.saved_logins``).
 """
 
 from __future__ import annotations
@@ -28,6 +33,18 @@ KEY_STORE_SCHEMA_SQL = """
         created_at TEXT NOT NULL,
         set_at TEXT,
         value_ref TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS saved_logins (
+        id TEXT PRIMARY KEY,
+        site TEXT NOT NULL,
+        username TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'out_of_date')),
+        saved_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        last_used_by_thread_id TEXT,
+        UNIQUE (site, username)
     );
 
     CREATE TABLE IF NOT EXISTS key_write_attempts (
