@@ -1,7 +1,9 @@
-import type { ConversationFailure, EmailDraftContext } from '$lib/emailDraft';
+import type { ConversationFailure, EmailDraftContext, EmailDraftState } from '$lib/emailDraft';
 import { apiFetch } from './request';
 /** The server's answer for one draft (backend/api/email_drafts.py), before the view's own names. */
 interface ContextResponse {
+	state: EmailDraftState;
+	read_at: string | null;
 	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
 	/** With `unreadable`: the reference the server logged the failure under. */
@@ -36,8 +38,33 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 		return failed('unreadable');
 	}
 	return {
-		status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
+		state: body.state, readAt: body.read_at ?? null, status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
 		answered: body.answered ?? undefined, conversation: body.conversation ?? [],
 		attachments: body.attachments ?? [], notes: body.notes ?? [],
 	};
+}
+
+export type DraftActionResult =
+	| { state: 'sent'; not_delivered_to?: string[] }
+	| { state: 'discarded' | 'sending' | 'unconfirmed' | 'failed'; reason?: string }
+	| { state: 'changed' | 'newer'; message: string }
+	| { state: 'signin' | 'missing' };
+
+async function draftAction(artifactId: string, action: 'send' | 'discard', body?: { text: string; read_at: string | null }): Promise<DraftActionResult> {
+	const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/${action}`, {
+		method: 'POST', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+	});
+	if (res.status === 401) return { state: 'signin' };
+	if (res.status === 404) return { state: 'missing' };
+	if (res.status === 409) return (await res.json()).detail;
+	if (!res.ok) return { state: 'failed' };
+	return await res.json() as DraftActionResult;
+}
+
+export function sendEmailDraft(artifactId: string, text: string, readAt: string | null): Promise<DraftActionResult> {
+	return draftAction(artifactId, 'send', { text, read_at: readAt });
+}
+
+export function discardEmailDraft(artifactId: string): Promise<DraftActionResult> {
+	return draftAction(artifactId, 'discard');
 }

@@ -19,6 +19,7 @@
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
+	import EmailSendBar from './EmailSendBar.svelte';
 	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
@@ -112,6 +113,7 @@
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
+	let sendEnded = $state(false);
 	// An email draft keeps its text in the editor, with the warnings above it and the read-only conversation below. The
 	// editor sits in the same wrapper either way, so editing the header never remounts it. `readAttempt` counts the
 	// person's retries of a failed read; each one reads the draft's context again.
@@ -186,7 +188,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} readOnly={readOnly || sendEnded} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		<!-- A refusal stays on screen while a choice's write runs (the draft is 'saving' then, with no error), so Details is not closed and rebuilt. -->
 		{#if saveError || refusedStale}
 			<div class="save-error" role="alert">{saveError || EDITOR_STALE_STATUS}{#if tabInstanceId && refusedStale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
@@ -195,6 +197,11 @@
 {/snippet}
 
 <div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
+	{#if docState === 'ready' && draft && artifactId}
+		{#key artifactId}
+			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
+		{/key}
+	{/if}
 	{#if docState === 'loading' || docState === 'error'}
 		<DocLoadState state={docState} name={documentName} {onRetry} />
 	{:else}
