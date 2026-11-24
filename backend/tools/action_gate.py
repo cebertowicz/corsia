@@ -1,4 +1,7 @@
-"""The code gate in front of every outbound send: the person asked, and saw this text.
+"""The code gate in front of an agent's outbound send: the person asked, and saw this text.
+
+Agents send invites and texts through it. Email has no agent send: the person sends an
+email draft themselves with Send now (``api/email_drafts.py``).
 
 ``check_action`` passes only when the call runs inside a live turn that the
 person started or wrote into, the draft is the thread's own open draft, the

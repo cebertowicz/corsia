@@ -2,7 +2,7 @@
 
 A draft is plain text the person reads in the workspace: ``To:``, optional ``Cc:`` and
 ``Subject:`` lines, a blank line, the body, then the signature after a ``-- `` delimiter.
-``email_send`` parses the bytes the gate approved and builds the message from them.
+Send now (``tools.email_send_approved``) parses the exact bytes the person sent and builds the message from them.
 """
 
 from __future__ import annotations
