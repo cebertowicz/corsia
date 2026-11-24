@@ -15,10 +15,10 @@ def test_suggestion_history_migration_is_registered_and_preserves_existing_rows(
         db.execute("INSERT INTO existing VALUES ('kept')")
         migrate_204_to_205(db)
         db.execute(
-            "INSERT INTO doc_suggestion_history VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ('event', 'artifact', '[]', '{}', 'before', 'after', 'accepted'),
+            "INSERT INTO doc_suggestion_history VALUES (?, ?, ?, ?, ?)",
+            ('event', 'artifact', '{}', 'before', 'after'),
         )
         assert db.execute('SELECT value FROM existing').fetchone()[0] == 'kept'
-        assert db.execute('SELECT state FROM doc_suggestion_history').fetchone()[0] == 'accepted'
+        assert db.execute('SELECT event_id FROM doc_suggestion_history').fetchone()[0] == 'event'
     finally:
         db.close()

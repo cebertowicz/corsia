@@ -187,6 +187,86 @@ async def test_redo_refuses_a_suggestion_decided_again_after_undo(integration_cl
     assert _row(suggestion['id'])['decision'] == ('accepted' if new_decision == 'accept' else 'rejected')
 
 
+def _change_rows(sql, params=()):
+    from infra.database import get_db, write_transaction
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope='test_history_rows') as connection:
+            connection.execute(sql, params)
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['moved_to_another_event', 'deleted', 'mixed_states'])
+async def test_transition_refuses_when_the_events_rows_no_longer_agree(integration_client, doc, _registrable_roots, change):
+    doc.write_text(BODY)
+    owner, artifact_id = await _own(integration_client, doc)
+    first = await _suggest(owner, doc, replacement='# New design', quote=HEADING)
+    second = await _suggest(owner, doc, replacement='A concise tail sentence', quote=TAIL)
+    event = _accept_all(integration_client, artifact_id).json()['decision_event_id']
+    after = doc.read_text()
+    if change == 'moved_to_another_event':
+        await asyncio.to_thread(_change_rows, "UPDATE doc_comments SET decision_event_id='another-event' WHERE id=?", (first['id'],))
+    elif change == 'deleted':
+        await asyncio.to_thread(_change_rows, 'DELETE FROM doc_comments WHERE id=?', (first['id'],))
+    else:
+        await asyncio.to_thread(_change_rows, 'UPDATE doc_comments SET decision=NULL WHERE id=?', (first['id'],))
+    url = f'/api/artifacts/{artifact_id}/suggestions/history'
+    for ids in ([first['id'], second['id']], [second['id']]):
+        refused = integration_client.post(url, params={'token': _OWNER}, json={
+            'event_id': event, 'ids': ids, 'direction': 'undo', 'expected_sha256': digest(after), 'text': BODY,
+        })
+        assert refused.status_code == 409, (change, ids, refused.text)
+        assert doc.read_text() == after
+    assert _row(second['id'])['decision'] == 'accepted'
+
+
+@pytest.mark.asyncio
+async def test_an_event_with_no_rows_is_refused(integration_client, doc, _registrable_roots):
+    owner, path = await _own_in_folder(integration_client, doc)
+    suggestion = await _suggest(owner, path)
+    accepted = _user_decide(integration_client, suggestion['id'], 'accept').json()['comment']
+    after = path.read_text()
+    await asyncio.to_thread(_change_rows, 'DELETE FROM doc_comments WHERE id=?', (suggestion['id'],))
+    refused = integration_client.post(
+        f"/api/artifacts/{accepted['artifact_id']}/suggestions/history", params={'token': _OWNER}, json={
+            'event_id': accepted['decision_event_id'], 'ids': [suggestion['id']], 'direction': 'undo',
+            'expected_sha256': digest(after), 'text': 'x',
+        })
+    assert refused.status_code == 409
+    assert path.read_text() == after
+
+
+@pytest.mark.asyncio
+async def test_undo_redo_undo_cycle_reads_state_from_the_suggestion_rows(integration_client, doc, _registrable_roots):
+    owner, path = await _own_in_folder(integration_client, doc)
+    before = path.read_text()
+    suggestion = await _suggest(owner, path)
+    accepted = _user_decide(integration_client, suggestion['id'], 'accept').json()['comment']
+    after = path.read_text()
+    url = f"/api/artifacts/{accepted['artifact_id']}/suggestions/history"
+
+    def move(direction, current, target):
+        return integration_client.post(url, params={'token': _OWNER}, json={
+            'event_id': accepted['decision_event_id'], 'ids': [suggestion['id']], 'direction': direction,
+            'expected_sha256': digest(current), 'text': target,
+        })
+
+    for direction, current, target, decision in (
+        ('undo', after, before, None), ('redo', before, after, 'accepted'), ('undo', after, before, None),
+    ):
+        moved = move(direction, current, target)
+        assert moved.status_code == 200, (direction, moved.text)
+        assert path.read_text() == target
+        assert _row(suggestion['id'])['decision'] == decision
+        assert _row(suggestion['id'])['decision_event_id'] == accepted['decision_event_id']
+    assert set(receipt(accepted['decision_event_id'])) == {
+        'event_id', 'artifact_id', 'decision_metadata', 'before_sha256', 'after_sha256',
+    }
+
+
 @pytest.mark.asyncio
 async def test_failed_undo_preserves_outside_edit_before_restore(integration_client, doc, _registrable_roots, monkeypatch):
     import sqlite3
@@ -213,7 +293,7 @@ async def test_failed_undo_preserves_outside_edit_before_restore(integration_cli
     assert response.status_code >= 400
     assert path.read_text() == outside
     assert _row(suggestion['id'])['decision'] == 'accepted'
-    assert receipt(accepted['decision_event_id'])['state'] == 'accepted'
+    assert _row(suggestion['id'])['decision'] == 'accepted'
 
 
 @pytest.mark.asyncio
@@ -283,11 +363,9 @@ async def test_transition_record_joins_the_callers_transaction(integration_clien
             with pytest.raises(RuntimeError, match='roll back owner'):
                 with write_transaction(db, scope='test_transition_owner'):
                     _record(event, [suggestion['id']], 'undo', db=db)
-                    assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                                      (event['event_id'],)).fetchone()[0] == 'undone'
+                    assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] is None
                     raise RuntimeError('roll back owner')
-            assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                              (event['event_id'],)).fetchone()[0] == 'accepted'
+            assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] == 'accepted'
             assert _row(suggestion['id'])['decision'] == 'accepted'
         finally:
             db.close()
@@ -314,12 +392,10 @@ async def test_registration_and_history_transition_roll_back_together(integratio
                     service.register_write_strict(owner, str(path), metadata={'history_probe': 'pending'}, db=db)
                     _record(event, [suggestion['id']], 'undo', db=db)
                     assert 'history_probe' in models.get_artifact(accepted['artifact_id'], db=db)['metadata']
-                    assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                                      (event['event_id'],)).fetchone()[0] == 'undone'
+                    assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] is None
                     raise RuntimeError('roll back publication')
             assert models.get_artifact(accepted['artifact_id'], db=db)['metadata'] == original
-            assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                              (event['event_id'],)).fetchone()[0] == 'accepted'
+            assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] == 'accepted'
             assert _row(suggestion['id'])['decision'] == 'accepted'
         finally:
             db.close()
@@ -354,12 +430,10 @@ async def test_durable_registration_and_transition_share_owner_rollback(integrat
                     )
                     _record(event, [suggestion['id']], 'undo', db=db)
                     assert 'test-publication-digest' in models.get_artifact(accepted['artifact_id'], db=db)['metadata']
-                    assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                                      (event['event_id'],)).fetchone()[0] == 'undone'
+                    assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] is None
                     raise RuntimeError('roll back publication')
             assert models.get_artifact(accepted['artifact_id'], db=db)['metadata'] == original
-            assert db.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                              (event['event_id'],)).fetchone()[0] == 'accepted'
+            assert db.execute('SELECT decision FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()[0] == 'accepted'
             assert _row(suggestion['id'])['decision'] == 'accepted'
         finally:
             db.close()

@@ -54,47 +54,48 @@ def _load(artifact_id: str, event_id: str, ids: list[str], user_id: str) -> tupl
         if event is None or not ids or len(set(ids)) != len(ids):
             raise _refused()
         event = dict(event)
-        recorded_ids = json.loads(event['suggestion_ids'])
-        if sorted(recorded_ids) != sorted(ids):
-            raise _refused()
         owner = owner_row(db, artifact['parent_thread_id'])
         return artifact, event, owner[1] if owner else None
     finally:
         db.close()
 
 
-def _check_rows(db, event: dict, ids: list[str], state: str) -> None:
-    marks = ','.join('?' for _ in ids)
-    rows = db.execute(f'SELECT id, artifact_id, decision, decision_event_id FROM doc_comments WHERE id IN ({marks})', ids).fetchall()
-    decision = 'accepted' if state == 'accepted' else None
-    if len(rows) != len(ids) or any(
-        row['artifact_id'] != event['artifact_id'] or row['decision'] != decision
-        or row['decision_event_id'] != event['event_id'] for row in rows
-    ):
+def _event_state(db, event: dict, ids: list[str]) -> str:
+    """What the event's suggestion rows say: 'accepted' or 'undone'.
+
+    The request's ids, the rows still carrying this event and the suggestions whose metadata the receipt holds must be the
+    same set: a row decided again, or deleted, would otherwise leave a smaller set that undo or redo applies in full.
+    """
+    rows = db.execute('SELECT id, decision FROM doc_comments WHERE decision_event_id=? AND artifact_id=?',
+                      (event['event_id'], event['artifact_id'])).fetchall()
+    held = sorted(json.loads(event['decision_metadata']))
+    if not rows or sorted(row['id'] for row in rows) != held or sorted(ids) != held:
         raise _refused()
+    decisions = {row['decision'] for row in rows}
+    if decisions == {'accepted'}:
+        return 'accepted'
+    if decisions == {None}:
+        return 'undone'
+    raise _refused()
 
 
-def _check_current_rows(event: dict, ids: list[str]) -> None:
+def _current_state(event: dict, ids: list[str]) -> str:
     db = get_db()
     try:
-        _check_rows(db, event, ids, event['state'])
+        return _event_state(db, event, ids)
     finally:
         db.close()
 
 
 def _record(event: dict, ids: list[str], direction: str, *, db=None) -> None:
     previous = 'accepted' if direction == 'undo' else 'undone'
-    target = 'undone' if direction == 'undo' else 'accepted'
     metadata = json.loads(event['decision_metadata'])
     owns_db = db is None
     db = db or get_db()
     try:
         with write_transaction(db, scope='suggestion_history_transition') as connection:
-            current = connection.execute('SELECT state FROM doc_suggestion_history WHERE event_id=?',
-                                         (event['event_id'],)).fetchone()
-            if current is None or current['state'] != previous:
+            if _event_state(connection, event, ids) != previous:
                 raise _refused()
-            _check_rows(connection, event, ids, previous)
             for comment_id in ids:
                 if direction == 'undo':
                     fields: dict[str, Any] = {'decision': None, 'decided_by': None, 'decided_by_thread_id': None,
@@ -105,7 +106,6 @@ def _record(event: dict, ids: list[str], direction: str, *, db=None) -> None:
                     fields = {**metadata[comment_id], 'decision': 'accepted', 'resolved': not replied,
                               'closed_by_decision': not replied}
                 store.update(comment_id, fields, db=connection)
-            connection.execute('UPDATE doc_suggestion_history SET state=? WHERE event_id=?', (target, event['event_id']))
     finally:
         if owns_db:
             db.close()
@@ -127,10 +127,10 @@ async def transition_suggestion_history(
         current_text = await run_off_db(read_doc_text, artifact['path'])
         current_hash = hashlib.sha256(current_text.encode()).hexdigest()
         target_state = 'undone' if direction == 'undo' else 'accepted'
-        await run_in_db(_check_current_rows, event, ids)
-        if event['state'] == target_state and current_hash == target_hash:
+        state = await run_in_db(_current_state, event, ids)
+        if state == target_state and current_hash == target_hash:
             return {'text': current_text, 'revision': target_hash}
-        if event['state'] == target_state or current_hash not in {source_hash, target_hash}:
+        if state == target_state or current_hash not in {source_hash, target_hash}:
             raise _refused()
         result = None
         if current_hash == source_hash:

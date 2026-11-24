@@ -375,11 +375,9 @@ Source: `backend/infra/suggestion_history_schema.py`.
 |---|---|---|---|---|---|
 | `event_id` | TEXT | Yes | No | — | — |
 | `artifact_id` | TEXT | No | Yes | — | — |
-| `suggestion_ids` | TEXT | No | Yes | — | — |
 | `decision_metadata` | TEXT | No | Yes | — | — |
 | `before_sha256` | TEXT | No | Yes | — | — |
 | `after_sha256` | TEXT | No | Yes | — | — |
-| `state` | TEXT | No | Yes | — | — |
 
 Indexes: `sqlite_autoindex_doc_suggestion_history_1` (event_id, unique).
 
