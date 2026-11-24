@@ -12,6 +12,14 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 Released 2026-11-24.
 
+### Upgrading
+
+- After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
+
+### Activity
+
+- Activity is now your to-do list: everything waiting on you (documents to approve, decisions, steps only you can do, messages waiting for your yes, and replies to your comments) in one list, in the order the project's conductor sets (CORSIA's outside a project), each with why it is there. The top item opens beside the list, in the same pane a chat uses, with its control at the bottom; once you act, the next item opens, and Next moves on without acting. On a phone the list and the open item take turns, with your place and Next in the app bar. An item that comes back to the list is ranked again. Documents opened here no longer add tabs to their chats. The old Continue, Needs you, In progress, Waiting and Complete sections and the Measures button are gone; Measurement stays in the sidebar.
+
 ### Plans and priorities
 
 - A failed workflow step now closes only work that depends on it; independent work stays open.
@@ -37,10 +45,6 @@ Released 2026-11-24.
 - The plan chip at the bottom of a chat on a phone now turns orange when that chat's plan holds something for you, the same mark the chat carries in the left menu; pausing that plan clears both.
 - When you approve a workflow step with a long name, an offer to hand future approvals to the agent now fits its task's title and shows the full names below; before, creating the offer could fail your approval.
 
-### Activity
-
-- Activity is now your to-do list: everything waiting on you (documents to approve, decisions, steps only you can do, messages waiting for your yes, and replies to your comments) in one list, in the order the project's conductor sets (CORSIA's outside a project), each with why it is there. The top item opens beside the list, in the same pane a chat uses, with its control at the bottom; once you act, the next item opens, and Next moves on without acting. On a phone the list and the open item take turns, with your place and Next in the app bar. An item that comes back to the list is ranked again. Documents opened here no longer add tabs to their chats. The old Continue, Needs you, In progress, Waiting and Complete sections and the Measures button are gone; Measurement stays in the sidebar.
-
 ### Comments and suggestions
 
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
@@ -52,7 +56,6 @@ Released 2026-11-24.
 - A comment list on a phone now grows, settles or closes when you drag anywhere on its top row, not only on the small grabber; a press on a button in that row still just presses the button.
 - A comment on a live document now attaches while someone else keeps typing elsewhere in it, on text and on image regions; before, it could fail with "The document changed before your comment could be attached" until the typing paused. It is still refused when the text you selected itself changed.
 - A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
-- A comment or reply refused because its document no longer takes comments now shows the server's reason and keeps your draft.
 - A comment or reply sent from a document pane left open after the document was promoted to a new location now lands on the document's current location with its earlier comments, and every comment saved on an earlier location moves there once on upgrade; before, it could be saved where no pane listed it. When a comment or reply on selected text, on an image or in a thread is refused because its document no longer takes comments, the app now shows that reason and keeps your draft, and does not offer to try again.
 - A comment or reply that arrives while its thread is open, in chat or in a document, is now marked read when you close the thread, by Escape, a click outside, picking another thread, closing the popover or sheet, or switching to another chat or document; pressing an image comment's number disc marks it read, as pressing its card does; and a press on a link in a comment card, or one that ends a text selection, no longer marks it read. Hovering over a suggestion's text now only rings its card, instead of opening it and moving the margin. In chat, a press anywhere on the transcript away from a highlight or margin card, message actions included, now lets go of the picked margin card, as a click outside does in a document. Before, a reply that arrived while the thread was open stayed unread after you left it.
 - A comment reply field stays on screen after you jump to it on a phone and as you type at the end of a reply in a short popover, so Send stays in reach; an unread long comment in the margin shows whole instead of behind Show more; and Escape inside a thread in the comment list goes back to the list. Before, the field and Send could sit off screen, and Escape closed the whole list.
@@ -200,11 +203,12 @@ Released 2026-11-24.
 - A conductor now also owns patterns across its agents, including a failure that a cheaper earlier check in another agent's workflow would have caught.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A lesson an agent saves is no longer lost in a workspace with a long history of guidance changes; before, the save could time out after 30 seconds and drop the lesson.
+- A long chat stays responsive while an agent works through many steps; before, the time CORSIA spent checking the chat's history grew steeply with the number of steps.
 - A one-time reminder or clock schedule an agent sets with a time zone offset now goes off at that instant, in any zone including your own; before, it could go off hours early or late.
 - A pull request that is closed and then reopened is followed again: it returns to Files in its agent's chat, the agent is told it was reopened, and the agent's event rules fire on it again. Before, nothing about it reached the agent after the reopen.
 - A pull request whose checks all finish while CORSIA is briefly busy now still starts its review; before, it could wait at Waiting for checks until CORSIA restarted.
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
-- A script that is running when CORSIA shuts down or restarts is now recorded as interrupted, and if an event rule started it, the rule's agent is told which event the run was for. Before, the run was recorded as a script that failed, and the agent was told to fix the script.
+- A script that is running when CORSIA shuts down or restarts is now recorded as interrupted, and if an event rule started it, the rule's agent is told which runs were lost, so it can do their work itself; the run is not started again. Before, the run was recorded as a script that failed and the agent was told to fix the script, or nobody was told.
 - After you replace a connected app's refused key and the app reconnects, a chat that already hit the old error now loads that app's tools; you no longer have to start a new chat. A chat that was already running also picks up an app connected after it started.
 - Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
 - Agents can now update or remove something installed from CORSIA's community after confirming that its local edits may be discarded. Before that choice, they are told which files changed; when CORSIA can't tell exactly, they get every file to review and are told the list isn't exact.
@@ -226,9 +230,7 @@ Released 2026-11-24.
 - In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - Nothing limits how many Claude Code agents work at once any more. Before, once eight were working (the default limit), an agent's next hand-off was refused and it was told to do the work itself, and an agent started by one of your rules waited for a free place.
-- Reading a long run of an agent's steps in one chat no longer rereads them for every tool call, so checkpoint boundary checks stay quick as the run grows; results are unchanged.
 - The CORSIA agent now does your work itself by default, including email and messages on accounts connected outside projects. It suggests a separate agent from the start only for an area of your life with its own contacts and responsibilities, and for other work only when you say so, or once it keeps taking more of your time per finished task, getting fewer tasks right the first time, or costing more.
-- When a script that an event rule started stops before it finishes, as happens when CORSIA restarts, the rule's agent is now told which runs were lost, so it can do their work itself. Before, the run ended and nobody was told. The run is still not started again.
 - When an agent brings you something to judge, it now opens by restating the goal in its own words, with everything you need to decide at the top and the detail below for when you want it.
 - When an agent started by another agent finishes, saving its closing note no longer holds up other requests on a busy server.
 - When an event rule starts an agent and its owner's Claude Code or Codex account has hit its limit or is signed out, the agent now waits up to eight minutes while CORSIA checks the usage of the project's next account, and starts there if that account isn't limited. Before, it was refused at once. It's still refused if that account is limited too, if the check doesn't finish in time, or if the project doesn't move chats to other accounts.
@@ -288,10 +290,6 @@ Released 2026-11-24.
 - Usage sharing in setup and Settings now says that nothing is sent yet.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
-### Upgrading
-
-- After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
-
 ### Security and approvals
 
 - A reply to a comment is now accepted only on the document that comment is on.
@@ -300,7 +298,7 @@ Released 2026-11-24.
 - A website open in the shared browser can no longer make your computer ask for camera or microphone access; the site gets a stand-in camera and microphone instead.
 - On macOS, the first time an agent uses the microphone, hears a call or meeting, or works in another app such as Messages, macOS asks for your permission.
 - Registering a repository now works while agents are working, even when that work is running in the repository itself, and one already in the project's own source folder is registered where it is. Work that starts after it is registered is held to the new protection at once, and work already running keeps the access it started with; before, it was refused while any agent was working, and one already in the source folder was always refused.
-- Saved website logins are now kept in the key store, readable only by the server.
+- Saved website logins are now kept in the key store, readable only by CORSIA.
 - The shared browser's protection for password fields now covers a sign-in form shown inside a frame from another site; before, fields in such a frame were not protected.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
