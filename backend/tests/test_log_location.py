@@ -37,6 +37,10 @@ def test_symlinked_state_has_one_log_folder(tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(state, target_is_directory=True)
     assert logs_dir(alias, home=tmp_path, platform="darwin") == logs_dir(state, home=tmp_path, platform="darwin")
+    vector = json.loads(VECTOR.read_text())
+    root_alias = tmp_path / "root-alias"
+    root_alias.symlink_to(vector["state_root"], target_is_directory=True)
+    assert logs_dir(root_alias, home=tmp_path, platform="darwin").name == vector["folder"]
 
 
 def test_lifecycle_results_stay_in_state_while_restart_logs_move(tmp_path, monkeypatch):

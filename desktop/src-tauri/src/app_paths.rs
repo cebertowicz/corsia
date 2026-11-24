@@ -282,6 +282,11 @@ pub(crate) mod tests {
         let expected = vector["folder"].as_str().unwrap();
         let path = log_path(Path::new("/test-home"), state, "service.log").unwrap();
         assert_eq!(path.parent().unwrap().file_name().unwrap(), expected);
+        let temp = tempfile::tempdir().unwrap();
+        let alias = temp.path().join("state-alias");
+        std::os::unix::fs::symlink(state, &alias).unwrap();
+        let via_alias = log_path(Path::new("/test-home"), &alias, "service.log").unwrap();
+        assert_eq!(via_alias.parent().unwrap().file_name().unwrap(), expected);
     }
 
     #[test]

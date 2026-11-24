@@ -22,6 +22,8 @@ LINE_CHARS = 200
 # or a key block spanning lines is still recognised; bytes past this point of a line can
 # never reach its kept part.
 _LINE_BYTES = LINE_CHARS * 4 + 4096
+# An intentionally generous 64 KiB input-line limit bounds buffering before masking;
+# lines reaching the limit are dropped whole so a split credential cannot leak. Not traffic-derived.
 _FORWARD_LINE_BYTES = 65536
 _OVERSIZE_MARKER = "[REDACTED: stderr line over 65536 bytes]"
 
@@ -34,6 +36,9 @@ class StderrTail:
         self._secrets = sorted({value for value in secrets if value}, key=len, reverse=True)
         self._lines: deque[str] = deque(maxlen=TAIL_LINES)
         self._lock = threading.Lock()
+        # 128 is a fixed burst allowance, not a measured workload: it bounds queued
+        # lines when stderr blocks; dropped lines are counted and reported at close.
+        # Masking and UTF-8 replacement can expand each line beyond the input cap.
         self._forward_queue: Queue[bytes] = Queue(maxsize=128)
         self._reader_done = threading.Event()
         self._dropped_lines = 0
