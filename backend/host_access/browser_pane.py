@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_pane_state, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_pane_state, browser_screencast, browser_text_fields
 from host_access.processes import PROCESS_OWNER
 
 __all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "clipboard_undo", "clipboard_paste", "clipboard_selection", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
@@ -110,6 +110,11 @@ async def password_probe(thread_id: str, connection_token: str,
     """Probe the shared page for a password field over this pane's page endpoint."""
     endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PAGE_CHECK_FAILED)
     return await browser_cdp.page_password_probe(endpoint, known)
+
+
+async def text_fields(thread_id: str, connection_token: str, width: float, height: float) -> tuple[list[dict], tuple[object, object] | None]:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be checked")
+    return await browser_text_fields.probe_fields(endpoint, width, height)
 
 
 async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> str:

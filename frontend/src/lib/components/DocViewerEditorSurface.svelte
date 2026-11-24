@@ -14,6 +14,7 @@
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import DocLoadState from './DocLoadState.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
+	import DocTouchCommentBar from './DocTouchCommentBar.svelte';
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
@@ -51,6 +52,8 @@
 		onEdit,
 		onLayout,
 		readOnly,
+		reading = false,
+		touchReading = false,
 		imageBase = null,
 		onOpenImage,
 		saveError,
@@ -83,6 +86,8 @@
 		onEdit: (changes: ChangeDesc, open: ReadonlySet<string>) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
+		reading?: boolean;
+		touchReading?: boolean;
 		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
@@ -148,6 +153,7 @@
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function coveredBySheet(from: number, opening: boolean) { return editor?.coveredBySheet(from, opening); }
 	export function editorView() { return editor?.editorView(); }
+	export function clearInputSelection() { editor?.clearInputSelection(); }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
@@ -174,7 +180,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		<!-- A refusal stays on screen while a choice's write runs (the draft is 'saving' then, with no error), so Details is not closed and rebuilt. -->
 		{#if saveError || refusedStale}
 			<div class="save-error" role="alert">{saveError || EDITOR_STALE_STATUS}{#if tabInstanceId && refusedStale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
@@ -182,7 +188,7 @@
 	</div>
 {/snippet}
 
-<div class="doc-main" class:email-mode={email} bind:this={column}>
+<div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
 	{#if docState === 'loading' || docState === 'error'}
 		<DocLoadState state={docState} name={documentName} {onRetry} />
 	{:else}
@@ -196,10 +202,18 @@
 	{/if}
 </div>
 
-{#if pendingSel && !listOverText}
+{#if touchReading}
+	<DocTouchCommentBar {column} offered={!!pendingSel && !listOverText} onComment={() => { if (!listOverText) onStartComment(); }} />
+{:else if pendingSel && !listOverText}
 	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
 	</button>
 {/if}
+
+<style>
+	/* The editor's own end room (40vh, which lets the last line scroll above a keyboard) stays; the bar's room only raises it when it would be smaller. A scroll into view leaves exactly what the bar covers clear: a margin card's field lying just above the bar must not count as hidden, or the browser re-centres the document on it. */
+	.touch-reading :global(.cm-content:not(.cm-md-cell-editor .cm-content)) { padding-bottom: max(40vh, calc(var(--document-comment-room, 60px) + var(--space-4))); }
+	.touch-reading :global(.cm-scroller:not(.cm-md-cell-editor .cm-scroller)) { scroll-padding-bottom: var(--document-comment-room, 60px); }
+</style>

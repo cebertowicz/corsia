@@ -69,6 +69,7 @@ def _envelope(db) -> dict:
     )
     running = _task(plan.id, "Running", db=db, parent_id=phase.id)
     waiting = _task(plan.id, "Waiting", db=db, parent_id=phase.id)
+    _task(plan.id, "Person action", db=db, parent_id=phase.id, assignee="user")
     review = _task(plan.id, "Review", db=db)
     delegated = _task(plan.id, "Delegated", db=db, spawn_kind="claude-code")
     _task(service.ensure_plan("thread", "worker", db=db).id, "Child step", db=db)
@@ -139,6 +140,7 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
     # The fixture is only a contract if it carries the facts the pane branches on.
     assert any(node["execution"]["attempts"] for node in nodes)
     assert any(node["execution"]["causes"] for node in nodes)
+    assert any(node["attention_path"] for node in nodes)
     assert any(node["evidence"] for node in nodes)
     assert any(node["commitment_cost"] for node in nodes)
     assert any(node["child"] for node in nodes)

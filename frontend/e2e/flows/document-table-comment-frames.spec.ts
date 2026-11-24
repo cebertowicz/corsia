@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { longPressThenSelect } from '../support/tableCells';
+import { enterDocumentEdit } from '../support/documentReading';
 
 /**
  * Where a comment's text lands. With the comment list open beside the editor (desktop), a navigation brings a table row and a
@@ -208,6 +209,8 @@ test.describe('@flow:document-table-comment-frames @surface:documents phone', ()
 	test('the draft sheet leaves a commented table cell above where it rests', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		await openDocument(page, { width: 390, height: 844 });
+		// This journey opens a cell editor with a tap; a touch opening is Reading, which opens none, so choose Edit first.
+		await enterDocumentEdit(page);
 		const { handle, scrollTop } = await viewportOf(page);
 		const cell = page.locator('.cm-md-table td', { hasText: 'owner-10' });
 		await expect(async () => {

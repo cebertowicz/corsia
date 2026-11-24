@@ -3,6 +3,7 @@ name = "spake2-vector-gen"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license = "AGPL-3.0-only"
 description = "Regenerates backend/tests/fixtures/spake2-rust-0.4-vector.json"
 
 [dependencies]

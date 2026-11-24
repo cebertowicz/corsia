@@ -20,6 +20,11 @@ AUTOMATION_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         summary="List this thread's schedules",
         activity="Listing automations",
     ),
+    "attention_rank": ToolCatalogEntry(
+        "automations", status="active", authority="automation-write",
+        summary="Read and rank the person's Activity list",
+        activity="Ranking Activity",
+    ),
     "event_rules": ToolCatalogEntry(
         "automations", status="active", authority="event-rules-write",
         summary="Rules that wake you, with your own note, when a connected app's event matches, or stop its delivery",

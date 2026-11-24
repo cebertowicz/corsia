@@ -91,6 +91,23 @@ async def test_saved_fill_refuses_text_a_global_flag_could_read(synthetic_browse
     await synthetic_browser.owner.shutdown()
 
 
+async def test_saved_fill_on_a_dropdown_is_refused_before_the_page_changes(synthetic_browser, monkeypatch):
+    """A native fill would clear the dropdown's choice and report it filled; select is not a saved shape."""
+    from host_access import browser_dom_write
+    _pin_cli_0_31_2(synthetic_browser, monkeypatch)
+    checked = []
+    async def dropdown(_run, _endpoint, selector):
+        checked.append(selector)
+        return True
+    monkeypatch.setattr(browser_dom_write, 'is_dropdown', dropdown)
+    await synthetic_browser.owner.run('a', ['open', 'about:blank'])
+    with pytest.raises(Exception, match="a fill can't choose a dropdown's option. Nothing was changed"):
+        await synthetic_browser.owner.run('a', ['fill', '#size', 'Large'])
+    assert checked == ['#size']
+    assert not any(call[-3:-2] in {('fill',), ('select',)} for call in synthetic_browser.calls)
+    await synthetic_browser.owner.shutdown()
+
+
 async def test_older_cli_keeps_conservative_dash_guard(synthetic_browser, monkeypatch):
     monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     await synthetic_browser.owner.run('a', ['open', 'about:blank'])

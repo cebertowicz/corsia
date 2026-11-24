@@ -33,7 +33,7 @@ flowchart TB
 
 ## Approval modes
 
-**Auto-approve** is under **Settings → System → Host access review**. At this commit it is **off** unless you turn it on: every application the reviewer allows waits for you. With it on, an allowed application becomes active at once, and the model's verdict is the only approval.
+**Auto-approve** is under **Settings → System → Host access review**. It is **on** for a new install; an install set up before this default changed keeps the choice it had (off, unless it was turned on). With it on, an allowed application becomes active at once, and the model's verdict is the only approval. With it off, every application the reviewer allows waits for you.
 
 Two kinds of request always need you, whatever the setting: an exception to a repository's policy (a pinned branch or a protected main checkout), and launching another AI agent command-line tool. Only a signed-in person session can turn Auto-approve or the reviewer fallback on or off, approve, reject or revoke; agent and API tokens can't (`backend/api/system.py`, `backend/infra/auth.py`). One exception: a project's conductor agent may choose which model reviews, but not clear that choice.
 
@@ -86,7 +86,7 @@ The floor binds the leased command and what it starts, nothing else. A leased co
 
 ## How often it says yes and no
 
-The repository README reports one week on the install that builds CORSIA, published on 2026-10-09, with Auto-approve on: 471 of 519 reviewed applications (91%) were approved automatically, 34 rejected and 14 went to a person; of 1,586 commands run under leases, 48 were blocked. Those figures don't say how many of the approvals were right. No measurement of wrong approvals or wrong blocks is published.
+[README evidence and limits](../readme-evidence.md#operational-aggregates) reports one week on the install that builds CORSIA, published on 2026-10-09, with Auto-approve on: 471 of 519 reviewed applications (91%) were approved automatically, 34 rejected and 14 went to a person; of 1,586 commands run under leases, 48 were blocked. Those figures don't say how many of the approvals were right. No measurement of wrong approvals or wrong blocks is published.
 
 ## Check it yourself
 

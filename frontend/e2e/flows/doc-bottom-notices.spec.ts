@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/heldComments';
+import { enterDocumentEdit } from '../support/documentReading';
 
 // The bottom notices (the jump control, and a below activity pill) float over a document's foot. The text never moves or shrinks as
 // one comes or goes: a line on screen stays exactly where it is. While one shows, a line the caret moves onto stops above it, and
@@ -162,6 +163,8 @@ test(`${TAG} 393px: a line the caret moves onto stops above the jump control whi
 	test.setTimeout(90_000);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await openDocument(page, request, 'caret', true);
+	// The caret journey needs Edit; a touch opening is Reading, so choose Edit first.
+	await enterDocumentEdit(page);
 	await expect(jump(page), 'the jump control points at the unread reply below').toBeVisible();
 	await caretToFoot(page, 100);
 	const before = await scroller(page).evaluate((node) => node.scrollTop);
