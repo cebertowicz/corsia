@@ -52,11 +52,11 @@
 		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
-		/** Comment-sheet header options: `actions` are word buttons at the leading edge, apart from Close (a thread's Agree and Resolve); `compact` draws the design system's drawer radius, not the 28px glass sheet. */
+		/** Header options: `actions` are word buttons at the leading edge, apart from Close; `compact` draws the design system's drawer radius, not the 28px glass sheet. */
 		actions?: Snippet; compact?: boolean;
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
-		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */ doneIcon?: boolean;
+		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`). */ doneIcon?: boolean;
 		onClose: () => void;
 		children: Snippet;
 		initialFocusSelector?: string;

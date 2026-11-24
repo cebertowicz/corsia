@@ -19,6 +19,9 @@ test('a phone reply is never in the sheet field and the sheet thread together', 
   expect(narrow).toBe(true);
   const sheet = await openCommentThread(row, page, QUOTE, { tap: true });
   await expect(sheet.getByText('A note on the phrase')).toBeVisible();
+  const panel = page.locator('[data-adaptive-drawer] .drawer-panel');
+  await expect(panel.locator('.drawer-done')).toHaveText('Close');
+  await expect(panel).toHaveCSS('border-top-left-radius', '28px');
   await sheet.getByPlaceholder('Reply…').fill('Draft reply');
 
   // The provider start after the input is stored takes seconds, as on a loaded machine.
