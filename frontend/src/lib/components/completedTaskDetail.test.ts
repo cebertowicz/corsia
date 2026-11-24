@@ -30,6 +30,20 @@ describe('completed task detail', () => {
 		expect(taskDetail(byId, 'c')!.text).toBeNull();
 	});
 
+	it('shows only the path for a workflow step, whose description and criteria are agent instructions', () => {
+		const byId = indexNodes([
+			node('run', null, { title: 'Plan the trip' }),
+			node('ground', 'run', {
+				workflow_step: 'ground',
+				description: '## Ground\nStart here, before acting. Models like you fail in two known ways.',
+				acceptance_criteria: "the run's intent holds only Goal and Done when",
+			}),
+			node('own', 'run', { workflow_step: '+extra', description: 'Added because the venue changed' }),
+		]);
+		expect(taskDetail(byId, 'ground')).toEqual({ crumbs: ['Plan the trip'], gap: false, text: null });
+		expect(taskDetail(byId, 'own')!.text).toBeNull();
+	});
+
 	it('marks a path that stops at a missing ancestor', () => {
 		const detail = taskDetail(indexNodes([node('b', 'gone'), node('c', 'b')]), 'c')!;
 		expect(detail.crumbs).toEqual(['Title b']);
