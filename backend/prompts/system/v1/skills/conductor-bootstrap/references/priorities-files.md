@@ -6,11 +6,11 @@ Use this when you write, review or suggest a change to a priorities file: at set
 
 - **The project's file:** `context/PRIORITIES.md`. What the whole team puts first.
 - **Each agent's file:** `PRIORITIES.md` in that agent's own `context/` folder (`.threads/<agent id>/context/`). Its Now is the problems that agent is there to solve, in order. A project line the agent serves may be one of them.
-- Every agent loads both on every turn, so keep each to a few short lines. On an install with no project, an agent's own file is its only one.
+- Every agent loads both on every turn, so keep each to a few short lines. On an install with no project, an agent's own file is its only one, so its Now also holds what the person said comes first for themselves.
 
 ## What a file holds
 
-- **Use line:** the file opens with this line, in italics, and keeps it: `*Use: when two pieces of work compete, the one higher under Now goes first. The person owns this file; agents suggest changes and never edit it.*` Name the person in place of "the person".
+- **Use line:** the file opens with this line, in italics, and keeps it: `*Use: when two pieces of work compete, the one higher under Now goes first. The person owns this file; agents suggest changes and never edit it.*` Put the person's name in place of "the person" only if they gave it.
 - **Now:** only the problems the person said come first, in their order. A line names a problem, never a task: tasks stay in plans. A date they give goes under Dates, not Now.
 - **Always:** kinds of work this agent may start without asking, only where that differs from the project's file.
 - **Dates:** only dates the person set.
@@ -20,7 +20,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 ## How to fill one
 
 - Every line traces to the person's words or a decision they made, or reads `Not set yet`. Never fill a gap with what seems likely.
-- Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. No platform terms or jargon.
+- Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. Keep the words that say what is wrong; a topic alone is not a problem. No platform terms or jargon.
 - For each new agent, ask the person what that agent should solve first. Its Now holds what they name, in their order, or reads `Not set yet` if they name nothing.
 - Each Now line serves a goal of the project or of the agent. When a line serves none, ask the person about it; never write it in silently.
 - The person approves each file. A file they have not approved does not count.
