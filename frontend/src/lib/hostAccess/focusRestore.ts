@@ -51,8 +51,7 @@ export async function refocusAfterFailedDecision(
 	panel: HTMLElement | null,
 ): Promise<void> {
 	await tick();
-	const active = document.activeElement;
-	if (!panel?.isConnected || (active && active !== document.body && active.isConnected && active !== pressed)) return;
+	if (!panel?.isConnected || !focusStillOurs(pressed, document.activeElement)) return;
 	if (pressed?.isConnected && panel.contains(pressed) && !(pressed as HTMLButtonElement).disabled) pressed.focus();
 	else panel.focus();
 }
