@@ -169,3 +169,93 @@ async def test_request_account_does_not_change_bound_sender(mail, monkeypatch):
     assert await send_now(_artifact(saved), body, _owner(mail.thread)) == {"state": "sent"}
     assert len(mail.sent_requests()) == 1
     assert mail.sent_requests()[0].headers["authorization"] == f"Bearer {ACCESS}"
+
+
+def _review_ask(thread_id: str, artifact_id: str) -> str:
+    """The draft's agent asks the person to review the draft (block_node with the draft as its ask)."""
+    import uuid
+
+    from plans import service
+    from plans.boundary import PlanActor, mutate
+
+    db = get_db()
+    try:
+        plan = service.ensure_plan("thread", thread_id, db=db)
+        node = service.add_node(plan.id, kind="task", title="Send the reply?", acceptance_criteria="Answered", db=db)
+        db.commit()
+        token = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()["user_id"]
+        mutate(plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Read the reply before it goes",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": artifact_id,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=PlanActor(thread_id, token, None), provenance="test.send_now", mutation_id=uuid.uuid4().hex, db=db)
+        db.commit()
+        return node.id
+    finally:
+        db.close()
+
+
+def _open_asks(artifact_id: str) -> list:
+    from plans.public import raised_asks
+    from registry import artifact_record
+
+    db = get_db()
+    try:
+        return raised_asks(db, str(artifact_record.identity_row_for(artifact_id, db=db)["id"]))
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["send", "discard"])
+async def test_send_or_dont_send_answers_the_review_request(mail, monkeypatch, action):
+    """E7: the person's review item for the draft goes with Send now or Don't send, in the same request."""
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr("events.delivery.deliver_to_thread", notice)
+    monkeypatch.setattr("plans.public.drive_threads", AsyncMock())
+    saved = await _draft(mail)
+    artifact, owner = _artifact(saved), _owner(mail.thread)
+    await asyncio.to_thread(_review_ask, mail.thread, artifact)
+    assert len(_open_asks(artifact)) == 1
+    if action == "send":
+        assert await send_now(artifact, SendNow(text=(mail.workspace / saved["path"]).read_text()), owner) == {"state": "sent"}
+    else:
+        assert await dont_send(artifact, owner) == {"state": "discarded"}
+    assert _open_asks(artifact) == []
+    assert "Your review request on it is answered." in notice.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_failed_send_leaves_the_review_request_open(mail, monkeypatch):
+    monkeypatch.setattr("events.delivery.deliver_to_thread", AsyncMock(return_value=True))
+    saved = await _draft(mail)
+    artifact = _artifact(saved)
+    await asyncio.to_thread(_review_ask, mail.thread, artifact)
+    mail.send_mode = "400"
+    result = await send_now(artifact, SendNow(text=(mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
+    assert result["state"] == "failed"
+    assert len(_open_asks(artifact)) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_review_request_says_nothing_about_one(mail, monkeypatch):
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr("events.delivery.deliver_to_thread", notice)
+    saved = await _draft(mail)
+    await send_now(_artifact(saved), SendNow(text=(mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
+    assert "review request" not in notice.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_review_answer_tells_the_agent_to_settle_it(mail, monkeypatch):
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr("events.delivery.deliver_to_thread", notice)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("attention store down")
+
+    monkeypatch.setattr("registry.attention.clear_attention", broken)
+    saved = await _draft(mail)
+    result = await send_now(_artifact(saved), SendNow(text=(mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
+    assert result == {"state": "sent"}
+    assert "couldn't be marked answered; settle it yourself" in notice.await_args.args[2]

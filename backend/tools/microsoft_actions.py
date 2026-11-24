@@ -24,8 +24,8 @@ from tools.microsoft_account import _designated
 log = logging.getLogger(__name__)
 MAIL_AFTER_DRAFT = (
     "Show the person the draft (link its path) and end your turn. They send it themselves with "
-    "Send on the draft, or tell you what to change; you have no tool that sends email. If "
-    "they ask you in chat to send it, tell them to press Send on the draft. If they ask for "
+    "Send now on the draft, or tell you what to change; you have no tool that sends email. If "
+    "they ask you in chat to send it, tell them to press Send now on the draft. If they ask for "
     "changes, save again with microsoft_mail_draft (same draft_id) and show them the new version. "
     "You get a notice when they send it or choose Don't send."
 )

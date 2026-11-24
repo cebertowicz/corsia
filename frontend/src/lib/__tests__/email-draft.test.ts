@@ -94,7 +94,7 @@ describe('reading a draft’s context', () => {
 
 	it('asks the draft’s route by artifact id and maps the server’s answer to the view’s names', async () => {
 		const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-			status: 'ready', reason: null, replied_to: 'r-1', answered: ['dana.whitfield@example.com'],
+			state: 'open', read_at: '2026-11-24T19:00:00+00:00', status: 'ready', reason: null, replied_to: 'r-1', answered: ['dana.whitfield@example.com'],
 			conversation: [DANA, ANSWERED],
 			attachments: [{ name: 'map.png', path: '/w/map.png', size: 10, type: 'image', unavailable: false }],
 			notes: ['Same subject as an email from Oct 2.'],
@@ -103,7 +103,7 @@ describe('reading a draft’s context', () => {
 		const context = await fetchEmailDraftContext('art/1');
 		expect((fetchMock.mock.calls[0] as unknown[])[0]).toBe('/api/email-drafts/art%2F1/context');
 		expect(context).toEqual({
-			status: 'ready', reason: undefined, repliedTo: 'r-1', answered: ['dana.whitfield@example.com'],
+			state: 'open', readAt: '2026-11-24T19:00:00+00:00', status: 'ready', reason: undefined, repliedTo: 'r-1', answered: ['dana.whitfield@example.com'],
 			conversation: [DANA, ANSWERED],
 			attachments: [{ name: 'map.png', path: '/w/map.png', size: 10, type: 'image', unavailable: false }],
 			notes: ['Same subject as an email from Oct 2.'],

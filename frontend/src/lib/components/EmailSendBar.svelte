@@ -4,20 +4,26 @@
 	import { discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
 	import type { ConversationFailure, EmailDraftState } from '$lib/emailDraft';
 
-	let { artifactId, text, readAt = null, initialState = 'open', readOnly = false, connected = true, blocker = null, ended = $bindable(false), onReread = () => {}, onRefused = () => {} }: {
+	let { artifactId, text, readAt = null, initialState = 'open', readOnly = false, connected = true, blocker = null, ended = $bindable(false), flush = async () => true, readState = async () => null, onReread = () => {}, onRefused = () => {} }: {
 		artifactId: string; text: () => string; readAt?: string | null; initialState?: EmailDraftState;
 		readOnly?: boolean; connected?: boolean; blocker?: string | null; ended?: boolean;
+		/** Saves every pending edit; false when the save failed. Send waits on it, so the text it carries is the saved text. */
+		flush?: () => Promise<boolean>;
+		/** The draft's state as the server holds it, or null when it can't be read. */
+		readState?: () => Promise<EmailDraftState | null>;
 		onReread?: () => void; onRefused?: (reason: ConversationFailure) => void;
 	} = $props();
 	type Step = 'draft' | 'confirm' | 'sending' | 'sent' | 'failed' | 'declined' | 'unconfirmed';
-	let step = $state<Step>(untrack(() => initialState === 'sent' ? 'sent' : initialState === 'discarded' ? 'declined' : initialState === 'sending' ? 'unconfirmed' : 'draft'));
+	const fromState = (state: EmailDraftState): Step => state === 'sent' ? 'sent' : state === 'discarded' ? 'declined' : state === 'sending' ? 'unconfirmed' : 'draft';
+	let step = $state<Step>(untrack(() => fromState(initialState)));
 	let message = $state('');
 	let notDeliveredTo = $state<string[]>([]);
 	// Don't send is on its way: the question stays on screen with its buttons held, never 'Sending…'.
 	let declining = $state(false);
 	const reasonId = $props.id();
 	const canSend = $derived(connected && !blocker && !readOnly);
-	$effect(() => { ended = step === 'sent' || step === 'declined'; });
+	// From the click on, the text on screen is what is being sent: no edit may follow it.
+	$effect(() => { ended = step === 'sending' || step === 'sent' || step === 'declined' || step === 'unconfirmed'; });
 	onDestroy(() => { ended = false; });
 
 	function apply(result: DraftActionResult) {
@@ -32,17 +38,29 @@
 				break;
 			case 'signin': case 'missing':
 				step = 'draft'; onRefused(result.state); break;
+			case 'unknown': return settleFromServer();
 		}
+	}
+	/**
+	 * The server didn't give an answer (an error status, or the connection dropped): only the draft's stored state says
+	 * whether the email left. Open means no send holds it, so it didn't leave; sending means it may have.
+	 */
+	async function settleFromServer() {
+		const state = await readState().catch(() => null);
+		step = state === null ? 'unconfirmed' : state === 'open' ? 'failed' : fromState(state);
 	}
 	async function startSend() {
 		if (!canSend || (step !== 'draft' && step !== 'failed')) return;
 		step = 'sending'; message = '';
-		try { apply(await sendEmailDraft(artifactId, text(), readAt)); } catch { step = 'failed'; }
+		if (!await flush().catch(() => false)) {
+			step = 'draft'; message = 'Couldn’t save your last edit, so nothing was sent. Press Send now again.'; return;
+		}
+		try { await apply(await sendEmailDraft(artifactId, text(), readAt)); } catch { await settleFromServer(); }
 	}
 	async function decline() {
 		if (step !== 'confirm' || declining || !connected || readOnly) return;
 		declining = true;
-		try { apply(await discardEmailDraft(artifactId)); } catch { step = 'draft'; } finally { declining = false; }
+		try { await apply(await discardEmailDraft(artifactId)); } catch { await settleFromServer(); } finally { declining = false; }
 	}
 </script>
 
@@ -58,7 +76,7 @@
 		{/if}
 		<span class="bar-actions">
 			<Button size="sm" variant="secondary" disabled={!connected} onclick={() => (step = 'confirm')}>Don’t send</Button>
-			<Button size="sm" variant="primary" ariaDisabled={!canSend} describedby={canSend ? undefined : reasonId} onclick={startSend}>Send</Button>
+			<Button size="sm" variant="primary" ariaDisabled={!canSend} describedby={canSend ? undefined : reasonId} onclick={startSend}>Send now</Button>
 		</span>
 	{:else if step === 'confirm'}
 		<span class="bar-text" role="status">Don’t send this email?</span>
@@ -71,14 +89,15 @@
 		<span class="bar-text failed" role="alert">Couldn’t send. The email didn’t leave, and the draft is kept.</span>
 		<span class="bar-actions"><Button size="sm" variant="secondary" disabled={!connected || readOnly} onclick={() => (step = 'confirm')}>Don’t send</Button><Button size="sm" variant="primary" ariaDisabled={!canSend} describedby={canSend ? undefined : reasonId} onclick={startSend}>Retry</Button></span>
 	{:else if step === 'unconfirmed'}
-		<span class="bar-text" role="status">Couldn’t confirm the email left. Check your Sent mail before sending again.</span>
+		<span class="bar-text" role="status">Couldn’t confirm the email left. Check your Sent mail. If it isn’t there, ask the agent for a new draft.</span>
 	{:else}
 		<span class="bar-text" role="status">Not sent. This draft is marked as not to send.</span>
 	{/if}
 </div>
 
 <style>
-	.email-send-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-1) var(--space-2); min-height: var(--space-7); padding: var(--space-1) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-phone-inset, var(--doc-rail, 44px)); border-bottom: 1px solid var(--border-subtle); }
+	/* The left inset is the email header's own (EmailNotes), so the bar's text starts where From does. */
+	.email-send-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-1) var(--space-2); min-height: var(--space-7); padding: var(--space-1) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-inset, 24px); border-bottom: 1px solid var(--border-subtle); }
 	.bar-text { flex: 1 1 12rem; min-width: 0; font-size: var(--text-footnote); line-height: var(--lh-normal); color: var(--text-secondary); overflow-wrap: anywhere; }
 	.bar-text.failed { color: var(--red-text); }
 	.bar-actions { flex: 0 0 auto; display: inline-flex; gap: var(--space-2); }

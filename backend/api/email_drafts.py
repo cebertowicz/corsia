@@ -157,15 +157,24 @@ def _first_recipient(data: bytes) -> str:
 
 
 _AGENT = {
-    SENT: "The person sent email draft {id} with its Send button (revision {revision}, {at}). It has gone out; there is "
-          "nothing more to send. Settle any review you asked for on it.{extra}",
-    "failed": "The person pressed Send on email draft {id} from {account}, but it wasn't sent: {reason}. The "
-              "draft is still open, and they can press Send again once it's fixed.",
-    UNCONFIRMED: "The person pressed Send on email draft {id} from {account}, but the mail service didn't "
-                 "confirm it, so it may have gone out. Don't resend it; ask them to check their Sent mail.",
+    SENT: "The person sent email draft {id} with Send now (revision {revision}, {at}). It has gone out; there is "
+          "nothing more to send.{review}{extra}",
+    "failed": "The person pressed Send now on email draft {id} from {account}, but it wasn't sent: {reason}. The "
+              "draft is still open, and they can press Send now again once it's fixed.",
+    UNCONFIRMED: "The person pressed Send now on email draft {id} from {account}, but the mail service didn't "
+                 "confirm it, so it may have gone out. Don't resend it; ask them to check their Sent mail. If it "
+                 "isn't there, save a new draft when they ask for one.",
     "discarded": "The person chose Don't send on email draft {id}. It won't be sent. Save a new draft only if they "
-                 "ask for another version.",
+                 "ask for another version.{review}",
 }
+#: How the notice ends, by what became of the draft's review request (``_answer_review``).
+_REVIEW = {
+    True: " Your review request on it is answered.",
+    False: " Its review request couldn't be marked answered; settle it yourself.",
+    None: "",
+}
+#: Don't send answers the review as changes requested, with a note that says what that means here.
+DECLINED_NOTE = "Not sent: the person chose Don't send. Save a new draft only if they ask for one."
 _PERSON = {
     SENT: "You sent the email to {to}.{extra}",
     "failed": "The email to {to} wasn't sent.",
@@ -174,8 +183,40 @@ _PERSON = {
 }
 
 
+def _answer_review(artifact_id: str, outcome: str, woken: list[str]) -> bool | None:
+    """Send now or Don't send settles the draft's review request in the same request (E7), so no stale item stays in
+    the person's list. True: answered. None: no request was open. False: the answer failed (logged); the agent's
+    notice says so. Every open request on the draft is answered: a draft's review is the question whether to send it."""
+    from doceditor.review_bar import AnswerRefused
+    from registry.attention import clear_attention
+
+    verdict, note = ("approved", None) if outcome == SENT else ("changes_requested", DECLINED_NOTE)
+    try:
+        clear_attention(artifact_id, outcome="answer", verdict=verdict, note=note, drives=woken)
+    except AnswerRefused as exc:
+        if exc.code == "ask_stale":
+            return None
+        logger.warning("draft-send artifact={}: the review answer was refused ({})", artifact_id, exc.code)
+        return False
+    except Exception:  # noqa: BLE001 - the email's outcome is already stored; only the review answer failed
+        logger.exception("draft-send artifact={}: answering the review failed", artifact_id)
+        return False
+    return True
+
+
+async def _settle_review(artifact_id: str, outcome: str) -> bool | None:
+    woken: list[str] = []
+    answered = await run_in_db(_answer_review, artifact_id, outcome, woken)
+    if woken:
+        from plans.public import drive_threads
+
+        await drive_threads(woken)
+    return answered
+
+
 async def _tell_agent(draft: dict[str, Any], outcome: str, *, revision: str, to: str, account: str | None,
-                      reason: str | None = None, refused: tuple[str, ...] = (), note: str | None = None) -> None:
+                      reason: str | None = None, refused: tuple[str, ...] = (), note: str | None = None,
+                      review: bool | None = None) -> None:
     """The draft's own agent learns each outcome, and the row it reads is the send's record: draft, revision,
     outcome and time, never the body. Best-effort: the draft's state is already stored."""
     from events.delivery import deliver_to_thread
@@ -184,7 +225,7 @@ async def _tell_agent(draft: dict[str, Any], outcome: str, *, revision: str, to:
     logger.info("draft-send draft={} revision={} outcome={} at={}", draft["id"], revision, outcome, at)
     missed = f" These addresses did not get it: {', '.join(refused)}." if refused else ""
     summary = _AGENT[outcome].format(id=draft["id"], revision=revision, at=at, account=account or "its account",
-                                     reason=reason or "the mail service refused it",
+                                     reason=reason or "the mail service refused it", review=_REVIEW[review],
                                      extra=missed + (f" {note}" if note else ""))
     try:
         delivered = await deliver_to_thread(
@@ -238,8 +279,9 @@ async def send_now(artifact_id: str, body: SendNow, user: dict = Depends(require
     if result.state == IN_FLIGHT:
         # Another click or tab claimed it first; answer where that one stands now.
         return await _now_settled(artifact_id, user["id"], draft)
+    review = await _settle_review(artifact_id, SENT) if result.state == SENT else None
     await _tell_agent(draft, result.state, revision=revision, to=_first_recipient(live), account=result.account,
-                      reason=result.reason, refused=result.not_delivered_to, note=result.note)
+                      reason=result.reason, refused=result.not_delivered_to, note=result.note, review=review)
     if result.state == "failed":
         return {"state": result.state, "reason": result.reason}
     # The person must not read 'Sent' as 'everyone got it' when the mail host refused some addresses.
@@ -259,5 +301,7 @@ async def dont_send(artifact_id: str, user: dict = Depends(require_human_user)) 
     except DraftError:
         return await _now_settled(artifact_id, user["id"], draft)
     live = await asyncio.to_thread(_read_bytes, str(draft["path"])) or b""
-    await _tell_agent(draft, "discarded", revision=document_revision(live), to=_first_recipient(live), account=None)
+    review = await _settle_review(artifact_id, "discarded")
+    await _tell_agent(draft, "discarded", revision=document_revision(live), to=_first_recipient(live), account=None,
+                      review=review)
     return {"state": "discarded"}

@@ -48,7 +48,9 @@ export type DraftActionResult =
 	| { state: 'sent'; not_delivered_to?: string[] }
 	| { state: 'discarded' | 'sending' | 'unconfirmed' | 'failed'; reason?: string }
 	| { state: 'changed' | 'newer'; message: string }
-	| { state: 'signin' | 'missing' };
+	| { state: 'signin' | 'missing' }
+	/** The server didn't answer the action (an error status): whether it happened is read from the draft's state. */
+	| { state: 'unknown' };
 
 async function draftAction(artifactId: string, action: 'send' | 'discard', body?: { text: string; read_at: string | null }): Promise<DraftActionResult> {
 	const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/${action}`, {
@@ -57,12 +59,18 @@ async function draftAction(artifactId: string, action: 'send' | 'discard', body?
 	if (res.status === 401) return { state: 'signin' };
 	if (res.status === 404) return { state: 'missing' };
 	if (res.status === 409) return (await res.json()).detail;
-	if (!res.ok) return { state: 'failed' };
+	// Only the server's own 'failed' answer means the email provably didn't leave; an error status says nothing either way.
+	if (!res.ok) return { state: 'unknown' };
 	return await res.json() as DraftActionResult;
 }
 
 export function sendEmailDraft(artifactId: string, text: string, readAt: string | null): Promise<DraftActionResult> {
 	return draftAction(artifactId, 'send', { text, read_at: readAt });
+}
+
+/** The draft's state as the server holds it, or null when the read didn't reach the server. */
+export async function readEmailDraftState(artifactId: string): Promise<EmailDraftState | null> {
+	return (await fetchEmailDraftContext(artifactId)).state ?? null;
 }
 
 export function discardEmailDraft(artifactId: string): Promise<DraftActionResult> {

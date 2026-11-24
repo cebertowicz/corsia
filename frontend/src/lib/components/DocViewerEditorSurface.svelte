@@ -22,7 +22,7 @@
 	import EmailSendBar from './EmailSendBar.svelte';
 	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
-	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
+	import { fetchEmailDraftContext, readEmailDraftState } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 	import DocStaleChoice from './DocStaleChoice.svelte';
@@ -47,6 +47,7 @@
 		pendingComment = null,
 		scrollTo,
 		onSave,
+		onFlush = async () => true,
 		onSelect,
 		onAnchorFocus,
 		onCaretAway,
@@ -83,6 +84,8 @@
 		pendingComment?: CommentSelection | null;
 		scrollTo: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
 		onSave: () => void;
+		/** Saves every pending edit and resolves once the server holds them; false when the save failed. */
+		onFlush?: () => Promise<boolean>;
 		onSelect: (selection: PendingSelection | null) => void;
 		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		onCaretAway?: () => void;
@@ -199,7 +202,7 @@
 <div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
 	{#if docState === 'ready' && draft && artifactId}
 		{#key artifactId}
-			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
+			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
 		{/key}
 	{/if}
 	{#if docState === 'loading' || docState === 'error'}

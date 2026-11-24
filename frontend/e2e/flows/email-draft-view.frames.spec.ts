@@ -14,6 +14,7 @@ import { createSession, lastAssistantMessage, loginByUrl, sendChatMessage, TEST_
 import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 import { enterDocumentEdit } from '../support/documentReading';
+import { raiseAsk } from '../support/reviewAsk';
 import { FONT, FOUR, NEWER, SAME_SUBJECT, failed, fresh, markEmailDraft, mockEmailDraftContext, reply, type ServerAttachment, type ServerContext } from '../support/emailDraftContext';
 
 const OUT = process.env.EMAIL_FRAMES_OUT ?? '';
@@ -82,6 +83,7 @@ type Scenario = {
 	name: string; doc: keyof typeof DOCS; context: Answer;
 	act?: (page: Page, docPath: string, request: APIRequestContext) => Promise<void>;
 	/** Only 1440 light and 393 dark. */ thin?: boolean;
+	/** The draft's agent has an open review ask on it when the draft opens. */ ask?: boolean;
 	/** The pointer stays where the act left it (a hover frame); otherwise it is moved off the page before the shot. */ keepPointer?: boolean;
 };
 
@@ -290,8 +292,14 @@ const SCENARIOS: Scenario[] = [
 	} },
 	// Send and Don't send on the draft: the bar before the click and each answer the server gives after it.
 	{ name: '20a-send-ready', doc: 'reply', context: reply(), act: async (page) => {
-		await expect(sendBar(page).getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+		await expect(sendBar(page).getByRole('button', { name: 'Send now', exact: true })).toBeEnabled();
 		await expect(sendBar(page).getByRole('button', { name: 'Don’t send', exact: true })).toBeEnabled();
+	} },
+	// On a phone the draft opens for reading (#3253), so the Cc button shows only once the person taps Edit.
+	{ name: '20a2-send-ready-editing', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+		await enterDocumentEdit(page);
+		await expect(page.locator('.cm-email-cc-add')).toBeVisible();
+		await expect(sendBar(page).getByRole('button', { name: 'Send now', exact: true })).toBeEnabled();
 	} },
 	{ name: '20b-sending', doc: 'reply', context: reply(), thin: true, act: async (page) => {
 		const sent = await answerDraftAction(page, 'send', 'hold');
@@ -307,7 +315,8 @@ const SCENARIOS: Scenario[] = [
 		await expect(page.locator('.cm-content')).toHaveAttribute('aria-readonly', 'true');
 		expect(sent.bodies).toHaveLength(1);
 	} },
-	{ name: '20d-sent-partly', doc: 'reply', context: reply(), thin: true, act: async (page) => {
+	// Priya is in this draft's Cc, so the one address the mail service refused is one the draft named.
+	{ name: '20d-sent-partly', doc: 'ccadded', context: reply(), thin: true, act: async (page) => {
 		await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent', not_delivered_to: ['priya.raman@example.com'] } });
 		await clickSend(page);
 		await expect(sendBar(page)).toHaveText('Sent. priya.raman@example.com didn’t get it.');
@@ -328,7 +337,15 @@ const SCENARIOS: Scenario[] = [
 		await answerDraftAction(page, 'send', { status: 409, body: { detail: { state: 'changed', message: 'The draft changed; review it again.' } } });
 		await clickSend(page);
 		await expect(sendBar(page).getByRole('status')).toHaveText('The draft changed; review it again.');
-		await expect(sendBar(page).getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+		await expect(sendBar(page).getByRole('button', { name: 'Send now', exact: true })).toBeEnabled();
+	} },
+	// A newer email arrived after the draft was read: the server refuses, and the bar re-reads the conversation, which now shows it.
+	{ name: '20j-send-newer', doc: 'reply', context: (_files, reads) => reads === 0 ? reply() : reply({ conversation: [...NEWER[1], ...FOUR] }), thin: true, act: async (page) => {
+		await answerDraftAction(page, 'send', { status: 409, body: { detail: { state: 'newer', message: 'A newer email arrived in this conversation; review it again.' } } });
+		await clickSend(page);
+		await expect(sendBar(page).getByRole('status')).toHaveText('A newer email arrived in this conversation; review it again.');
+		await expectConversation(page, 1 + FOUR.length, 1);
+		await expect(sendBar(page).getByRole('button', { name: 'Send now', exact: true })).toBeEnabled();
 	} },
 	{ name: '20h-dont-send-asks', doc: 'reply', context: reply(), thin: true, act: async (page) => {
 		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
@@ -342,20 +359,45 @@ const SCENARIOS: Scenario[] = [
 		await expect(page.locator('.cm-content')).toHaveAttribute('aria-readonly', 'true');
 		expect(discarded.bodies).toHaveLength(1);
 	} },
+	// The agent asked for a review of the draft: Send now and Don't send answer it in the same request (E7), so the ask leaves.
+	{ name: '20k-sent-ask-gone', doc: 'reply', context: reply(), ask: true, thin: true, act: async (page) => {
+		await expect(page.locator('.review-bar.ask, .rb-dock')).toBeVisible();
+		await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } }, 'approved');
+		await clickSend(page);
+		await expect(sendBar(page)).toHaveText('Sent');
+		await expect(page.locator('.review-bar.ask, .rb-dock')).toHaveCount(0, { timeout: 10_000 });
+	} },
+	{ name: '20l-not-sent-ask-gone', doc: 'reply', context: reply(), ask: true, thin: true, act: async (page) => {
+		await expect(page.locator('.review-bar.ask, .rb-dock')).toBeVisible();
+		await answerDraftAction(page, 'discard', { status: 200, body: { state: 'discarded' } }, 'changes_requested');
+		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
+		await sendBar(page).getByRole('button', { name: 'Don’t send', exact: true }).click();
+		await expect(sendBar(page)).toHaveText('Not sent. This draft is marked as not to send.');
+		await expect(page.locator('.review-bar.ask, .rb-dock')).toHaveCount(0, { timeout: 10_000 });
+	} },
 ];
 
 const sendBar = (page: Page) => page.locator('.email-send-bar');
-const clickSend = (page: Page) => sendBar(page).getByRole('button', { name: 'Send', exact: true }).click();
+const clickSend = (page: Page) => sendBar(page).getByRole('button', { name: 'Send now', exact: true }).click();
 /**
  * Answers `POST /api/email-drafts/{id}/{action}` the way backend/api/email_drafts.py does (a 409 carries its answer in `detail`),
- * or holds it unanswered; returns the request bodies the bar sent.
+ * or holds it unanswered; returns the request bodies the bar sent. With `review`, it first answers the draft's open review
+ * ask through the real clear route, the same `clear_attention` the send route calls (E7): the frame's draft record is a
+ * browser stand-in, so the real send route can't run, but the ask leaving the screen is the server's real answer.
  */
-async function answerDraftAction(page: Page, action: 'send' | 'discard', answer: { status: number; body: unknown } | 'hold') {
+async function answerDraftAction(page: Page, action: 'send' | 'discard', answer: { status: number; body: unknown } | 'hold', review?: 'approved' | 'changes_requested') {
 	const seen = { bodies: [] as unknown[] };
 	await page.route((url) => new RegExp(`^/api/email-drafts/[^/]+/${action}$`).test(url.pathname), async (route) => {
 		if (route.request().method() !== 'POST') return route.fallback();
 		seen.bodies.push(route.request().postDataJSON() ?? {});
 		if (answer === 'hold') return;
+		if (review) {
+			const artifactId = new URL(route.request().url()).pathname.split('/')[3];
+			const cleared = await page.request.post(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
+				data: { token: TEST_TOKEN, outcome: 'answer', verdict: review, note: review === 'approved' ? null : "Not sent: the person chose Don't send. Save a new draft only if they ask for one.", hold_ids: [] },
+			});
+			expect(cleared.ok(), await cleared.text()).toBeTruthy();
+		}
 		await route.fulfill({ status: answer.status, contentType: 'application/json', body: JSON.stringify(answer.body) });
 	});
 	return seen;
@@ -377,6 +419,7 @@ async function seedAndOpen(request: APIRequestContext, browser: Browser, testInf
 	const seeded = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: docPath, text: DOCS[scenario.doc], thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
+	if (scenario.ask) raiseAsk(threadId, artifactId, 'Check the reply to Dana before it goes.');
 	const context = await browser.newContext({
 		baseURL: testInfo.project.use.baseURL, viewport: vp.viewport, colorScheme: theme, reducedMotion: 'reduce',
 		deviceScaleFactor: vp.phone ? 2 : 1, isMobile: vp.phone, hasTouch: vp.phone,

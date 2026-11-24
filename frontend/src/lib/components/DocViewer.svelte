@@ -320,6 +320,7 @@
 		pendingComment={draftController.pendingComment}
 		scrollTo={scroll.value}
 		onSave={flushNow}
+		onFlush={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={(id, anchor, viaSuggestion, click) => { notePress([id], click); openCards.comment(id, anchor, viaSuggestion, click); }}
 		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}

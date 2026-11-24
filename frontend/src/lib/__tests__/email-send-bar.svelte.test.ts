@@ -11,7 +11,7 @@ const response = (state: string, status = 200, message = '') => ({ ok: status ==
 const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name);
 const press = (name: string) => { button(name)!.click(); flushSync(); };
 const render = (props: Record<string, unknown> = {}) => { component = mount(EmailSendBar, { target: host, props: { artifactId: 'a/1', text: () => 'To: a@example.com\n\nExact ✉\n', readAt: 'read-time', ...props } }); flushSync(); };
-const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); flushSync(); };
+const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); };
 beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); apiFetch.mockReset(); });
 afterEach(() => { if (component) unmount(component); component = null; host.remove(); });
 
@@ -23,7 +23,7 @@ describe('email send bar', () => {
 	it('posts the exact editor text and read time once on a double click, then shows Sent', async () => {
 		let resolve!: (value: unknown) => void;
 		apiFetch.mockReturnValue(new Promise((r) => { resolve = r; }));
-		render(); const send = button('Send')!; send.click(); send.click(); flushSync();
+		render(); const send = button('Send now')!; send.click(); send.click(); flushSync(); await settle();
 		expect(apiFetch).toHaveBeenCalledTimes(1);
 		expect(apiFetch).toHaveBeenCalledWith('/api/email-drafts/a%2F1/send', expect.objectContaining({ method: 'POST', body: JSON.stringify({ text: 'To: a@example.com\n\nExact ✉\n', read_at: 'read-time' }) }));
 		expect(host.textContent).toContain('Sending…'); expect(host.querySelectorAll('button')).toHaveLength(0);
@@ -31,23 +31,59 @@ describe('email send bar', () => {
 	});
 	it('names addresses the mail host did not deliver to after sending', async () => {
 		apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ state: 'sent', not_delivered_to: ['lee@example.com', 'sam@example.com'] }) });
-		render(); press('Send'); await settle(); expect(host.textContent?.trim()).toBe('Sent. lee@example.com, sam@example.com didn’t get it.'); expect(host.querySelectorAll('button')).toHaveLength(0);
+		render(); press('Send now'); await settle(); expect(host.textContent?.trim()).toBe('Sent. lee@example.com, sam@example.com didn’t get it.'); expect(host.querySelectorAll('button')).toHaveLength(0);
 	});
 	it('confirms discard, keeps a draft on cancel, and sends the discard', async () => {
 		apiFetch.mockResolvedValue(response('discarded')); render(); press('Don’t send'); expect(host.textContent).toContain('Don’t send this email?'); press('Keep draft'); press('Don’t send'); press('Don’t send'); await settle();
 		expect(apiFetch).toHaveBeenCalledWith('/api/email-drafts/a%2F1/discard', expect.objectContaining({ method: 'POST' })); expect(host.textContent).toContain('Not sent. This draft is marked as not to send.');
 	});
 	it('offers retry after failure and succeeds', async () => {
-		apiFetch.mockResolvedValueOnce(response('failed')).mockResolvedValueOnce(response('sent')); render(); press('Send'); await settle(); expect(host.textContent).toContain('Couldn’t send. The email didn’t leave, and the draft is kept.'); press('Retry'); await settle(); expect(host.textContent?.trim()).toBe('Sent');
+		apiFetch.mockResolvedValueOnce(response('failed')).mockResolvedValueOnce(response('sent')); render(); press('Send now'); await settle(); expect(host.textContent).toContain('Couldn’t send. The email didn’t leave, and the draft is kept.'); press('Retry'); await settle(); expect(host.textContent?.trim()).toBe('Sent');
 	});
-	it('handles a network failure', async () => { apiFetch.mockRejectedValue(new Error('offline')); render(); press('Send'); await settle(); expect(button('Retry')).toBeTruthy(); });
+	it('reads the stored state when the route answers 500 after the email went', async () => {
+		apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+		const readState = vi.fn().mockResolvedValue('sent');
+		render({ readState }); press('Send now'); await settle();
+		expect(readState).toHaveBeenCalledTimes(1); expect(host.textContent?.trim()).toBe('Sent'); expect(host.querySelectorAll('button')).toHaveLength(0);
+	});
+	it('says the email didn’t leave after a dropped connection only when the stored draft is still open', async () => {
+		apiFetch.mockRejectedValue(new Error('offline'));
+		render({ readState: vi.fn().mockResolvedValue('open') }); press('Send now'); await settle();
+		expect(host.textContent).toContain('The email didn’t leave'); expect(button('Retry')).toBeTruthy();
+	});
+	it('claims nothing when neither the send nor the state read answers', async () => {
+		apiFetch.mockRejectedValue(new Error('offline'));
+		render({ readState: vi.fn().mockResolvedValue(null) }); press('Send now'); await settle();
+		expect(host.textContent).not.toContain('didn’t leave'); expect(host.textContent).toContain('Couldn’t confirm the email left.'); expect(host.querySelectorAll('button')).toHaveLength(0);
+	});
+	it('saves the last edit before it sends, and sends nothing when that save fails', async () => {
+		let saved!: (ok: boolean) => void;
+		const flush = vi.fn(() => new Promise<boolean>((r) => { saved = r; }));
+		apiFetch.mockResolvedValue(response('sent'));
+		render({ flush }); press('Send now'); await settle();
+		expect(flush).toHaveBeenCalledTimes(1); expect(apiFetch).not.toHaveBeenCalled(); expect(host.textContent).toContain('Sending…');
+		saved(false); await settle();
+		expect(apiFetch).not.toHaveBeenCalled(); expect(host.textContent).toContain('Couldn’t save your last edit, so nothing was sent.'); expect(button('Send now')).toBeTruthy();
+		press('Send now'); saved(true); await settle();
+		expect(apiFetch).toHaveBeenCalledTimes(1); expect(host.textContent?.trim()).toBe('Sent');
+	});
+	it('locks the editor from the click, and keeps it locked when the send is unconfirmed', async () => {
+		let ended = false;
+		let answer!: (value: unknown) => void;
+		apiFetch.mockReturnValue(new Promise((r) => { answer = r; }));
+		component = mount(EmailSendBar, { target: host, props: { artifactId: 'a/1', text: () => 'x', get ended() { return ended; }, set ended(v: boolean) { ended = v; } } }); flushSync();
+		expect(ended).toBe(false);
+		press('Send now'); await settle(); expect(ended).toBe(true);
+		answer(response('unconfirmed')); await settle();
+		expect(ended).toBe(true); expect(host.textContent).toContain('If it isn’t there, ask the agent for a new draft.');
+	});
 	it.each(['changed', 'newer'])('shows the %s refusal and rereads only newer', async (state) => {
-		const reread = vi.fn(); apiFetch.mockResolvedValue(response(state, 409, 'Review again')); render({ onReread: reread }); press('Send'); await settle(); expect(host.textContent).toContain('Review again'); expect(button('Send')).toBeTruthy(); expect(reread).toHaveBeenCalledTimes(state === 'newer' ? 1 : 0);
+		const reread = vi.fn(); apiFetch.mockResolvedValue(response(state, 409, 'Review again')); render({ onReread: reread }); press('Send now'); await settle(); expect(host.textContent).toContain('Review again'); expect(button('Send now')).toBeTruthy(); expect(reread).toHaveBeenCalledTimes(state === 'newer' ? 1 : 0);
 	});
-	it.each(['sending', 'unconfirmed'])('does not offer another send for %s', async (state) => { apiFetch.mockResolvedValue(response(state)); render(); press('Send'); await settle(); expect(host.textContent).toContain('Couldn’t confirm the email left.'); expect(host.querySelectorAll('button')).toHaveLength(0); });
+	it.each(['sending', 'unconfirmed'])('does not offer another send for %s', async (state) => { apiFetch.mockResolvedValue(response(state)); render(); press('Send now'); await settle(); expect(host.textContent).toContain('Couldn’t confirm the email left.'); expect(host.querySelectorAll('button')).toHaveLength(0); });
 	it.each([['sent', 'Sent'], ['discarded', 'Not sent.'], ['sending', 'Couldn’t confirm the email left.']])('opens %s in its settled state', (state, expected) => { render({ initialState: state, readOnly: true }); expect(host.textContent).toContain(expected); expect(host.querySelectorAll('button')).toHaveLength(0); });
-	it('blocks offline and unavailable attachments with a reason', () => { render({ connected: false }); expect(host.textContent).toContain('Offline.'); expect(button('Send')?.getAttribute('aria-disabled')).toBe('true'); press('Send'); expect(apiFetch).not.toHaveBeenCalled(); });
-	it('names a missing attachment', () => { render({ blocker: 'file.pdf' }); expect(host.textContent).toContain('file.pdf is unavailable.'); expect(button('Send')?.getAttribute('aria-disabled')).toBe('true'); });
+	it('blocks offline and unavailable attachments with a reason', () => { render({ connected: false }); expect(host.textContent).toContain('Offline.'); expect(button('Send now')?.getAttribute('aria-disabled')).toBe('true'); press('Send now'); expect(apiFetch).not.toHaveBeenCalled(); });
+	it('names a missing attachment', () => { render({ blocker: 'file.pdf' }); expect(host.textContent).toContain('file.pdf is unavailable.'); expect(button('Send now')?.getAttribute('aria-disabled')).toBe('true'); });
 	it('shows read-only for an open draft', () => { render({ readOnly: true }); expect(host.textContent).toContain('Read-only. This draft can’t be sent from here.'); expect(host.querySelectorAll('button')).toHaveLength(0); });
-	it.each([[401, 'signin'], [404, 'missing']])('maps %s to the existing context refusal', async (status, reason) => { const refused = vi.fn(); apiFetch.mockResolvedValue(response('', status as number)); render({ onRefused: refused }); press('Send'); await settle(); expect(refused).toHaveBeenCalledWith(reason); });
+	it.each([[401, 'signin'], [404, 'missing']])('maps %s to the existing context refusal', async (status, reason) => { const refused = vi.fn(); apiFetch.mockResolvedValue(response('', status as number)); render({ onRefused: refused }); press('Send now'); await settle(); expect(refused).toHaveBeenCalledWith(reason); });
 });
