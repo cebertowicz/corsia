@@ -575,9 +575,11 @@ def _submitted_with_sign_in_request() -> page.Requests:
 
 
 @pytest.mark.asyncio
-async def test_a_sign_in_request_still_open_at_the_limit_leaves_the_result_unknown(monkeypatch):
+@pytest.mark.parametrize("shown", [True, False])
+async def test_a_sign_in_request_still_open_at_the_limit_leaves_the_result_unknown(monkeypatch, shown):
+    """Whether or not the password field still shows: a page that would read signed in waits on it too."""
     tracker = _submitted_with_sign_in_request()
-    assert await _settle(monkeypatch, tracker, [("L1", "example.com", True)]) == "unknown"
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", shown)]) == "unknown"
 
 
 @pytest.mark.asyncio
