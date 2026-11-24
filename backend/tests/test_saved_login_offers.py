@@ -31,8 +31,7 @@ from infra.settings import set_devices_outside_address
 
 BACKEND = Path(__file__).resolve().parents[1]
 SITE = "https://example.com"
-#: The only modules that may make, confirm or check an offer. The browser's capture of the
-#: person's own submit (host_access/browser_login_capture.py) joins in its own reviewed change.
+#: The only modules that may make, confirm or check an offer.
 SEAM_ALLOWLIST = frozenset({
     "infra/saved_login_offers.py",
     "infra/saved_logins.py",

@@ -18,7 +18,10 @@ def is_submit(kind: object, event: Mapping[str, object]) -> bool:
 
 
 def writes_value(args: Sequence[str]) -> bool:
-    """Whether an agent command can put a value into a field, including within a batch."""
+    """Whether an agent command can put a value into a field, including within a batch.
+
+    Capture marks the document before every such command runs.
+    """
     if not args:
         return False
     if args[0] == "batch":

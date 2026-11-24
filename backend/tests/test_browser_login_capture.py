@@ -988,3 +988,27 @@ async def test_new_group_drops_old_offer_and_username(monkeypatch, slow, new_ses
         await drain_capture()
         saved_login_offers.drop_thread("another-thread")
         saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+async def test_a_new_session_that_ends_before_its_submit_runs_still_drops_the_replaced_offer(monkeypatch):
+    """The old session stays open, so nothing else would drop its offer."""
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_a, **_k: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_a, **_k: [])
+    new_key = f"{THREAD}:new"
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        await drain_capture()
+        assert KEY in saved_login_offers._offers
+        page.fields.clear()
+        open_step(monkeypatch, visit="new-step")
+        await capture.person_submit(THREAD, new_key, "ws://page")
+        capture.session_ended(THREAD, new_key)
+        await drain_capture()
+        assert KEY not in saved_login_offers._offers
+        assert capture._state(THREAD).flights == []
+    finally:
+        await drain_capture()
+        saved_login_offers.drop_thread(THREAD)

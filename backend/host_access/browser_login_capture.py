@@ -43,7 +43,6 @@ log = logging.getLogger(__name__)
 # (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
 CAPTURE_TIMEOUT = 1.0
 _WORLD = "corsia-login-capture"
-# Capture marks every agent command that can put a value into a field.
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
 _ANY_DOCUMENT = ""
 
@@ -157,8 +156,7 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
     try:
         read = await asyncio.wait_for(_submit(thread_id, endpoint, step), CAPTURE_TIMEOUT)
     except asyncio.CancelledError:
-        _queue(thread_id, item, previous, finished, _discard(thread_id, flight),
-               lambda: _forget(thread_id, flight) if flight is not None else None)
+        _queue(thread_id, item, previous, finished, _discard(thread_id, flight), lambda: _skipped(thread_id, flight))
         raise
     except Exception:
         log.warning("saved-login capture skipped a submit it couldn't read")
@@ -172,8 +170,14 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
             work = _offer(thread_id, item, flight, read)
     else:
         work = _note(session_key, read)
-    _queue(thread_id, item, previous, finished, work,
-           lambda: _forget(thread_id, flight) if flight is not None else None)
+    _queue(thread_id, item, previous, finished, work, lambda: _skipped(thread_id, flight))
+
+
+def _skipped(thread_id: str, flight: _Flight | None) -> None:
+    """The submit's session ended before its work ran; a group it replaced still drops its held offer."""
+    if flight is not None:
+        _drop_replaced(flight)
+        _forget(thread_id, flight)
 
 
 def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
