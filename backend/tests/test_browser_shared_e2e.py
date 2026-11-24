@@ -937,8 +937,11 @@ async def test_a_settled_password_visit_refuses_reads_of_its_hidden_field_by_ref
             assert steps == ["opened", "settled"]
             refs = re.findall(r"textbox \[ref=(e\d+)\]", snapshot)
             assert len(refs) == 2, snapshot
-            assert "123456" in await owner.run(thread_id, ("get", "value", f"@{refs[1]}"), session="existing")
-            assert "person" in await owner.run(thread_id, ("get", "value", "#user"), session="existing")
+            # The person filled the password field on this page, so until it reloads or navigates the other fields'
+            # values aren't read either, even by ref.
+            for command in (("get", "value", f"@{refs[1]}"), ("get", "value", "#user")):
+                with pytest.raises(BrowserSessionError, match="filled in a password field on this page"):
+                    await owner.run(thread_id, command, session="existing")
             for command in (("get", "value", "#pw"), ("get", "attr", "#pw", "value"), ("get", "value", "input[type=password]"),
                             ("eval", "pw.value")):
                 with pytest.raises(BrowserSessionError, match="has shown a password field"):
