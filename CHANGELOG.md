@@ -14,6 +14,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread you left to switch conversations reopens with the reply you were writing when you return; before, it did not reopen.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
+- A chat comment you start typing right after closing another comment's popover keeps your text; before, the closing popover could clear it when the margin card took its place.
 - A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat comment's answer now comes only from what the agent sent you when Focus is on, so a comment answered with an update and again in the agent's closing words shows one reply; before, it showed both. With Focus off, every step you see still answers.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
