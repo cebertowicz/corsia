@@ -159,7 +159,8 @@ export interface ArrangeInput {
 }
 
 /**
- * Render order: at every level its still-open rows in plan order, then its
+ * Render order: a workflow run's steps in the run's order, whatever their states.
+ * At every other level its still-open rows in plan order, then its
  * finished-but-not-yet-folded rows newest settled first, then its revealed
  * folded rows (also newest first), then its one fold row -- so the top row of
  * every level is always its current or next item. Each row is followed by its
@@ -219,26 +220,32 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 			items.push({ kind: 'node', key: node.id, node, ...extra });
 			emit(node.id);
 		};
-		for (const node of [...work, ...timed, ...untimed]) push(node);
-		// Quiet scheduled work: one group row, from the first member. A member's children follow its row (or its cluster) once the group is open.
-		if (scheduled.length >= 1) {
-			for (const node of scheduled) {
-				emitted.add(node.id);
-				grouped.add(node.id);
+		// A workflow run's steps are a sequence: they show in the run's own order (plan order), each row with its own
+		// state and time, nested runs included. The sort below is for a level of separate pieces of work.
+		if (rows.some((node) => node.workflow_step)) {
+			for (const node of rows) push(node);
+		} else {
+			for (const node of [...work, ...timed, ...untimed]) push(node);
+			// Quiet scheduled work: one group row, from the first member. A member's children follow its row (or its cluster) once the group is open.
+			if (scheduled.length >= 1) {
+				for (const node of scheduled) {
+					emitted.add(node.id);
+					grouped.add(node.id);
+				}
+				// A closed group hides its members' subtrees too, so the stray-row sweep below must not surface them.
+				if (!(input.isScheduledOpen?.(level) ?? false)) for (const node of scheduled) tuckAway(node.id);
+				const isOpen = input.isScheduledOpen?.(level) ?? false;
+				const depth = scheduled[0].depth;
+				items.push({ kind: 'scheduled', key: `scheduled:${level}`, level, depth, members: scheduled, open: isOpen });
+				for (const cluster of isOpen ? scheduledClusters(scheduled) : []) {
+					const [only] = cluster.members;
+					if (cluster.members.length === 1) items.push({ kind: 'node', key: only.id, node: only, nest: 1, view: 'clock' });
+					else items.push({ kind: 'cluster', key: `cluster:${level}:${Math.floor(cluster.at / 60_000)}`, depth, at: cluster.at, members: cluster.members });
+					for (const member of cluster.members) emit(member.id);
+				}
 			}
-			// A closed group hides its members' subtrees too, so the stray-row sweep below must not surface them.
-			if (!(input.isScheduledOpen?.(level) ?? false)) for (const node of scheduled) tuckAway(node.id);
-			const isOpen = input.isScheduledOpen?.(level) ?? false;
-			const depth = scheduled[0].depth;
-			items.push({ kind: 'scheduled', key: `scheduled:${level}`, level, depth, members: scheduled, open: isOpen });
-			for (const cluster of isOpen ? scheduledClusters(scheduled) : []) {
-				const [only] = cluster.members;
-				if (cluster.members.length === 1) items.push({ kind: 'node', key: only.id, node: only, nest: 1, view: 'clock' });
-				else items.push({ kind: 'cluster', key: `cluster:${level}:${Math.floor(cluster.at / 60_000)}`, depth, at: cluster.at, members: cluster.members });
-				for (const member of cluster.members) emit(member.id);
-			}
+			for (const node of [...finished, ...revealed]) push(node);
 		}
-		for (const node of [...finished, ...revealed]) push(node);
 		const view = levels.get(level);
 		if (view && input.isLevelOpen(level)) {
 			items.push({ kind: 'fold', key: `fold:${level}`, level, depth: view.depth, view, shown: revealed.length });
