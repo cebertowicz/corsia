@@ -39,8 +39,9 @@ from host_access.browser_session_state import BrowserSessionError
 from infra import saved_login_offers
 
 log = logging.getLogger(__name__)
-# Real Chrome measured max 6.87 ms; the bound only stops a stuck page holding the click.
-CAPTURE_TIMEOUT = 1.5
+# Measured on PR #3242 (figures in its body); one second bounds a delay that can interrupt a person's thought
+# (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
+CAPTURE_TIMEOUT = 1.0
 _WORLD = "corsia-login-capture"
 # Capture marks every agent command that can put a value into a field.
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
