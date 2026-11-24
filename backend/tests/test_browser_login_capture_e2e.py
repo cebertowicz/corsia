@@ -225,7 +225,7 @@ async def test_the_persons_sign_in_is_offered_then_confirmed_and_the_value_goes_
             assert holder.calls == [("offer_login", key, origin, ACCOUNT, MARKER), ("confirm_offer", key)]
             assert MARKER not in caplog.text
             assert MARKER not in repr(vars(step))
-            assert MARKER not in repr(capture._pending) + repr(capture._marks)
+            assert MARKER not in repr(capture._threads)
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.shutdown()
