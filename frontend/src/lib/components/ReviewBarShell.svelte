@@ -299,6 +299,9 @@
 	.rb-capsule { display: contents; }
 	/* While a comment sheet is up, one verdict group is on screen at a time: the answer row is not drawn, and gives up its height, so no blank band is left where it was and a landscape sheet does not cover the text under the bar. The phone capsule below slides away instead. */
 	.review-bar.ask.suppressed .rb-row2 { display: none; }
+	/* In the header, what Approve also accepts is the status slot's neutral line beside the buttons, as it was: it takes the room the buttons leave, and the empty status gives it up. */
+	.rb-capsule :global(.rb-derived) { flex: 1 1 0; min-width: 0; margin: 0; color: var(--text-secondary); }
+	.rb-capsule:has(:global(.rb-derived)) .rb-status:empty { flex: 0 0 0; }
 	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
 	/* The note grows at every width, with the same bounded scrolling used by the narrow canvas. */
 	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
@@ -328,6 +331,11 @@
 		.review-bar.ask .rb-status:not(:empty) { flex-basis: 100%; }
 		.review-bar.noting :global(.rb-note) { flex: 1 0 100%; order: 1; height: auto; min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
+	}
+
+	/* What Approve also accepts is short and belongs to that button, so it keeps the buttons' row until the canvas is too narrow for both. A refusal or a sending message still takes its own row. */
+	@container doc-canvas (max-width: 32rem) {
+		.review-bar.ask .rb-capsule :global(.rb-derived) { flex-basis: 100%; }
 	}
 
 	/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */
