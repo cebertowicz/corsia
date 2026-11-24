@@ -149,15 +149,15 @@ const theme = EditorView.baseTheme({
 /** The inline marks of open suggestions, derived from `commentRanges`, with the pointer behavior that goes with them. */
 export function suggestionMarks(pointer: () => SuggestionPointer): Extension[] {
 	// A touch has no pointer resting on the text: the mouseover a browser sends after one is its selection starting (a long press), and focusing the suggestion then redraws its marks and drops that selection.
+	// The last pointer to arrive decides, so a mouse that moves over the text after a touch (a touch laptop, a tablet with a trackpad) hovers again without a press.
 	let touched = false;
+	const arrived = (event: PointerEvent) => { touched = event.pointerType === 'touch'; return false; };
 	return [
 		EditorView.decorations.compute([commentRanges, suggestionTyping], marks),
 		theme,
 		EditorView.domEventHandlers({
-			pointerdown(event) {
-				touched = event.pointerType === 'touch';
-				return false;
-			},
+			pointerdown: arrived,
+			pointerover: arrived,
 			mousedown(event) {
 				const insert = suggestionOf(event.target);
 				const id = insert?.classList.contains('cm-suggestion-insert') ? insert.getAttribute(ID_ATTR) : null;

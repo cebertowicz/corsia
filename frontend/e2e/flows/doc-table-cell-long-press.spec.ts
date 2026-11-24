@@ -21,7 +21,7 @@ for (const width of [320, 393]) {
 				const cell = page.locator('.cm-md-table td').filter({ hasText: /^Cell passage$/ });
 				await cell.scrollIntoViewIfNeeded();
 				await page.waitForTimeout(500);
-							// A finger held on the word, as the browser's own touch handling sees it (not a scripted range).
+				// A finger held on the word, as the browser's own touch handling sees it (not a scripted range).
 				const cdp = await page.context().newCDPSession(page);
 				const word = await cell.evaluate((td) => {
 					const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
@@ -30,7 +30,7 @@ for (const width of [320, 393]) {
 					range.setStart(node, 0);
 					range.setEnd(node, 4);
 					const r = range.getBoundingClientRect();
-					return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, text: node.textContent };
+					return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 				});
 				await cdp.send('Input.synthesizeTapGesture', { x: word.x, y: word.y, duration: 1200, tapCount: 1, gestureSourceType: 'touch' });
 				// Past the editor's own focus sync, which is what used to collapse the word.
