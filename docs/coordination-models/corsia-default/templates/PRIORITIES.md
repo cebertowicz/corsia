@@ -16,8 +16,8 @@ person's name in place of "The person" only if they gave it. -->
 
 ## Always
 
-- Fix a contribution of its own that upstream reports broken, before new
-  work, without asking.
+- <Work the person said this agent may start without asking, or "Not set
+  yet" if they said none.>
 
 ## Dates
 
