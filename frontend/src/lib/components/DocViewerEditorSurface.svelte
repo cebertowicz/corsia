@@ -213,7 +213,7 @@
 {/if}
 
 <style>
-	/* The editor's own end room (40vh, which lets the last line scroll above a keyboard) stays; the bar's room only raises it when it would be smaller. */
+	/* The editor's own end room (40vh, which lets the last line scroll above a keyboard) stays; the bar's room only raises it when it would be smaller. A scroll into view leaves exactly what the bar covers clear: a margin card's field lying just above the bar must not count as hidden, or the browser re-centres the document on it. */
 	.touch-reading :global(.cm-content:not(.cm-md-cell-editor .cm-content)) { padding-bottom: max(40vh, calc(var(--document-comment-room, 60px) + var(--space-4))); }
-	.touch-reading :global(.cm-scroller:not(.cm-md-cell-editor .cm-scroller)) { scroll-padding-bottom: calc(var(--document-comment-room, 60px) + var(--space-4)); }
+	.touch-reading :global(.cm-scroller:not(.cm-md-cell-editor .cm-scroller)) { scroll-padding-bottom: var(--document-comment-room, 60px); }
 </style>

@@ -6,6 +6,8 @@
 	let width = $state(0);
 	$effect(() => {
 		const root = column, element = bar;
+		// Measured again each time the offer comes or goes: the column can move (a page or panel sliding in) without resizing, and the bar must not keep an earlier place.
+		void offered;
 		if (!root || !element) return;
 		const viewport = window.visualViewport;
 		const update = () => {
@@ -13,7 +15,9 @@
 			left = bounds.left;
 			width = bounds.width;
 			bottom = Math.max(0, window.innerHeight - ((viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)));
-			root.style.setProperty('--document-comment-room', `${element.getBoundingClientRect().height}px`);
+			// The room is what the bar covers of the document's column, never more: a bar on a column that ends above the page's foot covers less than its own height.
+			const barBox = element.getBoundingClientRect();
+			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(barBox.height, bounds.bottom - barBox.top))}px`);
 		};
 		update();
 		const observer = new ResizeObserver(update);
@@ -23,12 +27,17 @@
 		viewport?.addEventListener('scroll', update);
 		window.addEventListener('resize', update);
 		window.addEventListener('scroll', update, true);
+		// A column sliding into place moves without a resize or a scroll: its transition or animation ending is the moment it has arrived.
+		window.addEventListener('transitionend', update, true);
+		window.addEventListener('animationend', update, true);
 		return () => {
 			observer.disconnect();
 			viewport?.removeEventListener('resize', update);
 			viewport?.removeEventListener('scroll', update);
 			window.removeEventListener('resize', update);
 			window.removeEventListener('scroll', update, true);
+			window.removeEventListener('transitionend', update, true);
+			window.removeEventListener('animationend', update, true);
 			root.style.removeProperty('--document-comment-room');
 		};
 	});
