@@ -244,7 +244,8 @@
 	// Untracked: close() reads the open thread, and opening one must not close it.
 	$effect(() => { void threadId; untrack(() => { close(); afterClose = null; closing = false; selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
 	// The column coming up while a thread is open hands that thread to its card: picked there, with its unsent reply, so it is never open twice.
-	$effect(() => { if (marginComments) untrack(() => { if (viewing) { selectedCommentId = viewing.commentId; viewing = null; returnFocus = null; } }); });
+	// The popover is removed mid-exit, so a close it had begun is dropped with it: no exit will end to run it, and a later one would clear the next comment.
+	$effect(() => { if (marginComments) untrack(() => { if (viewing) { selectedCommentId = viewing.commentId; viewing = null; returnFocus = null; afterClose = null; closing = false; } }); });
 	onMount(() => {
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
