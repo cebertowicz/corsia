@@ -41,28 +41,32 @@ for (const width of [320, 393, 768, 1440]) {
 				await expect(content).toHaveAttribute('contenteditable', 'false');
 				await page.screenshot({ path: info.outputPath('reading-return.png') });
 			});
-			test('selected passage offers a tappable Comment in Reading and Edit', async ({ page }, info) => {
+			test('fixed Comment offer and selected endpoint scroll room in Reading and Edit', async ({ page }, info) => {
 				await openReadingDocument(page, width, theme);
 				if (width === 1440) {
 					await selectReadingPassage(page, 'Opening passage');
-					await expect(page.locator('.sel-comment')).toHaveCount(1);
+					await expect(page.locator('.touch-comment-bar')).toHaveCount(0);
 					return;
 				}
 				for (const editing of [false, true]) {
 					if (editing) await enterDocumentEdit(page);
 					await selectReadingPassage(page, 'Final passage and selection endpoints.');
-					const offer = page.locator('.sel-comment');
-					await expect(offer).toHaveCount(1);
+					const offer = page.locator('.touch-comment-bar.offered');
 					await expect(offer).toBeVisible();
-					// The button is measured once its width is known (the frame after it appears) and its pop-in has ended.
-					const viewport = page.viewportSize()!;
-					await expect.poll(async () => {
-						const box = await offer.boundingBox();
-						return !!box && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
-					}, { message: 'Comment sits fully inside the screen' }).toBe(true);
+					await expect(page.locator('.sel-comment')).toHaveCount(1);
+					const target = await offer.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
+					expect(target!.height).toBeGreaterThanOrEqual(44);
+					expect(target!.width).toBeGreaterThanOrEqual(44);
+					const geometry = await offer.evaluate(el => {
+						const bar = el.getBoundingClientRect(), viewport = window.visualViewport!;
+						const scroller = document.querySelector<HTMLElement>('.doc .cm-scroller')!;
+						return { bottom: bar.bottom, visibleBottom: viewport.offsetTop + viewport.height, reserve: parseFloat(getComputedStyle(scroller.querySelector('.cm-content')!).paddingBottom), height: bar.height };
+					});
+					expect(Math.abs(geometry.bottom - geometry.visibleBottom)).toBeLessThanOrEqual(1);
+					expect(geometry.reserve).toBeGreaterThan(geometry.height);
 					await page.screenshot({ path: info.outputPath(editing ? 'edit-selection.png' : 'reading-selection.png') });
 					// Tapping it opens the comment on exactly that passage, and the document's text is unchanged.
-					await offer.click();
+					await offer.getByRole('button', { name: 'Comment', exact: true }).click();
 					const sheet = page.getByRole('dialog', { name: 'Document comments' });
 					await expect(sheet.locator('.composer textarea')).toBeVisible();
 					await sheet.getByRole('button', { name: 'Close', exact: true }).click();
@@ -72,6 +76,36 @@ for (const width of [320, 393, 768, 1440]) {
 			});
 		});
 	}
+}
+
+// A selection taller than the screen: its end is scrolled into view and the one Comment offer stays on screen, below the last selected line.
+for (const width of [320, 393]) {
+	test.describe(`@flow:doc-phone-reading @surface:documents ${width} selection taller than the screen`, () => {
+		test.beforeEach(({}, info) => test.skip(info.project.name !== 'chromium-mobile', 'touch'));
+		test('Comment stays in the fixed bar and the selected end clears it, in Reading and Edit', async ({ page }, info) => {
+			await openReadingDocument(page, width);
+			for (const editing of [false, true]) {
+				if (editing) await enterDocumentEdit(page);
+				await inEditorView(page, view => {
+					const text = view.state.doc.toString(), at = text.indexOf('Opening passage'), end = text.length - 1;
+					view.dispatch({ selection: { anchor: at, head: end }, effects: view.constructor.scrollIntoView(end, { y: 'end' }) });
+				}, null);
+				const bar = page.locator('.touch-comment-bar.offered');
+				await expect(bar).toBeVisible();
+				const button = bar.getByRole('button', { name: 'Comment', exact: true });
+				await expect(button).toBeVisible();
+				await expect.poll(async () => {
+					const box = (await button.boundingBox())!, viewport = page.viewportSize()!;
+					return box.height >= 44 && box.width >= 44 && box.y >= 0 && box.y + box.height <= viewport.height;
+				}).toBe(true);
+				const barTop = (await bar.boundingBox())!.y;
+				const endBottom = await inEditorView(page, view => view.coordsAtPos(view.state.doc.length - 1)!.bottom, null);
+				expect(endBottom, 'the last selected line is not under the bar').toBeLessThanOrEqual(barTop);
+				expect(await inEditorView(page, view => view.state.selection.main.to - view.state.selection.main.from, null), 'the selection is longer than the screen').toBeGreaterThan(1000);
+				await page.screenshot({ path: info.outputPath(editing ? 'tall-edit.png' : 'tall-reading.png') });
+			}
+		});
+	});
 }
 
 // Edit is the person's choice and lasts until Done: the revision refresh the first save sets off replaces the tab object (same id) and must not end it.
