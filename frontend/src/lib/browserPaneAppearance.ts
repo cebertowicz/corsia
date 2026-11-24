@@ -15,6 +15,8 @@ export class PaneAppearance {
 	holdSize(held: boolean) {
 		const canvas = this.canvas();
 		this.sizeBeforeOffer = held && canvas ? paneSize(canvas) : undefined;
+		// The canvas is back to its full size by the time the hold ends, so no resize follows to say so.
+		if (!held) this.send();
 	}
 
 	/** A new page target knows nothing yet, so the next send goes out whatever was sent before. */

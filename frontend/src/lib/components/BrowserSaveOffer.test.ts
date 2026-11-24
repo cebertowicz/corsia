@@ -215,7 +215,7 @@ describe('save-login offer: a page that navigates by itself', () => {
 });
 
 describe('save-login offer: what it shows', () => {
-	it('shows the whole domain, however long, when the question is not measured to need more than two lines', async () => {
+	it('shows the whole domain, however long', async () => {
 		const long = `${'x'.repeat(60)}.example.com`;
 		offers = [{ ...OFFER, domain: long }];
 		const { socket, canvas } = render();
@@ -233,6 +233,10 @@ describe('save-login offer: what it shows', () => {
 		await settle();
 		expect(button('Save').disabled).toBe(true);
 		expect(button('Save').classList.contains('loading')).toBe(true);
+		// Saving is announced as busy on the button and on the dock, and Not now stays usable.
+		expect(button('Save').getAttribute('aria-busy')).toBe('true');
+		expect(dock()!.getAttribute('aria-busy')).toBe('true');
+		expect(button('Not now').disabled).toBe(false);
 		release({ ok: true, status: 200, json: async () => ({}) });
 		await settle();
 		expect(dock()!.textContent).toContain('Saved');
@@ -242,7 +246,7 @@ describe('save-login offer: what it shows', () => {
 		offers = [{ ...OFFER, update: true }];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		expect(dock()!.textContent).toContain('Update the saved github.com login?');
+		expect(dock()!.textContent).toContain('Update the saved github.com login with this password?');
 		expect(button('Update')).toBeTruthy();
 		expect(button('Not now')).toBeTruthy();
 		expect(button('Save')).toBeUndefined();
@@ -266,19 +270,14 @@ describe('save-login offer: what it shows', () => {
 		expect(dock()!.contains(document.activeElement)).toBe(false);
 	});
 
-	// jsdom has no layout, so a hidden copy "wraps" by its text length: 30 characters to a line of the question, 20 to the username's.
-	function wrapByLength() {
-		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-			if (!this.classList.contains('probe')) return new DOMRect(0, 0, 100, 20);
-			const style = getComputedStyle(this);
-			const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4 || 20;
-			const perLine = this.classList.contains('username') ? 20 : 30;
-			return new DOMRect(0, 0, 100, line * Math.max(1, Math.ceil((this.textContent ?? '').length / perLine)));
-		});
+	// jsdom has no layout, so the hidden copy of the username "overflows" by its text length: 20 characters fit its line.
+	function widthByLength() {
+		vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(() => 20);
+		vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) { return this.classList.contains('probe') ? (this.textContent ?? '').length : 0; });
 	}
 
 	it('shortens a username in the middle only when it overflows its line, keeping the whole one for hover and screen readers', async () => {
-		wrapByLength();
+		widthByLength();
 		const long = `${'a'.repeat(30)}@${'b'.repeat(30)}.example.com`;
 		offers = [{ ...OFFER, username: long }];
 		const { socket, canvas } = render();
@@ -293,7 +292,7 @@ describe('save-login offer: what it shows', () => {
 	});
 
 	it('shows a username that fits its line whole, however many characters it has', async () => {
-		wrapByLength();
+		widthByLength();
 		const fits = 'a-name-of-20-chars!!';
 		offers = [{ ...OFFER, username: fits }];
 		const { socket, canvas } = render();
@@ -301,15 +300,16 @@ describe('save-login offer: what it shows', () => {
 		expect(dock()!.querySelector('.username:not(.probe) [aria-hidden="true"]')!.textContent).toBe(fits);
 	});
 
-	it('cuts a domain in the middle once the question would need a third line', async () => {
-		wrapByLength();
+	it('never cuts a domain: a very long one wraps in full, and only the username is ever shortened', async () => {
+		widthByLength();
 		const long = `${'x'.repeat(70)}.example.com`;
-		offers = [{ ...OFFER, domain: long }];
+		offers = [{ ...OFFER, domain: long, username: `${'a'.repeat(30)}@example.com` }];
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		const question = dock()!.querySelector('.question')!.textContent!;
-		expect(question).toContain('…');
-		expect(question.length).toBeLessThanOrEqual(60);
+		expect(question).toContain(long);
+		expect(question).not.toContain('…');
+		expect(dock()!.querySelector('.username:not(.probe) [aria-hidden="true"]')!.textContent).toContain('…');
 	});
 
 	it('shortenMiddle keeps both ends of a long text and leaves a short one alone', () => {
@@ -565,5 +565,105 @@ describe('save-login offer: touch typing and failures', () => {
 		await settle();
 		expect(dock()).toBeNull();
 		expect(report).toHaveBeenCalledWith('[saved login offer] not-now failed', 'thread', failure);
+	});
+});
+
+describe('save-login offer: motion', () => {
+	type Played = { node: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions };
+	let played: Played[];
+	const forDock = () => played.filter(entry => entry.node.classList.contains('save-offer'));
+	const forError = () => played.filter(entry => entry.node.classList.contains('error'));
+	const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+	beforeEach(() => {
+		played = [];
+		const root = document.documentElement.style;
+		root.setProperty('--dur-tight', '120ms');
+		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
+		root.setProperty('--ease-entrance', 'cubic-bezier(0.22, 1, 0.36, 1)');
+		// jsdom has no Web Animations: record what the dock and the error line ask for.
+		(Element.prototype as unknown as { animate: unknown }).animate = function (this: Element, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+			// Svelte books each transition with an empty animation of its own; only the ones the dock asked for are kept.
+			if (keyframes.length) played.push({ node: this, keyframes, options });
+			return {
+				finished: Promise.resolve(),
+				cancel() {},
+				set onfinish(done: () => void) { setTimeout(done, Number(options.duration)); },
+			};
+		};
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 64));
+	});
+
+	afterEach(() => {
+		const root = document.documentElement.style;
+		['--dur-tight', '--ease-snap', '--ease-entrance'].forEach(name => root.removeProperty(name));
+		delete (Element.prototype as unknown as { animate?: unknown }).animate;
+	});
+
+	it('grows the dock in from nothing with a fade on arrival, never popping', async () => {
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		const [arrival] = forDock();
+		expect(arrival.keyframes[0]).toMatchObject({ height: '0px', opacity: 0 });
+		expect(arrival.keyframes[1]).toMatchObject({ height: '64px', opacity: 1 });
+		expect(arrival.options.duration).toBe(220);
+	});
+
+	it('fades the dock and closes its gap on exit at 0.7 of the standard duration, on the snap easing', async () => {
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Not now').click();
+		await settle();
+		const exit = forDock().at(-1)!;
+		expect(exit.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
+		expect(exit.options.duration).toBeCloseTo(154);
+		expect(exit.options.easing).toBe('cubic-bezier(0.2, 0, 0, 1)');
+		expect(dock()).not.toBeNull();
+		await wait(300);
+		expect(dock()).toBeNull();
+	});
+
+	it('animates the error line in the same way', async () => {
+		saveStatus = 500;
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		const [arrival] = forError();
+		expect(arrival.keyframes[0]).toMatchObject({ height: '0px', opacity: 0 });
+		expect(arrival.options.duration).toBe(220);
+		saveStatus = 200;
+		button('Save').click();
+		await settle();
+		expect(forError().at(-1)!.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
+	});
+
+	it('only crossfades over the tight duration under reduced motion', async () => {
+		reducedMotion.value!.set(true);
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		const [arrival] = forDock();
+		expect(arrival.options.duration).toBe(120);
+		expect(Object.keys(arrival.keyframes[1])).toEqual(['opacity', 'offset'].filter(key => key in arrival.keyframes[1]));
+		expect(arrival.keyframes[1]).not.toHaveProperty('height');
+		reducedMotion.value!.set(false);
+	});
+
+	it('keeps the agent viewport at its pre-dock size until the dock has left, then sends the real size', async () => {
+		const { socket, canvas } = render();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		await signIn(socket, canvas);
+		// Docked, the canvas is shorter; a theme change while the dock leaves still reports the pre-dock height.
+		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 70));
+		button('Not now').click();
+		await settle();
+		theme.set('light');
+		await wait(0);
+		expect(dock()).not.toBeNull();
+		expect(appearances().at(-1)).toMatchObject({ height: 100, scheme: 'light' });
+		await wait(300);
+		expect(dock()).toBeNull();
+		expect(appearances().at(-1)).toMatchObject({ height: 70, scheme: 'light' });
+		theme.set('dark');
 	});
 });
