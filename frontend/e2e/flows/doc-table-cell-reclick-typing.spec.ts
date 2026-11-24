@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { frame } from '../support/tableCells';
+import { enterDocumentEdit } from '../support/documentReading';
 
 /**
  * Reclicking a commented cell to close its card must not send the next keystroke somewhere the reader never clicked.
@@ -73,6 +74,8 @@ async function openDocument(page: Page, size: { width: number; height: number },
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-md-table table')).toBeVisible({ timeout: 15_000 });
+	// A touch opening is Reading, which takes no typing; this journey is about typing, so choose Edit first (a no-op for a mouse opening).
+	await enterDocumentEdit(page);
 	const highlight = page.locator('.cm-md-table td .cm-comment-anchor', { hasText: QUOTED }).first();
 	if (anchor === QUOTED) await expect(highlight).toBeVisible();
 	return { request, docPath, commentId, highlight };

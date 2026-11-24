@@ -72,8 +72,8 @@ jobs:
           CORSIA_TEST_CHROME="$CORSIA_NATIVE_CHROME_BINARY" .venv/bin/python -m pytest -c backend/pytest.ini \
             backend/tests/test_browser_frame_password_real.py \
             -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/frame-guard.log"
-          # A skip would pass silently; both shapes and both phone-typing checks must run.
-          grep -q " 4 passed" "$RUNNER_TEMP/frame-guard.log"
+          # A skip would pass silently; both frame shapes, the phone-typing check and both touch-field checks must run.
+          grep -q " 5 passed" "$RUNNER_TEMP/frame-guard.log"
       - name: Verify setup steps run in the native browser
         env:
           CORSIA_BROWSER_E2E: '1'
@@ -88,11 +88,20 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
             "backend/tests/test_browser_shared_e2e.py::test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_cannot_prove" \
             "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_opens_the_popup_its_button_opens" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_click_on_a_link_inside_a_frame_applies_to_that_link" \
+            "backend/tests/test_browser_shared_e2e.py::test_probe_and_write_walk_find_the_same_documents" \
+            "backend/tests/test_browser_shared_e2e.py::test_holds_cap_counts_an_unchecked_document_as_a_match" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_covered_link_inside_a_frame_is_still_refused" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_covered_link_in_one_of_two_frames_laid_out_alike_is_refused_as_ambiguous" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_link_in_an_embed_below_the_fold_with_a_look_alike_in_view_is_refused_as_ambiguous" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_link_below_its_own_frames_fold_is_never_written_in_a_look_alike_frame" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike" \
             "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through" \
             "backend/tests/test_browser_shared_e2e.py::test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option" \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all six must actually run.
-          grep -q " 6 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all seventeen must actually run (the frame click and the off-screen twins run for
+          # a same-origin and a cross-site frame, the nested embed for a frame on its wrapper's site and on the page's).
+          grep -q " 17 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'

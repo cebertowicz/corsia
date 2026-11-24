@@ -33,8 +33,8 @@ def turn_running_before(db: sqlite3.Connection, thread_id: str, moment: str) -> 
     ).fetchone() is not None
 
 
-def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a plan liveness wake in the thread's FIFO has not begun its write.
+def event_wake_queued(db: sqlite3.Connection, thread_id: str, event_type: str) -> bool:
+    """Whether an ``event_type`` wake in the thread's FIFO has not begun its write.
 
     Unclaimed and claimed-but-unwritten wakes both count: either will still be
     read. A claim held by a Turn that is no longer running does not, so an
@@ -43,10 +43,15 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
     return db.execute(
         "SELECT 1 FROM messages m WHERE m.thread_id=? AND m.delivery_state='queued' "
         "AND m.input_order IS NOT NULL AND m.write_started_at IS NULL "
-        "AND json_extract(m.metadata,'$.event_type')='plan.liveness_wake' "
+        "AND json_extract(m.metadata,'$.event_type')=? "
         f"AND {LIVE_CLAIM} LIMIT 1",
-        (thread_id,),
+        (thread_id, event_type),
     ).fetchone() is not None
+
+
+def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether a plan liveness wake in the thread's FIFO has not begun its write."""
+    return event_wake_queued(db, thread_id, 'plan.liveness_wake')
 
 
 def turn_starting_work_pending(db: sqlite3.Connection, thread_id: str) -> bool:
