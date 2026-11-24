@@ -3,8 +3,9 @@
 Every agent browser command's text comes back through ``tools.browser_runtime._run_owned``: its result,
 and the text of any error it raised. That one place calls :func:`blank_output` once per command, which reads
 the saved passwords once (``infra.saved_logins.blanking_values``: each saved password of 8 or more characters)
-and replaces each one wherever it appears, raw, URL-encoded or JSON-encoded, with :data:`BLANK`. That covers
-snapshots, page text, `get` results, eval and script results, console and network logs, and error text.
+and replaces each one wherever it appears, raw, URL-encoded, HTML-escaped or JSON-encoded, with :data:`BLANK`.
+That covers snapshots, page text, `get` results (get html too), eval and script results, console and network
+logs, and error text.
 
 A result that can't be checked, because the saved passwords couldn't be read, is withheld rather than returned
 unchecked. Nothing here logs, keeps or returns a password: the values live only in this call's locals.
@@ -48,14 +49,32 @@ def _json_forms(value: str) -> set[str]:
     return forms
 
 
+def _html_forms(value: str) -> set[str]:
+    """The value as a browser serialises it into markup (Chrome 152, checked on a real page): text escapes &, <, >
+    and U+00A0 as &nbsp;; an attribute also escapes " as &quot;. XMLSerializer keeps U+00A0 as it is, and
+    attribute serialisation before Chrome escaped < and > there kept them, so both are written too."""
+    escaped = value.replace("&", "&amp;")
+    forms = set()
+    for markup in (escaped.replace("<", "&lt;").replace(">", "&gt;"), escaped):
+        for quoted in (markup, markup.replace('"', "&quot;")):
+            forms |= {quoted, quoted.replace("\u00a0", "&nbsp;")}
+    return forms
+
+
 def encodings(value: str) -> set[str]:
-    """Every written form of one saved value that is blanked: raw, URL-encoded and JSON-encoded."""
-    plain = {value} | _url_forms(value)
+    """Every written form of one saved value that is blanked: raw, URL-encoded, HTML-escaped and each of those
+    JSON-encoded (get html returns its markup inside JSON)."""
+    plain = {value} | _url_forms(value) | _html_forms(value)
     return {form for text in plain for form in {text} | _json_forms(text) if form}
 
 
 def blank(text: str, values: Iterable[str]) -> str:
-    """The text with every form of each value replaced by BLANK, the longest forms first."""
+    """The text with every form of each value replaced by BLANK, the longest forms first.
+
+    One str.replace per form, deliberately: measured on a 200 KB snapshot, about 14 ms at 100 saved logins and
+    143 ms at 1000. A single compiled alternation was 4 to 8 times slower, and a trie-shaped one is faster
+    only when kept between commands, which would hold every saved password's forms in memory.
+    """
     forms = sorted({form for value in values for form in encodings(value)}, key=len, reverse=True)
     for form in forms:
         text = text.replace(form, BLANK)

@@ -44,6 +44,16 @@ def _saved(state) -> tuple[str, str]:
 # Under saved_logins.BLANKING_MIN characters, so it is never blanked.
 SHORT_VALUE = "short7x"
 
+
+def _chrome_text(value: str) -> str:
+    """How Chrome 152 serialises a text node (checked on a real page): &, <, > and U+00A0 escaped; quotes kept."""
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\u00a0", "&nbsp;")
+
+
+def _chrome_attribute(value: str) -> str:
+    """How Chrome 152 serialises an attribute value: the text escapes plus \" as &quot;; ' kept."""
+    return _chrome_text(value).replace('"', "&quot;")
+
 ENCODINGS = {
     "raw": lambda value: value,
     "url": lambda value: quote(value, safe=""),
@@ -51,6 +61,9 @@ ENCODINGS = {
     "url_component": lambda value: quote(value, safe="-_.!~*'()"),
     "json": lambda value: json.dumps(value)[1:-1],
     "json_unicode": lambda value: json.dumps(value, ensure_ascii=False)[1:-1],
+    "html_text": _chrome_text,
+    "html_attribute": _chrome_attribute,
+    "html_attribute_in_json": lambda value: json.dumps(_chrome_attribute(value))[1:-1],
 }
 
 # Each kind of output as agent-browser's --json writes it, with the page's text in it.
@@ -58,6 +71,7 @@ KINDS = {
     "snapshot": lambda text: (0, {"success": True, "data": {"snapshot": f'- heading "Welcome"\n- text: {text}'}}),
     "page_text": lambda text: (0, {"success": True, "data": {"text": f"Signed in. {text}"}}),
     "get": lambda text: (0, {"success": True, "data": {"value": text}}),
+    "get_html": lambda text: (0, {"success": True, "data": {"html": f'<p>{text}</p><input value="{text}">'}}),
     "eval": lambda text: (0, {"success": True, "data": {"result": {"copied": text, "list": [text]}}}),
     "eval_string": lambda text: (0, {"success": True, "data": {"result": f"copied {text}"}}),
     "console": lambda text: (0, {"success": True, "data": {"messages": [{"type": "log", "text": text}]}}),
@@ -138,8 +152,11 @@ async def test_a_short_saved_value_and_unrelated_text_are_left_alone(state, monk
 
 
 @contextmanager
-def _page_showing(text: str):
-    body = f"<!doctype html><title>Account</title><main><h1>Account</h1><p>{html.escape(text)}</p></main>".encode()
+def _page_showing(text: str, *, in_attributes: bool = False):
+    fields = (f'<input id="field" value="{html.escape(text)}" data-copy="{html.escape(text)}">'
+              if in_attributes else "")
+    body = (f"<!doctype html><title>Account</title><main><h1>Account</h1><p>{html.escape(text)}</p>{fields}</main>"
+            .encode())
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -188,6 +205,69 @@ async def test_a_saved_value_shown_on_a_real_page_comes_back_blanked_in_a_snapsh
     for text in outputs:
         _absent(text, secret_text, marker)
         assert blanking.BLANK in text, text
+
+
+def _markup_value() -> str:
+    return f"Ab1&\"<>' {uuid.uuid4().hex}"
+
+
+# Every way a browser writes a value into markup: Chrome 152's text and attribute serialisation (checked on a real
+# page), XMLSerializer's (U+00A0 kept as it is), and attributes as written before Chrome escaped < and > in them.
+MARKUP_FORMS = {
+    "text": _chrome_text,
+    "attribute": _chrome_attribute,
+    "xml_text": lambda value: value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+    "xml_attribute": lambda value: (value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                                   .replace('"', "&quot;")),
+    "attribute_before_lt_gt": lambda value: (value.replace("&", "&amp;").replace('"', "&quot;")
+                                            .replace(" ", "&nbsp;")),
+}
+
+
+@pytest.mark.parametrize("in_json", [False, True])
+@pytest.mark.parametrize("form", sorted(MARKUP_FORMS))
+def test_each_markup_form_of_a_value_is_blanked(form, in_json):
+    value = _markup_value()
+    written = MARKUP_FORMS[form](value)
+    assert written != value
+    if in_json:
+        written = json.dumps(written)[1:-1]
+    assert blanking.blank(f"<p>{written}</p>", [value]) == f"<p>{blanking.BLANK}</p>"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_value_in_a_real_pages_markup_comes_back_blanked_from_every_markup_command(state, monkeypatch):
+    """Real Chrome: the saved value carries &, \", <, > and ', in text and in attributes; get html, an eval of
+    outerHTML, an attribute read, page text and a snapshot each come back with it blanked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    marker = uuid.uuid4().hex
+    markup_text = f"Ab1&\"<>'{marker}"
+    saved_logins.save_login(site="https://example.com", username="me@example.com", password=markup_text,
+                            saved_by="person")
+    thread_id = f"blanking-{uuid.uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-blanking", instance_key=uuid.uuid4().hex)
+
+    async def run_browser(thread, args, **kwargs):
+        kwargs.pop("lease_id", None)
+        return await owner.run(thread, args, **kwargs)
+
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    commands = (["get", "html", "main"], ["eval", "document.querySelector('main').outerHTML"],
+                ["get", "attr", "#field", "data-copy"], ["get", "text", "main"], ["snapshot"])
+    try:
+        with _page_showing(markup_text, in_attributes=True) as url:
+            assert not (await browser_runtime._run(["open", url], thread_id=thread_id)).startswith("Error:")
+            outputs = {" ".join(args[:2]): await browser_runtime._run(args, thread_id=thread_id) for args in commands}
+    finally:
+        await owner.close_thread(thread_id)
+    for command, text in outputs.items():
+        assert not text.startswith("Error:"), (command, text)
+        _absent(text, markup_text, marker)
+        assert blanking.BLANK in text, command
+    # get html returns the markup inside JSON, with the attribute's " written as &quot;.
+    assert blanking.BLANK in outputs["get html"] and "&amp;" not in outputs["get html"]
 
 
 def test_every_written_form_of_a_value_is_blanked_longest_first():

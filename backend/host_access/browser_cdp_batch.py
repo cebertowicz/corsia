@@ -33,8 +33,9 @@ class BatchingCdpClient(CdpClient):
             index = pending.pop(reply_id)
             error, result = response.get("error"), response.get("result")
             if error is not None or not isinstance(result, dict):
-                code, message = (error.get("code"), error.get("message")) if isinstance(error, dict) else (None, "no result")
-                log.debug("CDP %s failed (code %s): %s", method, code, message)
+                code = error.get("code") if isinstance(error, dict) else None
+                # Method, id and numeric code only, as call_in: an error's message can quote the request's params.
+                log.debug("CDP %s (id %s) failed with code %s", method, reply_id, code if isinstance(code, int) else None)
                 continue
             results[index] = result
         return results
