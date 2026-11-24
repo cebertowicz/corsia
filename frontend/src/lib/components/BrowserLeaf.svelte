@@ -146,8 +146,7 @@
 		}
 		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
 			passwordPage = message.visible;
-			// Emptied on each password page, so the next one announces again.
-			// Screenshots and value reads stay refused for the rest of the visit, so this claims no more than the step ending.
+			// Emptied on each password page, so the next one announces again. Reads stay refused for the rest of the visit.
 			announcement = passwordPage ? '' : 'The password step is over';
 			if (passwordPage) agent.clearMark();
 			return;
