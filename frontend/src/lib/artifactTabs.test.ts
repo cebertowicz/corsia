@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, getActiveTab, hasChangedTab, isTabChanged, openLegacyDiscussionTab, openSubagentTab, openTab, renameTab, resolveTabArtifact, restoreWorkspace, type RevisionCheck, type ThreadArtifactWorkspace } from './artifactTabs';
+import { applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, consumeLanding, emptyWorkspace, getActiveTab, hasChangedTab, isTabChanged, openLegacyDiscussionTab, openSubagentTab, openTab, renameTab, resolveTabArtifact, restoreWorkspace, type RevisionCheck, type ThreadArtifactWorkspace } from './artifactTabs';
 
 function withTabs(...opens: { artifactId?: string | null; path: string; title: string }[]): ThreadArtifactWorkspace {
 	return opens.reduce((ws, input) => openTab(ws, input), emptyWorkspace());
@@ -388,5 +388,23 @@ describe('restoreWorkspace', () => {
 		expect(restoreWorkspace(null)).toBeNull();
 		expect(restoreWorkspace({ tabs: 'nope' })).toBeNull();
 		expect(restoreWorkspace({ tabs: [] })).toBeNull();
+	});
+});
+
+describe('a reply landing that names its thread', () => {
+	it('carries the named thread, replaces it on a later open of the same tab, and is consumed with the landing', () => {
+		let ws = openTab(emptyWorkspace(), { artifactId: 'doc', path: '/d.md', title: 'd', landOn: 'new-replies', landOnCommentId: 'a' });
+		const id = ws.activeTabId!;
+		expect(getActiveTab(ws)).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'a' });
+		ws = openTab(ws, { artifactId: 'doc', path: '/d.md', title: 'd', landOn: 'new-replies', landOnCommentId: 'b' });
+		expect(ws.activeTabId).toBe(id);
+		expect(getActiveTab(ws)).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'b' });
+		// A landing that names no thread drops the earlier one rather than reusing it.
+		ws = openTab(ws, { artifactId: 'doc', path: '/d.md', title: 'd', landOn: 'new-replies' });
+		expect(getActiveTab(ws)?.landOnCommentId).toBeUndefined();
+		ws = openTab(ws, { artifactId: 'doc', path: '/d.md', title: 'd', landOn: 'new-replies', landOnCommentId: 'b' });
+		ws = consumeLanding(ws, id)!;
+		expect(getActiveTab(ws)?.landOn).toBeUndefined();
+		expect(getActiveTab(ws)?.landOnCommentId).toBeUndefined();
 	});
 });

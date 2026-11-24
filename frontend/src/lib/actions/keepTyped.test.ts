@@ -250,6 +250,17 @@ describe('typing hints', () => {
 		expect(['autocomplete', 'autocorrect', 'autocapitalize', 'spellcheck'].map((name) => field.getAttribute(name))).toEqual(['off', 'on', 'sentences', 'true']);
 	});
 
+	it('names a prose field "search" next to autocomplete off, so Safari offers no contact AutoFill', () => {
+		expect([field.getAttribute('name'), field.getAttribute('autocomplete')]).toEqual(['search', 'off']);
+	});
+
+	it('keeps the name a field sets itself', () => {
+		const own = document.createElement('textarea');
+		own.setAttribute('name', 'notes');
+		keepTyped(own).destroy();
+		expect([own.getAttribute('name'), own.getAttribute('autocomplete')]).toEqual(['notes', 'off']);
+	});
+
 	it('keeps a hint the field sets itself', () => {
 		const own = document.createElement('textarea');
 		own.setAttribute('spellcheck', 'false');
@@ -260,7 +271,7 @@ describe('typing hints', () => {
 	it('gives a name field the repair alone', () => {
 		const name = document.createElement('input');
 		keepTyped(name, { prose: false }).destroy();
-		expect(['autocomplete', 'autocorrect', 'autocapitalize', 'spellcheck'].some((hint) => name.hasAttribute(hint))).toBe(false);
+		expect(['autocomplete', 'autocorrect', 'autocapitalize', 'spellcheck', 'name'].some((hint) => name.hasAttribute(hint))).toBe(false);
 	});
 });
 

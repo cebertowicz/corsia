@@ -51,6 +51,35 @@ erDiagram
 
 ## Tables
 
+### `activity_rank_nudges`
+
+Source: `backend/infra/activity_ranking_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `user_id` | TEXT | Yes | Yes | — | — |
+| `scope` | TEXT | Yes | Yes | — | — |
+| `last_enqueued_at` | TEXT | No | Yes | — | — |
+| `seen_keys` | TEXT | No | Yes | '[]' | — |
+
+Indexes: `sqlite_autoindex_activity_rank_nudges_1` (user_id, scope, unique).
+
+### `activity_ranks`
+
+Source: `backend/infra/activity_ranking_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `user_id` | TEXT | Yes | Yes | — | — |
+| `scope` | TEXT | Yes | Yes | — | — |
+| `item_key` | TEXT | Yes | Yes | — | — |
+| `position` | INTEGER | No | Yes | — | — |
+| `reason` | TEXT | No | Yes | — | — |
+| `ranked_by` | TEXT | No | Yes | — | — |
+| `ranked_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_activity_ranks_1` (user_id, scope, item_key, unique).
+
 ### `plan_ask_deferrals`
 
 Source: `backend/infra/plan_schema.py`.
