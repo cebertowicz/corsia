@@ -61,6 +61,7 @@ class _Offer:
     confirmed: bool = False
 
     def view(self) -> OfferView:
+        """What the person may see of this offer."""
         return OfferView(self.site, self.site.removeprefix("https://"), self.username, self.update)
 
 
@@ -170,9 +171,9 @@ def save_offer(session_key: str | None, *, saved_by: str, db: sqlite3.Connection
     """
     with _lock:
         offer = _offers.get(session_key) if session_key is not None else None
-        if offer is None or not offer.confirmed:
+        if session_key is None or offer is None or not offer.confirmed:
             raise KeyStoreError(NO_OFFER)
-        _offers.pop(session_key, None)
+        del _offers[session_key]
     return save_login(site=offer.site, username=offer.username, password=offer.password, saved_by=saved_by, db=db)
 
 
