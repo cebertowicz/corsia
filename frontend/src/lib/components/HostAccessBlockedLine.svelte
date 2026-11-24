@@ -19,7 +19,7 @@
 
 <div class="blocked-line" role="status">
 	<span>{stale
-		? 'Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.'
+		? 'Couldn’t check that this request is still current, so you can’t approve it yet.'
 		: incomplete}</span>
 	<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
 </div>

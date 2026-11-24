@@ -1124,10 +1124,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(button('Reject')?.disabled).toBe(false));
 	});
 
-	it('disables Reject, not only Approve, when the selected thread truth becomes stale', async () => {
+	it('keeps Reject enabled when the selected thread truth becomes stale, and sends the last view', async () => {
+		// The server checks the revision and hash it is sent, so a Reject from the last view either ends
+		// that same request or comes back refused as changed; Approve stays disabled.
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
-			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503));
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingLease, state: 'rejected' }))
+			.mockResolvedValue(response({ leases: [] }));
 		vi.stubGlobal('fetch', fetchMock);
 
 		component = mountControl();
@@ -1137,12 +1141,55 @@ describe('HostAccessLeaseControl', () => {
 		emit('host_access_changed', { lease_id: 'lease-1' });
 		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
 		const dialog = await openPendingDrawer();
-		const reject = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Reject');
-		expect(reject?.disabled).toBe(true);
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject');
+		expect(reject?.disabled).toBe(false);
 		reject!.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/lease-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 4, application_hash: 'hash-1' });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeNull());
+	});
+
+	it('keeps a stale saved-login fill rejectable through its own route', async () => {
+		const waitingFill: HostAccessFill = {
+			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+		};
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingFill] }))
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingFill, state: 'denied' }))
+			.mockResolvedValue(response({ leases: [] }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		const trigger = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLButtonElement>('[aria-label="Review a request to sign in with a saved login"]');
+			expect(found).toBeTruthy();
+			return found!;
+		});
+		emit('host_access_changed', { lease_id: 'fill-1' });
+		await vi.waitFor(() => expect(host.querySelector('.pending-status.stale')).toBeTruthy());
+		trigger.click();
+		flushSync();
 		await tick();
-		expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+		const dialog = host.querySelector('[role="dialog"]')!;
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject')!;
+		expect(reject.disabled).toBe(false);
+		reject.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/fills/fill-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 1, application_hash: 'fill-hash' });
 	});
 
 	it('disables Reject and no-ops its click when CAS identity is malformed', async () => {

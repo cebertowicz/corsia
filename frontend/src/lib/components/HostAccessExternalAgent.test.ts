@@ -19,7 +19,8 @@ afterEach(async () => {
 
 function show(lease: HostAccessLease, stale = false) {
 	component = mount(HostAccessPendingRequestDrawer, { target: host, props: {
-		lease, stale, deciding: false, rejectDisabled: stale,
+		// As the control passes them: a stale read blocks Approve, never Reject.
+		lease, stale, deciding: false, rejectDisabled: false,
 		approveDisabled: stale || !approvalReady(lease),
 		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
 	} });
@@ -147,13 +148,13 @@ it('rejects malformed directory, duplicate launch, extra repo field and excessiv
 	expect(duration(1_801)).toBe('Invalid duration');
 });
 
-it('preserves stale decision guards for an otherwise complete external request', () => {
+it('preserves the stale Approve guard for an otherwise complete external request', () => {
 	show(externalLease(), true);
 	expect(button('Approve')?.disabled).toBe(true);
-	expect(button('Reject')?.disabled).toBe(true);
+	expect(button('Reject')?.disabled).toBe(false);
 	const blocked = host.querySelector('.blocked-line')!;
 	expect(blocked.querySelector('span')!.textContent)
-		.toBe('Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.');
+		.toBe('Couldn’t check that this request is still current, so you can’t approve it yet.');
 	expect(blocked.querySelector('button')!.textContent?.trim()).toBe('Retry');
 	expect(blocked.querySelector('button')!.classList.contains('ghost')).toBe(true);
 	expect(host.textContent).not.toContain('Approval is blocked');
