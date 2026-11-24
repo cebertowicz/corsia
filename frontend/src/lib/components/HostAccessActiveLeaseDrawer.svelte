@@ -71,11 +71,11 @@
 		position: sticky;
 		top: 0;
 		z-index: 2;
-		padding: 8px 0 14px;
+		padding: var(--space-2) 0 var(--space-3);
 		background: var(--bg-secondary);
 	}
 	.active-drawer-head h2 {
-		margin: 4px 0 0;
+		margin: var(--space-1) 0 0;
 		overflow: hidden;
 		color: var(--text-primary);
 		font-size: var(--text-title3);
@@ -110,7 +110,7 @@
 	.active-drawer-body dl > div { min-width: 0; }
 	.active-drawer-body dd {
 		min-width: 0;
-		margin: 5px 0 0;
+		margin: var(--space-1) 0 0;
 		color: var(--text-secondary);
 		overflow-wrap: anywhere;
 	}
