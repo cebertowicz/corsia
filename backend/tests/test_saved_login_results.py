@@ -6,7 +6,8 @@ import sqlite3
 import pytest
 from loguru import logger
 
-from infra import saved_login_results, saved_logins
+import infra.saved_login_results as saved_login_results
+from infra import saved_logins
 from infra.database import get_db
 from infra.key_store_values import KeyStoreError
 
