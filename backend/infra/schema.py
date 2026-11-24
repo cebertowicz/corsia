@@ -34,12 +34,13 @@ from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.project_policy_schema import PROJECT_INFERENCE_POLICY_TABLE_SQL, PROJECT_REPO_POLICY_TABLE_SQL
 from infra.provider_availability_schema import PROVIDER_AVAILABILITY_TABLE_SQL
 from infra.scoped_history_indexes import SCOPED_HISTORY_INDEX_SQL
+from infra.activity_ranking_schema import ACTIVITY_RANKING_SQL
 from infra.settings_schema import SETTINGS_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 205
+SCHEMA_VERSION = 206
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -478,5 +479,5 @@ SCHEMA_SQL = f"""
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_BREAKS_SCHEMA_SQL}{MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}{SCOPED_HISTORY_INDEX_SQL}
-    {LEARNING_INDEX_SQL}
+    {LEARNING_INDEX_SQL}{ACTIVITY_RANKING_SQL}
 """

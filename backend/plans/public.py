@@ -100,6 +100,12 @@ from plans.activity_projection import (
     read_workspace as read_activity_workspace,
 )
 from plans.held_attention import queue_rows as held_reply_queue_rows
+# Activity's ranked list: review and task rows, and the agent a reply came from
+# (api/attention, doceditor/activity_reply_rows).
+from plans.activity_rows import dedupe_comment_tasks as dedupe_activity_comment_tasks
+from plans.activity_rows import rows as activity_plan_rows
+from plans.attention_detail import _UNKNOWN_SOURCE as UNKNOWN_THREAD_SOURCE
+from plans.attention_detail import _sources as thread_sources
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,
@@ -124,6 +130,7 @@ from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_node_read import read_node as read_operator_node
 from plans.operator_chat_state import THREAD_STATE_LIMIT, read_thread_states
 from plans.operator_projection import (
+    _project as check_operator_project,
     read_child as read_operator_child,
     read_project as read_operator_project,
     read_thread as read_operator_thread,

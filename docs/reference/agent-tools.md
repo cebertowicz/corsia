@@ -183,6 +183,7 @@ Pack: `automations`
 
 | Tool | Description |
 |---|---|
+| `attention_rank` | Read and rank the person's Activity list |
 | `automation_cancel` | Cancel one of this thread's schedules |
 | `automation_list` | List this thread's schedules |
 | `automation_schedule` | Schedule a clock or cadence wake for this thread |
