@@ -249,6 +249,8 @@ def test_selected_stalled_executor_has_compact_full_waiting_header_parity(db, ki
     assert detailed["progress"]["distribution"]["waiting"] == 1
     assert detailed["nodes"][0]["display"]["label_key"] == "waiting"
     assert detailed["nodes"][0]["status_reason"] == reason
+    # A stall reads waiting but will not move on its own: its path still opens.
+    assert detailed["nodes"][0]["attention_path"][-1] == task.id
 
 
 def test_queued_input_recovers_selected_error_executor_header(db):

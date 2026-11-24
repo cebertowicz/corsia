@@ -34,11 +34,14 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
             "witnessed": False,
         }
     execution = state["execution"]
-    # Quiet waits keep their causes without opening a path; only shown blocks
-    # and action owed to the person need this disclosure.
+    # Quiet waits keep their causes without opening a path. Shown blocks,
+    # action owed to the person, and selected work whose executor stopped
+    # (it reads waiting but is not a quiet wait) need this disclosure.
     attention_path = (
         [*node["path"], node["id"]]
-        if operator_node_state.shown_condition(state) == "blocked" or state["requires_user_action"]
+        if operator_node_state.shown_condition(state) == "blocked"
+        or state["requires_user_action"]
+        or state["executor_stopped"]
         else []
     )
     return {
