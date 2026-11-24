@@ -26,10 +26,12 @@ test('a project landing opens its documents library without a chat', async ({ pa
 	if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByRole('button', { name: /Jump to/ }).click();
 	await page.locator('.palette').getByRole('button', { name, exact: true }).click();
-	if (phone && !(await page.getByRole('button', { name: 'New chat' }).first().isVisible())) {
+	await expect(page.locator('.palette')).toBeHidden();
+	const newChat = page.locator('.rail-newchat-wrap').getByRole('button', { name: 'New chat', exact: true });
+	if (phone && !(await newChat.isVisible())) {
 		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	}
-	await page.getByRole('button', { name: 'New chat' }).first().click();
+	await newChat.click();
 	if (phone) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	await expect(page.getByText('No documents yet')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Browse documents…' }).click();
