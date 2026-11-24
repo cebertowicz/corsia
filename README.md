@@ -2,7 +2,7 @@
 
 ### AI agents that take whole jobs off your plate, and get better every time you correct them.
 
-Tell CORSIA what you want handled: your inbox, your calendar, a codebase. It sets up agents that own that work, connects them to your tools, and brings you only the calls that are yours to make. Free and open source, running on your own machine.
+Tell CORSIA what you want handled: your inbox, your calendar, a codebase. It sets up agents that own that work and connects them to your tools. Free and open source, running on your own machine.
 
 **[Download CORSIA for Mac](https://github.com/cebertowicz/corsia/releases/latest)** (Apple Silicon, macOS 15 or later): on the page that opens, download the file ending in `.dmg`. Or [run it as a Linux server](#getting-started).
 
@@ -32,9 +32,7 @@ CORSIA is built this way: its agents merged [1,069 pull requests in the 30 days 
 
 [How it works](docs/how-it-works/README.md) · [What it measures](docs/measurement.md) · [How lessons are tested](docs/how-it-works/learning.md) · [All documentation](docs/README.md)
 
-## Where it stands
-
-Proven on the install that builds CORSIA; not yet proven on anyone else's. 0.5.0 is the most structured release so far, and it still has gaps. What has shipped: [CHANGELOG](CHANGELOG.md).
+## 
 
 ## Getting started
 
