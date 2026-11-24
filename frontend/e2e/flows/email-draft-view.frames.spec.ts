@@ -394,8 +394,13 @@ async function answerDraftAction(page: Page, action: 'send' | 'discard', answer:
 		if (answer === 'hold') return;
 		if (review) {
 			const artifactId = new URL(route.request().url()).pathname.split('/')[3];
+			// The clear route answers only the holds it is shown, as the review bar does (the server's own E7 call needs none).
+			const ask = await page.request.get(`/api/attention/${encodeURIComponent(artifactId)}/review`, { params: { token: TEST_TOKEN } });
+			expect(ask.ok(), await ask.text()).toBeTruthy();
+			const holdIds = ((await ask.json()).hold_ids ?? []) as string[];
+			expect(holdIds.length, 'the draft has an open review ask').toBeGreaterThan(0);
 			const cleared = await page.request.post(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
-				data: { token: TEST_TOKEN, outcome: 'answer', verdict: review, note: review === 'approved' ? null : "Not sent: the person chose Don't send. Save a new draft only if they ask for one.", hold_ids: [] },
+				data: { token: TEST_TOKEN, outcome: 'answer', verdict: review, note: review === 'approved' ? null : "Not sent: the person chose Don't send. Save a new draft only if they ask for one.", hold_ids: holdIds },
 			});
 			expect(cleared.ok(), await cleared.text()).toBeTruthy();
 		}
