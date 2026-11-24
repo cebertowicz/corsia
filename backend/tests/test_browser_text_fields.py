@@ -57,6 +57,8 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
                 return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
             if method == 'DOM.getNodeForLocation':
                 return {'nodeId': 2}
+            if method == 'Page.getLayoutMetrics':
+                return {}
             raise AssertionError(method)
 
     monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
@@ -83,7 +85,8 @@ async def test_only_field_geometry_and_kind_reaches_touch_pane(monkeypatch):
     assert reports == [{'type': 'text_fields', 'fields': [{'x': 10, 'y': 20, 'width': 100, 'height': 20, 'kind': 'email'}]}]
     encoded = json.dumps(reports)
     assert all(private not in encoded for private in (secret, 'private-name', 'private-id', 'private-placeholder', 'private-label'))
-    assert set(calls) == {'DOM.getDocument', 'DOM.performSearch', 'DOM.getSearchResults', 'DOM.discardSearchResults', 'DOM.getBoxModel', 'DOM.getNodeForLocation'}
+    assert set(calls) == {'DOM.getDocument', 'DOM.performSearch', 'DOM.getSearchResults', 'DOM.discardSearchResults', 'Page.getLayoutMetrics',
+                          'DOM.getBoxModel', 'DOM.getNodeForLocation'}
 
 
 @pytest.mark.asyncio
@@ -248,6 +251,8 @@ async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
                 return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
             if method == 'DOM.getNodeForLocation':
                 return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
+            if method == 'Page.getLayoutMetrics':
+                return {}
             raise AssertionError(method)
 
     monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
@@ -258,7 +263,58 @@ async def test_an_editable_field_survives_a_hit_on_its_child(monkeypatch):
     assert fields == [{'x': 10, 'y': 20, 'width': 100, 'height': 20, 'kind': 'editable'}]
     assert focused is None
     assert [method for method, _node in calls if method not in {'DOM.performSearch', 'DOM.getSearchResults', 'DOM.discardSearchResults'}] == [
-        'DOM.getDocument', 'DOM.getBoxModel', 'DOM.getNodeForLocation']
+        'DOM.getDocument', 'Page.getLayoutMetrics', 'DOM.getBoxModel', 'DOM.getNodeForLocation']
+
+
+@pytest.mark.asyncio
+async def test_scrolled_page_hit_tests_in_document_pixels_and_clips_to_its_viewport(monkeypatch):
+    """Boxes are viewport pixels but the hit test takes document pixels, so a scrolled page adds its scroll.
+
+    A pane reporting a larger size than the page shows gets no box past the page's own viewport.
+    """
+    hit_points: list[tuple[int, int]] = []
+    # Node 7 sits in view; node 8 straddles the page's bottom edge at 300 css pixels.
+    borders = {7: (10, 20, 110, 40), 8: (10, 290, 110, 310)}
+
+    class FakeCdp(BatchingFake):
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            if method == 'DOM.getDocument':
+                return {'root': {'nodeId': 1}}
+            if method == 'DOM.performSearch':
+                return {'searchId': 'search', 'resultCount': int('type=email' in params['query'])}
+            if method == 'DOM.getSearchResults':
+                return {'nodeIds': [7, 8]}
+            if method == 'DOM.discardSearchResults':
+                return {}
+            if method == 'Page.getLayoutMetrics':
+                return {'cssVisualViewport': {'pageX': 5, 'pageY': 1000, 'clientWidth': 400, 'clientHeight': 300}}
+            if method == 'DOM.getBoxModel':
+                left, top, right, bottom = borders[params['nodeId']]
+                return {'model': {'border': [left, top, right, top, right, bottom, left, bottom]}}
+            if method == 'DOM.getNodeForLocation':
+                hit_points.append((params['x'], params['y']))
+                # Chrome answers in document pixels: only the scrolled point lands on a field.
+                return {7: {'nodeId': 7}, 8: {'nodeId': 8}}.get({1030: 7, 1295: 8}.get(params['y']), {'nodeId': 1})
+            raise AssertionError(method)
+
+    monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
+    async def no_frames(*_args):
+        return []
+    monkeypatch.setattr(browser_text_fields.browser_cdp_frames, 'child_frames', no_frames)
+    # The pane reports twice the page's height.
+    fields, _focused = await browser_text_fields.probe_fields('test', 400, 600)
+    assert hit_points == [(65, 1030), (65, 1295)]
+    assert fields == [{'x': 10, 'y': 20, 'width': 100, 'height': 20, 'kind': 'email'},
+                      {'x': 10, 'y': 290, 'width': 100, 'height': 10, 'kind': 'email'}]
 
 
 @pytest.mark.asyncio
@@ -295,6 +351,8 @@ async def test_in_view_fields_get_boxes_behind_many_off_screen_fields(monkeypatc
                 return {'model': {'border': [left, top, left + 40, top, left + 40, top + 20, left, top + 20]}}
             if method == 'DOM.getNodeForLocation':
                 return {'nodeId': in_view[(params['x'] - 10) // 50]}
+            if method == 'Page.getLayoutMetrics':
+                return {}
             raise AssertionError(method)
 
     monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
@@ -367,6 +425,8 @@ async def test_a_plain_field_hit_on_another_node_is_still_dropped(monkeypatch):
                 return {'model': {'border': [10, 20, 110, 20, 110, 40, 10, 40]}}
             if method == 'DOM.getNodeForLocation':
                 return {'nodeId': 8, 'backendNodeId': 88, 'frameId': 'frame'}
+            if method == 'Page.getLayoutMetrics':
+                return {}
             raise AssertionError(method)
 
     monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
@@ -413,6 +473,8 @@ async def test_one_read_probes_at_most_the_bounded_number_of_nodes(monkeypatch):
                 # Every box is the same, so the nth hit test is the nth box read's node.
                 node = probed[calls.count('DOM.getNodeForLocation') - 1]
                 return {'nodeId': node, 'backendNodeId': node, 'frameId': 'frame'}
+            if method == 'Page.getLayoutMetrics':
+                return {}
             raise AssertionError(method)
 
     monkeypatch.setattr(browser_text_fields, 'BatchingCdpClient', FakeCdp)
