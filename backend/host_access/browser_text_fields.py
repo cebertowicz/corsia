@@ -95,10 +95,12 @@ def _scroll_and_clip(metrics: dict, clip: tuple[float, float, float, float]) -> 
     Without these numbers no point can be placed, so the read fails rather than guess an unscrolled page.
     """
     viewport = metrics.get('cssVisualViewport')
-    values = [viewport.get(key) if isinstance(viewport, dict) else None
-              for key in ('pageX', 'pageY', 'clientWidth', 'clientHeight')]
-    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
-        raise BrowserSessionError("This page couldn't be checked")
+    values: list[float] = []
+    for key in ('pageX', 'pageY', 'clientWidth', 'clientHeight'):
+        value = viewport.get(key) if isinstance(viewport, dict) else None
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise BrowserSessionError("This page couldn't be checked")
+        values.append(float(value))
     page_x, page_y, width, height = values
     return page_x, page_y, (clip[0], clip[1], min(clip[2], width), min(clip[3], height))
 
