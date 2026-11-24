@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 _NO_THREAD = "Couldn’t find this chat, so no login can be saved for it."
 _BAD_BODY = "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."
 #: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
-_NO_LOGIN_TO_DELETE = "There's no saved login to delete."
+_NO_LOGIN_TO_DELETE = "There’s no saved login to delete."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 
