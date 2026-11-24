@@ -432,6 +432,77 @@ async def test_a_page_element_under_a_header_is_written_after_the_scroll_with_an
     assert page.resolved[-1] == LINK and page.written == ["field"]
 
 
+def _owner_at(rise):
+    return {"content": [8, 68 - rise, 608, 68 - rise, 608, 368 - rise, 8, 368 - rise]}
+
+
+def _gliding_owner(page):
+    """Each read of the frame owner's box takes the next queued place, as a smooth scroll still moving does."""
+    places = []
+    call = page.call
+
+    async def gliding(method, **params):
+        if method == "DOM.getBoxModel" and params.get("backendNodeId") == OWNER and places:
+            page.boxes[OWNER] = places.pop(0)
+        return await call(method, **params)
+
+    page.call = gliding
+    return places
+
+
+@pytest.mark.asyncio
+async def test_a_frame_target_under_the_header_is_written_once_its_frame_stops_scrolling_smoothly(monkeypatch):
+    """scrollintoview returns mid-scroll: the frame's first read after it is not where the frame ends up."""
+    page = _page(hit=TOP, frames=("child",), owners={"child": OWNER}, holds={"child"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    places = _gliding_owner(page)
+    rise = 40
+    moved_hit = (FRAMED_HIT[0], FRAMED_HIT[1] - rise)
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            places.extend([_owner_at(rise // 2), _owner_at(rise)])
+            page.boxes[LINK] = {"border": [56, 102 - rise, 156, 102 - rise, 156, 122 - rise, 56, 122 - rise]}
+            page.hits[moved_hit] = LINK
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.resolved[-1] == LINK and page.worlds[-1] == "child" and page.written == ["field"]
+
+
+@pytest.mark.asyncio
+async def test_a_page_element_under_a_header_is_written_while_an_embed_in_view_scrolls_smoothly(monkeypatch):
+    page = _page(frames=("child",), owners={"child": OWNER})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    places = _gliding_owner(page)
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            places.extend([_owner_at(20), _owner_at(40)])
+            page.boxes[LINK] = {"border": RAW}
+            page.hits[TOP_HIT] = LINK
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2")) == "ok"
+    assert page.resolved[-1] == LINK and page.written == ["field"]
+
+
+@pytest.mark.asyncio
+async def test_a_frame_owner_that_never_stops_moving_is_refused_not_written(monkeypatch):
+    page = _page(hit=TOP, frames=("child",), owners={"child": OWNER}, holds={"child"})
+    _connect(monkeypatch, **{PAGE_URL: page})
+    places = _gliding_owner(page)
+
+    async def run(args, timeout):
+        if args[0] == "scrollintoview":
+            places.extend(_owner_at(rise) for rise in range(1, 200))
+        return await _run(args, timeout)
+
+    with pytest.raises((browser_dom_write.DomWriteRefused, BrowserSessionError)):
+        await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2"))
+    assert page.written == []
+
+
 @pytest.mark.asyncio
 async def test_a_link_in_a_cross_site_frame_is_hit_in_the_frames_own_target_and_written_there(monkeypatch):
     # The frame attaches through the page's session.
