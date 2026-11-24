@@ -32,6 +32,32 @@ it('tracks the fixed delivery row, its gap, changes and cleanup', async () => {
 	expect(panel.style.getPropertyValue('--drawer-half-extra')).toBe('');
 });
 
+it('adds the heading\'s second row when the switch wraps under the title, and nothing while it is one row', () => {
+	let resized = () => {};
+	vi.stubGlobal('ResizeObserver', class {
+		constructor(callback: () => void) { resized = callback; }
+		observe() {}
+		disconnect() {}
+	});
+	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
+	vi.stubGlobal('cancelAnimationFrame', () => {});
+	const panel = document.createElement('div'); panel.className = 'drawer-panel';
+	const drawer = document.createElement('section');
+	const heading = document.createElement('div'); heading.className = 'drawer-heading'; heading.style.paddingBottom = '4px';
+	const tools = document.createElement('div'); tools.className = 'drawer-tools';
+	let headingHeight = 48;
+	heading.getBoundingClientRect = () => ({ height: headingHeight }) as DOMRect;
+	tools.getBoundingClientRect = () => ({ height: 44 }) as DOMRect;
+	heading.append(tools); drawer.append(heading); panel.append(drawer); document.body.append(panel);
+	const action = documentHalfSheetRoom(drawer)!;
+	expect(panel.style.getPropertyValue('--drawer-half-extra'), 'one row: 44 + 4 padding').toBe('0px');
+	headingHeight = 92; resized();
+	expect(panel.style.getPropertyValue('--drawer-half-extra'), 'wrapped: the second 44 px row').toBe('44px');
+	headingHeight = 48; resized();
+	expect(panel.style.getPropertyValue('--drawer-half-extra')).toBe('0px');
+	action.destroy();
+});
+
 it('counts no status row: the sheet has none, its switch is in the heading', () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });

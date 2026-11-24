@@ -108,3 +108,32 @@ test(`${TAG} 320 wide with 1 open and 1 resolved stays one row`, async ({ page, 
 	expect(h.labels[1].text.left - h.labels[0].text.right).toBeGreaterThanOrEqual(LABEL_GAP_AT_393 - 0.5);
 	expect(h.heading.height).toBeLessThan(52);
 });
+
+/** The half-detent sheet's list height with the sheet's own box: the wrapped heading row is room the list gives up, so the sheet grows by it. */
+const halfListHeight = async (page: Page) => {
+	await page.locator(SHEET).locator('[data-discussion-original]').first().tap();
+	await expect(page.locator(SHEET)).toHaveClass(/\bhalf\b/);
+	await page.waitForTimeout(700);
+	await settleRect(page, SHEET);
+	return page.evaluate(() => {
+		const list = document.querySelector<HTMLElement>('[data-adaptive-drawer] .drawer-panel .drawer-comments')!;
+		const head = document.querySelector<HTMLElement>('[data-adaptive-drawer] .drawer-panel .drawer-heading')!;
+		return { list: list.getBoundingClientRect().height, scrolls: list.scrollHeight > list.clientHeight, heading: head.getBoundingClientRect().height };
+	});
+};
+
+test(`${TAG} 320 wide at half detent: a wrapped heading takes no height from the list`, async ({ page, request }) => {
+	// One row of heading: 9 open and 9 resolved. Two rows: 12 and 11. Both lists overflow their box, so the box height is the measure.
+	await openList(page, request, 320, 9, 9);
+	expect(oneRow(await read(page)), '9/9 at 320 is one heading row').toBe(true);
+	const oneRowHeading = await halfListHeight(page);
+	expect(oneRowHeading.scrolls, 'the one-row list overflows its box').toBe(true);
+	await page.reload();
+	await openList(page, request, 320, 12, 11);
+	const wrapped = await read(page);
+	expect(oneRow(wrapped), '12/11 at 320 wraps the switch under the title').toBe(false);
+	const twoRowHeading = await halfListHeight(page);
+	expect(twoRowHeading.scrolls, 'the wrapped-heading list overflows its box').toBe(true);
+	expect(twoRowHeading.heading, 'the wrapped heading is the taller one').toBeGreaterThan(oneRowHeading.heading + 20);
+	expect(twoRowHeading.list, 'the half-detent list is as tall with a wrapped heading as with one row').toBeGreaterThanOrEqual(oneRowHeading.list - 1);
+});

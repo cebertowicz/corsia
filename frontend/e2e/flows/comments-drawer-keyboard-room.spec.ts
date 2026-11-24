@@ -136,3 +136,50 @@ for (const width of [393, 320]) {
 		});
 	}
 }
+
+/**
+ * A checkbox takes no typed text, so ticking one never counts as the keyboard being up: with suggestions from two authors, the Accept
+ * suggestions choice lists a checkbox per author inside the pinned row, and a tap on one leaves the row pinned and the footer below the list.
+ */
+test(`${TAG} ticking an author in the Accept suggestions choice leaves the row pinned and the footer fixed`, async ({ page, request }) => {
+	const doc = await seed(request, 'Checkbox focus');
+	for (let i = 0; i < 12; i += 1) await comment(request, doc, `Note ${i + 1}: check this step.`, (i % 12) + 1);
+	for (const step of [8, 9]) {
+		const writer = await createSession(request, `Other writer ${step} ${Math.random().toString(36).slice(2, 8)}`);
+		const made = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: { artifact_id: doc.artifactId, quote: `Step ${step}: the rollout`, replacement: `Phase ${step}: the rollout`, body: 'Use phase.', as_session_id: writer } });
+		expect(made.ok(), await made.text()).toBeTruthy();
+	}
+	await open(page, doc, 'phone', 'light');
+	await page.setViewportSize({ width: 393, height: FULL });
+	await settleMotion(page);
+	await page.locator('[data-comments-entry]').tap();
+	await expect(page.locator(SHEET)).toHaveCount(1);
+	await settleRect(page, SHEET);
+	await page.waitForTimeout(500);
+	const list = page.locator(`${SHEET} .drawer-comments`);
+	await page.locator(SHEET).getByRole('button', { name: 'Accept suggestions' }).tap();
+	const boxes = page.locator(`${SHEET} .suggestion-choices input[type="checkbox"]`);
+	await expect(boxes, 'one checkbox per author').toHaveCount(2);
+	await list.evaluate((el) => { el.scrollTop = 120; });
+	await page.waitForTimeout(300);
+	const reading = () => page.evaluate(() => {
+		const scroller = document.querySelector<HTMLElement>('[data-adaptive-drawer] .drawer-panel .drawer-comments')!;
+		const focused = document.activeElement as HTMLInputElement | null;
+		return {
+			pinned: !!scroller.querySelector('.list-accept-all.in-scroller.pinned'),
+			footerInList: !!scroller.querySelector('.drawer-foot'),
+			scrollTop: scroller.scrollTop,
+			focusedType: focused?.tagName === 'INPUT' ? focused.type : (focused?.tagName ?? null),
+		};
+	});
+	const before = await reading();
+	expect(before.pinned, 'the row is pinned before the tap').toBe(true);
+	expect(before.scrollTop, 'the list is scrolled').toBeGreaterThan(0);
+	await boxes.first().tap();
+	await page.waitForTimeout(500);
+	const after = await reading();
+	expect(after.focusedType, 'the tap focused the checkbox, so the test can tell').toBe('checkbox');
+	expect(after.pinned, 'with a checkbox focused no keyboard is up: the Accept suggestions row stays pinned').toBe(true);
+	expect(after.footerInList, 'the footer stays below the list').toBe(false);
+	expect(after.scrollTop, 'the list does not move').toBe(before.scrollTop);
+});
