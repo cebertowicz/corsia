@@ -12,6 +12,8 @@ from __future__ import annotations
 import importlib
 import logging
 import re
+import sqlite3
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -359,33 +361,87 @@ async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     assert refused.json() == {"detail": "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("text", [
-    offers.NO_OFFER, offers._SESSION_REFUSAL, offers._OWN_SITE_REFUSAL, saved_logins._SITE_REFUSAL,
-])
-async def test_a_refusal_the_person_can_act_on_answers_409_with_its_text(client, sessions, monkeypatch, text):
-    def refuse(*_args, **_kwargs):
-        raise KeyStoreError(text)
+_UNREADABLE = "The key store file could not be read."
 
-    monkeypatch.setattr(offers, "save_offer", refuse)
+
+def _unreadable_store(*_args, **_kwargs):
+    raise KeyStoreError(_UNREADABLE)
+
+
+@pytest.mark.asyncio
+async def test_save_with_no_offer_answers_409_with_its_text(client, sessions):
     refused = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
     assert refused.status_code == 409
-    assert refused.json() == {"detail": text}
+    assert refused.json() == {"detail": offers.NO_OFFER}
 
 
 @pytest.mark.asyncio
-async def test_any_other_save_failure_answers_500_with_fixed_text(client, sessions, monkeypatch, caplog):
-    def fail(*_args, **_kwargs):
-        raise KeyStoreError("internal x")
-
-    monkeypatch.setattr(offers, "save_offer", fail)
-    with caplog.at_level(logging.ERROR, logger=saved_logins_api.__name__):
-        failed = await client.post("/api/saved-logins/offer/save", json={"thread_id": "t-mine"}, headers=_person())
+async def test_a_failed_save_answers_500_keeps_the_offer_and_can_be_pressed_again(client, sessions, monkeypatch, caplog):
+    body = {"thread_id": "t-mine"}
+    _confirmed(_key(sessions))
+    with monkeypatch.context() as failing, caplog.at_level(logging.ERROR, logger=saved_logins_api.__name__):
+        failing.setattr(saved_logins.key_store_values, "put", _unreadable_store)
+        failed = await client.post("/api/saved-logins/offer/save", json=body, headers=_person())
     assert failed.status_code == 500
     assert failed.json() == {"detail": "Couldn’t save the login. Try again."}
-    assert "internal x" not in failed.text
     [record] = [record for record in caplog.records if record.name == saved_logins_api.__name__]
-    assert record.levelno == logging.ERROR and record.getMessage() == "Saving a login for thread t-mine failed: KeyStoreError"
+    assert record.levelno == logging.ERROR
+    assert record.getMessage() == f"Saving a login for thread t-mine failed: {_UNREADABLE}"
+    assert saved_logins.list_logins() == []
+    shown = await client.get("/api/saved-logins/offer", params=body, headers=_person())
+    assert shown.json() == {"offer": asdict(offers.OfferView(SITE, "example.com", "me@example.com", False))}
+    saved = await client.post("/api/saved-logins/offer/save", json=body, headers=_person())
+    assert saved.status_code == 200 and saved.json() == {"saved": True}
+    [login] = saved_logins.list_logins()
+    assert login.username == "me@example.com" and saved_logins.password_matches(login.id, "pw one 1")
+    assert offers.pending_offer(_key(sessions)) is None and offers._claims == {}
+
+
+def test_a_save_that_raises_anything_else_keeps_the_offer_and_raises_it(sessions, monkeypatch):
+    key = _key(sessions)
+    _confirmed(key)
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(saved_logins.key_store_values, "put", locked)
+    with pytest.raises(sqlite3.OperationalError):
+        offers.save_offer(key, saved_by=OWNER_USER)
+    assert offers.pending_offer(key) == offers.OfferView(SITE, "example.com", "me@example.com", False)
+    assert offers._claims == {}
+
+
+def test_a_newer_offer_during_a_failing_save_is_not_overwritten(sessions, monkeypatch):
+    key = _key(sessions)
+    _confirmed(key)
+
+    def newer_then_fail(*_args, **_kwargs):
+        _confirmed(key, username="newer@example.com", password="pw two 2")
+        _unreadable_store()
+
+    monkeypatch.setattr(saved_logins.key_store_values, "put", newer_then_fail)
+    with pytest.raises(KeyStoreError):
+        offers.save_offer(key, saved_by=OWNER_USER)
+    assert offers.pending_offer(key) == offers.OfferView(SITE, "example.com", "newer@example.com", False)
+    assert offers._claims == {}
+
+
+@pytest.mark.parametrize("drop", ["not now", "browser closed"])
+def test_a_drop_during_a_failing_save_is_not_undone(sessions, monkeypatch, drop):
+    key = _key(sessions)
+    _confirmed(key)
+
+    def dropped_then_fail(*_args, **_kwargs):
+        if drop == "not now":
+            offers.drop_offer(key)
+        else:
+            offers.drop_thread("t-mine")
+        _unreadable_store()
+
+    monkeypatch.setattr(saved_logins.key_store_values, "put", dropped_then_fail)
+    with pytest.raises(KeyStoreError):
+        offers.save_offer(key, saved_by=OWNER_USER)
+    assert offers._offers == {} and offers._claims == {}
 
 
 @pytest.mark.asyncio
