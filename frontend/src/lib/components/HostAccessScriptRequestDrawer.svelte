@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
-	import { cadence, approvalReady } from '$lib/hostAccess/leaseFormat';
+	import { cadence, approvalReady, casReady } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessScript } from '$lib/api/hostAccess';
 
 	/**
@@ -47,7 +47,7 @@
 		<section><span class="section-label">Reviewer’s reason</span><p>{request.reviewer_reason}</p></section>
 	</div>
 	<footer class="decision-actions">
-		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
+		<HostAccessBlockedLine {stale} incomplete={!ready} kind="script" rejectable={casReady(request)} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 			<span class="decision-spacer"></span>

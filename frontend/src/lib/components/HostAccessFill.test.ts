@@ -97,11 +97,12 @@ it('cannot be approved when stale or incomplete, and says why', async () => {
 	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current, so you can’t approve it yet.');
 	expect(stale.host.textContent).not.toContain('Retry to check again');
 	await unmount(stale.component);
-	const incomplete = pending(fill({ decision_capability: '' }));
-	expect(incomplete.host.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	// Without its decision fields neither decision can be sent (the control disables Reject too).
+	const incomplete = pending(fill({ decision_capability: '' }), { rejectDisabled: true });
+	expect(incomplete.host.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve or reject it. It clears when CORSIA restarts.');
 	const buttons = [...incomplete.host.querySelectorAll<HTMLButtonElement>('.decision-buttons button')];
 	// Approve is shown disabled, never hidden, so Reject keeps its place; reading again won't help, so no Retry.
-	expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Reject', false], ['Approve', true]]);
+	expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Reject', true], ['Approve', true]]);
 	expect([...incomplete.host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Retry');
 	await unmount(incomplete.component);
 	// Below the shortest duration there is nothing to pick: Approve is off, and the drawer says why.

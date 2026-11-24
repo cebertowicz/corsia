@@ -3,7 +3,7 @@
 	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
 	import HostAccessFillRequestDrawer from './HostAccessFillRequestDrawer.svelte';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
-	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
+	import { text, duration, policyLabel, approvalReady, casReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
@@ -174,7 +174,7 @@
 	</div>
 
 	<footer class="decision-actions">
-		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
+		<HostAccessBlockedLine {stale} incomplete={!ready} kind="lease" rejectable={casReady(lease)} {notice} {onRetry} />
 		<!-- Approve is always there, disabled when it can't be used, so Reject never moves. -->
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>

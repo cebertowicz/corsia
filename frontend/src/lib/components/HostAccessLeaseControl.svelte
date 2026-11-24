@@ -63,6 +63,10 @@
 	import { on } from '$lib/ws/events';
 
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
+	/** A decision refused because the request changed since it was read (409), for every kind. */
+	const NEW_DETAILS = 'This request has new details. Review them, then approve or reject it.';
+	/** An Approve that failed for any other reason; Approve stays on. */
+	const APPROVE_FAILED = 'Couldn’t approve the request. Try again.';
 
 	let {
 		threadId,
@@ -253,14 +257,22 @@
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';
-			// Only the server's own words: a dropped connection already shows the could-not-check line.
-			if (caught instanceof HostAccessApiError) decisionNotice = { leaseId: lease.id, message: caught.message };
-			if (
-				caught instanceof HostAccessApiError
-				&& (caught.status === 404 || caught.status === 409)
-			) {
-				// The mutation lost its CAS race; replace local state from HTTP.
+			const status = caught instanceof HostAccessApiError ? caught.status : null;
+			if (status === 409) {
+				// The request changed since it was read: never the server's words; read it again and say so.
+				decisionNotice = { leaseId: lease.id, message: NEW_DETAILS };
+			} else if (decision === 'approve' && !(status === 404 && lease.kind === 'fill')) {
+				// A failed Approve (a 500, any other refusal, or no connection) leaves Approve on to try again.
+				// A fill that is gone keeps its own approved line, below.
+				decisionNotice = { leaseId: lease.id, message: APPROVE_FAILED };
+				refreshTruth = status === 404;
+				if (!refreshTruth && focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;
+			} else if (status === 404) {
+				// Gone: the server's line, then the list without it.
+				decisionNotice = { leaseId: lease.id, message: (caught as HostAccessApiError).message };
 			} else {
+				// Only the server's own words: a dropped connection already shows the could-not-check line.
+				if (caught instanceof HostAccessApiError) decisionNotice = { leaseId: lease.id, message: caught.message };
 				stale = true;
 				refreshTruth = false;
 				if (focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;

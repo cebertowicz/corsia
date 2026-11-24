@@ -673,7 +673,10 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
 
-		expect(dialog.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+		// Without its decision fields Reject can't be sent either, so the line says the request stays.
+		expect(dialog.querySelector('.blocked-line')?.textContent?.trim()).toBe(rejectDisabled
+			? 'This request is missing details CORSIA needs to check it, so you can’t approve or reject it. It stays here until the agent withdraws it or CORSIA restarts.'
+			: 'This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
 		// Approve is shown disabled, never hidden; reading again won't change the request, so no Retry.
 		expect(
 			Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
@@ -841,12 +844,12 @@ describe('HostAccessLeaseControl', () => {
 		]);
 	});
 
-	it('keeps the server line on the drawer when a stale Reject is refused, over the refreshed request', async () => {
+	it('says a refused stale Reject found new details, never the server line, over the refreshed request', async () => {
 		const changed = { ...waitingLease, revision: 5, application_hash: 'hash-2', purpose: 'Restart the Home Assistant add-on' };
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
 			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
-			.mockResolvedValueOnce(response({ detail: 'This request has new details. Review them before you approve.' }, false, 409))
+			.mockResolvedValueOnce(response({ detail: 'Lease changed.' }, false, 409))
 			.mockResolvedValue(response({ leases: [changed] }));
 		vi.stubGlobal('fetch', fetchMock);
 
@@ -862,7 +865,8 @@ describe('HostAccessLeaseControl', () => {
 		// The re-read brings the changed request back, and the drawer still says why the Reject didn't land.
 		await vi.waitFor(() => expect(dialog.textContent).toContain('Restart the Home Assistant add-on'));
 		const notice = dialog.querySelector('.decision-actions .decision-notice');
-		expect(notice?.textContent).toBe('This request has new details. Review them before you approve.');
+		expect(notice?.textContent).toBe('This request has new details. Review them, then approve or reject it.');
+		expect(dialog.textContent).not.toContain('Lease changed.');
 		expect(notice?.getAttribute('role')).toBe('alert');
 		expect(dialog.querySelector('.decision-head .status')?.textContent?.trim()).toBe('Needs approval');
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
@@ -870,12 +874,13 @@ describe('HostAccessLeaseControl', () => {
 		expect(approve?.disabled).toBe(false);
 	});
 
-	it('shows the server line in the drawer when an approve fails, and drops it on the next decision', async () => {
+	it.each([
+		['a 500', () => response({ detail: 'Host access could not start. Try again in a moment.' }, false, 500)],
+		['no connection', () => Promise.reject(new TypeError('Failed to fetch'))],
+	])('says Approve failed after %s, keeps Approve on, and drops the line on the next decision', async (_label, failure) => {
 		let failApprove = true;
 		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-			if (init?.method === 'POST' && failApprove) {
-				return response({ detail: 'Host access could not start. Try again in a moment.' }, false, 500);
-			}
+			if (init?.method === 'POST' && failApprove) return failure();
 			if (init?.method === 'POST') return response({ ...waitingLease, state: 'rejected' });
 			return response({ leases: [waitingLease] });
 		});
@@ -885,16 +890,45 @@ describe('HostAccessLeaseControl', () => {
 		flushSync();
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
-		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+		const button = (name: string) => Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((candidate) => candidate.textContent?.trim() === name)!;
+		button('Approve').click();
 		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent)
-			.toBe('Host access could not start. Try again in a moment.'));
+			.toBe('Couldn’t approve the request. Try again.'));
+		// Never the server's own words, and the person can try again straight away.
+		expect(dialog.textContent).not.toContain('Host access could not start');
+		expect(dialog.querySelector('.decision-head .status')?.textContent?.trim()).toBe('Needs approval');
+		expect(button('Approve').disabled).toBe(false);
+		expect(fetchMock.mock.calls.map((call) => call[1]?.method ?? 'GET')).toEqual(['GET', 'POST']);
 
 		failApprove = false;
-		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Reject')!.click();
+		button('Reject').click();
 		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(2));
 		expect(dialog.querySelector('.decision-notice')).toBeNull();
+	});
+
+	it('says an Approve refused for new details reads the request again and shows it', async () => {
+		const changed = { ...waitingLease, revision: 5, application_hash: 'hash-2', purpose: 'Restart the Home Assistant add-on' };
+		let getCount = 0;
+		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') return response({ detail: 'Lease changed.' }, false, 409);
+			getCount += 1;
+			return response({ leases: [getCount === 1 ? waitingLease : changed] });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
+		const dialog = await openPendingDrawer();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+
+		await vi.waitFor(() => expect(dialog.textContent).toContain('Restart the Home Assistant add-on'));
+		expect(dialog.querySelector('.decision-notice')?.textContent)
+			.toBe('This request has new details. Review them, then approve or reject it.');
+		expect(dialog.textContent).not.toContain('Lease changed.');
+		expect(fetchMock.mock.calls.map((call) => call[1]?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET']);
 	});
 
 	it('disables approval when the selected thread truth becomes stale', async () => {
@@ -1327,7 +1361,7 @@ describe('HostAccessLeaseControl', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('keeps a non-conflict mutation failure visible and disables another decision', async () => {
+	it('keeps a non-conflict Reject failure visible and disables Approve', async () => {
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
 			.mockResolvedValueOnce(response(
@@ -1344,8 +1378,10 @@ describe('HostAccessLeaseControl', () => {
 
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve')!;
-		approve.click();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Reject')!.click();
 
+		// Reject failures other than new details keep the server's words (round 4 gave none for them).
 		await vi.waitFor(() => {
 			expect(host.textContent).toContain('Reviewer transport failed.');
 		});

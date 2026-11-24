@@ -9,6 +9,8 @@
 	let {
 		stale = false,
 		incomplete = false,
+		kind = 'lease',
+		rejectable = true,
 		notice = null,
 		onRetry,
 	}: {
@@ -16,10 +18,32 @@
 		stale?: boolean;
 		/** The request lacks what CORSIA needs to check it: no Retry, since reading again won't change it. */
 		incomplete?: boolean;
+		/** Which request this is: a script's refusal is Deny, and each kind clears in its own way. */
+		kind?: 'lease' | 'fill' | 'script';
+		/** Whether an incomplete request can still be rejected (its decision fields are whole). */
+		rejectable?: boolean;
 		/** The server's own line when it refused this request's last decision. */
 		notice?: string | null;
 		onRetry?: () => void;
 	} = $props();
+
+	/**
+	 * Why an incomplete request can't be approved, and what the person can do instead. When its decision
+	 * fields are missing it can't be refused either, so the line says how that kind of request clears.
+	 */
+	function incompleteLine(requestKind: 'lease' | 'fill' | 'script', canRefuse: boolean): string {
+		if (requestKind === 'script') {
+			return canRefuse
+				? 'This request is missing details CORSIA needs to check it, so you can’t approve it. Deny it and the agent can ask again.'
+				: 'This request is missing details CORSIA needs to check it, so you can’t approve or deny it. It stays here until the agent withdraws it or the agent is stopped.';
+		}
+		if (canRefuse) {
+			return 'This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.';
+		}
+		return requestKind === 'fill'
+			? 'This request is missing details CORSIA needs to check it, so you can’t approve or reject it. It clears when CORSIA restarts.'
+			: 'This request is missing details CORSIA needs to check it, so you can’t approve or reject it. It stays here until the agent withdraws it or CORSIA restarts.';
+	}
 </script>
 
 {#if notice}
@@ -31,7 +55,7 @@
 		{#if onRetry}<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>{/if}
 	</div>
 {:else if incomplete}
-	<p class="blocked-line" role="status">This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.</p>
+	<p class="blocked-line" role="status">{incompleteLine(kind, rejectable)}</p>
 {/if}
 
 <style>

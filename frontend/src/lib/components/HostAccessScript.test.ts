@@ -66,27 +66,35 @@ it('names a stale script request as the lease names it', async () => {
 	target.remove();
 });
 
-it('says an incomplete script request cannot be approved', async () => {
-	const lease = {
+it('says an incomplete script request cannot be approved, and names Deny', async () => {
+	const base = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
-		application_hash: 'a'.repeat(64), decision_capability: '',
+		application_hash: 'a'.repeat(64), decision_capability: 'decision',
 		script_name: 'task.py', script_path: '/workspace/task.py',
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 	} satisfies HostAccessScript;
-	const target = document.createElement('div');
-	document.body.appendChild(target);
-	const component = mount(HostAccessPendingRequestDrawer, { target, props: {
-		lease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: true,
-		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
-	} });
-	flushSync();
-	expect(target.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
-	const buttons = [...target.querySelectorAll<HTMLButtonElement>('button')];
-	expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Deny', false], ['Approve', true]]);
-	await unmount(component);
-	target.remove();
+	const cases = [
+		// Its decision fields are whole: Deny still works.
+		[{ ...base, purpose: '' }, false, 'This request is missing details CORSIA needs to check it, so you can’t approve it. Deny it and the agent can ask again.'],
+		// Without them neither decision can be sent; the control disables Deny too.
+		[{ ...base, decision_capability: '' }, true, 'This request is missing details CORSIA needs to check it, so you can’t approve or deny it. It stays here until the agent withdraws it or the agent is stopped.'],
+	] as const;
+	for (const [lease, rejectDisabled, line] of cases) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale: false, deciding: false, rejectDisabled, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		} });
+		flushSync();
+		expect(target.querySelector('.blocked-line')?.textContent?.trim()).toBe(line);
+		const buttons = [...target.querySelectorAll<HTMLButtonElement>('button')];
+		expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Deny', rejectDisabled], ['Approve', true]]);
+		await unmount(component);
+		target.remove();
+	}
 });
 
 it('says when a script runs in plain words', () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
-	import { approvalReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
+	import { approvalReady, casReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessFill } from '$lib/api/hostAccess';
 
 	/**
@@ -78,7 +78,7 @@
 		</section>
 	</div>
 	<footer class="decision-actions">
-		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
+		<HostAccessBlockedLine {stale} incomplete={!ready} kind="fill" rejectable={casReady(request)} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>
 			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
