@@ -109,20 +109,20 @@ async def _ask(thread_id: str, login_id: str) -> str:
 
 
 async def _fill(thread_id: str, login: saved_logins.SavedLogin, runtime: Any, command: Any) -> str:
-    """Check the document, reloading once if an agent touched it, then fill; a status for _result."""
+    """Fill a clean document; any agent mark on it, its site or the session, or a linked window, is 'not_clean'.
+
+    The page is never reloaded: a site or session mark outlives a reload, so it can't make the page clean, and
+    it would lose the person's progress on it.
+    """
     session, site = runtime.record.session, saved_logins.normalized_site(login.site)
     domain = registrable_domain(urlsplit(site).hostname or "")
-    for attempt in range(2):
-        endpoint = await browser_cdp.page_endpoint(command)
-        browser = await browser_cdp.browser_endpoint(command, page.PAGE_CHECK_FAILED)
-        async with browser_cdp.CdpClient(endpoint) as cdp:
-            loader = browser_cdp.loader_id(await cdp.call("Page.getFrameTree"))
-            if await _clean(thread_id, session, loader, domain, browser, endpoint):
-                return await _fill_on(cdp, thread_id, login, session, endpoint, loader, domain)
-        if attempt == 0:
-            # The limit an agent's own reload gets.
-            await command(("reload",), COMMAND_TIMEOUT)
-    return "not_clean"
+    endpoint = await browser_cdp.page_endpoint(command)
+    browser = await browser_cdp.browser_endpoint(command, page.PAGE_CHECK_FAILED)
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        loader = browser_cdp.loader_id(await cdp.call("Page.getFrameTree"))
+        if not await _clean(thread_id, session, loader, domain, browser, endpoint):
+            return "not_clean"
+        return await _fill_on(cdp, thread_id, login, session, endpoint, loader, domain)
 
 
 async def _clean(thread_id: str, session: str | None, loader: str, domain: str, browser: str, endpoint: str) -> bool:
@@ -154,6 +154,7 @@ async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logi
             # From here the value may be in the page, so every end records a result exactly once.
             if status == "typed":
                 status = "unsubmitted"
+                requests.submitted(asyncio.get_running_loop().time())
                 if await page.submit(cdp, form) in {"enter", "clicked"}:
                     status = await _settled(endpoint, domain, requests)
             return status
@@ -202,7 +203,9 @@ async def _settled(endpoint: str, site_domain: str, requests: page.Requests) -> 
     """Wait for the page to settle as the password step does: 'signed_in', 'rejected', or 'unknown'.
 
     It re-probes REPROBE_AFTER_INPUT after the submit and after each change, and settles once the page's
-    document, host and visible password field have held for REPROBE_EVERY with no sign-in request open.
+    document, host and visible password field have held for REPROBE_EVERY with no sign-in request started
+    since the submit still open. One still open at SETTLE_LIMIT, however slow, leaves the result 'unknown':
+    a slow server is never read as a rejected password.
     """
     clock = asyncio.get_running_loop().time
     deadline, last, still_since = clock() + SETTLE_LIMIT, None, clock()
@@ -215,7 +218,7 @@ async def _settled(endpoint: str, site_domain: str, requests: page.Requests) -> 
             last = None
             continue
         now, state = clock(), (probe.visit, probe.host, bool(probe.visible_nodes))
-        if state != last or requests.in_flight(now):
+        if state != last or requests.open_since_submit():
             last, still_since = state, now
             continue
         if now - still_since < browser_step_lifecycle.REPROBE_EVERY:

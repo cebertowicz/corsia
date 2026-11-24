@@ -46,10 +46,14 @@ class Owner:
 
 
 REAL_REQUESTS = page.Requests
+REAL_SETTLED = fill._settled
 
 
 class Requests:
     async def start(self, _endpoint):
+        return None
+
+    def submitted(self, _now):
         return None
 
     async def stop(self):
@@ -103,12 +107,10 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
 
         async def call(self, method, **_params):
             assert method == "Page.getFrameTree"
-            return {"frameTree": {"frame": {"loaderId": w.loaders[0]}}}
+            return {"frameTree": {"frame": {"loaderId": w.loaders[0], "url": f"{SITE}/login"}}}
 
     async def command(_owner, _runtime, _lease, args, _timeout):
         w.steps.append(args[0])
-        if args == ("reload",):
-            w.loaders.pop(0) if len(w.loaders) > 1 else None
 
     async def find(_cdp, site, _normalize):
         w.steps.append("find")
@@ -367,30 +369,32 @@ async def test_every_status_has_its_own_line_and_none_falls_through(world):
 
 
 @pytest.mark.asyncio
-async def test_a_document_an_agent_scripted_is_reloaded_once_and_then_filled(world):
-    world.loaders = ["L1", "L2"]
-    browser_fill_marks._scripted[THREAD] = {"L1"}
-    await fill.fill_saved_login(THREAD, world.login_id)
-    assert world.steps.count("reload") == 1 and world.typed
+async def test_a_document_an_agent_scripted_is_the_persons_sign_in_with_no_reload(world, caplog):
+    # The agent's eval marks this document and its site, as before_agent_command does for any agent script.
+    await browser_fill_marks.before_agent_command(THREAD, "s1", ENDPOINT, ("eval", "document.title"))
+    assert browser_fill_marks.scripted(THREAD, "L1") and browser_fill_marks.site_marked(THREAD, "s1", "example.com")
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == f"{fill.NOT_CLEAN.format(site=SITE)} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
+    assert "reload" not in world.steps and "read" not in world.steps and not world.typed
+    _never_shown(world, caplog, text)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dirty", ["route", "script_after_reload", "script_on_the_site", "linked_window"])
-async def test_a_document_still_not_clean_after_one_reload_is_the_persons_step(world, dirty, caplog):
+@pytest.mark.parametrize("dirty", ["route", "script_on_another_page_of_the_site", "linked_window"])
+async def test_a_marked_or_linked_page_is_the_persons_step_with_no_reload(world, dirty, caplog):
     if dirty == "route":
-        browser_fill_marks._session_marks.add((THREAD, "s1"))
-    elif dirty == "script_after_reload":
-        browser_fill_marks._scripted[THREAD] = {"L1"}
-    elif dirty == "script_on_the_site":
-        # A script on another page of the saved site: the reload gives a new document, but not a clean site.
-        world.loaders = ["L1", "L2"]
-        browser_fill_marks._site_marks.add((THREAD, "s1", "example.com"))
+        await browser_fill_marks.before_agent_command(THREAD, "s1", ENDPOINT, ("network", "route", "*"))
+    elif dirty == "script_on_another_page_of_the_site":
+        # The script ran in an earlier document of the saved site; this one is new, but the site is marked.
+        world.loaders = ["L0"]
+        await browser_fill_marks.before_agent_command(THREAD, "s1", ENDPOINT, ("eval", "1"))
+        world.loaders = ["L1"]
     else:
         world.linked = True
     text = await fill.fill_saved_login(THREAD, world.login_id)
     lead = fill.NOT_CLEAN.format(site=SITE)
     assert text == f"{lead} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
-    assert world.steps.count("reload") == 1 and "read" not in world.steps and not world.typed
+    assert "reload" not in world.steps and "read" not in world.steps and not world.typed
     _never_shown(world, caplog, text)
 
 
@@ -522,11 +526,114 @@ async def test_the_result_waits_for_the_page_to_settle_as_the_password_step_does
     assert await fill._settled(ENDPOINT, "example.com", tracker) == expected
 
 
-def test_a_request_still_open_holds_the_settle_until_it_counts_as_background():
+def _sent(tracker: page.Requests, request: str, now: float, kind: str = "XHR") -> None:
+    tracker.note({"method": "Network.requestWillBeSent", "params": {"requestId": request, "type": kind}}, now)
+
+
+def _finished(tracker: page.Requests, request: str, now: float) -> None:
+    tracker.note({"method": "Network.loadingFinished", "params": {"requestId": request}}, now)
+
+
+def test_only_sign_in_requests_started_since_the_submit_count_and_stay_open_until_they_finish():
     tracker = page.Requests()
-    tracker.note({"method": "Network.requestWillBeSent", "params": {"requestId": "1", "type": "XHR"}}, 10.0)
-    tracker.note({"method": "Network.requestWillBeSent", "params": {"requestId": "2", "type": "Image"}}, 10.0)
-    assert tracker.seen == 1 and tracker.in_flight(11.0)
-    assert not tracker.in_flight(10.0 + page.BACKGROUND_AFTER)
-    tracker.note({"method": "Network.loadingFinished", "params": {"requestId": "1"}}, 11.0)
-    assert not tracker.in_flight(11.0)
+    _sent(tracker, "poll", 9.0)
+    tracker.submitted(10.0)
+    _sent(tracker, "sign-in", 10.5)
+    _sent(tracker, "image", 10.5, kind="Image")
+    assert tracker.seen == 1 and tracker.open_since_submit()
+    # However long it has been open: no time turns a sign-in request into background traffic.
+    _finished(tracker, "sign-in", 500.0)
+    assert not tracker.open_since_submit()
+    assert tracker.seen == 1
+
+
+async def _settle(monkeypatch, tracker: page.Requests, probes, on_probe=None) -> str:
+    """_settled with fast timings; `on_probe(count, tracker, now)` runs before each probe answers."""
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_AFTER_INPUT", 0.01)
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_EVERY", 0.03)
+    monkeypatch.setattr(fill, "SETTLE_LIMIT", 0.3)
+    pending, count = list(probes), [0]
+
+    async def probe(_endpoint, _known):
+        count[0] += 1
+        if on_probe is not None:
+            on_probe(count[0], tracker, asyncio.get_running_loop().time())
+        visit, host, shown = pending.pop(0) if len(pending) > 1 else pending[0]
+        return browser_cdp.PasswordProbe(visit, host, frozenset({1}) if shown else frozenset(), "T1",
+                                         present_nodes=frozenset())
+
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+    return await fill._settled(ENDPOINT, "example.com", tracker)
+
+
+def _submitted_with_sign_in_request() -> page.Requests:
+    tracker = page.Requests()
+    now = asyncio.get_running_loop().time()
+    tracker.submitted(now)
+    _sent(tracker, "sign-in", now)
+    return tracker
+
+
+@pytest.mark.asyncio
+async def test_a_sign_in_request_still_open_at_the_limit_leaves_the_result_unknown(monkeypatch):
+    tracker = _submitted_with_sign_in_request()
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", True)]) == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("shown", "expected"), [(True, "rejected"), (False, "signed_in")])
+async def test_a_sign_in_request_that_finishes_lets_the_page_decide(monkeypatch, shown, expected):
+    tracker = _submitted_with_sign_in_request()
+
+    def answer_on_the_third_probe(count, held, now):
+        if count == 3:
+            _finished(held, "sign-in", now)
+
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", shown)], answer_on_the_third_probe) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("shown", "expected"), [(True, "rejected"), (False, "signed_in")])
+async def test_a_request_the_page_started_before_the_submit_doesnt_hold_the_result(monkeypatch, shown, expected):
+    tracker = page.Requests()
+    now = asyncio.get_running_loop().time()
+    _sent(tracker, "poll", now - 1)
+    tracker.submitted(now)
+    _sent(tracker, "sign-in", now)
+    _finished(tracker, "sign-in", now)
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", shown)]) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_slow_correct_sign_in_marks_nothing_out_of_date_and_records_unknown_once(world, monkeypatch, caplog):
+    """The sign-in request is still open at the settle limit: neither result is recorded, only fill_unknown."""
+    called = _results(monkeypatch)
+
+    class SlowServer(REAL_REQUESTS):
+        async def start(self, _endpoint):
+            return None
+
+        async def stop(self):
+            return None
+
+        def submitted(self, now):
+            super().submitted(now)
+            _sent(self, "sign-in", now)
+
+    monkeypatch.setattr(page, "Requests", SlowServer)
+    monkeypatch.setattr(fill, "_settled", REAL_SETTLED)
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_AFTER_INPUT", 0.01)
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_EVERY", 0.03)
+    monkeypatch.setattr(fill, "SETTLE_LIMIT", 0.3)
+
+    async def probe(_endpoint, _known):
+        # The sign-in page still shows its password field: only the open request keeps this from 'rejected'.
+        return browser_cdp.PasswordProbe("L1", "example.com", frozenset({1}), "T1", present_nodes=frozenset())
+
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == fill.UNKNOWN.format(site=SITE, username=USER)
+    assert called == ["fill_unknown"]
+    assert saved_logins.get_login(world.login_id).status != saved_logins.STATUS_OUT_OF_DATE
+    assert world.owner.declared == [] and world.typed
+    _never_shown(world, caplog, text)

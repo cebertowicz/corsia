@@ -25,11 +25,6 @@ PAGE_CHECK_FAILED = "This page couldn't be checked"
 _WORLD = "corsia-saved-login"
 # Request kinds that carry a sign-in; the rest (images, styles, long-lived streams) don't decide when it settled.
 _SIGN_IN_REQUESTS = frozenset({"Document", "XHR", "Fetch", "Other"})
-# A request still open this long after it started is a page's background traffic, not the sign-in. Basis: the
-# requirement that a page's own long-lived requests (polling, streams) don't hold the result to the settle
-# limit, while a sign-in answered within this time is waited for. 5 s is not measured: a sign-in answered
-# later, with its password field still showing, reads as rejected.
-BACKGROUND_AFTER = 5.0
 
 
 # Shared by every script below: the prototypes' own getters, and the submit button, action and method of a form
@@ -213,16 +208,27 @@ async def linked_windows(browser: CdpClient, target_id: str) -> bool:
 
 
 class Requests:
-    """The page's sign-in requests since the fill began, by id and start time only, never URL or body."""
+    """The page's sign-in requests, by id and start time only, never URL or body. Only those started at or after
+    the submit count: one the page started before it (its own polling or a stream) neither holds nor makes the
+    result. `seen` is how many started after the submit."""
 
     def __init__(self) -> None:
         self.seen = 0
         self._open: dict[str, float] = {}
+        self._submitted: float | None = None
         self._task: asyncio.Task | None = None
         self._cdp: CdpClient | None = None
 
-    def in_flight(self, now: float) -> bool:
-        return any(now - started < BACKGROUND_AFTER for started in self._open.values())
+    def submitted(self, now: float) -> None:
+        """The form is submitted now (the event loop's clock, as `note` is given)."""
+        self._submitted = now
+
+    def _since_submit(self, started: float) -> bool:
+        return self._submitted is not None and started >= self._submitted
+
+    def open_since_submit(self) -> bool:
+        """Whether a sign-in request started at or after the submit is still open."""
+        return any(self._since_submit(started) for started in self._open.values())
 
     def note(self, message: dict, now: float) -> None:
         method, params = message.get("method"), message.get("params") or {}
@@ -230,7 +236,7 @@ class Requests:
         if not isinstance(request, str):
             return
         if method == "Network.requestWillBeSent" and params.get("type") in _SIGN_IN_REQUESTS:
-            self.seen += 1
+            self.seen += self._since_submit(now)
             self._open[request] = now
         elif method in {"Network.loadingFinished", "Network.loadingFailed"}:
             self._open.pop(request, None)
