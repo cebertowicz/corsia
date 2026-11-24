@@ -18,7 +18,7 @@ def db():
 
 
 def test_ranks_order_current_items_and_ignore_stale(db):
-    replace_ranks(db, "u", "workspace", "ranker", [{"key": "b", "reason": "First"}, {"key": "old", "reason": "Old"}], "2026-01-01")
+    replace_ranks(db, "u", "workspace", "ranker", [{"key": "b", "reason": "First"}, {"key": "old", "reason": "Old"}], "2026-01-01", {"b", "old"})
     items = [{"key": "a"}, {"key": "b"}, {"key": "c"}]
     result = apply_ranks(db, "u", "workspace", items)
     assert [item["key"] for item in result] == ["b", "a", "c"]
@@ -27,9 +27,9 @@ def test_ranks_order_current_items_and_ignore_stale(db):
 
 
 def test_replace_scopes_are_independent(db):
-    replace_ranks(db, "u", "workspace", "ranker", [{"key": "a", "reason": "One"}], "2026-01-01")
-    replace_ranks(db, "u", "project", "ranker", [{"key": "b", "reason": "Two"}], "2026-01-02")
-    replace_ranks(db, "u", "workspace", "ranker", [{"key": "c", "reason": "Three"}], "2026-01-03")
+    replace_ranks(db, "u", "workspace", "ranker", [{"key": "a", "reason": "One"}], "2026-01-01", {"a"})
+    replace_ranks(db, "u", "project", "ranker", [{"key": "b", "reason": "Two"}], "2026-01-02", {"b"})
+    replace_ranks(db, "u", "workspace", "ranker", [{"key": "c", "reason": "Three"}], "2026-01-03", {"c"})
     assert [row[0] for row in db.execute("SELECT item_key FROM activity_ranks WHERE scope='workspace'")] == ["c"]
     assert [row[0] for row in db.execute("SELECT item_key FROM activity_ranks WHERE scope='project'")] == ["b"]
 
@@ -43,11 +43,19 @@ def test_validation_names_stale_and_overlong_items():
 
 
 def test_failed_replacement_rolls_back_to_previous_order(db):
-    replace_ranks(db, "u", "workspace", "ranker", [{"key": "a", "reason": "One"}], "2026-01-01")
+    replace_ranks(db, "u", "workspace", "ranker", [{"key": "a", "reason": "One"}], "2026-01-01", {"a"})
     db.commit()
     with pytest.raises(sqlite3.IntegrityError):
         with db:
             replace_ranks(db, "u", "workspace", "ranker", [
                 {"key": "b", "reason": "Two"}, {"key": "b", "reason": "Duplicate"},
-            ], "2026-01-02")
+            ], "2026-01-02", {"b"})
     assert [row[0] for row in db.execute("SELECT item_key FROM activity_ranks")] == ["a"]
+
+
+def test_a_set_forgets_seen_keys_missing_from_the_queue_it_read(db):
+    db.execute("INSERT INTO activity_rank_nudges(user_id, scope, last_enqueued_at, seen_keys) VALUES (?,?,?,?)",
+               ("u", "workspace", "2026-01-01", '["a", "gone", "kept"]'))
+    replace_ranks(db, "u", "workspace", "ranker", [{"key": "a", "reason": "One"}], "2026-01-02", {"a", "kept"})
+    seen = db.execute("SELECT seen_keys FROM activity_rank_nudges").fetchone()[0]
+    assert seen == '["a", "kept"]'

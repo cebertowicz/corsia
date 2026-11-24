@@ -17,7 +17,9 @@ from plans.public import thread_paused_since
 # in its queue, so items that arrive meanwhile are ranked by that one turn. Each wake records the
 # keys then in the queue; once it is read, the next sweep that finds an unranked key missing from
 # that record wakes it again. A key counts from when it entered the queue, not when its item was
-# created, so a person task created early that falls due later still wakes the ranker. Until
+# created, so a person task created early that falls due later still wakes the ranker. A set
+# forgets the seen keys missing from the queue it read, so an item that leaves and comes back
+# unranked is new again (infra/activity_ranking.replace_ranks). Until
 # ranked, an item shows in Activity below the ranked ones, marked 'Not ranked yet'.
 WAKE_EVENT = 'activity.unranked'
 
@@ -109,8 +111,8 @@ class ActivityRankingSource:
         for user_id, project_id, thread_id in _scopes(db):
             scope = project_id or WORKSPACE_SCOPE
             # Nothing wakes a paused lane (the same read rule evaluation uses, R7). No nudge is
-            # stamped, so after the unpause the first sweep that finds an item raised since the
-            # last nudge wakes the ranker once; nothing is replayed.
+            # stamped, so after the unpause the first sweep that finds an unranked key missing
+            # from the last wake's seen keys wakes the ranker once; nothing is replayed.
             if thread_paused_since(db, thread_id) is not None:
                 continue
             try:

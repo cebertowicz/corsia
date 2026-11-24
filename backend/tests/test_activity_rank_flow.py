@@ -259,3 +259,36 @@ def test_an_old_task_that_falls_due_after_the_last_wake_wakes_the_ranker(db):
     assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == ['root']
     seen = json.loads(db.execute('SELECT seen_keys FROM activity_rank_nudges').fetchone()[0])
     assert f'task:{waiting.id}' in seen
+
+
+def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_wakes_the_ranker(db, monkeypatch):
+    from automation.continuation.sources import activity_ranking
+    from tools import attention_rank
+    key = seed(db)
+    monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
+    node_id = key.split(':', 1)[1]
+    source = activity_ranking.ActivityRankingSource()
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
+    _read_wakes(db)
+    # The item goes into Later; the ranker's set reads the queue without it, dropping its rank.
+    db.execute('UPDATE plan_nodes SET later=1 WHERE id=?', (node_id,))
+    db.commit()
+    assert 'Ranked 0' in attention_rank._run('root', {'user_id':'user-1', 'project_id':'project-1'}, 'set', [])
+    db.execute('UPDATE plan_nodes SET later=0 WHERE id=?', (node_id,))
+    db.commit()
+    # Back in the queue unranked, it is new again.
+    assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == ['root']
+
+
+def test_every_activity_title_is_clipped_whichever_kind_built_it(db):
+    from api.attention import activity_queue
+    from infra.activity_queue_base import ELLIPSIS, TITLE_MAX_CHARS
+    plan = service.ensure_plan('thread', 'root', db=db)
+    node = service.add_node(plan.id, kind='task', title='Step', acceptance_criteria='Done', assignee='user', db=db)
+    # A row older than the plan title limit, or a decision or held message, can carry a long title.
+    db.execute('UPDATE plan_nodes SET title=? WHERE id=?', ('Step ' * 80, node.id))
+    db.commit()
+    rows, _, _ = activity_queue(db, 'user-1', view='activity')
+    titles = [row['title'] for row in rows if row['kind'] == 'task']
+    assert titles and all(len(title) <= TITLE_MAX_CHARS for title in titles)
+    assert any(title.endswith(ELLIPSIS) for title in titles)
