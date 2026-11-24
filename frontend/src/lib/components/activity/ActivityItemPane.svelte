@@ -353,8 +353,10 @@
 
 <style>
 	.doc-pane { position: relative; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-	/* The reply control docks over the document's bottom edge, where a review ask docks. */
-	.doc-band { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; }
+	/* The reply control docks over the document's bottom edge, where a review ask docks: placed one canvas pad in, so
+	   the card still reaches the pane's edges and its content keeps the same inset as every other band. */
+	.doc-band { --canvas-pad-inline: var(--space-5); position: absolute; left: var(--canvas-pad-inline); right: var(--canvas-pad-inline); bottom: 0; z-index: 5; }
+	:global(.activity.phone) .doc-band { --canvas-pad-inline: var(--space-3); }
 	.dh { margin: 0 0 var(--space-3); font-size: var(--text-title3); line-height: 1.35; color: var(--text-primary); }
 	.dctx { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
 	.pre { white-space: pre-wrap; }

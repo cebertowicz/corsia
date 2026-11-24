@@ -22,6 +22,7 @@ vi.mock('$lib/api/plans', async (original) => ({
 }));
 
 import ActivityView from './ActivityView.svelte';
+import shellSource from '$lib/components/ReviewBarShell.svelte?raw';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 
 let host: HTMLElement;
@@ -174,6 +175,34 @@ describe('Activity list', () => {
 		const text = host.textContent ?? '';
 		for (const gone of ['Continue', 'Needs you', 'In progress', 'Complete (', 'Measures']) expect(text).not.toContain(gone);
 		expect(host.querySelector('.row-summary, .section-toggle, .activity-measures, .needs-you, #activity-work-title')).toBeNull();
+	});
+});
+
+describe('Activity’s bottom band at rest', () => {
+	it.each([
+		[1, 'CORSIA Conductor', 'Waiting for your answer'],
+		[4, 'Packaging & Onboarding', 'A step only you can do'],
+		[5, 'Ecosystem', 'Waiting for your yes before it’s sent'],
+	])('row %i names %s before its status, without being opened', async (row, agent, status) => {
+		render();
+		await settle();
+		rows()[row].click();
+		await settle();
+		const band = pane().querySelector<HTMLElement>('.rb-dock')!;
+		expect(band.classList.contains('open')).toBe(false);
+		expect(band.classList.contains('asker')).toBe(true);
+		expect(band.querySelector('.rb-dock-who')?.textContent).toBe(agent);
+		expect(band.querySelector('.rb-dock-q')?.textContent).toBe(status);
+	});
+
+	it('keeps the name and its separator shown on the resting line', () => {
+		// The docked card hides the asker at rest everywhere else; this rule is what shows it in Activity.
+		const selector = '.rb-dock.asker:not(.open) .rb-dock-by, .rb-dock.asker:not(.open) .rb-dock-sep {';
+		const start = shellSource.indexOf(selector);
+		expect(start).toBeGreaterThan(-1);
+		expect(shellSource.slice(start, shellSource.indexOf('}', start))).toContain('display: inline;');
+		// It must come after the rule that hides them, or that rule wins.
+		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by {'));
 	});
 });
 
