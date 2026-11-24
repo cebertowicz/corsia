@@ -24,7 +24,7 @@ from infra.queries import get_thread_for_user
 router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
 _NO_THREAD = "No conversation has that id."
-_BAD_BODY = "Send the conversation's thread_id."
+_BAD_BODY = "This request needs the conversation it's for."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 

@@ -303,7 +303,7 @@ async def test_not_now_drops_the_offer_and_is_safe_to_repeat(client, sessions):
 async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "Send the conversation's thread_id."}
+    assert refused.json() == {"detail": "This request needs the conversation it's for."}
 
 
 @pytest.mark.asyncio
