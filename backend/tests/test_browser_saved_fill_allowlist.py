@@ -189,6 +189,8 @@ def test_the_saved_fill_lines_say_what_holds_and_until_when():
     assert "on this page" in withheld
     assert "in this browser session, so until the session ends only these commands run, on every page" in session
     assert "Scripts, reading field values, network routes and every other command are refused." in session
+    # The agent can't end the session itself, so the line names the next step.
+    assert session.endswith("tell the person in chat what you need it for.")
 
 
 # --- The session ----------------------------------------------------------------------------------------------
