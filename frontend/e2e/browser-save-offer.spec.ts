@@ -22,14 +22,17 @@ const view = { width: 900, height: 600 };
 const server = { offer: null as Offer | null, save: 200, saves: 0, notNows: 0, gets: 0 };
 
 const PAGE_TITLE = 'Sign in to GitHub';
+const GITHUB_PAGE = { heading: PAGE_TITLE, footer: 'New to GitHub? Create an account' };
+// A company's own sign-in page, for the long site names: the tab, the address and the page itself belong to that site.
+const COMPANY_PAGE = { heading: 'Sign in to Regional Operations', footer: 'Need access? Ask your administrator' };
 
 /** A sign-in page drawn at the size the agent's viewport has, so it fills the pane edge to edge in the person's colours. */
-async function pageImage(page: Page, width: number, height: number, scheme: 'light' | 'dark') {
+async function pageImage(page: Page, width: number, height: number, scheme: 'light' | 'dark', copy: { heading: string; footer: string } = GITHUB_PAGE) {
 	const palette = scheme === 'dark' ? { page: '#0d1117', card: '#161b22', line: '#30363d', text: '#e6edf3', quiet: '#8b949e', field: '#0d1117' } : { page: '#ffffff', card: '#f6f8fa', line: '#d0d7de', text: '#1f2328', quiet: '#59636e', field: '#ffffff' };
 	const field = (label: string, value: string) => `<label style="display:block;margin:16px 0 4px;font-weight:600">${label}</label><div style="padding:6px 12px;height:32px;box-sizing:border-box;border:1px solid ${palette.line};border-radius:6px;background:${palette.field};line-height:18px">${value}</div>`;
 	const shot = await page.context().newPage();
 	await shot.setViewportSize({ width, height });
-	await shot.setContent(`<body style="margin:0;height:100vh;background:${palette.page};color:${palette.text};font:14px -apple-system,'Segoe UI',Helvetica,Arial,sans-serif"><main style="width:min(308px,calc(100% - 32px));margin:0 auto;padding-top:${Math.round(height * 0.12)}px"><h1 style="margin:0 0 16px;font-size:24px;font-weight:300;text-align:center">${PAGE_TITLE}</h1><form style="padding:16px;border:1px solid ${palette.line};border-radius:6px;background:${palette.card}">${field('Username or email address', 'jordan@example.com')}${field('Password', '••••••••••••')}<div style="margin-top:16px;padding:6px 12px;border-radius:6px;background:#1f883d;color:#fff;font-weight:600;text-align:center">Sign in</div></form><p style="margin:16px 0 0;padding:16px;border:1px solid ${palette.line};border-radius:6px;text-align:center;color:${palette.quiet}">New to GitHub? Create an account</p></main></body>`);
+	await shot.setContent(`<body style="margin:0;height:100vh;background:${palette.page};color:${palette.text};font:14px -apple-system,'Segoe UI',Helvetica,Arial,sans-serif"><main style="width:min(308px,calc(100% - 32px));margin:0 auto;padding-top:${Math.round(height * 0.12)}px"><h1 style="margin:0 0 16px;font-size:24px;font-weight:300;text-align:center">${copy.heading}</h1><form style="padding:16px;border:1px solid ${palette.line};border-radius:6px;background:${palette.card}">${field('Username or email address', 'jordan@example.com')}${field('Password', '••••••••••••')}<div style="margin-top:16px;padding:6px 12px;border-radius:6px;background:#1f883d;color:#fff;font-weight:600;text-align:center">Sign in</div></form><p style="margin:16px 0 0;padding:16px;border:1px solid ${palette.line};border-radius:6px;text-align:center;color:${palette.quiet}">${copy.footer}</p></main></body>`);
 	const data = (await shot.screenshot({ type: 'jpeg', quality: 85 })).toString('base64');
 	await shot.close();
 	return data;
@@ -76,6 +79,8 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 	// The panel's open state outlives a test, so toggle it only when an earlier test left it closed.
 	const openBrowser = page.getByRole('button', { name: 'Open browser', exact: true });
 	if (!(await openBrowser.isVisible())) await page.getByRole('button', { name: 'Toggle panel' }).click();
+	// An earlier test can leave the panel closed with its button still in the page, which a click then cannot reach.
+	else if (!(await openBrowser.click({ trial: true, timeout: 1500 }).then(() => true, () => false))) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	await openBrowser.click();
 	const address = page.getByRole('textbox', { name: 'Browser address' });
 	await address.fill('https://github.com/login');
@@ -118,6 +123,13 @@ async function signIn(page: Page, canvas: ReturnType<Page['locator']>, send: (me
 	send({ type: 'browser_password_page', visible: false });
 	// The your-step notice fades out before anything is framed.
 	await expect(page.locator('.password-notice')).toHaveCount(0);
+}
+
+/** The pane's page moves to another site: its tab title, address and drawn page all say so, as they would in life. */
+async function showSite(page: Page, send: (message: object) => void, scheme: 'light' | 'dark', domain: string, title: string, copy: { heading: string; footer: string }) {
+	send({ type: 'browser_metadata', url: `https://${domain}/login`, title, domain });
+	send({ type: 'frame', metadata: { deviceWidth: view.width, deviceHeight: view.height }, data: await pageImage(page, view.width, view.height, scheme, copy) });
+	await page.waitForTimeout(300);
 }
 
 const dock = (page: Page) => page.locator('.save-offer');
@@ -218,6 +230,7 @@ test.describe('the pane save-login offer', () => {
 				// A domain is never cut, however long: the question wraps around it and nothing runs past the dock.
 				const wholeInside = () => dock(page).locator('.question').evaluate((node) => node.scrollWidth <= node.clientWidth && (node.closest('.save-offer') as HTMLElement).scrollWidth <= (node.closest('.save-offer') as HTMLElement).clientWidth);
 				for (const domain of [TWO_LINE_DOMAIN, LONG_DOMAIN]) {
+					await showSite(page, send, scheme, domain, 'Sign in · Regional Operations', COMPANY_PAGE);
 					server.offer = { ...GITHUB, domain, site: `https://${domain}` };
 					await signIn(page, canvas, send, touch);
 					await expect(dock(page).locator('.question')).toContainText(domain);
@@ -229,6 +242,7 @@ test.describe('the pane save-login offer', () => {
 				}
 
 				// A page that moves to another site by itself (a link, a form submit, an agent) closes the offer.
+				await showSite(page, send, scheme, 'github.com', PAGE_TITLE, GITHUB_PAGE);
 				server.offer = GITHUB;
 				await signIn(page, canvas, send, touch);
 				await expect(dock(page)).toBeVisible();
@@ -246,7 +260,8 @@ test.describe('the pane save-login offer', () => {
 		}
 	});
 
-	test('works by keyboard alone: Tab order is Save then Not now, and focus lands on the page when it closes', async ({ page, request }) => {
+	test('works by keyboard alone: Tab order is Save then Not now, and focus lands on the page when it closes', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
 		server.offer = GITHUB;
@@ -297,7 +312,8 @@ test.describe('the pane save-login offer', () => {
 		expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
 	});
 
-	test('Save keeps its width and Not now stays put while the save is pending, and the dock says it is busy', async ({ page, request }) => {
+	test('Save keeps its width and Not now stays put while the save is pending, and the dock says it is busy', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 393, height: 852 });
 		const { canvas, send } = await openPane(page, request, 'light');
 		server.offer = GITHUB;
@@ -321,7 +337,8 @@ test.describe('the pane save-login offer', () => {
 		await expect(dock(page)).toContainText('Saved');
 	});
 
-	test('the dock grows in and out and the error line with it, never popping', async ({ page, request }) => {
+	test('the dock grows in and out and the error line with it, never popping', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 768, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
 		// One height per animation frame, for the dock and for the error line inside it.
@@ -359,7 +376,8 @@ test.describe('the pane save-login offer', () => {
 		expect(between(await rest('dock'), from)).toBe(true);
 	});
 
-	test('a touch screen gets 44 px targets at any width', async ({ page, request }) => {
+	test('a touch screen gets 44 px targets at any width', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
 		// The screen turns touch once the pane is open, as a tablet docked to a keyboard does.
@@ -371,7 +389,8 @@ test.describe('the pane save-login offer', () => {
 		for (const name of ['Save', 'Not now']) expect((await dock(page).getByRole('button', { name }).boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
 	});
 
-	test('reduced motion closes the dock without a fade', async ({ page, request }) => {
+	test('reduced motion closes the dock without a fade', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
