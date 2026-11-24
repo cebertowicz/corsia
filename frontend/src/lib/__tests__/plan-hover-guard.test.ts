@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * A `:hover` rule outside `@media (hover: hover)` sticks after a tap on a touch screen, so a
- * tapped row or toggle keeps its hover chip (corsia#429). The Activity surfaces already guard
- * theirs, e.g. `activity/ActivityPlanRow.svelte`'s `.row-summary:hover` (line 238).
+ * tapped row or toggle keeps its hover chip (corsia#429).
  */
 const sources = import.meta.glob('../components/plans/*.svelte', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 

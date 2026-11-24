@@ -22,8 +22,7 @@ PASSWORD_PAGE = (
 )
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
-    "This page has shown a password field, so running scripts on it and reading that field stay refused. "
-    "Other commands still work."
+    "This page has shown a password field, so running scripts on it and reading that field stay refused."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
 # A failed plan write loses at most the person's task for the page, never the browser itself. What became of
@@ -153,14 +152,15 @@ async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, a
 
 
 async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
-                            resolve: Resolve | None = None, session: str | None = None) -> PageAccess:
+                            resolve: Resolve | None = None, session: str | None = None,
+                            current_session: Callable[[], str | None] | None = None) -> PageAccess:
     """require_page_access, also saying whether a snapshot's field values must be hidden (hide_field_values).
 
     A command passes with a password field visible only once the person marked it done (R14): every other
     path with one showing refuses first. Once a password step ended on the visit (finished_visit), only
     _filled_field_allows commands run until the visit ends, with or without a visible field.
     """
-    result, note = await _guarded_probe(thread_id, probe, session=session)
+    result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
     filled = bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
@@ -223,18 +223,21 @@ def hide_field_values(snapshot: str) -> str:
 
 
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
-                              session: str | None = None) -> None:
+                              session: str | None = None,
+                              current_session: Callable[[], str | None] | None = None) -> None:
     """Give the page to the person; an open declaration is a no-op, a decline is final for its visit."""
     instruction = str(instruction).strip()
     if not instruction:
         raise BrowserSessionError("browser person step needs an instruction")
-    _, note = await _guarded_probe(thread_id, probe, session=session, instruction=instruction)
+    _, note = await _guarded_probe(thread_id, probe, session=session, instruction=instruction,
+                                   current_session=current_session)
     if note is not None:
         raise BrowserSessionError(DECLARATION_NOT_RECORDED)
 
 
 async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, session: str | None = None,
-                         instruction: str | None = None) -> tuple[PasswordProbe, str | None]:
+                         instruction: str | None = None,
+                         current_session: Callable[[], str | None] | None = None) -> tuple[PasswordProbe, str | None]:
     """Share the agent probe and failure mapping between commands and declarations.
 
     A step that can't be written is logged and a live step is kept (the next call or re-probe recovers it);
@@ -254,7 +257,9 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         session=session, instruction=instruction or "",
     )
     try:
-        decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
+        decision = await browser_step_lifecycle.step_event(
+            thread_id, event, observer=partial(_observe_read_guard, thread_id),
+            page=_page_source(thread_id, probe, current_session))
     except Exception:
         log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
                     thread_id, exc_info=True)
@@ -274,6 +279,15 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
     return result, None
+
+
+def _page_source(thread_id: str, probe: browser_pane_state.Probe,
+                 current_session: Callable[[], str | None] | None) -> browser_pane_state.PageProbe:
+    """The agent's probe as a step's own page source, with the guard's known nodes and its observer."""
+    async def guarded_probe(_known: browser_pane_state.KnownNodes) -> PasswordProbe:
+        return await probe(_known_nodes(thread_id))
+
+    return browser_pane_state.PageProbe(guarded_probe, current_session, partial(_observe_read_guard, thread_id))
 
 
 def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_session: bool, guard_present: bool) -> None:

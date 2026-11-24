@@ -50,6 +50,18 @@ describe('rolledLive', () => {
 		expect(rolled.get('leaf')).toEqual(['w-leaf']);
 	});
 
+	it('carries no worker for a step the server reads Waiting, on the step or any branch over it', () => {
+		// The worker runs other work while this step waits for it to come back.
+		const { threads: rolled } = rolledLive([
+			step('root', null, null),
+			shown(step('parked', 'root', 'w-busy'), 'waiting', 'waiting'),
+			shown(step('worked', 'root', 'w-on-it'), 'working', 'waiting'),
+		]);
+
+		expect(rolled.get('parked')).toEqual([]);
+		expect(rolled.get('root')).toEqual(['w-on-it']);
+	});
+
 	it('ends on a parent cycle instead of walking it forever', () => {
 		const { threads: rolled } = rolledLive([step('a', 'b', 'w-a'), step('b', 'a', null)]);
 

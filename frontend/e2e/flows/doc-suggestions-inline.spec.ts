@@ -4,6 +4,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { layouts } from '../support/liveConcurrency';
+import { enterDocumentEdit } from '../support/documentReading';
 
 // The editor's inline marks for one suggestion: the struck quote and the drawn insert.
 const strike = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-del[data-suggestion-id="${id}"]`);
@@ -183,6 +184,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
+			// The phone layout runs in the touch project, which opens in Reading and takes no typing: choose Edit first (a no-op at 1440).
+			await enterDocumentEdit(page);
 			// A press on the struck quote opens its card at every width (the phone's sheet included); closing that card returns the editor to the caret.
 			await expect(strike(page, loose)).toHaveText('is loose');
 			// The middle of the struck quote, not either edge, so the typed character lands inside it.
@@ -212,6 +215,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
 			await expect(strike(page, loose)).toHaveText('is loose');
+			// The phone opens in Reading, which takes no typing: choose Edit first so the first key is the one under test.
+			await enterDocumentEdit(page);
 			await strike(page, loose).tap();
 			await expect(page.getByRole('dialog')).toBeVisible();
 			// No Escape: the key itself closes the sheet.
@@ -228,6 +233,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
+			// The phone layout runs in the touch project, which opens in Reading and takes no typing: choose Edit first (a no-op at 1440).
+			await enterDocumentEdit(page);
 			// Neither canvas here is wide enough for the margin, so the list (a popover, or the phone's sheet) is closed before the
 			// document is touched, and the card is still listed when it opens again.
 			await openComments(page, drawer);

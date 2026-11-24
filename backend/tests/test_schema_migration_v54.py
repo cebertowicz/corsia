@@ -22,7 +22,7 @@ def _index_names(db: sqlite3.Connection) -> set[str]:
 
 
 def test_fresh_schema_is_the_current_version() -> None:
-    assert SCHEMA_VERSION == 205
+    assert SCHEMA_VERSION == 207
 
 
 def test_historical_migration_adds_the_index_for_v54_replay() -> None:

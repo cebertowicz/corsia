@@ -500,9 +500,7 @@ def test_blocked_paths_liveness_and_server_owned_current_next(db):
 
     # Its only blocked leaf is sequenced behind open work: a wait, not a block.
     assert parent["progress"]["liveness"] == "waiting"
-    assert nodes[ids["blocked"]]["attention_path"] == [
-        ids["phase"], ids["track"], ids["blocked"],
-    ]
+    assert nodes[ids["blocked"]]["attention_path"] == []
     assert nodes[ids["next"]]["attention_path"] == []
     assert ids["blocked"] in parent["current_node_ids"]
     assert parent["next_node_ids"] == [ids["next"]]
@@ -837,6 +835,8 @@ def test_operator_node_carries_its_assignee(db):
     nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
 
     assert nodes[mine.id]["assignee"] == "user"
+    assert nodes[mine.id]["requires_user_action"] is True
+    assert nodes[mine.id]["attention_path"] == [mine.id]
     assert nodes[mine.id]["waiting_on"] == ["Ship it"]
     assert nodes[agent.id]["assignee"] is None
     assert nodes[agent.id]["waiting_on"] == []

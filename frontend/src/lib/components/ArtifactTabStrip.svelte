@@ -11,7 +11,8 @@
 		activeKey: string | null;
 		onSelect: (instanceId: string) => void;
 		onClose: (instanceId: string) => void;
-		onCollapse: () => void;
+		/** Absent where the pane is the whole view (Activity), so there is nothing to collapse into. */
+		onCollapse?: () => void;
 	} = $props();
 
 	let stripEl = $state<HTMLElement | undefined>(undefined);
@@ -137,9 +138,11 @@
 	</div>
 	<!-- The open document's Comments and Details sit after the tabs, before Collapse. -->
 	{#if $documentBar}<span class="doc-tools">{@render $documentBar.tools()}</span>{/if}
-	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
-		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-	</button>
+	{#if onCollapse}
+		<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+		</button>
+	{/if}
 </div>
 
 <style>

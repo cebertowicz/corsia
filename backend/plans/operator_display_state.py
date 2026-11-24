@@ -65,17 +65,20 @@ def node_paused(execution: dict) -> bool:
     return pause is not None and user_steering.is_user_pause(pause)
 
 
-def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> bool:
-    """The one rule for suppressing a plan-owned ask's attention until resume."""
-    return plan_paused or node_paused
+def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False, later: bool = False) -> bool:
+    """The one rule for suppressing a plan-owned ask's attention until resume.
+
+    A task in Later asks no one (Later design PS1): look and attention.
+    """
+    return plan_paused or node_paused or later
 
 
 def review_deferred(
-    condition: str, review_kind: str | None, *, plan_paused: bool, node_paused: bool,
+    condition: str, review_kind: str | None, *, plan_paused: bool, node_paused: bool, later: bool = False,
 ) -> bool:
     """Display and bucket consequence of ``ask_deferred`` for a row in human review."""
     return (
-        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
+        ask_deferred(plan_paused=plan_paused, node_paused=node_paused, later=later)
         and condition == "review" and review_kind in _HUMAN_REVIEWS
     )
 
@@ -91,7 +94,7 @@ def node_paused_sql(node_id_sql: str) -> str:
 
 def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
     """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
-    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
+    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)} OR EXISTS (SELECT 1 FROM plan_nodes later_node WHERE later_node.id={node_id_sql} AND later_node.later=1))"
 
 
 def asks_user_from_facts(
@@ -99,6 +102,9 @@ def asks_user_from_facts(
     *, has_attention: bool, causes: list[dict],
 ) -> bool:
     """Whether the row asks the person, independently of a pause ``ask_deferred`` counts.
+
+    Later is not read here: ``display_from_facts`` (look) and ``ask_deferred``
+    (attention) apply it, so a task in Later asks no one (Later design PS1).
 
     The person's own task still asks them while all that holds it is a pause
     (``ask_deferred`` defers its attention) or an agent's check-back watch: that
@@ -140,6 +146,7 @@ def display_from_facts(
     review_kind: str | None = None,
     *,
     asks_user: bool = False,
+    later: bool = False,
     child_working: bool = False,
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
@@ -147,10 +154,13 @@ def display_from_facts(
     """Reduce compact lifecycle facts into the canonical four-state display.
 
     ``asks_user`` is ``asks_user_from_facts``: a pause defers an ask's attention, never its look.
+    A task in Later asks no one (Later design PS1): look and attention.
     """
     if state in TERMINAL_DISPLAY:
         return dict(TERMINAL_DISPLAY[state])
     if asks_user:
+        if later:
+            return {"label_key": "waiting", "tone_key": "waiting"}
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}

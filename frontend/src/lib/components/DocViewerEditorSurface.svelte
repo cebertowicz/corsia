@@ -52,6 +52,7 @@
 		onEdit,
 		onLayout,
 		readOnly,
+		reading = false,
 		imageBase = null,
 		onOpenImage,
 		saveError,
@@ -86,6 +87,7 @@
 		onEdit: (changes: ChangeDesc, open: ReadonlySet<string>) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
+		reading?: boolean;
 		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
@@ -154,6 +156,7 @@
 	export function coveredBySheet(from: number, opening: boolean) { return editor?.coveredBySheet(from, opening); }
 	export function editorView() { return editor?.editorView(); }
 	export function acceptSuggestion(text: string, eventId: string, ids: string[]) { return editor?.acceptSuggestion(text, eventId, ids) ?? false; }
+	export function clearInputSelection() { editor?.clearInputSelection(); }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
@@ -180,7 +183,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		<!-- A refusal stays on screen while a choice's write runs (the draft is 'saving' then, with no error), so Details is not closed and rebuilt. -->
 		{#if saveError || refusedStale}
 			<div class="save-error" role="alert">{saveError || EDITOR_STALE_STATUS}{#if tabInstanceId && refusedStale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>

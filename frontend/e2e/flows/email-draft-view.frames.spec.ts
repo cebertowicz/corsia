@@ -13,6 +13,7 @@ import { expect, type APIRequestContext, type Browser, type Page, type TestInfo 
 import { createSession, lastAssistantMessage, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
+import { enterDocumentEdit } from '../support/documentReading';
 import { FONT, FOUR, NEWER, SAME_SUBJECT, failed, fresh, markEmailDraft, mockEmailDraftContext, reply, type ServerAttachment, type ServerContext } from '../support/emailDraftContext';
 
 const OUT = process.env.EMAIL_FRAMES_OUT ?? '';
@@ -226,6 +227,8 @@ const SCENARIOS: Scenario[] = [
 	{ name: '4e2-two-bad-addresses', doc: 'badto2', context: reply(), act: expectBad(['priya.raman', 'dana@'], '2 entries aren’t full email addresses: priya.raman, dana@.') },
 	{ name: '4f-mid-edit', doc: 'reply', context: reply(), act: async (page, docPath, request) => {
 		// Caret at the end of the To line, a second address half typed. The autosave must write the header line to the file.
+		// The phone viewport has a touch pointer, which opens documents in Reading; choose Edit before typing (a no-op at 1440).
+		await enterDocumentEdit(page);
 		const toLine = page.locator('.cm-line.cm-email-head').filter({ hasText: 'To:' });
 		const box = (await toLine.boundingBox())!;
 		await page.mouse.click(box.x + 40, box.y + box.height - 4);

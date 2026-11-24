@@ -16,7 +16,9 @@ Observer = Callable[[PasswordProbe | None, bool, bool], None]
 
 
 @dataclass(frozen=True)
-class PaneProbe:
+class PageProbe:
+    """A probe of the shared page: a connected pane's, or the agent's own for a browser step's page."""
+
     probe: Probe
     session: Callable[[], str | None] | None = None
     observer: Observer | None = None
@@ -25,7 +27,7 @@ _panes: dict[str, set[str]] = {}
 _capture_sizes: dict[str, tuple[int, int, bool]] = {}
 _pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
 # Each connected pane's probe of the shared page, over the page endpoint it already holds.
-_pane_probes: dict[str, dict[str, PaneProbe]] = {}
+_pane_probes: dict[str, dict[str, PageProbe]] = {}
 _screencasts: dict[str, dict[str, PaneScreencast]] = {}
 _target_changes: dict[str, dict[str, Callable[[], None]]] = {}
 # When the agent last acted in each thread's page, so a pane that connects later shows it there.
@@ -47,7 +49,7 @@ def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict
         if (seen := _agent_seen.get(thread_id)) is not None:
             report(_agent_message(time.monotonic() - seen))
     if probe is not None:
-        _pane_probes.setdefault(thread_id, {})[connection_token] = PaneProbe(probe, session, observer)
+        _pane_probes.setdefault(thread_id, {})[connection_token] = PageProbe(probe, session, observer)
         on_probe(thread_id)
 
 
@@ -97,7 +99,7 @@ def has_pane(thread_id: str) -> bool:
     return bool(_panes.get(thread_id))
 
 
-def pane_probes(thread_id: str) -> list[PaneProbe]:
+def pane_probes(thread_id: str) -> list[PageProbe]:
     """Every connected pane's probe of this thread's one shared page."""
     return list(_pane_probes.get(thread_id, {}).values())
 

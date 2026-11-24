@@ -15,6 +15,14 @@ export function stepState(card: Pick<UpdateCard, 'step_state'>, node: Pick<Opera
 }
 
 /**
+ * Whether an open step asks the person now: the plan row's own server word decides, so a step
+ * parked in Later reads as its row does (Waiting). A step the plan read does not list keeps asking.
+ */
+export function stepAsks(node: Pick<OperatorNode, 'display'> | undefined): boolean {
+	return !node?.display || node.display.label_key === 'needs_you';
+}
+
+/**
  * What Do → opens: the step's instructions document when it has one; a sign-in or other page in a
  * shared browser, that thread's browser; else the task's details in the plan.
  */
