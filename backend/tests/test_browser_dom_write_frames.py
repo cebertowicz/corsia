@@ -487,6 +487,13 @@ async def test_a_page_element_under_a_header_is_written_while_an_embed_in_view_s
     assert page.resolved[-1] == LINK and page.written == ["field"]
 
 
+class _HitsEverywhere(dict):
+    """Every point hits the link, so no missed hit can refuse the write before the frame's place is compared."""
+
+    def get(self, key, default=None):
+        return LINK
+
+
 @pytest.mark.asyncio
 async def test_a_frame_owner_that_never_stops_moving_is_refused_not_written(monkeypatch):
     page = _page(hit=TOP, frames=("child",), owners={"child": OWNER}, holds={"child"})
@@ -496,11 +503,13 @@ async def test_a_frame_owner_that_never_stops_moving_is_refused_not_written(monk
     async def run(args, timeout):
         if args[0] == "scrollintoview":
             places.extend(_owner_at(rise) for rise in range(1, 200))
+            page.hits = _HitsEverywhere()
         return await _run(args, timeout)
 
-    with pytest.raises((browser_dom_write.DomWriteRefused, BrowserSessionError)):
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
         await browser_dom_write.shared_action(run, PAGE_URL, ("click", "@e2"))
-    assert page.written == []
+    # Every hit lands, so the refusal is the frame-place comparison failing the page check, not a missed hit.
+    assert refused.value.reason == "page_error" and page.written == []
 
 
 @pytest.mark.asyncio
