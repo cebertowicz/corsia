@@ -1114,6 +1114,7 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     connection, and a separate reader cannot see the caller's uncommitted
     changes, so it captures exactly the pre-migration state.
 
+    A failed clone or WAL fold is logged and falls back to the page copy.
     Returns the backup path, or None for an in-memory database with no file.
     """
     source = _connection_database_path(conn)
@@ -1134,6 +1135,8 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
             clone_database(source, target, expected_user_version=from_version)
         except CloneUnsupported as unsupported:
             log.info("Pre-migration backup copies pages: %s", unsupported)
+        except Exception:
+            log.warning("Pre-migration backup clone failed for %s; copying pages", source, exc_info=True)
         else:
             startup_progress.backup_step(0, 0, 1)
             return target
