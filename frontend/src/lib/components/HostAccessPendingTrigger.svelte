@@ -51,6 +51,8 @@
 		align-items: center;
 		gap: var(--space-3);
 		width: 100%;
+		/* Never wider than its place: on a phone a long agent name would otherwise set its minimum width. */
+		min-width: 0;
 		min-height: var(--touch-target);
 		padding: var(--space-2) var(--space-3);
 		border: none;
