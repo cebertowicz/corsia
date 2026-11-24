@@ -73,25 +73,31 @@
 		color: var(--text-tertiary);
 		font-weight: var(--fw-semibold);
 	}
+	/* The agent and the site share a row only when both fit whole; otherwise the site wraps under the agent,
+	   so the site never shortens before the agent's name does. */
 	.pending-what {
 		display: flex;
 		flex: 1 1 0;
+		flex-wrap: wrap;
 		align-items: baseline;
-		gap: var(--space-2);
+		column-gap: var(--space-2);
+		row-gap: 0;
 		min-width: 0;
 	}
 	.pending-owner {
 		flex: 0 1 auto;
 		min-width: 0;
+		max-width: 100%;
 		overflow: hidden;
 		font-weight: var(--fw-medium);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	/* One line, shortened in the middle by whole segments (siteLabels), never wrapped. */
+	/* One line, never wrapped. Its whole width (--label-full, set by fitLabel) decides whether it fits beside
+	   the agent; on a line of its own it is shortened from the front only when the whole row is too narrow. */
 	.pending-site {
-		flex: 1 1 0;
-		min-width: 0;
+		flex: 1 1 var(--label-full, auto);
+		min-width: min(100%, var(--label-full, 0px));
 		overflow: hidden;
 		color: var(--text-secondary);
 		white-space: nowrap;
@@ -116,6 +122,6 @@
 			align-items: stretch;
 			gap: 0;
 		}
-		.pending-site { flex: none; }
+		.pending-site { flex: none; min-width: 0; }
 	}
 </style>
