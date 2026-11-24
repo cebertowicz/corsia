@@ -17,10 +17,10 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
+	import DocViewerDone from './DocViewerDone.svelte';
 
 	let {
-		presence,
-		touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
+		presence, touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
 		reviewBar,
 		ask = null,
 		commentsOpen = false,
@@ -223,8 +223,8 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
-	{#if touchReading && editing}<button type="button" class="bar-done" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={onDone}>Done</button>{/if}
-	<span class="bar-presence" hidden={touchReading && editing}>{#if presence}{@render presence()}{/if}</span>
+	{#if touchReading && editing}<DocViewerDone {onDone} />{/if}
+	<span class="bar-presence" hidden={touchReading && editing} style:display={touchReading && editing ? 'none' : 'contents'}>{#if presence}{@render presence()}{/if}</span>
 	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
 		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
 		<!-- The strip's own room decides whether the words show; the ↻ mark is the phone header's compact form. -->
@@ -266,7 +266,7 @@
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
-			{#if touchReading}<button type="button" class="p-row p-edit" disabled={!canEdit || editing} onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { panelOpen = false; onEnterEdit?.(); }}>Edit</button>{/if}
+			{#if touchReading}<button type="button" class="p-row p-edit" style:min-height="var(--touch-target)" disabled={!canEdit || editing} onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { panelOpen = false; onEnterEdit?.(); }}>Edit</button>{/if}
 			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
@@ -300,8 +300,8 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	/* The bar's controls: 36px with a pointer, 44px at phone width (IconButton lg's sizes), 16px apart (the hosts' gap). */
-	.bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
-	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload, .bar-done { --bar-row: var(--touch-target); } }
+	.bar-comments, .bar-details, .bar-reload { --bar-row: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); height: var(--bar-row); min-width: var(--bar-row); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-regular); white-space: nowrap; cursor: pointer; }
+	@media (max-width: 768px) { .bar-comments, .bar-details, .bar-reload { --bar-row: var(--touch-target); } }
 	.bar-comments:hover:not(:disabled), .bar-details:hover { background: var(--bg-hover); color: var(--text-primary); }
 	/* File changed is one control with two forms: the words, which size the button (dev's 135x32 text button), and the ↻ mark,
 	 * which is the square below. Its width is never fixed, or the label paints past the box and over its neighbour. */
@@ -323,7 +323,7 @@
 	.bar-comments .bar-sent svg, .bar-comments .bar-sent-measure svg { flex: none; }
 	.bar-comments .sent-check { width: 12px; height: 12px; stroke-width: 2.4; }
 	.bar-comments:disabled { opacity: 0.5; cursor: not-allowed; }
-	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible, .bar-done:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.bar-comments:focus-visible, .bar-details:focus-visible, .bar-reload:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	/* The tab strip's own room decides, not the window's: the row gives way in the order the phone header gives way in,
 	 * and the document tab is never what is shortened first. The svg rides in the control so the narrow form is the
 	 * approved phone header's ↻ mark, with the same accessible name and tooltip. */
@@ -345,8 +345,6 @@
 	.bar-comments svg { width: var(--text-subhead); height: var(--text-subhead); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	.bar-new { color: var(--accent-text); font-weight: var(--fw-medium); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
-	.bar-done { width: var(--touch-target); min-width: var(--touch-target); min-height: var(--touch-target); color: var(--accent-text); font-weight: var(--fw-semibold); }
-	.bar-presence { display: contents; } .bar-presence[hidden] { display: none; } .p-edit { min-height: var(--touch-target); }
 	.bar-details { padding: 0 var(--space-2); }
 	.bar-details svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 	.bar-details[aria-expanded='true'] { background: var(--bg-hover); color: var(--text-primary); }
