@@ -58,6 +58,29 @@ function groupToggle(): HTMLButtonElement {
 }
 
 describe('idle plan-group disclosure', () => {
+	it('opens only Working current paths, including delegated work and agent review', () => {
+		const nodes = [
+			node({ id: 'dependency-phase', kind: 'phase' }),
+			node({ id: 'dependency', parent_id: 'dependency-phase', depth: 1, unmet_dependencies: ['other'], display: { label_key: 'waiting', tone_key: 'waiting' } }),
+			node({ id: 'running-phase', kind: 'phase' }),
+			node({ id: 'running', parent_id: 'running-phase', depth: 1, state: 'active' }),
+			node({ id: 'child-phase', kind: 'phase' }),
+			node({ id: 'child', parent_id: 'child-phase', depth: 1, display: { label_key: 'working', tone_key: 'active' } }),
+			node({ id: 'review-phase', kind: 'phase' }),
+			node({ id: 'review', parent_id: 'review-phase', depth: 1, state: 'review_requested' }),
+		];
+		// Matrix: Ready for agent review opens only on the current owner path.
+		const index = indexPlanNodes(nodes, { maxDepth: 6, currentNodeIds: ['dependency', 'running', 'child', 'review'] });
+		expect([...index.defaultExpandedBranches].sort()).toEqual(['child-phase', 'review-phase', 'running-phase']);
+	});
+
+	it('opens a phase with a dependency wait and an imminent timed wait', () => {
+		const nodes = tree(waiting('soon', 12));
+		nodes.push(node({ id: 'dependency', parent_id: 'group', depth: 1, unmet_dependencies: ['other'], display: { label_key: 'waiting', tone_key: 'waiting' } }));
+		const index = indexPlanNodes(nodes, { maxDepth: 6, currentNodeIds: ['dependency', 'soon'], now: NOW });
+		expect(index.defaultExpandedBranches.has('group')).toBe(true);
+	});
+
 	it('does not default-open a group for a current leaf gathered into Scheduled', () => {
 		const nodes = tree(waiting('scheduled', 48));
 		const input: Parameters<typeof indexPlanNodes>[1] & { now: number } = {

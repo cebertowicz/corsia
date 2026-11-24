@@ -1,6 +1,7 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { nodeStateTone } from './planDisplay';
-import { isScheduledMember } from './planScheduled';
+import { isScheduledMember, SCHEDULE_HORIZON_MS } from './planScheduled';
+import { waitEndsAtMs } from './planWaits';
 import type { OperatorFoldLevel } from '$lib/api/plans';
 import type { FoldedWork, FoldLevelView } from './planFoldLevels';
 import {
@@ -18,7 +19,7 @@ import {
 export interface PlanTreeIndex {
 	/** Every node by id, for ancestor walks. */
 	byId: Map<string, OperatorNode>;
-	/** Ancestors of current non-scheduled and attention-path nodes, expanded by default. */
+	/** Ancestors of Working, imminent scheduled, and attention-path nodes, expanded by default. */
 	defaultExpandedBranches: Set<string>;
 	/** Parents whose children sit past `maxDepth`, offering a drill affordance. */
 	boundaryParents: Set<string>;
@@ -138,7 +139,10 @@ export function indexPlanNodes(
 	};
 	for (const id of currentNodeIds) {
 		const node = byId.get(id);
-		if (now === undefined || !node || !isScheduledMember(node, now)) revealAncestors(id);
+		if (!node) continue;
+		const end = waitEndsAtMs(node);
+		const imminent = now !== undefined && end !== null && end - now <= SCHEDULE_HORIZON_MS;
+		if ((node.display.label_key === 'working' && (now === undefined || !isScheduledMember(node, now))) || imminent) revealAncestors(id);
 	}
 	for (const node of nodes) for (const id of node.attention_path) revealAncestors(id);
 

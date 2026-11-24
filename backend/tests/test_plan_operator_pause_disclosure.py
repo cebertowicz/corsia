@@ -115,7 +115,9 @@ def test_whole_plan_pause_keeps_only_review_obligations_current():
 
         active, nodes = _read(db)
         assert {implement.id, harvest.id, ship.id} <= set(active["current_node_ids"])
-        assert nodes[ship.id]["attention_path"] == [later.id, ship.id]
+        assert nodes[implement.id]["display"]["label_key"] == "working"
+        assert nodes[harvest.id]["attention_path"] == []
+        assert nodes[ship.id]["attention_path"] == []
 
         _plan_lifecycle(plan.id, "pause", db=db)
         paused, nodes = _read(db)
@@ -133,7 +135,28 @@ def test_whole_plan_pause_keeps_only_review_obligations_current():
         _plan_lifecycle(plan.id, "resume", db=db)
         resumed, nodes = _read(db)
         assert ship.id in resumed["current_node_ids"]
-        assert nodes[ship.id]["attention_path"] == [later.id, ship.id]
+        assert nodes[ship.id]["attention_path"] == []
+    finally:
+        db.close()
+
+
+def test_watch_wait_stays_current_without_attention_path():
+    db = _db()
+    try:
+        plan = service.ensure_plan("thread", "owner", db=db)
+        phase = _phase(plan.id, "Phase", db=db)
+        task = _task(plan.id, "Watch", parent=phase, db=db)
+        boundary.mutate(
+            plan.id, "arm_watch",
+            {"node_id": task.id, "expected_revision": task.revision,
+             "reason": "Check back", "condition": {"type": "deadline", "value": "2030-01-01T00:00:00Z"}},
+            actor=PlanActor("owner", "user", "project"), provenance=PROVENANCE,
+            mutation_id="watch-disclosure", db=db,
+        )
+        projected, nodes = _read(db)
+        assert task.id in projected["current_node_ids"]
+        assert nodes[task.id]["display"]["label_key"] == "waiting"
+        assert nodes[task.id]["attention_path"] == []
     finally:
         db.close()
 
@@ -177,12 +200,14 @@ def test_node_pause_is_not_current_and_keeps_its_blocker_as_detail():
         resumed, nodes = _read(db)
         assert nodes[verify.id]["execution"]["condition"] == "blocked"
         assert verify.id in resumed["current_node_ids"]
-        assert nodes[verify.id]["attention_path"] == [build.id, verify.id]
+        # A legacy user hold with no actionable ask is shown as waiting.
+        assert nodes[verify.id]["attention_path"] == []
     finally:
         db.close()
 
 
 def test_failed_node_keeps_its_blocker_as_detail_without_opening_its_path():
+    """PLANS-ACCEPTANCE.md:36 and the state matrix:250 open red blocked paths."""
     db = _db()
     try:
         plan = service.ensure_plan("thread", "owner", db=db)
