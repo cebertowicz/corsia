@@ -299,4 +299,4 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md), then the developer path in [`docs/con
 
 ## License
 
-No repository-wide license has been specified yet.
+CORSIA is licensed under the [GNU Affero General Public License, version 3](LICENSE) (AGPL-3.0-only). Contributions are accepted under the [Contributor License Agreement](CLA.md). Parts bundled with the app keep their own licences.
