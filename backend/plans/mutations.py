@@ -134,13 +134,11 @@ def edit_node(
         raise service.PlanInputError("edit requires at least one changed field")
     if size is not _UNSET:
         from plans.size_fields import validate_size
-
         size = validate_size(size)
     with service._connection(db) as connection, service._write(connection):
         node = service._live_node_row(connection, node_id)
         if node["kind"] == "task" and size is None:
             from plans.size_fields import TASK_SIZE_REQUIRED
-
             raise service.PlanInputError(TASK_SIZE_REQUIRED)
         _assert_revision(node, expected_revision)
         moved = regroup.plan(connection, node, parent_id) if parent_id is not _UNSET else None
@@ -158,6 +156,8 @@ def edit_node(
         )
         size_changed = next_size != node["size"]
         crosses = later is not _UNSET and bool(later) != bool(node["later"])
+        if crosses and later:
+            later_fields.refuse_live_helper(connection, node, actor_id=actor_id)
         if not (restated or size_changed or crosses or moved) and difficulty_rerated is None:
             return service._node_from_row(connection, node)
         requirements_changed = (

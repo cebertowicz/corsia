@@ -89,6 +89,23 @@ def record_event(
         later_review.arm_node(connection, node_id)
 
 
+def refuse_live_helper(connection, node, *, actor_id: str | None) -> None:
+    """Refuse an agent's move while the canonical delegated wait is still live."""
+    from plans import wait_causes
+    from plans.boundary import is_user_audit_id
+    from prompts.plan_later_helper import HELPER_STILL_ON_TASK
+
+    if is_user_audit_id(actor_id) or not node["spawned_thread_id"]:
+        return
+    plan = service._plan_row(connection, node["plan_id"])
+    causes = wait_causes.delegation_causes([(node, plan)], db=connection).get(str(node["id"]), [])
+    for cause in causes:
+        if cause["reason_key"] != wait_causes.DELEGATED_CHILD_UNAVAILABLE:
+            raise service.PlanInputError(HELPER_STILL_ON_TASK.format(
+                thread=cause["child_thread_id"], title=node["title"],
+            ))
+
+
 def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | None) -> dict:
     """Apply an edit that names the cut, and free the slot when the cut moved onto it.
 
