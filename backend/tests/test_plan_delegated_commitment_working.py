@@ -154,3 +154,38 @@ def test_held_row_keeps_the_step_waiting_on_its_helper(db):
     row = _step_row(db, step)
     assert (row["label"], row["condition"]) == ("waiting", "waiting")
     assert row["reason"] == "Waiting for the delegated child to take up its open steps"
+
+
+def test_compact_read_parks_a_row_behind_a_running_row_and_an_idle_helper(db):
+    """Activity's compact read parks from the same causes as the full read. The
+    step's row waits on the helper's running row and on its own idle helper, so
+    it is parked in both reads and neither reads the step as Working."""
+    db.execute("UPDATE threads SET spawned_by=NULL WHERE id='parent'")
+    parent_plan = service.ensure_plan("thread", "parent", db=db)
+    step = service.add_node(parent_plan.id, kind="task", title="Delegate work",
+                            acceptance_criteria="Reviewed", spawn_kind="claude-code", db=db)
+    service.transition_node(step.id, "active", db=db)
+    child_plan = service.ensure_plan("thread", "worker", db=db)
+    running = service.add_node(child_plan.id, kind="task", title="Started before attach",
+                               acceptance_criteria="Done", db=db)
+    service.transition_node(running.id, "active", actor_id="worker", db=db)
+    selected, conflict = admission.select(running.id, actor_id="worker", provenance="test", db=db)
+    assert selected is not None and conflict is None
+    mutations.attach_spawned_thread(step.id, "worker", db=db)
+    child = service.add_node(child_plan.id, kind="task", title="Follow-up", acceptance_criteria="Done",
+                             spawn_kind="claude-code", db=db)
+    assert service._node_row(db, child.id)["commitment_id"] == service._node_row(db, step.id)["commitment_id"]
+    service.add_dependency(child.id, running.id, db=db)
+    service.transition_node(child.id, "active", actor_id="worker", db=db)
+    db.execute("INSERT INTO threads (id,user_id,project_id,spawned_by,model,created_at,updated_at) "
+               "VALUES ('helper','user-1','project-1','worker','native/model','t','t')")
+    mutations.attach_spawned_thread(child.id, "helper", db=db)
+    helper_plan = service.ensure_plan("thread", "helper", db=db)
+    service.add_node(helper_plan.id, kind="task", title="Helper step", acceptance_criteria="Done", db=db)
+    begin_worker_turn(db)
+    row = _step_row(db, step)
+    assert (row["label"], row["condition"]) == ("waiting", "waiting")
+    parent = service.ensure_plan("thread", "parent", db=db)
+    activity = activity_projection.read_project("project-1", actor=PlanActor(None, "user-1", None, kind="user"), db=db)
+    parent_activity = next(item for item in activity["plans"] if item["plan"]["id"] == parent.id)
+    assert parent_activity["display"]["label_key"] != "working"

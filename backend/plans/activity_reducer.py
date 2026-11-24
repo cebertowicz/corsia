@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from plans import (
     admission_projection,
@@ -37,6 +37,9 @@ class ReducedNode:
     user_pause: bool
     wait_deadline: str | None
     wait_deadline_latest: str | None
+    # Every cause admission sees for the row, the same list the full read gives
+    # parked_work, so both reads park the same commitments.
+    causes: tuple[dict, ...] = field(default=(), compare=False)
 
 
 def _execution_facts(
@@ -156,6 +159,7 @@ def reduce_node(
         user_pause=bool(row["has_user_pause"]),
         wait_deadline=row["wait_deadline"],
         wait_deadline_latest=row["wait_deadline_latest"],
+        causes=tuple(causes),
     )
 
 
@@ -205,7 +209,7 @@ def plan_state(
                 str(row["id"]): "running" if item.child_working else item.condition
                 for row, item in zip(open_leaves, incomplete)
             },
-            {str(row["id"]): row["causes"] for row in open_leaves},
+            {str(row["id"]): list(item.causes) for row, item in zip(open_leaves, incomplete)},
         ),
     )
 
