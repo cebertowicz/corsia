@@ -70,9 +70,9 @@ FILLED_FIELD_SNAPSHOT_WITHHELD = (
 )
 # A saved-login fill's own lines for the filled page (the server filled the field, not the person).
 SAVED_FILL_REFUSED = (
-    "A saved login was filled on this page, so until you open another page or reload this one, scripts, reading "
-    "field values or the page's HTML, network routes and screenshots are refused here, and each element must be "
-    "named by its @ref from a snapshot, not by a CSS selector. Commands that can't show the filled value still work."
+    "A saved login was filled on this page, so until you open another page or reload this one, screenshots are "
+    "refused here and each element must be named by its @ref from a snapshot, not by a CSS selector. The rest of "
+    "this browser session still runs only the commands its saved-login limit allows, on every page."
 )
 SAVED_FILL_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. A saved login was filled on this page, and the browser's output wasn't a "
