@@ -164,14 +164,15 @@ describe('Activity list', () => {
 	});
 
 	it('keeps a failed item open with the reason and Try again', async () => {
-		mutate.mockResolvedValue({ status: 'error', message: 'Plans are read-only right now.' });
+		// The plans API's own generic line is not shown; Activity names the action, as every press does.
+		mutate.mockResolvedValue({ status: 'error', message: 'The server had a problem handling this request.' });
 		render();
 		await settle();
 		rows()[4].click();
 		await settle();
 		buttonNamed('Done')!.click();
 		await settle();
-		expect(pane().querySelector('[role="alert"]')?.textContent).toBe('Plans are read-only right now.');
+		expect(pane().querySelector('[role="alert"]')?.textContent).toBe('Couldn’t mark this task done. Try again.');
 		expect(buttonNamed('Try again')).toBeTruthy();
 		expect(openRow()).toBe(rows()[4]);
 		expect(rows()).toHaveLength(7);
@@ -202,7 +203,8 @@ describe('Activity list', () => {
 		await settle();
 		const text = host.querySelector('[role="alert"]')?.textContent ?? '';
 		expect(text).toContain('Activity couldn’t load.');
-		expect(text).toContain('Try again.');
+		// The button already says it; no sentence repeats it.
+		expect(text).not.toContain('Try again.');
 		expect(text).not.toContain('connection');
 		expect(buttonNamed('Try again')).toBeTruthy();
 	});
@@ -385,6 +387,44 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 		expect(alert()).toBe('Couldn’t mark this task done. Try again.');
 		expect(buttonNamed('Try again')).toBeTruthy();
+	});
+
+	it('shows the server’s refusal of Done without Try again', async () => {
+		mutate.mockResolvedValue({ status: 'error', message: 'This task is already finished.', refused: true });
+		render();
+		await settle();
+		rows()[4].click();
+		await settle();
+		buttonNamed('Done')!.click();
+		await settle();
+		expect(alert()).toBe('This task is already finished.');
+		expect(buttonNamed('Try again')).toBeUndefined();
+		expect(emit).toHaveBeenCalledWith('activity', 'acted', { kind: 'task', action: 'done', outcome: 'refused', reason: 'rejected' });
+	});
+
+	it('shows a failed Send’s reference beside its line, as the dock does', async () => {
+		alsoServe('/api/held-replies/held-intel/approve', () => respond(500, { reference: 'err-7f3a' }));
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		buttonNamed('Send')!.click();
+		await settle();
+		expect(alert()).toBe('Couldn’t send this message. Try again.');
+		expect(pane().querySelector('.reference')?.textContent).toBe('Reference: err-7f3a');
+	});
+
+	it('shows why an earlier Send didn’t go, with its reference, before any press', async () => {
+		const detail = served[5].detail as { error: string | null; error_ref?: string | null };
+		detail.error = 'Couldn’t reach GitHub.';
+		detail.error_ref = 'err-91c2';
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		expect(pane().querySelector('.act-failure')?.textContent).toBe('Couldn’t reach GitHub.');
+		expect(pane().querySelector('.reference')?.textContent).toBe('Reference: err-91c2');
+		expect(buttonNamed('Send')).toBeTruthy();
 	});
 });
 

@@ -10,12 +10,12 @@ export type PressAction = 'answer' | 'send' | 'dont_send' | 'done';
 /**
  * What a press came to, in Activity's terms. `refused`: the server answered and pressing again can't change it, so it
  * shows without Try again (`final` when the item has also left the server's list). `failed`: it didn't go through,
- * and Try again may.
+ * and Try again may; `reference` is the server's id for a system failure, shown beside the line as the dock shows it.
  */
 export type Pressed =
 	| { outcome: 'succeeded' }
 	| { outcome: 'refused'; reason: string; text: string | null; final?: boolean }
-	| { outcome: 'failed'; text: string };
+	| { outcome: 'failed'; text: string; reference?: string };
 
 export const SUCCEEDED: Pressed = { outcome: 'succeeded' };
 
@@ -60,6 +60,7 @@ export function heldPressed(outcome: HeldOutcome, approve: boolean): Pressed {
 		default: return {
 			outcome: 'failed',
 			text: outcome.line ?? (approve ? 'Couldn’t send this message. Try again.' : 'Couldn’t decline this message. Try again.'),
+			...(outcome.reference ? { reference: outcome.reference } : {}),
 		};
 	}
 }
@@ -72,6 +73,9 @@ export function taskPressed(outcome: PlanLifecycleMutationOutcome): Pressed {
 		case 'forbidden': return {
 			outcome: 'refused', reason: 'forbidden', text: 'You can’t change this task. Ask the agent in chat to change it.',
 		};
-		default: return { outcome: 'failed', text: outcome.message };
+		// The server's own reason for refusing: pressing again won't change it.
+		default: return outcome.refused
+			? { outcome: 'refused', reason: 'rejected', text: outcome.message }
+			: { outcome: 'failed', text: 'Couldn’t mark this task done. Try again.' };
 	}
 }

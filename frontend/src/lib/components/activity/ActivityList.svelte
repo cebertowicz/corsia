@@ -64,7 +64,7 @@
 	{#if failure !== null}
 		<div class="empty" role="alert">
 			<b>Activity couldn’t load.</b>
-			<p>{failure === 0 ? 'Check your connection, then try again.' : 'Try again.'}</p>
+			{#if failure === 0}<p>Check your connection, then try again.</p>{/if}
 			<button type="button" class="link" onclick={onRetry}>Try again</button>
 		</div>
 	{:else if !loading && items.length === 0}

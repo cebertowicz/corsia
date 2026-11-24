@@ -2,6 +2,7 @@
 	import { setContext } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
+	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
@@ -51,7 +52,7 @@
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
 
 	let sending = $state(false);
-	let failure = $state<{ text: string; retry: PressAction | null; final: boolean } | null>(null);
+	let failure = $state<{ text: string; reference?: string; retry: PressAction | null; final: boolean } | null>(null);
 	/** The decision answer's retry key: kept across Try again so a retry can't answer twice. */
 	let answerMutation: string | null = null;
 
@@ -144,7 +145,7 @@
 		});
 		try {
 			if (pressed.outcome === 'failed') {
-				failure = { text: pressed.text, retry: action, final: false };
+				failure = { text: pressed.text, reference: pressed.reference, retry: action, final: false };
 				return;
 			}
 			if (pressed.outcome === 'refused') {
@@ -209,7 +210,8 @@
 </script>
 
 {#snippet failureLine()}
-	{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}
+	{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}
+	{:else if held?.error}<!-- Why the last Send didn't go, as the dock shows it until the next press. --><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}{/if}
 {/snippet}
 
 {#if doc}
