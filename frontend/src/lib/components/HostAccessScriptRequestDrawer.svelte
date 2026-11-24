@@ -51,8 +51,8 @@
 	<footer class="decision-actions">
 		<HostAccessBlockedLine {stale} incomplete={!ready} kind="script" rejectable={casReady(request)} {notice} {onRetry} />
 		<div class="decision-buttons">
-			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 			<span class="decision-spacer"></span>
+			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready} onclick={onApprove}>Approve</Button>
 		</div>
 	</footer>

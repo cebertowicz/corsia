@@ -82,7 +82,7 @@
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
-	/** The server's own line when it refused a decision, kept on that request's drawer after the re-read. */
+	/** The one line for a failed decision, kept on that request's drawer after the re-read while it is listed. */
 	let decisionNotice = $state<{ leaseId: string; message: string } | null>(null);
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
 	let nowMs = $state(Date.now());
@@ -252,10 +252,9 @@
 			await decideHostAccessLease(lease, decision, durationSeconds);
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
-			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';
+			// One line in the drawer; the server's words never reach the status strip.
 			const failure = decisionFailure(caught, decision, lease.kind);
 			if (failure.notice) decisionNotice = { leaseId: lease.id, message: failure.notice };
-			if (failure.stale) stale = true;
 			refreshTruth = failure.refresh;
 			if (!refreshTruth && focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;
 		} finally {

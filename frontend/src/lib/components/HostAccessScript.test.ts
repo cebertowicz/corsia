@@ -134,6 +134,34 @@ it('hides the Purpose label when the purpose is empty, in every state of the scr
 	}
 });
 
+it('puts Deny beside Approve as Reject sits in the other drawers: a ghost text action, no red, no spacer between', async () => {
+	const lease: HostAccessScript = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: 'capability',
+		script_name: 'task.py', script_path: '/workspace/task.py',
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	};
+	for (const rejectDisabled of [false, true]) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale: false, deciding: false, rejectDisabled, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		} });
+		flushSync();
+		const row = [...target.querySelector('.decision-buttons')!.children];
+		expect(row.map((child) => child.classList.contains('decision-spacer') ? 'spacer' : child.textContent?.trim()))
+			.toEqual(['spacer', 'Deny', 'Approve']);
+		expect(row[1].classList.contains('ghost')).toBe(true);
+		expect(row[1].classList.contains('danger')).toBe(false);
+		expect((row[1] as HTMLButtonElement).disabled).toBe(rejectDisabled);
+		await unmount(component);
+		target.remove();
+	}
+});
+
 it('says when a script runs in plain words', () => {
 	expect(cadence(null)).toBe('When a matching event arrives');
 	expect(cadence(1)).toBe('Every second');

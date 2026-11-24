@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 import { token } from '$lib/stores/auth';
 import { emit } from '$lib/ws/events';
-import type { HostAccessFill, HostAccessLease } from '$lib/api/hostAccess';
+import type { HostAccessFill, HostAccessItem, HostAccessLease, HostAccessScript } from '$lib/api/hostAccess';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -479,7 +479,8 @@ describe('HostAccessLeaseControl', () => {
 		const revoke = await openRevokeButton();
 		revoke.focus();
 		revoke.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('Reviewer transport failed.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t revoke the approval. Try again.'));
+		expect(host.textContent).not.toContain('Reviewer transport failed.');
 
 		truth = activeLease({
 			state: 'revoked',
@@ -1361,32 +1362,135 @@ describe('HostAccessLeaseControl', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('keeps a non-conflict Reject failure visible and disables Approve', async () => {
-		const fetchMock = vi.fn()
-			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
-			.mockResolvedValueOnce(response(
-				{ detail: 'Reviewer transport failed.' },
-				false,
-				503,
-			));
-		vi.stubGlobal('fetch', fetchMock);
+	const waitingScript: HostAccessScript = {
+		id: 'script-1', kind: 'script', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+		application_hash: 'script-hash', decision_capability: 'script-decision',
+		script_name: 'task.py', script_path: '/workspace/task.py', trigger: { cadence_seconds: 600 },
+		purpose: 'Check the result', user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+	};
+	const SCRIPT_TRIGGER = 'Review permission for this script to act as your agent and use the agents’ GitHub account';
+	const press = (dialog: Element, name: string) => Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+		.find((button) => button.textContent?.trim() === name)!;
+	async function openDrawerFor(item: HostAccessItem): Promise<HTMLElement> {
+		if (item.state === 'active') return openActiveDrawer();
+		const label = item.kind === 'script' ? SCRIPT_TRIGGER : 'Review temporary host access';
+		await vi.waitFor(() => expect(host.querySelector(`[aria-label="${label}"]`)).toBeTruthy());
+		host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
+		flushSync();
+		await tick();
+		return host.querySelector('[role="dialog"]')!;
+	}
 
+	const presses = [
+		['Approve', waitingLease, 'Couldn’t approve the request. Try again.'],
+		['Reject', waitingLease, 'Couldn’t reject the request. Try again.'],
+		['Deny', waitingScript, 'Couldn’t deny the request. Try again.'],
+		['Revoke host access', activeLease(), 'Couldn’t revoke the approval. Try again.'],
+	] as const;
+	const failures = [
+		['a 500', 'Internal Server Error', () => response({ detail: 'Internal Server Error' }, false, 500)],
+		['a 403', 'A current interactive user decision is required',
+			() => response({ detail: 'A current interactive user decision is required' }, false, 403)],
+		['no connection', 'Failed to fetch', () => Promise.reject(new TypeError('Failed to fetch'))],
+	] as const;
+	for (const [button, item, line] of presses) {
+		it.each(failures)(`shows one line, not the could-not-check line, when ${button} fails with %s, and keeps it on`, async (
+			_label, serverText, failure,
+		) => {
+			const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+				init?.method === 'POST' ? failure() : response({ leases: [item] })));
+			vi.stubGlobal('fetch', fetchMock);
+			component = mountControl();
+			flushSync();
+			if (item.state === 'active') await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
+			const dialog = await openDrawerFor(item);
+			press(dialog, button).click();
+
+			await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent).toBe(line));
+			// One line for the press: no could-not-check line in the drawer or the strip, and no server words.
+			expect([...dialog.querySelectorAll('.blocked-line')].map((found) => found.textContent?.trim())).toEqual([line]);
+			expect(host.textContent).not.toContain('Couldn’t check');
+			expect(host.textContent).not.toContain(serverText);
+			expect(press(dialog, button).disabled).toBe(false);
+			expect(fetchMock.mock.calls.map((call) => call[1]?.method ?? 'GET')).toEqual(['GET', 'POST']);
+		});
+	}
+
+	it('says a script request has new details in its own words when Deny is refused (409)', async () => {
+		let getCount = 0;
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') return response({ detail: 'Script request changed.' }, false, 409);
+			getCount += 1;
+			return response({ leases: [getCount === 1 ? waitingScript : { ...waitingScript, application_hash: 'script-hash-2' }] });
+		}));
 		component = mountControl();
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
-		const dialog = await openPendingDrawer();
+		const dialog = await openDrawerFor(waitingScript);
+		press(dialog, 'Deny').click();
 
-		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Approve')!;
-		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Reject')!.click();
+		await vi.waitFor(() => expect(getCount).toBe(2));
+		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent)
+			.toBe('This request has new details. Review them, then approve or deny it.'));
+		expect(dialog.textContent).not.toContain('Script request changed.');
+	});
 
-		// Reject failures other than new details keep the server's words (round 4 gave none for them).
-		await vi.waitFor(() => {
-			expect(host.textContent).toContain('Reviewer transport failed.');
-		});
-		expect(approve.disabled).toBe(true);
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+	it('says an approval changed when Revoke is refused (409), and drops the line when it leaves the list', async () => {
+		let truth: HostAccessLease[] = [activeLease()];
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') {
+				truth = [activeLease({ revision: 6 })];
+				return response({ detail: 'Lease changed.' }, false, 409);
+			}
+			return response({ leases: truth });
+		}));
+		component = mountControl();
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
+		const dialog = await openActiveDrawer();
+		press(dialog, 'Revoke host access').click();
+
+		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent)
+			.toBe('This approval has changed. Check it, then revoke it if you still need to.'));
+		expect(host.textContent).not.toContain('Lease changed.');
+		expect(press(dialog, 'Revoke host access').disabled).toBe(false);
+
+		// The approval ends elsewhere and leaves the list: the line goes with it.
+		truth = [];
+		emit('host_access_changed', { lease_id: 'lease-1' });
+		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeNull());
+		expect(host.textContent).not.toContain('This approval has changed');
+		expect(host.querySelector('.decision-notice')).toBeNull();
+	});
+
+	it('keeps a gone request on its path: a refused fill Reject (404) reads the list again without it', async () => {
+		const waitingFill: HostAccessFill = {
+			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+		};
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingFill] }))
+			.mockResolvedValueOnce(response({
+				detail: 'This sign-in request is closed. Ask the agent to try again if it still needs to sign in.',
+			}, false, 404))
+			.mockResolvedValue(response({ leases: [] }));
+		vi.stubGlobal('fetch', fetchMock);
+		component = mountControl();
+		flushSync();
+		const label = 'Review a request to sign in with a saved login';
+		await vi.waitFor(() => expect(host.querySelector(`[aria-label="${label}"]`)).toBeTruthy());
+		host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
+		flushSync();
+		await tick();
+		press(host.querySelector('[role="dialog"]')!, 'Reject').click();
+
+		await vi.waitFor(() => expect(host.querySelector(`[aria-label="${label}"]`)).toBeNull());
+		expect(fetchMock.mock.calls.map((call) => call[1]?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET']);
+		expect(host.textContent).not.toContain('Couldn’t reject');
+		expect(host.querySelector('.decision-notice')).toBeNull();
 	});
 });
 
