@@ -74,7 +74,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
     w = SimpleNamespace(login_id=login_id, sentinel=sentinel, owner=Owner(), steps=[], typed=[], loaders=["L1"],
                         grants=[True], form=page.SignInForm(7, True), outcome="signed_in", linked=False)
-    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fill_sessions):
+    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fills):
         held.clear()
 
     def may_fill(thread_id, login):
@@ -140,7 +140,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(page, "Requests", Requests)
     monkeypatch.setattr(fill, "_settled", settled)
     yield w
-    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fill_sessions):
+    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fills):
         held.clear()
 
 
@@ -203,12 +203,15 @@ async def test_a_step_already_open_on_the_sign_in_page_counts_as_the_persons_ste
 
 
 @pytest.mark.asyncio
-async def test_the_session_is_marked_and_the_approval_checked_immediately_before_the_value_is_read(world, caplog):
+async def test_the_document_and_session_are_marked_and_the_approval_checked_just_before_the_value_is_read(world, caplog):
     text = await fill.fill_saved_login(THREAD, world.login_id)
     assert world.steps[world.steps.index("read") - 1] == "may_fill"
     assert world.steps[-5:] == ["mark", "may_fill", "read", "type", "submit"]
     assert world.typed == [(USER, world.sentinel)]
-    assert browser_control._saved_fill(THREAD, "s1")
+    # The mark names the document checked before typing: only it gets the filled-field allowlist.
+    assert browser_control.saved_fill_session(THREAD, "s1")
+    assert browser_control._saved_fill_document(THREAD, "s1", world.loaders[0])
+    assert not browser_control._saved_fill_document(THREAD, "s1", "a-later-document")
     _never_shown(world, caplog, text)
 
 

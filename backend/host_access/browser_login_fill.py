@@ -127,8 +127,9 @@ async def _fill_on(cdp: page.QuietCdp, thread_id: str, login: saved_logins.Saved
     requests = page.Requests()
     await requests.start(endpoint)
     try:
-        # The session is under the filled-field allowlist before anything is typed (commit 1).
-        browser_control.mark_saved_fill(thread_id, session)
+        # Before anything is typed: this document under the filled-field allowlist, and the session under the
+        # saved-sign-in command limit. An unread loader id counts as every document.
+        browser_control.mark_saved_fill(thread_id, session, loader)
         typed = await _type(cdp, form, thread_id, login)
         if typed != "typed":
             return typed
