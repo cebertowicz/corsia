@@ -384,8 +384,7 @@ async def _visible(cdp: browser_cdp_frames.Session, node: int) -> bool:
     return rect is not None and rect["width"] > 0 and rect["height"] > 0
 
 
-def loader_id(tree: dict) -> str:
-    """The main frame's loader id (its document) in a Page.getFrameTree result, or "": the one reader of it."""
+def loader_id(tree: dict) -> str:  # The main frame's loader id (its document) in a getFrameTree result, or "".
     loader = ((tree.get("frameTree") or {}).get("frame") or {}).get("loaderId")
     return loader if isinstance(loader, str) else ""
 
