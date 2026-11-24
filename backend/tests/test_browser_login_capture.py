@@ -915,3 +915,76 @@ async def test_ended_session_skips_queued_username_and_new_session_works(monkeyp
         release.set()
         await drain_capture()
         saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["settle", "other", "domain", "session", "refused", "read-failed"])
+async def test_transition_table(monkeypatch, ending):
+    holder = Holder(monkeypatch)
+    holder.offered = ending != "refused"
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    if ending == "read-failed":
+        page.fields.clear()
+    await capture.person_submit(THREAD, KEY, "ws://page")
+    await drain_capture()
+    if ending in {"refused", "read-failed"}:
+        assert capture._state(THREAD).pending is None
+        assert holder.names() == ([] if ending == "read-failed" else ["offer_login"])
+        return
+    assert capture._state(THREAD).pending is not None
+    if ending == "session":
+        capture.session_ended(THREAD, KEY)
+    elif ending == "domain":
+        capture.step_decided(THREAD, probe(host="another.example.net"), None, None)
+    else:
+        capture.step_decided(THREAD, probe(), "settle" if ending == "settle" else "unsettled", None)
+    assert capture._state(THREAD).pending is None
+    assert holder.names() == ["offer_login", "confirm_offer" if ending == "settle" else "drop_offer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slow", [False, True])
+@pytest.mark.parametrize("new_session", [False, True])
+async def test_new_group_drops_old_offer_and_username(monkeypatch, slow, new_session):
+    entered, release = threading.Event(), threading.Event()
+    original = saved_login_offers._checked_offer
+
+    def checked(*args):
+        entered.set()
+        assert release.wait(3)
+        return original(*args)
+
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_a, **_k: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_a, **_k: [])
+    if slow:
+        monkeypatch.setattr(saved_login_offers, "_checked_offer", checked)
+    saved_login_offers.note_username(KEY, SITE, "person@example.com")
+    other_key = "another-thread:session"
+    new_key = f"{THREAD}:new"
+    saved_login_offers.note_username(other_key, SITE, "other@example.com")
+    saved_login_offers.note_username(new_key, SITE, "new@example.com")
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "")}))
+    open_step(monkeypatch)
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        if slow:
+            assert await asyncio.to_thread(entered.wait, 2)
+        else:
+            await drain_capture()
+            assert KEY in saved_login_offers._offers
+        page.fields.clear()
+        open_step(monkeypatch, visit="new-step")
+        await capture.person_submit(THREAD, new_key if new_session else KEY, "ws://page")
+        release.set()
+        await drain_capture()
+        assert KEY not in saved_login_offers._offers
+        assert KEY not in saved_login_offers._usernames
+        assert saved_login_offers._usernames[other_key] == (SITE, "other@example.com")
+        assert saved_login_offers._usernames[new_key] == (SITE, "new@example.com")
+        assert capture._state(THREAD).pending is None
+    finally:
+        release.set()
+        await drain_capture()
+        saved_login_offers.drop_thread("another-thread")
+        saved_login_offers.drop_thread(THREAD)

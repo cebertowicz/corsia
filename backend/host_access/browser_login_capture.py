@@ -8,15 +8,20 @@ that asks for the password on its next page. The step's ending then confirms or 
 What was typed stays in local variables between the read and the holder's call: no log line, exception text,
 step, event, global or attribute here ever holds it. Everything kept here is non-secret: which session has an
 offer waiting and its site's domain, and which documents an agent may have typed into.
+
+Offer transitions (flight and pending are exclusive: flight is forgotten before pending is set):
+    submit -> flight; read failed/timeout -> none after queued drop; read done -> holder call
+    offer made -> waiting, refused -> none; probe of another domain -> dropped
+    step settles without a field -> confirmed; other step end -> dropped
+    new step/session -> old offer dropped in queue order; session end -> dropped or skipped
+Confirmed and dropped offers leave capture's pending state; the holder owns confirmed offers.
 """
 from __future__ import annotations
 
 import asyncio
 import importlib
 import logging
-import shlex
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
 from urllib.parse import urlsplit
 
 from websockets.exceptions import WebSocketException
@@ -24,7 +29,9 @@ from websockets.exceptions import WebSocketException
 from host_access import browser_cdp_frames
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, world as _world
+from host_access.browser_login_capture_cdp import quiet_cdp as _QuietCdp
 from host_access import browser_login_capture_queue as _queue_state
+from host_access.browser_login_capture_policy import is_submit, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue
 from host_access.browser_login_capture_queue import tasks as _tasks
 from host_access.browser_domain import registrable_domain
@@ -35,11 +42,7 @@ log = logging.getLogger(__name__)
 # Real Chrome measured max 6.87 ms; the bound only stops a stuck page holding the click.
 CAPTURE_TIMEOUT = 1.5
 _WORLD = "corsia-login-capture"
-# Agent commands that can't put a value into a field (Governance rule 7); every other command marks the document.
-_NO_VALUE_COMMANDS = frozenset({
-    "click", "dblclick", "hover", "focus", "scroll", "scrollintoview", "get", "is", "snapshot", "screenshot",
-    "wait", "tab", "open", "goto", "navigate", "back", "forward", "reload",
-})
+# Capture marks every agent command that can put a value into a field.
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
 _ANY_DOCUMENT = ""
 
@@ -71,18 +74,6 @@ _READ_ACCOUNT = """(() => {
 })()"""
 
 
-class _Silent(logging.Logger):
-    """A logger that is never enabled, so the websocket carrying a read logs none of its frames at any level."""
-
-    def isEnabledFor(self, level: int) -> bool:  # noqa: N802 - logging.Logger's own name
-        return False
-
-
-def _QuietCdp(endpoint: str) -> CdpClient:  # noqa: N802 - retained as the capture test seam
-    """Use the common CDP client with frame logging disabled for this read."""
-    return CdpClient(endpoint, logger=_Silent(_WORLD))
-
-
 @dataclass(frozen=True)
 class _Pending:
     """An offer waiting on its step's ending: never the login itself."""
@@ -107,6 +98,7 @@ class _Flight:
     domain: str | None = None
     verdict: bool | None = None
     probe_domains: set[str] = field(default_factory=set)
+    replaced_group: _StepSubmits | None = None
 
 
 @dataclass
@@ -129,25 +121,10 @@ def _reset_for_tests() -> None:
     _queue_state.reset_for_tests()
 
 
-def is_submit(kind: object, event: Mapping[str, object]) -> bool:
-    """Whether a pane input is the person's own submit: a mouse press, or an Enter key press (rule 1)."""
-    if kind == "input_mouse":
-        return event.get("eventType") == "mousePressed"
-    return kind == "input_keyboard" and event.get("eventType") in {"keyDown", "rawKeyDown"} and event.get("key") == "Enter"
-
-
-def writes_value(args: Sequence[str]) -> bool:
-    """Whether an agent command can put a value into a field (rule 7); a batch counts if any command in it can."""
-    if not args:
-        return False
-    if args[0] == "batch":
-        try:
-            nested = [shlex.split(arg) for arg in args[1:] if arg != "--bail"]
-        except ValueError:
-            return True
-        return any(writes_value(command) for command in nested)
-    # wait --fn runs a page script, which can set a field.
-    return args[0] not in _NO_VALUE_COMMANDS or args[0] == "wait" and "--fn" in args
+def _prune(thread_id: str) -> None:
+    state = _threads.get(thread_id)
+    if state is not None and not (state.group or state.flights or state.pending or state.marks):
+        _threads.pop(thread_id, None)
 
 
 async def agent_writing(thread_id: str, endpoint: str) -> None:
@@ -164,7 +141,8 @@ async def agent_writing(thread_id: str, endpoint: str) -> None:
 
 
 def _marked(thread_id: str, loader: str) -> bool:
-    marks = _state(thread_id).marks
+    state = _threads.get(thread_id)
+    marks = state.marks if state is not None else {}
     return not loader or loader in marks or _ANY_DOCUMENT in marks
 
 
@@ -200,7 +178,9 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
 def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
     state = _state(thread_id)
     group = state.group
+    replaced = None
     if group is None or group.step is not step or group.session_key != session_key:
+        replaced = group
         group = _StepSubmits(step, session_key)
         state.group = group
     else:
@@ -208,7 +188,7 @@ def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
             if earlier.group is group:
                 earlier.verdict = None
     group.number += 1
-    flight = _Flight(group, group.number, session_key)
+    flight = _Flight(group, group.number, session_key, replaced_group=replaced)
     state.flights.append(flight)
     state.pending = None
     return flight
@@ -234,6 +214,7 @@ async def _note(session_key, account) -> None:
 
 async def _discard(thread_id: str, flight: _Flight | None) -> None:
     if flight is not None:
+        _drop_replaced(flight)
         if flight.group.offered:
             _settle(flight.session_key, confirm=False)
             flight.group.offered = False
@@ -244,9 +225,19 @@ def _forget(thread_id: str, flight: _Flight) -> None:
     flights = _state(thread_id).flights
     if flight in flights:
         flights.remove(flight)
+    _prune(thread_id)
+
+
+def _drop_replaced(flight: _Flight) -> None:
+    group = flight.replaced_group
+    if group is not None and group.offered:
+        _settle(group.session_key, confirm=False)
+        group.offered = False
+    flight.replaced_group = None
 
 
 async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple[str, str, str]) -> None:
+    _drop_replaced(flight)
     if flight.verdict is False:
         await _discard(thread_id, flight)
         return
@@ -259,7 +250,7 @@ async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple
     _forget(thread_id, flight)
     if not made:
         return
-    if item.ended:
+    if item.ended or _state(thread_id).group is not flight.group:
         _settle(item.session_key, confirm=False)
         flight.group.offered = False
         return
@@ -384,6 +375,7 @@ def session_ended(thread_id: str, session_key: str | None = None) -> None:
     if (pending := state.pending) is not None and pending.session_key == session_key:
         _resolve(thread_id, confirm=False)
     state.marks.clear()
+    _prune(thread_id)
 
 
 def _resolve(thread_id: str, *, confirm: bool) -> None:
