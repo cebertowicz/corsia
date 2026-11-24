@@ -56,7 +56,7 @@
 		decideHostAccessLease,
 		fetchHostAccessLeases,
 		HostAccessApiError,
-		type HostAccessLease, type HostAccessItem,
+		type HostAccessLease, type HostAccessItem, type HostAccessTimed,
 		type HostAccessLeaseDecision,
 	} from '$lib/api/hostAccess';
 	import { token } from '$lib/stores/auth';
@@ -117,7 +117,7 @@
 		pendingOpenFor = id;
 		pendingOpen = false;
 	});
-	const active = $derived(leases.filter((lease): lease is HostAccessLease => lease.state === 'active'));
+	const active = $derived(leases.filter((lease): lease is HostAccessTimed => lease.state === 'active'));
 	const transitional = $derived(
 		leases.filter((lease): lease is HostAccessLease => lease.state === 'reviewing' || lease.state === 'activating'),
 	);
@@ -143,7 +143,7 @@
 			: null;
 	}
 
-	function openActiveDrawer(lease: HostAccessLease, event: MouseEvent): void {
+	function openActiveDrawer(lease: HostAccessTimed, event: MouseEvent): void {
 		openActiveTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
 		openActiveLeaseId = lease.id;
 	}
@@ -241,7 +241,7 @@
 	async function decide(
 		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
-		decisionControl: Element | null = null,
+		decisionControl: Element | null = null, durationSeconds?: number,
 	): Promise<void> {
 		const currentToken = get(token);
 		if (!currentToken || decisionBlocked(lease, stale, decidingLeaseId)) return;
@@ -254,7 +254,7 @@
 		error = '';
 		let refreshTruth = true;
 		try {
-			await decideHostAccessLease(lease, decision);
+			await decideHostAccessLease(lease, decision, durationSeconds);
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';
@@ -414,7 +414,7 @@
 						deciding={decidingLeaseId === currentPending.id}
 						rejectDisabled={decisionBlocked(currentPending, stale, decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
-						onApprove={() => { void decide(currentPending, 'approve'); }}
+						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
 						onReject={(event) => { void decide(
 							currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,
 						); }}

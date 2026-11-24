@@ -1,0 +1,174 @@
+import { flushSync, mount, unmount } from 'svelte';
+import { afterEach, expect, it, vi } from 'vitest';
+import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
+import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
+import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
+import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
+import { approvalReady, fillDurations, owner, pendingLabel } from '$lib/hostAccess/leaseFormat';
+import { decideHostAccessLease, type HostAccessFill } from '$lib/api/hostAccess';
+
+vi.mock('$lib/api/request', () => ({ apiFetch: vi.fn() }));
+
+const targets: HTMLElement[] = [];
+afterEach(() => { for (const target of targets.splice(0)) target.remove(); });
+
+function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
+	return {
+		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
+		agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
+		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+		...overrides,
+	};
+}
+
+function target(): HTMLElement {
+	const element = document.createElement('div');
+	document.body.appendChild(element);
+	targets.push(element);
+	return element;
+}
+
+function pending(request: HostAccessFill, props: Record<string, unknown> = {}) {
+	const host = target();
+	const onApprove = vi.fn();
+	const onReject = vi.fn();
+	const component = mount(HostAccessPendingRequestDrawer, { target: host, props: {
+		lease: request, stale: false, deciding: false, rejectDisabled: false,
+		approveDisabled: !approvalReady(request), onApprove, onReject, onRetry: vi.fn(), ...props,
+	} });
+	flushSync();
+	return { host, component, onApprove, onReject };
+}
+
+it('names the agent, site and username, and approves for the duration the person picks', async () => {
+	const { host, component, onApprove, onReject } = pending(fill());
+	const text = host.textContent ?? '';
+	expect(text).toContain('Sign in with a saved login');
+	expect(text).toContain('Bookkeeper');
+	expect(text).toContain('https://example.com');
+	expect(text).toContain('me@example.com');
+	expect(text).toContain('Needs approval');
+	expect(text).toContain('The agent never sees it');
+	const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes']);
+	expect(radios[0].getAttribute('aria-checked')).toBe('true');
+	radios[1].click();
+	flushSync();
+	expect(radios[1].getAttribute('aria-checked')).toBe('true');
+	expect(radios[0].getAttribute('aria-checked')).toBe('false');
+	const buttons = [...host.querySelectorAll('button')];
+	buttons.find((button) => button.textContent?.trim() === 'Approve')?.click();
+	expect(onApprove).toHaveBeenCalledOnce();
+	expect(onApprove.mock.calls[0][1]).toBe(900);
+	buttons.find((button) => button.textContent?.trim() === 'Deny')?.click();
+	expect(onReject).toHaveBeenCalledOnce();
+	await unmount(component);
+});
+
+it('moves the duration choice with the arrow keys', async () => {
+	const { host, component, onApprove } = pending(fill());
+	const first = host.querySelector<HTMLButtonElement>('[role="radio"]')!;
+	first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+	flushSync();
+	expect(host.querySelector('[data-seconds="1800"]')?.getAttribute('aria-checked')).toBe('true');
+	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
+	expect(onApprove.mock.calls[0][1]).toBe(1800);
+	await unmount(component);
+});
+
+it('offers nothing above the cap the server sends', () => {
+	expect(fillDurations(1800)).toEqual([300, 900, 1800]);
+	expect(fillDurations(900)).toEqual([300, 900]);
+	expect(fillDurations(0)).toEqual([]);
+});
+
+it('cannot be approved when stale or incomplete, and says why', async () => {
+	const stale = pending(fill(), { stale: true, approveDisabled: true });
+	expect(stale.host.textContent).toContain('Not current');
+	expect(stale.host.textContent).toContain('Couldn’t check that this request is still current');
+	await unmount(stale.component);
+	const incomplete = pending(fill({ decision_capability: '' }));
+	expect(incomplete.host.textContent).toContain('This request arrived without everything needed to approve it.');
+	const labels = [...incomplete.host.querySelectorAll('button')].map((button) => button.textContent?.trim());
+	expect(labels).toContain('Deny');
+	expect(labels).not.toContain('Approve');
+	await unmount(incomplete.component);
+	expect(approvalReady(fill({ site: '' }))).toBe(false);
+	expect(approvalReady(fill({ state: 'active' }))).toBe(false);
+});
+
+it('shows a pending fill on the strip as the agent and site, with status as text', async () => {
+	const host = target();
+	const onclick = vi.fn();
+	const component = mount(HostAccessPendingTrigger, { target: host, props: {
+		request: fill(), stale: false, open: false, onclick,
+	} });
+	flushSync();
+	const button = host.querySelector('button')!;
+	expect(button.getAttribute('aria-label')).toBe('Review a request to sign in with a saved login');
+	expect(pendingLabel(fill())).toBe('Review a request to sign in with a saved login');
+	expect(button.textContent).toContain('Saved login');
+	expect(button.textContent).toContain('Bookkeeper · https://example.com');
+	expect(button.textContent).toContain('Needs approval');
+	expect(host.querySelector('.pill')).toBeNull();
+	button.click();
+	expect(onclick).toHaveBeenCalledOnce();
+	await unmount(component);
+	expect(owner(fill({ agent: ' ' }))).toBe('An agent');
+});
+
+it('shows a live grant with its time left and revokes it', async () => {
+	const host = target();
+	const onRevoke = vi.fn();
+	const active = fill({
+		state: 'active', revision: 2, duration_seconds: 900, expires_at: '2026-01-01T00:15:00Z',
+	});
+	const component = mount(HostAccessActiveLeaseDrawer, { target: host, props: {
+		lease: active, nowMs: Date.parse('2026-01-01T00:05:00Z'), disabled: false, deciding: false, onRevoke,
+	} });
+	flushSync();
+	const text = host.textContent ?? '';
+	expect(text).toContain('Bookkeeper can sign in to https://example.com as me@example.com.');
+	expect(text).toContain('15 minutes');
+	expect(text).toContain('10:00');
+	expect(text).not.toContain('Reviewer');
+	const revoke = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revoke approval');
+	revoke?.click();
+	expect(onRevoke).toHaveBeenCalledOnce();
+	await unmount(component);
+});
+
+it('labels a live grant chip as a saved login, not host access', async () => {
+	const host = target();
+	const component = mount(HostAccessActiveLeaseChip, { target: host, props: {
+		lease: fill({ state: 'active', revision: 2, duration_seconds: 300, expires_at: '2026-01-01T00:05:00Z' }),
+		nowMs: Date.parse('2026-01-01T00:00:00Z'), open: false, deciding: false, disabled: false,
+		onOpen: vi.fn(), onClose: vi.fn(), onRevoke: vi.fn(),
+	} });
+	flushSync();
+	const trigger = host.querySelector('.active-chip-trigger')!;
+	expect(trigger.getAttribute('aria-label')).toBe('Saved login approval');
+	expect(trigger.textContent).toContain('5:00');
+	await unmount(component);
+});
+
+it('posts a fill decision to the fill route with the picked duration only on approve', async () => {
+	const { apiFetch } = await import('$lib/api/request');
+	const fetch = vi.mocked(apiFetch);
+	fetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+	await decideHostAccessLease(fill(), 'approve', 900);
+	expect(fetch.mock.calls[0][0]).toBe('/api/host-access/leases/fills/fill-1/approve');
+	const init = fetch.mock.calls[0][1] as RequestInit;
+	expect(JSON.parse(init.body as string)).toEqual({
+		revision: 1, application_hash: 'a'.repeat(64), duration_seconds: 900,
+	});
+	expect((init.headers as Record<string, string>)['X-CORSIA-User-Decision']).toBe('capability');
+	fetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+	await decideHostAccessLease(fill({ state: 'active', revision: 2 }), 'revoke');
+	expect(fetch.mock.calls[1][0]).toBe('/api/host-access/leases/fills/fill-1/revoke');
+	expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+		revision: 2, application_hash: 'a'.repeat(64),
+	});
+});

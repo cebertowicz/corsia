@@ -29,13 +29,13 @@
 	aria-label={pendingLabel(request)}
 	aria-haspopup="dialog"
 	aria-expanded={open}
-	aria-busy={request.kind === 'script' && deciding}
+	aria-busy={(request.kind === 'script' || request.kind === 'fill') && deciding}
 	bind:this={element}
 	{onclick}
 >
-	{#if request.kind === 'script'}
-		<span class="eyebrow sentence">Script approval</span>
-		<span class="pending-owner">{request.script_name}</span>
+	{#if request.kind === 'script' || request.kind === 'fill'}
+		<span class="eyebrow sentence">{request.kind === 'script' ? 'Script approval' : 'Saved login'}</span>
+		<span class="pending-owner">{request.kind === 'script' ? request.script_name : `${owner(request)} · ${request.site}`}</span>
 		<span class="pending-status" class:stale class:deciding>{stale ? 'Not current' : deciding ? 'Saving…' : 'Needs approval'}</span>
 	{:else}
 		<span class="eyebrow">Temporary host access</span>

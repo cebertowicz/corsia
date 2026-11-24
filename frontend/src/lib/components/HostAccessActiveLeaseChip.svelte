@@ -2,7 +2,7 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
 	import { owner, remaining } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
+	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	/**
 	 * One active lease, as the compact shield-and-countdown chip that occupies
@@ -20,7 +20,7 @@
 		onClose,
 		onRevoke,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessTimed;
 		nowMs: number;
 		open: boolean;
 		deciding: boolean;
@@ -29,13 +29,15 @@
 		onClose: () => void;
 		onRevoke: (event: MouseEvent) => void;
 	} = $props();
+
+	const fill = $derived(lease.kind === 'fill');
 </script>
 
 <div class="active-chip">
 	<button
 		type="button"
 		class="active-chip-trigger"
-		aria-label="Host access"
+		aria-label={fill ? 'Saved login approval' : 'Host access'}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={onOpen}
@@ -52,14 +54,20 @@
 			stroke-linecap="round"
 			stroke-linejoin="round"
 		>
-			<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-			<path d="M12 8v4" />
-			<path d="M12 16h.01" />
+			{#if fill}
+				<circle cx="7.5" cy="15.5" r="5.5" />
+				<path d="m21 2-9.6 9.6" />
+				<path d="m15.5 7.5 3 3L22 7l-3-3" />
+			{:else}
+				<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+				<path d="M12 8v4" />
+				<path d="M12 16h.01" />
+			{/if}
 		</svg>
 		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
 	{#key lease.id}
-		<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
+		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
 			<HostAccessActiveLeaseDrawer
 				{lease}
 				{nowMs}

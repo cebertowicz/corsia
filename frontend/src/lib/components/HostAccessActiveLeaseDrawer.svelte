@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
-	import { duration, remaining } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
+	import { duration, owner, remaining } from '$lib/hostAccess/leaseFormat';
+	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	let {
 		lease,
@@ -10,7 +10,7 @@
 		deciding,
 		onRevoke,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessTimed;
 		nowMs: number;
 		disabled: boolean;
 		deciding: boolean;
@@ -20,17 +20,27 @@
 
 <div class="active-drawer">
 	<div class="active-drawer-body">
-		<p>{lease.purpose}</p>
-		<dl>
-			<dt>Approved duration</dt>
-			<dd>{duration(lease.requested_duration_seconds)}</dd>
-			<dt>Reviewer</dt>
-			<dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd>
-			<dt>Approval</dt>
-			<dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd>
-			<dt>Time remaining</dt>
-			<dd>{remaining(lease, nowMs)}</dd>
-		</dl>
+		{#if lease.kind === 'fill'}
+			<p>{owner(lease)} can sign in to {lease.site} as {lease.username}. CORSIA types the password; the agent never sees it.</p>
+			<dl>
+				<dt>Approved duration</dt>
+				<dd>{duration(lease.duration_seconds)}</dd>
+				<dt>Time remaining</dt>
+				<dd>{remaining(lease, nowMs)}</dd>
+			</dl>
+		{:else}
+			<p>{lease.purpose}</p>
+			<dl>
+				<dt>Approved duration</dt>
+				<dd>{duration(lease.requested_duration_seconds)}</dd>
+				<dt>Reviewer</dt>
+				<dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd>
+				<dt>Approval</dt>
+				<dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd>
+				<dt>Time remaining</dt>
+				<dd>{remaining(lease, nowMs)}</dd>
+			</dl>
+		{/if}
 	</div>
 	<div class="active-drawer-actions">
 		<Button
@@ -40,7 +50,7 @@
 			{disabled}
 			onclick={onRevoke}
 		>
-			Revoke host access
+			{lease.kind === 'fill' ? 'Revoke approval' : 'Revoke host access'}
 		</Button>
 	</div>
 </div>
