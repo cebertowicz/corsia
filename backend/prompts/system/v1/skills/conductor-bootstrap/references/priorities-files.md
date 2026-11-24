@@ -5,7 +5,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 ## Two levels
 
 - **The project's file:** `context/PRIORITIES.md`. What the whole team puts first.
-- **Each agent's file:** `PRIORITIES.md` in that agent's own `context/` folder (`.threads/<agent id>/context/`). Only its own lines, where they differ from the project's.
+- **Each agent's file:** `PRIORITIES.md` in that agent's own `context/` folder (`.threads/<agent id>/context/`). It never repeats a line from the project's file: when the agent's work serves one of the project's Now lines, its own Now reads `Not set yet`, unless the person gave that agent a different order.
 - Every agent loads both on every turn, so keep each to a few short lines. On an install with no project, an agent's own file is its only one.
 
 ## What a file holds

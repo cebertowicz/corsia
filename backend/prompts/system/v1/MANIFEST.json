@@ -112,10 +112,10 @@
       "sha256": "caaa0dc5c2b8b14eb9412538d1800c7deef7286e84c6ffd3324d4d1d1c5be020"
     },
     {
-      "bytes": 734,
+      "bytes": 732,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/templates/PRIORITIES.md",
-      "sha256": "cf690841e372fa1f8591c43125f5c00453b4a72c3929aa0c320037baf8ad731d"
+      "sha256": "febcaaa2122355c556e0636532e6d061192b0b6061b9c1194d003bddb72c2df6"
     },
     {
       "bytes": 4409,
@@ -232,10 +232,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 2586,
+      "bytes": 2724,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/priorities-files.md",
-      "sha256": "60278fc6590dfa1585339bae03725ae4c4f73a258799f036b0cea5490d9ce33a"
+      "sha256": "e8c73f7cd62687dc05ee98f49cc3a05846a968c1304de13e401e2cdfb151cc61"
     },
     {
       "bytes": 7206,

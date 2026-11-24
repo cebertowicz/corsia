@@ -4,7 +4,7 @@
 
 <!-- Example agent priorities file. Shape: skill conductor-bootstrap,
 references/priorities-files.md. Every line traces to the person's words or
-reads "Not set yet". Only lines that differ from the project's file.
+reads "Not set yet". Never repeats a line from the project's file.
 Replace every <…>, then delete this comment; keep the Use line. -->
 
 ## Now
