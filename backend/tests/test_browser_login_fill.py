@@ -44,15 +44,7 @@ class Owner:
             raise self.declare
 
 
-class Cdp:
-    def __init__(self, _endpoint) -> None:
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args):
-        return None
+REAL_REQUESTS = page.Requests
 
 
 class Requests:
@@ -74,8 +66,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
     w = SimpleNamespace(login_id=login_id, sentinel=sentinel, owner=Owner(), steps=[], typed=[], loaders=["L1"],
                         grants=[True], form=page.SignInForm(7, True), outcome="signed_in", linked=False)
-    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fills):
-        held.clear()
+    _clear_marks()
 
     def may_fill(thread_id, login):
         w.steps.append("may_fill")
@@ -97,8 +88,21 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     async def browser(_command, _refusal):
         return "ws://127.0.0.1:9/devtools/browser/B"
 
-    async def loader(_cdp):
-        return w.loaders[0]
+    class Cdp:
+        """The page's CDP connection: it answers only the frame tree, whose document is the current loader."""
+
+        def __init__(self, _endpoint) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def call(self, method, **_params):
+            assert method == "Page.getFrameTree"
+            return {"frameTree": {"frame": {"loaderId": w.loaders[0]}}}
 
     async def command(_owner, _runtime, _lease, args, _timeout):
         w.steps.append(args[0])
@@ -131,8 +135,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(browser_cdp, "page_endpoint", endpoint)
     monkeypatch.setattr(browser_cdp, "browser_endpoint", browser)
     monkeypatch.setattr(browser_session_commands, "_command", command)
-    monkeypatch.setattr(page, "QuietCdp", Cdp)
-    monkeypatch.setattr(page, "main_loader", loader)
+    monkeypatch.setattr(browser_cdp, "CdpClient", Cdp)
     monkeypatch.setattr(page, "linked_windows", linked)
     monkeypatch.setattr(page, "find_form", find)
     monkeypatch.setattr(page, "type_values", type_values)
@@ -140,7 +143,12 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(page, "Requests", Requests)
     monkeypatch.setattr(fill, "_settled", settled)
     yield w
-    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_control._saved_fills):
+    _clear_marks()
+
+
+def _clear_marks() -> None:
+    for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_fill_marks._site_marks,
+                 browser_control._saved_fills):
         held.clear()
 
 
@@ -256,24 +264,69 @@ async def test_a_result_the_page_never_showed_calls_neither_result_function(worl
 @pytest.mark.asyncio
 async def test_a_document_an_agent_scripted_is_reloaded_once_and_then_filled(world):
     world.loaders = ["L1", "L2"]
-    browser_fill_marks._mark(THREAD, "L1")
+    browser_fill_marks._scripted[THREAD] = {"L1"}
     await fill.fill_saved_login(THREAD, world.login_id)
     assert world.steps.count("reload") == 1 and world.typed
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dirty", ["route", "script_after_reload", "linked_window"])
+@pytest.mark.parametrize("dirty", ["route", "script_after_reload", "script_on_the_site", "linked_window"])
 async def test_a_document_still_not_clean_after_one_reload_is_the_persons_step(world, dirty, caplog):
     if dirty == "route":
-        browser_fill_marks._session_marks.add(f"{THREAD}:s1")
+        browser_fill_marks._session_marks.add((THREAD, "s1"))
     elif dirty == "script_after_reload":
-        browser_fill_marks._mark(THREAD, "L1")
+        browser_fill_marks._scripted[THREAD] = {"L1"}
+    elif dirty == "script_on_the_site":
+        # A script on another page of the saved site: the reload gives a new document, but not a clean site.
+        world.loaders = ["L1", "L2"]
+        browser_fill_marks._site_marks.add((THREAD, "s1", "example.com"))
     else:
         world.linked = True
     text = await fill.fill_saved_login(THREAD, world.login_id)
     lead = fill.NOT_CLEAN.format(site=SITE)
     assert text == f"{lead} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
     assert world.steps.count("reload") == 1 and "read" not in world.steps and not world.typed
+    _never_shown(world, caplog, text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("steps", [
+    (f"open {SITE}/account", "eval window.addEventListener('submit', () => {})"),
+    ("tab 2", "eval window.addEventListener('submit', () => {})"),
+    ("click @e4", "wait --fn window.ready"),
+])
+async def test_a_batch_that_runs_script_after_moving_documents_leaves_the_sign_in_to_the_person(world, steps, caplog):
+    # The batch's script may run in a document opened or switched to by an earlier step, so the session is marked.
+    await browser_fill_marks.before_agent_command(THREAD, "s1", ENDPOINT, ("batch", *steps))
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == f"{fill.NOT_CLEAN.format(site=SITE)} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
+    assert "read" not in world.steps and not world.typed
+    _never_shown(world, caplog, text)
+
+
+@pytest.mark.asyncio
+async def test_a_requests_watch_that_fails_to_start_still_closes_its_socket(world, monkeypatch, caplog):
+    closed = []
+
+    class Failing:
+        def __init__(self, _endpoint) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append(True)
+
+        async def call(self, method, **_params):
+            assert method == "Network.enable"
+            raise BrowserSessionError(page.PAGE_CHECK_FAILED)
+
+    monkeypatch.setattr(page, "Requests", REAL_REQUESTS)
+    monkeypatch.setattr(page, "CdpClient", Failing)
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == fill.REFUSED["page"]
+    assert closed == [True] and "read" not in world.steps and not world.typed
     _never_shown(world, caplog, text)
 
 
@@ -312,7 +365,7 @@ class FrameCdp:
         raise AssertionError(method)
 
 
-ONE = {"passwords": 1, "form": True, "user": True, "action": "https://example.com/session"}
+ONE = {"passwords": 1, "form": True, "user": True, "action": "https://example.com/session", "method": "post"}
 
 
 @pytest.mark.asyncio
@@ -325,9 +378,14 @@ ONE = {"passwords": 1, "form": True, "user": True, "action": "https://example.co
     ([("https://login.example.com", ONE)], "frame_origin"),
     ([("https://example.net", ONE)], "frame_origin"),
     ([("https://example.com", {**ONE, "action": "https://collect.example.net/p"})], "form_action"),
-    ([("https://example.com", {**ONE, "action": "http://example.com/session"})], "form_action"),
+    ([("https://example.com", {**ONE, "action": "http://example.com/session"})], "insecure_action"),
+    ([("https://example.com", {**ONE, "action": "http://login.example.com/session"})], "insecure_action"),
+    ([("https://example.com", {**ONE, "action": "http://example.net/session"})], "form_action"),
     ([("https://example.com", {**ONE, "action": "javascript:void(0)"})], "form_action"),
-    ([("https://example.com", {**ONE, "form": False, "action": ""})], page.SignInForm(100, True)),
+    ([("https://example.com", {**ONE, "method": "get"})], "get_form"),
+    ([("https://example.com", {**ONE, "method": "dialog"})], page.SignInForm(100, True)),
+    ([("https://example.com", {**ONE, "action": "https://example.net/p", "method": "get"})], "form_action"),
+    ([("https://example.com", {**ONE, "form": False, "action": "", "method": ""})], page.SignInForm(100, True)),
 ])
 async def test_the_field_must_be_in_an_https_frame_of_the_saved_site_and_its_form_must_send_there(frames, expected):
     assert await page.find_form(FrameCdp(frames), SITE, saved_logins.normalized_site) == expected
@@ -348,8 +406,7 @@ async def test_the_result_waits_for_the_page_to_settle_as_the_password_step_does
     monkeypatch.setattr(fill, "SETTLE_LIMIT", 0.3)
     pending = list(probes)
 
-    async def probe(_endpoint, _known, *, client=None):
-        assert client is page.QuietCdp
+    async def probe(_endpoint, _known):
         visit, host, shown = pending.pop(0) if len(pending) > 1 else pending[0]
         return browser_cdp.PasswordProbe(visit, host, frozenset({1}) if shown else frozenset(), "T1",
                                          present_nodes=frozenset())

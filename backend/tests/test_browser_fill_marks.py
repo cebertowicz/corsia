@@ -1,9 +1,9 @@
-"""Which agent commands mark a document or a whole session against a saved-login fill (browser_fill_marks)."""
+"""Which agent commands mark a document, a site or a whole session against a saved-login fill (browser_fill_marks)."""
 from __future__ import annotations
 
 import pytest
 
-from host_access import browser_fill_marks as marks
+from host_access import browser_cdp, browser_fill_marks as marks
 
 THREAD = "thread-marks"
 
@@ -12,9 +12,23 @@ THREAD = "thread-marks"
 def _fresh():
     marks._scripted.clear()
     marks._session_marks.clear()
+    marks._site_marks.clear()
     yield
     marks._scripted.clear()
     marks._session_marks.clear()
+    marks._site_marks.clear()
+
+
+@pytest.fixture
+def on_page(monkeypatch):
+    """The page's document and site as before_agent_command reads them; None stands for an unreadable page."""
+    current = {"page": ("L1", "example.com")}
+
+    async def page(_endpoint):
+        return current["page"]
+
+    monkeypatch.setattr(marks, "_page", page)
+    return current
 
 
 @pytest.mark.parametrize(("args", "document", "session"), [
@@ -39,43 +53,110 @@ def test_scripts_mark_their_document_and_lasting_changes_mark_the_session(args, 
 
 
 @pytest.mark.asyncio
-async def test_a_script_marks_only_the_document_it_ran_in(monkeypatch):
-    async def loader(_endpoint):
-        return "L1"
-
-    monkeypatch.setattr(marks, "_loader", loader)
+async def test_a_script_marks_the_document_it_ran_in_and_its_site_for_this_session(on_page):
     await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
     assert marks.scripted(THREAD, "L1") and not marks.scripted(THREAD, "L2")
+    assert marks.site_marked(THREAD, "s1", "example.com") and not marks.site_marked(THREAD, "s1", "other.test")
+    assert not marks.site_marked(THREAD, "s2", "example.com")
     assert not marks.session_marked(THREAD, "s1")
 
 
 @pytest.mark.asyncio
-async def test_a_document_that_cant_be_read_marks_every_document(monkeypatch):
-    async def unreadable(_endpoint):
-        return ""
-
-    monkeypatch.setattr(marks, "_loader", unreadable)
+async def test_a_new_document_on_a_scripted_site_is_still_marked_by_its_site(on_page):
+    # A reload commits a new loader, but a service worker or storage the script left still reaches the site.
     await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
-    assert marks.scripted(THREAD, "L2")
+    on_page["page"] = ("L2", "example.com")
+    assert not marks.scripted(THREAD, "L2")
+    assert marks.site_marked(THREAD, "s1", "example.com")
 
 
 @pytest.mark.asyncio
-async def test_a_route_marks_its_session_until_the_browser_closes(monkeypatch):
-    async def loader(_endpoint):
-        return "L1"
+@pytest.mark.parametrize("args", [
+    ("batch", "open https://example.com/b", "eval 1"),
+    ("batch", "tab 2", "eval 1"),
+    ("batch", "click @e1", "wait --fn window.ready"),
+    ("batch", "--bail", "back", "eval 1"),
+])
+async def test_a_batch_that_can_run_script_marks_the_whole_session(on_page, args):
+    # An earlier step can navigate or switch tabs, so the document a later script runs in isn't known in advance.
+    await marks.before_agent_command(THREAD, "s1", "ws://page", args)
+    assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
 
-    monkeypatch.setattr(marks, "_loader", loader)
+
+@pytest.mark.asyncio
+async def test_a_batch_without_a_script_step_marks_nothing(on_page):
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("batch", "click @e1", "snapshot -i"))
+    assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+    assert not marks.site_marked(THREAD, "s1", "example.com")
+
+
+@pytest.mark.asyncio
+async def test_a_page_whose_document_or_address_cant_be_read_marks_the_session(on_page):
+    on_page["page"] = None
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tree", [
+    {},
+    {"frameTree": None},
+    {"frameTree": {"frame": None}},
+    {"frameTree": {"frame": {"loaderId": "L1"}}},
+    {"frameTree": {"frame": {"loaderId": "L1", "url": "about:blank"}}},
+    {"frameTree": {"frame": {"url": "https://example.com/"}}},
+])
+async def test_an_unreadable_frame_tree_gives_no_page(monkeypatch, tree):
+    class Client:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def call(self, method):
+            assert method == "Page.getFrameTree"
+            return tree
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", Client)
+    assert await marks._page("ws://page") is None
+
+
+@pytest.mark.asyncio
+async def test_a_readable_frame_tree_gives_its_document_and_registrable_domain(monkeypatch):
+    class Client:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def call(self, _method):
+            return {"frameTree": {"frame": {"loaderId": "L9", "url": "https://login.example.com/a"}}}
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", Client)
+    assert await marks._page("ws://page") == ("L9", "example.com")
+
+
+@pytest.mark.asyncio
+async def test_a_route_marks_its_session_until_the_browser_closes(on_page):
     await marks.before_agent_command(THREAD, "s1", "ws://page", ("network", "route", "*"))
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
     assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
     assert not marks.session_marked("other-thread", "s1")
     marks.forget(THREAD)
     assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+    assert not marks.site_marked(THREAD, "s1", "example.com")
 
 
-def test_past_the_cap_every_document_counts_as_marked():
-    for index in range(marks._MARKS_KEPT + 1):
-        marks._mark(THREAD, f"L{index}")
-    assert marks.scripted(THREAD, "L0") and marks.scripted(THREAD, "never-seen")
+def test_an_unread_document_counts_as_scripted():
+    assert marks.scripted(THREAD, "")
 
 
 def test_a_fill_without_a_session_id_counts_as_marked():

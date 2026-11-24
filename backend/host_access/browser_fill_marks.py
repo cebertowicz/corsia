@@ -1,13 +1,20 @@
-"""Which documents an agent ran a script in, and which sessions it changed past a document, for the saved-login fill.
+"""Which documents, sites and sessions an agent ran a script in or changed, for the saved-login fill.
 
-A saved login is filled only on a clean document: one where no agent eval or script ran since it loaded and
-no agent network route is active (browser_login_fill). Before an agent eval or `wait --fn`, or a no-script
-command given an option outside _PLAIN_OPTIONS, the page's current document, its main frame's loader id, is
-marked; a reload or navigation commits a new loader, which starts clean. A document whose loader can't be read
-marks every document of the thread. Any other command outside _NO_SCRIPT_COMMANDS marks the whole session: a
-network route, init script or header outlives a reload, and an undo isn't trusted to have removed it. Both
-are kept until the session ends (forget); past _MARKS_KEPT documents every document counts as marked. Only
-identities are kept here, never page content.
+A saved login is filled only on a clean document (browser_login_fill). Before each agent command:
+
+- A command that can change the session past its document (a network route, an init script, a header: any
+  command outside _DOCUMENT_SCRIPT_COMMANDS) marks the whole session; an undo isn't trusted to have removed it.
+- A batch with any step that can run script marks the whole session: an earlier step can navigate or switch
+  tabs, so the document a later script runs in can't be known before the batch runs.
+- Any other command that can run script (an eval, `wait --fn`, or a no-script command given an option outside
+  _PLAIN_OPTIONS) marks the page's current document (its main frame's loader id) and that document's site (its
+  registrable domain) in this session. A reload or navigation commits a new, clean document, but a script can
+  leave stored state (a service worker, storage) that reaches every page of its site, so a fill on a marked
+  site is not clean even after a reload. A page whose document or address can't be read marks the session.
+
+Marks are kept until the browser closes (forget), with no cap: each is one identity per agent script command,
+freed with the session, and forgetting one could make a live document look clean. Only identities are kept
+here, never page content.
 """
 from __future__ import annotations
 
@@ -17,7 +24,8 @@ from typing import Sequence
 
 from websockets.exceptions import WebSocketException
 
-from host_access.browser_cdp import CdpClient
+from host_access import browser_cdp
+from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 
 log = logging.getLogger(__name__)
@@ -32,12 +40,12 @@ _NO_SCRIPT_COMMANDS = frozenset({
 _PLAIN_OPTIONS = frozenset({"-i", "--full", "--load", "--url", "--text", "--state"})
 # The commands whose script lives and dies with the document it ran in.
 _DOCUMENT_SCRIPT_COMMANDS = _NO_SCRIPT_COMMANDS | {"eval"}
-# Stands for "a document whose loader couldn't be read": every document of the thread counts as marked.
-_ANY_DOCUMENT = ""
-_MARKS_KEPT = 64
 
-_scripted: dict[str, dict[str, None]] = {}
-_session_marks: set[str] = set()
+# By thread: the documents (loader ids) an agent's script ran in. Loader ids never recur.
+_scripted: dict[str, set[str]] = {}
+# (thread, session) pairs, and (thread, session, registrable domain) triples, an agent marked.
+_session_marks: set[tuple[str, str | None]] = set()
+_site_marks: set[tuple[str, str | None, str]] = set()
 
 
 def _nested(args: Sequence[str]) -> list[list[str]] | None:
@@ -69,51 +77,58 @@ def outlives_document(args: Sequence[str]) -> bool:
 
 
 async def before_agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str]) -> None:
-    """Mark the session before a command that outlives its document, and the page's document before a script."""
-    if outlives_document(args):
-        _session_marks.add(f"{thread_id}:{session}")
-    if runs_script(args):
-        _mark(thread_id, await _loader(endpoint))
+    """Mark the session, or the page's document and site, before an agent command that can reach them."""
+    if outlives_document(args) or (bool(args) and args[0] == "batch" and runs_script(args)):
+        _session_marks.add((thread_id, session))
+    elif runs_script(args):
+        page = await _page(endpoint)
+        if page is None:
+            _session_marks.add((thread_id, session))
+            return
+        loader, domain = page
+        _scripted.setdefault(thread_id, set()).add(loader)
+        _site_marks.add((thread_id, session, domain))
 
 
-async def _loader(endpoint: str) -> str:
+async def _page(endpoint: str) -> tuple[str, str] | None:
+    """The page's document (loader id) and site (registrable domain), or None when either can't be read."""
     try:
         if endpoint:
-            async with CdpClient(endpoint) as cdp:
-                return main_loader(await cdp.call("Page.getFrameTree"))
-    except (BrowserSessionError, OSError, WebSocketException):
-        log.info("an agent's script ran on a page whose document couldn't be read; no saved login is filled there")
-    return _ANY_DOCUMENT
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                tree = await cdp.call("Page.getFrameTree")
+            loader, host = browser_cdp.loader_id(tree), browser_cdp.main_host(tree)
+            if loader and host:
+                return loader, registrable_domain(host)
+    except (BrowserSessionError, OSError, WebSocketException, ValueError):
+        pass
+    log.info("an agent's script ran on a page whose document couldn't be read; no saved login is filled this session")
+    return None
 
 
-def main_loader(tree: dict) -> str:
-    """The loader id of a frame tree's main frame, or the any-document mark when it has none."""
-    loader = ((tree.get("frameTree") or {}).get("frame") or {}).get("loaderId")
-    return loader if isinstance(loader, str) and loader else _ANY_DOCUMENT
-
-
-def _mark(thread_id: str, loader: str) -> None:
-    marks = _scripted.setdefault(thread_id, {})
-    marks[loader] = None
-    if len(marks) > _MARKS_KEPT:
-        # Forgetting an old mark could make a live document look clean, so past the cap every document counts.
-        _scripted[thread_id] = {_ANY_DOCUMENT: None}
+def _same_session(marked: str | None, session: str | None) -> bool:
+    # A mark or a fill with no session id can't be told apart from any session, so it counts as the same one.
+    return marked is None or session is None or marked == session
 
 
 def scripted(thread_id: str, loader: str) -> bool:
-    """Whether an agent may have run a script in this document since it loaded."""
-    marks = _scripted.get(thread_id, {})
-    return not loader or loader in marks or _ANY_DOCUMENT in marks
+    """Whether an agent may have run a script in this document since it loaded; an unread document counts."""
+    return not loader or loader in _scripted.get(thread_id, ())
 
 
 def session_marked(thread_id: str, session: str | None) -> bool:
-    """Whether an agent may have changed this session past a document, a network route included."""
-    # A command or a fill with no session id can't be told apart from any session, so it counts as marked.
-    return session is None or f"{thread_id}:{session}" in _session_marks or f"{thread_id}:None" in _session_marks
+    """Whether an agent may have changed this session past a document, or ran script it can't place."""
+    return session is None or any(thread == thread_id and _same_session(marked, session)
+                                  for thread, marked in _session_marks)
+
+
+def site_marked(thread_id: str, session: str | None, domain: str) -> bool:
+    """Whether an agent ran script on a page of this site (registrable domain) in this session."""
+    return any(thread == thread_id and _same_session(marked, session) and site == domain
+               for thread, marked, site in _site_marks)
 
 
 def forget(thread_id: str) -> None:
-    """The thread's browser closed: its documents, routes and scripts are gone with it."""
+    """The thread's browser closed: its documents, sites, routes and scripts are gone with it."""
     _scripted.pop(thread_id, None)
-    for key in [key for key in _session_marks if key.startswith(f"{thread_id}:")]:
-        _session_marks.discard(key)
+    _session_marks.difference_update({mark for mark in _session_marks if mark[0] == thread_id})
+    _site_marks.difference_update({mark for mark in _site_marks if mark[0] == thread_id})
