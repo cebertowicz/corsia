@@ -1,4 +1,4 @@
-# C.O.R.S.I.A.: Community-Orchestrated Recursive Self-Improving Agents
+# C.O.R.S.I.A.
 
 ### Give an agent a problem to own. CORSIA measures it on its results and on your attention.
 
