@@ -14,10 +14,12 @@
 			const bounds = root.getBoundingClientRect();
 			left = bounds.left;
 			width = bounds.width;
-			bottom = Math.max(0, window.innerHeight - ((viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)));
+			const lift = Math.max(0, window.innerHeight - ((viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)));
+			bottom = lift;
 			// The room is what the bar covers of the document's column, never more: a bar on a column that ends above the page's foot covers less than its own height.
-			const barBox = element.getBoundingClientRect();
-			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(barBox.height, bounds.bottom - barBox.top))}px`);
+			// The bar's top is worked out from the lift just set, not read back: the lift reaches the page at the next flush, so a measured top is the one before the move.
+			const height = element.getBoundingClientRect().height;
+			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(height, bounds.bottom - (window.innerHeight - lift - height)))}px`);
 		};
 		update();
 		const observer = new ResizeObserver(update);
