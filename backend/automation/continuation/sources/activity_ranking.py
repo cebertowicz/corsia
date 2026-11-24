@@ -1,20 +1,21 @@
 """Wake scope coordinators when their Activity order needs attention."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from loguru import logger
 from events.delivery import enqueue_event_wake
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
 from infra.database import write_transaction
+from infra.thread_input_rows import event_wake_queued
 from plans.public import thread_paused_since
 
-# Cost budget, not a measurement: at most 4 ranking wakes an hour per scope (96 a day) while new
-# items keep arriving. A new item waits at most this long for a rank, and meanwhile shows in
-# Activity below the ranked items, marked 'Not ranked yet'. The sweep itself runs every
-# automation.continuation.cadence.CONTINUATION_SWEEP_INTERVAL seconds.
-NUDGE_FLOOR = timedelta(minutes=15)
+# A ranker holds at most one unread ranking wake: no new wake is sent while the last one waits
+# in its queue, so items that arrive meanwhile are ranked by that one turn. Once it is read, the
+# next sweep that finds an item raised since then wakes it again. Until ranked, an item shows in
+# Activity below the ranked ones, marked 'Not ranked yet'.
+WAKE_EVENT = 'activity.unranked'
 
 # Scope -> the last failure logged for it, so a scope that keeps failing logs once until its
 # failure changes or it recovers, not once a sweep.
@@ -68,9 +69,9 @@ def _enqueue_if_due(db, user_id: str, project_id: str | None, thread_id: str, no
     current = _instant(now)
     if current is None:
         raise ValueError('invalid activity sweep timestamp')
-    last = _last_nudge(db, user_id, scope)
-    if last and current - last < NUDGE_FLOOR:
+    if event_wake_queued(db, thread_id, WAKE_EVENT):
         return False
+    last = _last_nudge(db, user_id, scope)
     rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view='activity')
     unranked = sum(row['rank'] is None for row in rows)
     if not ranker or ranker['thread_id'] != thread_id or not _eligible(rows, last):
@@ -78,12 +79,12 @@ def _enqueue_if_due(db, user_id: str, project_id: str | None, thread_id: str, no
     with write_transaction(db, scope='activity_rank_nudge') as tx:
         # Another sweep may have nudged this scope while the queue was read.
         locked_last = _last_nudge(tx, user_id, scope)
-        if locked_last != last or (locked_last and current - locked_last < NUDGE_FLOOR):
+        if locked_last != last or event_wake_queued(tx, thread_id, WAKE_EVENT):
             return False
         summary = (f'{unranked} items waiting on the person are not ranked. '
                    'Load attention_rank (tools_load names=["attention_rank"]), '
                    'call it with operation read, then set the order.')
-        enqueue_event_wake(thread_id, 'activity.unranked', summary,
+        enqueue_event_wake(thread_id, WAKE_EVENT, summary,
                            message_id=uuid4().hex, created_at=now, db=tx)
         tx.execute('INSERT INTO activity_rank_nudges(user_id,scope,last_enqueued_at) VALUES(?,?,?) '
                    'ON CONFLICT(user_id,scope) DO UPDATE SET last_enqueued_at=excluded.last_enqueued_at',

@@ -1,4 +1,4 @@
-"""Ranking authority and durable nudge throttling."""
+"""Ranking authority, and at most one unread ranking wake per ranker."""
 import json
 from plans import service
 from tests.test_attention_queue import db  # noqa: F401
@@ -39,22 +39,27 @@ def test_ranker_set_is_authorized_atomic_and_replaces(db, monkeypatch):
     assert read['items'][0]['rank']['reason'] == 'Ready'
 
 
-def test_nudge_is_debounced_and_rechecks_the_queue(db, monkeypatch):
-    from automation.continuation.sources import activity_ranking
-    key = seed(db)
-    wakes = []
-    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kw: wakes.append(args))
-    source = activity_ranking.ActivityRankingSource()
-    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    assert source.prepare('2026-01-01T00:14:59+00:00', db=db) == []
-    db.execute('INSERT INTO activity_ranks VALUES (?,?,?,?,?,?,?)',
-               ('user-1','project-1',key,1,'Ready','root','2026-01-01'))
+def _unread_wakes(db):
+    return db.execute("SELECT count(*) FROM messages WHERE thread_id='root' AND delivery_state='queued' "
+                      "AND write_started_at IS NULL "
+                      "AND json_extract(metadata,'$.event_type')='activity.unranked'").fetchone()[0]
+
+
+def _read_wakes(db):
+    db.execute("UPDATE messages SET write_started_at='2026-01-01T00:00:01+00:00' WHERE thread_id='root' "
+               "AND json_extract(metadata,'$.event_type')='activity.unranked'")
     db.commit()
-    assert source.prepare('2026-01-01T00:15:00+00:00', db=db) == []
-    assert len(wakes) == 1
 
 
-def test_only_new_unranked_items_trigger_another_nudge(db, monkeypatch):
+def _add_task(db, created_at):
+    plan = service.ensure_plan('thread', 'root', db=db)
+    node = service.add_node(plan.id, kind='task', title='New', acceptance_criteria='Done', assignee='user', db=db)
+    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?', (created_at, node.id))
+    db.commit()
+    return f'task:{node.id}'
+
+
+def test_no_second_wake_while_the_first_is_unread_and_items_raised_meanwhile_wake_once_after(db, monkeypatch):
     from api import attention
     from automation.continuation.sources import activity_ranking
 
@@ -67,18 +72,30 @@ def test_only_new_unranked_items_trigger_another_nudge(db, monkeypatch):
         assert not connection.in_transaction
         return actual_queue(connection, *args, **kwargs)
     monkeypatch.setattr(attention, 'activity_queue', read_without_write_lock)
-    wakes = []
-    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
     source = activity_ranking.ActivityRankingSource()
     assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    assert source.prepare('2026-01-01T00:15:00+00:00', db=db) == []
-    plan = service.ensure_plan('thread', 'root', db=db)
-    new = service.add_node(plan.id, kind='task', title='New', acceptance_criteria='Done', assignee='user', db=db)
-    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?', ('2026-01-01T00:01:00Z', new.id))
+    # Unread: a new item raised now does not stack a second wake.
+    _add_task(db, '2026-01-01T00:01:00+00:00')
+    assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == []
+    assert _unread_wakes(db) == 1
+    # Read, with an item raised since the last wake: exactly one more wake.
+    _read_wakes(db)
+    assert source.prepare('2026-01-01T00:03:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T00:04:00+00:00', db=db) == []
+    # Read, nothing raised since: the ranker is not woken again for items it already saw.
+    _read_wakes(db)
+    assert source.prepare('2026-01-01T00:05:00+00:00', db=db) == []
+    assert _unread_wakes(db) == 0
+
+
+def test_a_ranked_queue_sends_no_wake(db):
+    from automation.continuation.sources import activity_ranking
+    key = seed(db)
+    db.execute('INSERT INTO activity_ranks VALUES (?,?,?,?,?,?,?)',
+               ('user-1','project-1',key,1,'Ready','root','2026-01-01'))
     db.commit()
-    assert source.prepare('2026-01-01T00:15:00+00:00', db=db) == ['root']
-    assert source.prepare('2026-01-01T00:30:00+00:00', db=db) == []
-    assert len(wakes) == 2
+    assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert _unread_wakes(db) == 0
 
 
 def test_concurrent_nudge_recheck_prevents_duplicate(db, monkeypatch):
@@ -137,8 +154,6 @@ def test_paused_ranker_is_not_woken_and_wakes_once_after_unpause(db, monkeypatch
     seed(db)
     paused = {'root': '2026-01-01T00:00:00+00:00'}
     monkeypatch.setattr(activity_ranking, 'thread_paused_since', lambda _db, thread: paused.get(thread))
-    wakes = []
-    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
     source = activity_ranking.ActivityRankingSource()
     assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == []
     assert source.prepare('2026-01-01T01:00:00+00:00', db=db) == []
@@ -146,7 +161,7 @@ def test_paused_ranker_is_not_woken_and_wakes_once_after_unpause(db, monkeypatch
     paused.clear()
     assert source.prepare('2026-01-01T02:00:00+00:00', db=db) == ['root']
     assert source.prepare('2026-01-01T02:01:00+00:00', db=db) == []
-    assert len(wakes) == 1
+    assert _unread_wakes(db) == 1
 
 
 def test_a_scope_that_keeps_failing_logs_once_until_it_changes(db, monkeypatch):
