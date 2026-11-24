@@ -1,8 +1,12 @@
 <h1 align="center">C.O.R.S.I.A.<br/><sub><sub>Community-Orchestrated Recursive Self-Improving Agents</sub></sub></h1>
 
-<h3 align="center">Give an agent a problem to own.<br/>It improves itself, measured on its results and your attention.</h3>
+<h3 align="center">Give an agent a problem to own.<br/>CORSIA measures it on its results and on your attention.</h3>
 
-<p align="center">It sets KPIs for the problem you gave it, and CORSIA counts every minute it takes from you. The agent learns from both, to get better results for less of your time.</p>
+<p align="center">CORSIA counts every minute an agent takes from you and how much of its work you accept on the first try. It is built so agents learn from both and need less of your time; that they do is not yet proven.</p>
+
+<p align="center"><a href="https://github.com/cebertowicz/corsia/releases/latest"><strong>Download CORSIA for Mac</strong></a><br/><sub>Apple Silicon, macOS 15 or later</sub></p>
+
+<p align="center"><strong>What it costs:</strong> CORSIA is free and open source. Its agents run on a model you bring: a Claude or ChatGPT subscription you already pay for, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. A team of agents uses far more of a subscription than one agent does, so start with one.</p>
 
 <p align="center">
   <picture>
@@ -22,7 +26,7 @@
 </p>
 <p align="center"><sub>Measured on the install that builds CORSIA, September 25 to October 8.</sub></p>
 
-<p align="center"><strong>CORSIA improves itself the same way.</strong> Its own agents build and maintain it: <a href="#built-by-its-own-agents">962 pull requests in 30 days</a>, under one maintainer.</p>
+<p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">962 pull requests in 30 days</a>, under one maintainer.</p>
 
 <p align="center">
   <img alt="macOS only" src="https://img.shields.io/badge/platform-macOS_only-000000?logo=apple&logoColor=white">
@@ -31,6 +35,7 @@
   <img alt="Local models: oMLX on Apple Silicon" src="https://img.shields.io/badge/local_models-oMLX_·_Apple_Silicon-555555?logo=apple&logoColor=white">
   <img alt="Self-hosted: plain files and SQLite" src="https://img.shields.io/badge/self--hosted-plain_files_+_SQLite-2ea44f?logo=sqlite&logoColor=white">
   <img alt="Built by its own agents" src="https://img.shields.io/badge/built_by-its_own_agents-7c3aed">
+  <img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </p>
 
 <p align="center">
@@ -45,7 +50,7 @@
 
 ## How it works
 
-Most agents do what you ask and remember more each time. A CORSIA agent answers for a result instead: it is measured on it, checked by an agent other than itself where it matters, and keeps a lesson only while the lesson earns its place.
+Most agents do what you ask and remember more each time. A CORSIA agent answers for a result instead: it is measured on it, checked by an agent other than itself where it matters, and holds each lesson it learns as a trial with a review date.
 
 **Pick a problem and let an agent own it.** The agent answers for a measurable outcome: your time, for an assistant that takes email, scheduling and follow-ups off your week; bugs that reach users; new users who quit during setup. It sets the KPIs for that problem and answers for them, on top of the two goals every agent starts with: less of your time, better results. Recording those KPIs beside CORSIA's own measures is being added. It carries work from decision to verified result, hands bounded steps to **temporary workers**, and messages other agents directly. Each deliverable has one accountable agent.
 
@@ -86,7 +91,7 @@ Asking for less of your attention is only safe with proof that the work is getti
 - **Quality and cost per result.** The first-try rate counts tasks accepted without being sent back or corrected. Cost counts the tokens of each accepted task, including every worker it used, and their dollars at API list prices where a model has them.
 - **Each agent against its own past.** Measurement compares each agent with its previous weeks and flags one that moved the wrong way. Models compete on your work: each gets one row of accepted tasks and cost per accepted task, against the week before.
 - **Each agent on its own KPIs** (being added). Every agent keeps KPIs for the problem it owns, such as bugs that reach users, for an agent that owns release quality, or hours of your week spent on email and meetings, for an assistant. Agents record those outcomes as they happen, and any project can send its own OpenTelemetry events, so a problem's progress sits beside the built-in measures.
-- **Lessons expire unless they earn their place.** Most agent memory only grows. When a CORSIA agent learns from a correction or a failure, it writes a short trial: the evidence, when the lesson applies and when it doesn't, and a review date. The trial loads until that date. Then the agent keeps, revises or retires it, with a report of which turns received and read each version. Being added: a comparison of tasks that received the lesson with similar tasks that didn't, so the review sees whether it helped, not only who saw it (the dashed line above). A retired lesson stops loading and keeps its history. Your own instructions are never trials and never expire.
+- **Lessons expire unless the agent renews them.** Most agent memory only grows. When a CORSIA agent learns from a correction or a failure, it writes a short trial: the evidence, when the lesson applies and when it doesn't, and a review date. The trial loads until that date. Then the agent keeps, revises or retires it, with a report of which turns received and read each version. Being added: a comparison of tasks that received the lesson with similar tasks that didn't, so the review sees whether it helped, not only who saw it (the dashed line above). A retired lesson stops loading and keeps its history. Your own instructions are never trials and never expire.
 - **The conductor acts on what moved.** It revises the coordination model, context and skills from what the measurements show, and recommends a new agent when a problem outgrows the one that has it. Each change is versioned with its reason. Being added: the trends mark when guidance changed, so a shift in the numbers lines up with its cause.
 
 ## What it asks of you
@@ -136,10 +141,13 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 
 ## Getting started
 
-- A Mac with Apple Silicon and macOS 15 or later, or an Ubuntu 24.04+ or Debian 12+ server. Agents run as your own user account with unrestricted network access, so read [Security](#security) first.
-- Macs with less than 32 GB of memory need a cloud model provider (Claude Code, Codex or an API key) for agent work. Teams use a lot of tokens, so start with one agent.
+1. [Download CORSIA](https://github.com/cebertowicz/corsia/releases/latest) (`CORSIA-<version>-aarch64.dmg`), open it and drag CORSIA to Applications. It needs a Mac with Apple Silicon and macOS 15 or later.
+2. Open CORSIA. Setup continues in the app: create a local account, then connect a model.
 
-Open Terminal and run:
+- Macs with less than 32 GB of memory need a cloud model provider (Claude Code, Codex or an API key) for agent work. Teams use a lot of tokens, so start with one agent.
+- Agents run as your own user account with unrestricted network access, so read [Security](#security) first.
+
+To run CORSIA from a source checkout, or as a server on Ubuntu 24.04+ or Debian 12+, open Terminal and run:
 
 ```bash
 git clone --branch main https://github.com/cebertowicz/corsia.git ~/.corsia
@@ -262,7 +270,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 
 **Apps**
 - [x] Web app and an installable phone app
-- [ ] Packaged macOS desktop app *(source in `desktop/`)*
+- [x] macOS desktop app that updates itself
 
 </details>
 
