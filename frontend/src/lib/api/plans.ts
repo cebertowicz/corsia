@@ -45,7 +45,8 @@ export type PlanLifecycleMutationOutcome =
 	| { status: 'success' }
 	| { status: 'conflict'; detail?: string }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string };
+	/** `refused`: the server answered 422 with its own reason, which pressing again won't change. */
+	| { status: 'error'; message: string; refused?: true };
 
 /** Post one audited, revision-safe plan mutation as the authenticated user. */
 async function postPlanMutation(
@@ -72,7 +73,7 @@ async function postPlanMutation(
 	// written for the person who sent it; a generic line would only hide it.
 	const detail = showRefusal ? await refusalDetail(res) : undefined;
 	if (res.status === 409) return { status: 'conflict', detail };
-	if (res.status === 422 && detail) return { status: 'error', message: detail };
+	if (res.status === 422 && detail) return { status: 'error', message: detail, refused: true };
 	return { status: 'error', message: safeErrorMessage(res.status) };
 }
 

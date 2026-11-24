@@ -257,6 +257,22 @@ Source: `backend/infra/key_store_schema.py`.
 
 Indexes: `sqlite_autoindex_key_write_attempts_1` (token_hash, unique).
 
+### `saved_login_fill_audit`
+
+Source: `backend/infra/key_store_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | INTEGER | Yes | No | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+| `login_id` | TEXT | No | Yes | — | — |
+| `site` | TEXT | No | Yes | — | — |
+| `username` | TEXT | No | Yes | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `result` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_saved_login_fill_audit_login_created` (login_id, created_at).
+
 ### `saved_logins`
 
 Source: `backend/infra/key_store_schema.py`.

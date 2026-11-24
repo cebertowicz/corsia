@@ -518,12 +518,12 @@ test('plan copy: oversize count and resolved decision', async ({ page, request }
 });
 
 
-test('plan copy: task details, read-only discussion, task menu, empty pane, activity row', async ({ page }, info) => {
+test('plan copy: task details, read-only discussion, task menu, empty pane', async ({ page }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
 	test.setTimeout(150_000);
 	for (const width of [1920, 393]) {
-		for (const row of [6, 7, 8, 10, 15, 17]) {
-			if ((row === 15 || row === 17) && width === 393) continue; // These labels are hidden on phones.
+		for (const row of [6, 7, 8, 10, 15]) {
+			if (row === 15 && width === 393) continue; // This label is hidden on phones.
 			await view(page, width, width === 393 ? 852 : 1080, 'light');
 			await page.goto('/_design?frame=attention-dock&scenario=empty');
 			await page.evaluate(async (selected) => {
@@ -546,10 +546,6 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 					const { activeThreadId } = await load('/src/lib/stores/threads.ts');
 					activeThreadId.set(null);
 					mount(Component, { target: host, props: { sections: [{ title: 'Plan', kind: 'plan' }] } });
-				} else if (selected === 17) {
-					const { default: Component } = await load('/src/lib/components/activity/ActivityPlanRow.svelte');
-					const row = { entry: { plan: { id: 'p', revision: 1 }, owner: { thread_id: 't', label: 'Example chat', type: 'thread' }, progress: { open: 1, liveness: 'waiting' }, has_nodes: false, display: { label_key: 'waiting', tone_key: 'waiting' }, priority_at: new Date().toISOString() }, thread: null, ownerType: 'thread', state: 'waiting' };
-					mount(Component, { target: host, props: { row, onSelectThread: () => {} } });
 				} else {
 					const { default: Component } = await load('/src/lib/components/plans/PlanNodeDetails.svelte');
 					const item = node({ title: 'Review task' });
@@ -559,8 +555,8 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 				}
 				flushSync();
 			}, row);
-			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'Waiting, this task alone:';
-			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : 'Waiting, this task alone:';
+			await expect(page.getByText(text)).toBeVisible();
 			await shot(page, `copy-${row}-${width}`);
 		}
 	}

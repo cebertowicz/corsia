@@ -13,6 +13,7 @@ import { clearDraft, existingDraft, relocateDraftTarget } from '$lib/stores/docS
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
 import { clearTabViewState } from '$lib/stores/tabViewState';
+import { isActivityWorkspace } from '$lib/stores/activityWorkspace';
 
 export {
 	emptyWorkspace, tabKey, getActiveTab, isTabChanged, hasChangedTab,
@@ -38,6 +39,7 @@ function loadPersisted(): PersistedShape {
 		if (!parsed || typeof parsed !== 'object') return { threads: {}, splitWidth: null };
 		const threads: Record<string, ThreadArtifactWorkspace> = {};
 		for (const [threadId, value] of Object.entries(parsed.threads ?? {})) {
+			if (isActivityWorkspace(threadId)) continue;
 			const restored = restoreWorkspace(value);
 			if (restored && restored.tabs.length) threads[threadId] = restored;
 		}
@@ -68,6 +70,7 @@ function persistentWorkspace(
 function persistentThreads(): Record<string, ThreadArtifactWorkspace> {
 	const kept: Record<string, ThreadArtifactWorkspace> = {};
 	for (const [threadId, workspace] of Object.entries(get(threadWorkspaces))) {
+		if (isActivityWorkspace(threadId)) continue;
 		const persistent = persistentWorkspace(workspace);
 		if (persistent) kept[threadId] = persistent;
 	}

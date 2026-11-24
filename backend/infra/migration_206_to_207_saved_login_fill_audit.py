@@ -1,4 +1,4 @@
-"""Schema 205 -> 206: saved-login fill history, retained after login deletion.
+"""Schema 206 -> 207: saved-login fill history, retained after login deletion.
 
 The DDL is copied so this migration always creates its original shape. The
 migration runner owns the transaction.
@@ -7,7 +7,7 @@ migration runner owns the transaction.
 import sqlite3
 
 
-def migrate_205_to_206(conn: sqlite3.Connection) -> None:
+def migrate_206_to_207(conn: sqlite3.Connection) -> None:
     """Add the fill audit table and its login/time index."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS saved_login_fill_audit (
@@ -17,7 +17,7 @@ def migrate_205_to_206(conn: sqlite3.Connection) -> None:
             site TEXT NOT NULL,
             username TEXT NOT NULL,
             thread_id TEXT NOT NULL,
-            result TEXT NOT NULL CHECK (result IN ('filled', 'rejected'))
+            result TEXT NOT NULL CHECK (result IN ('filled', 'rejected', 'unknown'))
         )
     """)
     conn.execute("""

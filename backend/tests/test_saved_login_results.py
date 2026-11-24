@@ -63,7 +63,27 @@ def test_result_is_recorded_without_password_and_survives_deletion(login, caplog
         logger.remove(sink)
 
 
-@pytest.mark.parametrize("operation", [saved_login_results.fill_succeeded, saved_login_results.fill_failed])
+@pytest.mark.parametrize("stale", [False, True])
+def test_unknown_fill_records_each_attempt_without_changing_login(login, caplog, stale):
+    if stale:
+        saved_logins.mark_out_of_date(login)
+    before = saved_logins.get_login(login)
+    logs = []
+    sink = logger.add(logs.append)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            assert saved_login_results.fill_unknown("agent", login) is None
+            assert saved_login_results.fill_unknown("agent", login) is None
+        audit = rows()
+        assert len(audit) == 2
+        assert all(row[0] and row[1:] == (login, "https://example.com", "alice", "agent", "unknown") for row in audit)
+        assert saved_logins.get_login(login) == before
+        assert "sentinel-unique-for-test" not in repr((audit, logs, caplog.text))  # gitleaks:allow
+    finally:
+        logger.remove(sink)
+
+
+@pytest.mark.parametrize("operation", [saved_login_results.fill_succeeded, saved_login_results.fill_failed, saved_login_results.fill_unknown])
 def test_unknown_login_and_invalid_thread_write_nothing(login, operation):
     with pytest.raises(KeyStoreError):
         operation("agent", "0" * 32)
