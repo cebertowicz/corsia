@@ -258,7 +258,9 @@ describe('HostAccessLeaseControl', () => {
 		expect(activeDialog.querySelector('.active-drawer-head .section-label')?.textContent).toBe('Sign in with a saved login');
 		expect(activeDialog.querySelector('.active-drawer-head h2')?.textContent).toBe('Bookkeeper');
 		expect([...activeDialog.querySelectorAll('dt.section-label')].map((label) => label.textContent))
-			.toEqual(['Approved duration', 'Time remaining']);
+			.toEqual(['Site', 'Username', 'For how long', 'Time remaining']);
+		expect([...activeDialog.querySelectorAll('dd')].slice(0, 2).map((value) => value.textContent))
+			.toEqual(['https://example.com', 'me@example.com']);
 		Array.from(activeDialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Revoke approval')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeNull());
@@ -511,7 +513,8 @@ describe('HostAccessLeaseControl', () => {
 		expect(dialog.textContent).toContain(expectedDuration);
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
-		expect(Boolean(approve)).toBe(approvalAllowed);
+		// Approve is always there; it is off when the request can't be approved.
+		expect(approve?.disabled).toBe(!approvalAllowed);
 		expect(Boolean(dialog.querySelector('.blocked-line'))).toBe(!approvalAllowed);
 	});
 
@@ -618,11 +621,13 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
 
-		expect(dialog.querySelector('.blocked-line')?.textContent).toContain('incomplete or malformed');
+		expect(dialog.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+		// Approve is shown disabled, never hidden; reading again won't change the request, so no Retry.
 		expect(
-			Array.from(dialog.querySelectorAll('button'))
-				.some((button) => button.textContent?.trim() === 'Approve'),
-			).toBe(false);
+			Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+				.find((button) => button.textContent?.trim() === 'Approve')?.disabled,
+			).toBe(true);
+		expect(Array.from(dialog.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Retry')).toBe(false);
 		// Missing attestation fails approvalReady but does not touch casReady's
 		// fields (id/application_hash/decision_capability/revision), so Reject
 		// is correctly still actionable — matching the pre-refactor base at
@@ -668,17 +673,19 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
 
-		expect(dialog.querySelector('.blocked-line')?.textContent).toContain('incomplete or malformed');
+		expect(dialog.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+		// Approve is shown disabled, never hidden; reading again won't change the request, so no Retry.
 		expect(
-			Array.from(dialog.querySelectorAll('button'))
-				.some((button) => button.textContent?.trim() === 'Approve'),
-			).toBe(false);
+			Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+				.find((button) => button.textContent?.trim() === 'Approve')?.disabled,
+			).toBe(true);
+		expect(Array.from(dialog.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Retry')).toBe(false);
 		// Reject is gated only by casReady (id/application_hash/
 		// decision_capability/revision), independent of approvalReady's wider
 		// data checks — matching the pre-refactor base. Only the four rows
 		// above that mutate a casReady field expect Reject disabled=true; every
 		// other malformation leaves the lease's CAS identity intact, so Reject
-		// stays actionable even while Approve is correctly hidden.
+		// stays actionable while Approve is shown disabled.
 		const reject = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Reject');
 		expect(reject?.disabled).toBe(rejectDisabled);
@@ -832,6 +839,62 @@ describe('HostAccessLeaseControl', () => {
 			'POST',
 			'GET',
 		]);
+	});
+
+	it('keeps the server line on the drawer when a stale Reject is refused, over the refreshed request', async () => {
+		const changed = { ...waitingLease, revision: 5, application_hash: 'hash-2', purpose: 'Restart the Home Assistant add-on' };
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ detail: 'This request has new details. Review them before you approve.' }, false, 409))
+			.mockResolvedValue(response({ leases: [changed] }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
+		emit('host_access_changed', { lease_id: 'lease-1' });
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
+		const dialog = await openPendingDrawer();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Reject')!.click();
+
+		// The re-read brings the changed request back, and the drawer still says why the Reject didn't land.
+		await vi.waitFor(() => expect(dialog.textContent).toContain('Restart the Home Assistant add-on'));
+		const notice = dialog.querySelector('.decision-actions .decision-notice');
+		expect(notice?.textContent).toBe('This request has new details. Review them before you approve.');
+		expect(notice?.getAttribute('role')).toBe('alert');
+		expect(dialog.querySelector('.decision-head .status')?.textContent?.trim()).toBe('Needs approval');
+		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve');
+		expect(approve?.disabled).toBe(false);
+	});
+
+	it('shows the server line in the drawer when an approve fails, and drops it on the next decision', async () => {
+		let failApprove = true;
+		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST' && failApprove) {
+				return response({ detail: 'Host access could not start. Try again in a moment.' }, false, 500);
+			}
+			if (init?.method === 'POST') return response({ ...waitingLease, state: 'rejected' });
+			return response({ leases: [waitingLease] });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
+		const dialog = await openPendingDrawer();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent)
+			.toBe('Host access could not start. Try again in a moment.'));
+
+		failApprove = false;
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Reject')!.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(2));
+		expect(dialog.querySelector('.decision-notice')).toBeNull();
 	});
 
 	it('disables approval when the selected thread truth becomes stale', async () => {

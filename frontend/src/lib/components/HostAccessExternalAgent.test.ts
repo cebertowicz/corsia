@@ -109,13 +109,15 @@ it('blocks an incomplete launch and shows plain missing-command copy outside cod
 	external.command = '';
 	expect(approvalReady(lease)).toBe(false);
 	show(lease);
-	expect(button('Approve')).toBeUndefined();
+	// Approve stays in its place, disabled; Reject keeps its place beside it.
+	expect(button('Approve')?.disabled).toBe(true);
 	expect(button('Reject')?.disabled).toBe(false);
 	const missing = host.querySelector('.launch-missing')!;
 	expect(missing.textContent).toBe('Command missing');
 	expect(missing.closest('code')).toBeNull();
 	expect(host.querySelector('.blocked-line')?.textContent)
-		.toContain('The request, independent attestation, or decision identity is incomplete or malformed.');
+		.toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	expect(button('Retry')).toBeUndefined();
 });
 
 it('names a missing working folder and prevents approval', () => {
@@ -126,7 +128,7 @@ it('names a missing working folder and prevents approval', () => {
 	expect(approvalReady(lease)).toBe(false);
 	show(lease);
 	expect(host.querySelector('.launch-missing')?.textContent).toBe('Working folder missing');
-	expect(button('Approve')).toBeUndefined();
+	expect(button('Approve')?.disabled).toBe(true);
 });
 
 it('rejects malformed directory, duplicate launch, extra repo field and excessive duration', () => {
@@ -168,7 +170,7 @@ it('names the state in the header and the asked duration in the body', () => {
 	show(externalLease());
 	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Needs approval');
 	const durationSection = host.querySelector('.risk-grid section')!;
-	expect(durationSection.querySelector('.label')!.textContent).toBe('Duration');
+	expect(durationSection.querySelector('.label')!.textContent).toBe('For how long');
 	expect(durationSection.querySelector('p')!.textContent).toBe(duration(externalLease().requested_duration_seconds));
 	expect(host.querySelector('.decision-body .blocked-line')).toBeNull();
 	// Command and Working folder are section labels; only the exceptions heading is amber.

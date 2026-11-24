@@ -2,35 +2,49 @@
 	import { Button } from '$lib/components/ui';
 
 	/**
-	 * Why an access request can't be approved: one red line and a ghost Retry, no box. The fill,
-	 * script and lease request drawers all draw it from here, so its words and look live in one place.
-	 * The lease drawer still passes its own `incomplete` words until its wording is settled.
+	 * What a request drawer's footer says above its decision: the server's refusal of the last decision,
+	 * and why Approve is off. One red line each, no box. The fill, script and lease request drawers and the
+	 * active drawer all draw it from here, so its words and look live in one place.
 	 */
 	let {
-		stale,
+		stale = false,
+		incomplete = false,
+		notice = null,
 		onRetry,
-		incomplete = 'This request arrived without everything needed to approve it. Retry to load it again.',
 	}: {
-		stale: boolean;
-		onRetry: () => void;
-		incomplete?: string;
+		/** The last read failed: Retry reads again. */
+		stale?: boolean;
+		/** The request lacks what CORSIA needs to check it: no Retry, since reading again won't change it. */
+		incomplete?: boolean;
+		/** The server's own line when it refused this request's last decision. */
+		notice?: string | null;
+		onRetry?: () => void;
 	} = $props();
 </script>
 
-<div class="blocked-line" role="status">
-	<span>{stale
-		? 'Couldn’t check that this request is still current, so you can’t approve it yet.'
-		: incomplete}</span>
-	<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
-</div>
+{#if notice}
+	<p class="blocked-line decision-notice" role="alert">{notice}</p>
+{/if}
+{#if stale}
+	<div class="blocked-line" role="status">
+		<span>Couldn’t check that this request is still current, so you can’t approve it yet.</span>
+		{#if onRetry}<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>{/if}
+	</div>
+{:else if incomplete}
+	<p class="blocked-line" role="status">This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.</p>
+{/if}
 
 <style>
 	.blocked-line {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
+		margin: 0;
 		color: var(--red-text);
 		font-size: var(--text-footnote);
 	}
 	.blocked-line span { flex: 1; min-width: 0; }
+	/* A ghost action's text sits inside its padding and border; pull it out so the word lines up
+	   with the right edge of Approve below it. */
+	.blocked-line :global(.btn.ghost) { margin-right: calc(-1 * (var(--button-pad-x-sm) + 1px)); }
 </style>

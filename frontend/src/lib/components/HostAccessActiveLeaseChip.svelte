@@ -17,6 +17,7 @@
 		open,
 		deciding,
 		disabled,
+		notice = null,
 		onOpen,
 		onClose,
 		onRevoke,
@@ -26,6 +27,8 @@
 		open: boolean;
 		deciding: boolean;
 		disabled: boolean;
+		/** The server's line when it refused the last Revoke. */
+		notice?: string | null;
 		onOpen: (event: MouseEvent) => void;
 		onClose: () => void;
 		onRevoke: (event: MouseEvent) => void;
@@ -52,6 +55,7 @@
 				{nowMs}
 				{deciding}
 				{disabled}
+				{notice}
 				onRevoke={onRevoke}
 			/>
 		</AdaptiveDrawer>

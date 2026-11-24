@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import { duration, owner, remaining } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
@@ -8,12 +9,15 @@
 		nowMs,
 		disabled,
 		deciding,
+		notice = null,
 		onRevoke,
 	}: {
 		lease: HostAccessTimed;
 		nowMs: number;
 		disabled: boolean;
 		deciding: boolean;
+		/** The server's line when it refused the last Revoke. */
+		notice?: string | null;
 		onRevoke: (event: MouseEvent) => void;
 	} = $props();
 </script>
@@ -29,13 +33,15 @@
 		{#if lease.kind === 'fill'}
 			<p>{owner(lease)} can sign in to {lease.site} as {lease.username}. CORSIA types the password; the agent never sees it.</p>
 			<dl>
-				<div><dt class="section-label">Approved duration</dt><dd>{duration(lease.duration_seconds)}</dd></div>
+				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
+				<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>
+				<div><dt class="section-label">For how long</dt><dd>{duration(lease.duration_seconds)}</dd></div>
 				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
 			</dl>
 		{:else}
 			<p>{lease.purpose}</p>
 			<dl>
-				<div><dt class="section-label">Approved duration</dt><dd>{duration(lease.requested_duration_seconds)}</dd></div>
+				<div><dt class="section-label">For how long</dt><dd>{duration(lease.requested_duration_seconds)}</dd></div>
 				<div><dt class="section-label">Reviewer</dt><dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd></div>
 				<div><dt class="section-label">Approval</dt><dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd></div>
 				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
@@ -43,6 +49,7 @@
 		{/if}
 	</div>
 	<div class="active-drawer-actions">
+		<HostAccessBlockedLine {notice} />
 		<Button
 			variant="ghost"
 			size="sm"
@@ -72,6 +79,7 @@
 		top: 0;
 		z-index: 2;
 		padding: var(--space-2) 0 var(--space-3);
+		border-bottom: 1px solid var(--border-subtle);
 		background: var(--bg-secondary);
 	}
 	.active-drawer-head h2 {
@@ -108,6 +116,8 @@
 		margin: 0;
 	}
 	.active-drawer-body dl > div { min-width: 0; }
+	/* A site or username can be long: each takes the full row, as on the request sheet. */
+	.active-drawer-body dl > .wide { grid-column: 1 / -1; }
 	.active-drawer-body dd {
 		min-width: 0;
 		margin: var(--space-1) 0 0;
@@ -119,9 +129,15 @@
 		bottom: 0;
 		z-index: 2;
 		display: flex;
-		justify-content: flex-end;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-2);
 		/* Flush-bottom sheet: the footer carries the bottom inset itself. */
 		padding: var(--space-3) 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		border-top: 1px solid var(--border-subtle);
 		background: var(--bg-secondary);
 	}
+	.active-drawer-actions :global(.blocked-line) { align-self: stretch; }
+	/* The ghost action's word ends where a request sheet's Approve ends: pull it out of its own padding. */
+	.active-drawer-actions > :global(.btn.ghost) { margin-right: calc(-1 * (var(--button-pad-x-sm) + 1px)); }
 </style>

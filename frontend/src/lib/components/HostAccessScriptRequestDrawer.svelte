@@ -15,6 +15,7 @@
 		deciding,
 		rejectDisabled,
 		approveDisabled,
+		notice = null,
 		onApprove,
 		onReject,
 		onRetry,
@@ -24,6 +25,7 @@
 		deciding: boolean;
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
+		notice?: string | null;
 		onApprove: (event: MouseEvent) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
@@ -45,13 +47,11 @@
 		<section><span class="section-label">Reviewer’s reason</span><p>{request.reviewer_reason}</p></section>
 	</div>
 	<footer class="decision-actions">
-		{#if stale || !ready}
-			<HostAccessBlockedLine {stale} {onRetry} />
-		{/if}
+		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 			<span class="decision-spacer"></span>
-			{#if ready}<Button variant="primary" loading={deciding} disabled={approveDisabled} onclick={onApprove}>Approve</Button>{/if}
+			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready} onclick={onApprove}>Approve</Button>
 		</div>
 	</footer>
 </div>

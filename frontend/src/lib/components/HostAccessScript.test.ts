@@ -82,10 +82,9 @@ it('says an incomplete script request cannot be approved', async () => {
 		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
 	} });
 	flushSync();
-	expect(target.textContent).toContain('This request arrived without everything needed to approve it. Retry to load it again.');
-	const labels = [...target.querySelectorAll('button')].map((button) => button.textContent?.trim());
-	expect(labels).toContain('Deny');
-	expect(labels).not.toContain('Approve');
+	expect(target.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	const buttons = [...target.querySelectorAll<HTMLButtonElement>('button')];
+	expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Deny', false], ['Approve', true]]);
 	await unmount(component);
 	target.remove();
 });

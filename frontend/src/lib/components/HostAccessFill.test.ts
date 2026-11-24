@@ -98,15 +98,16 @@ it('cannot be approved when stale or incomplete, and says why', async () => {
 	expect(stale.host.textContent).not.toContain('Retry to check again');
 	await unmount(stale.component);
 	const incomplete = pending(fill({ decision_capability: '' }));
-	expect(incomplete.host.textContent).toContain('This request arrived without everything needed to approve it.');
-	const labels = [...incomplete.host.querySelectorAll('button')].map((button) => button.textContent?.trim());
-	expect(labels).toContain('Reject');
-	expect(labels).not.toContain('Approve');
+	expect(incomplete.host.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	const buttons = [...incomplete.host.querySelectorAll<HTMLButtonElement>('.decision-buttons button')];
+	// Approve is shown disabled, never hidden, so Reject keeps its place; reading again won't help, so no Retry.
+	expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Reject', false], ['Approve', true]]);
+	expect([...incomplete.host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Retry');
 	await unmount(incomplete.component);
-	// Below the shortest duration there is nothing to pick: Approve goes, and the drawer says why.
+	// Below the shortest duration there is nothing to pick: Approve is off, and the drawer says why.
 	const short = pending(fill({ max_duration_seconds: 120 }));
-	expect(short.host.textContent).toContain('This request arrived without everything needed to approve it.');
-	expect([...short.host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Approve');
+	expect(short.host.querySelector('.blocked-line')?.textContent?.trim()).toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	expect([...short.host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
 	await unmount(short.component);
 	expect(approvalReady(fill({ max_duration_seconds: 299 }))).toBe(false);
 	expect(approvalReady(fill({ max_duration_seconds: 300 }))).toBe(true);

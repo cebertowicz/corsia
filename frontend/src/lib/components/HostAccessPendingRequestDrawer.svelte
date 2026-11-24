@@ -11,6 +11,7 @@
 		deciding,
 		rejectDisabled,
 		approveDisabled,
+		notice = null,
 		onApprove,
 		onReject,
 		onRetry,
@@ -22,6 +23,8 @@
 		/** Mirrors the parent decide() guard so a visibly-enabled control never silently no-ops. */
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
+		/** The server's line when it refused this request's last decision. */
+		notice?: string | null;
 		/** A fill approval passes the duration the person picked; nothing else does. */
 		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
@@ -74,9 +77,9 @@
 {/snippet}
 
 {#if lease.kind === 'script'}
-	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
+	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} />
 {:else if lease.kind === 'fill'}
-	<HostAccessFillRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
+	<HostAccessFillRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} />
 {:else}
 <div class="pending-drawer">
 	<header class="decision-head">
@@ -117,7 +120,7 @@
 		</section>
 
 		<div class="risk-grid">
-			<section><span class="label">Duration</span><p>{duration(lease.requested_duration_seconds)}</p></section>
+			<section><span class="label">For how long</span><p>{duration(lease.requested_duration_seconds)}</p></section>
 			{#if text(lease.expected_resources)}
 				<section><span class="label">Resources</span><p>{lease.expected_resources}</p></section>
 			{/if}
@@ -171,30 +174,12 @@
 	</div>
 
 	<footer class="decision-actions">
-		{#if stale || !ready}
-			<HostAccessBlockedLine {stale} {onRetry}
-				incomplete="The request, independent attestation, or decision identity is incomplete or malformed." />
-		{/if}
+		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
+		<!-- Approve is always there, disabled when it can't be used, so Reject never moves. -->
 		<div class="decision-buttons">
-		<span class="decision-spacer"></span>
-		<Button
-			variant="ghost"
-			loading={deciding}
-			disabled={rejectDisabled}
-			onclick={onReject}
-		>
-			Reject
-		</Button>
-		{#if ready}
-			<Button
-				variant="primary"
-				loading={deciding}
-				disabled={approveDisabled}
-				onclick={onApprove}
-			>
-				Approve
-			</Button>
-		{/if}
+			<span class="decision-spacer"></span>
+			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready} onclick={onApprove}>Approve</Button>
 		</div>
 	</footer>
 </div>
@@ -222,7 +207,10 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 18px;
-		padding: 8px 0 14px;
+		padding: var(--space-2) 0 var(--space-3);
+		/* A hairline under the pinned head and over the pinned footer, as the decision drawer draws them,
+		   so content scrolling under either ends at a rule instead of a hard cut. */
+		border-bottom: 1px solid var(--border-subtle);
 		/* The sheet is opaque and so are its strips, in the sheet's own fill: no lighter inset
 		   band, and nothing scrolled shows behind the title or the decision. */
 		background: var(--bg-secondary);
@@ -250,7 +238,7 @@
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
-	:global(.pending-drawer .purpose p) { color: var(--text-primary); font-size: var(--text-body); }
+	:global(.pending-drawer .purpose p) { font-size: var(--text-body); }
 	/* The footer holds why Approve is off (when it is) above the decision, so a disabled or
 	   missing Approve always shows its reason at every width without scrolling. */
 	:global(.pending-drawer .decision-actions) {
@@ -263,12 +251,14 @@
 		   and sits on the scroller's edge instead of above a strip of padding the
 		   content scrolls through. */
 		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		border-top: 1px solid var(--border-subtle);
 		background: var(--bg-secondary);
 	}
+	/* A finger's width between Reject and Approve at every width, so one is never pressed for the other. */
 	:global(.pending-drawer .decision-buttons) {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--touch-target);
 	}
 	:global(.pending-drawer .decision-spacer) { flex: 1; }
 
@@ -353,13 +343,10 @@
 		/* Keep the first requested exception above the sticky decision footer even
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
-		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
 		/* A segmented choice in a request sheet (the fill's duration) is finger-sized on a phone. */
 		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
-		/* A finger's width between Reject and Approve, so one is never pressed for the other. */
-		:global(.pending-drawer .decision-buttons) { gap: var(--touch-target); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);

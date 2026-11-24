@@ -82,6 +82,8 @@
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
+	/** The server's own line when it refused a decision, kept on that request's drawer after the re-read. */
+	let decisionNotice = $state<{ leaseId: string; message: string } | null>(null);
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
 	let nowMs = $state(Date.now());
 	let generation = 0;
@@ -150,6 +152,7 @@
 
 	function closeActiveDrawer(): void {
 		openActiveLeaseId = null;
+		decisionNotice = null;
 		openActiveTrigger?.focus();
 		openActiveTrigger = null;
 	}
@@ -160,6 +163,7 @@
 
 	function closePendingDrawer(): void {
 		pendingOpen = false;
+		decisionNotice = null;
 		pendingTriggerEl?.focus();
 	}
 
@@ -181,18 +185,8 @@
 	}
 
 	async function refresh(requestedThreadId = threadId): Promise<void> {
-		if (!text(requestedThreadId)) {
-			generation += 1;
-			activeRequest?.abort();
-			activeRequest = null;
-			focusRestoreIntent = null;
-			leases = [];
-			stale = false;
-			error = '';
-			return;
-		}
-		const currentToken = get(token);
-		if (!currentToken) {
+		// No chat, or signed out: nothing to show.
+		if (!text(requestedThreadId) || !get(token)) {
 			generation += 1;
 			activeRequest?.abort();
 			activeRequest = null;
@@ -252,12 +246,15 @@
 			decision, lease.id, decisionThreadId, decisionControl,
 		);
 		error = '';
+		decisionNotice = null;
 		let refreshTruth = true;
 		try {
 			await decideHostAccessLease(lease, decision, durationSeconds);
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';
+			// Only the server's own words: a dropped connection already shows the could-not-check line.
+			if (caught instanceof HostAccessApiError) decisionNotice = { leaseId: lease.id, message: caught.message };
 			if (
 				caught instanceof HostAccessApiError
 				&& (caught.status === 404 || caught.status === 409)
@@ -285,6 +282,7 @@
 		leases = [];
 		stale = false;
 		error = '';
+		decisionNotice = null;
 		focusRestoreIntent = null;
 		openActiveLeaseId = null;
 		pendingOpen = false;
@@ -382,6 +380,7 @@
 								open={openActiveLeaseId === lease.id}
 								deciding={decidingLeaseId === lease.id}
 								disabled={decisionBlocked(lease, stale, decidingLeaseId)}
+								notice={decisionNotice?.leaseId === lease.id ? decisionNotice.message : null}
 								onOpen={(event) => { openActiveDrawer(lease, event); }}
 								onClose={closeActiveDrawer}
 								onRevoke={(event) => {
@@ -414,6 +413,7 @@
 						deciding={decidingLeaseId === currentPending.id}
 						rejectDisabled={decisionBlocked(currentPending, staleBlocks(stale, 'reject'), decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
+						notice={decisionNotice?.leaseId === currentPending.id ? decisionNotice.message : null}
 						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
 						onReject={(event) => { void decide(
 							currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,

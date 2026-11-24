@@ -385,7 +385,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
 		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
 		// The header carries the state; the asked duration is body text, not a second amber.
-		await expect(dialog.locator('.risk-grid section').first()).toContainText('Duration');
+		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('For how long');
 		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
@@ -422,14 +422,31 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
-		// Reject sits beside Approve, not across the footer from it; on a phone a finger's width apart.
+		// Reject sits beside Approve, not across the footer from it, a finger's width apart at every width.
 		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
-		if (viewport!.width <= 720) {
-			expect(besideGap).toBeGreaterThanOrEqual(44);
-			expect(besideGap).toBeLessThanOrEqual(48);
-		} else {
-			expect(besideGap).toBeGreaterThanOrEqual(0);
-			expect(besideGap).toBeLessThanOrEqual(16);
+		expect(besideGap).toBeGreaterThanOrEqual(44);
+		expect(besideGap).toBeLessThanOrEqual(45);
+		// The pinned head keeps 12px under its title at every width; both pinned strips end at a hairline
+		// over the scrolling content, as the decision drawer's do.
+		await expect(dialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(dialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(dialog.locator('.decision-actions')).toHaveCSS('border-top-width', '1px');
+		// The keyboard reaches Reject, then Approve, and each shows a focus ring.
+		await dialog.getByRole('button', { name: 'Reject' }).focus();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeFocused();
+		for (const name of ['Approve', 'Reject']) {
+			if (name === 'Reject') await page.keyboard.press('Shift+Tab');
+			const ring = await dialog.getByRole('button', { name }).evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { visible: element.matches(':focus-visible'), style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+			});
+			expect(ring, `${name} shows a focus ring`).toMatchObject({ visible: true });
+			expect(ring.style, `${name} outline`).not.toBe('none');
+			expect(ring.width, `${name} outline width`).toBeGreaterThan(0);
 		}
 
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
@@ -528,6 +545,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(revokeBoxAtRest).toBeTruthy();
 		expect(revokeBoxAtRest!.y).toBeGreaterThanOrEqual(0);
 		expect(revokeBoxAtRest!.y + revokeBoxAtRest!.height).toBeLessThanOrEqual(viewport!.height);
+		// Revoke's word ends where a request sheet's Approve ends: the content's right edge.
+		const revokeTextRight = await revokeHostAccess.evaluate((element) => {
+			const range = document.createRange();
+			range.selectNodeContents(element);
+			return range.getBoundingClientRect().right;
+		});
+		expect(Math.abs(revokeTextRight - (activeBodyBox!.x + activeBodyBox!.width))).toBeLessThanOrEqual(1);
+		await expect(activeDialog.locator('.active-drawer-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(activeDialog.locator('.active-drawer-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(activeDialog.locator('.active-drawer-actions')).toHaveCSS('border-top-width', '1px');
 		await footerSitsOnScrollerEdge(activeDialog, '.active-drawer-actions');
 
 		// Escape closes the drawer without revoking, and returns focus to the

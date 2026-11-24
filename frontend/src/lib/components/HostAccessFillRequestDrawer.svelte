@@ -16,6 +16,7 @@
 		deciding,
 		rejectDisabled,
 		approveDisabled,
+		notice = null,
 		onApprove,
 		onReject,
 		onRetry,
@@ -25,6 +26,7 @@
 		deciding: boolean;
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
+		notice?: string | null;
 		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
@@ -76,16 +78,12 @@
 		</section>
 	</div>
 	<footer class="decision-actions">
-		{#if stale || !ready}
-			<HostAccessBlockedLine {stale} {onRetry} />
-		{/if}
+		<HostAccessBlockedLine {stale} incomplete={!ready} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>
 			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
-			{#if ready}
-				<Button variant="primary" loading={deciding} disabled={approveDisabled}
-					onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
-			{/if}
+			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready}
+				onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
 		</div>
 	</footer>
 </div>
