@@ -14,4 +14,6 @@ export interface DocViewerTarget {
 	artifactId: string | null;
 	/** Tab-scoped arrival instruction, cleared after the viewer uses it. */
 	landOn?: DocumentLanding;
+	/** With `landOn`: the thread to land on instead of the first unread. */
+	landOnCommentId?: string;
 }

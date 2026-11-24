@@ -43,12 +43,16 @@ export function holdRemaining(shownAt: number, now: number): number {
 	return Math.max(0, shownAt + PHRASE_HOLD_MS - now);
 }
 
-/** The threads whose running Turn would be this item's work: its worker first. */
+/**
+ * The threads whose running Turn would be this item's work: its worker first.
+ * A worker counts only while the server reads the step Working: a worker busy
+ * on other work while this step waits is not this step's work.
+ */
 export function liveStepThreads(node: OperatorNode): string[] {
 	const execution = node.execution;
 	if (execution.condition === 'terminal') return [];
 	const threads: string[] = [];
-	if (node.child?.thread_id) threads.push(node.child.thread_id);
+	if (node.child?.thread_id && node.display.label_key === 'working') threads.push(node.child.thread_id);
 	if (execution.condition === 'running' && execution.selection) {
 		threads.push(execution.selection.executor_thread_id);
 	}

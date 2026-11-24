@@ -3,6 +3,7 @@ import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { savedContaining, settled } from '../support/tableCells';
 import { test } from '../support/test';
+import { enterDocumentEdit } from '../support/documentReading';
 
 /**
  * Editing a table cell on a phone. A wide table scrolls sideways inside its own box rather than pushing the page, and
@@ -51,6 +52,7 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	await expect(page.locator('.cm-md-table table').first()).toBeVisible({ timeout: 20_000 });
 	// Choosing the document closes the sidebar, and the page slides back into place after the table is drawn.
 	await settled(page);
+	await enterDocumentEdit(page);
 	return { docPath, params };
 }
 

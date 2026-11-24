@@ -111,11 +111,19 @@ def _chrome(url: str):
 
 async def _until(check, seconds: float = 15):
     deadline = time.monotonic() + seconds
+    last_error = None
     while True:
-        if (result := await check()) is not None:
-            return result
+        try:
+            if (result := await check()) is not None:
+                return result
+        except BrowserSessionError as exc:
+            # A page still loading can replace a node between the probe's search and its read of that node;
+            # the probe then refuses with this error, and the next poll reads the settled page.
+            if "couldn't be checked" not in str(exc):
+                raise
+            last_error = exc
         if time.monotonic() > deadline:
-            raise AssertionError("condition not reached on the live page")
+            raise AssertionError("condition not reached on the live page") from last_error
         await asyncio.sleep(0.2)
 
 
@@ -172,6 +180,36 @@ async def test_touch_field_boxes_contain_no_page_content_on_real_chrome():
         fields = (await browser_text_fields.probe_fields(endpoint, 800, 600))[0]
         assert {field['kind'] for field in fields} == {'text', 'password'}
         assert next(field for field in fields if field['kind'] == 'password')['y'] >= 60
+
+
+@pytest.mark.asyncio
+async def test_touch_field_boxes_on_a_scrolled_page_on_real_chrome():
+    """A field in view on a scrolled page gets its box, and a pane reporting more than the page shows
+    gets the straddling field's box cut at the page's bottom edge."""
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            async def viewport():
+                reply = await cdp.call('Runtime.evaluate', returnByValue=True,
+                                       expression='[visualViewport.width, visualViewport.height]')
+                return reply['result']['value']
+
+            # A new headless window shrinks its viewport over its first second; the edge field is placed once it holds.
+            async def steady():
+                first = await viewport()
+                await asyncio.sleep(0.5)
+                return first if first == await viewport() else None
+
+            width, height = await _until(steady)
+            placed = await cdp.call('Runtime.evaluate', returnByValue=True, expression=f"""
+                const field = (id, top) => `<input id=${{id}} type=text style='position:absolute;left:10px;top:${{top}}px;width:120px;height:24px;margin:0;border:0;padding:0'>`;
+                document.body.innerHTML = `<div style='height:5000px'></div>` + field('seen', 1200) + field('edge', {1000 + height - 10});
+                scrollTo(0, 1000);
+                [visualViewport.height, scrollY]""")
+        assert placed['result']['value'] == [height, 1000]
+        await asyncio.sleep(0.2)
+        fields = (await browser_text_fields.probe_fields(endpoint, width, height * 2))[0]
+        assert fields == [{'x': 10, 'y': 200, 'width': 120, 'height': 24, 'kind': 'text'},
+                          {'x': 10, 'y': height - 10, 'width': 120, 'height': 10, 'kind': 'text'}]
 
 
 @pytest.mark.asyncio

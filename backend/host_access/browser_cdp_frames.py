@@ -80,6 +80,11 @@ def split_key(key: int) -> tuple[int | None, int]:
     return (document or None), key & ((1 << _NODE_BITS) - 1)
 
 
+def document_owner(document: int) -> tuple[int | None, int]:
+    """A child document's parent document key and its frame owner's backend node id."""
+    return split_key(document >> _NODE_BITS)
+
+
 def frame_owner(key: int) -> int:
     """The top-document element holding a key's frame; a top-document node is its own."""
     # Each frame level adds a loader tag and a backendNodeId, so a level is two node widths.
@@ -89,7 +94,8 @@ def frame_owner(key: int) -> int:
 
 
 async def search_page(page: Page, find: Callable[[Session], Awaitable[set[int]]],
-                      visible: Callable[[Session, int], Awaitable[bool]]) -> tuple[set[int], Documents]:
+                      visible: Callable[[Session, int], Awaitable[bool]], *,
+                      child_limit: Callable[[], int] | None = None) -> tuple[set[int], Documents]:
     """`find`'s nodes in the page and every frame inside it, keyed, with each document's session."""
     found: set[int] = set()
     documents: Documents = {None: (page, True)}
@@ -98,7 +104,9 @@ async def search_page(page: Page, find: Callable[[Session], Awaitable[set[int]]]
         document = pending.pop()
         session, shown = documents[document]
         found |= {node_key(document, node) for node in await find(session)}
-        for child, element, loader in await child_frames(page, session):
+        children = (await child_frames(page, session) if child_limit is None
+                    else await child_frames(page, session, limit=child_limit()))
+        for child, element, loader in children:
             key = document_key(node_key(document, element), loader)
             documents[key] = (child, shown and await visible(session, element))
             pending.append(key)
@@ -120,7 +128,7 @@ async def shown_keys(documents: Documents, keys: set[int] | frozenset[int],
     return frozenset(shown_now)
 
 
-async def child_frames(client: Attaching, session: Session) -> list[tuple[FrameSession, int, object]]:
+async def child_frames(client: Attaching, session: Session, *, limit: int | None = None) -> list[tuple[FrameSession, int, object]]:
     """Each out-of-process frame directly inside `session`'s document: its session, its frame element's
     backendNodeId and the loader id of the document it shows.
 
@@ -129,11 +137,13 @@ async def child_frames(client: Attaching, session: Session) -> list[tuple[FrameS
     """
     start = len(client.attached)
     await session.call("Target.setAutoAttach", autoAttach=True, waitForDebuggerOnStart=False, flatten=True)
-    frames = []
+    frames: list[tuple[FrameSession, int, object]] = []
     for target in client.attached[start:]:
         info = target.get("targetInfo") or {}
         if target.get("parentSessionId") != session.session_id or info.get("type") != "iframe":
             continue
+        if limit is not None and len(frames) >= limit:
+            raise BrowserSessionError(PAGE_CHECK_FAILED)
         child = target.get("sessionId")
         if not isinstance(child, str) or not child:
             raise BrowserSessionError(PAGE_CHECK_FAILED)
