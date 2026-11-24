@@ -60,7 +60,7 @@ _PASSWORD_EMPTY = "Type the password first."
 _PASSWORD_REFUSAL = f"A password is 1-{VALUE_MAX} characters with no control characters. Nothing was saved."
 _SAVED_BY_REFUSAL = "A saved login needs the person who saved it."
 _THREAD_REFUSAL = "A login's use needs the thread that used it."
-_NO_LOGIN = "There's no saved login to delete."
+_NO_LOGIN = "No saved login has that id."
 
 
 @dataclass(frozen=True)

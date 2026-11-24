@@ -28,6 +28,8 @@ router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
 _NO_THREAD = "The chat this login is for can't be found, so nothing is saved."
 _BAD_BODY = "Something went wrong in CORSIA. Try again."
+#: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
+_NO_LOGIN_TO_DELETE = "There's no saved login to delete."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 
@@ -95,9 +97,9 @@ async def list_saved_logins(_user: dict = Depends(require_human_user)) -> dict:
 
 @router.delete("/{login_id}")
 async def delete_saved_login(login_id: str, _user: dict = Depends(require_person_write)) -> dict:
-    """Delete one saved login and its password."""
+    """Delete one saved login and its password; 404 when there is no such login."""
     try:
         await run_in_db(saved_logins.delete_login, login_id)
-    except KeyStoreError as refused:
-        raise HTTPException(404, str(refused)) from None
+    except KeyStoreError:
+        raise HTTPException(404, _NO_LOGIN_TO_DELETE) from None
     return {"deleted": login_id}

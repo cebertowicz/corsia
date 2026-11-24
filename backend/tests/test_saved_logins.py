@@ -215,7 +215,7 @@ def test_delete_removes_the_login_and_its_entry(state):
     ):
         with pytest.raises(KeyStoreError) as refused:
             action(login_id)
-        assert str(refused.value) == "There's no saved login to delete."
+        assert str(refused.value) == "No saved login has that id."
     from infra.database import get_db
 
     assert get_db().execute(
@@ -227,7 +227,7 @@ def test_delete_removes_the_login_and_its_entry(state):
 def test_an_unknown_or_malformed_id_is_refused(state, login_id):
     with pytest.raises(KeyStoreError) as refused:
         saved_logins.get_login(login_id)
-    assert str(refused.value) == "There's no saved login to delete."
+    assert str(refused.value) == "No saved login has that id."
 
 
 def test_blanking_values_holds_every_saved_password_of_eight_or_more_characters(state):

@@ -383,6 +383,14 @@ async def test_list_and_delete(client, sessions):
     assert missing.status_code == 404
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("login_id", ["0" * 32, "not-an-id"])
+async def test_deleting_a_login_that_is_not_there_says_so(client, sessions, login_id):
+    missing = await client.delete(f"/api/saved-logins/{login_id}", headers=_person())
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "There's no saved login to delete."}
+
+
 _ROUTES = [
     ("GET", "/api/saved-logins/offer?thread_id=t-mine", None),
     ("POST", "/api/saved-logins/offer/save", {"thread_id": "t-mine"}),
