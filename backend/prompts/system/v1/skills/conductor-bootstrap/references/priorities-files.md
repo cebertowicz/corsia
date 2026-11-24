@@ -20,7 +20,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 ## How to fill one
 
 - Every line traces to the person's words or a decision they made, or reads `Not set yet`. Never fill a gap with what seems likely.
-- Use the person's words, not platform terms or jargon.
+- Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. No platform terms or jargon.
 - The person approves each file. A file they have not approved does not count.
 
 ## What it starts
