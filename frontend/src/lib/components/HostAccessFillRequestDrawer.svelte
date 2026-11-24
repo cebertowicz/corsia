@@ -51,8 +51,8 @@
 		<div><div class="section-label">Sign in with a saved login</div><h2 title={owner(request)}>{owner(request)}</h2></div>
 		<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
 	</header>
-	<div class="decision-body">
-		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can stop this at any time.</p>
+	<div class="decision-body fill-body">
+		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke it at any time.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
 		<section><span class="section-label">Username</span><p>{request.username}</p></section>
 		<section>
@@ -83,9 +83,9 @@
 		{/if}
 	</div>
 	<footer class="decision-actions">
-		<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 		<span class="decision-spacer"></span>
-		{#if ready && seconds !== null}
+		<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+		{#if ready}
 			<Button variant="primary" loading={deciding} disabled={approveDisabled}
 				onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
 		{/if}
@@ -94,10 +94,13 @@
 
 <style>
 	.section-label {
+		display: block;
 		color: var(--text-tertiary);
 		font-size: var(--text-footnote);
 		font-weight: var(--fw-semibold);
 	}
+	/* The last control clears the sticky footer by the same step at every width. */
+	.fill-body { padding-bottom: var(--space-4); }
 	.explainer { margin: 0; }
 	.status {
 		flex: none;
@@ -107,6 +110,9 @@
 	}
 	.status.stale, .blocked-line { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
+	@media (pointer: coarse) {
+		.durations .segment { min-height: var(--touch-target); }
+	}
 	.blocked-line {
 		display: flex;
 		align-items: center;

@@ -411,26 +411,20 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await dialog.getByRole('button', { name: 'Approve' }).click();
 		await expect(page.locator('.active-chip .countdown')).toContainText(':');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
-		const hostAccessDisclosure = page.getByRole('button', { name: 'Host access', exact: true });
+		// The chip's words are its name, the time left included.
+		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access \d+:\d{2}$/ });
 		const revokeHostAccess = page.getByRole('button', { name: 'Revoke host access' });
 		await expect(hostAccessDisclosure).toBeVisible();
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			// The solid material is the trigger's; the wrapper only lays it out.
+			// A composer chip: no fill and no border at rest; it sits clear of the messages instead.
 			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
-				const solidProbe = document.createElement('div');
-				solidProbe.style.background = 'var(--bg-secondary)';
-				document.body.appendChild(solidProbe);
-				const solidBackground = getComputedStyle(solidProbe).backgroundColor;
-				solidProbe.remove();
-				return {
-					actualBackground: getComputedStyle(element).backgroundColor,
-					solidBackground,
-				};
+				const style = getComputedStyle(element);
+				return { background: style.backgroundColor, border: style.borderTopWidth };
 			});
-			expect(chipMaterial.actualBackground).toBe(chipMaterial.solidBackground);
+			expect(chipMaterial).toEqual({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
 
 			const messages = page.locator('.messages');
 			await messages.evaluate((element) => { element.scrollTop = element.scrollHeight; });

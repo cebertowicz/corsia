@@ -97,8 +97,14 @@ async function openPendingDrawer(): Promise<HTMLElement> {
 	return host.querySelector('[role="dialog"]')!;
 }
 
+/** The active chip whose words (its accessible name) start with the kind: "Host access 14:52". */
+function chipTrigger(kind: 'Host access' | 'Saved login'): HTMLButtonElement | null {
+	return Array.from(host.querySelectorAll<HTMLButtonElement>('.active-chip-trigger'))
+		.find((button) => button.textContent?.replace(/\s+/g, ' ').trim().startsWith(`${kind} `)) ?? null;
+}
+
 async function openActiveDrawer(): Promise<HTMLElement> {
-	const trigger = host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Host access"]')!;
+	const trigger = chipTrigger('Host access')!;
 	trigger.click();
 	flushSync();
 	await tick();
@@ -237,14 +243,14 @@ describe('HostAccessLeaseControl', () => {
 			.find((button) => button.textContent?.trim() === 'Approve')!.click();
 		await tick();
 
-		await vi.waitFor(() => expect(host.querySelector('.active-chip [aria-label="Saved login approval"]')).toBeTruthy());
+		await vi.waitFor(() => expect(chipTrigger('Saved login')).toBeTruthy());
 		const approve = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
 		expect(approve?.[0]).toBe('/api/host-access/leases/fills/fill-1/approve');
 		expect(JSON.parse(String(approve?.[1]?.body))).toEqual({
 			revision: 1, application_hash: 'fill-hash', duration_seconds: 1800,
 		});
 
-		host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Saved login approval"]')!.click();
+		chipTrigger('Saved login')!.click();
 		flushSync();
 		await tick();
 		const activeDialog = host.querySelector('[role="dialog"]')!;
@@ -277,11 +283,12 @@ describe('HostAccessLeaseControl', () => {
 		const chip = host.querySelector('.active-chip');
 		expect(chip).toBeTruthy();
 		expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
-		const trigger = chip!.querySelector<HTMLButtonElement>('[aria-label="Host access"]');
-		expect(trigger?.getAttribute('aria-label')).toBe('Host access');
-		expect(trigger?.querySelector('.host-access-icon')).toBeTruthy();
-		expect(trigger?.textContent).toContain('5:00');
-		expect(trigger?.querySelector('.countdown')?.getAttribute('aria-hidden')).toBe('true');
+		const trigger = chip!.querySelector<HTMLButtonElement>('.active-chip-trigger');
+		// The chip's words are its accessible name, time included: no static label, nothing hidden, no icon.
+		expect(trigger?.hasAttribute('aria-label')).toBe(false);
+		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 5:00');
+		expect(trigger?.querySelector('[aria-hidden="true"]')).toBeNull();
+		expect(trigger?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
 
 		trigger?.click();
@@ -534,7 +541,7 @@ describe('HostAccessLeaseControl', () => {
 		});
 		try {
 			await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-			host.querySelector<HTMLElement>('.active-chip [aria-label="Host access"]')!.click();
+			chipTrigger('Host access')!.click();
 			flushSync();
 			await tick();
 			expect(host.textContent).toContain('Thread one purpose.');
@@ -547,7 +554,7 @@ describe('HostAccessLeaseControl', () => {
 
 			resolveThreadTwo(response({ leases: [threadTwo] }));
 			await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-			host.querySelector<HTMLElement>('.active-chip [aria-label="Host access"]')!.click();
+			chipTrigger('Host access')!.click();
 			flushSync();
 			await tick();
 			expect(host.textContent).toContain('Thread two purpose.');
@@ -838,6 +845,14 @@ describe('HostAccessLeaseControl', () => {
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(approve?.disabled).toBe(true);
+		// The drawer's status is coloured text, not a pill, and its Retry is a text action.
+		const status = dialog.querySelector('.decision-head .status');
+		expect(status?.textContent?.trim()).toBe('Not current');
+		expect(status?.classList.contains('stale')).toBe(true);
+		expect(dialog.querySelector('.pill')).toBeNull();
+		const retry = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Retry');
+		expect(retry?.className).toContain('ghost');
 	});
 
 	it('takes the full mobile band for the stale notice, not the narrow chip slot', async () => {
@@ -920,19 +935,19 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await tick();
 		expect(host.querySelector('.countdown')?.textContent).toBe('0:02');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:02');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
 		expect(host.querySelector('.countdown')?.textContent).toBe('0:01');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:01');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
 		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(chipTrigger('Host access')).toBeTruthy();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 
 		await vi.advanceTimersByTimeAsync(1_999);
@@ -1001,8 +1016,8 @@ describe('HostAccessLeaseControl', () => {
 		component = mountControl();
 		flushSync();
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
-		expect(host.querySelector('[aria-label="Host access"]')?.querySelector('.host-access-icon')).toBeTruthy();
+		expect(chipTrigger('Host access')).toBeTruthy();
+		expect(chipTrigger('Host access')?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
 		expect(host.textContent).not.toContain('Other thread');
 		expect(host.textContent).not.toContain('application_reviewer_failure');
@@ -1086,7 +1101,7 @@ describe('HostAccessLeaseControl', () => {
 
 		component = mountControl();
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('.active-chip [aria-label="Host access"]')).toBeTruthy());
+		await vi.waitFor(() => expect(chipTrigger('Host access')).toBeTruthy());
 		const revokeButton = await openRevokeButton();
 		revokeButton.click();
 		await tick();
@@ -1277,7 +1292,7 @@ describe('HostAccessLeaseControl — AdaptiveDrawer routing (#1123)', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 		expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 
-		const trigger = host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Host access"]')!;
+		const trigger = chipTrigger('Host access')!;
 		trigger.click();
 		flushSync();
 		await tick();

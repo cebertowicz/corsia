@@ -62,8 +62,15 @@ it('names the agent, site and username, and approves for the duration the person
 	buttons.find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove).toHaveBeenCalledOnce();
 	expect(onApprove.mock.calls[0][1]).toBe(900);
-	buttons.find((button) => button.textContent?.trim() === 'Deny')?.click();
+	const reject = buttons.find((button) => button.textContent?.trim() === 'Reject')!;
+	reject.click();
 	expect(onReject).toHaveBeenCalledOnce();
+	// Approve is the one solid action; Reject is a text action right beside it.
+	const approve = buttons.find((button) => button.textContent?.trim() === 'Approve')!;
+	expect(approve.classList.contains('primary')).toBe(true);
+	expect(reject.classList.contains('ghost')).toBe(true);
+	expect(reject.nextElementSibling).toBe(approve);
+	expect(buttons.filter((button) => button.classList.contains('primary'))).toHaveLength(1);
 	await unmount(component);
 });
 
@@ -92,9 +99,16 @@ it('cannot be approved when stale or incomplete, and says why', async () => {
 	const incomplete = pending(fill({ decision_capability: '' }));
 	expect(incomplete.host.textContent).toContain('This request arrived without everything needed to approve it.');
 	const labels = [...incomplete.host.querySelectorAll('button')].map((button) => button.textContent?.trim());
-	expect(labels).toContain('Deny');
+	expect(labels).toContain('Reject');
 	expect(labels).not.toContain('Approve');
 	await unmount(incomplete.component);
+	// Below the shortest duration there is nothing to pick: Approve goes, and the drawer says why.
+	const short = pending(fill({ max_duration_seconds: 120 }));
+	expect(short.host.textContent).toContain('This request arrived without everything needed to approve it.');
+	expect([...short.host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Approve');
+	await unmount(short.component);
+	expect(approvalReady(fill({ max_duration_seconds: 299 }))).toBe(false);
+	expect(approvalReady(fill({ max_duration_seconds: 300 }))).toBe(true);
 	expect(approvalReady(fill({ site: '' }))).toBe(false);
 	expect(approvalReady(fill({ state: 'active' }))).toBe(false);
 });
@@ -135,6 +149,7 @@ it('shows a live grant with its time left and revokes it', async () => {
 	expect(text).toContain('10:00');
 	expect(text).not.toContain('Reviewer');
 	const revoke = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revoke approval');
+	expect(revoke?.classList.contains('ghost')).toBe(true);
 	revoke?.click();
 	expect(onRevoke).toHaveBeenCalledOnce();
 	await unmount(component);
@@ -149,8 +164,11 @@ it('labels a live grant chip as a saved login, not host access', async () => {
 	} });
 	flushSync();
 	const trigger = host.querySelector('.active-chip-trigger')!;
-	expect(trigger.getAttribute('aria-label')).toBe('Saved login approval');
-	expect(trigger.textContent).toContain('5:00');
+	// Its words are its name, time included: no static label, nothing hidden, no decorative icon.
+	expect(trigger.hasAttribute('aria-label')).toBe(false);
+	expect(trigger.textContent?.replace(/\s+/g, ' ').trim()).toBe('Saved login 5:00');
+	expect(trigger.querySelector('[aria-hidden="true"]')).toBeNull();
+	expect(trigger.querySelector('svg')).toBeNull();
 	await unmount(component);
 });
 

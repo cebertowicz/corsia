@@ -185,6 +185,20 @@ def test_the_longest_duration_is_the_host_access_cap(world):
     assert granted["duration_seconds"] == fills.MAX_GRANT_SECONDS == 1800
 
 
+#: The drawer's shortest duration choice (FILL_DURATIONS_SECONDS in frontend leaseFormat.ts).
+SHORTEST_DRAWER_CHOICE = 300
+
+
+def test_every_request_offers_at_least_the_drawers_shortest_choice(world):
+    """The drawer shows Approve only with a duration to pick, so the server never offers less than its shortest one."""
+    assert fills.MAX_GRANT_SECONDS >= SHORTEST_DRAWER_CHOICE
+    rows = [fills.request_fill(AGENT_THREAD, world["login"]), fills.request_fill(OTHER_THREAD, world["other_login"])]
+    assert all(row["max_duration_seconds"] >= SHORTEST_DRAWER_CHOICE for row in rows)
+    assert all(row["max_duration_seconds"] >= SHORTEST_DRAWER_CHOICE for row in fills.listed(PERSON))
+    _approve(rows[0], seconds=SHORTEST_DRAWER_CHOICE)
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is True
+
+
 def test_a_call_naming_another_thread_from_inside_an_agents_turn_is_refused(world):
     """C3: the running turn's own thread is the only one a call may name."""
     from infra import state
