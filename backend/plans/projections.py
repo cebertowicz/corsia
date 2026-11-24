@@ -91,9 +91,24 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         ),
         moving=moving,
         delegated_moving=delegated_moving,
+        parked_commitments=_parked_commitments(incomplete, projected),
     )
     memo[plan_id] = state
     return state
+
+
+def _parked_commitments(rows, projected) -> frozenset[str]:
+    """Only commitments whose every open leaf is parked suppress child motion."""
+    parked: set[str] = set()
+    moving: set[str] = set()
+    for row in rows:
+        causes = projected[str(row["id"])]["causes"]
+        is_parked = any(
+            cause.get("placed") or cause.get("watch_id") or cause.get("dependency_node_id")
+            or cause["reason_key"] == "plan_paused" for cause in causes
+        )
+        (parked if is_parked else moving).add(str(row["commitment_id"]))
+    return frozenset(parked - moving)
 
 
 def _held(connection, plan_id: str, executions: list[dict], listed_ids=None) -> bool:

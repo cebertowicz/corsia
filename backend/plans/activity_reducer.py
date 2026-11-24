@@ -201,6 +201,10 @@ def plan_state(
         ),
         moving=moving,
         delegated_moving=delegated_moving,
+        parked_commitments=projections._parked_commitments(
+            [row for row in leaves if row["state"] not in service._TERMINAL_STATES],
+            {str(row["id"]): row for row in leaves},
+        ),
     )
 
 
