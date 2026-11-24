@@ -130,10 +130,14 @@
 	// On phones an open rail covers the Settings content; the System Updates row is then not visible.
 	const settingsSurfaceVisible = $derived(!$isMobile || !sidebarOpen);
 
-	function browseDocumentsForThread(threadId: string) {
-		docPickerTarget.set({ threadId });
+	function browseDocuments() {
 		paneOpen.set(false);
 		onDocuments('all');
+	}
+
+	function browseDocumentsForThread(threadId: string) {
+		docPickerTarget.set({ threadId });
+		browseDocuments();
 	}
 
 	$effect(() => {
@@ -286,7 +290,7 @@
 			{protectArtifactSplit}
 			onPickProject={onPickProjectAndClosePane}
 			onBrowseDocuments={browseDocumentsForThread}
-			onBrowseProjectDocuments={() => onDocuments('all')}
+			onBrowseProjectDocuments={browseDocuments}
 		/>
 	{/if}
 	</div>

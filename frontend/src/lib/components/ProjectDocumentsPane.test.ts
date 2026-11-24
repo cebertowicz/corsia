@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { get } from 'svelte/store';
+import { paneOpen } from '$lib/stores/paneOpen';
+import { docPickerTarget } from '$lib/stores/docPickerTarget';
 import { buildPaneConfig } from '$lib/homePaneConfig';
 import { activeThreadId } from '$lib/stores/threads';
 import Pane from './Pane.svelte';
@@ -12,6 +15,8 @@ afterEach(() => {
 	if (component) unmount(component);
 	host?.remove();
 	activeThreadId.set(null);
+	paneOpen.set(false);
+	docPickerTarget.set(null);
 });
 
 it('offers the documents route on a project landing without a chat', () => {
@@ -29,8 +34,10 @@ it('offers the documents route on a project landing without a chat', () => {
 	expect(onBrowseProjectDocuments).toHaveBeenCalledOnce();
 });
 
-it('routes the project browse control to the full documents library', () => {
+it('closes the pane and routes project browsing to the full library without a picker', () => {
 	activeThreadId.set(null);
+	paneOpen.set(true);
+	docPickerTarget.set(null);
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	const onDocuments = vi.fn();
@@ -48,5 +55,7 @@ it('routes the project browse control to the full documents library', () => {
 	const button = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('Browse documents…'));
 	expect(button).toBeTruthy();
 	button!.click();
+	expect(get(paneOpen)).toBe(false);
+	expect(get(docPickerTarget)).toBeNull();
 	expect(onDocuments).toHaveBeenCalledExactlyOnceWith('all');
 });

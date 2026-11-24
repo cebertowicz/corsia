@@ -4,7 +4,9 @@ import { test } from '../support/test';
 import { e2eModel, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 test('a project landing opens its documents library without a chat', async ({ page, request }, info) => {
-	test.skip(info.project.name !== 'chromium-desktop');
+	test.skip(!['chromium-desktop', 'chromium-mobile'].includes(info.project.name));
+	const phone = info.project.name === 'chromium-mobile';
+	if (phone) await page.setViewportSize({ width: 393, height: 852 });
 	const params = { token: TEST_TOKEN };
 	const name = `Project documents ${Date.now()}`;
 	const created = await request.post('/api/projects', { params, data: { name, status: 'active' } });
@@ -21,10 +23,16 @@ test('a project landing opens its documents library without a chat', async ({ pa
 	expect(doc.ok()).toBeTruthy();
 
 	await loginByUrl(page, { waitForComposer: false });
+	if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByRole('button', { name: /Jump to/ }).click();
 	await page.locator('.palette').getByRole('button', { name, exact: true }).click();
+	if (phone && !(await page.getByRole('button', { name: 'New chat' }).first().isVisible())) {
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	}
 	await page.getByRole('button', { name: 'New chat' }).first().click();
+	if (phone) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	await expect(page.getByText('No documents yet')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Browse documents…' }).click();
 	await expect(page.locator('.docs')).toBeVisible();
+	if (phone) await expect(page.locator('aside.pane')).not.toHaveClass(/\bopen\b/);
 });
