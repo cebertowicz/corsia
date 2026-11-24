@@ -170,7 +170,7 @@
 </script>
 
 {#if (personStep && !isCommentTask(personStep)) || personReceipt}
-	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} {docked} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} onDismissed={() => void bar.load()} />
+	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} {docked} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} />
 {:else if !isCommentTask(personStep) && bar.visible}
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}

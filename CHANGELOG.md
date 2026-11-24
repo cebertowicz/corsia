@@ -8,6 +8,9 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
+- Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
+
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
 
 Released 2026-11-24.
@@ -117,14 +120,6 @@ Released 2026-11-24.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A document on a touch screen opens for reading and commenting, with Edit in its menu and Done to end typing. Selecting text offers Comment as it does on a computer, and changing modes keeps your writing and unfinished comments.
 - A document promoted to a new place keeps its comments, and the task that held them for you follows it; before, it opened with no comments and the task closed saying they couldn't be shown.
-- A document's controls now take one row at every width, so the document gets most of the screen on a phone: its name and open-files list stay in the app bar, up to three recent-activity avatars share the bar with Comments and Details, and status, owner, History and review requests open from Details. On a phone the sidebar button leaves the document view; Back returns to chat, and Show panel is in Details. The name stays whole or shortens in the middle as avatars share its room. Comments opens a drawer with Open and Resolved, Send and Deliver immediately; Accept suggestions offers a checklist when several people suggested changes, and is available for two eligible suggestions across authors. While a returning document is being put back, its controls wait until it is visible. On a phone, a review ask sits on a card at the document's bottom edge; on a larger screen it stays in the document's header. Either way it offers Send back and Approve, and Approve says which suggestions it also accepts. Before, controls could take three rows on a phone and the status line could wrap.
-- A document's owner and supervisor pickers list the agents of its own workspace or project and tell agents with the same name apart by their responsibility. You can take ownership even when others use CORSIA or no one currently owns the document. A project's instruction documents show its conductor as their owner, and your comments on them go to it. A change that fails says Couldn’t change.
-- Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
-- A document's owner and supervisor stay visible when you return to its tab while it loads; their controls become available once loading finishes.
-- When a document is waiting for your review, its Approve and Send back buttons now show up even when the first try to load them fails or stalls, including after a lost connection or when you come back to the app.
-- A document's status line stays on one line while a reply is unread, on a standard-size phone such as a current iPhone and when the document area is narrow: the comment count shortens to "N unread", and the text below no longer jumps down. On smaller phones it can still take two lines.
-- A document's text, its table cells and a code file are now large enough on a phone that tapping into them no longer zooms the page; before, an iPhone zoomed in slightly and cut off the right edge until you pinched back out.
-- A document's owner in the Documents list now shows in full on a phone, and the description is shortened first; before, the end of the line, the owner, was cut off. When the owner's name alone fills the line, the description is left out and the name is shortened.
 - A document that is open live no longer refuses other reads and writes of it while a save is in progress on a busy disk; before, they could fail with a database error.
 - A document with no owner shows Owner: None.
 - A document you are reading stays still when a status banner such as Reconnecting appears or goes above it; before, the text slid down by the banner's height and back.

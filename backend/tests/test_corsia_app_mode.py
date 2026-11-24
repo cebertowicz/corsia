@@ -693,6 +693,38 @@ def test_prepare_discard_and_ensure_use_the_app_binary_and_its_staged_copy(app):
     assert app.launchd_calls() == []
 
 
+@pytest.mark.asyncio
+async def test_post_stage_room_refusal_runs_real_packaged_discard(app, isolated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+    from fastapi import HTTPException
+    from api import settings_restart
+    from infra import config
+    from infra.database_migrations import BackupRoomError
+
+    monkeypatch.setattr(config, "LOGS_DIR", app.root / "logs")
+    monkeypatch.setattr("infra.drain.cancel_drain_projection", lambda: None)
+    monkeypatch.setattr("automation.restart_settlement.resume_threads_detached", lambda *_args: None)
+    monkeypatch.setattr("automation.update_failure_notice.tell_conductor_detached", lambda *_args: None)
+    staged = app.stage("2.0.0", "2")
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock(
+        side_effect=[None, BackupRoomError("full", 100, 25)]
+    ))
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    monkeypatch.setattr(settings_restart, "fresh_update_target", AsyncMock(return_value=None))
+
+    with pytest.raises(HTTPException) as raised:
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "owner"}, "update", app.script, app.env(), ["restart"],
+            lambda name: app.root / name, caller_token="test",
+        )
+    assert raised.value.detail == {"code": "disk_space", "needed_bytes": 100, "free_bytes": 25}
+    assert not staged.exists()
+    drain.assert_not_awaited()
+    assert not app.launchd_calls()
+
+
 def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     app.load()
     app.stage("2.0.0", "2")
