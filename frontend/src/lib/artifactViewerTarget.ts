@@ -11,5 +11,6 @@ export function targetForTab(t: ArtifactTab, projectId: string | null, threadId:
 		threadId,
 		artifactId: t.artifactId,
 		landOn: t.landOn,
+		landOnCommentId: t.landOnCommentId,
 	};
 }

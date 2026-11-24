@@ -438,7 +438,7 @@ describe('BrowserLeaf agent presence', () => {
 		socket.receive({ type: 'browser_password_page', visible: false });
 		flushSync();
 		expect([ring(), seam()]).toEqual([true, true]);
-		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('Agent can see the page again');
+		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('The password step is over');
 		// The announcement is for assistive technology only; the toolbar shows no status for it.
 		expect(host.querySelector('.status')).toBeNull();
 	});
