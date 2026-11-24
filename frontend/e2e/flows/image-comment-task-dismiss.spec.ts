@@ -40,7 +40,7 @@ for (const width of [393, 320, 1440]) test(`image comment task is dismissed from
 	expect(geometry.width).toBeGreaterThanOrEqual(44);
 	expect(geometry.height).toBeGreaterThanOrEqual(44);
 	expect(geometry.top).toBeGreaterThanOrEqual(geometry.headingBottom);
-	await expect(drawer.locator('.task-who'), 'the asker leads the summary, as it did on its card').toHaveText(new RegExp(`^${image.sessionTitle.slice(0, 8)}`));
+	await expect(drawer.locator('.task-who strong'), 'the asker leads the summary, as it did on its card').toHaveText(new RegExp(`^${image.sessionTitle.slice(0, 8)}`));
 	const row = await dismiss.evaluate((button) => {
 		const summary = button.closest('.task-dismiss')!.querySelector('.task-summary')!.getBoundingClientRect();
 		const box = button.getBoundingClientRect();

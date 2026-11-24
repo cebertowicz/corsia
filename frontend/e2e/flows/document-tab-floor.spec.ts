@@ -59,7 +59,10 @@ for (const [kind, filename] of [
 			const rect = element.getBoundingClientRect();
 			return { height: rect.height, children: [...element.children].map((child) => { const box = child.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }; }) };
 		});
-		expect(boxes.height).toBeLessThanOrEqual(57);
+		// The strip is one row of the header's own height; wrapping or growing past it is what the floor guards.
+		const headerHeight = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--header-height')));
+		expect(headerHeight).toBeGreaterThan(0);
+		expect(boxes.height).toBeLessThanOrEqual(headerHeight + 0.5);
 		expect(boxes.children[0].right).toBeLessThanOrEqual(boxes.children[1].left + 1);
 		for (const box of boxes.children) expect(box.bottom - box.top).toBeLessThanOrEqual(boxes.height);
 		const close = page.getByRole('button', { name: `Close ${filename}` });

@@ -279,7 +279,7 @@ test.describe('comment task highlight taps', () => {
 			await expectTouchLands(sheet.getByText(body).first(), `the card text "${body}" of a thread opened from a highlight`);
 			await expectTouchLands(sheet.getByPlaceholder('Reply…').first(), `the reply box of the thread opened from "${quote}"`);
 			await expect(taskGroup).toHaveText(`${after} to review`);
-			console.log(`TAP "${quote}": task=${JSON.stringify(await taskAction.textContent())}`);
+			console.log(`TAP "${quote}": task=${JSON.stringify(await taskGroup.textContent())}`);
 			await light(`${name}-after`);
 			await sheet.getByRole('button', { name: /^Close( comments)?$/ }).tap();
 			await expect(sheet).toHaveCount(0);
