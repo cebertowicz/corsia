@@ -108,6 +108,22 @@ class PasswordReadGuard:
 # per document it has guarded: leaving a tab never lifts it, and a loader id never recurs, so a new
 # document is never over-refused. Cleared when the thread's browser closes.
 _guarded_visits: dict[str, dict[str, PasswordReadGuard]] = {}
+# A session a saved login was filled in (browser_login_fill marks it before typing), by thread: from that fill
+# until the session ends, every agent command in it runs under the filled-field allowlist, on every page.
+_saved_fill_sessions: dict[str, str | None] = {}
+
+
+def mark_saved_fill(thread_id: str, session: str | None) -> None:
+    """Put this session under the filled-field allowlist until it ends; called before a saved login is typed."""
+    _saved_fill_sessions[thread_id] = session
+
+
+def _saved_fill(thread_id: str, session: str | None) -> bool:
+    if thread_id not in _saved_fill_sessions:
+        return False
+    marked = _saved_fill_sessions[thread_id]
+    # A mark or a command with no session id can't be told apart from the filled session, so it counts as it.
+    return marked is None or session is None or marked == session
 
 
 def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None,
@@ -163,7 +179,8 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
     result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
-    filled = bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
+    filled = (bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
+              or _saved_fill(thread_id, session))
     if filled and not _filled_field_allows(args):
         raise BrowserSessionError(FILLED_FIELD_REFUSED)
     return PageAccess(note, filled)
@@ -331,6 +348,7 @@ def browser_closed(thread_id: str) -> None:
     """Clear read guards and agent presence; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
+    _saved_fill_sessions.pop(thread_id, None)
 
 
 async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...], resolve: Resolve | None) -> None:
