@@ -24,7 +24,9 @@ from host_access import (browser_cli, browser_copy_state, browser_executables, b
                          browser_launch)
 
 logger = logging.getLogger(__name__)
-_STATE_SAVE_TIMEOUT = 30.0
+_STATE_LOAD_TIMEOUT = 30.0
+# Reading the holder's sign-in for a copy; browser_copy_state keeps its page reads inside this.
+_COPY_READ_TIMEOUT = 30.0
 _COOKIE_TIMEOUT = 5.0
 # The Network.Cookie fields Storage.setCookies accepts back as a CookieParam.
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
@@ -203,7 +205,7 @@ async def restore_copy(owner: Any, runtime: Any) -> None:
         runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
         return
     runtime.attempt = await owner._invoke(
-        owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_SAVE_TIMEOUT)
+        owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_LOAD_TIMEOUT)
     await owner._observe_attempt(runtime)
     if runtime.attempt.returncode or runtime.attempt.timed_out or runtime.attempt.completion != "exited":
         logger.warning("browser sign-in copy could not be restored: completion=%s timed_out=%s exit=%s",
@@ -241,7 +243,7 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
                 return
             # Read in place, never agent-browser's `state save`: it loads each visited site in a new tab of
             # the holder's browser and can stall there past its limit.
-            state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _STATE_SAVE_TIMEOUT)
+            state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _COPY_READ_TIMEOUT)
         await asyncio.to_thread(_write_private_json, target, state)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
