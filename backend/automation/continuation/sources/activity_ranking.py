@@ -24,9 +24,11 @@ def _scopes(db):
 
 
 def _instant(value: str | None) -> datetime | None:
+    if not value:
+        return None
     try:
         parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except (AttributeError, ValueError):
+    except ValueError:
         return None
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 

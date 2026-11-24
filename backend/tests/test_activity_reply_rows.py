@@ -26,6 +26,8 @@ def test_document_unread_and_ownership():
     assert len(rows) == 1
     assert rows[0]['detail'] == {'artifact_id':'d1','root_id':'rootd1','reply_id':'d13'}
     assert rows[0]['open'] == {'artifact_id':'d1','comment_id':'rootd1'}
+    # The row names who answered which of the person's comments, never the file name.
+    assert rows[0]['title'] == 'One replied to your comment “question”'
     db.execute("UPDATE artifact_registrations SET relationship_state='subscriber-recent' WHERE id='rd1'")
     db.execute("INSERT INTO artifact_registration_events(id,artifact_id,event_type,old_owner_thread_id,created_at) VALUES ('ev','d1','ownership_released','one','4')")
     assert reply_rows(db,'u1', reviewed_artifact_ids=set()) == []
@@ -49,6 +51,7 @@ def test_chat_unread_endpoint_and_ownership():
     rows = reply_rows(db,'u1', reviewed_artifact_ids=set())
     assert len(rows) == 1
     assert rows[0]['open'] == {'thread_id':'t','message_id':'target'}
+    assert rows[0]['title'] == 'Thread replied to your comment in chat'
     assert {k: rows[0]['detail'][k] for k in ('thread_id','message_id','cid','assistant_message_id')} == {'thread_id':'t','message_id':'user','cid':'c1.1','assistant_message_id':'answer'}
     assert reply_rows(db,'u2', reviewed_artifact_ids=set()) == []
     db.execute("INSERT INTO chat_comment_views(user_id,user_message_id,cid,seen_at) VALUES ('u1','user','c1.1','2')")

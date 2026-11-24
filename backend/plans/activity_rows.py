@@ -12,6 +12,32 @@ from plans import activity_facts, activity_projection, activity_reducer, attenti
 from plans.boundary import PlanActor
 
 
+def _due_person_tasks(db, plans):
+    """The person's open task leaves that are waiting on them now."""
+    compact = activity_facts.compact_nodes(list(plans), db=db)
+    _, human, waits = activity_facts.decision_indexes(list(plans), db=db)
+    task_nodes = []
+    for plan_id, nodes in compact.items():
+        work = node_states.work_ids(nodes)
+        parents = node_states.parent_ids(nodes, work=work)
+        leaves = node_states.leaves(nodes, work=work, parents=parents)
+        for node in leaves:
+            if node["assignee"] != "user" or node["kind"] != "task" or node["state"] not in ("pending", "active"):
+                continue
+            reduced = activity_reducer.reduce_node(node, plans[plan_id], review_kind=activity_facts.review_kind(node, plans[plan_id], human), decision_wait=node["id"] in waits, child_cause=None, executor_stop_fact=None)
+            _, causes, *_ = activity_reducer._execution_facts(
+                node, plans[plan_id], decision_wait=node['id'] in waits, child_cause=None,
+            )
+            # A linked ask may need the person while the task itself is blocked.
+            task_due = operator_display_state.asks_user_from_facts(
+                node['state'], reduced.condition, node['assignee'], None,
+                has_attention=False, causes=causes,
+            )
+            if reduced.requires_user_action and task_due:
+                task_nodes.append(node)
+    return task_nodes
+
+
 def rows(db, user_id, annotated):
     actor = PlanActor(None, user_id, None, kind="user")
     reviews = [item for item in annotated if item.get("hold_ids") and not item.get("deferred")
@@ -42,27 +68,7 @@ def rows(db, user_id, annotated):
         "AND n.archived_at IS NULL", (user_id,))]
     allowed = activity_projection.counted_plan_ids(candidate_plans, actor=actor, db=db)
     plans = {r["id"]: dict(r) for r in db.execute("SELECT * FROM plans WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(sorted(allowed)),))}
-    compact = activity_facts.compact_nodes(list(plans), db=db)
-    _, human, waits = activity_facts.decision_indexes(list(plans), db=db)
-    task_nodes = []
-    for plan_id, nodes in compact.items():
-        work = node_states.work_ids(nodes)
-        parents = node_states.parent_ids(nodes, work=work)
-        leaves = node_states.leaves(nodes, work=work, parents=parents)
-        for node in leaves:
-            if node["assignee"] != "user" or node["kind"] != "task" or node["state"] not in ("pending", "active"):
-                continue
-            reduced = activity_reducer.reduce_node(node, plans[plan_id], review_kind=activity_facts.review_kind(node, plans[plan_id], human), decision_wait=node["id"] in waits, child_cause=None, executor_stop_fact=None)
-            _, causes, *_ = activity_reducer._execution_facts(
-                node, plans[plan_id], decision_wait=node['id'] in waits, child_cause=None,
-            )
-            # A linked ask may need the person while the task itself is blocked.
-            task_due = operator_display_state.asks_user_from_facts(
-                node['state'], reduced.condition, node['assignee'], None,
-                has_attention=False, causes=causes,
-            )
-            if reduced.requires_user_action and task_due:
-                task_nodes.append(node)
+    task_nodes = _due_person_tasks(db, plans)
     node_ids = [n["id"] for n in task_nodes]
     details = {r["id"]: dict(r) for r in db.execute("SELECT id,title,revision,created_at FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),))}
     links = person_comment_task.comment_tasks(db, node_ids)
@@ -91,7 +97,7 @@ def rows(db, user_id, annotated):
             continue
         newest = asks[found["id"]][0]
         artifact_id = found["id"]
-        out.append({"renderer":"review", "kind":"review", "key":f"review:{artifact_id}", "external_id":item["external_id"], "title":item.get("title") or item["external_id"], "raised_at":newest["raised_at"], "source":sources.get(newest["asker_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id}, "detail":{"artifact_id":artifact_id, "hold_ids":item["hold_ids"]}, "priority":0})
+        out.append({"renderer":"review", "kind":"review", "key":f"review:{artifact_id}", "external_id":item["external_id"], "title":" ".join((newest.get("reason") or "").split())[:160] or item.get("title") or item["external_id"], "raised_at":newest["raised_at"], "source":sources.get(newest["asker_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id}, "detail":{"artifact_id":artifact_id, "hold_ids":item["hold_ids"]}, "priority":0})
     for node in task_nodes:
         detail = details[node["id"]]
         artifact_id = links.get(node["id"])

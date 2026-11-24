@@ -38,6 +38,9 @@ def test_suppression_follows_actual_emitted_authorized_reviews(db):
         return {r['detail']['artifact_id'] for r in rows if r['kind'] == 'review'}
     reviewed = project()
     assert reviewed == {artifact}
+    # A review row reads as the agent's ask, not the document's file name.
+    annotated = public.annotate_attention(_authorized_raised(None, 'user-1', db=db), db=db)
+    assert [r['title'] for r in candidate.rows(db, 'user-1', annotated) if r['kind'] == 'review'] == ['Review it']
     assert reply_rows(db, 'user-1', reviewed_artifact_ids=reviewed) == []
     db.execute("UPDATE plans SET state='archived' WHERE id=?", (plan.id,))
     reviewed = project()

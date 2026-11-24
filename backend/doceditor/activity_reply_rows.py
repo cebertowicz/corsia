@@ -14,6 +14,14 @@ def _title(text: str | None, fallback: str) -> str:
     return " ".join((text or "").split())[:160] or fallback
 
 
+def _reply_title(agent: str | None, row) -> str:
+    """Say who answered which of the person's comments; a document's file name is not that."""
+    agent = agent or 'An agent'
+    if row['root_kind'] == 'user' and _title(row['root_body'], ''):
+        return _title(f"{agent} replied to your comment “{_title(row['root_body'], '')}”", '')
+    return _title(f"{agent} replied in your comment thread on {_title(row['artifact_title'], 'a document')}", '')
+
+
 def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dict]:
     """Return actionable unread agent replies visible to this user.
 
@@ -36,7 +44,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
       WHERE r.relationship_state IN ('owner-pinned','owner-active')
     ), unread AS (
       SELECT root.id AS root_id, item.id AS reply_id, item.artifact_id,
-             item.created_at, item.author_thread_id,
+             item.created_at, item.author_thread_id, root.body AS root_body, root.author_kind AS root_kind,
              ROW_NUMBER() OVER (PARTITION BY root.id ORDER BY item.created_at DESC,item.id DESC) AS pos
       {unread_sql}
       AND item.parent_id IS NOT NULL AND item.author_kind='agent'
@@ -74,7 +82,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
         result.append({
             'renderer': 'reply', 'kind': 'reply', 'key': f'doc-reply:{artifact}:{root}',
             'external_id': f'doc-reply:{artifact}:{root}',
-            'title': _title(row['artifact_title'], 'Document reply'), 'raised_at': row['created_at'],
+            'title': _reply_title(sources[row['author_thread_id']]['thread_label'], row), 'raised_at': row['created_at'],
             'source': sources[row['author_thread_id']], 'open': {'artifact_id': artifact, 'comment_id': root},
             'detail': {'artifact_id': artifact, 'root_id': root, 'reply_id': reply}, 'priority': 0,
         })
@@ -84,7 +92,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
         source = sources[thread]
         result.append({
             'renderer': 'reply', 'kind': 'reply', 'key': key, 'external_id': key,
-            'title': _title(source['thread_label'], 'Chat reply'), 'raised_at': row['answered_at'],
+            'title': f"{source['thread_label'] or 'An agent'} replied to your comment in chat", 'raised_at': row['answered_at'],
             'source': source, 'open': {'thread_id': thread, 'message_id': row['target_message_id']},
             'detail': {'thread_id': thread, 'message_id': message, 'cid': cid,
                        'assistant_message_id': row['assistant_message_id'],
