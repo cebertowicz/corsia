@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PaneShell from './PaneShell.svelte';
 	import ArtifactPane from './ArtifactPane.svelte';
+	import PaneBrowseButton from './PaneBrowseButton.svelte';
 	import ThreadPlanPane from './plans/ThreadPlanPane.svelte';
 	import PlanHeadControls from './plans/PlanHeadControls.svelte';
 	import { paneOpen } from '$lib/stores/paneOpen';
@@ -14,12 +15,13 @@
 	import { openPlanDiscussionLeaf, openPlanSubagentLeaf } from '$lib/planLeafReturn';
 	import { registerPlanSurface } from '$lib/planNodeFocus';
 
-	let { label = 'Workspace', sections = [] as Section[], protectArtifactSplit = false, onPickProject, onBrowseDocuments }: {
+	let { label = 'Workspace', sections = [] as Section[], protectArtifactSplit = false, onPickProject, onBrowseDocuments, onBrowseProjectDocuments }: {
 		label?: string;
 		sections?: Section[];
 		protectArtifactSplit?: boolean;
 		onPickProject?: (p: { id: string; name: string }) => void;
 		onBrowseDocuments?: (threadId: string) => void;
+		onBrowseProjectDocuments?: () => void;
 	} = $props();
 
 	const activeProjects = $derived($projects.filter((p) => p.status === 'active'));
@@ -97,6 +99,8 @@
 							{/if}
 						{:else if s.kind === 'artifacts'}
 							<ArtifactPane threadId={$activeThreadId} {onBrowseDocuments} />
+						{:else if s.kind === 'documents' && onBrowseProjectDocuments}
+							<PaneBrowseButton kind="documents" onclick={onBrowseProjectDocuments} />
 						{:else}
 							<div class="stub-row">{s.empty ?? 'Nothing here yet'}</div>
 						{/if}
