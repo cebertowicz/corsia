@@ -354,7 +354,7 @@
 			// failed attempt to set this computer up. Null is the plain "start the local service" retry.
 			let retryAction = null;
 			let approvalPoll;
-			let approvalPollInFlight = false;
+			let approvalCheckInFlight = null;
 			let continuationStarted = false;
 
 			function showStarting() {
@@ -589,6 +589,8 @@
 				clearInterval(approvalPoll);
 				status.textContent = 'Starting CORSIA…';
 				if (showApproval) {
+					actions.hidden = true;
+					retry.className = 'primary';
 					approvalCheck.dataset.state = 'on';
 					approvalState.textContent = 'On';
 					window.setTimeout(() => window.location.replace(startup.url), 600);
@@ -597,39 +599,57 @@
 				window.location.replace(startup.url);
 			}
 
+			function checkBackgroundApproval() {
+				if (approvalCheckInFlight) return approvalCheckInFlight;
+				if (continuationStarted) return Promise.resolve();
+				approvalCheckInFlight = (async () => {
+					try {
+						const startup = await invoke('start_local_service');
+						if (startup.state === 'ready') continueToService(startup, true);
+					} catch (_) {
+					}
+				})().finally(() => { approvalCheckInFlight = null; });
+				return approvalCheckInFlight;
+			}
+
+			async function checkApprovalAgain() {
+				retry.disabled = true;
+				try {
+					await checkBackgroundApproval();
+				} finally {
+					if (retryAction === checkApprovalAgain) retry.disabled = false;
+				}
+			}
+
 			async function showBackgroundApproval() {
 				quitFailure = false;
+				adoptionPrompt = false;
 				adoptionRecovery = null;
 				freshAction = null;
 				startFreshButton.hidden = true;
 				freshList.hidden = true;
-				retryAction = null;
+				retryAction = checkApprovalAgain;
 				note.hidden = true;
 				details.hidden = true;
 				line.textContent = 'Turn this on so your agents keep working when you close this window.';
 				line.hidden = false;
 				log.hidden = true;
 				spinner.hidden = true;
-				actions.hidden = true;
+				actions.hidden = false;
+				failureLoginItems.hidden = true;
+				setUpLocal.hidden = true;
 				saveReport.hidden = true;
+				quit.hidden = false;
+				retry.hidden = false;
+				retry.disabled = false;
+				retry.textContent = 'Check again';
+				retry.className = 'secondary';
 				status.textContent = 'Keep CORSIA running';
 				backgroundApproval.hidden = false;
 				approvalCheck.dataset.state = 'off';
 				approvalState.textContent = 'Off';
 				clearInterval(approvalPoll);
-				approvalPoll = setInterval(async () => {
-					if (approvalPollInFlight || continuationStarted) return;
-					approvalPollInFlight = true;
-					try {
-						const startup = await invoke('start_local_service');
-						if (startup.state === 'ready') {
-							continueToService(startup, true);
-						}
-					} catch (_) {
-					} finally {
-						approvalPollInFlight = false;
-					}
-				}, 1000);
+				approvalPoll = setInterval(checkBackgroundApproval, 1000);
 			}
 
 			// Runs a command that answers like start_local_service: the local service is ready, or needs approval.

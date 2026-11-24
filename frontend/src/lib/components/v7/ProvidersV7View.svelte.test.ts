@@ -256,7 +256,7 @@ describe('ProvidersV7View card request', () => {
 		const row = document.querySelector('[data-provider-card="codex"]') as HTMLElement;
 		expect(document.querySelector('[data-provider-card="claude-code"]')?.closest('.host-section')).toBe(row.closest('.host-section'));
 		expect(row.closest('.host-section')?.textContent).toContain('Agent CLIs');
-		expect(row.textContent).toContain('Uses your ChatGPT subscription.');
+		expect(row.textContent).toContain('Uses your ChatGPT account.');
 		const signIn = row.querySelector('.setup-action') as HTMLButtonElement;
 		expect(signIn.textContent).toBe('Sign in');
 		signIn.click();

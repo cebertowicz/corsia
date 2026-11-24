@@ -2,7 +2,7 @@
 
 Chrome locks a profile to one running browser. The first session of an owner holds the shared profile; a
 session that starts while it is held launches on a throwaway profile seeded with a copy of the holder's
-sign-in (agent-browser's private ``state save`` / ``state load``), kept in private state and removed on close.
+sign-in (read over CDP, restored with agent-browser's ``state load``), kept in private state and removed on close.
 Cookies a copy gains are written back to the profile's browser when the copy closes, or kept until it next runs.
 A session whose owning user cannot be resolved receives neither the profile nor a copy.
 """
@@ -20,11 +20,17 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from host_access import browser_cli, browser_executables, browser_identity as identity, browser_launch
+from host_access import (browser_cdp, browser_cli, browser_copy_state, browser_executables,
+                         browser_identity as identity, browser_launch)
 
 logger = logging.getLogger(__name__)
-_STATE_SAVE_TIMEOUT = 30.0
-_COOKIE_TIMEOUT = 5.0
+# Restoring the copied sign-in into the copy's browser before its first action; past this the copy's launch
+# fails as "saved sign-in could not be restored" instead of hanging. 30 s is the limit the state step has
+# had since sign-in copies began (#1546).
+_STATE_LOAD_TIMEOUT = 30.0
+# Reading the holder's sign-in for a copy, while the holder's own commands wait on its lock; past this the
+# copy starts signed out and the holder is freed. browser_copy_state keeps its reads inside this.
+_COPY_READ_TIMEOUT = 30.0
 # The Network.Cookie fields Storage.setCookies accepts back as a CookieParam.
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
                   "priority", "sourceScheme", "sourcePort", "partitionKey")
@@ -202,7 +208,7 @@ async def restore_copy(owner: Any, runtime: Any) -> None:
         runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
         return
     runtime.attempt = await owner._invoke(
-        owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_SAVE_TIMEOUT)
+        owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_LOAD_TIMEOUT)
     await owner._observe_attempt(runtime)
     if runtime.attempt.returncode or runtime.attempt.timed_out or runtime.attempt.completion != "exited":
         logger.warning("browser sign-in copy could not be restored: completion=%s timed_out=%s exit=%s",
@@ -233,18 +239,15 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
     target = browser_launch.copy_path(record.session)
     try:
         async with holder.command_lock:
-            if holder.record.binding is None or holder.record.terminal_state != "running":
+            if (holder.record.binding is None or holder.record.terminal_state != "running"
+                    or holder.chrome is None or not holder.chrome.endpoint):
                 logger.warning("browser sign-in copy unavailable: holder not running")
                 runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
                 return
-            result = await owner._invoke(
-                owner._session_argv(holder, ("state", "save", str(target))), timeout=_STATE_SAVE_TIMEOUT)
-        if result.returncode == 0 and not result.timed_out and result.completion == "exited" and target.is_file():
-            os.chmod(target, 0o600)
-        else:
-            logger.warning("browser sign-in copy was not saved: exit=%s", result.returncode)
-            target.unlink(missing_ok=True)
-            runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
+            # Read in place, never agent-browser's `state save`: it loads each visited site in a new tab of
+            # the holder's browser and can stall there past its limit.
+            state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _COPY_READ_TIMEOUT)
+        await asyncio.to_thread(_write_private_json, target, state)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
         with contextlib.suppress(OSError):
@@ -281,10 +284,14 @@ def _write_cookies(path: Path, cookies: Sequence[Mapping[str, Any]]) -> None:
     if not cookies:
         path.unlink(missing_ok=True)
         return
+    _write_private_json(path, {"cookies": list(cookies)})
+
+
+def _write_private_json(path: Path, data: Mapping[str, Any]) -> None:
     temporary = path.with_name(f"{path.name}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump({"cookies": list(cookies)}, handle)
+        json.dump(data, handle)
     os.replace(temporary, path)
 
 
@@ -303,7 +310,7 @@ async def keep_copy_signins(owner: Any, runtime: Any) -> None:
         if profile is None:
             return
         async with CdpClient(runtime.chrome.endpoint, max_size=None) as cdp:
-            current = (await asyncio.wait_for(cdp.call("Storage.getCookies"), _COOKIE_TIMEOUT)).get("cookies")
+            current = (await asyncio.wait_for(cdp.call("Storage.getCookies"), browser_cdp.BROWSER_CALL_TIMEOUT)).get("cookies")
         seeded = {_cookie_key(cookie): cookie.get("value")
                   for cookie in await asyncio.to_thread(_read_cookies, browser_launch.copy_path(record.session))}
         gained = [cookie for cookie in current or () if isinstance(cookie, dict)
@@ -334,7 +341,7 @@ async def apply_kept_signins(runtime: Any) -> None:
                and not (key == "expires" and cookie.get("session"))} for cookie in cookies]
     try:
         async with CdpClient(runtime.chrome.endpoint, max_size=None) as cdp:
-            await asyncio.wait_for(cdp.call("Storage.setCookies", cookies=params), _COOKIE_TIMEOUT)
+            await asyncio.wait_for(cdp.call("Storage.setCookies", cookies=params), browser_cdp.BROWSER_CALL_TIMEOUT)
     except Exception:
         logger.warning("kept browser sign-ins could not be written yet; they wait for the next launch", exc_info=True)
         return

@@ -14,6 +14,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread you left to switch conversations reopens with the reply you were writing when you return; before, it did not reopen.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
+- A chat comment you start typing right after closing another comment's popover keeps your text; before, the closing popover could clear it when the margin card took its place.
 - A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat comment's answer now comes only from what the agent sent you when Focus is on, so a comment answered with an update and again in the agent's closing words shows one reply; before, it showed both. With Focus off, every step you see still answers.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
@@ -57,6 +58,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A file you own stays yours even if its Owner line names an agent.
 - A folder you choose in oMLX for its SSD cache is kept across CORSIA's restarts, crash recovery and updates; before, CORSIA replaced it with its own folder at the next launch.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
+- The Keep CORSIA running screen now offers Quit and Check again alongside Open Login Items.
 - A lesson an agent saves is no longer lost in a workspace with a long history of guidance changes; before, the save could time out after 30 seconds and drop the lesson.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A long chat now loads in full; before, a very long one could fail to load its messages.
@@ -79,6 +81,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - When an event rule starts an agent and its owner's Claude Code or Codex account has hit its limit or is signed out, the agent now waits up to eight minutes while CORSIA checks the usage of the project's next account, and starts there if that account isn't limited. Before, it was refused at once. It's still refused if that account is limited too, if the check doesn't finish in time, or if the project doesn't move chats to other accounts.
 - Saving a shared document no longer overwrites a change made to it at the same moment; the save stops, nothing is lost, and you can try again.
 - If a document changes after you start editing it, saving your typing no longer overwrites that change: the save is refused and your text stays in the editor.
+- A second agent that opens the browser while another agent is using it now starts without delay; before, it sometimes waited half a minute and then started signed out. It gets the first agent's cookies for every site, which carry most sign-ins, but other saved site data only from the sites open in the first agent's browser. A site that keeps your sign-in in that other data, and isn't open there, starts signed out for the second agent.
 - A sign-in task for a page on a site with a long name now reaches you, with the name shortened in its title; before, the task was never created, so you were never asked and the agent's browser commands were refused.
 - After you mark a sign-in task done, the agent can use that page again even while its password field still shows; before, the agent stayed locked out and you had to finish the page alone. Once a sign-in step ends on a page (you mark it done, decline it, or the password field goes away), the agent still can't run scripts there or read any field's value until it opens another page or reloads that one. Its page reads hide every field's value and screenshots stay off, so it never sees what you typed. On a site that signs you in without loading a new page, the agent reloads once to get these back.
 - A suggestion whose text was edited, or whose original text is no longer in the document, now says so in plain terms, such as The text doesn't match this suggestion, and explains why Accept is off.
@@ -86,6 +89,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A table cell in a document that holds only an image, such as a status badge, now takes a comment: click beside the image, or select across the cell, and Comment appears as it does for a cell's text. Before, nothing was offered; clicking the image itself still opens it larger.
 - A task assigned to you keeps its Needs you look when its agent sets its own check-back, and a check-back no longer counts as waiting time on it. Dependencies, blockers and other holds still defer it; while a plan is paused, the task still reads Needs you, but what it asks of you waits for the plan to resume.
 - A task for a document's comments now closes once its plan or the task itself resumes, when the document was deleted or its comments were left behind while it was paused; before, the task stayed open for comments that no longer had a place.
+- Tasks an agent has parked in Later no longer show as needing you.
 - After a restart, CORSIA records the actions it interrupted as unfinished, so they no longer stop a later checkpoint.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
 - An agent's browser that crashed or was quit now starts again on the agent's next browser action, with your saved sign-ins, and the agent is told to open its page again; before, every action failed with "This page couldn't be checked" until the agent closed the browser itself.
@@ -189,6 +193,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Sending a message to a working agent, and an agent's scheduled wake, no longer fail while a long chat saves a checkpoint; before, they could wait 30 seconds and fail.
 - Several new comments you leave on a document before an agent starts on it now reach the agent as one task, instead of one task for each.
+- Setup and Settings describe Claude Code and Codex as using your Claude or ChatGPT account, including accounts billed per use.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - Switching models now shows progress as soon as you choose in all chats. Sending a new message to a chat held by a Claude Code or Codex usage limit checks that account again; if usage has reset, queued messages resume in order.
