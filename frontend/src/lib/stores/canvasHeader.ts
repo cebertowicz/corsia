@@ -27,6 +27,8 @@ export type CanvasHeaderState = {
 	titleAction?: CanvasHeaderTitleAction;
 	onBack?: () => void;
 	backLabel?: string;
+	/** Back and the enabled actions read as links, and Back keeps its label on a phone (an Activity item). */
+	links?: boolean;
 	tag?: string;
 	actions?: CanvasHeaderAction[];
 } | null;

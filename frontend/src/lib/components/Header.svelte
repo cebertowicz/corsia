@@ -129,7 +129,7 @@
 	{/if}
 {/snippet}
 
-<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} class:phone-document={phoneDocument} data-document-bar-row data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} class:phone-document={phoneDocument} class:links={isTakeover && h?.links} data-document-bar-row data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
@@ -310,6 +310,7 @@
 	.h-act:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 	.h-act:disabled { color: var(--text-tertiary); cursor: default; }
 	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent-text); }
+	.links .h-back, .links .h-act:not(:disabled) { color: var(--accent-text); }
 
 	.h-overflow { display: none; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
@@ -385,6 +386,7 @@
 		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
 		.h-icon { width: var(--touch-target); height: var(--touch-target); }
 		.h-back-label { display: none; }
+		.links .h-back-label { display: inline; }
 		.h-act.overflowable { display: none; }
 		.h-overflow { display: flex; }
 	}

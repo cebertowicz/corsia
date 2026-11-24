@@ -109,6 +109,7 @@ describe('syncCanvasHeader — no doc', () => {
 		syncCanvasHeader(makeInput({ activeView: 'activity' }));
 		const h = get(canvasHeader);
 		expect(h?.backLabel).toBe('Activity');
+		expect(h?.links).toBe(true);
 		h?.onBack?.();
 		expect(onBack).toHaveBeenCalledOnce();
 		const next = h?.actions?.[0];

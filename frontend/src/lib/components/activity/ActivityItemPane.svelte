@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { setContext } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
-	import ReviewBarShell from '$lib/components/ReviewBarShell.svelte';
+	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import type { ActivityQueueItem } from '$lib/api/activityQueue';
@@ -32,6 +33,9 @@
 		onActed: () => Promise<void> | void;
 		onOpenChat: (threadId: string) => void;
 	} = $props();
+
+	// Every band here, the document's own review band included, names the agent asking at rest.
+	setContext(ASKER_AT_REST, true);
 
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));

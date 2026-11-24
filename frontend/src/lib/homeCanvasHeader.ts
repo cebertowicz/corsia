@@ -58,6 +58,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 			? {
 				title: '',
 				backLabel: 'Activity',
+				links: true,
 				onBack: item.onBack,
 				actions: [{
 					id: 'activity-next',
