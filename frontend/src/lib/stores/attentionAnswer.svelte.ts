@@ -9,6 +9,7 @@ import {
   isPickAny,
   OTHER_OPTION_ID,
   recommendedIds,
+  type AnswerOutcome,
   type DecisionDetail,
 } from "$lib/api/attentionQueue";
 import { token } from "$lib/stores/auth";
@@ -24,7 +25,7 @@ import {
 } from "./attentionDock.svelte";
 import { answers, setAnswer, showNotice, type AnswerState } from "./attentionAnswerState";
 
-function newMutationId(): string {
+export function newMutationId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `decision-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -65,17 +66,7 @@ export async function submitAnswer(decision: DecisionDetail): Promise<void> {
   expandedId.set(null);
   activeId.set(follower ? follower.external_id : null);
 
-  const outcome = await answerDecision(
-    decisionId,
-    pickAny
-      ? {
-          optionIds: draft.picked ?? recommendedIds(decision),
-          otherText: draft.other.trim(),
-          expectedRevision: decision.revision,
-        }
-      : { optionId: optionId ?? undefined, otherText: draft.other.trim(), expectedRevision: decision.revision },
-    draft.mutationId,
-  );
+  const outcome = await sendAnswer(decision, draft, draft.mutationId);
   if (generation !== identityEpoch()) return;
   if (outcome.status === "ok" || outcome.status === "gone") {
     draft.mutationId = null;
@@ -107,6 +98,28 @@ export async function submitAnswer(decision: DecisionDetail): Promise<void> {
   } else {
     rollBack(decisionId, "error", "That answer couldn’t be saved. Try again.");
   }
+}
+
+/**
+ * Sends a draft as the decision's answer and returns what the server said. It writes no dock state, so any surface
+ * can report the outcome its own way; the dock's reporting is `submitAnswer` above.
+ */
+export function sendAnswer(
+  decision: DecisionDetail,
+  draft: { selected: string | null; picked: string[] | null; other: string },
+  mutationId: string,
+): Promise<AnswerOutcome> {
+  return answerDecision(
+    decision.id,
+    isPickAny(decision)
+      ? {
+          optionIds: draft.picked ?? recommendedIds(decision),
+          otherText: draft.other.trim(),
+          expectedRevision: decision.revision,
+        }
+      : { optionId: draft.selected ?? undefined, otherText: draft.other.trim(), expectedRevision: decision.revision },
+    mutationId,
+  );
 }
 
 /**

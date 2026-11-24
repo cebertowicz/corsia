@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { syncCanvasHeader } from '$lib/homeCanvasHeader';
+import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 
 type Input = Parameters<typeof syncCanvasHeader>[0];
 
@@ -23,7 +24,10 @@ function makeInput(overrides: Partial<Input> = {}): Input {
 	};
 }
 
-beforeEach(() => canvasHeader.set(null));
+beforeEach(() => {
+	canvasHeader.set(null);
+	activityPhoneItem.set(null);
+});
 
 function compact(overrides: Record<string, unknown> = {}) {
 	return {
@@ -90,11 +94,40 @@ describe('syncCanvasHeader — no doc', () => {
 		expect(get(canvasHeader)).toBeNull();
 	});
 
-	it('uses a non-navigating scope header for Activity instead of a conductor label', () => {
+	it('names Activity in a non-navigating header, whatever the scope', () => {
 		syncCanvasHeader(makeInput({ activeView: 'activity', uiScopeName: 'CORSIA' }));
 		const h = get(canvasHeader);
-		expect(h?.title).toBe('CORSIA');
+		expect(h?.title).toBe('Activity');
 		expect(h?.onBack).toBeUndefined();
+		expect(h?.actions).toBeUndefined();
+	});
+
+	it('gives a phone Activity item its way back to the list and Next with its position', () => {
+		const onBack = vi.fn();
+		const onNext = vi.fn();
+		activityPhoneItem.set({ position: 2, count: 7, nextDisabled: false, nextTitle: 'Sign the 0.5.0 build', onBack, onNext });
+		syncCanvasHeader(makeInput({ activeView: 'activity' }));
+		const h = get(canvasHeader);
+		expect(h?.backLabel).toBe('Activity');
+		expect(h?.links).toBe(true);
+		h?.onBack?.();
+		expect(onBack).toHaveBeenCalledOnce();
+		const next = h?.actions?.[0];
+		expect(next?.label).toBe('2 of 7 · Next ›');
+		// The tooltip names what Next opens; the copy glossary has no one word for every kind.
+		expect(next?.title).toBe('Next: Sign the 0.5.0 build');
+		expect(next?.disabled).toBe(false);
+		next?.onClick();
+		expect(onNext).toHaveBeenCalledOnce();
+	});
+
+	it('greys the phone header Next on the last Activity item', () => {
+		activityPhoneItem.set({ position: 7, count: 7, nextDisabled: true, nextTitle: null, onBack: vi.fn(), onNext: vi.fn() });
+		syncCanvasHeader(makeInput({ activeView: 'activity' }));
+		const next = get(canvasHeader)?.actions?.[0];
+		expect(next?.label).toBe('7 of 7 · Next ›');
+		expect(next?.title).toBe('This is the last one');
+		expect(next?.disabled).toBe(true);
 	});
 
 	it('returns Documents header in documents view', () => {

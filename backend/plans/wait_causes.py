@@ -94,7 +94,7 @@ _CHILD_SQL = """
        WHERE n.id IN ({marks}) AND n.spawned_thread_id IS NOT NULL AND {live}
          AND COALESCE({newest_attachment}, n.id)=n.id
     ), open_needs AS ({open_needs})
-    SELECT n.id AS node_id, n.spawned_thread_id AS child_id,
+    SELECT n.id AS node_id, n.commitment_id AS commitment_id, n.spawned_thread_id AS child_id,
            n.executor_thread_id AS executor_thread_id,
            n.owner_thread_id AS owner_thread_id,
            t.lifecycle_state AS lifecycle_state, t.archived_reason AS archived_reason,
@@ -366,16 +366,16 @@ def delegation_cause(row, *, plan, child) -> dict | None:
     # a Turn already open at review does not hide the needed intervention.
     # A stalled child counts only work actually moving below it.
     stalled = row["stalled"]
-    active = bool(child.delegated_moving or (not stalled and (
+    busy = bool(child.delegated_moving or (not stalled and (
         row["input_queued"]
         or (
             row["turn_running"]
             and (not review_only or row["turn_started_after_review"])
         )
     )))
-    if not (active or row["open_work"] or review_only):
+    if not (busy or row["open_work"] or review_only):
         return None
-    if active:
+    if active := busy and str(row["commitment_id"]) not in child.parked_commitments:
         reason_key = DELEGATED_CHILD
         reason = "A delegated child is working on this step"
     elif review_only:
