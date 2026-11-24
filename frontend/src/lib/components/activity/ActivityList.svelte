@@ -15,7 +15,7 @@
 		ranker,
 		openKey,
 		loading = false,
-		failed = false,
+		failure = null,
 		nextDisabled,
 		onOpen,
 		onNext,
@@ -28,7 +28,8 @@
 		/** The open item, or on a phone the marked one. */
 		openKey: string | null;
 		loading?: boolean;
-		failed?: boolean;
+		/** Why the first read failed: 0 when it never reached the server, else the status the server answered. */
+		failure?: number | null;
 		nextDisabled: boolean;
 		onOpen: (key: string) => void;
 		onNext: () => void;
@@ -60,10 +61,10 @@
 </script>
 
 <div class="activity-list" aria-busy={loading}>
-	{#if failed}
+	{#if failure !== null}
 		<div class="empty" role="alert">
 			<b>Activity couldn’t load.</b>
-			<p>Check your connection, then try again.</p>
+			<p>{failure === 0 ? 'Check your connection, then try again.' : 'Try again.'}</p>
 			<button type="button" class="link" onclick={onRetry}>Try again</button>
 		</div>
 	{:else if !loading && items.length === 0}

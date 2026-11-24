@@ -295,7 +295,7 @@ describe('Header for an open Activity item on a phone', () => {
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
 	function openItem(nextDisabled = false) {
-		activityPhoneItem.set({ position: 2, count: 7, nextDisabled, onBack: () => {}, onNext: () => {} });
+		activityPhoneItem.set({ position: 2, count: 7, nextDisabled, nextTitle: nextDisabled ? null : 'Next one', onBack: () => {}, onNext: () => {} });
 		syncCanvasHeader({
 			threadSettingsOpen: false, compactArtifact: null, contextAttachTarget: null, activeView: 'activity',
 			uiScopeName: null, activeThreadId: null, conductorThreadId: null, threads: [],

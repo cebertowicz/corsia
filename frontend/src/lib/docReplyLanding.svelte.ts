@@ -48,13 +48,18 @@ export function createReplyLanding(source: {
 }) {
 	let arrivedAt = $state<string | null>(null);
 	// A tab opened from a waiting reply lands once on the thread it names, or else the first unread root in document
-	// order, after the comments have loaded (an empty list mid-load would spend the landing on nothing). A later open
-	// of the same tab that names another thread lands again. Ordinary document opens leave the comments surface alone.
+	// order, after the comments have loaded (an empty list mid-load would spend the landing on nothing). Once the tab's
+	// landing is used up, a later landing on the same tab lands again, on the same thread or another. Ordinary document
+	// opens leave the comments surface alone.
 	$effect(() => {
 		const target = source.target();
-		const instance = target?.instanceId;
-		const arrival = instance ? `${instance}\u0000${target?.landOnCommentId ?? ''}` : null;
-		if (target?.landOn !== 'new-replies' || !source.ready() || !arrival || arrivedAt === arrival) return;
+		if (target?.landOn !== 'new-replies') {
+			arrivedAt = null;
+			return;
+		}
+		const instance = target.instanceId;
+		const arrival = instance ? `${instance}\u0000${target.landOnCommentId ?? ''}` : null;
+		if (!source.ready() || !arrival || arrivedAt === arrival) return;
 		const first = source.first();
 		const landing = source.landing();
 		// A comment load can finish before its anchors are placed in the document. Do not spend this one-shot

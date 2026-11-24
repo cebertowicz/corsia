@@ -63,7 +63,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 				actions: [{
 					id: 'activity-next',
 					label: `${item.position} of ${item.count} · Next ›`,
-					title: item.nextDisabled ? 'This is the last item' : 'Next item',
+					title: item.nextTitle === null ? 'This is the last one' : `Next: ${item.nextTitle}`,
 					onClick: item.onNext,
 					primary: true,
 					disabled: item.nextDisabled,

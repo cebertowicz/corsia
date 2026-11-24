@@ -250,6 +250,20 @@ test('Activity first version: built frames', async ({ page, request }) => {
 		await shot(page, name);
 	}
 
+	// A message whose recipient is gone comes back not sent: it stays, with the server's line and no Try again.
+	const goneLine = 'Couldn’t send the reply because the public issue “Does CORSIA run on an Intel Mac?” no longer exists.';
+	await page.route('**/api/held-replies/held-intel/approve', (route) => route.fulfill({
+		status: 200, contentType: 'application/json',
+		body: JSON.stringify({ ok: true, state: 'not_sent', reason: 'recipient_gone', line: goneLine }),
+	}));
+	await rows(page).nth(5).click();
+	await page.locator('.pane-col').getByRole('button', { name: 'Send', exact: true }).click();
+	await expect(page.locator('.pane-col').getByText(goneLine)).toBeVisible();
+	await expect(page.locator('.pane-col').getByRole('button', { name: 'Try again' })).toHaveCount(0);
+	await expect(rows(page).nth(5)).toHaveAttribute('aria-current', 'true');
+	await shot(page, 'g2-message-not-sent-1440.png');
+	await page.unroute('**/api/held-replies/held-intel/approve');
+
 	// Forty items with the long fourth open.
 	await page.unroute(/\/api\/attention\/queue\?(.*&)?view=activity/);
 	await serveActivity(page, w, fortyItems(w));

@@ -7,9 +7,11 @@
 	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 	import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
+	import { emitProductEvent } from '$lib/product_events';
+	import type { ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { followerOf, nextKey } from './activityItems';
+	import { followerOf, keepInPlace, nextKey } from './activityItems';
 
 	/**
 	 * Activity: everything waiting on the person, ranked by the scope's conductor (CORSIA in the workspace), with the
@@ -43,6 +45,8 @@
 	let phoneOpen = $state(false);
 	/** The order the person last saw, so an item that leaves is followed by what came after it. */
 	let seenKeys: string[] = [];
+	/** The open item, kept where it was while the person reads why the server let it go; released when they move on. */
+	let kept = $state<ActivityQueueItem | null>(null);
 	let arrived = false;
 	let list = $state<ActivityList | undefined>(undefined);
 
@@ -52,12 +56,14 @@
 			openKey = null;
 			phoneOpen = false;
 			seenKeys = [];
+			kept = null;
 			arrived = false;
+			emitProductEvent('activity', 'opened', { scope: projectId ? 'project' : 'workspace' });
 			return store.start();
 		});
 	});
 
-	const items = $derived(store.queue?.items ?? []);
+	const items = $derived(keepInPlace(store.queue?.items ?? [], kept, seenKeys));
 	const loading = $derived(store.status === 'loading');
 	const openIndex = $derived(items.findIndex((item) => item.key === openKey));
 	const openItem = $derived(openIndex >= 0 ? items[openIndex] : null);
@@ -91,15 +97,24 @@
 		if (!active || active === document.body) list?.focusOpen();
 	}
 
-	function open(key: string) {
+	/** Opening another row, or Next, is moving on: a kept item is let go. */
+	function moveTo(key: string) {
+		if (kept && kept.key !== key) kept = null;
 		openKey = key;
+	}
+
+	function open(key: string) {
+		const kind = items.find((item) => item.key === key)?.kind;
+		moveTo(key);
 		if (get(isMobile)) phoneOpen = true;
+		emitProductEvent('activity', 'row_opened', { kind });
 	}
 
 	function next() {
 		const to = nextKey(items, openKey);
 		if (!to) return;
-		openKey = to;
+		moveTo(to);
+		emitProductEvent('activity', 'next');
 		void tick().then(() => {
 			if (!get(isMobile)) list?.focusOpen();
 		});
@@ -118,6 +133,7 @@
 				position: openIndex + 1,
 				count: items.length,
 				nextDisabled,
+				nextTitle: items[openIndex + 1]?.title ?? null,
 				onBack: () => { phoneOpen = false; },
 				onNext: next,
 			}
@@ -142,7 +158,7 @@
 				ranker={store.queue?.ranker ?? null}
 				{openKey}
 				{loading}
-				failed={store.status === 'error'}
+				failure={store.status === 'error' ? store.failure : null}
 				{nextDisabled}
 				onOpen={open}
 				onNext={next}
@@ -151,10 +167,10 @@
 			/>
 		</div>
 	</section>
-	<section class="pane-col" bind:offsetWidth={paneWidth} aria-label={openItem ? openItem.title : 'Open item'}>
+	<section class="pane-col" bind:offsetWidth={paneWidth} aria-label={openItem ? openItem.title : 'Nothing open'}>
 		{#if openItem}
 			{#key openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} onActed={() => store.reload()} onOpenChat={openChat} />
+				<ActivityItemPane item={openItem} {workspaceKey} onActed={() => store.reload()} onKeep={() => { kept = openItem; }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
 			<div class="nothing">Nothing to open.</div>

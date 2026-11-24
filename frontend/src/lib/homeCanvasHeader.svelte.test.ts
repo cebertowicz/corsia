@@ -25,7 +25,7 @@ it('re-runs the effect that syncs the header when the phone Activity item change
 	flushSync();
 	expect(get(canvasHeader)?.title).toBe('Activity');
 
-	activityPhoneItem.set({ position: 3, count: 7, nextDisabled: false, onBack: () => {}, onNext: () => {} });
+	activityPhoneItem.set({ position: 3, count: 7, nextDisabled: false, nextTitle: 'Next one', onBack: () => {}, onNext: () => {} });
 	flushSync();
 	expect(get(canvasHeader)?.actions?.[0]?.label).toBe('3 of 7 · Next ›');
 

@@ -8,6 +8,8 @@ export interface ActivityPhoneItem {
 	position: number;
 	count: number;
 	nextDisabled: boolean;
+	/** The title of what Next opens; null on the last one. */
+	nextTitle: string | null;
 	onBack: () => void;
 	onNext: () => void;
 }

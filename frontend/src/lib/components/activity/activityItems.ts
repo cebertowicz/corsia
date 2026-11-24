@@ -73,6 +73,22 @@ export function followerOf(
 	return items[place]?.key ?? null;
 }
 
+/**
+ * The list with the item the person is still reading after the server let it go (its press was refused and it left),
+ * at the place it held in the order they last saw. Once they move on it is no longer kept, and the list is the
+ * server's alone.
+ */
+export function keepInPlace(
+	items: readonly ActivityQueueItem[],
+	kept: ActivityQueueItem | null,
+	previous: readonly string[],
+): readonly ActivityQueueItem[] {
+	if (!kept || items.some((item) => item.key === kept.key)) return items;
+	const at = previous.indexOf(kept.key);
+	const place = at < 0 ? items.length : Math.min(at, items.length);
+	return [...items.slice(0, place), kept, ...items.slice(place)];
+}
+
 export function documentOf(item: ActivityQueueItem): { artifactId: string; commentId?: string } | null {
 	if (item.open && 'artifact_id' in item.open) {
 		return { artifactId: item.open.artifact_id, commentId: item.open.comment_id };

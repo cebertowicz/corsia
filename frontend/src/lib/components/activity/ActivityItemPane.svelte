@@ -7,30 +7,34 @@
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import type { ActivityQueueItem } from '$lib/api/activityQueue';
-	import { mutateUserTask } from '$lib/api/plans';
 	import { markCommentThreadViewed } from '$lib/api/docs';
-	import { draftFor } from '$lib/stores/attentionDock.svelte';
-	import { submitAnswer } from '$lib/stores/attentionAnswer.svelte';
-	import { decideHeld } from '$lib/stores/attentionHeld.svelte';
-	import { answers } from '$lib/stores/attentionAnswerState';
+	import type { HeldVerb } from '$lib/api/heldReplies';
+	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
+	import { emitProductEvent } from '$lib/product_events';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { openArtifactTab, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 	import {
 		chatReplyOf, decisionOf, docReplyOf, documentOf, findDocument, heldOf, taskOf, taskSteps,
 		type DocumentLookup,
 	} from './activityItems';
+	import {
+		answerPressed, decideHeldPress, markTaskDonePress, SUCCEEDED, type PressAction, type Pressed,
+	} from './activityPress';
 
 	/**
 	 * The open item, in the pane the chat uses for documents. A document opens in Activity's own workspace (never a
 	 * chat's), read for the chat it came from; every other kind gets the same frame. Each kind's control sits in the
 	 * docked band at the bottom and settles the item through the call its own surface already uses; the list then
-	 * re-reads, and the item leaves only when the server stops returning it.
+	 * re-reads, and the item leaves only when the server stops returning it. Every outcome of a press is reported here,
+	 * under the band's buttons; nothing here writes the dock's state.
 	 */
-	let { item, workspaceKey, onActed, onOpenChat }: {
+	let { item, workspaceKey, onActed, onKeep, onOpenChat }: {
 		item: ActivityQueueItem;
 		workspaceKey: string;
 		/** Re-read the queue after an act landed. */
 		onActed: () => Promise<void> | void;
+		/** The server let the item go without doing what was pressed: keep it open, with the reason, until the person moves on. */
+		onKeep: () => void;
 		onOpenChat: (threadId: string) => void;
 	} = $props();
 
@@ -47,7 +51,9 @@
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
 
 	let sending = $state(false);
-	let failure = $state('');
+	let failure = $state<{ text: string; retry: PressAction | null; final: boolean } | null>(null);
+	/** The decision answer's retry key: kept across Try again so a retry can't answer twice. */
+	let answerMutation: string | null = null;
 
 	// Decision draft: nothing is chosen until the person chooses, even where an agent recommends an option.
 	let selected = $state<string | null>(null);
@@ -62,7 +68,8 @@
 		if (item.key === shownKey) return;
 		shownKey = item.key;
 		sending = false;
-		failure = '';
+		failure = null;
+		answerMutation = null;
 		selected = null;
 		picked = [];
 		other = '';
@@ -118,25 +125,36 @@
 		}
 	}
 
-	/** Runs one press: busy while it runs, then either the list re-reads or the reason shows under the button. */
-	async function press(run: () => Promise<string | null>) {
+	/**
+	 * Runs one press: busy while it runs, then the list re-reads, or the reason shows under the buttons. A refusal
+	 * re-reads too, since the item changed or left; one that left stays open here until the person moves on.
+	 */
+	async function press(action: PressAction, verb: string, run: () => Promise<Pressed>) {
 		if (sending) return;
 		sending = true;
-		failure = '';
+		failure = null;
+		let pressed: Pressed;
 		try {
-			const problem = await run();
-			if (problem) failure = problem;
-			else await onActed();
+			pressed = await run();
 		} catch {
-			failure = 'That didn’t go through. Try again.';
+			pressed = { outcome: 'failed', text: `Couldn’t ${verb}. Try again.` };
+		}
+		emitProductEvent('activity', 'acted', {
+			kind: item.kind, action, outcome: pressed.outcome, ...(pressed.outcome === 'refused' ? { reason: pressed.reason } : {}),
+		});
+		try {
+			if (pressed.outcome === 'failed') {
+				failure = { text: pressed.text, retry: action, final: false };
+				return;
+			}
+			if (pressed.outcome === 'refused') {
+				if (pressed.text) failure = { text: pressed.text, retry: null, final: pressed.final ?? false };
+				if (pressed.final) onKeep();
+			}
+			await onActed();
 		} finally {
 			sending = false;
 		}
-	}
-
-	function answerFailure(id: string): string | null {
-		const state = get(answers)[id];
-		return state?.state === 'failed' ? state.message : null;
 	}
 
 	const answerReady = $derived.by(() => {
@@ -147,16 +165,15 @@
 	});
 
 	function answer(d: DecisionDetail) {
-		return press(async () => {
-			const draft = draftFor(d.id);
-			draft.selected = isPickAny(d) ? null : selected;
-			draft.picked = isPickAny(d) ? [...picked] : null;
-			draft.other = other;
-			await submitAnswer(d);
-			const problem = answerFailure(d.id);
-			// A changed decision re-reads; the list then shows its new revision.
-			if (problem) await onActed();
-			return problem;
+		return press('answer', 'save your answer', async () => {
+			answerMutation ??= newMutationId();
+			const outcome = await sendAnswer(d, {
+				selected: isPickAny(d) ? null : selected,
+				picked: isPickAny(d) ? [...picked] : null,
+				other,
+			}, answerMutation);
+			if (outcome.status === 'ok' || outcome.status === 'gone') answerMutation = null;
+			return answerPressed(outcome);
 		});
 	}
 
@@ -164,53 +181,35 @@
 		picked = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
 	}
 
-	const decide = (verb: 'approve' | 'decline') => press(async () => {
-		if (!held) return null;
-		await decideHeld(held, verb);
-		return answerFailure(held.id);
+	const decide = (verb: HeldVerb) => verb === 'approve'
+		? press('send', 'send this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED))
+		: press('dont_send', 'decline this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED));
+	const markTaskDone = () => press('done', 'mark this task done', async () => (task ? markTaskDonePress(task) : SUCCEEDED));
+	const markReplyRead = () => press('done', 'mark this reply read', async () => {
+		if (docReply) await markCommentThreadViewed(docReply.artifact_id, docReply.root_id, docReply.reply_id);
+		return SUCCEEDED;
 	});
 
-	const markTaskDone = () => press(async () => {
-		if (!task) return null;
-		const outcome = await mutateUserTask(task.plan_id, 'mark_done', task.node_id, task.revision,
-			`mark_done:${task.node_id}:${task.revision}`);
-		if (outcome.status === 'success') return null;
-		if (outcome.status === 'conflict') {
-			await onActed();
-			return 'This task changed. Showing the latest.';
-		}
-		return outcome.status === 'forbidden'
-			? 'You can’t change this task. Ask the agent in chat to change it.'
-			: outcome.message;
-	});
-
-	const markReplyRead = () => press(async () => {
-		if (!docReply) return null;
-		try {
-			await markCommentThreadViewed(docReply.artifact_id, docReply.root_id, docReply.reply_id);
-			return null;
-		} catch {
-			return 'Couldn’t mark this reply read. Try again.';
-		}
-	});
-
-	/** Reply reopens the document on the reply, with its comment box open under the thread, as in a document today. */
-	async function reply() {
-		const ws = get(threadWorkspaces)[workspaceKey];
-		const tab = ws?.tabs.find((t) => t.instanceId === ws.activeTabId);
-		if (!tab || tab.kind !== 'document' || lookup?.status !== 'found' || !doc) return;
-		await requestArtifactTabClose(workspaceKey, tab, () => {});
+	/**
+	 * Reply lands the open document on the reply again, with its comment box open under the thread, as in a document
+	 * today. The tab stays open: closing it would send the person's unsent comments.
+	 */
+	function reply() {
+		if (lookup?.status !== 'found' || !doc) return;
 		openArtifactTab(workspaceKey, {
 			artifactId: doc.artifactId, path: lookup.path, title: lookup.title, landOn: 'new-replies', landOnCommentId: replyThread,
 		});
 	}
 
-	const primaryLabel = (label: string) => (failure ? 'Try again' : label);
+	/** The button whose press failed reads Try again; after a refusal or a final outcome, every button keeps its name. */
+	const labelFor = (action: PressAction, label: string) => (failure?.retry === action ? 'Try again' : label);
+	/** An item the server has let go can't be acted on again. */
+	const settled = $derived(failure?.final ?? false);
 	const lookupFailed = $derived(lookup?.status === 'missing' || lookup?.status === 'failed');
 </script>
 
 {#snippet failureLine()}
-	{#if failure}<p class="act-failure" role="alert">{failure}</p>{/if}
+	{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}
 {/snippet}
 
 {#if doc}
@@ -241,7 +240,7 @@
 						{#snippet actions()}
 							<div class="rb-actions">
 								<Button size="sm" variant="ghost" disabled={sending} onclick={() => void reply()}>Reply</Button>
-								<Button size="sm" variant="primary" loading={sending} onclick={() => void markReplyRead()}>{primaryLabel('Done')}</Button>
+								<Button size="sm" variant="primary" loading={sending} onclick={() => void markReplyRead()}>{labelFor('done', 'Done')}</Button>
 							</div>
 							{@render failureLine()}
 						{/snippet}
@@ -286,7 +285,7 @@
 			<ReviewBarShell view="ask" {who} full="Waiting for your answer" askLabel="Decision" docked busy={sending}>
 				{#snippet actions()}
 					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} disabled={!answerReady} onclick={() => void answer(decision)}>{primaryLabel('Answer')}</Button>
+						<Button size="sm" variant="primary" loading={sending} disabled={!answerReady || settled} onclick={() => void answer(decision)}>{labelFor('answer', 'Answer')}</Button>
 					</div>
 					{@render failureLine()}
 				{/snippet}
@@ -306,7 +305,7 @@
 			<ReviewBarShell view="ask" {who} full="A step only you can do" askLabel="Task for you" docked busy={sending}>
 				{#snippet actions()}
 					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} onclick={() => void markTaskDone()}>{primaryLabel('Done')}</Button>
+						<Button size="sm" variant="primary" loading={sending} onclick={() => void markTaskDone()}>{labelFor('done', 'Done')}</Button>
 					</div>
 					{@render failureLine()}
 				{/snippet}
@@ -324,8 +323,8 @@
 			<ReviewBarShell view="ask" {who} full="Waiting for your yes before it’s sent" askLabel="Message waiting for your yes" docked busy={sending}>
 				{#snippet actions()}
 					<div class="rb-actions">
-						<Button size="sm" variant="ghost" disabled={sending} onclick={() => void decide('decline')}>Don’t send</Button>
-						<Button size="sm" variant="primary" loading={sending} onclick={() => void decide('approve')}>{primaryLabel('Send')}</Button>
+						<Button size="sm" variant="ghost" disabled={sending || settled} onclick={() => void decide('decline')}>{labelFor('dont_send', 'Don’t send')}</Button>
+						<Button size="sm" variant="primary" loading={sending} disabled={settled} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
 					</div>
 					{@render failureLine()}
 				{/snippet}
