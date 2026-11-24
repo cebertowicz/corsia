@@ -271,10 +271,8 @@
 
 	.eyebrow, .label {
 		color: var(--text-tertiary);
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		font-size: var(--text-caption);
-		font-weight: 650;
+		font-size: var(--text-footnote);
+		font-weight: var(--fw-semibold);
 	}
 	.decision-body .explainer { margin: 0; }
 	.status {
