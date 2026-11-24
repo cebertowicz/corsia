@@ -19,7 +19,6 @@ import psutil
 from infra.default_port import DEFAULT_BACKEND_PORT
 from infra.devices_listener import DEFAULT_PORT as DEVICES_PORT, FALLBACK_PORTS as DEVICES_FALLBACK_PORTS
 from infra.devices_names import local_hostname
-from infra.key_store_values import KeyStoreError
 from infra.saved_logins import normalized_site
 from infra.settings import get_devices_outside_address
 
@@ -62,13 +61,18 @@ def _this_computer_hosts() -> frozenset[str]:
 
 
 def _outside_site(db: sqlite3.Connection | None) -> str | None:
+    """The outside address as a normalized site, or None when none is set.
+
+    The devices settings keep the name as typed, which may end in a dot
+    (``home.example.com.``); the browser reports the host without it, so the dot
+    is dropped before comparing. A stored value that still isn't a site raises
+    ``KeyStoreError``, which refuses the offer rather than skipping this check.
+    """
     address = get_devices_outside_address(db=db)
     if not address:
         return None
-    try:
-        return normalized_site(f"https://{address}")
-    except KeyStoreError:
-        return None
+    host, colon, port = address.partition(":")
+    return normalized_site(f"https://{host.removesuffix('.')}{colon}{port}")
 
 
 def is_own_site(site: str, *, db: sqlite3.Connection | None = None) -> bool:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
@@ -31,12 +32,11 @@ from infra.settings import set_devices_outside_address
 BACKEND = Path(__file__).resolve().parents[1]
 SITE = "https://example.com"
 #: The only modules that may make, confirm or check an offer. The browser's capture of the
-#: person's own submit (host_access/browser_login_capture.py, built separately) joins on purpose.
+#: person's own submit (host_access/browser_login_capture.py) is added here by its own reviewed change.
 SEAM_ALLOWLIST = frozenset({
     "infra/saved_login_offers.py",
     "infra/saved_logins.py",
     "api/saved_logins.py",
-    "host_access/browser_login_capture.py",
     "tests/test_saved_login_offers.py",
     "tests/test_saved_logins_leaks.py",
 })
@@ -88,7 +88,7 @@ def test_an_unconfirmed_offer_is_not_shown_or_saved(sessions):
     key = _key(sessions)
     assert offers.offer_login(key, SITE, "me", "pw one 1") is True
     assert offers.pending_offer(key) is None
-    with pytest.raises(KeyStoreError, match="No sign-in is waiting"):
+    with pytest.raises(KeyStoreError, match="There's no sign-in to save here"):
         offers.save_offer(key, saved_by=OWNER_USER)
     assert saved_logins.list_logins() == []
     offers.confirm_offer(key)
@@ -117,11 +117,45 @@ def test_a_two_page_sign_in_uses_the_noted_username_once(sessions):
     key = _key(sessions)
     offers.note_username(key, SITE, "me@example.com")
     assert offers.offer_login(key, "https://elsewhere.example", "", "pw one 1") is False
-    offers.note_username(key, SITE, "me@example.com")
-    assert offers.offer_login(key, SITE, None, "pw one 1") is True
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True  # still noted for this site
     offers.confirm_offer(key)
     assert offers.pending_offer(key).username == "me@example.com"
     assert offers.offer_login(key, SITE, None, "pw one 1") is False  # used up
+
+
+def test_a_click_or_failed_attempt_before_the_real_submit_keeps_the_noted_username(sessions):
+    key = _key(sessions)
+    saved_logins.save_login(site=SITE, username="me@example.com", password="pw old 0", saved_by=OWNER_USER)
+    offers.note_username(key, SITE, "me@example.com")
+    with pytest.raises(KeyStoreError):
+        offers.offer_login(key, SITE, None, "")  # a show-password click with the field still empty
+    assert offers.offer_login(key, SITE, None, "pw old 0") is False  # the saved password: no offer
+    assert offers.offer_login(key, SITE, None, "pw wrong 9") is True  # a failed attempt, never confirmed
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True  # the real submit
+    assert offers.confirm_offer(key) is True
+    assert offers.pending_offer(key) == offers.OfferView(SITE, "example.com", "me@example.com", True)
+
+
+def test_confirming_or_saving_uses_up_the_noted_username(sessions):
+    key = _key(sessions)
+    offers.note_username(key, SITE, "me@example.com")
+    assert offers.offer_login(key, SITE, None, "pw one 1") is True
+    assert offers._usernames  # kept until the sign-in is confirmed
+    offers.confirm_offer(key)
+    assert offers._usernames == {}
+    offers.note_username(key, SITE, "me@example.com")  # noted again after the confirm
+    offers.save_offer(key, saved_by=OWNER_USER)
+    assert offers._usernames == {}
+    assert offers.offer_login(key, SITE, None, "pw two 2") is False
+
+
+def test_a_username_noted_for_one_site_is_never_used_on_another(sessions):
+    key = _key(sessions)
+    offers.note_username(key, SITE, "me@example.com")
+    assert offers.offer_login(key, "https://other.example", None, "pw one 1") is False
+    assert offers.offer_login(key, "https://other.example", "someone", "pw one 1") is True
+    offers.confirm_offer(key)
+    assert offers.pending_offer(key) == offers.OfferView("https://other.example", "other.example", "someone", False)
 
 
 def test_a_login_already_saved_with_this_password_gets_no_offer(sessions):
@@ -219,6 +253,24 @@ def test_this_computers_name_and_the_outside_address_are_refused(sessions):
     assert offers.offer_login(key, "https://localhost:8443", "me", "pw one 1") is True
 
 
+@pytest.mark.parametrize(
+    "stored,site", [("home.example.net.", "https://home.example.net"), ("home.example.net.:8443", "https://home.example.net:8443")],
+)
+def test_an_outside_address_saved_with_a_trailing_dot_is_refused(sessions, stored, site):
+    set_devices_outside_address(stored)
+    with pytest.raises(KeyStoreError, match="CORSIA itself"):
+        offers.offer_login(_key(sessions), site, "me", "pw one 1")
+    assert offers.pending_offer(_key(sessions)) is None
+
+
+def test_an_outside_address_that_is_not_a_site_refuses_the_offer(sessions):
+    set_devices_outside_address("not a host!")
+    with pytest.raises(KeyStoreError):
+        offers.offer_login(_key(sessions), SITE, "me", "pw one 1")
+    offers.confirm_offer(_key(sessions))
+    assert offers.pending_offer(_key(sessions)) is None
+
+
 def test_a_malformed_session_key_is_refused(sessions):
     for key in ("", "t-mine", ":s1", None):
         with pytest.raises(KeyStoreError):
@@ -303,7 +355,7 @@ async def test_not_now_drops_the_offer_and_is_safe_to_repeat(client, sessions):
 async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "This request needs the conversation it's for."}
+    assert refused.json() == {"detail": "Something went wrong in CORSIA. Try again."}
 
 
 @pytest.mark.asyncio
@@ -331,6 +383,14 @@ async def test_list_and_delete(client, sessions):
     assert missing.status_code == 404
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("login_id", ["0" * 32, "not-an-id"])
+async def test_deleting_a_login_that_is_not_there_says_so(client, sessions, login_id):
+    missing = await client.delete(f"/api/saved-logins/{login_id}", headers=_person())
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "There's no saved login to delete."}
+
+
 _ROUTES = [
     ("GET", "/api/saved-logins/offer?thread_id=t-mine", None),
     ("POST", "/api/saved-logins/offer/save", {"thread_id": "t-mine"}),
@@ -353,10 +413,24 @@ async def test_an_agent_token_is_refused_on_every_route(client, sessions, method
     assert [login.id for login in saved_logins.list_logins()] == [login_id]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path,body", _ROUTES)
+async def test_a_session_in_the_url_reads_but_changes_nothing(client, sessions, method, path, body):
+    _confirmed(_key(sessions))
+    login_id = saved_logins.save_login(site=SITE, username="kept", password="pw two 2", saved_by=OWNER_USER)
+    route, _, query = path.replace("0" * 32, login_id).partition("?")
+    url_session = dict(parse_qsl(query)) | {"token": OWNER_SESSION_TOKEN}
+    answered = await client.request(method, route, json=body, params=url_session)
+    assert answered.status_code == (200 if method == "GET" else 401), (method, path, answered.status_code)
+    assert offers.pending_offer(_key(sessions)) is not None
+    assert [login.id for login in saved_logins.list_logins()] == [login_id]
+
+
 def test_every_route_is_the_persons_alone():
     from infra.auth import require_human_user
 
     routes = [route for route in saved_logins_api.router.routes if route.path.startswith("/api/saved-logins")]
     assert len(routes) == len(_ROUTES)
     for route in routes:
-        assert any(dep.call is require_human_user for dep in route.dependant.dependencies), route.path
+        expected = require_human_user if route.methods == {"GET"} else saved_logins_api.require_person_write
+        assert any(dep.call is expected for dep in route.dependant.dependencies), route.path

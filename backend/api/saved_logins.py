@@ -1,7 +1,10 @@
 """The person's own saved-login routes: the save offer, and the list of saved logins.
 
 Every route needs the signed-in person's session (``require_human_user``); an
-agent's token is refused. The offer routes also need a thread the person owns,
+agent's token is refused. A route that changes something (Save, Not now,
+Delete) takes that session from the ``Authorization`` header only, as the key
+store's own writes do: a session in the URL reaches logs, referrers and
+browser history, so it authorizes the reads here and no change. The offer routes also need a thread the person owns,
 and resolve its current browser session on the server, so an offer from an
 earlier browser session never shows. No route carries a password. Save and Not
 now read only ``thread_id`` from their body and refuse anything else with fixed
@@ -16,17 +19,24 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from infra import saved_login_offers, saved_logins
-from infra.auth import require_human_user
+from infra.auth import require_human_user, require_user_header_only
 from infra.db_async import run_in_db
 from infra.key_store_values import KeyStoreError
 from infra.queries import get_thread_for_user
 
 router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
-_NO_THREAD = "No conversation has that id."
-_BAD_BODY = "This request needs the conversation it's for."
+_NO_THREAD = "The chat this login is for can't be found, so nothing is saved."
+_BAD_BODY = "Something went wrong in CORSIA. Try again."
+#: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
+_NO_LOGIN_TO_DELETE = "There's no saved login to delete."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
+
+
+def require_person_write(user: dict = Depends(require_user_header_only)) -> dict:
+    """The signed-in person's session for a change, read from the ``Authorization`` header only."""
+    return require_human_user(user)
 
 
 async def _thread_id(request: Request) -> str:
@@ -61,7 +71,7 @@ async def get_offer(thread_id: str, user: dict = Depends(require_human_user)) ->
 
 
 @router.post("/offer/save")
-async def save_offer(request: Request, user: dict = Depends(require_human_user)) -> dict:
+async def save_offer(request: Request, user: dict = Depends(require_person_write)) -> dict:
     """Save the thread's confirmed offer as the signed-in person, then drop it; 409 when none is held."""
     key = await _session_key(await _thread_id(request), user)
     try:
@@ -73,7 +83,7 @@ async def save_offer(request: Request, user: dict = Depends(require_human_user))
 
 
 @router.post("/offer/not-now")
-async def not_now(request: Request, user: dict = Depends(require_human_user)) -> dict:
+async def not_now(request: Request, user: dict = Depends(require_person_write)) -> dict:
     """Drop the thread's offer, if any. Safe to repeat."""
     saved_login_offers.drop_offer(await _session_key(await _thread_id(request), user))
     return {"offer": None}
@@ -86,10 +96,10 @@ async def list_saved_logins(_user: dict = Depends(require_human_user)) -> dict:
 
 
 @router.delete("/{login_id}")
-async def delete_saved_login(login_id: str, _user: dict = Depends(require_human_user)) -> dict:
-    """Delete one saved login and its password."""
+async def delete_saved_login(login_id: str, _user: dict = Depends(require_person_write)) -> dict:
+    """Delete one saved login and its password; 404 when there is no such login."""
     try:
         await run_in_db(saved_logins.delete_login, login_id)
-    except KeyStoreError as refused:
-        raise HTTPException(404, str(refused)) from None
+    except KeyStoreError:
+        raise HTTPException(404, _NO_LOGIN_TO_DELETE) from None
     return {"deleted": login_id}

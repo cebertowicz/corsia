@@ -35,9 +35,12 @@ from infra.saved_logins import (
     logins_for_site, normalized_site, password_matches, save_login, validated_password, validated_username,
 )
 
-_SESSION_REFUSAL = "A save offer needs the browser session it came from."
+_SESSION_REFUSAL = (
+    "The shared browser this sign-in came from has closed, so it can't be saved. "
+    "It's offered again the next time you sign in."
+)
 _OWN_SITE_REFUSAL = "CORSIA doesn't save a login for CORSIA itself."
-NO_OFFER = "No sign-in is waiting to be saved."
+NO_OFFER = "There's no sign-in to save here. It's offered again the next time you sign in."
 
 
 @dataclass(frozen=True)
@@ -102,16 +105,17 @@ def offer_login(
 
     Call at the person's own submit, before it is known to have worked, and
     :func:`confirm_offer` once it has. Every call replaces the session's earlier
-    offer, even when it makes none, and uses up the noted username. With no
-    username, the one noted for this session and site is used; with none
-    noted, no offer is made. No offer is made when this login is already saved
+    offer, even when it makes none. With no username, the one noted for this
+    session and site is used; with none noted, no offer is made. A confirmed
+    sign-in uses up the noted username, so a click before the real submit or a
+    failed attempt leaves it for the next submit. No offer is made when this login is already saved
     with this password; a different saved password makes an update offer.
     CORSIA's own address is refused. Reads the database, so call it off the event loop.
     """
     key, claim = _key(session_key), object()
     with _lock:
         _offers.pop(key, None)
-        noted = _usernames.pop(key, None)
+        noted = _usernames.get(key)
         _claims[key] = claim
     try:
         offer = _checked_offer(site, username, password, noted, db)
@@ -145,12 +149,16 @@ def _checked_offer(
 
 
 def confirm_offer(session_key: str) -> bool:
-    """Mark the session's offer confirmed once the person's sign-in settled cleanly; return whether one was held."""
+    """Mark the session's offer confirmed once the person's sign-in settled cleanly; return whether one was held.
+
+    Confirming uses up the session's noted username.
+    """
     key = _key(session_key)
     with _lock:
         offer = _offers.get(key)
         if offer is not None:
             _offers[key] = replace(offer, confirmed=True)
+            _usernames.pop(key, None)
     return offer is not None
 
 
@@ -166,14 +174,15 @@ def pending_offer(session_key: str | None) -> OfferView | None:
 def save_offer(session_key: str | None, *, saved_by: str, db: sqlite3.Connection | None = None) -> str:
     """Save the session's pending offer as the person ``saved_by``; return the login id.
 
-    An unconfirmed offer is refused and kept. A confirmed one leaves memory
-    first, so a failed save keeps nothing either.
+    An unconfirmed offer is refused and kept. A confirmed one and the noted
+    username leave memory first, so a failed save keeps nothing either.
     """
     with _lock:
         offer = _offers.get(session_key) if session_key is not None else None
         if session_key is None or offer is None or not offer.confirmed:
             raise KeyStoreError(NO_OFFER)
         del _offers[session_key]
+        _usernames.pop(session_key, None)
     return save_login(site=offer.site, username=offer.username, password=offer.password, saved_by=saved_by, db=db)
 
 
