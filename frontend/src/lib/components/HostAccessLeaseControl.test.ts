@@ -1379,7 +1379,7 @@ describe('HostAccessLeaseControl', () => {
 		host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
 		flushSync();
 		await tick();
-		return host.querySelector('[role="dialog"]')!;
+		return host.querySelector<HTMLElement>('[role="dialog"]')!;
 	}
 
 	const presses = [
