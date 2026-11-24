@@ -1,11 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from '../support/test';
-import { cell, cellContent, DOC, editorIn, frame, LAYOUTS, onlyIn, openTableDocument } from '../support/tableCells';
+import { cell, cellContent, DOC, editorIn, frame, LAYOUTS, onlyIn, openTableDocument, type Layout } from '../support/tableCells';
 
 /**
  * An empty cell has no text to select for a comment, so while its editor is open and still empty the Comment offer is the
- * whole cell's, placed on that cell. The first character typed takes the offer away; deleting it brings the offer back. The
- * offer sits inside the empty cell or, where the cell is too narrow, covers no cell, and is inside the visible page.
+ * whole cell's, placed on that cell. The first character typed takes the offer away; deleting it brings the offer back. On a
+ * desktop the offer sits inside the empty cell or, where the cell is too narrow, covers no cell; on a phone it is the fixed
+ * bottom bar's button, with the cell being edited clear of the bar. Either way it is inside the visible page.
  */
 
 const FILLED = '| Signs | Plain words in a cell. | open |';
@@ -15,7 +16,7 @@ const EMPTY_DOC = DOC.replace(FILLED, '| Signs | Plain words in a cell. |  |');
  * The offer's box against the open cell, the editor's line and the visible page: what keeps it on its cell, off the text and
  * above a phone's keyboard.
  */
-async function offerClear(page: Page) {
+async function offerClear(page: Page, layout: Layout) {
 	const [offer, open, line, viewport] = await Promise.all([
 		page.locator('.sel-comment').boundingBox(),
 		cell(page, 2, 2).boundingBox(),
@@ -25,11 +26,22 @@ async function offerClear(page: Page) {
 	expect(offer, 'the offer is drawn').not.toBeNull();
 	expect(line, 'the cell editor\'s line is drawn').not.toBeNull();
 	expect(open, 'the open cell is drawn').not.toBeNull();
-	// Inside the empty cell, which holds no text, or, when the cell is too narrow, clear of every cell of the table.
-	const inside = offer!.x >= open!.x - 1 && offer!.y >= open!.y - 1 && offer!.x + offer!.width <= open!.x + open!.width + 1 && offer!.y + offer!.height <= open!.y + open!.height + 1;
-	const cells = await page.locator('.cm-md-table td, .cm-md-table th').evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
-	const covered = cells.filter((c) => offer!.x < c.x + c.width && offer!.x + offer!.width > c.x && offer!.y < c.y + c.height && offer!.y + offer!.height > c.y);
-	expect(inside || covered.length === 0, `the offer ${JSON.stringify(offer)} sits inside the empty cell ${JSON.stringify(open)} or covers no cell (it covers ${JSON.stringify(covered)})`).toBe(true);
+	if (layout.project === 'chromium-mobile') {
+		// A phone offers Comment in the fixed bottom bar: the bar is whole on the visible page, its button is a 44 px target, and the cell being edited is clear of the bar.
+		const bar = page.locator('.touch-comment-bar.offered');
+		await expect(bar, 'a phone offers the whole-cell comment in the bottom bar').toBeVisible();
+		const barBox = (await bar.boundingBox())!;
+		expect(offer!.height, 'the Comment button is a 44 px target').toBeGreaterThanOrEqual(44);
+		expect(offer!.width, 'the Comment button is a 44 px target wide').toBeGreaterThanOrEqual(44);
+		expect(barBox.y >= viewport.top && barBox.y + barBox.height <= viewport.top + viewport.height, `the bar ${JSON.stringify(barBox)} is whole on the visible page ${JSON.stringify(viewport)}`).toBe(true);
+		expect(open!.y + open!.height, `the cell being edited ${JSON.stringify(open)} is clear of the bar ${JSON.stringify(barBox)}`).toBeLessThanOrEqual(barBox.y + 1);
+	} else {
+		// Inside the empty cell, which holds no text, or, when the cell is too narrow, clear of every cell of the table.
+		const inside = offer!.x >= open!.x - 1 && offer!.y >= open!.y - 1 && offer!.x + offer!.width <= open!.x + open!.width + 1 && offer!.y + offer!.height <= open!.y + open!.height + 1;
+		const cells = await page.locator('.cm-md-table td, .cm-md-table th').evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
+		const covered = cells.filter((c) => offer!.x < c.x + c.width && offer!.x + offer!.width > c.x && offer!.y < c.y + c.height && offer!.y + offer!.height > c.y);
+		expect(inside || covered.length === 0, `the offer ${JSON.stringify(offer)} sits inside the empty cell ${JSON.stringify(open)} or covers no cell (it covers ${JSON.stringify(covered)})`).toBe(true);
+	}
 	expect(offer!.y, 'the offer starts inside the visible page').toBeGreaterThanOrEqual(viewport.top);
 	expect(offer!.y + offer!.height, 'and ends inside it').toBeLessThanOrEqual(viewport.top + viewport.height);
 	expect(offer!.x + offer!.width, 'and is not cut off at the side').toBeLessThanOrEqual(viewport.width);
@@ -52,7 +64,7 @@ for (const layout of LAYOUTS) {
 
 			const offer = page.locator('.sel-comment');
 			await expect(offer, 'the empty cell offers a comment on the whole cell').toBeVisible();
-			testInfo.annotations.push({ type: 'offer-boxes', description: JSON.stringify(await offerClear(page)) });
+			testInfo.annotations.push({ type: 'offer-boxes', description: JSON.stringify(await offerClear(page, layout)) });
 			await frame(page, `06-empty-cell-offer-${at}`);
 
 			await page.keyboard.type('x');
@@ -61,7 +73,7 @@ for (const layout of LAYOUTS) {
 
 			await page.keyboard.press('Backspace');
 			await expect(offer, 'emptying the cell brings the offer back').toBeVisible();
-			await offerClear(page);
+			await offerClear(page, layout);
 
 			// The offer still starts a comment: the press on it closes the cell editor, and the offer has to outlast that.
 			if (layout.project === 'chromium-mobile') await offer.tap(); else await offer.click();

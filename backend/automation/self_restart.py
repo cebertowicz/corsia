@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from automation.restart_queries import usual_update_seconds as usual_update_seconds
 import uuid
 import json
+import sqlite3
 
 from automation.restart_rule import ACTIVE_PHASES, HOLD_PHASES, IN_FLIGHT_TTL_SECONDS
 from automation.restart_rule import row_is_active
@@ -130,19 +131,18 @@ def mark_conductor_told(operation_id: str, *, db=None) -> bool:
 def restart_holds_new_work(*, db=None) -> bool:
     """Return cutoff truth once the durable owner has entered steering.
 
-    Admission is also used by deliberately minimal/legacy database fixtures that
-    do not install restart lifecycle state. Such a database cannot contain a
-    durable cutoff, so it has no hold to honor; production startup installs the
-    owner table before serving ingress. ``holding`` reserves an operation without
-    changing the pre-existing build-window ingress behavior.
+    Read the table directly (a sqlite_master probe grows with the schema, on every
+    Turn terminal). Minimal fixtures lack it and hold nothing; production installs
+    it before ingress. ``holding`` reserves without changing build-window ingress.
     """
     connection = db or get_db()
     try:
-        installed = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='self_restart_requests'"
-        ).fetchone()
-        active = _active_row(connection) if installed is not None else None
+        try:
+            active = _active_row(connection)
+        except sqlite3.OperationalError as error:
+            if str(error) != "no such table: self_restart_requests":
+                raise
+            active = None
         return active is not None and active.get("phase") in HOLD_PHASES - {"holding"}
     finally:
         if db is None:

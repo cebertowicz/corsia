@@ -40,6 +40,10 @@ class CloneUnsupported(Exception):
     """The platform or file system cannot clone; no target file was left behind."""
 
 
+class CloneInconsistent(RuntimeError):
+    """The clone does not hold the locked state, so the write-lock reasoning above failed."""
+
+
 def _clone_file(source: Path, target: Path) -> None:
     """Clone one file to a new path, owner-only. Raises ``CloneUnsupported`` or ``OSError``."""
     if sys.platform == "darwin":
@@ -90,8 +94,8 @@ def clone_database(source: Path, target: Path, *, expected_user_version: int) ->
     """Snapshot ``source`` (and its WAL) into the new self-contained file ``target``.
 
     The caller must hold ``source``'s write lock and must not have written under it. Raises
-    ``CloneUnsupported`` when cloning is not possible, leaving no target; any other failure removes
-    what it wrote and re-raises.
+    ``CloneUnsupported`` when cloning is not possible, leaving no target; ``CloneInconsistent`` when
+    the clone does not hold the locked state; any other failure removes what it wrote and re-raises.
     """
     wal = source.with_name(f"{source.name}-wal")
     has_wal = wal.exists() and wal.stat().st_size > 0
@@ -107,13 +111,13 @@ def clone_database(source: Path, target: Path, *, expected_user_version: int) ->
         try:
             version = int(snapshot.execute("PRAGMA user_version").fetchone()[0])
             if version != expected_user_version:
-                raise RuntimeError(
+                raise CloneInconsistent(
                     f"cloned database reads user_version {version}, expected {expected_user_version}"
                 )
             if has_wal:
                 busy, _frames, _moved = snapshot.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                 if busy:
-                    raise RuntimeError("could not fold the cloned WAL into the backup")
+                    raise sqlite3.OperationalError("could not fold the cloned WAL into the backup")
         finally:
             snapshot.close()
     except BaseException:
