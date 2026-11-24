@@ -53,6 +53,52 @@ def test_nudge_is_debounced_and_rechecks_the_queue(db, monkeypatch):
     assert len(wakes) == 1
 
 
+def test_only_new_unranked_items_trigger_another_nudge(db, monkeypatch):
+    from api import attention
+    from automation.continuation.sources import activity_ranking
+
+    key = seed(db)
+    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?',
+               ('2025-12-31T23:59:00+00:00', key.removeprefix('task:')))
+    db.commit()
+    actual_queue = attention.activity_queue
+    def read_without_write_lock(connection, *args, **kwargs):
+        assert not connection.in_transaction
+        return actual_queue(connection, *args, **kwargs)
+    monkeypatch.setattr(attention, 'activity_queue', read_without_write_lock)
+    wakes = []
+    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
+    source = activity_ranking.ActivityRankingSource()
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T00:15:00+00:00', db=db) == []
+    plan = service.ensure_plan('thread', 'root', db=db)
+    new = service.add_node(plan.id, kind='task', title='New', acceptance_criteria='Done', assignee='user', db=db)
+    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?', ('2026-01-01T00:01:00Z', new.id))
+    db.commit()
+    assert source.prepare('2026-01-01T00:15:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T00:30:00+00:00', db=db) == []
+    assert len(wakes) == 2
+
+
+def test_concurrent_nudge_recheck_prevents_duplicate(db, monkeypatch):
+    from api import attention
+    from automation.continuation.sources import activity_ranking
+
+    seed(db)
+    def nudge_during_read(connection, *args, **kwargs):
+        result = original_queue(connection, *args, **kwargs)
+        connection.execute('INSERT INTO activity_rank_nudges VALUES (?,?,?)',
+                           ('user-1', 'project-1', '2026-01-01T00:00:00+00:00'))
+        connection.commit()
+        return result
+    original_queue = attention.activity_queue
+    monkeypatch.setattr(attention, 'activity_queue', nudge_during_read)
+    wakes = []
+    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
+    assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert wakes == []
+
+
 def test_nudge_enqueues_real_system_input(db):
     from automation.continuation.sources.activity_ranking import ActivityRankingSource
     seed(db)
