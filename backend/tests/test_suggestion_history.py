@@ -481,6 +481,9 @@ async def test_failed_decision_record_restores_text_and_allows_retry(
         fault.setattr(suggestion_history_actions, '_record', fail_record)
         failed = integration_client.post(url, params={'token': _OWNER}, json=body)
     assert called and failed.status_code >= 400
+    # The person is told the document is unchanged and what to do next; the reload that follows drops the step, so no retry.
+    assert failed.json()['detail'] == suggestion_history_actions._not_recorded(direction)
+    assert failed.json()['detail'].startswith(f'Couldn’t {direction} that. The document is unchanged.')
     assert path.read_text() == original
     assert _row(suggestion['id'])['decision'] == original_decision
     retry = integration_client.post(url, params={'token': _OWNER}, json=body)

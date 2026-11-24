@@ -29,6 +29,19 @@ def _refused() -> CommentActionError:
     return CommentActionError('stale', 'The document or suggestions changed. Reload and try again.')
 
 
+def _not_recorded(direction: str) -> str:
+    """The write was undone: the text is as it was. The reload that follows drops the step, so the next move is the card or the text."""
+    if direction == 'undo':
+        return 'Couldn’t undo that. The document is unchanged. To take the suggestion back, edit the text yourself.'
+    return 'Couldn’t redo that. The document is unchanged. You can accept the suggestion again from its card.'
+
+
+def _not_restored(direction: str) -> str:
+    """Neither the suggestion nor the text could be put back: the document reloads to what was saved."""
+    return (f'Couldn’t {direction} that, and the document may not match the suggestion. '
+            'The document reloads to show what was saved; check the suggestion on its card.')
+
+
 def _load(artifact_id: str, event_id: str, ids: list[str], user_id: str) -> tuple[dict, dict, str | None]:
     db = get_db()
     try:
@@ -131,8 +144,6 @@ async def transition_suggestion_history(
                     await write(artifact['path'], current_text, project_id,
                                 f'Restore after failed {direction}', target_hash, None, (), suppress_feedback=True)
                 except Exception as restore_error:
-                    raise CommentActionError(
-                        'unrecorded', 'The suggestion state could not be recorded and the document could not be restored. Reload the document and comments.',
-                    ) from restore_error
-            raise CommentActionError('unrecorded', 'The suggestion state could not be recorded.') from exc
+                    raise CommentActionError('unrecorded', _not_restored(direction)) from restore_error
+            raise CommentActionError('unrecorded', _not_recorded(direction)) from exc
         return {'text': text, 'revision': result.get('revision') if result else target_hash}
