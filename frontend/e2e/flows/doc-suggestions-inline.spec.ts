@@ -215,6 +215,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
 			await expect(strike(page, loose)).toHaveText('is loose');
+			// The phone opens in Reading, which takes no typing: choose Edit first so the first key is the one under test.
+			await enterDocumentEdit(page);
 			await strike(page, loose).tap();
 			await expect(page.getByRole('dialog')).toBeVisible();
 			// No Escape: the key itself closes the sheet.

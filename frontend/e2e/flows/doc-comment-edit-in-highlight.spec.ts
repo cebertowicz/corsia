@@ -179,6 +179,8 @@ test('@flow:doc-comment-edit-in-highlight on a phone, a key typed with the sheet
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await open(page, request, { wide: false });
+	// A touch opening is Reading and takes no typing: choose Edit first, then the tap-then-key path is the one under test.
+	await enterDocumentEdit(page);
 	await highlight(page).tap();
 	await expect(sheet(page)).toBeVisible();
 	await page.keyboard.type('Z');

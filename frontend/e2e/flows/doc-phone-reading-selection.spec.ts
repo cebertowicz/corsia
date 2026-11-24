@@ -14,6 +14,11 @@ for (const width of [320, 393, 768]) {
 			await expect(cell).toBeVisible();
 			const selectCell = async () => {
 				await page.locator('.doc .cm-content').first().focus();
+				// A scripted range set in the same tick as focus() is read back by CodeMirror's DOM observer on its focus flush and collapsed
+				// (DOMObserver.flush -> applyDOMChange -> dispatchReadingTransactions); a person's long-press never sets a range that close to a focus.
+				// Let the focus settle first. (A real long-press in a table cell selects nothing on dev either: tracked separately.)
+				await expect.poll(() => inEditorView(page, view => view.hasFocus, null)).toBe(true);
+				await page.evaluate(() => new Promise(requestAnimationFrame));
 				await cell.evaluate(el => {
 					const range = document.createRange(); range.selectNodeContents(el);
 					const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range);

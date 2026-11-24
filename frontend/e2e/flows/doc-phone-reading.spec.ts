@@ -54,13 +54,20 @@ for (const width of [320, 393, 768, 1440]) {
 					const offer = page.locator('.sel-comment');
 					await expect(offer).toHaveCount(1);
 					await expect(offer).toBeVisible();
-					const box = (await offer.boundingBox())!;
+					// The button is measured once its width is known (the frame after it appears) and its pop-in has ended.
 					const viewport = page.viewportSize()!;
-					expect(box.x).toBeGreaterThanOrEqual(0);
-					expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
-					expect(box.y).toBeGreaterThanOrEqual(0);
-					expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+					await expect.poll(async () => {
+						const box = await offer.boundingBox();
+						return !!box && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
+					}, { message: 'Comment sits fully inside the screen' }).toBe(true);
 					await page.screenshot({ path: info.outputPath(editing ? 'edit-selection.png' : 'reading-selection.png') });
+					// Tapping it opens the comment on exactly that passage, and the document's text is unchanged.
+					await offer.click();
+					const sheet = page.getByRole('dialog', { name: 'Document comments' });
+					await expect(sheet.locator('.composer textarea')).toBeVisible();
+					await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+					await expect(sheet).toBeHidden();
+					expect(await inEditorView(page, view => view.state.doc.toString(), null)).toBe(READING_DOC);
 				}
 			});
 		});
