@@ -231,6 +231,14 @@ class ConductorInstructionFileReplaceTool(Tool):
                 file_path = _target_path(_instruction_paths(target, db), path)
                 if not file_path.is_file():
                     raise RosterChangeError("attached instruction file is missing")
+                from registry import service
+                from registry.shared_document_messages import owner_refusal
+                from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_scope
+
+                artifact = service.find_file_identity(str(file_path), db=db)
+                if artifact and artifact_owner(str(artifact["id"]), db=db) == UI_PRINCIPAL:
+                    scope_root, _ = document_scope(file_path, workspace=Path(config.WORKSPACE), db=db)
+                    raise RosterChangeError(owner_refusal(file_path, scope_root, UI_PRINCIPAL, db=db))
                 if file_path.stat().st_size > MAX_TEXT_BYTES:
                     raise RosterChangeError(f"attached instruction file exceeds the {MAX_TEXT_BYTES}-byte limit")
                 return {"path": str(file_path), "user_id": user_id}

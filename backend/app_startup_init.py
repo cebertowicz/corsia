@@ -42,6 +42,11 @@ def initialize_startup(logger) -> None:
     recover_interrupted_held_replies()
     sweep_owed_status()
     initialize_workspace(WORKSPACE, logger)
+    from infra.database import write_transaction
+    from registry.priorities_ownership import migrate_priorities_ownership
+
+    with write_transaction(None, scope="priorities_person_ownership") as db:
+        migrate_priorities_ownership(WORKSPACE, db=db)
 
 
 async def initialize_startup_off_loop(logger) -> None:

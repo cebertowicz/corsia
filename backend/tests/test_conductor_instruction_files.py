@@ -26,7 +26,11 @@ def _setup(tmp_path, monkeypatch):
     import infra.config as config
 
     workspace = tmp_path / "workspace"
+    from infra.platform_paths import WorkspaceSelection
     monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="test-workspace", root=workspace.resolve(), name="Test workspace",
+    ))
     db = get_db()
     try:
         db.execute(
@@ -88,6 +92,27 @@ async def test_pin_cross_scope_conductors_cannot_read_instruction_files(isolated
             result = await tool.execute(target, requested, _thread_id=caller)
             assert result == "Error: Conductor and target must share a scope."
             assert "private instruction" not in result
+
+
+@pytest.mark.asyncio
+async def test_replace_refuses_person_owned_attached_instruction(isolated_db, tmp_path, monkeypatch):
+    from registry import models, service
+
+    conductor, target, _, _, path = _setup(tmp_path, monkeypatch)
+    db = get_db()
+    try:
+        artifact = service.register_write_strict(conductor, str(path), db=db)
+        models.rehome_artifact(integration=artifact["integration"], type=artifact["type"],
+                               external_id=artifact["external_id"], new_owner_thread_id="ui",
+                               actor_thread_id=None, authority="test", reason="test", source_path="test", db=db)
+    finally:
+        db.close()
+    revision = hashlib.sha256(path.read_bytes()).hexdigest()
+    result = await ConductorInstructionFileReplaceTool().execute(
+        target, str(path), revision, "changed", _thread_id=conductor,
+    )
+    assert "Only the person edits it directly" in result and "doc_comment_create" in result
+    assert path.read_text() == "# Role\nOriginal\n"
 
 
 @pytest.mark.asyncio

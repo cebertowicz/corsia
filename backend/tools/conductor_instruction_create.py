@@ -130,6 +130,8 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
         writes = _install_paths(target, kind, name, content, supporting_files)
         before = {path: path.read_bytes() if path.exists() else None for path in writes}
         current_revision = "absent" if all(value is None for value in before.values()) else _bundle_revision(before)
+        if kind == "priorities" and current_revision != "absent":
+            raise RosterChangeError("priorities file already exists; suggest changes to its owner")
         changed = before != writes
         if changed and expected_revision != current_revision:
             raise RosterChangeError(f"instruction bundle changed; current revision is {current_revision}; read current files and retry")
@@ -137,6 +139,15 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
     # transaction, so it runs between the check and the attach, as the replace tool's save does.
     history = _save_bundle(writes, before, actor, kwargs) if changed else {}
     primary = next(iter(writes))
+    if kind == "priorities":
+        from registry import service
+
+        try:
+            service.register_write_strict(actor, str(primary))
+        except Exception as exc:
+            if primary.is_file() and not primary.is_symlink() and primary.read_bytes() == writes[primary]:
+                primary.unlink()
+            raise RosterChangeError("priorities registration failed; inspect the destination before retrying") from exc
     with write_transaction(None, scope="conductor_instruction_file_attach") as db:
         if kind == "responsibility":
             files = thread_bootloader_files(target_id, db=db)

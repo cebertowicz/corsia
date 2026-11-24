@@ -32,7 +32,11 @@ def _setup(tmp_path, monkeypatch):
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    from infra.platform_paths import WorkspaceSelection
     monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="test-workspace", root=workspace.resolve(), name="Test workspace",
+    ))
     db = get_db()
     try:
         db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('other','Other','t','t')")
@@ -137,6 +141,40 @@ async def test_priorities_create_delivers_and_rejects_extra_paths(isolated_db, t
         assert any(row.stable_reference == str(path) and row.inclusion == "included" for row in sources)
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_priorities_registration_owner_and_existing_refusal(isolated_db, tmp_path, monkeypatch):
+    from registry import service
+    from registry.shared_principals import artifact_owner
+
+    _, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    tool = ConductorInstructionFileCreateTool()
+    receipt = json.loads(await tool.execute(target, "priorities", "absent", "# Priorities\n", _thread_id=actor))
+    path = Path(receipt["path"])
+    db = get_db()
+    try:
+        artifact = service.find_file_identity(str(path), db=db)
+        assert artifact_owner(artifact["id"], db=db) == "ui"
+    finally:
+        db.close()
+    result = await tool.execute(target, "priorities", receipt["revision"], "changed", _thread_id=actor)
+    assert result.startswith("Error:") and path.read_text() == "# Priorities\n"
+
+
+@pytest.mark.asyncio
+async def test_priorities_registration_failure_removes_new_file(isolated_db, tmp_path, monkeypatch):
+    from registry import service
+
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    def fail(*args, **kwargs):
+        raise RuntimeError("registration failed")
+    monkeypatch.setattr(service, "register_write_strict", fail)
+    result = await ConductorInstructionFileCreateTool().execute(
+        target, "priorities", "absent", "# Priorities\n", _thread_id=actor,
+    )
+    assert "registration failed" in result
+    assert not (workspace / ".threads" / target / "context" / "PRIORITIES.md").exists()
 
 
 @pytest.mark.asyncio
