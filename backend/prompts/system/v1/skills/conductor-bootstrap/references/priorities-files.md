@@ -12,7 +12,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 
 - **Use line:** the file opens with this line, in italics, and keeps it: `*Use: when two pieces of work compete, the one higher under Now goes first. The person owns this file; agents suggest changes and never edit it.*` Put the person's name in place of "the person" only if they gave it.
 - **Now:** only the problems the person said come first, in their order. A line names a problem or what the person wants, never a task: tasks stay in plans. A date they give goes under Dates, not Now.
-- **Always:** kinds of work this agent may start without asking, only where that differs from the project's file.
+- **Always:** only kinds of work the person said this agent may start without asking, where that differs from the project's file.
 - **Dates:** only dates the person set.
 - **Waits** and **Goes first, whatever is above** (the project's file only): what does not start yet, and what jumps the order (something that stops a person or an agent working today).
 - **Never in a file:** goals, budgets, single incidents, or rules for one kind of work. Goals are long-term and live with the project's or the agent's own description of its work; a priorities file says only what comes first now. A rule for one kind of work goes in that work's workflow or skill.
