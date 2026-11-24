@@ -19,7 +19,9 @@
  *
  * `prose` (default true) also gives the field the chat input's typing hints, unless the field sets them itself: no
  * autocomplete, autocorrect on, sentence capitals, spellcheck, and the name "search". Safari ignores `autocomplete="off"`,
- * but its shipped AutoFill keywords skip a field named "search", so a prose field gets no "AutoFill Contact" strip.
+ * and its AutoFill keyword data lists "search" among the field labels it ignores, so naming a prose field "search" is
+ * meant to keep the Contact strip off it. This is a reasoned workaround: it has not been tried on a textarea or on a
+ * device, so recheck it if Safari changes.
  * Name and title fields pass `{ prose: false }` for the repair alone.
  *
  * The inserted text is cut to fit the field's `maxlength`, as the browser cuts an insertion, since a value written from
