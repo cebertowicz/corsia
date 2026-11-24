@@ -26,8 +26,8 @@ from infra.queries import get_thread_for_user
 
 router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
-_NO_THREAD = "No chat has that id."
-_BAD_BODY = "This request needs the chat it's for."
+_NO_THREAD = "The chat this login is for can't be found, so nothing is saved."
+_BAD_BODY = "Something went wrong in CORSIA. Try again."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 

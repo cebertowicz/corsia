@@ -88,7 +88,7 @@ def test_an_unconfirmed_offer_is_not_shown_or_saved(sessions):
     key = _key(sessions)
     assert offers.offer_login(key, SITE, "me", "pw one 1") is True
     assert offers.pending_offer(key) is None
-    with pytest.raises(KeyStoreError, match="No sign-in is waiting"):
+    with pytest.raises(KeyStoreError, match="There's no sign-in to save here"):
         offers.save_offer(key, saved_by=OWNER_USER)
     assert saved_logins.list_logins() == []
     offers.confirm_offer(key)
@@ -355,7 +355,7 @@ async def test_not_now_drops_the_offer_and_is_safe_to_repeat(client, sessions):
 async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "This request needs the chat it's for."}
+    assert refused.json() == {"detail": "Something went wrong in CORSIA. Try again."}
 
 
 @pytest.mark.asyncio

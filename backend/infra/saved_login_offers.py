@@ -35,9 +35,12 @@ from infra.saved_logins import (
     logins_for_site, normalized_site, password_matches, save_login, validated_password, validated_username,
 )
 
-_SESSION_REFUSAL = "A save offer needs the browser session it came from."
+_SESSION_REFUSAL = (
+    "The shared browser this sign-in came from has closed, so it can't be saved. "
+    "It's offered again the next time you sign in."
+)
 _OWN_SITE_REFUSAL = "CORSIA doesn't save a login for CORSIA itself."
-NO_OFFER = "No sign-in is waiting to be saved."
+NO_OFFER = "There's no sign-in to save here. It's offered again the next time you sign in."
 
 
 @dataclass(frozen=True)
