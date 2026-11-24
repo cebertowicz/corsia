@@ -1372,9 +1372,17 @@ describe('HostAccessLeaseControl', () => {
 	const SCRIPT_TRIGGER = 'Review permission for this script to act as your agent and use the agents’ GitHub account';
 	const press = (dialog: Element, name: string) => Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 		.find((button) => button.textContent?.trim() === name)!;
+	const FILL_TRIGGER = 'Review a request to sign in with a saved login';
+	const fillRequest: HostAccessFill = {
+		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+		created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+	};
 	async function openDrawerFor(item: HostAccessItem): Promise<HTMLElement> {
 		if (item.state === 'active') return openActiveDrawer();
-		const label = item.kind === 'script' ? SCRIPT_TRIGGER : 'Review temporary host access';
+		const label = item.kind === 'script' ? SCRIPT_TRIGGER : item.kind === 'fill' ? FILL_TRIGGER : 'Review temporary host access';
 		await vi.waitFor(() => expect(host.querySelector(`[aria-label="${label}"]`)).toBeTruthy());
 		host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
 		flushSync();
@@ -1491,6 +1499,139 @@ describe('HostAccessLeaseControl', () => {
 		expect(fetchMock.mock.calls.map((call) => call[1]?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET']);
 		expect(host.textContent).not.toContain('Couldn’t reject');
 		expect(host.querySelector('.decision-notice')).toBeNull();
+	});
+
+	/** A browser moves focus to <body> when the pressed button turns disabled for its request; jsdom doesn't. */
+	function pressAsBrowser(button: HTMLButtonElement): void {
+		button.focus();
+		button.click();
+		button.blur();
+	}
+	async function escapeClosesDrawer(): Promise<void> {
+		document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(0));
+	}
+	async function mountWith(item: HostAccessItem, fetchMock: ReturnType<typeof vi.fn>): Promise<HTMLElement> {
+		vi.stubGlobal('fetch', fetchMock);
+		component = mountControl();
+		flushSync();
+		if (item.state === 'active') await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
+		return openDrawerFor(item);
+	}
+
+	const refocusCases = [
+		['a saved login’s', 'Reject', 500, fillRequest],
+		['a saved login’s', 'Reject', 409, fillRequest],
+		['a host-access request’s', 'Reject', 500, waitingLease],
+		['a script request’s', 'Deny', 409, waitingScript],
+		['an active approval’s', 'Revoke host access', 500, activeLease()],
+	] as const;
+	it.each(refocusCases)('puts focus back on %s %s after a %i, so Escape still closes the drawer', async (
+		_kind, button, status, item,
+	) => {
+		const dialog = await mountWith(item, vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+			init?.method === 'POST' ? response({ detail: 'Server words.' }, false, status) : response({ leases: [item] }))));
+		const pressed = press(dialog, button);
+		pressAsBrowser(pressed);
+		expect(document.activeElement).toBe(document.body);
+
+		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')).toBeTruthy());
+		await vi.waitFor(() => expect(document.activeElement).toBe(pressed));
+		expect(pressed.disabled).toBe(false);
+		await escapeClosesDrawer();
+	});
+
+	it('puts focus on the drawer panel when the pressed button is still off after a failed press', async () => {
+		// Approve is refused for new details, and the request read again is missing what CORSIA needs: Approve stays off.
+		const incomplete = {
+			...waitingLease, revision: 5,
+			reviewer: { ...waitingLease.reviewer!, attestation: null },
+			application_review_result: { ...waitingLease.application_review_result, attestation: null },
+		};
+		let getCount = 0;
+		const dialog = await mountWith(waitingLease, vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') return response({ detail: 'Lease changed.' }, false, 409);
+			getCount += 1;
+			return response({ leases: [getCount === 1 ? waitingLease : incomplete] });
+		}));
+		const approve = press(dialog, 'Approve');
+		pressAsBrowser(approve);
+
+		await vi.waitFor(() => expect(getCount).toBe(2));
+		await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
+		expect(press(dialog, 'Approve').disabled).toBe(true);
+		await escapeClosesDrawer();
+	});
+
+	it('leaves focus where the person moved it while a decision that then fails was in flight', async () => {
+		let fail!: () => void;
+		const held = new Promise<Response>((resolve) => {
+			fail = () => resolve(response({ detail: 'Internal Server Error' }, false, 500));
+		});
+		const dialog = await mountWith(waitingLease, vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+			init?.method === 'POST' ? held : response({ leases: [waitingLease] }))));
+		pressAsBrowser(press(dialog, 'Reject'));
+		const done = press(dialog, 'Done');
+		done.focus();
+		fail();
+
+		await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')).toBeTruthy());
+		await tick();
+		expect(document.activeElement).toBe(done);
+	});
+
+	const noBody = () => ({ ok: false, status: 404, json: async () => { throw new SyntaxError('no body'); } }) as unknown as Response;
+	const stillListedCases = [
+		['Reject', 'a host-access request', waitingLease, 'Host-access lease not found',
+			'This request is closed, so there’s nothing to reject.'],
+		['Reject', 'a saved login', fillRequest,
+			'This sign-in request is closed. Ask the agent to try again if it still needs to sign in.',
+			'This request is closed, so there’s nothing to reject.'],
+		['Deny', 'a script request', waitingScript, 'Script request not found',
+			'This request is closed, so there’s nothing to deny.'],
+		['Revoke host access', 'an active approval', activeLease(), 'Host-access lease not found',
+			'This approval has ended, so there’s nothing to revoke.'],
+	] as const;
+	for (const [button, kind, item, detail, line] of stillListedCases) {
+		it.each([['its detail', detail], ['no body', 'Host access request failed (404)']])(
+			`shows one line of its own when ${button} on ${kind} finds it gone (404, %s) while it is still listed`,
+			async (_label, serverText) => {
+				const dialog = await mountWith(item, vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+					if (init?.method !== 'POST') return response({ leases: [item] });
+					return serverText === detail ? response({ detail }, false, 404) : noBody();
+				}));
+				const pressed = press(dialog, button);
+				pressAsBrowser(pressed);
+
+				await vi.waitFor(() => expect(dialog.querySelector('.decision-notice')?.textContent).toBe(line));
+				expect([...dialog.querySelectorAll('.blocked-line')].map((found) => found.textContent?.trim())).toEqual([line]);
+				expect(host.textContent).not.toContain(serverText);
+				expect(host.textContent).not.toContain('Couldn’t check');
+				await vi.waitFor(() => expect(document.activeElement).toBe(pressed));
+			},
+		);
+	}
+
+	const goneCases = [
+		['Approve', 'a saved login', fillRequest], ['Approve', 'a host-access request', waitingLease],
+		['Reject', 'a host-access request', waitingLease], ['Reject', 'a saved login', fillRequest],
+		['Deny', 'a script request', waitingScript], ['Revoke host access', 'an active approval', activeLease()],
+	] as const;
+	it.each(goneCases)('sends focus to the composer when %s on %s finds it gone (404) and its drawer closes', async (
+		button, _kind, item,
+	) => {
+		const composer = addComposer();
+		let gone = false;
+		const dialog = await mountWith(item, vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method !== 'POST') return response({ leases: gone ? [] : [item] });
+			gone = true;
+			return response({ detail: 'Not found' }, false, 404);
+		}));
+		pressAsBrowser(press(dialog, button));
+
+		await vi.waitFor(() => expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(0));
+		await vi.waitFor(() => expect(document.activeElement).toBe(composer));
 	});
 });
 

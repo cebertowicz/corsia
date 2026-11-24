@@ -13,14 +13,15 @@ describe('decisionFailure', () => {
 	it('names what changed on a 409 by decision and kind, never the server line, and reads it again', () => {
 		for (const kind of ['lease', 'fill'] as const) {
 			for (const decision of ['approve', 'reject'] as const) {
-				expect(decisionFailure(refused(409), decision, kind)).toEqual({ notice: NEW_DETAILS, refresh: true });
+				expect(decisionFailure(refused(409), decision, kind)).toEqual({ notice: NEW_DETAILS, refresh: true, gone: false });
 			}
 		}
 		for (const decision of ['approve', 'reject'] as const) {
-			expect(decisionFailure(refused(409), decision, 'script')).toEqual({ notice: NEW_DETAILS_SCRIPT, refresh: true });
+			expect(decisionFailure(refused(409), decision, 'script'))
+				.toEqual({ notice: NEW_DETAILS_SCRIPT, refresh: true, gone: false });
 		}
 		for (const kind of ['lease', 'fill'] as const) {
-			expect(decisionFailure(refused(409), 'revoke', kind)).toEqual({ notice: APPROVAL_CHANGED, refresh: true });
+			expect(decisionFailure(refused(409), 'revoke', kind)).toEqual({ notice: APPROVAL_CHANGED, refresh: true, gone: false });
 		}
 	});
 
@@ -34,19 +35,41 @@ describe('decisionFailure', () => {
 			for (const caught of [refused(500), refused(503, 'Host access request failed (503)'), refused(403,
 				'A current interactive user decision is required'), refused(400), offline()]) {
 				const failure = decisionFailure(caught, decision, kind);
-				expect(failure).toEqual({ notice: line, refresh: false });
+				expect(failure).toEqual({ notice: line, refresh: false, gone: false });
 				expect(failure.notice).not.toContain(caught.message);
 			}
 		}
 	});
 
-	it('keeps a gone request on its current path: the server line, then the list without it', () => {
-		expect(decisionFailure(refused(404), 'approve', 'lease')).toEqual({ notice: APPROVE_FAILED, refresh: true });
-		expect(decisionFailure(refused(404, 'This sign-in request is closed.'), 'approve', 'fill'))
-			.toEqual({ notice: 'This sign-in request is closed.', refresh: true });
-		expect(decisionFailure(refused(404, 'This sign-in request is closed.'), 'reject', 'fill'))
-			.toEqual({ notice: 'This sign-in request is closed.', refresh: true });
-		expect(decisionFailure(refused(404, 'This approval has ended.'), 'revoke', 'fill'))
-			.toEqual({ notice: 'This approval has ended.', refresh: true });
+	// A gone request or approval (404), for each button by kind: the server's own detail, and a 404 with no body.
+	const GONE_DETAIL = {
+		lease: 'Host-access lease not found',
+		script: 'Script request not found',
+		fill: 'This sign-in request is closed. Ask the agent to try again if it still needs to sign in.',
+	} as const;
+	const NO_BODY = 'Host access request failed (404)';
+	const goneCases = [
+		['reject', 'lease', 'This request is closed, so there’s nothing to reject.'],
+		['reject', 'fill', 'This request is closed, so there’s nothing to reject.'],
+		['reject', 'script', 'This request is closed, so there’s nothing to deny.'],
+		['revoke', 'lease', 'This approval has ended, so there’s nothing to revoke.'],
+		['revoke', 'fill', 'This approval has ended, so there’s nothing to revoke.'],
+		['revoke', 'script', 'This approval has ended, so there’s nothing to revoke.'],
+		['approve', 'lease', 'Couldn’t approve the request. Try again.'],
+		['approve', 'script', 'Couldn’t approve the request. Try again.'],
+	] as const;
+	it.each(goneCases)('gives %s on a gone %s request one line of its own, never server text', (
+		decision, kind, line,
+	) => {
+		for (const serverText of [GONE_DETAIL[kind], NO_BODY]) {
+			const failure = decisionFailure(refused(404, serverText), decision, kind);
+			expect(failure).toEqual({ notice: line, refresh: true, gone: true });
+			expect(failure.notice).not.toContain(serverText);
+		}
+	});
+
+	it('keeps a saved login’s own closed-request line on Approve, the one 404 that passes server text through', () => {
+		expect(decisionFailure(refused(404, GONE_DETAIL.fill), 'approve', 'fill'))
+			.toEqual({ notice: GONE_DETAIL.fill, refresh: true, gone: true });
 	});
 });

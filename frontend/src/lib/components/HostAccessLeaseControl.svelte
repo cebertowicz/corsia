@@ -48,7 +48,7 @@
 	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
 	import { decisionBlocked, owner, pendingLabel, staleBlocks, text } from '$lib/hostAccess/leaseFormat';
 	import {
-		focusRestoreIntentForDecision,
+		decisionTargets, focusRestoreIntentForDecision, refocusAfterFailedDecision,
 		restoreComposerFocusAfterLeaseRemoval,
 		type FocusRestoreIntent,
 	} from '$lib/hostAccess/focusRestore';
@@ -138,12 +138,6 @@
 	const decidingLeaseId = $derived(
 		leases.find((lease) => inFlightDecisionIds.has(lease.id))?.id ?? null,
 	);
-
-	function enclosingLeaseControl(event: MouseEvent): Element | null {
-		return event.currentTarget instanceof Element
-			? event.currentTarget.closest('[data-adaptive-drawer], .active-chip') // the drawer is portaled out of the chip
-			: null;
-	}
 
 	function openActiveDrawer(lease: HostAccessTimed, event: MouseEvent): void {
 		openActiveTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
@@ -235,37 +229,38 @@
 	async function decide(
 		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
-		decisionControl: Element | null = null, durationSeconds?: number,
+		event: MouseEvent | null = null, durationSeconds?: number,
 	): Promise<void> {
 		const currentToken = get(token);
 		if (!currentToken || decisionBlocked(lease, staleBlocks(stale, decision), decidingLeaseId)) return;
 		const decisionThreadId = lease.root_thread_id;
 		const decisionAttempt = claimDecision(lease.id);
 		if (!decisionAttempt) return;
-		focusRestoreIntent = focusRestoreIntentForDecision(
-			decision, lease.id, decisionThreadId, decisionControl,
-		);
+		const { pressed, panel, control } = decisionTargets(event, decision);
+		focusRestoreIntent = focusRestoreIntentForDecision(decision, lease.id, decisionThreadId, control);
 		error = '';
 		decisionNotice = null;
-		let refreshTruth = true;
+		let refreshTruth = true, failed = false;
 		try {
 			await decideHostAccessLease(lease, decision, durationSeconds);
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
+			failed = true;
 			// One line in the drawer; the server's words never reach the status strip.
 			const failure = decisionFailure(caught, decision, lease.kind);
 			if (failure.notice) decisionNotice = { leaseId: lease.id, message: failure.notice };
 			refreshTruth = failure.refresh;
+			if (failure.gone) {
+				focusRestoreIntent = focusRestoreIntentForDecision(decision, lease.id, decisionThreadId, control, true);
+			}
 			if (!refreshTruth && focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;
 		} finally {
-			if (
-				refreshTruth
-				&& isCurrentDecision(lease.id, decisionAttempt)
-				&& threadId === decisionThreadId
-			) {
+			if (refreshTruth && isCurrentDecision(lease.id, decisionAttempt) && threadId === decisionThreadId) {
 				await refresh(decisionThreadId);
 			}
 			releaseDecision(lease.id, decisionAttempt);
+			// Still listed, so its drawer stays open: give focus back to what the person pressed.
+			if (failed && leases.some((item) => item.id === lease.id)) void refocusAfterFailedDecision(pressed, panel);
 		}
 	}
 
@@ -375,9 +370,7 @@
 								notice={decisionNotice?.leaseId === lease.id ? decisionNotice.message : null}
 								onOpen={(event) => { openActiveDrawer(lease, event); }}
 								onClose={closeActiveDrawer}
-								onRevoke={(event) => {
-									void decide(lease, 'revoke', enclosingLeaseControl(event));
-								}}
+								onRevoke={(event) => { void decide(lease, 'revoke', event); }}
 							/>
 						{/each}
 					</div>
@@ -406,10 +399,8 @@
 						rejectDisabled={decisionBlocked(currentPending, staleBlocks(stale, 'reject'), decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
 						notice={decisionNotice?.leaseId === currentPending.id ? decisionNotice.message : null}
-						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
-						onReject={(event) => { void decide(
-							currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,
-						); }}
+						onApprove={(event, durationSeconds) => { void decide(currentPending, 'approve', event, durationSeconds); }}
+						onReject={(event) => { void decide(currentPending, 'reject', event); }}
 						onRetry={() => { void refresh(); }}
 					/>
 				</AdaptiveDrawer>
