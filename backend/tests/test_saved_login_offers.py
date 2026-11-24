@@ -355,7 +355,7 @@ async def test_not_now_drops_the_offer_and_is_safe_to_repeat(client, sessions):
 async def test_a_malformed_body_is_a_fixed_refusal(client, sessions, body):
     refused = await client.post("/api/saved-logins/offer/save", content=body, headers=_person())
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "Something went wrong in CORSIA. Try again."}
+    assert refused.json() == {"detail": "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."}
 
 
 @pytest.mark.asyncio
