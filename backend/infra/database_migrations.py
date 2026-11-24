@@ -1204,20 +1204,48 @@ def _changed_tables(
     )
 
 
-def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
+ForeignKeyViolation = tuple[str, int | None, str, int]
+
+
+def _foreign_key_violations(conn: sqlite3.Connection) -> set[ForeignKeyViolation]:
+    """Every row whose foreign key points at a missing parent row."""
+    return {
+        (row[0], row[1], row[2], row[3])
+        for row in conn.execute("PRAGMA foreign_key_check")
+    }
+
+
+def _validate(
+    conn: sqlite3.Connection,
+    changed_tables: list[str],
+    violations_before: set[ForeignKeyViolation],
+) -> None:
     """Check the migrated database inside the transaction, before commit.
 
-    Foreign keys are checked across the whole database; page structure and
-    row-to-index agreement only for tables the migration created or rebuilt.
-    Data-only steps rely on SQLite maintaining their indexes.
+    Foreign keys: only violations the migration introduced fail it. An orphan
+    row that was already there before the first step is not this migration's
+    doing, and failing on it would roll back every later update with no way
+    forward. Comparing whole-database checks (rather than checking only the
+    tables whose schema changed) keeps data-only steps covered: a step that
+    deletes parent rows changes no schema entry. A step that renames a table or
+    renumbers rows makes an old orphan look new, which fails safe.
+
+    Page structure and row-to-index agreement are checked only for tables the
+    migration created or rebuilt. Data-only steps rely on SQLite maintaining
+    their indexes.
 
     No whole-database ``quick_check``: its b-tree walk is one VM operation, so
     on a 25 GB database it ran 61 s without a progress callback, past the
     desktop's 60 s startup stall, while checking pages no step touched.
     """
-    broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+    broken = sorted(_foreign_key_violations(conn) - violations_before, key=repr)
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
+    if violations_before:
+        log.warning(
+            "Migration kept %d foreign key violations that predate it, e.g. %s",
+            len(violations_before), sorted(violations_before, key=repr)[:5],
+        )
     for table in changed_tables:
         quoted_table = table.replace('"', '""')
         integrity = conn.execute(
@@ -1293,13 +1321,18 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 # opened before startup began publishing.
                 startup_progress.watch(conn)
                 before_schema = _schema_snapshot(conn)
+                violations_before = _foreign_key_violations(conn)
                 for done, version in enumerate(steps, start=1):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
                     startup_progress.mark("migrating", done=done, total=len(steps))
                 conn.execute(f"PRAGMA user_version={target_version}")
                 startup_progress.mark("validating")
-                _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
+                _validate(
+                    conn,
+                    _changed_tables(before_schema, _schema_snapshot(conn)),
+                    violations_before,
+                )
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from
                 # the room check *before* any copy is made, and an in-memory
