@@ -74,6 +74,12 @@ jobs:
             -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/frame-guard.log"
           # A skip would pass silently; both shapes and both phone-typing checks must run.
           grep -q " 4 passed" "$RUNNER_TEMP/frame-guard.log"
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -sf "$CORSIA_NATIVE_BROWSER_BINARY" "$RUNNER_TEMP/browser-bin/agent-browser"
+          PATH="$RUNNER_TEMP/browser-bin:$PATH" CORSIA_BROWSER_E2E=1 env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
+            backend/tests/test_browser_login_capture_e2e.py \
+            -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/login-capture.log"
+          grep -q " 4 passed" "$RUNNER_TEMP/login-capture.log"
       - name: Verify setup steps run in the native browser
         env:
           CORSIA_BROWSER_E2E: '1'

@@ -364,7 +364,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
-        browser_login_capture.session_ended(thread_id)
+        browser_login_capture.session_ended(thread_id, f"{thread_id}:{session}")
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

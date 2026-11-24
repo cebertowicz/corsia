@@ -120,9 +120,26 @@ def holder(monkeypatch) -> Holder:
 def _clean_capture_state():
     capture._pending.clear()
     capture._marks.clear()
+    capture._groups.clear()
+    capture._flights.clear()
+    capture._tails.clear()
+    capture._items.clear()
     yield
     capture._pending.clear()
     capture._marks.clear()
+    capture._groups.clear()
+    capture._flights.clear()
+    capture._tails.clear()
+
+
+async def drain_capture() -> None:
+    while capture._tasks:
+        await asyncio.gather(*list(capture._tasks))
+
+
+async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> None:
+    await capture.person_submit(thread_id, session_key, endpoint)
+    await drain_capture()
 
 
 def use_page(monkeypatch, page: FakePage) -> FakePage:
@@ -253,7 +270,7 @@ async def test_a_session_or_page_that_cant_be_found_never_stops_the_persons_inpu
 @pytest.mark.asyncio
 async def test_no_open_password_step_makes_no_offer(monkeypatch, holder):
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert "offer_login" not in holder.names()
 
 
@@ -265,7 +282,7 @@ async def test_rule2_the_field_and_username_are_read_in_an_isolated_world_of_the
     page = use_page(monkeypatch, FakePage(frames=(("top", "https://shell.example.com"), ("child", SITE)),
                                           fields={7: ("child", MARKER, "person@example.com")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     # The site is the field's own frame's security origin, never the page-reported URL.
     assert holder.calls == [("offer_login", KEY, SITE, "person@example.com", MARKER)]
     methods = [method for method, _params in page.calls]
@@ -278,7 +295,7 @@ async def test_rule2_the_field_and_username_are_read_in_an_isolated_world_of_the
 async def test_rule2_an_empty_username_still_offers(monkeypatch, holder):
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == [("offer_login", KEY, SITE, "", MARKER)]
 
 
@@ -290,7 +307,7 @@ async def test_rule2_reads_only_the_steps_visible_in_process_fields(monkeypatch,
     fields = {7: ("top", "" if case == "empty" else MARKER, "person"), 8: ("top", "another-value", "person")}
     page = use_page(monkeypatch, FakePage(fields=fields, hidden={7} if case == "hidden" else ()))
     open_step(monkeypatch, nodes=nodes)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == []
     if case in {"out_of_process", "hidden"}:
         assert "Runtime.callFunctionOn" not in [method for method, _params in page.calls]
@@ -302,9 +319,9 @@ async def test_rule3_a_site_that_isnt_https_is_skipped_unread(monkeypatch, holde
     page = use_page(monkeypatch, FakePage(frames=(("top", origin),), fields={7: ("top", MARKER, "person")},
                                           accounts={"top": "person@example.com"}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     lifecycle._steps.pop(THREAD)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == []
     assert {"Runtime.callFunctionOn", "Runtime.evaluate"}.isdisjoint(method for method, _params in page.calls)
 
@@ -336,7 +353,7 @@ async def test_rule4_sentinel_reaches_offer_login_and_nowhere_else(monkeypatch, 
     step = open_step(monkeypatch)
     monkeypatch.setitem(lifecycle._sessions, THREAD, "session-1")
 
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     await lifecycle.step_event(THREAD, lifecycle.Event("probe", probe(), session="session-1"))
 
     assert holder.calls == [("offer_login", KEY, SITE, "person@example.com", MARKER), ("confirm_offer", KEY)]
@@ -358,7 +375,7 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
     monkeypatch.setattr(saved_login_offers, "offer_login", refuse)
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert "saved-login capture skipped a submit it couldn't read" in caplog.text
     assert MARKER not in caplog.text
     assert capture._pending == {}
@@ -368,7 +385,7 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
 async def test_offer_login_runs_off_the_event_loop(monkeypatch, holder):
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
     assert holder.offer_threads and threading.get_ident() not in holder.offer_threads
 
@@ -387,7 +404,7 @@ async def test_a_step_that_ends_while_the_holder_checks_drops_the_offer(monkeypa
     monkeypatch.setattr(saved_login_offers, "offer_login", offer_then_step_changes)
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert capture._pending == {}
     assert holder.calls == [("offer_login", KEY, SITE, "person@example.com", MARKER), ("drop_offer", KEY)]
     open_step(monkeypatch, visit="doc-10")
@@ -400,7 +417,7 @@ async def test_an_offer_the_holder_didnt_make_is_never_confirmed_or_dropped(monk
     holder.offered = False
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert capture._pending == {}
     capture.step_decided(THREAD, probe(), "settle", None)
     capture.session_ended(THREAD)
@@ -429,7 +446,7 @@ async def test_a_step_that_ended_during_the_read_gets_no_offer(monkeypatch, hold
         return await original(self, method, **params)
 
     monkeypatch.setattr(FakeCdp, "call", end_step_mid_read)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == [] and page.calls
 
 
@@ -478,7 +495,7 @@ async def test_rule5_a_failed_submit_that_comes_back_with_a_field_drops_through_
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
     open_step(monkeypatch)
     monkeypatch.setitem(lifecycle._sessions, THREAD, "session-1")
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     await lifecycle.step_event(THREAD, lifecycle.Event("probe", probe(visible=frozenset({11})), session="session-1"))
     assert holder.names() == ["offer_login", "drop_offer"]
     assert isinstance(lifecycle._steps.get(THREAD), browser_steps.PasswordStep)
@@ -516,15 +533,15 @@ async def test_rule7_an_agent_mark_on_the_document_stops_offers_and_username_not
     page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}, accounts={"top": "person@example.com"}))
     await capture.agent_writing(THREAD, "ws://page")
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     lifecycle._steps.pop(THREAD)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == []
     assert {"Runtime.callFunctionOn", "Runtime.evaluate"}.isdisjoint(method for method, _params in page.calls)
     # A new document is unmarked.
     page.loader = "doc-2"
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
 
 
@@ -534,13 +551,13 @@ async def test_rule7_session_end_clears_marks_and_an_unreadable_page_marks_every
     await capture.agent_writing(THREAD, "ws://page")
     capture.session_ended(THREAD)
     open_step(monkeypatch)
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
     holder.calls.clear()
     await capture.agent_writing(THREAD, "")
     page.loader = "doc-9"
-    await capture.person_submit(THREAD, KEY, "ws://page")
-    assert holder.calls == []
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == [("drop_offer", KEY)]
 
 
 @pytest.mark.asyncio
@@ -588,17 +605,322 @@ async def test_rule7_the_agent_command_path_marks_before_a_writing_command_runs(
 async def test_rule8_a_filled_username_is_noted_on_a_page_with_no_password_step(monkeypatch, holder):
     use_page(monkeypatch, FakePage(frames=(("top", "https://shell.example.com"), ("child", SITE)),
                                    accounts={"child": "person@example.com"}))
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == [("note_username", KEY, SITE, "person@example.com")]
 
 
 @pytest.mark.asyncio
 async def test_rule8_no_username_or_an_open_password_step_notes_nothing(monkeypatch, holder):
     page = use_page(monkeypatch, FakePage(accounts={}))
-    await capture.person_submit(THREAD, KEY, "ws://page")
+    await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == []
     page.accounts = {"top": "person@example.com"}
     page.fields = {7: ("top", "", "person@example.com")}
     open_step(monkeypatch)
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_two_inflight_submits_keep_the_real_holders_noted_username(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original = saved_login_offers._checked_offer
+    lock = threading.Lock()
+    calls = 0
+    active = 0
+
+    def checked(*args):
+        nonlocal calls, active
+        with lock:
+            calls += 1
+            ordinal = calls
+            active += 1
+            assert active == 1, "holder calls overlapped"
+        try:
+            if ordinal == 1:
+                entered.set()
+                assert release.wait(3)
+            return original(*args)
+        finally:
+            with lock:
+                active -= 1
+
+    saved_login_offers.drop_thread(THREAD)
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(saved_login_offers, "_checked_offer", checked)
+    saved_login_offers.note_username(KEY, SITE, "person@example.com")
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "")}))
+    open_step(monkeypatch)
+    try:
+        first = asyncio.create_task(capture.person_submit(THREAD, KEY, "ws://page"))
+        assert await asyncio.to_thread(entered.wait, 2)
+        assert first.done(), "input waited for the holder"
+        page.fields[7] = ("top", "new-value", "")
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        release.set()
+        await first
+        await drain_capture()
+        capture.step_decided(THREAD, probe(), "settle", None)
+        await drain_capture()
+        offer = saved_login_offers.pending_offer(KEY)
+        assert offer is not None and offer.username == "person@example.com"
+        assert saved_login_offers._offers[KEY] == saved_login_offers._Offer(
+            SITE, "person@example.com", "new-value", update=False, confirmed=True)
+        assert calls == 2
+    finally:
+        release.set()
+        saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+async def test_empty_first_submit_keeps_the_real_holders_noted_username(monkeypatch):
+    saved_login_offers.drop_thread(THREAD)
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_args, **_kwargs: [])
+    saved_login_offers.note_username(KEY, SITE, "person@example.com")
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", "", "")}))
+    open_step(monkeypatch)
+    try:
+        await settled_submit(THREAD, KEY, "ws://page")
+        page.fields[7] = ("top", MARKER, "")
+        await settled_submit(THREAD, KEY, "ws://page")
+        capture.step_decided(THREAD, probe(), "settle", None)
+        offer = saved_login_offers.pending_offer(KEY)
+        assert offer is not None and offer.username == "person@example.com"
+    finally:
+        saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("later", ["different", "marked", "timeout"])
+async def test_later_non_login_submit_drops_earlier_offer(monkeypatch, holder, later):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    open_step(monkeypatch, nodes=frozenset({7, 8}))
+    await settled_submit(THREAD, KEY, "ws://page")
+    if later == "different":
+        page.fields[8] = ("top", "another-value", "person")
+    elif later == "marked":
+        await capture.agent_writing(THREAD, "ws://page")
+    else:
+        monkeypatch.setattr(capture, "CAPTURE_TIMEOUT", 0.01)
+        page.hang = True
+    await settled_submit(THREAD, KEY, "ws://page")
+    capture.step_decided(THREAD, probe(), "settle", None)
+    assert holder.names() == ["offer_login", "drop_offer"]
+    assert THREAD not in capture._pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("event", "expected"), [("open", None), ("settle", "confirm_offer"),
+                                                ("domain", "drop_offer"), ("session", "drop_offer")])
+async def test_step_and_session_events_while_holder_runs(monkeypatch, holder, event, expected):
+    entered, release = threading.Event(), threading.Event()
+    offer = saved_login_offers.offer_login
+
+    def slow(*args):
+        entered.set()
+        assert release.wait(3)
+        return offer(*args)
+
+    monkeypatch.setattr(saved_login_offers, "offer_login", slow)
+    monkeypatch.setattr(capture, "CAPTURE_TIMEOUT", 0.05)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    open_step(monkeypatch)
+    try:
+        await asyncio.wait_for(capture.person_submit(THREAD, KEY, "ws://page"), 0.05)
+        assert await asyncio.to_thread(entered.wait, 2)
+        if event == "settle":
+            capture.step_decided(THREAD, probe(), "settle", None)
+        elif event == "domain":
+            capture.step_decided(THREAD, probe(host="other.example.org"), None, None)
+        elif event == "session":
+            capture.session_ended(THREAD)
+        release.set()
+        await drain_capture()
+        assert holder.names() == (["offer_login", expected] if expected else ["offer_login"])
+        assert (THREAD in capture._pending) is (event == "open")
+    finally:
+        release.set()
+        await drain_capture()
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_reads_still_call_holder_in_submit_order(monkeypatch, holder):
+    entered, release = asyncio.Event(), asyncio.Event()
+    count = 0
+
+    async def read(_thread, _endpoint, _step):
+        nonlocal count
+        count += 1
+        if count == 1:
+            entered.set()
+            await release.wait()
+            return SITE, "person", "first-value"
+        return SITE, "person", "second-value"
+
+    monkeypatch.setattr(capture, "_submit", read)
+    open_step(monkeypatch)
+    first = asyncio.create_task(capture.person_submit(THREAD, KEY, "ws://page"))
+    await entered.wait()
     await capture.person_submit(THREAD, KEY, "ws://page")
     assert holder.calls == []
+    release.set()
+    await first
+    await drain_capture()
+    assert [call[-1] for call in holder.calls] == ["first-value", "second-value"]
+    assert THREAD in capture._pending
+
+
+@pytest.mark.asyncio
+async def test_failed_step_drops_prior_offer_when_latest_queued_call_is_skipped(monkeypatch, holder):
+    entered, release = threading.Event(), threading.Event()
+    offer = saved_login_offers.offer_login
+
+    def slow(*args):
+        entered.set()
+        assert release.wait(3)
+        return offer(*args)
+
+    monkeypatch.setattr(saved_login_offers, "offer_login", slow)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    open_step(monkeypatch)
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        assert await asyncio.to_thread(entered.wait, 2)
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        capture.step_decided(THREAD, probe(visible=frozenset({7})), "unsettled", None)
+        release.set()
+        await drain_capture()
+        assert holder.names() == ["offer_login", "drop_offer"]
+        assert THREAD not in capture._pending
+    finally:
+        release.set()
+        await drain_capture()
+
+
+@pytest.mark.asyncio
+async def test_any_document_mark_is_never_evicted(monkeypatch):
+    page = use_page(monkeypatch, FakePage())
+    await capture.agent_writing(THREAD, "")
+    for number in range(100):
+        page.loader = f"document-{number}"
+        await capture.agent_writing(THREAD, "ws://page")
+    assert capture._marked(THREAD, "another-document")
+    assert capture._ANY_DOCUMENT in capture._marks[THREAD]
+
+
+@pytest.mark.asyncio
+async def test_session_end_skips_queued_old_session_offer_before_new_session(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original = saved_login_offers._checked_offer
+    checks = []
+
+    def checked(*args):
+        checks.append(args[1])
+        if len(checks) == 1:
+            entered.set()
+            assert release.wait(3)
+        return original(*args)
+
+    saved_login_offers.drop_thread(THREAD)
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(saved_login_offers, "_checked_offer", checked)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    new_key = f"{THREAD}:session-2"
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        assert await asyncio.to_thread(entered.wait, 2)
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        saved_login_offers.drop_thread(THREAD)
+        capture.session_ended(THREAD)
+        open_step(monkeypatch, visit="doc-new")
+        await capture.person_submit(THREAD, new_key, "ws://page")
+        release.set()
+        await drain_capture()
+        capture.step_decided(THREAD, probe(), "settle", None)
+        assert KEY not in saved_login_offers._offers
+        assert saved_login_offers.pending_offer(KEY) is None
+        assert saved_login_offers.pending_offer(new_key) is not None
+        assert len(checks) == 2
+    finally:
+        release.set()
+        await drain_capture()
+        saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", ["step", "session"])
+async def test_real_holder_has_no_offer_after_slow_call_and_ending(monkeypatch, event):
+    entered, release = threading.Event(), threading.Event()
+    original = saved_login_offers._checked_offer
+
+    def checked(*args):
+        entered.set()
+        assert release.wait(3)
+        return original(*args)
+
+    saved_login_offers.drop_thread(THREAD)
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(saved_login_offers, "_checked_offer", checked)
+    monkeypatch.setattr(capture, "CAPTURE_TIMEOUT", 0.02)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        assert await asyncio.to_thread(entered.wait, 2)
+        await asyncio.sleep(0.03)
+        if event == "step":
+            capture.step_decided(THREAD, probe(visible=frozenset({7})), "unsettled", None)
+        else:
+            saved_login_offers.drop_thread(THREAD)
+            capture.session_ended(THREAD)
+        release.set()
+        await drain_capture()
+        assert saved_login_offers.pending_offer(KEY) is None
+        assert KEY not in saved_login_offers._offers
+        assert THREAD not in capture._pending
+    finally:
+        release.set()
+        await drain_capture()
+        saved_login_offers.drop_thread(THREAD)
+
+
+@pytest.mark.asyncio
+async def test_ended_session_skips_queued_username_and_new_session_works(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original = saved_login_offers._checked_offer
+
+    def checked(*args):
+        entered.set()
+        assert release.wait(3)
+        return original(*args)
+
+    saved_login_offers.drop_thread(THREAD)
+    monkeypatch.setattr(saved_login_offers, "is_own_site", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(saved_login_offers, "logins_for_site", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(saved_login_offers, "_checked_offer", checked)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")},
+                                  accounts={"top": "person@example.com"}))
+    open_step(monkeypatch)
+    new_key = f"{THREAD}:session-2"
+    try:
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        assert await asyncio.to_thread(entered.wait, 2)
+        monkeypatch.delitem(lifecycle._steps, THREAD)
+        await capture.person_submit(THREAD, KEY, "ws://page")
+        saved_login_offers.drop_thread(THREAD)
+        capture.session_ended(THREAD, KEY)
+        await capture.person_submit(THREAD, new_key, "ws://page")
+        release.set()
+        await drain_capture()
+        assert KEY not in saved_login_offers._usernames
+        assert KEY not in saved_login_offers._offers
+        assert saved_login_offers._usernames[new_key] == (SITE, "person@example.com")
+    finally:
+        release.set()
+        await drain_capture()
+        saved_login_offers.drop_thread(THREAD)
