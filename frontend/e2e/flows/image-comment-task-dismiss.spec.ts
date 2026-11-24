@@ -40,6 +40,17 @@ for (const width of [393, 320, 1440]) test(`image comment task is dismissed from
 	expect(geometry.width).toBeGreaterThanOrEqual(44);
 	expect(geometry.height).toBeGreaterThanOrEqual(44);
 	expect(geometry.top).toBeGreaterThanOrEqual(geometry.headingBottom);
+	await expect(drawer.locator('.task-who'), 'the asker leads the summary, as it did on its card').toHaveText(new RegExp(`^${image.sessionTitle.slice(0, 8)}`));
+	const row = await dismiss.evaluate((button) => {
+		const summary = button.closest('.task-dismiss')!.querySelector('.task-summary')!.getBoundingClientRect();
+		const box = button.getBoundingClientRect();
+		const labelLeft = box.left + Number.parseFloat(getComputedStyle(button).paddingLeft);
+		return { sameRow: box.top < summary.bottom, labelLeft, summaryLeft: summary.left };
+	});
+	// Wrapped onto its own row the label starts where the summary's text starts; beside it, at 393 and wider, it stays on the summary's row.
+	if (width === 320) expect(row.sameRow, 'at 320 the button wraps').toBe(false);
+	else expect(row.sameRow, 'beside the summary at 393 and wider').toBe(true);
+	if (!row.sameRow) expect(Math.abs(row.labelLeft - row.summaryLeft)).toBeLessThanOrEqual(1);
 	await dismiss.click({ timeout: 10_000 });
 	await expect(pill(page)).toHaveAccessibleName('4 comments');
 	await expect.poll(async () => {

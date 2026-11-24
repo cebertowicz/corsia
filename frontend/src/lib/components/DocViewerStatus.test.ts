@@ -389,6 +389,9 @@ describe('DocViewerStatus toolbar', () => {
 		expect(entry.getAttribute('aria-label')).toBe('Document details');
 		const panel = host.querySelector('.doc-panel')!;
 		expect([...panel.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Dismiss all')).toHaveLength(1);
+		const task = panel.querySelector('.task-dismiss')!;
+		expect(task.querySelector('.task-who')?.textContent?.trim()).toBe('Docs agent');
+		expect(task.querySelector('.task-who')?.nextElementSibling?.textContent).toBe('2 comments to review');
 	});
 
 	it('names behind Details what waits there, in the words the panel uses, and never a count', () => {

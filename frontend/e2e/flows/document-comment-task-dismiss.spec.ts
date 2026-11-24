@@ -35,6 +35,7 @@ for (const width of [393, 320, 1440]) test(`document comment task is dismissed f
 	const details = await openDetails(page);
 	await page.screenshot({ path: testInfo.outputPath(`task-${width}-details.png`) });
 	await expect(details.getByText(/comments, .*suggestions to review/)).toBeVisible();
+	await expect(details.locator('.task-who'), 'the asker is named over the summary, as on its card').toHaveText(new RegExp(`^${title.slice(0, 8)}`));
 	await details.getByRole('button', { name: 'Dismiss all', exact: true }).click();
 	await expect.poll(async () => {
 		const response = await request.get(`/api/attention/${artifactId}/review`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
