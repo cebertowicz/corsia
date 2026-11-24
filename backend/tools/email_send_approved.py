@@ -99,11 +99,12 @@ def _sent(account: str, result: str) -> SendResult:
     if not isinstance(body, dict):
         return SendResult(SENT, account)
     refused = body.get("not_delivered_to")
-    note = body.get("note")
+    # Every note a backend writes on a sent email reaches the agent (a mail host adds its Sent and Drafts copy notes).
+    notes = [text for key in ("note", "sent_copy_note", "draft_copy_note") if isinstance(text := body.get(key), str) and text]
     return SendResult(
         SENT, account,
         not_delivered_to=tuple(str(address) for address in refused) if isinstance(refused, list) else (),
-        note=note if isinstance(note, str) else None,
+        note=" ".join(notes) or None,
     )
 
 
