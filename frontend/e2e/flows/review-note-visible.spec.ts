@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { raiseAsk } from '../support/reviewAsk';
 import { seed, open } from '../support/reviewFixtures';
+import { askFormOf, expectAskPlacement } from '../support/askPlacement';
 import { setDebugVersionOverlay } from '../support/heldComments';
 
 
@@ -14,7 +15,10 @@ for (const [width, height, mode, project] of [[1440, 900, 'default', 'chromium-d
   raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
   await open(page, doc, mode, theme);
   await page.setViewportSize({ width, height });
-  const bar = page.locator('[data-ask-card]');
+  // A phone's ask is the docked card; on a larger screen it is the row in the document header (its receipt is a `.review-bar` too).
+  const form = askFormOf(mode);
+  await expectAskPlacement(page, form);
+  const bar = page.locator(form === 'docked' ? '[data-ask-card]' : '.review-bar');
   await bar.getByRole('button', { name: 'Send back', exact: true }).click();
   const note = bar.getByRole('textbox');
   for (let i = 0; i < 8; i++) {
