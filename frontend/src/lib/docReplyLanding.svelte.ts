@@ -17,7 +17,12 @@ export function createReplyNavigation(source: {
 	openImageOr: (id: string, otherwise: () => void) => void;
 	onLanded: () => void;
 }) {
-	const first = () => source.comments().find(hasUnread) ?? null;
+	// The thread the opener named, when it is in this document; otherwise the first unread root in document order.
+	const first = () => {
+		const named = source.target()?.landOnCommentId;
+		const comments = source.comments();
+		return (named ? comments.find((item) => item.id === named) : undefined) ?? comments.find(hasUnread) ?? null;
+	};
 	const landing = (thread: DocComment | null) => thread
 		? canvasCommentScrollTarget(source.comments(), source.text(), thread.id, false, 'quote-tap') : null;
 	createReplyLanding({
@@ -42,19 +47,20 @@ export function createReplyLanding(source: {
 	open: (first: DocComment | null, landing: CanvasScrollTarget | null) => void;
 }) {
 	let arrivedAt = $state<string | null>(null);
-	// A tab opened from a waiting reply lands once on the first unread root in document order,
-	// after the comments have loaded (an empty list mid-load would spend the landing on nothing).
-	// Ordinary document opens leave the comments surface alone.
+	// A tab opened from a waiting reply lands once on the thread it names, or else the first unread root in document
+	// order, after the comments have loaded (an empty list mid-load would spend the landing on nothing). A later open
+	// of the same tab that names another thread lands again. Ordinary document opens leave the comments surface alone.
 	$effect(() => {
 		const target = source.target();
 		const instance = target?.instanceId;
-		if (target?.landOn !== 'new-replies' || !source.ready() || !instance || arrivedAt === instance) return;
+		const arrival = instance ? `${instance}\u0000${target?.landOnCommentId ?? ''}` : null;
+		if (target?.landOn !== 'new-replies' || !source.ready() || !arrival || arrivedAt === arrival) return;
 		const first = source.first();
 		const landing = source.landing();
 		// A comment load can finish before its anchors are placed in the document. Do not spend this one-shot
 		// landing on a null target: wait for the first unread root to become scrollable, then land on its text.
 		if (first?.placement === 'placing' && !landing) return;
-		arrivedAt = instance;
+		arrivedAt = arrival;
 		void tick().then(() => source.open(first, landing));
 	});
 }

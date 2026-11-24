@@ -274,6 +274,8 @@ test('Activity first version: built frames', async ({ page, request }) => {
 	await reload(page);
 	await expect(rows(page)).toHaveCount(7);
 	await expect(openRow(page)).toContainText('saved passwords');
+	// The pointer is still on the sidebar toggle tapped to get here; move it off so the frame shows no hover.
+	await page.mouse.move(196, 840);
 	await shot(page, 'd-list-393.png');
 	await rows(page).first().click();
 	await expect(page.getByText(/1 of 7 · Next/)).toBeVisible();

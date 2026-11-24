@@ -16,7 +16,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { openArtifactTab, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 	import {
-		chatReplyOf, decisionOf, docReplyOf, documentOf, findDocument, heldOf, taskOf,
+		chatReplyOf, decisionOf, docReplyOf, documentOf, findDocument, heldOf, taskOf, taskSteps,
 		type DocumentLookup,
 	} from './activityItems';
 
@@ -74,11 +74,14 @@
 	const docArtifactId = $derived(doc?.artifactId ?? null);
 	const itemKey = $derived(item.key);
 	const landsOnReplies = $derived(item.kind === 'reply');
+	// A reply row opens on the thread it quotes, never the document's first unread one.
+	const replyThread = $derived(docReply?.root_id ?? doc?.commentId);
 	$effect(() => {
 		const artifactId = docArtifactId;
 		const thread = sourceThread;
 		const key = itemKey;
 		const landOnReplies = landsOnReplies;
+		const commentId = replyThread;
 		if (!artifactId) {
 			lookup = null;
 			void closeAllBut(null);
@@ -98,7 +101,7 @@
 				artifactId,
 				path: found.path,
 				title: found.title,
-				...(landOnReplies ? { landOn: 'new-replies' as const } : {}),
+				...(landOnReplies ? { landOn: 'new-replies' as const, landOnCommentId: commentId } : {}),
 			});
 			const open = get(threadWorkspaces)[workspaceKey]?.activeTabId ?? null;
 			void closeAllBut(open);
@@ -197,7 +200,9 @@
 		const tab = ws?.tabs.find((t) => t.instanceId === ws.activeTabId);
 		if (!tab || tab.kind !== 'document' || lookup?.status !== 'found' || !doc) return;
 		await requestArtifactTabClose(workspaceKey, tab, () => {});
-		openArtifactTab(workspaceKey, { artifactId: doc.artifactId, path: lookup.path, title: lookup.title, landOn: 'new-replies' });
+		openArtifactTab(workspaceKey, {
+			artifactId: doc.artifactId, path: lookup.path, title: lookup.title, landOn: 'new-replies', landOnCommentId: replyThread,
+		});
 	}
 
 	const primaryLabel = (label: string) => (failure ? 'Try again' : label);
@@ -292,7 +297,10 @@
 	<ActivityKindPanel label="Task">
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
-			{#if task.description}<p class="dctx pre">{task.description}</p>{/if}
+			{#if task.description}{@const steps = taskSteps(task.description)}
+				{#if steps.kind === 'text'}<p class="body pre">{steps.text}</p>
+				{:else}<svelte:element this={steps.kind === 'numbered' ? 'ol' : 'ul'} class="body steps" start={steps.kind === 'numbered' ? steps.start : undefined}>{#each steps.items as step, i (i)}<li>{step}</li>{/each}</svelte:element>{/if}
+			{/if}
 		{/snippet}
 		{#snippet band()}
 			<ReviewBarShell view="ask" {who} full="A step only you can do" askLabel="Task for you" docked busy={sending}>
@@ -358,18 +366,24 @@
 	.doc-band { --canvas-pad-inline: var(--space-5); position: absolute; left: var(--canvas-pad-inline); right: var(--canvas-pad-inline); bottom: 0; z-index: 5; }
 	:global(.activity.phone) .doc-band { --canvas-pad-inline: var(--space-3); }
 	.dh { margin: 0 0 var(--space-3); font-size: var(--text-title3); line-height: 1.35; color: var(--text-primary); }
-	.dctx { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
+	/* Every kind's body reads at the document body's size and spacing (cm/theme.ts: 15px = --text-body; --text-input on a phone). */
+	.dctx, .body, blockquote, .opt { font-size: var(--text-body); line-height: var(--lh-relaxed); }
+	:global(.activity.phone) :is(.dctx, .body, blockquote, .opt) { font-size: var(--text-input); }
+	.dctx { margin: 0 0 var(--space-3); color: var(--text-secondary); }
+	.body { margin: 0 0 var(--space-3); color: var(--text-primary); }
+	.steps { padding-left: var(--space-5); }
+	.steps li + li { margin-top: var(--space-1); }
 	.pre { white-space: pre-wrap; }
 	blockquote {
 		margin: var(--space-4) 0; padding: 0 0 0 var(--space-4); border-left: 1px solid var(--border-subtle);
-		font-size: var(--text-callout); line-height: 1.55; color: var(--text-primary);
+		color: var(--text-primary);
 	}
 	.options { margin: var(--space-3) 0 0; padding: 0; border: 0; }
-	.opt { display: flex; gap: var(--space-3); padding: var(--space-3) 0; font-size: var(--text-subhead); cursor: pointer; }
+	.opt { display: flex; gap: var(--space-3); padding: var(--space-3) 0; cursor: pointer; }
 	.opt input { flex: none; margin: var(--space-px-2) 0 0; accent-color: var(--accent); }
 	.opt b { font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.opt em { margin-left: var(--space-2); font-style: normal; color: var(--accent-text); font-size: var(--text-footnote); }
-	.opt-detail { display: block; margin-top: var(--space-1); color: var(--text-secondary); line-height: 1.45; }
+	.opt-detail { display: block; margin-top: var(--space-1); color: var(--text-secondary); }
 	.other {
 		width: 100%; box-sizing: border-box; margin-top: var(--space-1); padding: var(--space-2);
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);

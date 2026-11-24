@@ -98,6 +98,23 @@ export function docReplyOf(item: ActivityQueueItem): ActivityDocReplyDetail | nu
 	const detail = item.detail as Partial<ActivityDocReplyDetail>;
 	return detail.artifact_id && detail.root_id && detail.reply_id ? (detail as ActivityDocReplyDetail) : null;
 }
+export type TaskSteps =
+	| { kind: 'numbered'; start: number; items: string[] }
+	| { kind: 'bulleted'; items: string[] }
+	| { kind: 'text'; text: string };
+
+/** A task's text as a list when every line is a numbered step, or every line a bullet; otherwise the text as written. */
+export function taskSteps(text: string): TaskSteps {
+	const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+	const numbered = lines.map((line) => /^(\d+)[.)]\s+(.+)$/.exec(line));
+	if (lines.length && numbered.every(Boolean)) {
+		return { kind: 'numbered', start: Number(numbered[0]![1]), items: numbered.map((match) => match![2]) };
+	}
+	const bulleted = lines.map((line) => /^[-*•]\s+(.+)$/.exec(line));
+	if (lines.length && bulleted.every(Boolean)) return { kind: 'bulleted', items: bulleted.map((match) => match![1]) };
+	return { kind: 'text', text };
+}
+
 export const chatReplyOf = (item: ActivityQueueItem) =>
 	item.kind === 'reply' && chatOf(item) ? (item.detail as ActivityChatReplyDetail) : null;
 

@@ -2,7 +2,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityQueueItem } from '$lib/api/activityQueue';
-import { activityFrameItems, activityQueueBody } from '$lib/__tests__/fixtures/attentionQueue';
+import { activityFrameItems, activityItem, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
 
 const { mobile, mutate } = vi.hoisted(() => ({
 	mobile: { store: null as null | import('svelte/store').Writable<boolean> },
@@ -11,10 +11,10 @@ const { mobile, mutate } = vi.hoisted(() => ({
 
 vi.mock('$lib/ws/events', () => ({ on: () => () => {} }));
 vi.mock('$lib/ws', () => ({ on: () => () => {} }));
-vi.mock('$lib/stores/viewport', async () => {
+vi.mock('$lib/stores/viewport', async (original) => {
 	const { writable: w } = await import('svelte/store');
 	mobile.store = w(false);
-	return { isMobile: mobile.store };
+	return { ...(await original<typeof import('$lib/stores/viewport')>()), isMobile: mobile.store };
 });
 vi.mock('$lib/api/plans', async (original) => ({
 	...(await original<typeof import('$lib/api/plans')>()),
@@ -23,7 +23,11 @@ vi.mock('$lib/api/plans', async (original) => ({
 
 import ActivityView from './ActivityView.svelte';
 import shellSource from '$lib/components/ReviewBarShell.svelte?raw';
+import paneSource from './ActivityItemPane.svelte?raw';
+import listSource from './ActivityList.svelte?raw';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
+import { consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -206,6 +210,76 @@ describe('Activity’s bottom band at rest', () => {
 	});
 });
 
+describe('item bodies', () => {
+	it('shows a task’s numbered steps as a numbered list', async () => {
+		render();
+		await settle();
+		rows()[4].click();
+		await settle();
+		const steps = [...pane().querySelectorAll('ol.steps li')].map((li) => li.textContent);
+		expect(steps).toEqual([
+			'Packaging & Onboarding starts the signing.',
+			'Sign in with your Apple ID and enter the code Apple sends.',
+			'Press Done.',
+		]);
+		expect(pane().querySelector('.pre')).toBeNull();
+	});
+
+	it('reads every kind’s body at the document’s body size and line spacing', () => {
+		// jsdom applies no component styles, so the rule is read from the source, as the band test above does.
+		const rule = paneSource.match(/\n\t\.dctx, \.body, blockquote, \.opt \{([^}]*)\}/);
+		expect(rule?.[1]).toContain('font-size: var(--text-body)');
+		expect(rule?.[1]).toContain('line-height: var(--lh-relaxed)');
+		// On a phone the document's text is --text-input (cm/theme.ts), and so is every body here.
+		expect(paneSource).toContain(':global(.activity.phone) :is(.dctx, .body, blockquote, .opt) { font-size: var(--text-input); }');
+		// No other rule in the pane sets a size on those bodies.
+		for (const selector of ['.dctx {', '.body {', 'blockquote {', '.opt {', '.opt-detail {']) {
+			const start = paneSource.indexOf(`\t${selector}`);
+			expect(start, selector).toBeGreaterThan(-1);
+			const block = paneSource.slice(start, paneSource.indexOf('}', start));
+			expect(block, selector).not.toContain('font-size');
+			expect(block, selector).not.toContain('line-height');
+		}
+	});
+});
+
+describe('a reply row in a document with two replied threads', () => {
+	const replyRow = (key: string, root: string, reply: string, position: number) => activityItem({
+		key, kind: 'reply', title: `Structured Plans replied on ${root}.`,
+		source: activitySource('Structured Plans', 'thread-plans'),
+		open: { artifact_id: 'art-later', comment_id: root },
+		detail: { artifact_id: 'art-later', root_id: root, reply_id: reply },
+		rank: { position, reason: 'So you see the reply.', ranked_by: 'thread-conductor', ranked_at: '2026-11-24T04:10:00Z' },
+	});
+	const activityTab = () => {
+		const ws = get(threadWorkspaces)[activityWorkspaceKey('project-1')];
+		return ws?.tabs.find((tab) => tab.instanceId === ws.activeTabId);
+	};
+
+	it('opens each row, and its Reply, on that row’s own thread', async () => {
+		served = [replyRow('reply:first', 'c-first', 'r-first', 1), replyRow('reply:second', 'c-second', 'r-second', 2)];
+		const fetchStub = vi.mocked(fetch);
+		const queue = fetchStub.getMockImplementation()!;
+		fetchStub.mockImplementation(async (input) => String(input).includes('/api/threads/thread-plans/artifacts')
+			? respond(200, { nodes: [{ kind: 'artifact', id: 'art-later', name: 'later.md', title: 'Later row', path: '/docs/later.md' }], needs_attention: [] })
+			: queue(input));
+		render();
+		await settle();
+		expect(activityTab()).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'c-first' });
+
+		rows()[1].click();
+		await settle();
+		const tab = activityTab()!;
+		expect(tab.landOnCommentId).toBe('c-second');
+
+		// Reply reopens the document on the same thread, not the document's first unread one.
+		consumeTabLanding(activityWorkspaceKey('project-1'), tab.instanceId);
+		buttonNamed('Reply')!.click();
+		await settle();
+		expect(activityTab()).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'c-second' });
+	});
+});
+
 describe('Activity on a phone', () => {
 	it('shows the list, then the item alone with position and Next in the header', async () => {
 		mobile.store!.set(true);
@@ -231,5 +305,15 @@ describe('Activity on a phone', () => {
 		expect(view.classList.contains('phone-item')).toBe(false);
 		expect(get(activityPhoneItem)).toBeNull();
 		expect(openRow()).toBe(rows()[2]);
+	});
+
+	it('keeps the list’s type and header spacing as on a wide screen', () => {
+		// Read from the source: jsdom applies no component styles.
+		const phoneRules = listSource.split('\n').filter((line) => line.includes(':global(.activity.phone)'));
+		// Titles keep the sidebar rows' token; the phone type scale alone raises it.
+		expect(phoneRules.some((line) => line.includes('strong'))).toBe(false);
+		// Links get their touch area from a pseudo-element, so Next and the ranker link don't push the header lines apart.
+		expect(listSource).not.toMatch(/min-height: var\(--touch-target\)/);
+		expect(listSource).toMatch(/\.link::after \{\n[^}]*height: var\(--touch-target\)/);
 	});
 });

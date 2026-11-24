@@ -167,8 +167,11 @@
 	.empty b { font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.empty p { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: 1.45; }
 	.nothere { margin: var(--space-4) var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.4; }
-	/* On a phone (Activity's own phone mode) rows and links grow to touch size. */
+	/* On a phone (Activity's own phone mode) rows and links grow to touch size. Titles keep the sidebar rows' size, which
+	   the phone type scale already raises. A link's touch area is drawn around it, so the header lines keep their spacing. */
 	:global(.activity.phone) .item { padding: var(--space-3) var(--space-2); }
-	:global(.activity.phone) .itemtop strong { font-size: var(--text-callout); line-height: 1.35; }
-	:global(.activity.phone) .next, :global(.activity.phone) .link { min-height: var(--touch-target); }
+	:global(.activity.phone) .link { position: relative; }
+	:global(.activity.phone) .link::after {
+		content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%);
+	}
 </style>
