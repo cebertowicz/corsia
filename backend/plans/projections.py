@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from infra.packed_rows import fetch_all
-from plans import aggregates, node_states, open_tree, wait_causes
+from plans import aggregates, node_states, open_tree, parked_work, wait_causes
 from plans.delegation_epoch import (  # noqa: F401
     delegated_work_returned, open_delegated_node_ids, open_delegated_work, open_row_sql,
 )
@@ -91,24 +91,17 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         ),
         moving=moving,
         delegated_moving=delegated_moving,
-        parked_commitments=_parked_commitments(incomplete, projected),
+        parked_commitments=parked_work.parked_commitments(
+            incomplete,
+            {
+                key: "running" if wait_causes.child_is_working(execution) else execution["condition"]
+                for key, execution in projected.items()
+            },
+            {key: execution["causes"] for key, execution in projected.items()},
+        ),
     )
     memo[plan_id] = state
     return state
-
-
-def _parked_commitments(rows, projected) -> frozenset[str]:
-    """Only commitments whose every open leaf is parked suppress child motion."""
-    parked: set[str] = set()
-    moving: set[str] = set()
-    for row in rows:
-        causes = projected[str(row["id"])]["causes"]
-        is_parked = any(
-            cause.get("placed") or cause.get("watch_id") or cause.get("dependency_node_id")
-            or cause["reason_key"] == "plan_paused" for cause in causes
-        )
-        (parked if is_parked else moving).add(str(row["commitment_id"]))
-    return frozenset(parked - moving)
 
 
 def _held(connection, plan_id: str, executions: list[dict], listed_ids=None) -> bool:

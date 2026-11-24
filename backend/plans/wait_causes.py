@@ -366,16 +366,16 @@ def delegation_cause(row, *, plan, child) -> dict | None:
     # a Turn already open at review does not hide the needed intervention.
     # A stalled child counts only work actually moving below it.
     stalled = row["stalled"]
-    active = bool(child.delegated_moving or (not stalled and (
+    busy = bool(child.delegated_moving or (not stalled and (
         row["input_queued"]
         or (
             row["turn_running"]
             and (not review_only or row["turn_started_after_review"])
         )
-    ))) and str(row["commitment_id"]) not in child.parked_commitments
-    if not (active or row["open_work"] or review_only):
+    )))
+    if not (busy or row["open_work"] or review_only):
         return None
-    if active:
+    if active := busy and str(row["commitment_id"]) not in child.parked_commitments:
         reason_key = DELEGATED_CHILD
         reason = "A delegated child is working on this step"
     elif review_only:

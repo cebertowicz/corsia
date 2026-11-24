@@ -12,6 +12,7 @@ from plans import (
     operator_node_state,
     operator_nodes,
     operator_stopped,
+    parked_work,
     projections,
     service,
     wait_causes,
@@ -170,21 +171,6 @@ def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
     return leaves, parents, counts
 
 
-def _parked_commitments(plan: dict, leaves: list[dict]) -> frozenset[str]:
-    """The full projection's parked read, over the same causes it sees.
-
-    A compact row carries only its stored causes; the plan pause is intrinsic,
-    so it is added here as ``_execution_facts`` adds it.
-    """
-    open_leaves = [row for row in leaves if row["state"] not in service._TERMINAL_STATES]
-    return projections._parked_commitments(open_leaves, {
-        str(row["id"]): {
-            "causes": [*admission_projection.intrinsic_cause_facts(row, plan), *row["causes"]],
-        }
-        for row in open_leaves
-    })
-
-
 def plan_state(
     plan: dict, rows: list[dict], reduced: dict[str, ReducedNode], *,
     leaves: list[dict] | None = None, parents: set[str] | None = None,
@@ -193,11 +179,8 @@ def plan_state(
     if leaves is None:
         leaves = node_states.leaves(rows)
     counted = node_states.in_play(rows, leaf_rows=leaves, parents=parents)
-    incomplete = [
-        reduced[str(row["id"])]
-        for row in leaves
-        if row["state"] not in service._TERMINAL_STATES
-    ]
+    open_leaves = [row for row in leaves if row["state"] not in service._TERMINAL_STATES]
+    incomplete = [reduced[str(row["id"])] for row in open_leaves]
     conditions = [item.condition for item in incomplete]
     delegated_moving = any(item.child_working for item in incomplete)
     moving = any(
@@ -216,7 +199,14 @@ def plan_state(
         ),
         moving=moving,
         delegated_moving=delegated_moving,
-        parked_commitments=_parked_commitments(plan, leaves),
+        parked_commitments=parked_work.parked_commitments(
+            open_leaves,
+            {
+                str(row["id"]): "running" if item.child_working else item.condition
+                for row, item in zip(open_leaves, incomplete)
+            },
+            {str(row["id"]): row["causes"] for row in open_leaves},
+        ),
     )
 
 
