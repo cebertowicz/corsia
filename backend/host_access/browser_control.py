@@ -68,6 +68,16 @@ FILLED_FIELD_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. The person filled in a password field on this page, and "
     "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
 )
+# A saved-login fill's own lines for the filled page (the server filled the field, not the person).
+SAVED_FILL_REFUSED = (
+    "A saved login was filled on this page, so until you open another page or reload this one, scripts, reading "
+    "field values or the page's HTML, network routes and screenshots are refused here, and each element must be "
+    "named by its @ref from a snapshot, not by a CSS selector. Commands that can't show the filled value still work."
+)
+SAVED_FILL_SNAPSHOT_WITHHELD = (
+    "Error: this snapshot was withheld. A saved login was filled on this page, and the browser's output wasn't a "
+    "snapshot whose field values could be hidden. Run snapshot again."
+)
 # Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
 # display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
 # new text input the probe can't tell from any other. So for the rest of the visit only commands that never
@@ -108,22 +118,29 @@ class PasswordReadGuard:
 # per document it has guarded: leaving a tab never lifts it, and a loader id never recurs, so a new
 # document is never over-refused. Cleared when the thread's browser closes.
 _guarded_visits: dict[str, dict[str, PasswordReadGuard]] = {}
-# A session a saved login was filled in (browser_login_fill marks it before typing), by thread: from that fill
-# until the session ends, every agent command in it runs under the filled-field allowlist, on every page.
-_saved_fill_sessions: dict[str, str | None] = {}
+# Saved-login fills by thread: (session, filled tab's main-frame loader id). Cleared when its browser closes.
+_saved_fills: dict[str, set[tuple[str | None, str | None]]] = {}
 
 
-def mark_saved_fill(thread_id: str, session: str | None) -> None:
-    """Put this session under the filled-field allowlist until it ends; called before a saved login is typed."""
-    _saved_fill_sessions[thread_id] = session
+def mark_saved_fill(thread_id: str, session: str | None, document: str | None) -> None:
+    """Before a saved login is typed: allowlist its document until a new one commits; limit its session to the end."""
+    _saved_fills.setdefault(thread_id, set()).add((session, document or None))
 
 
-def _saved_fill(thread_id: str, session: str | None) -> bool:
-    if thread_id not in _saved_fill_sessions:
-        return False
-    marked = _saved_fill_sessions[thread_id]
+def _same_session(marked: str | None, session: str | None) -> bool:
     # A mark or a command with no session id can't be told apart from the filled session, so it counts as it.
     return marked is None or session is None or marked == session
+
+
+def saved_fill_session(thread_id: str, session: str | None) -> bool:
+    """Whether a saved login was filled in this session, which then runs only _saved_command shapes until it ends."""
+    return any(_same_session(marked, session) for marked, _ in _saved_fills.get(thread_id, ()))
+
+
+def _saved_fill_document(thread_id: str, session: str | None, visit: str) -> bool:
+    # A document id that wasn't read, on either side, counts as the filled document.
+    return any(_same_session(marked, session) and (document is None or not visit or document == visit)
+               for marked, document in _saved_fills.get(thread_id, ()))
 
 
 def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None,
@@ -151,10 +168,12 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
 
 @dataclass(frozen=True)
 class PageAccess:
-    """What a command the guard let through must carry: its note, and whether a snapshot hides field values."""
+    """What a command the guard let through must carry: its note, whether a snapshot hides field values, and
+    whether this is a document a saved login was filled in (its lines are then the SAVED_FILL ones)."""
 
     note: str | None
     filled_field_visit: bool
+    saved_fill: bool = False
 
 
 async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
@@ -179,11 +198,11 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
     result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
-    filled = (bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
-              or _saved_fill(thread_id, session))
+    saved = _saved_fill_document(thread_id, session, result.visit)
+    filled = saved or bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
     if filled and not _filled_field_allows(args):
-        raise BrowserSessionError(FILLED_FIELD_REFUSED)
-    return PageAccess(note, filled)
+        raise BrowserSessionError(SAVED_FILL_REFUSED if saved else FILLED_FIELD_REFUSED)
+    return PageAccess(note, filled, saved)
 
 
 def _filled_field_allows(args: tuple[str, ...]) -> bool:
@@ -348,7 +367,7 @@ def browser_closed(thread_id: str) -> None:
     """Clear read guards and agent presence; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
-    _saved_fill_sessions.pop(thread_id, None)
+    _saved_fills.pop(thread_id, None)
 
 
 async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...], resolve: Resolve | None) -> None:

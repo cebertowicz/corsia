@@ -25,6 +25,14 @@ _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream",
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
                    "Use the browser tools to navigate and interact with the page.")
+# After a saved-login fill, the session runs only _saved_command shapes until it ends, on every page.
+SAVED_FILL_SESSION_REFUSED = (
+    "A saved login was filled in this browser session, so until the session ends only these commands run, on "
+    "every page: open, reload, snapshot (or snapshot -i), get title, get url, click, fill, wait (a time, an "
+    "element or --load networkidle), screenshot (or screenshot --full; not on the page the login was filled on) "
+    "and tab (but not tab new or tab close). Scripts, reading field values, network routes and every other "
+    "command are refused."
+)
 _CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
 logger = logging.getLogger(__name__)
 _SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
@@ -154,13 +162,14 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     if not pane and runtime.chrome is not None and runtime.chrome.exited:
         runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
-    if runtime.record.profile or runtime.record.copy_of:
+    saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+    if saved_sign_in or browser_control.saved_fill_session(thread_id, runtime.record.session):
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
         if _script_config(config) or not (trusted_navigation and not pane or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
-            raise BrowserSessionError(_SCRIPT_REFUSAL)
+            raise BrowserSessionError(_SCRIPT_REFUSAL if saved_sign_in else SAVED_FILL_SESSION_REFUSED)
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
     owner._queued_actions += 1
@@ -211,13 +220,13 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
-    note, filled_field_visit = None, False
+    note, filled_field_visit, saved_fill = None, False, False
     if guarded:
         access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
             current_session=partial(owner.session_identity, thread_id))
-        note, filled_field_visit = access.note, access.filled_field_visit
+        note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
@@ -248,7 +257,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if filled_field_visit and args[0] == "snapshot":
         hidden = hidden_snapshot(result)
         if hidden is None:
-            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+            withheld = browser_control.SAVED_FILL_SNAPSHOT_WITHHELD if saved_fill else browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD
+            return _noted(withheld, note)
         result = hidden
     rendered = owner._model_result(result, runtime.record)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
