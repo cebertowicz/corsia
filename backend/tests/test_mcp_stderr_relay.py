@@ -1,4 +1,4 @@
-"""The MCP stderr relay must mask output without stalling its child."""
+"""The MCP stderr relay masks output and drains after masking failures."""
 
 import subprocess
 import sys
@@ -75,19 +75,3 @@ async def test_mask_failure_drops_output_and_keeps_draining(monkeypatch, capfd):
     assert tail.lines() == ["[REDACTED]"]
     assert tail._dropped_lines == 256 and warnings
     assert capfd.readouterr().err == ""
-
-
-@pytest.mark.asyncio
-async def test_blocked_forwarder_does_not_block_child(monkeypatch):
-    from tools import mcp_stdio_launch
-
-    release = threading.Event()
-    monkeypatch.setattr(mcp_stdio_launch, "_write_all", lambda fd, _data: (release.wait(5), fd)[1])
-    tail = StderrTail("test", [])
-    try:
-        source = "import os\nfor _ in range(500): os.write(2, b'x' * 1024 + b'\\n')\n"
-        subprocess.run([sys.executable, "-c", source], stderr=tail.file, check=True, timeout=5)
-    finally:
-        release.set()
-        await tail.close(None, None, None)
-    assert not tail._reader.is_alive()

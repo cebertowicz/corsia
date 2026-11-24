@@ -5,7 +5,6 @@ from collections import deque
 from collections.abc import Iterable
 from contextlib import AsyncExitStack
 import os
-from queue import Empty, Queue
 import sys
 import threading
 from types import TracebackType
@@ -22,25 +21,20 @@ LINE_CHARS = 200
 # or a key block spanning lines is still recognised; bytes past this point of a line can
 # never reach its kept part.
 _LINE_BYTES = LINE_CHARS * 4 + 4096
-# An intentionally generous 64 KiB input-line limit bounds buffering before masking;
-# lines reaching the limit are dropped whole so a split credential cannot leak. Not traffic-derived.
+# macOS's BIG_PIPE_SIZE in <sys/pipe.h> is 64 KiB, the maximum pipe capacity.
+# Bound one unfinished line to that capacity; drop it whole at the limit to avoid leaking fragments.
 _FORWARD_LINE_BYTES = 65536
 _OVERSIZE_MARKER = f"[REDACTED: stderr line over {_FORWARD_LINE_BYTES} bytes]"
 
 
 class StderrTail:
-    """Relay masked child stderr without letting a slow destination block the child."""
+    """Relay masked child stderr and keep a short tail for connection errors."""
 
     def __init__(self, name: str, secrets: Iterable[str]):
         self.name = name
         self._secrets = sorted({value for value in secrets if value}, key=len, reverse=True)
         self._lines: deque[str] = deque(maxlen=TAIL_LINES)
         self._lock = threading.Lock()
-        # 128 is a fixed burst allowance, not a measured workload: it bounds queued
-        # lines when stderr blocks; dropped lines are counted and reported at close.
-        # Masking and UTF-8 replacement can expand each line beyond the input cap.
-        self._forward_queue: Queue[bytes] = Queue(maxsize=128)
-        self._reader_done = threading.Event()
         self._dropped_lines = 0
         read_fd, write_fd = os.pipe()
         self.file = open(write_fd, "w", encoding="utf-8", closefd=True)
@@ -48,35 +42,19 @@ class StderrTail:
             forward: int | None = sys.stderr.fileno()
         except (AttributeError, OSError, ValueError):
             forward = None
-        self._writer = threading.Thread(
-            target=self._forward, args=(forward,), name=f"mcp-stderr-forward:{name}", daemon=True,
-        )
         self._reader = threading.Thread(
-            target=self._relay, args=(read_fd,), name=f"mcp-stderr:{name}", daemon=True,
+            target=self._relay, args=(read_fd, forward), name=f"mcp-stderr:{name}", daemon=True,
         )
-        self._writer.start()
         self._reader.start()
 
-    def _forward(self, fd: int | None) -> None:
-        while not self._reader_done.is_set() or not self._forward_queue.empty():
-            try:
-                data = self._forward_queue.get(timeout=0.05)
-            except Empty:
-                continue
-            if fd is not None:
-                try:
-                    fd = _write_all(fd, data)
-                except Exception:
-                    fd = None
-
-    def _relay(self, read_fd: int) -> None:
+    def _relay(self, read_fd: int, forward: int | None) -> None:
         partial = b""
         tail_partial = b""
         overflow = False
         private_block = False
 
         def emit(line: bytes, *, newline: bool, truncated: bool = False) -> None:
-            nonlocal private_block
+            nonlocal private_block, forward
             try:
                 text = line.decode("utf-8", "replace")
                 begins_key = "-----BEGIN " in text and "PRIVATE KEY-----" in text
@@ -84,36 +62,34 @@ class StderrTail:
                 hidden = truncated or private_block or begins_key or any("\n" in secret for secret in self._secrets)
                 private_block = (private_block or begins_key) and not ends_key
                 safe = _OVERSIZE_MARKER if truncated else REDACTION_MARKER if hidden else self.mask(text)
-                self._forward_queue.put_nowait((safe + ("\n" if newline else "")).encode("utf-8"))
+                if forward is not None:
+                    forward = _write_all(forward, (safe + ("\n" if newline else "")).encode("utf-8"))
             except Exception:
-                # A broken sanitizer or full queue drops this output, never the child.
+                # A broken sanitizer drops this output while the reader keeps draining.
                 self._dropped_lines += 1
 
-        try:
-            with open(read_fd, "rb", buffering=0, closefd=True) as pipe:
-                while chunk := pipe.read(4096):
-                    *complete, tail_partial = (tail_partial + chunk).split(b"\n")
-                    tail_partial = tail_partial[:_LINE_BYTES]
-                    self._keep(line[:_LINE_BYTES] for line in complete)
-                    parts = chunk.split(b"\n")
-                    for index, data in enumerate(parts):
-                        ended = index < len(parts) - 1
+        with open(read_fd, "rb", buffering=0, closefd=True) as pipe:
+            while chunk := pipe.read(4096):
+                *complete, tail_partial = (tail_partial + chunk).split(b"\n")
+                tail_partial = tail_partial[:_LINE_BYTES]
+                self._keep(line[:_LINE_BYTES] for line in complete)
+                parts = chunk.split(b"\n")
+                for index, data in enumerate(parts):
+                    ended = index < len(parts) - 1
+                    if not overflow:
+                        if len(partial) + len(data) >= _FORWARD_LINE_BYTES:
+                            emit((partial + data)[:_FORWARD_LINE_BYTES], newline=True, truncated=True)
+                            partial, overflow = b"", True
+                        else:
+                            partial += data
+                    if ended:
                         if not overflow:
-                            if len(partial) + len(data) >= _FORWARD_LINE_BYTES:
-                                emit((partial + data)[:_FORWARD_LINE_BYTES], newline=True, truncated=True)
-                                partial, overflow = b"", True
-                            else:
-                                partial += data
-                        if ended:
-                            if not overflow:
-                                emit(partial, newline=True)
-                            partial, overflow = b"", False
-            if partial:
-                emit(partial, newline=False)
-            if tail_partial:
-                self._keep([tail_partial])
-        finally:
-            self._reader_done.set()
+                            emit(partial, newline=True)
+                        partial, overflow = b"", False
+        if partial:
+            emit(partial, newline=False)
+        if tail_partial:
+            self._keep([tail_partial])
 
     def _keep(self, lines: Iterable[bytes]) -> None:
         decoded = [line.decode("utf-8", "replace").rstrip("\r") for line in lines]
@@ -147,7 +123,6 @@ class StderrTail:
         # The child is gone by now, so the reader is at end of file unless something it
         # started still holds the pipe; never wait long for that.
         await asyncio.to_thread(self._reader.join, 1.0)
-        await asyncio.to_thread(self._writer.join, 1.0)
         if self._dropped_lines:
             logger.warning("MCP server '{}' stderr relay dropped {} lines", self.name, self._dropped_lines)
         if exc_type is not None:
