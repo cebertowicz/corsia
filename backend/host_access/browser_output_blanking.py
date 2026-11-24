@@ -3,7 +3,8 @@
 Every agent browser command's text comes back through ``tools.browser_runtime._run_owned``: its result,
 and the text of any error it raised. That one place calls :func:`blank_output` once per command, which reads
 the saved passwords once (``infra.saved_logins.blanking_values``: each saved password of 8 or more characters)
-and replaces each one wherever it appears, raw, URL-encoded, HTML-escaped or JSON-encoded, with :data:`BLANK`.
+and replaces each one wherever it appears, raw, URL-encoded, HTML-escaped or JSON-encoded, and with its
+whitespace as a snapshot or page text shows it, with :data:`BLANK`.
 That covers snapshots, page text, `get` results (get html too), eval and script results, console and network
 logs, and error text.
 
@@ -29,6 +30,9 @@ UNCHECKED = "Error: this browser result was withheld because it couldn't be chec
 # encodeURIComponent, the form encoder (URLSearchParams) and a path encoder that keeps "/".
 _URL_SAFE = ("", "-_.!~*'()", "-_.*", "/")
 _PERCENT = re.compile(r"%[0-9A-F]{2}")
+# Page text's collapsible whitespace: a run of these shows as one space.
+_COLLAPSIBLE = re.compile(r"[ \t\n\r\f]+")
+_ASCII_SPACE = " \t\n\r\f"
 
 
 def _url_forms(value: str) -> set[str]:
@@ -61,10 +65,26 @@ def _html_forms(value: str) -> set[str]:
     return forms
 
 
+def _whitespace_forms(value: str) -> set[str]:
+    """The value as a snapshot or page text shows it (Chrome 152, checked on a real page): a snapshot's page text
+    drops U+00A0; page text collapses a run of spaces to one and trims spaces at either end; a snapshot line's
+    end is trimmed of U+00A0 too. Any mix of these. A form shorter than a blanked value could be is left out,
+    so a value that is mostly spaces doesn't blank short ordinary text."""
+    forms, todo = {value}, [value]
+    while todo:
+        text = todo.pop()
+        for form in (text.replace(" ", ""), _COLLAPSIBLE.sub(" ", text), text.strip(_ASCII_SPACE), text.strip()):
+            if form not in forms:
+                forms.add(form)
+                todo.append(form)
+    return {form for form in forms if form == value or len(form) >= saved_logins.BLANKING_MIN}
+
+
 def encodings(value: str) -> set[str]:
-    """Every written form of one saved value that is blanked: raw, URL-encoded, HTML-escaped and each of those
-    JSON-encoded (get html returns its markup inside JSON)."""
-    plain = {value} | _url_forms(value) | _html_forms(value)
+    """Every written form of one saved value that is blanked: raw, URL-encoded, HTML-escaped, as a snapshot or
+    page text shows its whitespace, and each of those JSON-encoded (get html and get text return theirs inside
+    JSON). URLs and markup keep whitespace as written; only rendered text changes it."""
+    plain = {value} | _url_forms(value) | _html_forms(value) | _whitespace_forms(value)
     return {form for text in plain for form in {text} | _json_forms(text) if form}
 
 
