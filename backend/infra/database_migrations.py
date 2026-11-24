@@ -263,6 +263,7 @@ from infra.migration_201_to_202_node_usage_groups import migrate_201_to_202
 from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
 from infra.migration_203_to_204_comment_search import migrate_203_to_204
 from infra.migration_204_to_205_saved_logins import migrate_204_to_205
+from infra.migration_205_to_206_saved_login_fill_audit import migrate_205_to_206
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -955,6 +956,7 @@ MIGRATIONS[201] = migrate_201_to_202
 MIGRATIONS[202] = migrate_202_to_203
 MIGRATIONS[203] = migrate_203_to_204
 MIGRATIONS[204] = migrate_204_to_205
+MIGRATIONS[205] = migrate_205_to_206
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

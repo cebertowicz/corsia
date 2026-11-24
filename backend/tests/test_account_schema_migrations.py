@@ -877,6 +877,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 204 -> 205 adds the saved logins table.
         from infra.migration_204_to_205_saved_logins import migrate_204_to_205
         migrate_204_to_205(db)
+        # 205 -> 206 adds saved-login fill history.
+        from infra.migration_205_to_206_saved_login_fill_audit import migrate_205_to_206
+        migrate_205_to_206(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -1010,7 +1013,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 205
+    assert SCHEMA_VERSION == 206
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
