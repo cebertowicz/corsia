@@ -507,7 +507,7 @@ describe('HostAccessLeaseControl', () => {
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(Boolean(approve)).toBe(approvalAllowed);
-		expect(host.textContent?.includes('Approval is blocked.')).toBe(!approvalAllowed);
+		expect(Boolean(dialog.querySelector('.blocked-line'))).toBe(!approvalAllowed);
 	});
 
 	it('clears the disclosure on a thread switch and uses replacement truth', async () => {
@@ -613,7 +613,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
 
-		expect(dialog.textContent).toContain('Approval is blocked');
+		expect(dialog.querySelector('.blocked-line')?.textContent).toContain('incomplete or malformed');
 		expect(
 			Array.from(dialog.querySelectorAll('button'))
 				.some((button) => button.textContent?.trim() === 'Approve'),
@@ -663,7 +663,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
 		const dialog = await openPendingDrawer();
 
-		expect(dialog.textContent).toContain('Approval is blocked');
+		expect(dialog.querySelector('.blocked-line')?.textContent).toContain('incomplete or malformed');
 		expect(
 			Array.from(dialog.querySelectorAll('button'))
 				.some((button) => button.textContent?.trim() === 'Approve'),

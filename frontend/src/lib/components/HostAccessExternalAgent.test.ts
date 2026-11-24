@@ -113,7 +113,8 @@ it('blocks an incomplete launch and shows plain missing-command copy outside cod
 	const missing = host.querySelector('.launch-missing')!;
 	expect(missing.textContent).toBe('Command missing');
 	expect(missing.closest('code')).toBeNull();
-	expect(host.querySelector('.approval-blocked')).not.toBeNull();
+	expect(host.querySelector('.blocked-line')?.textContent)
+		.toContain('The request, independent attestation, or decision identity is incomplete or malformed.');
 });
 
 it('names a missing working folder and prevents approval', () => {
@@ -150,6 +151,10 @@ it('preserves stale decision guards for an otherwise complete external request',
 	show(externalLease(), true);
 	expect(button('Approve')?.disabled).toBe(true);
 	expect(button('Reject')?.disabled).toBe(true);
-	expect(host.querySelector('.approval-blocked')!.textContent)
-		.toContain('Refresh authoritative state before deciding.');
+	const blocked = host.querySelector('.blocked-line')!;
+	expect(blocked.querySelector('span')!.textContent)
+		.toBe('Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.');
+	expect(blocked.querySelector('button')!.textContent?.trim()).toBe('Retry');
+	expect(blocked.querySelector('button')!.classList.contains('ghost')).toBe(true);
+	expect(host.textContent).not.toContain('Approval is blocked');
 });

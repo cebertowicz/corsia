@@ -167,10 +167,9 @@
 		</section>
 
 		{#if stale || !ready}
-			<div class="approval-blocked" role="status">
-				<strong>Approval is blocked.</strong>
+			<div class="blocked-line" role="status">
 				<span>{stale
-					? 'Refresh authoritative state before deciding.'
+					? 'Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.'
 					: 'The request, independent attestation, or decision identity is incomplete or malformed.'}</span>
 				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
 			</div>
@@ -178,15 +177,15 @@
 	</div>
 
 	<footer class="decision-actions">
+		<span class="decision-spacer"></span>
 		<Button
-			variant="danger"
+			variant="ghost"
 			loading={deciding}
 			disabled={rejectDisabled}
 			onclick={onReject}
 		>
 			Reject
 		</Button>
-		<span class="decision-spacer"></span>
 		{#if ready}
 			<Button
 				variant="primary"
@@ -295,18 +294,7 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
 	}
-	.risk-grid section, .review {
-		padding: 12px;
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius-sm);
-		background: var(--bg-secondary);
-	}
-	.repo-policy-context {
-		padding: 12px;
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius-sm);
-		background: var(--bg-secondary);
-	}
+	/* Every section is a label over plain text: no card border or fill. */
 	.repo-policy-context ul, .policy-exceptions ul {
 		display: grid;
 		gap: 8px;
@@ -323,13 +311,6 @@
 	}
 	.repo-policy-context li strong { color: var(--text-primary); }
 	.project-id { font-size: var(--text-footnote); }
-	.policy-exceptions {
-		padding: 12px;
-		border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
-		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--amber) 8%, var(--bg-secondary));
-	}
-	.policy-exceptions .label { color: var(--amber); }
 	.policy-exceptions .external-warning {
 		color: var(--text-primary);
 		margin: 8px 0 16px;
@@ -357,19 +338,15 @@
 		color: var(--text-primary);
 		font-size: var(--text-subhead);
 	}
-	.approval-blocked {
-		display: grid;
-		grid-template-columns: auto 1fr auto;
+	/* The same one red line and ghost Retry the fill and script drawers use; no box. */
+	.blocked-line {
+		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 10px 12px;
-		border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
-		border-radius: var(--radius-sm);
-		background: var(--red-bg);
-		color: var(--red);
+		gap: var(--space-2);
+		color: var(--red-text);
 		font-size: var(--text-footnote);
 	}
-	.approval-blocked span { color: var(--text-secondary); }
+	.blocked-line span { flex: 1; min-width: 0; }
 
 	@media (max-width: 720px) {
 		/* Keep the first requested exception above the sticky decision footer even
@@ -378,7 +355,6 @@
 		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
-		.policy-exceptions { padding: var(--space-2); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);
@@ -388,9 +364,5 @@
 			gap: 2px;
 		}
 		.risk-grid { grid-template-columns: 1fr; }
-		.approval-blocked {
-			grid-template-columns: 1fr auto;
-		}
-		.approval-blocked strong { grid-column: 1 / -1; }
 	}
 </style>

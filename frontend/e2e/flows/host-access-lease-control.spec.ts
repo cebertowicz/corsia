@@ -370,6 +370,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByText('home-assistant: Protected base checkout', { exact: true })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
+		// Approve is the one solid action; Reject is a ghost text action.
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toHaveClass(/\bghost\b/);
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toHaveClass(/\bprimary\b/);
+		// Every section is a label over plain text, with no card border or fill.
+		const sections = dialog.locator('.risk-grid section, .repo-policy-context, .policy-exceptions, .review');
+		expect(await sections.count()).toBeGreaterThanOrEqual(3);
+		for (const section of await sections.all()) {
+			await expect(section).toHaveCSS('border-top-width', '0px');
+			await expect(section).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+		}
 
 		const viewport = page.viewportSize();
 		// The sheet slides up from below on open; its bounds are read where it comes to rest.
@@ -405,6 +415,10 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
+		// Reject sits directly beside Approve, not across the footer from it.
+		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
+		expect(besideGap).toBeGreaterThanOrEqual(0);
+		expect(besideGap).toBeLessThanOrEqual(16);
 
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 
