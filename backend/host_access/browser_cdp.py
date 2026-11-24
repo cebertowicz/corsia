@@ -115,7 +115,7 @@ class CdpClient:
         await self.socket.close()
 
 
-async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]) -> PasswordProbe:
+async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]], *, client: type[CdpClient] | None = None) -> PasswordProbe:
     """Find visible password inputs on the page target, preserving this visit's reveal-toggle nodes (AR3).
 
     ``known`` maps each guarded visit to its password nodes; only those of the page's own visit apply.
@@ -124,7 +124,7 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
     out-of-process (cross-origin) frame (browser_cdp_frames keys their nodes), and transfers only the matching
     nodes, never the whole DOM. A field in a frame is visible only while each frame element above it is.
     """
-    async with CdpClient(endpoint) as cdp:
+    async with (client or CdpClient)(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = _loader_id(frame)
         host = _host(frame)
