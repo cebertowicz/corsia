@@ -26,8 +26,8 @@ from events.connectors import mail_poller as poller
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
 from tools import calendar_list as google_calendar
-from api.email_drafts import SendNow, send_now
-from tests.test_email_drafts_api import _artifact, _owner
+from api.email_drafts import send_now
+from tests.test_email_drafts_api import _artifact, _owner, _shown
 from tools.action_gate import Approved
 from tools.calendar_list import CalendarDraftInviteTool, CalendarSendInviteTool
 from tools.google_email import EmailDraftTool
@@ -82,7 +82,7 @@ async def _draft(host, **fields) -> dict:
 async def _send(host, saved: dict) -> dict:
     text = (host.workspace / saved["path"]).read_text()
     with patch('events.delivery.deliver_to_thread', new_callable=AsyncMock):
-        return await send_now(_artifact(saved), SendNow(text=text), _owner(host.thread))
+        return await send_now(_artifact(saved), _shown(saved, text), _owner(host.thread))
 
 
 def _no_leak(*texts: str) -> None:
@@ -121,7 +121,7 @@ async def test_a_partly_refused_send_succeeds_and_names_only_the_refused_address
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr('events.delivery.deliver_to_thread', notice)
     text = (host.workspace / saved['path']).read_text()
-    out = await send_now(_artifact(saved), SendNow(text=text), _owner(host.thread))
+    out = await send_now(_artifact(saved), _shown(saved, text), _owner(host.thread))
     assert out == {'state': 'sent', 'not_delivered_to': ['lee@example.com']}
     assert host.built.smtp.sent[0][0] == ["pat@example.com"]
     assert _row(saved["draft_id"])["state"] == "sent"

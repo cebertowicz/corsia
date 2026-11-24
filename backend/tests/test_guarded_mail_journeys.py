@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 from infra.database import get_db
 from fastapi import HTTPException
-from api.email_drafts import SendNow, send_now
-from tests.test_email_drafts_api import _artifact, _owner
+from api.email_drafts import send_now
+from tests.test_email_drafts_api import _artifact, _owner, _shown
 from tools.email_send_approved import UNGUARDED_REPLY
 
 import httpx
@@ -63,7 +63,7 @@ def clean_screen(monkeypatch):
 async def send(mail, draft):
     text = (mail.workspace / draft['path']).read_text()
     with patch('events.delivery.deliver_to_thread', new_callable=AsyncMock):
-        return await send_now(_artifact(draft), SendNow(text=text), _owner(mail.thread))
+        return await send_now(_artifact(draft), _shown(draft, text), _owner(mail.thread))
 
 
 async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):

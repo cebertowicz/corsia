@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 import infra.config as config
-from api.email_drafts import draft_context
+from api.email_drafts import SendNow, draft_context, target_version
 from infra.database import get_db
 from infra.failure_reference import REFERENCE
 from registry.service import register_write
@@ -58,6 +58,12 @@ UNSENT = _email("m-120", "Sam Lee <sam@example.com>", 1793200000000, "Half-writt
 
 def _owner(thread_id: str) -> dict:
     return {"id": get_db().execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()["user_id"]}
+
+
+def _shown(saved: dict, text: str, **fields) -> SendNow:
+    """Send now as the view sends it: the text on screen and the stored target its last read returned."""
+    row = get_db().execute("SELECT target_json FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()
+    return SendNow(text=text, target_version=target_version(dict(row)), **fields)
 
 
 def _artifact(saved: dict) -> str:

@@ -14,6 +14,7 @@ newer emails arrived the view works out from this data and that reading.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +95,7 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     read_at = datetime.now(timezone.utc).isoformat()
     # The draft's own chat opens its attachments, whichever chat is on screen.
     base = {"thread_id": draft["thread_id"], "state": draft["state"], "read_at": None,
+            "target_version": target_version(draft),
             "attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target.get("attachments") or []),
             "notes": [str(note) for note in target.get("notes") or [] if isinstance(note, str)]}
     reply_to = target.get("reply_to")
@@ -134,10 +136,20 @@ CHANGED = "The draft changed; review it again."
 NEWER_LINE = "A newer email arrived in this conversation; review it again."
 
 
+def target_version(draft: dict[str, Any]) -> str:
+    """Which stored target (attachments, account, reply, notes) the view showed: an agent's save that changes only the
+    target leaves the text alone, so the text check can't see it."""
+    return hashlib.sha256(str(draft.get("target_json") or "{}").encode("utf-8")).hexdigest()
+
+
 class SendNow(BaseModel):
-    """The draft's text as the person's screen shows it, and when their view last read the conversation."""
+    """The draft's text as the person's screen shows it, the target its view read, and when it read the conversation.
+
+    A send without ``target_version`` is refused: what goes out besides the text was never shown.
+    """
 
     text: str
+    target_version: str | None = None
     read_at: str | None = None
 
 
@@ -269,7 +281,7 @@ async def send_now(artifact_id: str, body: SendNow, user: dict = Depends(require
         if (settled := _settled(draft)) is not None:
             return settled
         live = await asyncio.to_thread(_read_bytes, str(draft["path"]))
-        if live is None or live != body.text.encode("utf-8"):
+        if live is None or live != body.text.encode("utf-8") or body.target_version != target_version(draft):
             raise HTTPException(409, {"state": "changed", "message": CHANGED})
         revision = document_revision(live)
         if revision != draft["recorded_revision"]:

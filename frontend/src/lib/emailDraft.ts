@@ -60,6 +60,8 @@ export interface EmailDraftInfo {
 export interface EmailDraftContext {
 	state?: EmailDraftState;
 	readAt?: string | null;
+	/** Which stored target (attachments, account, reply) this read showed; Send now carries it back. */
+	targetVersion?: string | null;
 	/** Context the person may want, shown folded into one line under the header. */
 	notes: string[];
 	/** The id of the email the draft answers. Emails above it in `conversation` came after it. Absent: a new email. */

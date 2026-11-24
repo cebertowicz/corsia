@@ -51,11 +51,11 @@ async def test_gmail_reports_returned_thread_mismatch(mail, approve, monkeypatch
     mail.fake.handler = handler
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr('events.delivery.deliver_to_thread', notice)
-    from api.email_drafts import SendNow, send_now
-    from tests.test_email_drafts_api import _artifact, _owner
+    from api.email_drafts import send_now
+    from tests.test_email_drafts_api import _artifact, _owner, _shown
 
     text = (mail.workspace / saved['path']).read_text()
-    result = await send_now(_artifact(saved), SendNow(text=text), _owner(mail.thread))
+    result = await send_now(_artifact(saved), _shown(saved, text), _owner(mail.thread))
     assert result == {'state': 'sent'}
     assert len(mail.sends) == 1 and mail.sends[0]['threadId'] == 't-9'
     notice.assert_awaited_once()

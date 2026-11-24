@@ -20,9 +20,9 @@ from connections.mailhost.endpoints import Endpoints, Server
 from connections.mailhost.errors import (
     COPY_REFUSED, MESSAGE_REFUSED, PASSWORD_REFUSED, RECIPIENTS_REFUSED, SENDER_REFUSED, MailHostError,
 )
-from api.email_drafts import SendNow, send_now
+from api.email_drafts import send_now
 from infra.database import get_db
-from tests.test_email_drafts_api import _artifact, _owner
+from tests.test_email_drafts_api import _artifact, _owner, _shown
 from tools import mailhost_backend
 from tools.google_email import EmailDraftTool
 from tools.mail_backends import NO_BACKEND, backend_for
@@ -50,7 +50,7 @@ async def _send_with_notice(host, saved, monkeypatch):
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr("events.delivery.deliver_to_thread", notice)
     text = (host.workspace / saved["path"]).read_text()
-    out = await send_now(_artifact(saved), SendNow(text=text), _owner(host.thread))
+    out = await send_now(_artifact(saved), _shown(saved, text), _owner(host.thread))
     notice.assert_awaited_once()
     return out, notice.await_args
 

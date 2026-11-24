@@ -10,7 +10,7 @@ let component: Record<string, unknown> | null = null;
 const response = (state: string, status = 200, message = '') => ({ ok: status === 200, status, json: async () => status === 409 ? { detail: { state, message } } : { state } });
 const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name);
 const press = (name: string) => { button(name)!.click(); flushSync(); };
-const render = (props: Record<string, unknown> = {}) => { component = mount(EmailSendBar, { target: host, props: { artifactId: 'a/1', text: () => 'To: a@example.com\n\nExact ✉\n', readAt: 'read-time', ...props } }); flushSync(); };
+const render = (props: Record<string, unknown> = {}) => { component = mount(EmailSendBar, { target: host, props: { artifactId: 'a/1', text: () => 'To: a@example.com\n\nExact ✉\n', targetVersion: 'shown-target', readAt: 'read-time', ...props } }); flushSync(); };
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); };
 beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); apiFetch.mockReset(); });
 afterEach(() => { if (component) unmount(component); component = null; host.remove(); });
@@ -20,12 +20,12 @@ describe('email send bar', () => {
 		apiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', state: 'open', read_at: 'server-time', conversation: [], attachments: [], notes: [] }) });
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ state: 'open', readAt: 'server-time' });
 	});
-	it('posts the exact editor text and read time once on a double click, then shows Sent', async () => {
+	it('posts the exact editor text, shown target and read time once on a double click, then shows Sent', async () => {
 		let resolve!: (value: unknown) => void;
 		apiFetch.mockReturnValue(new Promise((r) => { resolve = r; }));
 		render(); const send = button('Send now')!; send.click(); send.click(); flushSync(); await settle();
 		expect(apiFetch).toHaveBeenCalledTimes(1);
-		expect(apiFetch).toHaveBeenCalledWith('/api/email-drafts/a%2F1/send', expect.objectContaining({ method: 'POST', body: JSON.stringify({ text: 'To: a@example.com\n\nExact ✉\n', read_at: 'read-time' }) }));
+		expect(apiFetch).toHaveBeenCalledWith('/api/email-drafts/a%2F1/send', expect.objectContaining({ method: 'POST', body: JSON.stringify({ text: 'To: a@example.com\n\nExact ✉\n', target_version: 'shown-target', read_at: 'read-time' }) }));
 		expect(host.textContent).toContain('Sending…'); expect(host.querySelectorAll('button')).toHaveLength(0);
 		resolve(response('sent')); await settle(); expect(host.textContent?.trim()).toBe('Sent');
 	});
@@ -95,8 +95,8 @@ describe('email send bar', () => {
 		answer(response('unconfirmed')); await settle();
 		expect(ended).toBe(true); expect(host.textContent).toContain('If it isn’t there, ask the agent for a new draft.');
 	});
-	it.each(['changed', 'newer'])('shows the %s refusal and rereads only newer', async (state) => {
-		const reread = vi.fn(); apiFetch.mockResolvedValue(response(state, 409, 'Review again')); render({ onReread: reread }); press('Send now'); await settle(); expect(host.textContent).toContain('Review again'); expect(button('Send now')).toBeTruthy(); expect(reread).toHaveBeenCalledTimes(state === 'newer' ? 1 : 0);
+	it.each(['changed', 'newer'])('shows the %s refusal and rereads the view', async (state) => {
+		const reread = vi.fn(); apiFetch.mockResolvedValue(response(state, 409, 'Review again')); render({ onReread: reread }); press('Send now'); await settle(); expect(host.textContent).toContain('Review again'); expect(button('Send now')).toBeTruthy(); expect(reread).toHaveBeenCalledTimes(1);
 	});
 	it.each(['sending', 'unconfirmed'])('does not offer another send for %s', async (state) => { apiFetch.mockResolvedValue(response(state)); render(); press('Send now'); await settle(); expect(host.textContent).toContain('Couldn’t confirm the email left.'); expect(host.querySelectorAll('button')).toHaveLength(0); });
 	it.each([['sent', 'Sent'], ['discarded', 'Not sent.'], ['sending', 'Couldn’t confirm the email left.']])('opens %s in its settled state', (state, expected) => { render({ initialState: state, readOnly: true }); expect(host.textContent).toContain(expected); expect(host.querySelectorAll('button')).toHaveLength(0); });

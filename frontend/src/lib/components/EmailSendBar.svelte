@@ -4,8 +4,8 @@
 	import { discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
 	import type { ConversationFailure, EmailDraftState } from '$lib/emailDraft';
 
-	let { artifactId, text, readAt = null, initialState = 'open', readOnly = false, connected = true, blocker = null, ended = $bindable(false), flush = async () => true, readState = async () => null, onReread = () => {}, onRefused = () => {} }: {
-		artifactId: string; text: () => string; readAt?: string | null; initialState?: EmailDraftState;
+	let { artifactId, text, targetVersion = null, readAt = null, initialState = 'open', readOnly = false, connected = true, blocker = null, ended = $bindable(false), flush = async () => true, readState = async () => null, onReread = () => {}, onRefused = () => {} }: {
+		artifactId: string; text: () => string; targetVersion?: string | null; readAt?: string | null; initialState?: EmailDraftState;
 		readOnly?: boolean; connected?: boolean; blocker?: string | null; ended?: boolean;
 		/** Saves every pending edit; false when the save failed. Send waits on it, so the text it carries is the saved text. */
 		flush?: () => Promise<boolean>;
@@ -35,7 +35,8 @@
 			case 'failed': step = 'failed'; break;
 			case 'changed': case 'newer':
 				message = result.message; step = 'draft';
-				if (result.state === 'newer') onReread();
+				// Either refusal re-reads the view: a newer email, or attachments an agent's save changed, show before the next click.
+				onReread();
 				break;
 			case 'signin': case 'missing':
 				step = 'draft'; onRefused(result.state); break;
@@ -62,7 +63,7 @@
 		if (!await flush().catch(() => false)) {
 			step = 'draft'; message = 'Couldn’t save your last edit, so nothing was sent. Press Send now again.'; return;
 		}
-		try { await apply(await sendEmailDraft(artifactId, text(), readAt), 'send'); } catch { await settleFromServer('send'); }
+		try { await apply(await sendEmailDraft(artifactId, text(), targetVersion, readAt), 'send'); } catch { await settleFromServer('send'); }
 	}
 	async function decline() {
 		if (step !== 'confirm' || declining || !connected || readOnly) return;

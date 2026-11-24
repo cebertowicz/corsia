@@ -4,6 +4,7 @@ import { apiFetch } from './request';
 interface ContextResponse {
 	state: EmailDraftState;
 	read_at: string | null;
+	target_version: string;
 	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
 	/** With `unreadable`: the reference the server logged the failure under. */
@@ -38,7 +39,7 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 		return failed('unreadable');
 	}
 	return {
-		state: body.state, readAt: body.read_at ?? null, status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
+		state: body.state, readAt: body.read_at ?? null, targetVersion: body.target_version ?? null, status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
 		answered: body.answered ?? undefined, conversation: body.conversation ?? [],
 		attachments: body.attachments ?? [], notes: body.notes ?? [],
 	};
@@ -52,7 +53,7 @@ export type DraftActionResult =
 	/** The server didn't answer the action (an error status): whether it happened is read from the draft's state. */
 	| { state: 'unknown' };
 
-async function draftAction(artifactId: string, action: 'send' | 'discard', body?: { text: string; read_at: string | null }): Promise<DraftActionResult> {
+async function draftAction(artifactId: string, action: 'send' | 'discard', body?: { text: string; target_version: string | null; read_at: string | null }): Promise<DraftActionResult> {
 	const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/${action}`, {
 		method: 'POST', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
 	});
@@ -64,8 +65,9 @@ async function draftAction(artifactId: string, action: 'send' | 'discard', body?
 	return await res.json() as DraftActionResult;
 }
 
-export function sendEmailDraft(artifactId: string, text: string, readAt: string | null): Promise<DraftActionResult> {
-	return draftAction(artifactId, 'send', { text, read_at: readAt });
+/** Send now carries what the view showed: the text, the stored target its last read returned, and that read's time. */
+export function sendEmailDraft(artifactId: string, text: string, targetVersion: string | null, readAt: string | null): Promise<DraftActionResult> {
+	return draftAction(artifactId, 'send', { text, target_version: targetVersion, read_at: readAt });
 }
 
 /** The draft's state as the server holds it, or null when the read didn't reach the server. */

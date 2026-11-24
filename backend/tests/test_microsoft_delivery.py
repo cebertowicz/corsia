@@ -10,7 +10,7 @@ import httpx
 import pytest
 from jsonschema import ValidationError, validate
 
-from api.email_drafts import SendNow, send_now
+from api.email_drafts import send_now
 from connections.connected_accounts import store_credentials
 from connections.microsoft import calendar, client
 from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE, SERVICE_UNAVAILABLE
@@ -18,6 +18,7 @@ from infra.database import get_db
 from registry.service import register_write
 from delegation_fixtures import deleg_db  # noqa: F401
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
+from tests.test_email_drafts_api import _shown
 from tests.test_microsoft_refresh import Response, connect
 from tools import action_delivery, microsoft_calendar_invites
 from tools.action_gate import Approved
@@ -109,7 +110,7 @@ async def _send_mail(saved: dict[str, Any]) -> dict[str, Any]:
     registered = register_write(THREAD, str(path), notify=False)
     assert registered is not None
     user_id = get_db().execute("SELECT user_id FROM threads WHERE id=?", (THREAD,)).fetchone()["user_id"]
-    return await send_now(registered["id"], SendNow(text=path.read_text()), {"id": user_id})
+    return await send_now(registered["id"], _shown(saved, path.read_text()), {"id": user_id})
 
 
 async def _calendar_draft(

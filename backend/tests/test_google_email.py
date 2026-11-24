@@ -146,10 +146,10 @@ def _row(draft_id: str) -> dict:
 
 
 async def _send(mail: Gmail, saved: dict) -> dict:
-    from api.email_drafts import SendNow, send_now
-    from tests.test_email_drafts_api import _artifact, _owner
+    from api.email_drafts import send_now
+    from tests.test_email_drafts_api import _artifact, _owner, _shown
 
-    return await send_now(_artifact(saved), SendNow(text=(mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
+    return await send_now(_artifact(saved), _shown(saved, (mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
 
 
 def _mime(body: dict):
