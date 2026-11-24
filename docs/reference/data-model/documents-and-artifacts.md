@@ -24,6 +24,7 @@ erDiagram
     doc_comments ||--o{ doc_comment_recipient_state : root_id
     doc_comments ||--o{ doc_comment_tags : comment_id
     doc_comments ||--o{ doc_comment_thread_views : root_id
+    doc_comment_snapshots o|--o{ doc_comments : snapshot_id
     doc_comments o|--o{ doc_comments : parent_id
 ```
 
@@ -195,6 +196,18 @@ Source: `backend/infra/doc_comments_schema.py`.
 
 Indexes: `sqlite_autoindex_doc_comment_recipient_state_1` (root_id, agent_id, unique).
 
+### `doc_comment_snapshots`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | INTEGER | Yes | No | — | — |
+| `digest` | BLOB | No | Yes | — | — |
+| `text` | BLOB | No | Yes | — | — |
+
+Indexes: `snapshots_digest` (digest).
+
 ### `doc_comment_tags`
 
 Source: `backend/infra/doc_comments_schema.py`.
@@ -280,8 +293,9 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `closed_by_decision` | INTEGER | No | Yes | 0 | — |
 | `tagged_user_id` | TEXT | No | No | — | — |
 | `closed_by_agreement` | INTEGER | No | Yes | 0 | — |
+| `snapshot_id` | INTEGER | No | No | — | doc_comment_snapshots.id |
 
-Indexes: `idx_doc_comments_artifact` (artifact_id, created_at), `idx_doc_comments_decision_event` (decision_event_id), `idx_doc_comments_parent` (parent_id), `idx_doc_comments_region_number` (artifact_id, expression, region_number, partial unique), `idx_doc_comments_user_created` (created_at, id), `sqlite_autoindex_doc_comments_1` (id, unique).
+Indexes: `idx_doc_comments_artifact` (artifact_id, created_at), `idx_doc_comments_decision_event` (decision_event_id), `idx_doc_comments_parent` (parent_id), `idx_doc_comments_region_number` (artifact_id, expression, region_number, partial unique), `idx_doc_comments_snapshot` (snapshot_id), `idx_doc_comments_user_created` (created_at, id), `sqlite_autoindex_doc_comments_1` (id, unique).
 
 ### `doc_feedback_batch_items`
 
