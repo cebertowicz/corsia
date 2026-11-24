@@ -38,7 +38,8 @@ from typing import Any
 
 from loguru import logger
 
-from infra import saved_logins
+from host_access.browser_domain import url_domain
+from infra import product_events, saved_logins
 from infra.host_access_leases import MAX_LEASE_DURATION_SECONDS
 from infra.key_store_values import KeyStoreError
 from infra.time import utc_now, utc_now_iso
@@ -139,9 +140,27 @@ def _thread_record(thread_id: str) -> tuple[str, str, str]:
     return row["user_id"], root, title or _AGENT_FALLBACK
 
 
-def _prune(now: float) -> None:
-    for key in [key for key, item in _approvals.items() if not item.live(now)]:
-        del _approvals[key]
+def _prune(now: float) -> list[_Approval]:
+    """Drop what has run out and return it. Only a grant runs out; a waiting request stays until decided."""
+    expired = [item for item in _approvals.values() if not item.live(now)]
+    for item in expired:
+        del _approvals[item.id]
+    return expired
+
+
+def _emit(action: str, item: _Approval, properties: dict[str, Any] | None = None) -> None:
+    """Count a fill transition: the thread and, on approve, the minutes picked. Never the site, username or id.
+
+    Called outside the lock. A route runs these functions in a worker thread, so the write never blocks
+    the event loop.
+    """
+    product_events.emit_product_event("saved_login", action, thread_id=item.thread_id, properties=properties)
+
+
+def _emit_expired(expired: list[_Approval]) -> None:
+    """A grant is recorded as expired when the next read drops it; a restart first drops it uncounted."""
+    for item in expired:
+        _emit("fill_expired", item)
 
 
 def _public(item: _Approval) -> dict[str, Any]:
@@ -154,6 +173,8 @@ def _public(item: _Approval) -> dict[str, Any]:
         "root_thread_id": item.root_thread_id,
         "agent": item.agent,
         "site": item.site,
+        #: The site's registrable domain from the Public Suffix List, so a shortened site always keeps it whole.
+        "domain": url_domain(item.site),
         "username": item.username,
         "revision": item.revision,
         "application_hash": item.application_hash,
@@ -192,17 +213,24 @@ def request_fill(thread_id: str, login_id: str) -> dict[str, Any]:
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     user_id, root, agent = _thread_record(clean_thread)
     now_iso = utc_now_iso()
+    existing: _Approval | None = None
     with _lock:
-        _prune(time.monotonic())
-        for item in _approvals.values():
-            if item.thread_id == clean_thread and item.login_id == login.id:
-                return _public(item)
-        item = _Approval(
-            id=uuid.uuid4().hex, thread_id=clean_thread, root_thread_id=root, user_id=user_id, agent=agent,
-            login_id=login.id, site=login.site, username=login.username,
-            created_at=now_iso, updated_at=now_iso, revision=1, state=AWAITING_USER,
+        expired = _prune(time.monotonic())
+        existing = next(
+            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id),
+            None,
         )
-        _approvals[item.id] = item
+        if existing is None:
+            item = _Approval(
+                id=uuid.uuid4().hex, thread_id=clean_thread, root_thread_id=root, user_id=user_id, agent=agent,
+                login_id=login.id, site=login.site, username=login.username,
+                created_at=now_iso, updated_at=now_iso, revision=1, state=AWAITING_USER,
+            )
+            _approvals[item.id] = item
+    _emit_expired(expired)
+    if existing is not None:
+        return _public(existing)
+    _emit("fill_requested", item)
     logger.info("saved-login fill requested: approval {} thread {} login {}", item.id, clean_thread, login.id)
     _notify(item)
     return _public(item)
@@ -239,12 +267,13 @@ def may_fill(thread_id: str, login_id: str) -> bool:
 def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, Any]]:
     """This person's waiting requests and live grants, oldest first; one chat's when a root is named."""
     with _lock:
-        _prune(time.monotonic())
+        expired = _prune(time.monotonic())
         items = [
             item for item in _approvals.values()
             if item.user_id == user_id
             and (root_thread_id is None or root_thread_id in (item.root_thread_id, item.thread_id))
         ]
+    _emit_expired(expired)
     items.sort(key=lambda item: (item.created_at, item.id))
     return [_public(item) for item in items]
 
@@ -252,11 +281,12 @@ def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, An
 def get(approval_id: str, *, user_id: str) -> dict[str, Any]:
     """One of this person's requests or grants, or :class:`FillApprovalNotFound`."""
     with _lock:
-        _prune(time.monotonic())
+        expired = _prune(time.monotonic())
         item = _approvals.get(approval_id)
-        if item is None or item.user_id != user_id:
-            raise FillApprovalNotFound(_NO_REQUEST)
-        return _public(item)
+    _emit_expired(expired)
+    if item is None or item.user_id != user_id:
+        raise FillApprovalNotFound(_NO_REQUEST)
+    return _public(item)
 
 
 def _current(approval_id: str, user_id: str, state: str, revision: int, application_hash: str) -> _Approval:
@@ -292,6 +322,7 @@ def approve_fill(
             deadline=time.monotonic() + seconds,
         )
         _approvals[item.id] = item
+    _emit("fill_approved", item, {"duration_minutes": seconds // 60 if seconds % 60 == 0 else round(seconds / 60, 2)})
     logger.info("saved-login fill approved: approval {} for {}s", item.id, seconds)
     _notify(item)
     return _public(item)
@@ -301,6 +332,7 @@ def _end(approval_id: str, user_id: str, state: str, revision: int, application_
     with _lock:
         item = _current(approval_id, user_id, state, revision, application_hash)
         del _approvals[item.id]
+    _emit(f"fill_{verb}", item)
     logger.info("saved-login fill {}: approval {}", verb, item.id)
     _notify(item)
     ended = _public(item)

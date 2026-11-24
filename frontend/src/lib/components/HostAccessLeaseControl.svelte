@@ -362,7 +362,7 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="Not current" size="sm" />
+						<StatePill state="error" label="Couldn’t check" size="sm" />
 						<span>{staleNotice}</span>
 						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
 					</div>
@@ -502,7 +502,6 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
-			--host-access-owner-wrap: normal;
 			--host-access-eyebrow-display: none;
 		}
 	}

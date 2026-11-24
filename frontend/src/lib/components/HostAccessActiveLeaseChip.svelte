@@ -1,12 +1,12 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
-	import { owner, remaining } from '$lib/hostAccess/leaseFormat';
+	import { minutesLeft, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	/**
 	 * One active approval, as the composer-style chip that names it in words with
-	 * its time remaining ("Host access 14:52", "Saved login 14:52"), plus the
+	 * its time remaining ("Host access · 15 min left", "Saved login · 15 min left"), plus the
 	 * drawer it opens. The words are its accessible name, time included. Open state
 	 * stays with the control that owns it, so only one chip is open at a time
 	 * and focus can be restored to the trigger after the drawer closes.
@@ -43,7 +43,7 @@
 		onclick={onOpen}
 	>
 		<!-- One inline run, so the space between the words and the time stays in the accessible name. -->
-		<span class="chip-text">{fill ? 'Saved login' : 'Host access'} <span class="countdown">{remaining(lease, nowMs)}</span></span>
+		<span class="chip-text">{fill ? 'Saved login' : 'Host access'} · <span class="countdown">{minutesLeft(lease, nowMs)}</span></span>
 	</button>
 	{#key lease.id}
 		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom {open} onClose={onClose}>

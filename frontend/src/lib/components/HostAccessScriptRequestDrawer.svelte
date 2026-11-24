@@ -34,7 +34,7 @@
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div><div class="section-label">Allow this script to act as your agent and use the agents’ GitHub account</div><h2 title={request.script_name}>{request.script_name}</h2></div>
-		<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
 	</header>
 	<div class="decision-body">
 		<section><span class="section-label">File</span><p>{request.script_path}</p></section>

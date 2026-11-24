@@ -58,7 +58,7 @@ it('names a stale script request as the lease names it', async () => {
 		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
 	} });
 	flushSync();
-	expect(target.textContent).toContain('Not current');
+	expect(target.textContent).toContain('Couldn’t check');
 	expect(target.textContent).not.toContain('Needs refresh');
 	expect(target.textContent).toContain('Couldn’t check that this request is still current');
 	expect(target.querySelector('.pill')).toBeNull();

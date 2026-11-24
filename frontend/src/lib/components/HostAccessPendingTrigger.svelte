@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { StatePill } from '$lib/components/ui';
-	import { duration, owner, pendingLabel } from '$lib/hostAccess/leaseFormat';
+	import { owner, pendingLabel } from '$lib/hostAccess/leaseFormat';
+	import { fitLabel, siteLabels } from '$lib/hostAccess/siteLabel';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 
 	/** The strip chip that opens a pending request's drawer. */
@@ -29,23 +29,23 @@
 	aria-label={pendingLabel(request)}
 	aria-haspopup="dialog"
 	aria-expanded={open}
-	aria-busy={(request.kind === 'script' || request.kind === 'fill') && deciding}
+	aria-busy={deciding}
 	bind:this={element}
 	{onclick}
 >
-	{#if request.kind === 'script' || request.kind === 'fill'}
-		<span class="eyebrow sentence">{request.kind === 'script' ? 'Script approval' : 'Saved login'}</span>
-		<span class="pending-owner">{request.kind === 'script' ? request.script_name : `${owner(request)} · ${request.site}`}</span>
-		<span class="pending-status" class:stale class:deciding>{stale ? 'Not current' : deciding ? 'Saving…' : 'Needs approval'}</span>
-	{:else}
-		<span class="eyebrow">Temporary host access</span>
-		<span class="pending-owner">{owner(request)}</span>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(request.requested_duration_seconds)} size="sm" />
-	{/if}
+	<span class="pending-kind">{request.kind === 'script' ? 'Script approval' : request.kind === 'fill' ? 'Saved login' : 'Temporary host access'}</span>
+	<span class="pending-what">
+		<span class="pending-owner">{request.kind === 'script' ? request.script_name : owner(request)}</span>
+		{#if request.kind === 'fill'}
+			<span class="pending-site" title={request.site} use:fitLabel={siteLabels(request.site, request.domain)}></span>
+		{/if}
+	</span>
+	<span class="pending-status" class:stale class:deciding>{stale ? 'Couldn’t check' : deciding ? 'Saving…' : 'Needs approval'}</span>
 	<span class="pending-action">Review →</span>
 </button>
 
 <style>
+	/* A plain line of text (DESIGN-SYSTEM §0.2): no border, no fill, no pill; the status is the only colour. */
 	.pending-request-trigger {
 		display: flex;
 		align-items: center;
@@ -53,11 +53,12 @@
 		width: 100%;
 		min-height: var(--touch-target);
 		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--amber-line);
+		border: none;
 		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--amber) 10%, var(--bg-secondary));
+		background: none;
 		color: var(--text-primary);
 		font: inherit;
+		font-size: var(--text-footnote);
 		text-align: left;
 		cursor: pointer;
 		pointer-events: auto;
@@ -66,45 +67,55 @@
 		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
-	.pending-owner {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-		text-overflow: ellipsis;
-		/* HostAccessLeaseControl's phone breakpoint sets these two. */
-		white-space: var(--host-access-owner-wrap, nowrap);
-	}
-	.pending-request-trigger .eyebrow {
+	.pending-kind {
 		display: var(--host-access-eyebrow-display, inline);
 		flex: none;
-		color: var(--amber);
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		font-size: var(--text-caption);
-		font-weight: 650;
-	}
-	/* The script chip draws §0.1 roles: sentence-case label, status as coloured text. */
-	.pending-request-trigger .eyebrow.sentence {
 		color: var(--text-tertiary);
-		text-transform: none;
-		letter-spacing: normal;
-		font-size: var(--text-footnote);
 		font-weight: var(--fw-semibold);
+	}
+	.pending-what {
+		display: flex;
+		flex: 1 1 0;
+		align-items: baseline;
+		gap: var(--space-2);
+		min-width: 0;
+	}
+	.pending-owner {
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		font-weight: var(--fw-medium);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	/* One line, shortened in the middle by whole segments (siteLabels), never wrapped. */
+	.pending-site {
+		flex: 1 1 0;
+		min-width: 0;
+		overflow: hidden;
+		color: var(--text-secondary);
+		white-space: nowrap;
 	}
 	.pending-status {
 		flex: none;
 		color: var(--amber-text);
-		font-size: var(--text-footnote);
 		font-weight: var(--fw-medium);
 	}
 	.pending-status.stale { color: var(--red-text); }
 	.pending-status.deciding { color: var(--text-secondary); }
 	.pending-action {
 		flex: none;
-		color: var(--amber);
-		font-size: var(--text-footnote);
+		color: var(--text-primary);
 		font-weight: var(--fw-medium);
+	}
+
+	/* On a phone the agent and the site stack, so the site keeps a line of its own. */
+	@media (max-width: 720px) {
+		.pending-what {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0;
+		}
+		.pending-site { flex: none; }
 	}
 </style>

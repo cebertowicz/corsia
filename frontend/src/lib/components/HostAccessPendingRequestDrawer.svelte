@@ -83,7 +83,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<span class="status" class:stale>{stale ? 'Not current' : duration(lease.requested_duration_seconds)}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : duration(lease.requested_duration_seconds)}</span>
 	</header>
 
 	<div class="decision-body">
