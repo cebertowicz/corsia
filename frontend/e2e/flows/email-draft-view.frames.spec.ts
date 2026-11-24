@@ -330,8 +330,9 @@ const SCENARIOS: Scenario[] = [
 	{ name: '20f-send-unconfirmed', doc: 'reply', context: reply(), thin: true, act: async (page) => {
 		await answerDraftAction(page, 'send', { status: 200, body: { state: 'unconfirmed' } });
 		await clickSend(page);
-		await expect(sendBar(page)).toHaveText('Couldn’t confirm the email left. Check your Sent mail before sending again.');
+		await expect(sendBar(page)).toHaveText('Couldn’t confirm the email left. Check your Sent mail. If it isn’t there, ask the agent for a new draft.');
 		await expect(sendBar(page).getByRole('button')).toHaveCount(0);
+		await expect(page.locator('.cm-content')).toHaveAttribute('aria-readonly', 'true');
 	} },
 	{ name: '20g-send-changed', doc: 'reply', context: reply(), thin: true, act: async (page) => {
 		await answerDraftAction(page, 'send', { status: 409, body: { detail: { state: 'changed', message: 'The draft changed; review it again.' } } });
