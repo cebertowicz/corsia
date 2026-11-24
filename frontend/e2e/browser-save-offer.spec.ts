@@ -21,7 +21,9 @@ const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holding
 const view = { width: 900, height: 600 };
 const server = { offer: null as Offer | null, save: 200, saveBody: {} as unknown, saves: 0, notNows: 0, gets: 0 };
 
-const SERVER_TEXT = 'There’s no sign-in to save here. It’s offered again the next time you sign in.';
+const SERVER_TEXT = 'This login can’t be saved from here anymore. Unless it’s already saved, it’s offered again the next time you sign in.';
+// The longest refusal the server sends: the sign-in's browser closed before Save.
+const CLOSED_TEXT = 'The shared browser this sign-in came from has closed, so it can’t be saved. It’s offered again the next time you sign in.';
 const PAGE_TITLE = 'Sign in';
 const EXAMPLE_PAGE = { heading: PAGE_TITLE, footer: 'Create an account' };
 // A company's own sign-in page, for the long site names: the tab, the address and the page itself belong to that site.
@@ -179,20 +181,21 @@ test.describe('the pane save-login offer', () => {
 				expect(dockBox!.y).toBeLessThan(canvasBox!.y + canvasBox!.height);
 				expect(Math.abs(canvasBox!.width - view.width)).toBeLessThanOrEqual(1);
 				expect(Math.abs(canvasBox!.height - view.height)).toBeLessThanOrEqual(1);
-				// The surface of the document review bar's dock: secondary background, rounded top corners, no divider line.
+				// The surface of the document review bar's dock: secondary background, rounded top corners, and its hairline on the top and sides, none along the bottom.
 				const surface = await dock(page).evaluate((node) => {
 					const style = getComputedStyle(node);
 					const probe = document.createElement('i');
-					probe.style.cssText = 'background: var(--bg-secondary); border-radius: var(--radius-xl)';
+					probe.style.cssText = 'background: var(--bg-secondary); border-radius: var(--radius-xl); border: 1px solid var(--border-subtle)';
 					document.body.append(probe);
-					const expected = { background: getComputedStyle(probe).backgroundColor, radius: getComputedStyle(probe).borderTopLeftRadius };
+					const expected = { background: getComputedStyle(probe).backgroundColor, radius: getComputedStyle(probe).borderTopLeftRadius, line: getComputedStyle(probe).borderTopColor };
 					probe.remove();
-					return { background: style.backgroundColor, topLeft: style.borderTopLeftRadius, topRight: style.borderTopRightRadius, bottomLeft: style.borderBottomLeftRadius, top: style.borderTopWidth, expected };
+					return { background: style.backgroundColor, topLeft: style.borderTopLeftRadius, topRight: style.borderTopRightRadius, bottomLeft: style.borderBottomLeftRadius, widths: [style.borderTopWidth, style.borderLeftWidth, style.borderRightWidth, style.borderBottomWidth], lines: [style.borderTopColor, style.borderLeftColor, style.borderRightColor], expected };
 				});
 				expect(surface.background).toBe(surface.expected.background);
 				expect([surface.topLeft, surface.topRight]).toEqual([surface.expected.radius, surface.expected.radius]);
 				expect(surface.bottomLeft).toBe('0px');
-				expect(surface.top).toBe('0px');
+				expect(surface.widths).toEqual(['1px', '1px', '1px', '0px']);
+				expect(surface.lines).toEqual([surface.expected.line, surface.expected.line, surface.expected.line]);
 				// Save and Not now are a pair on the right. Wide enough, the pair sits to the right of the question; narrower, it takes its own row below, still on the right.
 				const [saveBox, notNowBox, copyBox] = await Promise.all([
 					dock(page).getByRole('button', { name: 'Save' }).boundingBox(),
@@ -274,15 +277,46 @@ test.describe('the pane save-login offer', () => {
 				await expect(dock(page)).toHaveCount(0);
 				expect(server.notNows).toBe(2);
 
+				// A refusal takes the question's place at no smaller size, and a sentence that needs more room eases it in: the frame
+				// after the swap is not yet at the full height (motion.md: a content swap has no size jump).
+				const refuseMeasured = async (detail: string) => {
+					server.offer = EXAMPLE;
+					await signIn(page, canvas, send, touch);
+					await expect(dock(page)).toContainText('Save the example.com login for agents?');
+					await page.waitForTimeout(400);
+					const asking = (await dock(page).boundingBox())!.height;
+					await page.evaluate((text) => {
+						const w = window as unknown as { swap: number[] };
+						w.swap = [];
+						const sample = () => {
+							const node = document.querySelector('.save-offer');
+							if (node?.querySelector('.question')?.textContent === text) w.swap.push(node.getBoundingClientRect().height);
+							if (node && w.swap.length < 40) requestAnimationFrame(sample);
+						};
+						requestAnimationFrame(sample);
+					}, detail);
+					server.save = 409;
+					server.saveBody = { detail };
+					await dock(page).getByRole('button', { name: 'Save' }).click();
+					await expect(dock(page).locator('.question')).toHaveText(detail);
+					await page.waitForTimeout(400);
+					const swap = await page.evaluate(() => (window as unknown as { swap: number[] }).swap);
+					const first = swap[0];
+					const refused = (await dock(page).boundingBox())!.height;
+					// Frames caught part-way through the ease, strictly between the two heights.
+					const between = swap.filter((height) => height > asking + 1 && height < refused - 1).length;
+					expect(refused).toBeGreaterThanOrEqual(asking - 0.5);
+					expect(first).toBeGreaterThanOrEqual(asking - 0.5);
+					if (refused > asking + 1) {
+						expect(first).toBeLessThan(refused - 1);
+						expect(between).toBeGreaterThan(0);
+					}
+					test.info().annotations.push({ type: 'refusal height', description: `${size.name} ${scheme} ${detail === CLOSED_TEXT ? 'closed-browser' : 'no-offer'}: asking ${asking.toFixed(1)} px, first frame after the swap ${first.toFixed(1)} px, ${between} frames part-way, settled ${refused.toFixed(1)} px` });
+				};
+
 				// A 409 (or a 404) puts the server's sentence in the question's place, removes Save and Not now, leaves Close with focus, and never fades by itself.
-				server.offer = EXAMPLE;
-				await signIn(page, canvas, send, touch);
-				await expect(dock(page)).toContainText('Save the example.com login for agents?');
-				server.save = 409;
-				server.saveBody = { detail: SERVER_TEXT };
 				const savesBefore = server.saves;
-				await dock(page).getByRole('button', { name: 'Save' }).click();
-				await expect(dock(page).locator('.question')).toHaveText(SERVER_TEXT);
+				await refuseMeasured(SERVER_TEXT);
 				await expect(page.locator('[aria-live="polite"]', { hasText: SERVER_TEXT }).first()).toBeAttached();
 				await expect(dock(page).getByRole('button', { name: 'Save' })).toHaveCount(0);
 				await expect(dock(page).getByRole('button', { name: 'Not now' })).toHaveCount(0);
@@ -300,6 +334,13 @@ test.describe('the pane save-login offer', () => {
 				await dock(page).getByRole('button', { name: 'Close' }).click();
 				await expect(dock(page)).toHaveCount(0);
 				expect(server.notNows).toBe(3);
+
+				// The longest sentence, for a sign-in whose browser has since closed.
+				await refuseMeasured(CLOSED_TEXT);
+				await expect(dock(page).getByRole('button', { name: 'Close' })).toBeFocused();
+				if (size.name !== '768') await shot(page, size.name, scheme, '8-refused-closed');
+				await dock(page).getByRole('button', { name: 'Close' }).click();
+				await expect(dock(page)).toHaveCount(0);
 				server.save = 200;
 
 				// A domain is never cut, however long: the question wraps around it and nothing runs past the dock.
@@ -420,6 +461,8 @@ test.describe('the pane save-login offer', () => {
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		await page.waitForTimeout(400);
+		// The page's clock stops before Save, so the Saved line cannot fade out while the window narrows.
+		await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
 		await dock(page).getByRole('button', { name: 'Save' }).click();
 		await expect(dock(page)).toContainText('Saved');
 		// The held height is a floor, not a fixed box: a narrower window takes more room for the line and gets it.

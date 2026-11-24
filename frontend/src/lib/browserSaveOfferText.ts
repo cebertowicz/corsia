@@ -2,7 +2,7 @@ import type { SaveOffer } from '$lib/api/savedLoginOffer';
 
 const question = (offer: SaveOffer, domain: string) => offer.update ? `Update the saved ${domain} login with this password?` : `Save the ${domain} login for agents?`;
 
-/** Every string of the save-login offer, approved by Product Experience (Nov 24). */
+/** Every string of the save-login offer the pane itself words; a refusal's sentence comes from the server. */
 export const SAVE_OFFER_TEXT = {
 	save: 'Save',
 	update: 'Update',

@@ -405,6 +405,8 @@ describe('save-login offer: Save, Not now and closing', () => {
 		button('Save').click();
 		await settle();
 		expect(dock()!.style.minHeight).toBe('96px');
+		// A floor and not a fixed box: nothing pins the height itself.
+		expect(dock()!.style.height).toBe('');
 	});
 
 	it('says Updated for an update offer', async () => {
@@ -466,7 +468,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	};
 	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
 
-	it.each([[409, 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
+	it.each([[409, 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
 		await refuse(status, { detail });
 		expect(dock()!.querySelector('.question')!.textContent).toBe(detail);
 		expect(dock()!.textContent).not.toContain('Save the');
@@ -481,10 +483,18 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(host.querySelector(`[id="${dock()!.getAttribute('aria-labelledby')}"]`)!.textContent).toBe(detail);
 	});
 
+	it('keeps the asking height as the dock’s floor when a refusal takes the question’s place', async () => {
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 96));
+		await refuse(409, { detail: 'This login can’t be saved from here anymore. Unless it’s already saved, it’s offered again the next time you sign in.' });
+		expect(dock()!.querySelector('.question')!.textContent).toContain('can’t be saved from here anymore');
+		expect(dock()!.style.minHeight).toBe('96px');
+		expect(dock()!.style.height).toBe('');
+	});
+
 	it('moves focus to Close when Save had it, and never fades by itself', async () => {
 		vi.useFakeTimers();
 		saveStatus = 409;
-		saveBody = { detail: 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.' };
+		saveBody = { detail: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' };
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		button('Save').focus();
@@ -500,7 +510,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	});
 
 	it('Close dismisses as Not now does: it posts not-now, closes, and leaves focus on the page', async () => {
-		await refuse(409, { detail: 'There\u2019s no sign-in to save here. It\u2019s offered again the next time you sign in.' });
+		await refuse(409, { detail: 'This login can\u2019t be saved from here anymore. Unless it\u2019s already saved, it\u2019s offered again the next time you sign in.' });
 		button('Close').focus();
 		button('Close').click();
 		await settle();
@@ -764,6 +774,50 @@ describe('save-login offer: motion', () => {
 		button('Save').click();
 		await settle();
 		expect(forError().at(-1)!.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
+	});
+
+	// The dock is 64 px while it asks; the closed-browser sentence needs 84.
+	const CLOSED = 'The shared browser this sign-in came from has closed, so it can’t be saved. It’s offered again the next time you sign in.';
+	const refuseWith = async (detail: string, refusedHeight: number) => {
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const refused = this.classList.contains('save-offer') && this.querySelector('.question')?.textContent === detail;
+			return new DOMRect(0, 0, 100, refused ? refusedHeight : 64);
+		});
+		saveStatus = 409;
+		saveBody = { detail };
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		played = [];
+		button('Save').click();
+		await settle();
+		await wait(0);
+	};
+	const sized = () => forDock().filter(entry => entry.keyframes.some(frame => 'height' in frame));
+
+	it('eases the extra height in over the standard duration when a refusal needs more room', async () => {
+		await refuseWith(CLOSED, 84);
+		const [grow] = sized();
+		expect(grow.keyframes).toEqual([{ height: '64px' }, { height: '84px' }]);
+		expect(grow.options).toMatchObject({ duration: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+		expect(dock()!.style.minHeight).toBe('64px');
+		// The clip lasts only as long as the ease.
+		expect(dock()!.style.overflow).toBe('');
+	});
+
+	it('plays no size change for a refusal that fits the asking height', async () => {
+		await refuseWith(CLOSED, 64);
+		expect(sized()).toEqual([]);
+		expect(played.filter(entry => entry.node.classList.contains('body'))).toEqual([]);
+	});
+
+	it('crossfades the content instead of easing the height under reduced motion', async () => {
+		reducedMotion.value!.set(true);
+		await refuseWith(CLOSED, 84);
+		reducedMotion.value!.set(false);
+		expect(sized()).toEqual([]);
+		const [fade] = played.filter(entry => entry.node.classList.contains('body'));
+		expect(fade.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+		expect(fade.options.duration).toBe(120);
 	});
 
 	it('crossfades over the tight duration under reduced motion', async () => {

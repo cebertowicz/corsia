@@ -6,7 +6,7 @@
 	import { hostInDomain } from '$lib/browserAddress';
 	import { SAVE_OFFER_TEXT as text, shortenMiddle } from '$lib/browserSaveOfferText';
 	import { CONFIRMATION_HOLD_MS } from '$lib/confirmationHold';
-	import { ms } from '$lib/popoverMotion';
+	import { cssVar, ms } from '$lib/popoverMotion';
 	import { blockSlot } from '$lib/slotMotion';
 
 	/**
@@ -159,7 +159,7 @@
 		if (!result.saved && result.message) {
 			// Save is about to go: if focus was on it (or dropped to the page while it was busy), it moves to Close.
 			const focusWasHere = !document.activeElement || document.activeElement === document.body || !!dock?.contains(document.activeElement);
-			refusal = result.message;
+			showRefusal(result.message);
 			announcement = result.message;
 			if (focusWasHere) void tick().then(() => closeButton?.focus());
 			return;
@@ -179,10 +179,34 @@
 		finishAfterHold();
 	}
 
-	/** Reads the dock's rendered height while it still asks, and keeps it as the dock's floor for the confirmation and its fade. */
+	/** Reads the dock's rendered height while it still asks, and keeps it as the dock's floor for the confirmation, its fade and a refusal. */
 	function holdHeight() {
 		const measured = dock?.getBoundingClientRect().height ?? 0;
 		heldHeight = measured > 0 ? `${measured}px` : null;
+		return measured;
+	}
+
+	/**
+	 * The refusal takes the question's place at no less than the asking height. A sentence that needs more room eases the extra
+	 * height in over the standard duration; under reduced motion the size changes at once and the content crossfades instead.
+	 */
+	function showRefusal(message: string) {
+		const from = holdHeight();
+		refusal = message;
+		void tick().then(() => {
+			if (!dock || refusal !== message || from <= 0) return;
+			const to = dock.getBoundingClientRect().height;
+			if (to - from < 0.5) return;
+			if ($prefersReducedMotion) {
+				dock.querySelector('.body')?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms('--dur-tight'), easing: cssVar('--ease-snap') });
+				return;
+			}
+			const node = dock;
+			node.style.overflow = 'hidden';
+			const grow = node.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: ms('--dur-standard'), easing: cssVar('--ease-snap') });
+			const release = () => node.style.removeProperty('overflow');
+			void grow.finished.then(release, release);
+		});
 	}
 
 	function finishAfterHold() {
@@ -249,8 +273,8 @@
 {/if}
 
 <style>
-	/* The docked card of the document review bar (.rb-dock): over the page's bottom edge, solid, top corners rounded, no divider line. */
-	.save-offer { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; container-type: inline-size; display: flex; flex-direction: column; justify-content: center; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); animation: dock-in var(--dur-standard) var(--ease-entrance) backwards; transition: opacity var(--dur-standard) var(--ease-snap); }
+	/* The docked card of the document review bar (.rb-dock): over the page's bottom edge, solid, top corners rounded, and the same hairline on its top and sides, so its edge shows on a white page. */
+	.save-offer { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; container-type: inline-size; display: flex; flex-direction: column; justify-content: center; border: 1px solid var(--border-subtle); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); animation: dock-in var(--dur-standard) var(--ease-entrance) backwards; transition: opacity var(--dur-standard) var(--ease-snap); }
 	.save-offer.fading { opacity: 0; }
 	@keyframes dock-in { from { opacity: 0; transform: translateY(var(--space-4)); } }
 	@keyframes dock-fade { from { opacity: 0; } }
