@@ -33,21 +33,31 @@ SETTLE_LIMIT = COMMAND_TIMEOUT
 ASKED = ("The person has been asked to approve filling the saved login for {site} ({username}). Nothing was "
          "filled; try again once they approve it.")
 NO_BROWSER = "No browser is open for this thread, so nothing was filled. Open the sign-in page first."
-NOT_CLEAN = ("The saved login for {site} wasn't filled, because an agent's script or browser change ran where "
-             "it could read the sign-in page.")
-UNKNOWN = ("The saved login for {site} was filled and sent, but the page didn't show whether the sign-in worked. "
-           "Take a snapshot to see where the page is.")
+NOT_CLEAN = ("The saved login for {site} wasn't filled: an agent's script or browser change, or another open window, "
+             "could reach the sign-in page, even after reloading it.")
+UNKNOWN = ("The saved login for {site} ({username}) was filled and sent, but the page didn't show whether the sign-in "
+           "worked. Take a snapshot to see where the page is.")
+# Every other status's line; each is formatted with the login's site and username.
 REFUSED = {
-    "no_field": "The saved login wasn't filled: this page doesn't show exactly one password field.",
-    "http_frame": "The saved login wasn't filled: the password field isn't on an https page.",
+    "no_field": ("The saved login for {site} wasn't filled: this page doesn't show exactly one password field. If it "
+                 "asks for the username first, enter {username}, go on to the password page and try again."),
+    "http_frame": "The saved login wasn't filled: the password field isn't on a secure (https) page.",
     "frame_origin": "The saved login for {site} wasn't filled: the password field belongs to another site.",
     "form_action": "The saved login for {site} wasn't filled: the sign-in form sends to another site.",
-    "changed": "The saved login wasn't filled: the sign-in form changed while it was being checked.",
-    "no_grant": "The saved login wasn't filled: the person's approval ended before it could be.",
-    "page": "The saved login wasn't filled: this page couldn't be checked.",
+    "insecure_action": "The saved login for {site} wasn't filled: the sign-in form doesn't send securely (https).",
+    "get_form": "The saved login for {site} wasn't filled: the sign-in form would put the password in the page address.",
+    "changed": "The saved login for {site} wasn't filled: the sign-in form changed while it was being checked.",
+    "no_grant": "The saved login for {site} wasn't filled: the person's approval ended before it could be used.",
+    "gone": "The saved login wasn't filled: it's no longer saved.",
+    "page": ("The saved login for {site} wasn't filled: the page didn't respond as expected. Take a snapshot to see "
+             "where it is."),
     "unsubmitted": ("The saved login for {site} was filled, but its form couldn't be sent. Take a snapshot and "
                     "use the page's sign-in button."),
 }
+# Statuses whose line leads the person's own sign-in step.
+_PERSON_SIGNS_IN = {"not_clean": NOT_CLEAN, "get_form": REFUSED["get_form"]}
+# The ends after which the sign-in's result is known and recorded by its own result function.
+_RESULT_KNOWN = frozenset({"signed_in", "rejected"})
 
 
 def _owner() -> Any:
@@ -62,7 +72,7 @@ async def fill_saved_login(thread_id: str, login_id: str) -> str:
     try:
         login = await asyncio.to_thread(saved_logins.get_login, login_id)
     except ValueError:
-        return REFUSED["no_grant"]
+        return REFUSED["gone"]
     owner = _owner()
     try:
         await owner._pin_native()
@@ -91,7 +101,10 @@ async def _ask(thread_id: str, login_id: str) -> str:
         if login.status != saved_logins.STATUS_OUT_OF_DATE:
             return text
         return await _person_step(_owner(), thread_id, login, text)
-    login = await asyncio.to_thread(saved_logins.get_login, login_id)
+    try:
+        login = await asyncio.to_thread(saved_logins.get_login, login_id)
+    except ValueError:
+        return REFUSED["gone"]
     return ASKED.format(site=login.site, username=login.username)
 
 
@@ -134,17 +147,32 @@ async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logi
         # Before anything is typed: this document under the filled-field allowlist, and the session under the
         # saved-sign-in command limit. An unread loader id counts as every document.
         browser_control.mark_saved_fill(thread_id, session, loader)
-        typed = await _type(cdp, form, thread_id, login)
-        if typed != "typed":
-            return typed
-        if await page.submit(cdp, form) not in {"enter", "clicked"}:
-            return "unsubmitted"
-        return await _settled(endpoint, domain, requests)
+        status = await _type(cdp, form, thread_id, login)
+        if status == "no_grant":
+            return status
+        try:
+            # From here the value may be in the page, so every end records a result exactly once.
+            if status == "typed":
+                status = "unsubmitted"
+                if await page.submit(cdp, form) in {"enter", "clicked"}:
+                    status = await _settled(endpoint, domain, requests)
+            return status
+        finally:
+            if status not in _RESULT_KNOWN:
+                await _record_unknown(thread_id, login)
     finally:
         await requests.stop()
 
 
+async def _record_unknown(thread_id: str, login: saved_logins.SavedLogin) -> None:
+    try:
+        await asyncio.to_thread(saved_login_results.fill_unknown, thread_id, login.id)
+    except Exception as exc:  # noqa: BLE001 - a failed audit write must not replace the fill's own result
+        log.warning("saved-login fill result couldn't be recorded: %s", type(exc).__name__)
+
+
 async def _type(cdp: browser_cdp.CdpClient, form: page.SignInForm, thread_id: str, login: saved_logins.SavedLogin) -> str:
+    """'no_grant' when nothing was read, so nothing was typed; else type_values's status, or 'page'."""
     text = await asyncio.to_thread(_saved_value, thread_id, login.id)
     if text is None:
         return "no_grant"
@@ -208,11 +236,10 @@ async def _result(owner: Any, thread_id: str, login: saved_logins.SavedLogin, st
     if status == "rejected":
         text = await asyncio.to_thread(saved_login_results.fill_failed, thread_id, login.id)
         return await _person_step(owner, thread_id, login, text)
-    if status == "not_clean":
-        return await _person_step(owner, thread_id, login, NOT_CLEAN.format(site=login.site))
-    if status == "unknown":
-        return UNKNOWN.format(site=login.site)
-    return REFUSED.get(status, REFUSED["page"]).format(site=login.site)
+    if status in _PERSON_SIGNS_IN:
+        return await _person_step(owner, thread_id, login, _PERSON_SIGNS_IN[status].format(site=login.site))
+    line = UNKNOWN if status == "unknown" else REFUSED[status]
+    return line.format(site=login.site, username=login.username)
 
 
 async def _person_step(owner: Any, thread_id: str, login: saved_logins.SavedLogin, lead: str) -> str:

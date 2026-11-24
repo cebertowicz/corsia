@@ -19,6 +19,7 @@ from host_access import (
 )
 from host_access.browser_session_state import BrowserSessionError
 from infra import key_store_values, saved_login_fills, saved_login_results, saved_logins
+from infra.database import get_db
 
 THREAD = "thread-fill"
 SITE = "https://example.com"
@@ -161,7 +162,7 @@ def _never_shown(w, caplog, *texts: str) -> None:
 
 def _results(monkeypatch) -> list[str]:
     called: list[str] = []
-    for name in ("fill_succeeded", "fill_failed"):
+    for name in ("fill_succeeded", "fill_failed", "fill_unknown"):
         def recording(*a, _real=getattr(saved_login_results, name), _name=name):
             called.append(_name)
             return _real(*a)
@@ -227,7 +228,7 @@ async def test_the_document_and_session_are_marked_and_the_approval_checked_just
 async def test_an_approval_that_ends_before_typing_types_nothing(world, caplog):
     world.grants = [True, False]
     text = await fill.fill_saved_login(THREAD, world.login_id)
-    assert text == fill.REFUSED["no_grant"] and "read" not in world.steps and not world.typed
+    assert text == fill.REFUSED["no_grant"].format(site=SITE) and "read" not in world.steps and not world.typed
 
 
 @pytest.mark.asyncio
@@ -254,11 +255,115 @@ async def test_a_rejected_sign_in_calls_only_fill_failed_and_gives_the_person_th
 
 
 @pytest.mark.asyncio
-async def test_a_result_the_page_never_showed_calls_neither_result_function(world, monkeypatch):
+async def test_a_result_the_page_never_showed_records_it_as_unknown(world, monkeypatch):
     called = _results(monkeypatch)
     world.outcome = "unknown"
-    assert await fill.fill_saved_login(THREAD, world.login_id) == fill.UNKNOWN.format(site=SITE)
-    assert called == []
+    assert await fill.fill_saved_login(THREAD, world.login_id) == fill.UNKNOWN.format(site=SITE, username=USER)
+    assert called == ["fill_unknown"]
+
+
+def _audit(login_id: str) -> list[str]:
+    db = get_db()
+    try:
+        return [row[0] for row in db.execute(
+            "SELECT result FROM saved_login_fill_audit WHERE login_id = ?", (login_id,)).fetchall()]
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("end", ["unknown", "unsubmitted", "type_changed", "type_raises", "submit_raises",
+                                 "settle_raises"])
+async def test_every_end_after_typing_began_without_a_known_result_writes_one_unknown_row(world, monkeypatch, end):
+    async def raises(*_args):
+        raise RuntimeError("down")
+
+    def answers(status):
+        async def answer(*_args):
+            return status
+        return answer
+
+    if end == "unknown":
+        world.outcome = "unknown"
+    elif end == "unsubmitted":
+        monkeypatch.setattr(page, "submit", answers("unsubmitted"))
+    elif end == "type_changed":
+        monkeypatch.setattr(page, "type_values", answers("changed"))
+    elif end == "type_raises":
+        monkeypatch.setattr(page, "type_values", raises)
+    elif end == "submit_raises":
+        monkeypatch.setattr(page, "submit", raises)
+    else:
+        monkeypatch.setattr(fill, "_settled", raises)
+    called = _results(monkeypatch)
+    await fill.fill_saved_login(THREAD, world.login_id)
+    assert called == ["fill_unknown"] and _audit(world.login_id) == ["unknown"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("outcome", "row"), [("signed_in", "filled"), ("rejected", "rejected")])
+async def test_a_known_result_writes_only_its_own_row(world, outcome, row):
+    world.outcome = outcome
+    await fill.fill_saved_login(THREAD, world.login_id)
+    assert _audit(world.login_id) == [row]
+
+
+@pytest.mark.asyncio
+async def test_nothing_typed_writes_no_row(world):
+    world.grants = [True, False]
+    await fill.fill_saved_login(THREAD, world.login_id)
+    assert _audit(world.login_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_unknown_record_keeps_the_fills_own_line(world, monkeypatch, caplog):
+    world.outcome = "unknown"
+
+    def broken(*_args):
+        raise ValueError(f"no login {world.sentinel}")
+
+    monkeypatch.setattr(saved_login_results, "fill_unknown", broken)
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == fill.UNKNOWN.format(site=SITE, username=USER)
+    _never_shown(world, caplog, text)
+
+
+@pytest.mark.asyncio
+async def test_a_login_no_longer_saved_says_so(world, monkeypatch):
+    def gone(*_args, **_kwargs):
+        raise ValueError("not saved")
+
+    monkeypatch.setattr(saved_logins, "get_login", gone)
+    assert await fill.fill_saved_login(THREAD, world.login_id) == fill.REFUSED["gone"]
+
+
+@pytest.mark.asyncio
+async def test_a_get_sign_in_form_is_refused_before_any_read_and_is_the_persons_step(world, caplog):
+    world.form = "get_form"
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    lead = fill.REFUSED["get_form"].format(site=SITE)
+    assert text == f"{lead} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
+    assert world.owner.declared == [f"Sign in to {SITE} yourself"]
+    assert "read" not in world.steps and "mark" not in world.steps and not world.typed
+    _never_shown(world, caplog, text)
+
+
+# Every status _fill can end in: find_form's refusals, type_values's and the fill's own.
+STATUSES = ["signed_in", "rejected", "not_clean", "unknown", "no_field", "http_frame", "frame_origin",
+            "form_action", "insecure_action", "get_form", "changed", "no_grant", "page", "unsubmitted"]
+
+
+@pytest.mark.asyncio
+async def test_every_status_has_its_own_line_and_none_falls_through(world):
+    login = saved_logins.get_login(world.login_id)
+    lines = {}
+    for status in STATUSES:
+        browser_control._saved_fills.clear()
+        lines[status] = await fill._result(world.owner, THREAD, login, status)
+    assert len(set(lines.values())) == len(STATUSES), lines
+    assert all("{" not in line for line in lines.values()), lines
+    with pytest.raises(KeyError):
+        await fill._result(world.owner, THREAD, login, "a-status-with-no-line")
 
 
 @pytest.mark.asyncio
@@ -325,17 +430,17 @@ async def test_a_requests_watch_that_fails_to_start_still_closes_its_socket(worl
     monkeypatch.setattr(page, "Requests", REAL_REQUESTS)
     monkeypatch.setattr(page, "CdpClient", Failing)
     text = await fill.fill_saved_login(THREAD, world.login_id)
-    assert text == fill.REFUSED["page"]
+    assert text == fill.REFUSED["page"].format(site=SITE)
     assert closed == [True] and "read" not in world.steps and not world.typed
     _never_shown(world, caplog, text)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refusal", ["no_field", "http_frame", "frame_origin", "form_action"])
+@pytest.mark.parametrize("refusal", ["no_field", "http_frame", "frame_origin", "form_action", "insecure_action"])
 async def test_a_form_that_fails_a_check_is_refused_with_a_fixed_line_before_anything_is_read(world, refusal):
     world.form = refusal
     text = await fill.fill_saved_login(THREAD, world.login_id)
-    assert text == fill.REFUSED[refusal].format(site=SITE)
+    assert text == fill.REFUSED[refusal].format(site=SITE, username=USER)
     assert "read" not in world.steps and "mark" not in world.steps and not world.typed
 
 

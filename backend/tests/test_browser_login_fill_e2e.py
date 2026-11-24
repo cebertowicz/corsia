@@ -247,12 +247,13 @@ async def test_a_form_whose_action_was_pointed_at_another_site_is_refused(browse
 @pytest.mark.asyncio
 async def test_a_password_field_that_turns_into_a_text_field_gets_nothing(browser, monkeypatch):
     with site("unused") as (origin, posts):
-        login_id = _save(browser, _admit_fixture(monkeypatch, origin))
+        site_origin = _admit_fixture(monkeypatch, origin)
+        login_id = _save(browser, site_origin)
         try:
             await _agent(browser, "open", f"{origin}/flips.html")
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
-            assert text == fill.REFUSED["changed"], text
+            assert text == fill.REFUSED["changed"].format(site=site_origin), text
             assert posts == []
             async with browser_cdp.CdpClient(await browser.owner.page_endpoint(browser.thread)) as cdp:
                 typed = await cdp.call("Runtime.evaluate", returnByValue=True,
