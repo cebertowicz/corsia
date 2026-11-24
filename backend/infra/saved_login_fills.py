@@ -55,7 +55,7 @@ ACTIVE = "active"
 
 _NO_REQUEST = "This sign-in request is closed. Ask the agent to try again if it still needs to sign in."
 _NO_GRANT = "This approval has ended."
-_NOT_CURRENT = "This request has new details. Review them before you approve."
+_NOT_CURRENT = "This request has new details. Review them, then approve or reject it."
 _NO_THREAD = "A fill request needs the agent's own thread."
 _OTHER_THREAD = "A fill request can only be made for the agent's own thread."
 _DURATION = f"Pick a duration from {MIN_GRANT_SECONDS} to {MAX_GRANT_SECONDS} seconds."

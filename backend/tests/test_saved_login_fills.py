@@ -166,7 +166,7 @@ def test_decisions_need_the_current_request_of_the_same_person(world):
     row = fills.request_fill(AGENT_THREAD, world["login"])
     with pytest.raises(fills.FillApprovalNotFound):
         _approve(row, user_id=OTHER_PERSON)
-    with pytest.raises(fills.FillApprovalError, match="^This request has new details. Review them before you approve.$"):
+    with pytest.raises(fills.FillApprovalError, match="^This request has new details. Review them, then approve or reject it.$"):
         fills.approve_fill(row["id"], user_id=PERSON, revision=row["revision"] + 1,
                            application_hash=row["application_hash"], duration_seconds=60)
     with pytest.raises(fills.FillApprovalError):

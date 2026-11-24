@@ -1,40 +1,26 @@
 import { width } from '$lib/accountAddress';
 
 /**
- * The ways a saved login's site can read on one line, longest first. A shorter one drops whole segments from
- * the middle: the scheme ("https://") and each subdomain label are segments, the cut falls only between them,
- * and the registrable domain (with any port) always stays whole at the end. "…" marks the cut, with no spaces.
+ * The ways a saved login's site can read on one line in the chat entry, longest first. The scheme is never
+ * shown (a fill is https only; the drawer shows the full address). A shorter form drops whole subdomain labels
+ * from the front and keeps the end, so the cut never falls inside a label and the registrable domain (with any
+ * port) always stays whole. "…" marks the cut, with no space after it.
  *
- * The backend names the registrable domain from the Public Suffix List. Without one (an IP address, or a host
- * it couldn't name), the whole host is the tail, as the browser pane's address does.
+ * The backend names the registrable domain from the Public Suffix List. Without one (for an IP address it is
+ * the address itself), the whole host is the tail, as the browser pane's address does.
  */
 export function siteLabels(site: string, domain: string | null | undefined): string[] {
 	const match = /^([a-z][a-z0-9+.-]*:\/\/)?([^/:]+)(:\d+)?(.*)$/i.exec(site);
 	if (!match) return [site];
-	const [, scheme = '', host, port = '', rest] = match;
+	const [, , host, port = '', rest] = match;
 	const inside = !!domain && (host === domain || host.endsWith(`.${domain}`));
 	const tailHost = inside ? domain! : host;
 	const labels = inside && host !== domain ? host.slice(0, host.length - domain!.length - 1).split('.') : [];
-	const segments = [...(scheme ? [scheme] : []), ...labels.map((label) => `${label}.`)];
 	const tail = `${tailHost}${port}${rest}`;
-	const out = [`${segments.join('')}${tail}`];
-	const seen = new Set(out);
-	const cut: Array<{ text: string; head: number }> = [];
-	// Keep `head` segments from the front and `back` from the end; at least one segment goes.
-	for (let head = segments.length; head >= 0; head--) {
-		for (let back = segments.length - head - 1; back >= 0; back--) {
-			const front = segments.slice(0, head).join('').replace(/\.$/, '');
-			const end = segments.slice(segments.length - back).join('');
-			cut.push({ text: `${front}…${end}${tail}`, head });
-		}
-	}
-	// Longest first; between two of a length, the one keeping more of the front.
-	cut.sort((a, b) => b.text.length - a.text.length || b.head - a.head);
-	for (const { text } of cut) {
-		if (!seen.has(text)) {
-			seen.add(text);
-			out.push(text);
-		}
+	const out = [`${labels.map((label) => `${label}.`).join('')}${tail}`];
+	// Drop one more label from the front each time, down to the domain alone.
+	for (let kept = labels.length - 1; kept >= 0; kept--) {
+		out.push(`…${labels.slice(labels.length - kept).map((label) => `${label}.`).join('')}${tail}`);
 	}
 	return out;
 }
@@ -42,6 +28,7 @@ export function siteLabels(site: string, domain: string | null | undefined): str
 /**
  * Show the longest of `labels` that fits the element's width on one line; the last one if none does.
  * The element's own text is set here, so it renders empty, and it is refitted whenever its width changes.
+ * It also sets `--label-full` to the longest label's width, so a layout can give the whole label room first.
  */
 export function fitLabel(node: HTMLElement, labels: string[]) {
 	let current = labels;
@@ -49,6 +36,8 @@ export function fitLabel(node: HTMLElement, labels: string[]) {
 	const fit = () => {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(() => {
+			const full = `${Math.ceil(width(current[0] ?? '', getComputedStyle(node)))}px`;
+			if (node.style.getPropertyValue('--label-full') !== full) node.style.setProperty('--label-full', full);
 			const room = node.clientWidth;
 			// Not laid out (hidden, or not shown yet): keep the whole site until there is room to measure.
 			if (!room) {

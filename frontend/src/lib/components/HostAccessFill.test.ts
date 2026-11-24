@@ -149,7 +149,9 @@ it('shows a pending fill on the strip as the agent and site, with status as text
 	expect(button.textContent).toContain('Saved login');
 	expect(button.querySelector('.pending-owner')?.textContent).toBe('Bookkeeper');
 	expect(button.querySelector('.pending-site')?.getAttribute('title')).toBe(fill().site);
-	expect(button.querySelector('.pending-site')?.textContent).toBe(fill().site);
+	// The entry shows the site without its scheme; the title and the drawer keep the full address.
+	expect(button.querySelector('.pending-site')?.textContent).toBe(fill().site.replace(/^https:\/\//, ''));
+	expect(button.querySelector('.pending-site')?.textContent).not.toContain('://');
 	expect(button.textContent).toContain('Needs approval');
 	expect(host.querySelector('.pill')).toBeNull();
 	button.click();
