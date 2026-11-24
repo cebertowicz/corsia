@@ -31,7 +31,8 @@ SAVED_FILL_SESSION_REFUSED = (
     "every page: open, reload, snapshot (or snapshot -i), get title, get url, click, fill, wait (a time, an "
     "element or --load networkidle), screenshot (or screenshot --full; not on the page the login was filled on) "
     "and tab (but not tab new or tab close). Scripts, reading field values, network routes and every other "
-    "command are refused."
+    "command are refused. If the task needs a command that isn't on this list, tell the person in chat what you "
+    "need it for."
 )
 _CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
 logger = logging.getLogger(__name__)

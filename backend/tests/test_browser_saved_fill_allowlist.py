@@ -180,7 +180,8 @@ def test_the_saved_fill_lines_say_what_holds_and_until_when():
     page, withheld, session = (browser_control.SAVED_FILL_REFUSED, browser_control.SAVED_FILL_SNAPSHOT_WITHHELD,
                                browser_session_commands.SAVED_FILL_SESSION_REFUSED)
     for line in (page, withheld, session):
-        assert "A saved login was filled" in line and "person" not in line
+        # The server filled the field, so no line says the person did.
+        assert "A saved login was filled" in line and "person filled" not in line
     assert "on this page, so until you open another page or reload this one" in page
     # Only a screenshot or a CSS-selector target passes the session limit and then meets the page's own refusal.
     assert "screenshots are refused here and each element must be named by its @ref" in page
@@ -189,6 +190,8 @@ def test_the_saved_fill_lines_say_what_holds_and_until_when():
     assert "on this page" in withheld
     assert "in this browser session, so until the session ends only these commands run, on every page" in session
     assert "Scripts, reading field values, network routes and every other command are refused." in session
+    # The agent can't end the session itself, so the line names the next step.
+    assert session.endswith("tell the person in chat what you need it for.")
 
 
 # --- The session ----------------------------------------------------------------------------------------------
