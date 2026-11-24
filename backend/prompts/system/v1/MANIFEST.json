@@ -232,10 +232,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 3272,
+      "bytes": 3297,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/priorities-files.md",
-      "sha256": "7947a46d47a13f112960cb8eac26b52e5add873d23db9408a68027454961a5d2"
+      "sha256": "124a8fff936bc01bd3a94d8b95a7c97e145dc8fd3af5d0f91ed6c281e14f65da"
     },
     {
       "bytes": 7206,
