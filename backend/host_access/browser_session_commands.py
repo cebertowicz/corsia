@@ -70,11 +70,14 @@ async def preserve_cancelled(owner: Any, runtime: Any) -> None:
     await asyncio.shield(owner._close_one(runtime))
 
 
-def restart_notice(notices: set[str], thread_id: str, notice: str | None) -> str | None:
-    if thread_id not in notices:
+SESSION_RESTARTED = "The browser restarted; you may need to sign in again."
+
+
+def restart_notice(notices: dict[str, str], thread_id: str, notice: str | None) -> str | None:
+    """Prefix a fresh session's notice, once, with why its browser started again."""
+    restart = notices.pop(thread_id, None)
+    if restart is None:
         return notice
-    notices.discard(thread_id)
-    restart = "The browser restarted; you may need to sign in again."
     return f"{restart} {notice}" if notice else restart
 
 
@@ -183,14 +186,19 @@ async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_w
     """Close a session whose Chrome died or was quit, and admit a fresh one on the same saved sign-in.
 
     Its agent-browser daemon outlives Chrome, so without this every later command fails its page check.
+    The first command to see the dead browser claims the restart: it alone queues the notice, which the
+    fresh record takes once, and reports it. Another command racing it only waits on the same close.
     """
     record = runtime.record
-    logger.info("managed Chrome exited outside a close; starting the browser again")
+    claimed = owner._sessions.get(record.thread_id) is runtime and record.thread_id not in owner._restart_notices
+    if claimed:
+        logger.info("managed Chrome exited outside a close; starting the browser again")
+        owner._restart_notices[record.thread_id] = _CHROME_RESTARTED
     await owner._close_runtime(runtime)
     fresh = await owner._admit(record.thread_id, lease_id=lease_id or record.lease_id,
                                show_window=record.shared if show_window is None else show_window, session=session)
-    notice = fresh.record.profile_notice
-    fresh.record = replace(fresh.record, profile_notice=f"{_CHROME_RESTARTED} {notice}" if notice else _CHROME_RESTARTED)
+    if claimed:
+        await asyncio.to_thread(emit_product_event, "browser_pane", "chrome_restarted", thread_id=record.thread_id)
     return fresh
 
 
