@@ -32,15 +32,9 @@ _NO_THREAD = "Couldn’t find this chat, so no login can be saved for it."
 _BAD_BODY = "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."
 #: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
 _NO_LOGIN_TO_DELETE = "There’s no saved login to delete."
-#: Save's answer to a failure the person can't act on; its cause goes to the log, never to the person.
+#: Save's answer to any other key store refusal. The offer is kept, so Save can be pressed again;
+#: the refusal's own fixed text goes to the log with the thread id, never to the person.
 _SAVE_FAILED = "Couldn’t save the login. Try again."
-#: Save's refusals the person can act on, answered with 409 and their own text.
-_SAVE_REFUSALS = frozenset({
-    saved_login_offers.NO_OFFER,
-    saved_login_offers._SESSION_REFUSAL,
-    saved_login_offers._OWN_SITE_REFUSAL,
-    saved_logins._SITE_REFUSAL,
-})
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 
@@ -85,18 +79,19 @@ async def get_offer(thread_id: str, user: dict = Depends(require_human_user)) ->
 async def save_offer(request: Request, user: dict = Depends(require_person_write)) -> dict:
     """Save the thread's confirmed offer as the signed-in person, then drop it.
 
-    409 with the refusal's own text when no confirmed offer is held, the browser
-    session closed, the site is CORSIA itself or its address isn't https://; any
-    other failure is 500 with fixed text, and only its type is logged.
+    409 with ``NO_OFFER`` when no confirmed offer is held, which includes a
+    closed or relaunched browser; 500 with fixed text for any other key store
+    refusal, the offer kept and the refusal's fixed text logged; 400 for a bad
+    body; 404 when the person has no such chat.
     """
     thread_id = await _thread_id(request)
     key = await _session_key(thread_id, user)
     try:
         await run_in_db(saved_login_offers.save_offer, key, saved_by=user["id"])
     except KeyStoreError as refused:
-        if str(refused) in _SAVE_REFUSALS:
+        if str(refused) == saved_login_offers.NO_OFFER:
             raise HTTPException(409, str(refused)) from None
-        log.error("Saving a login for thread %s failed: %s", thread_id, type(refused).__name__)
+        log.error("Saving a login for thread %s failed: %s", thread_id, refused)
         raise HTTPException(500, _SAVE_FAILED) from None
     return {"saved": True}
 
