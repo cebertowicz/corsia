@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane, browser_pane_state
+from host_access import browser_cdp, browser_control, browser_dom_frames, browser_dom_write, browser_pane, browser_pane_state
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -18,6 +18,16 @@ def _no_presence_state():
     yield
     for registry in (browser_pane_state._panes, browser_pane_state._pane_reports, browser_pane_state._agent_seen):
         registry.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_frame_listing(monkeypatch):
+    # These page fakes contain no frames and do not implement flattened CDP sessions.
+    async def empty_walk(page):
+        page.attached = []
+        return browser_dom_frames.FrameWalk([], 0)
+
+    monkeypatch.setattr(browser_dom_write, "walk_frames", empty_walk)
 
 
 def _owner(monkeypatch, password_page):

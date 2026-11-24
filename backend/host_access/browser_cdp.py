@@ -347,8 +347,7 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
 
 def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
-    parsed = urlparse(browser_endpoint)
-    listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
+    listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
     try:
         with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
             targets = json.load(response)
@@ -358,8 +357,7 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
         raise BrowserSessionError("This page couldn't be checked")
     pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
     if expected_url:
-        pages.sort(key=lambda target: (target.get("url") != expected_url,
-                                       expected_title is not None and target.get("title") != expected_title))
+        pages.sort(key=lambda page: (page.get("url") != expected_url, expected_title not in (None, page.get("title"))))
     for target in pages:
         endpoint = target.get("webSocketDebuggerUrl")
         if isinstance(endpoint, str) and endpoint.startswith("ws"):
@@ -367,17 +365,19 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
     raise BrowserSessionError("This page couldn't be checked")
 
 
-async def border_rect(cdp: browser_cdp_frames.Session, **node: object) -> Rect | None:
+async def border_rect(cdp: browser_cdp_frames.Session, *, strict: bool = False, **node: object) -> Rect | None:
     """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
         model = await cdp.call("DOM.getBoxModel", **node)
+        border = model.get("model", {}).get("border")
+        if not isinstance(border, list) or len(border) < 8:
+            raise BrowserSessionError(browser_cdp_frames.PAGE_CHECK_FAILED)
+        x, y = border[0], border[1]
+        return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
     except BrowserSessionError:
+        if strict:
+            raise
         return None
-    border = model.get("model", {}).get("border")
-    if not isinstance(border, list) or len(border) < 8:
-        return None
-    x, y = border[0], border[1]
-    return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
 
 
 async def _visible(cdp: browser_cdp_frames.Session, node: int) -> bool:
