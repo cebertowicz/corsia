@@ -35,10 +35,10 @@ from tests.test_google_sign_in import (  # noqa: F401  (fixtures)
     conductor,
     google,
 )
-from tools import action_delivery, action_gate, gmail_backend, google_email
+from tools import google_email
 from tools.action_drafts import claim_for_send, create_draft, mark_sent, record_draft
-from tools.action_gate import Approved
-from tools.google_email import EmailDraftTool, EmailSendTool
+
+from tools.google_email import EmailDraftTool
 
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 SIGNATURE_HTML = "<div>Sam Lee<br>CORSIA &amp; Co</div><div><br></div>"
@@ -130,14 +130,8 @@ async def mail(google, conductor, client_file, tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def approve(monkeypatch):
-    """Stand in for an approving gate: the thread's draft row and the file's current bytes."""
-
-    async def approved(kind, draft_id, revision):
-        row = get_db().execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
-        return Approved(dict(row), (config.WORKSPACE / row["path"]).read_bytes())
-
-    monkeypatch.setattr(google_email, "check_action", approved)
+def approve():
+    """The person now approves by clicking Send now."""
 
 
 async def _draft(mail: Gmail, **fields) -> dict:
@@ -151,10 +145,11 @@ def _row(draft_id: str) -> dict:
     return dict(get_db().execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone())
 
 
-async def _send(mail: Gmail, saved: dict) -> str:
-    return await EmailSendTool().execute(
-        _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
-    )
+async def _send(mail: Gmail, saved: dict) -> dict:
+    from api.email_drafts import SendNow, send_now
+    from tests.test_email_drafts_api import _artifact, _owner
+
+    return await send_now(_artifact(saved), SendNow(text=(mail.workspace / saved["path"]).read_text()), _owner(mail.thread))
 
 
 def _mime(body: dict):
@@ -256,7 +251,7 @@ async def test_a_reply_draft_saved_with_the_old_in_reply_to_line_still_sends_thr
     from connections.mail.draft_format_conversion import convert_open_drafts
     await convert_open_drafts()
     assert "In reply to:" not in path.read_text()
-    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    assert await _send(mail, saved) == {"state": "sent"}
     message = _mime(mail.sends[0])
     assert message["In-Reply-To"] == "<abc@mail.example>" and "In reply to" not in message.get_body(("plain",)).get_content()
 
@@ -363,7 +358,7 @@ async def test_send_re_checks_reach_and_uses_the_drafts_own_account(mail, approv
     assert json.loads(_row(saved["draft_id"])["target_json"])["account_id"] == mail.account
     monkeypatch.setattr(connected_accounts, "account_reaches_thread", lambda *args, **kwargs: False)
     out = await _send(mail, saved)
-    assert out == f"Error: Not sent: {NONE_AVAILABLE}"
+    assert out == {"state": "failed", "reason": NONE_AVAILABLE}
     assert mail.sent_requests() == [] and _row(saved["draft_id"])["state"] == "open"
 
 
@@ -387,28 +382,20 @@ async def test_a_draft_saved_before_accounts_is_never_sent_from_a_guessed_accoun
     db = get_db()
     db.execute("UPDATE action_drafts SET target_json='{}' WHERE id=?", (saved["draft_id"],))
     db.commit()
-    assert await _send(mail, saved) == f"Error: {google_email.NO_ACCOUNT}"
+    assert await _send(mail, saved) == {"state": "failed", "reason": "this draft isn't tied to an email account"}
     assert mail.sent_requests() == []
 
 
 # --- email_send ----------------------------------------------------------------------------
 
 
-async def test_send_without_a_live_turn_sends_nothing(mail):
-    saved = await _draft(mail)
-    out = await _send(mail, saved)
-    assert out == f"Error: {action_gate.NO_TURN}"
-    assert mail.sent_requests() == []
-    assert _row(saved["draft_id"])["state"] == "open"
+
 
 
 async def test_send_builds_the_message_from_the_approved_bytes_and_marks_it_sent(mail, approve):
     saved = await _draft(mail, cc=["pat@example.com"], reply_to_message_id="m-100")
-    out = json.loads(await _send(mail, saved))
-    assert out == {
-        "sent_message_id": "sent-1", "thread_id": f"google:{mail.account}:thread:t-9",
-        "account_id": mail.account,
-    }
+    out = await _send(mail, saved)
+    assert out == {"state": "sent"}
     [request] = mail.sent_requests()
     assert request.headers["authorization"] == f"Bearer {ACCESS}"
     body = mail.sends[0]
@@ -431,20 +418,7 @@ async def test_send_builds_the_message_from_the_approved_bytes_and_marks_it_sent
     assert row["state"] == "sent" and row["external_id"] == "sent-1" and row["sent_at"]
 
 
-async def test_the_message_carries_the_bytes_the_gate_approved_not_a_second_read(mail, monkeypatch):
-    saved = await _draft(mail, body="Approved text.")
-    approved_text = (mail.workspace / saved["path"]).read_bytes()
-    (mail.workspace / saved["path"]).write_text("To: evil@example.com\nSubject: Swapped\n\nSwapped text.\n")
 
-    async def gate(kind, draft_id, revision):
-        return Approved(_row(draft_id), approved_text)
-
-    monkeypatch.setattr(google_email, "check_action", gate)
-    await _send(mail, saved)
-    message = _mime(mail.sends[0])
-    assert message["To"] == "sam@example.com" and message["Subject"] == "Lunch"
-    plain = message.get_body(preferencelist=("plain",)).get_content()
-    assert "Approved text." in plain and "Swapped" not in plain
 
 
 async def test_a_send_that_never_left_returns_the_draft_to_open(mail, approve):
@@ -452,18 +426,18 @@ async def test_a_send_that_never_left_returns_the_draft_to_open(mail, approve):
         mail.send_mode = mode
         saved = await _draft(mail, subject=f"Lunch {mode}")
         out = await _send(mail, saved)
-        assert out.startswith("Error: Not sent:"), out
+        assert out["state"] == "failed" and out["reason"], out
         assert _row(saved["draft_id"])["state"] == "open"
     # Once Google is reachable again the same draft goes out.
     mail.send_mode = "ok"
-    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    assert await _send(mail, saved) == {"state": "sent"}
 
 
 async def test_a_sign_in_google_refuses_before_the_send_leaves_the_draft_open(mail, approve):
     saved = await _draft(mail)
     mail.fake.refresh_status = 400
     out = await _send(mail, saved)
-    assert out == f"Error: Not sent: {google_client.SIGN_IN_RECOVERY}"
+    assert out == {"state": "failed", "reason": google_client.SIGN_IN_RECOVERY}
     assert mail.sent_requests() == []
     assert _row(saved["draft_id"])["state"] == "open"
 
@@ -473,25 +447,15 @@ async def test_a_send_whose_outcome_is_unknown_stays_claimed_and_is_not_repeated
     mail.send_mode = mode
     saved = await _draft(mail)
     out = await _send(mail, saved)
-    assert out == f"Error: {gmail_backend.EMAIL_UNCONFIRMED}"
+    assert out == {"state": "unconfirmed"}
     assert _row(saved["draft_id"])["state"] == "sending"
     mail.send_mode = "ok"
     again = await _send(mail, saved)
-    assert again == f"Error: {google_email.STILL_SENDING}"
+    assert again == {"state": "sending"}
     assert len(mail.sent_requests()) == 1
 
 
-async def test_a_lost_claim_race_sends_nothing(mail, approve, monkeypatch):
-    saved = await _draft(mail)
 
-    def lost(draft_id, **kwargs):
-        from tools.action_drafts import DraftError
-
-        raise DraftError("The draft is not open.")
-
-    monkeypatch.setattr(action_delivery, "claim_for_send", lost)
-    assert await _send(mail, saved) == f"Error: {google_email.STILL_SENDING}"
-    assert mail.sent_requests() == []
 
 
 async def test_a_from_line_that_is_not_the_connected_account_sends_nothing(mail, approve):
@@ -499,10 +463,7 @@ async def test_a_from_line_that_is_not_the_connected_account_sends_nothing(mail,
     path = mail.workspace / saved["path"]
     path.write_text(path.read_text().replace(f"From: {EMAIL}", "From: someone.else@example.com"))
     out = await _send(mail, saved)
-    assert out == (
-        "Error: Not sent: the From line doesn't match the email account this draft was written "
-        f"from ({EMAIL}). Save the draft again with email_draft and show the person."
-    )
+    assert out == {"state": "failed", "reason": f"the From line doesn't match the account the draft was written from ({EMAIL})"}
     assert mail.sent_requests() == []
     assert _row(saved["draft_id"])["state"] == "open"
 
@@ -511,7 +472,7 @@ async def test_from_is_compared_without_case_and_never_chooses_the_sender(mail, 
     saved = await _draft(mail)
     path = mail.workspace / saved["path"]
     path.write_text(path.read_text().replace(f"From: {EMAIL}", f"From: {EMAIL.upper()}"))
-    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    assert await _send(mail, saved) == {"state": "sent"}
     assert "from" not in {key.lower() for key in _mime(mail.sends[0]).keys()}
 
 
@@ -520,14 +481,14 @@ async def test_a_document_without_a_from_line_still_sends(mail, approve):
     path = mail.workspace / saved["path"]
     path.write_text(path.read_text().replace(f"From: {EMAIL}\n", "", 1))
     assert "From:" not in path.read_text().split("\n\n")[0]
-    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    assert await _send(mail, saved) == {"state": "sent"}
 
 
 async def test_a_document_that_is_not_in_draft_format_is_refused_before_the_claim(mail, approve):
     saved = await _draft(mail)
     path = mail.workspace / saved["path"]
     path.write_text("Subject: only\n\nNo recipient.\n")
-    assert await _send(mail, saved) == f"Error: {google_email.BAD_DOCUMENT}"
+    assert (await _send(mail, saved))["state"] == "failed"
     assert _row(saved["draft_id"])["state"] == "open"
     assert mail.sent_requests() == []
 
@@ -540,7 +501,7 @@ async def test_a_line_break_in_a_stored_threading_header_cannot_add_a_header(mai
         "UPDATE action_drafts SET target_json=? WHERE id=?", (json.dumps(target), saved["draft_id"]),
     )
     get_db().commit()
-    assert await _send(mail, saved) == f"Error: {google_email.BAD_DOCUMENT}"
+    assert (await _send(mail, saved))["state"] == "failed"
     assert mail.sent_requests() == []
 
 
@@ -549,13 +510,13 @@ async def test_no_google_secret_reaches_a_result_or_a_log(mail, approve, caplog)
     outputs = []
     saved = await _draft(mail, reply_to_message_id="m-100")
     outputs.append(json.dumps(saved))
-    outputs.append(await _send(mail, saved))
+    outputs.append(json.dumps(await _send(mail, saved)))
     mail.send_mode = "500"
     again = await _draft(mail, subject="Second")
-    outputs.append(await _send(mail, again))
+    outputs.append(json.dumps(await _send(mail, again)))
     third = await _draft(mail, subject="Third")
     mail.fake.refresh_status = 400
-    outputs.append(await _send(mail, third))
+    outputs.append(json.dumps(await _send(mail, third)))
     blob = "\n".join(outputs) + caplog.text
     for secret in (ACCESS, REFRESH, SECRET):
         assert secret not in blob
@@ -628,19 +589,7 @@ def test_record_draft_replaces_the_target_only_when_given(isolated_db):
     assert row["recorded_revision"] == document_revision(b"three")
 
 
-async def test_the_agent_is_told_to_send_only_when_the_person_says_to(mail):
-    from tools.catalog_entries import TOOL_CATALOG
 
-    sentence = (
-        "Show the person the draft (link its path), end your turn, and call email_send only when "
-        "their reply says to send it; if they ask for changes, save again with email_draft and "
-        "show them the new version."
-    )
-    assert sentence in EmailDraftTool().description
-    assert "Returns draft_id and revision, which email_send needs." in EmailDraftTool().description
-    assert "latest message says to send this draft" in EmailSendTool().description
-    assert (await _draft(mail))["next"] == sentence
-    assert TOOL_CATALOG["email_send"].summary == "Send a saved email draft after the person says to send it"
 
 
 async def test_notes_live_in_the_record_and_compose_writes_only_email_headers(mail):

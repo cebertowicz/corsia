@@ -1,6 +1,7 @@
 """Additional guarded mail journeys through the real tools and fake providers."""
 import json
 from email import message_from_bytes, policy
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -10,7 +11,7 @@ from tests.test_google_email import GMAIL, THREADED, _draft as gmail_draft, _row
 from mailhost_helpers import authority, env, servers  # noqa: F401
 from test_mailhost_send import _draft as host_draft, _row as host_row, _send, make_host  # noqa: F401
 from test_mailhost_threads_folders_invites import ORIGINAL, _id
-from tools.google_email import EmailDraftTool, EmailSendTool
+from tools.google_email import EmailDraftTool
 from tools.reviewed_drafts import working_root
 
 pytestmark = pytest.mark.asyncio
@@ -37,7 +38,7 @@ async def test_gmail_warning_is_in_saved_draft(mail):
     assert not mail.sends
 
 
-async def test_gmail_reports_returned_thread_mismatch(mail, approve):
+async def test_gmail_reports_returned_thread_mismatch(mail, approve, monkeypatch):
     provider_state(mail, [THREADED])
     saved = await gmail_draft(mail, to=[], reply_to_message_id='m-100')
     inner = mail.fake.handler
@@ -48,9 +49,17 @@ async def test_gmail_reports_returned_thread_mismatch(mail, approve):
             return httpx.Response(200, json={'id': 'sent-1', 'threadId': 'another-thread'})
         return inner(request)
     mail.fake.handler = handler
-    result = json.loads(await EmailSendTool().execute(_thread_id=mail.thread, draft_id=saved['draft_id'], revision=saved['revision']))
-    assert 'different thread' in result['note']
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr('events.delivery.deliver_to_thread', notice)
+    from api.email_drafts import SendNow, send_now
+    from tests.test_email_drafts_api import _artifact, _owner
+
+    text = (mail.workspace / saved['path']).read_text()
+    result = await send_now(_artifact(saved), SendNow(text=text), _owner(mail.thread))
+    assert result == {'state': 'sent'}
     assert len(mail.sends) == 1 and mail.sends[0]['threadId'] == 't-9'
+    notice.assert_awaited_once()
+    assert notice.await_args.args[2].endswith('The email was sent, but Gmail returned a different thread than the reply target.')
 
 
 async def test_host_warning_is_in_saved_draft(make_host):
@@ -110,7 +119,7 @@ async def test_host_detected_font_plain_alternative_and_attachment_send(make_hos
     assert [a['name'] for a in target['attachments']] == ['report.txt']
     assert 'Attachment:' not in document
     result = await _send(host, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(host.built.smtp.sent) == 1
     message = message_from_bytes(host.built.smtp.sent[0][1], policy=policy.default)
     html = message.get_body(preferencelist=('html',)).get_content().lower()

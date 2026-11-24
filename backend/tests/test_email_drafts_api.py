@@ -27,7 +27,7 @@ from tests.test_google_email import (  # noqa: F401  (fixtures)
     client_file,
     conductor,
     google,
-    mail,
+    mail as mail,
 )
 
 
@@ -335,14 +335,13 @@ async def test_only_the_draft_record_makes_a_file_an_email_draft(mail):
     copy = path.with_name("copy.md")
     copy.write_text(path.read_text(), encoding="utf-8")
     assert read_document(str(copy), user, None, mail.thread)["email_draft"] is None
-    # Once sent or discarded it is history, kept in the format it was saved in, so it opens as that file.
+    # Sent history remains an email view and opens read-only.
     db = get_db()
     try:
         db.execute("UPDATE action_drafts SET state='sent' WHERE id=?", (saved["draft_id"],))
         db.commit()
     finally:
         db.close()
-    assert read_document(str(path), user, None, mail.thread)["email_draft"] is None
-    with pytest.raises(HTTPException) as sent:
-        await draft_context(_artifact(saved), _owner(mail.thread))
-    assert sent.value.status_code == 404
+    loaded = read_document(str(path), user, None, mail.thread)
+    assert loaded["email_draft"]["state"] == "sent" and loaded["writable"] is False
+    assert (await draft_context(_artifact(saved), _owner(mail.thread)))["state"] == "sent"

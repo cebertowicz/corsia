@@ -1,4 +1,4 @@
-"""Microsoft gated delivery lifecycle tests with Graph mocked at the HTTP boundary."""
+"""Microsoft delivery lifecycle tests with Graph mocked at the HTTP boundary."""
 from __future__ import annotations
 
 import json
@@ -10,22 +10,21 @@ import httpx
 import pytest
 from jsonschema import ValidationError, validate
 
+from api.email_drafts import SendNow, send_now
 from connections.connected_accounts import store_credentials
 from connections.microsoft import calendar, client
 from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE, SERVICE_UNAVAILABLE
 from infra.database import get_db
+from registry.service import register_write
 from delegation_fixtures import deleg_db  # noqa: F401
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
 from tests.test_microsoft_refresh import Response, connect
-from tools import action_delivery, microsoft_actions, microsoft_calendar_invites
+from tools import action_delivery, microsoft_calendar_invites
 from tools.action_gate import Approved
 from tools.action_drafts import create_draft
 from tools.microsoft_actions import (
-    MAIL_STILL_SENDING,
-    MAIL_UNCONFIRMED,
     MicrosoftCalendarListTool,
     MicrosoftMailDraftTool,
-    MicrosoftMailSendTool,
 )
 from tools.microsoft_calendar_invites import (
     CALENDAR_STILL_SENDING,
@@ -59,25 +58,31 @@ def _row(draft_id: str) -> dict[str, Any]:
     return dict(get_db().execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone())
 
 
-async def _no_designated(_kwargs: dict[str, Any]) -> None:
-    return None
-
-
 async def _token(_account: str) -> str:
     return "access"
 
 
 @pytest.fixture
 def microsoft(deleg_db, workspace, monkeypatch):  # noqa: F811
+    import events.delivery
     from infra import config
+    from infra.corsia_agent import set_corsia_agent
     from tools import sandbox_config
 
     # The workspace root and the process's workspace selection name one root, as they do in production.
     monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace))
     monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
     account = connect()
-    monkeypatch.setattr(microsoft_actions, "_designated", _no_designated)
+    set_corsia_agent(THREAD, db=deleg_db)
     monkeypatch.setattr(client, "access_token", _token)
+
+    notices: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    async def notice(*args: object, **kwargs: object) -> bool:
+        notices.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(events.delivery, "deliver_to_thread", notice)
     return account
 
 
@@ -95,6 +100,16 @@ async def _mail_draft(account: str) -> dict[str, Any]:
     )
     assert not result.startswith("Error:"), result
     return json.loads(result)
+
+
+async def _send_mail(saved: dict[str, Any]) -> dict[str, Any]:
+    from infra import config
+
+    path = (config.WORKSPACE / saved["path"]).resolve()
+    registered = register_write(THREAD, str(path), notify=False)
+    assert registered is not None
+    user_id = get_db().execute("SELECT user_id FROM threads WHERE id=?", (THREAD,)).fetchone()["user_id"]
+    return await send_now(registered["id"], SendNow(text=path.read_text()), {"id": user_id})
 
 
 async def _calendar_draft(
@@ -239,68 +254,62 @@ def _approve(monkeypatch: pytest.MonkeyPatch) -> None:
         from infra import config
         return Approved(row, (config.WORKSPACE / row["path"]).read_bytes())
 
-    monkeypatch.setattr(microsoft_actions, "check_action", approved)
     monkeypatch.setattr(microsoft_calendar_invites, "check_action", approved)
 
 
 async def test_mail_send_carries_cc_and_refuses_mismatched_from_before_graph(microsoft, monkeypatch):
-    _approve(monkeypatch)
     calls = _graph(monkeypatch, [Response(202, {})])
-    saved = await _mail_draft(microsoft)
+    token_accounts = []
 
-    sent = json.loads(await MicrosoftMailSendTool().execute(
-        _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
-    ))
-    assert sent == {"sent": True, "account_id": microsoft}
+    async def token_for(account_id):
+        token_accounts.append(account_id)
+        return "access"
+
+    monkeypatch.setattr(client, "access_token", token_for)
+    saved = await _mail_draft(microsoft)
+    assert await _send_mail(saved) == {"state": "sent"}
+    assert token_accounts == [microsoft]
     assert calls[0]["json"]["message"]["ccRecipients"] == [{"emailAddress": {"address": "cc@example.test"}}]
 
     saved = await _mail_draft(microsoft)
     from infra import config
     path = config.WORKSPACE / saved["path"]
     path.write_text(path.read_text().replace("From: mail@example.test", "From: other@example.test"))
-    assert await MicrosoftMailSendTool().execute(
-        _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
-    ) == "Error: Not sent: the From line does not match the Microsoft account this draft was written from."
+    assert await _send_mail(saved) == {
+        "state": "failed", "reason": "the From line doesn't match the account the draft was written from (mail@example.test)",
+    }
     assert len(calls) == 1
 
 
 async def test_mail_timeout_stays_claimed_and_second_send_refuses(microsoft, monkeypatch):
-    _approve(monkeypatch)
     calls = _graph(monkeypatch, [httpx.ReadTimeout("late response")])
     saved = await _mail_draft(microsoft)
-    tool = MicrosoftMailSendTool()
-    first = await tool.execute(_thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"])
-    assert first == f"Error: {MAIL_UNCONFIRMED}"
+    assert await _send_mail(saved) == {"state": "unconfirmed"}
     assert _row(saved["draft_id"])["state"] == "sending"
-    second = await tool.execute(_thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"])
-    assert second == f"Error: {MAIL_STILL_SENDING}"
+    assert await _send_mail(saved) == {"state": "sending"}
     assert len(calls) == 1
 
 
 async def test_mail_graph_400_releases_claim_with_named_refusal(microsoft, monkeypatch):
-    _approve(monkeypatch)
     _graph(monkeypatch, [Response(400, {})])
     saved = await _mail_draft(microsoft)
-    result = await MicrosoftMailSendTool().execute(
-        _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
-    )
-    assert result == "Error: Not sent: Microsoft refused this request. Check the ids, names or fields you passed and try again."
+    assert await _send_mail(saved) == {
+        "state": "failed", "reason": "Microsoft refused this request. Check the ids, names or fields you passed and try again.",
+    }
     assert _row(saved["draft_id"])["state"] == "open"
 
 
-async def test_mail_delivery_succeeds_when_mark_sent_fails(microsoft, monkeypatch):
-    _approve(monkeypatch)
-    _graph(monkeypatch, [Response(202, {})])
+async def test_mail_delivery_is_unconfirmed_when_mark_sent_fails(microsoft, monkeypatch):
+    calls = _graph(monkeypatch, [Response(202, {})])
     saved = await _mail_draft(microsoft)
+    db = get_db()
+    db.execute("""CREATE TRIGGER fail_mark_sent BEFORE UPDATE OF state ON action_drafts
+                  WHEN NEW.state = 'sent' BEGIN SELECT RAISE(ABORT, 'database unavailable'); END""")
+    db.commit()
 
-    def fail_mark_sent(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("database unavailable")
-
-    monkeypatch.setattr(action_delivery, "mark_sent", fail_mark_sent)
-    assert json.loads(await MicrosoftMailSendTool().execute(
-        _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
-    )) == {"sent": True, "account_id": microsoft}
+    assert await _send_mail(saved) == {"state": "unconfirmed"}
     assert _row(saved["draft_id"])["state"] == "sending"
+    assert len(calls) == 1
 
 
 async def test_calendar_create_claims_before_graph_and_update_refuses_blank_event_id(microsoft, workspace, monkeypatch):
@@ -388,7 +397,7 @@ async def test_delivery_logs_only_unexpected_credential_failures(monkeypatch, ca
     assert ("could not acquire delivery credentials" in caplog.text) is logged
 
 
-async def test_changed_outside_refusals_name_the_microsoft_draft_tools(microsoft, deleg_db):  # noqa: F811
+async def test_person_edited_mail_is_sent_while_calendar_changed_outside_is_refused(microsoft, deleg_db, monkeypatch):  # noqa: F811
     from infra import config
 
     mail = await _mail_draft(microsoft)
@@ -396,14 +405,12 @@ async def test_changed_outside_refusals_name_the_microsoft_draft_tools(microsoft
     for saved in (mail, invite):
         path = config.WORKSPACE / saved["path"]
         path.write_text(path.read_text() + "\nEdited by the person.\n")
+    calls = _graph(monkeypatch, [Response(202, {})])
+    assert await _send_mail(mail) == {"state": "sent"}
+    assert "Edited by the person." in calls[0]["json"]["message"]["body"]["content"]
     _admit(deleg_db, "outlook-send")
     _bind(deleg_db, "outlook-send")
 
-    refused = await MicrosoftMailSendTool().execute(
-        _thread_id=THREAD, account_id=microsoft, draft_id=mail["draft_id"], revision=mail["revision"],
-    )
-    assert refused.startswith("Error: Not sent: the draft was changed outside the draft tools")
-    assert "keep their changes when you save it with microsoft_mail_draft," in refused
     refused = await MicrosoftCalendarCreateTool().execute(
         _thread_id=THREAD, account_id=microsoft, draft_id=invite["draft_id"], revision=invite["revision"],
     )

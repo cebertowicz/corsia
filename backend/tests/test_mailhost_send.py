@@ -1,6 +1,6 @@
 """Drafts, sending and invitations on a mail host: the same reviewed-draft gate as Gmail, over IMAP APPEND and SMTP.
 
-Servers are the local TLS fakes in ``mailhost_fakes``; every send goes through ``email_send`` / ``calendar_send_invite``.
+Servers are the local TLS fakes in ``mailhost_fakes``; email sends go through Send now.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ import json
 import logging
 from email import message_from_bytes, policy
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from mailhost_fakes import HOST_REPLY_MARKER, FakeSmtp
@@ -25,10 +26,11 @@ from events.connectors import mail_poller as poller
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
 from tools import calendar_list as google_calendar
-from tools import google_email
+from api.email_drafts import SendNow, send_now
+from tests.test_email_drafts_api import _artifact, _owner
 from tools.action_gate import Approved
 from tools.calendar_list import CalendarDraftInviteTool, CalendarSendInviteTool
-from tools.google_email import EmailDraftTool, EmailSendTool
+from tools.google_email import EmailDraftTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,7 +53,6 @@ def make_host(conductor, servers, tmp_path, monkeypatch):
         found = get_db().execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
         return Approved(dict(found), (workspace / found["path"]).read_bytes())
 
-    monkeypatch.setattr(google_email, "check_action", approved)
     monkeypatch.setattr(google_calendar, "check_action", approved)
     async def build(**tuning) -> SimpleNamespace:
         built = servers(**tuning)
@@ -78,8 +79,10 @@ async def _draft(host, **fields) -> dict:
     return json.loads(out)
 
 
-async def _send(host, saved: dict) -> str:
-    return await EmailSendTool().execute(_thread_id=host.thread, draft_id=saved["draft_id"], revision=saved["revision"])
+async def _send(host, saved: dict) -> dict:
+    text = (host.workspace / saved["path"]).read_text()
+    with patch('events.delivery.deliver_to_thread', new_callable=AsyncMock):
+        return await send_now(_artifact(saved), SendNow(text=text), _owner(host.thread))
 
 
 def _no_leak(*texts: str) -> None:
@@ -98,39 +101,46 @@ async def test_a_draft_is_appended_to_the_hosts_drafts_folder_and_nothing_is_sen
 
 async def test_send_submits_over_smtp_to_every_recipient_and_keeps_a_sent_copy(host) -> None:
     saved = await _draft(host)
-    out = json.loads(await _send(host, saved))
+    out = await _send(host, saved)
     [(recipients, data)] = host.built.smtp.sent
     assert recipients == ["pat@example.com", "lee@example.com"]
     sent = message_from_bytes(data, policy=policy.default)
-    assert sent["Subject"] == "Lunch" and sent["From"] == ADDRESS and out["account_id"] == host.account_id
-    assert out["sent_message_id"] == sent["Message-ID"]
+    assert sent["Subject"] == "Lunch" and sent["From"] == ADDRESS
+    assert out == {'state': 'sent'}
     assert sent["Message-ID"].endswith("@" + ADDRESS.rpartition("@")[2] + ">")
     assert [folder for folder, _ in host.built.imap.appended] == ["Drafts", "Sent"]
     assert message_from_bytes(host.built.imap.appended[1][1], policy=policy.default)["Message-ID"] == sent["Message-ID"]
     assert _row(saved["draft_id"])["state"] == "sent"
-    assert (await _send(host, saved)).startswith("Error")
+    assert await _send(host, saved) == {"state": "sent"}
     assert len(host.built.smtp.sent) == 1
 
 
-async def test_a_partly_refused_send_succeeds_and_names_only_the_refused_addresses(make_host) -> None:
+async def test_a_partly_refused_send_succeeds_and_names_only_the_refused_addresses(make_host, monkeypatch) -> None:
     host = await make_host(smtp={"refused_recipients": {"lee@example.com"}})
     saved = await _draft(host)
-    out = json.loads(await _send(host, saved))
-    assert out["not_delivered_to"] == ["lee@example.com"]
-    assert out["note"] == "Tell the person that these addresses did not get the email."
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr('events.delivery.deliver_to_thread', notice)
+    text = (host.workspace / saved['path']).read_text()
+    out = await send_now(_artifact(saved), SendNow(text=text), _owner(host.thread))
+    assert out == {'state': 'sent', 'not_delivered_to': ['lee@example.com']}
     assert host.built.smtp.sent[0][0] == ["pat@example.com"]
     assert _row(saved["draft_id"])["state"] == "sent"
     _no_leak(json.dumps(out))
+    notice.assert_awaited_once()
+    assert notice.await_args is not None
+    assert 'These addresses did not get it: lee@example.com' in notice.await_args.args[2]
+    assert notice.await_args.args[3]['not_delivered_to'] == ['lee@example.com']
+    assert notice.await_args.kwargs['chip'] == "You sent the email to pat@example.com. lee@example.com didn't get it."
 
 
 async def test_a_sender_refusal_reopens_the_draft_and_never_retries_submission(make_host) -> None:
     host = await make_host(smtp={"refuse_sender": True})
     saved = await _draft(host)
     out = await _send(host, saved)
-    assert out == f"Error: Not sent: {MailHostError(SENDER_REFUSED, host='mail.test')}"
+    assert out == {"state": "failed", "reason": str(MailHostError(SENDER_REFUSED, host='mail.test'))}
     assert _row(saved["draft_id"])["state"] == "open"
     assert host.built.smtp.sent == [] and len(host.built.smtp.mail_from) == 1
-    _no_leak(out)
+    _no_leak(json.dumps(out))
 
 
 async def test_a_sent_copy_is_always_appended_and_the_retired_host_flag_is_not_written(host) -> None:
@@ -154,9 +164,9 @@ async def test_a_missing_sent_copy_does_not_turn_a_delivered_send_into_a_failure
     monkeypatch.setattr(MailHostBackend, "sent_html", staticmethod(sent_html))
     with caplog.at_level(logging.WARNING):
         out = await _send(host, saved)
-    assert not out.startswith("Error") and len(host.built.smtp.sent) == 1
+    assert out == {"state": "sent"} and len(host.built.smtp.sent) == 1
     assert _row(saved["draft_id"])["state"] == "sent"
-    _no_leak(out, caplog.text)
+    _no_leak(json.dumps(out), caplog.text)
 
 
 async def test_a_refused_password_sends_nothing_reopens_the_draft_and_turns_the_row_to_refused(host, monkeypatch) -> None:
@@ -165,18 +175,18 @@ async def test_a_refused_password_sends_nothing_reopens_the_draft_and_turns_the_
     saved = await _draft(host)
     host.built.smtp.password = "changed-after-the-draft"
     out = await _send(host, saved)
-    assert out.startswith("Error: Not sent: ") and "didn’t accept this app password" in out
+    assert out['state'] == 'failed' and "didn’t accept this app password" in out['reason']
     assert host.built.smtp.sent == [] and _row(saved["draft_id"])["state"] == "open"
     found = row(host.account_id)
     assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and notified
-    _no_leak(out, found["raw"])
+    _no_leak(json.dumps(out), found["raw"])
 
 
 async def test_an_unreachable_smtp_server_sends_nothing_and_reopens_the_draft(host) -> None:
     saved = await _draft(host)
     host.built.smtp.close()
     out = await _send(host, saved)
-    assert out.startswith("Error: Not sent: CORSIA couldn’t reach")
+    assert out['state'] == 'failed' and out['reason'].startswith('CORSIA couldn’t reach')
     assert _row(saved["draft_id"])["state"] == "open"
     assert host.built.smtp.sent == []
 
@@ -190,10 +200,10 @@ async def test_a_disconnect_after_data_stays_claimed_and_never_tries_the_next_po
     try:
         saved = await _draft(host)
         out = await _send(host, saved)
-        assert out.startswith("Error: The mail host didn't confirm the send")
+        assert out == {'state': 'unconfirmed'}
         assert _row(saved["draft_id"])["state"] == "sending"
         assert len(host.built.smtp.sent) == 1 and fallback.sent == []
-        assert (await _send(host, saved)).startswith("Error")
+        assert await _send(host, saved) == {'state': 'sending'}
         assert fallback.sent == []
     finally:
         fallback.close()
@@ -222,7 +232,7 @@ async def test_the_password_is_in_no_draft_send_or_log_text(host, caplog) -> Non
     with caplog.at_level(logging.DEBUG):
         saved = await _draft(host)
         out = await _send(host, saved)
-    _no_leak(json.dumps(saved), out, caplog.text, row(host.account_id)["raw"])
+    _no_leak(json.dumps(saved), json.dumps(out), caplog.text, row(host.account_id)["raw"])
     for _, raw in host.built.imap.appended:
         assert PASSWORD.encode() not in raw
     for _, data in host.built.smtp.sent:
