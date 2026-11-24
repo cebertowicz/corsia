@@ -6,6 +6,7 @@ output. The value must not come back in any of its forms.
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import os
@@ -268,6 +269,68 @@ async def test_a_saved_value_in_a_real_pages_markup_comes_back_blanked_from_ever
         assert blanking.BLANK in text, command
     # get html returns the markup inside JSON, with the attribute's " written as &quot;.
     assert blanking.BLANK in outputs["get html"] and "&amp;" not in outputs["get html"]
+
+
+# What Chrome 152's snapshot and page text make of a value's whitespace (measured on a real page): the saved value
+# and the form shown. A snapshot drops U+00A0 from page text; page text collapses a run of spaces and trims spaces
+# at either end; a snapshot -i line's end is trimmed of U+00A0 too.
+WHITESPACE_FORMS = {
+    "nbsp_dropped": ("Ab1 cd{m}", "Ab1cd{m}"),
+    "spaces_collapsed": ("Ab1  cd{m}", "Ab1 cd{m}"),
+    "leading_space_trimmed": (" Ab1cd{m}", "Ab1cd{m}"),
+    "trailing_space_trimmed": ("Ab1cd{m} ", "Ab1cd{m}"),
+    "trailing_nbsp_trimmed": ("Ab1cd{m} ", "Ab1cd{m}"),
+    "all_at_once": ("  Ab1   cd{m} ", "Ab1 cd{m}"),
+}
+
+
+@pytest.mark.parametrize("in_json", [False, True])
+@pytest.mark.parametrize("form", sorted(WHITESPACE_FORMS))
+def test_each_whitespace_form_a_snapshot_shows_is_blanked(form, in_json):
+    marker = uuid.uuid4().hex[:8]
+    value, shown = (text.format(m=marker) for text in WHITESPACE_FORMS[form])
+    assert shown != value
+    if in_json:
+        shown = json.dumps(shown)[1:-1]
+    assert blanking.blank(f"<p>{shown}</p>", [value]) == f"<p>{blanking.BLANK}</p>"
+
+
+def test_a_value_without_whitespace_adds_no_form_and_a_short_trimmed_form_blanks_nothing():
+    assert blanking._whitespace_forms("Ab1-cd-ef") == {"Ab1-cd-ef"}
+    # Trimmed, this value is "ab": blanking it would wreck ordinary text, so only its own forms are blanked.
+    assert blanking.blank("a tab bar", ["ab      "]) == "a tab bar"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(WHITESPACE_FORMS))
+async def test_a_saved_value_with_whitespace_on_a_real_page_comes_back_blanked(state, monkeypatch, case):
+    """Real Chrome: the value is page text and a shown-password text field's value; snapshot, snapshot -i and page
+    text each come back with it blanked in whatever form they show its whitespace."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    marker = uuid.uuid4().hex
+    shown_text = WHITESPACE_FORMS[case][0].format(m=marker)
+    await asyncio.to_thread(saved_logins.save_login, site="https://example.com", username="me@example.com",
+                            password=shown_text, saved_by="person")
+    thread_id = f"blanking-{uuid.uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-blanking", instance_key=uuid.uuid4().hex)
+
+    async def run_browser(thread, args, **kwargs):
+        kwargs.pop("lease_id", None)
+        return await owner.run(thread, args, **kwargs)
+
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    commands = (["snapshot"], ["snapshot", "-i"], ["get", "text", "main"])
+    try:
+        with _page_showing(shown_text, in_attributes=True) as url:
+            assert not (await browser_runtime._run(["open", url], thread_id=thread_id)).startswith("Error:")
+            outputs = {" ".join(args): await browser_runtime._run(args, thread_id=thread_id) for args in commands}
+    finally:
+        await owner.close_thread(thread_id)
+    for command, text in outputs.items():
+        assert marker not in text, (command, text)
+        assert blanking.BLANK in text, (command, text)
 
 
 def test_every_written_form_of_a_value_is_blanked_longest_first():

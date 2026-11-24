@@ -286,7 +286,7 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
             raise
-        log.warning("browser page check failed for thread %s", thread_id, exc_info=True)
+        log.warning("browser page check failed for thread %s: %s", thread_id, type(exc).__name__)
         raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
     event = browser_step_lifecycle.Event(
         "declare" if instruction is not None else "probe", result,
@@ -296,9 +296,9 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         decision = await browser_step_lifecycle.step_event(
             thread_id, event, observer=partial(_observe_read_guard, thread_id),
             page=_page_source(thread_id, probe, current_session))
-    except Exception:
-        log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
-                    thread_id, exc_info=True)
+    except Exception as exc:  # the type only: a chained error's text can quote what the page or CDP returned
+        log.warning("browser step for thread %s could not be recorded (%s); a live step is kept for the next call",
+                    thread_id, type(exc).__name__)
         _observe_read_guard(thread_id, result, False, False)
         # A held step means its task exists (a failed row read, settle or emit leaves it), so the page is the
         # person's and its normal refusal is true; the kind comes from in-memory state, not the store that failed.

@@ -48,9 +48,9 @@ async def test_unexpected_command_failure_logs_its_type_only_never_its_text_or_t
     assert sentinel not in caplog.text and all(sentinel not in repr(each.__dict__) for each in caplog.records)
 
 
-async def test_close_failure_is_logged_with_traceback(monkeypatch, caplog):
+async def test_close_failure_is_logged_by_its_type_only(monkeypatch, caplog):
     async def fail(_thread_id):
-        raise RuntimeError("close failed")
+        raise RuntimeError("close failed sentinel-close-7f3")
 
     monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "close_browser", fail)
     with caplog.at_level(logging.WARNING, logger=browser_runtime.__name__):
@@ -58,7 +58,8 @@ async def test_close_failure_is_logged_with_traceback(monkeypatch, caplog):
 
     assert result.startswith("Error: browser cleanup could not be verified")
     (record,) = _records(caplog, browser_runtime.__name__)
-    assert record.exc_info is not None and "thread-2" in record.getMessage()
+    assert record.exc_info is None and "thread-2" in record.getMessage() and "RuntimeError" in record.getMessage()
+    assert "sentinel-close-7f3" not in caplog.text
 
 
 # The served page holds no sentinel; its script copies the URL's fragment into two fields' value attributes, so the
@@ -129,14 +130,14 @@ async def test_page_state_in_cdp_frames_never_reaches_a_log_at_debug(isolated_db
     assert sentinel not in caplog.text and all(sentinel not in repr(each.__dict__) for each in caplog.records)
 
 
-async def test_failed_page_probe_is_logged_before_it_is_mapped_to_page_check_failed(caplog):
+async def test_failed_page_probe_is_logged_by_its_type_before_it_is_mapped_to_page_check_failed(caplog):
     async def probe(_known):
-        raise RuntimeError("page probe unavailable")
+        raise RuntimeError("page probe unavailable sentinel-probe-2c9")
 
     with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
         with pytest.raises(BrowserSessionError, match=browser_control.PAGE_CHECK_FAILED):
             await browser_control.require_page_access("thread-3", probe, ("snapshot",))
 
     (record,) = _records(caplog, browser_control.__name__)
-    assert record.exc_info is not None and record.exc_info[0] is RuntimeError
-    assert "thread-3" in record.getMessage()
+    assert record.exc_info is None and "RuntimeError" in record.getMessage()
+    assert "thread-3" in record.getMessage() and "sentinel-probe-2c9" not in caplog.text
