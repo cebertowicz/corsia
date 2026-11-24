@@ -380,6 +380,9 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await expect(section).toHaveCSS('border-top-width', '0px');
 			await expect(section).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 		}
+		// With no box, the exceptions label keeps the warning colour the pending status uses.
+		const warningColor = await dialog.locator('.decision-head .status').evaluate((element) => getComputedStyle(element).color);
+		await expect(dialog.locator('.policy-exceptions .label')).toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
 		// The sheet slides up from below on open; its bounds are read where it comes to rest.

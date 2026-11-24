@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui';
 	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
 	import HostAccessFillRequestDrawer from './HostAccessFillRequestDrawer.svelte';
+	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
@@ -167,12 +168,8 @@
 		</section>
 
 		{#if stale || !ready}
-			<div class="blocked-line" role="status">
-				<span>{stale
-					? 'Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.'
-					: 'The request, independent attestation, or decision identity is incomplete or malformed.'}</span>
-				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
-			</div>
+			<HostAccessBlockedLine {stale} {onRetry}
+				incomplete="The request, independent attestation, or decision identity is incomplete or malformed." />
 		{/if}
 	</div>
 
@@ -311,6 +308,8 @@
 	}
 	.repo-policy-context li strong { color: var(--text-primary); }
 	.project-id { font-size: var(--text-footnote); }
+	/* No box, but the label keeps its warning colour: it is the drawer's one risk signal. */
+	.policy-exceptions .label { color: var(--amber-text); }
 	.policy-exceptions .external-warning {
 		color: var(--text-primary);
 		margin: 8px 0 16px;
@@ -338,15 +337,8 @@
 		color: var(--text-primary);
 		font-size: var(--text-subhead);
 	}
-	/* The same one red line and ghost Retry the fill and script drawers use; no box. */
-	.blocked-line {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		color: var(--red-text);
-		font-size: var(--text-footnote);
-	}
-	.blocked-line span { flex: 1; min-width: 0; }
+	/* The last line clears the sticky footer by the same step as the fill drawer's. */
+	.decision-body { padding-bottom: var(--space-4); }
 
 	@media (max-width: 720px) {
 		/* Keep the first requested exception above the sticky decision footer even

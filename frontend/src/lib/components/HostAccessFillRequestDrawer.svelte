@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import { approvalReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessFill } from '$lib/api/hostAccess';
 
@@ -74,12 +75,7 @@
 			</div>
 		</section>
 		{#if stale || !ready}
-			<div class="blocked-line" role="status">
-				<span>{stale
-					? 'Couldn’t check that this request is still current, so it can’t be approved. Retry to check again.'
-					: 'This request arrived without everything needed to approve it. Retry to load it again.'}</span>
-				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
-			</div>
+			<HostAccessBlockedLine {stale} {onRetry} />
 		{/if}
 	</div>
 	<footer class="decision-actions">
@@ -108,16 +104,9 @@
 		font-size: var(--text-footnote);
 		font-weight: var(--fw-medium);
 	}
-	.status.stale, .blocked-line { color: var(--red-text); }
+	.status.stale { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
 	@media (pointer: coarse) {
 		.durations .segment { min-height: var(--touch-target); }
 	}
-	.blocked-line {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-footnote);
-	}
-	.blocked-line span { flex: 1; min-width: 0; }
 </style>
