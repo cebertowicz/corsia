@@ -204,7 +204,7 @@ describe('HostAccessLeaseControl', () => {
 	it('approves a saved-login fill for the picked duration, then revokes it from its chip', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -291,7 +291,7 @@ describe('HostAccessLeaseControl', () => {
 		const trigger = chip!.querySelector<HTMLButtonElement>('.active-chip-trigger');
 		// The chip's words are its accessible name, time included: no static label, nothing hidden, no icon.
 		expect(trigger?.hasAttribute('aria-label')).toBe(false);
-		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 5:00');
+		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 5 min left');
 		expect(trigger?.querySelector('[aria-hidden="true"]')).toBeNull();
 		expect(trigger?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
@@ -939,19 +939,19 @@ describe('HostAccessLeaseControl', () => {
 		flushSync();
 		await vi.advanceTimersByTimeAsync(0);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:02');
-		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:02');
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:01');
-		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:01');
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 		expect(chipTrigger('Host access')).toBeTruthy();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 
@@ -962,7 +962,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(1);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 
 		await vi.advanceTimersByTimeAsync(3_999);
 		await tick();
@@ -995,7 +995,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(120_000);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(7);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 	});
 
 	it('does not leak another thread terminal failure into the selected thread', async () => {
@@ -1161,7 +1161,7 @@ describe('HostAccessLeaseControl', () => {
 	it('keeps a stale saved-login fill rejectable through its own route', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',

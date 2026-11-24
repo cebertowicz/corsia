@@ -502,7 +502,6 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
-			--host-access-owner-wrap: normal;
 			--host-access-eyebrow-display: none;
 		}
 	}

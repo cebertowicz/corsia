@@ -358,3 +358,56 @@ def test_another_persons_session_cannot_see_or_decide(world):
         assert _post(client, theirs, pending, "approve", pending["decision_capability"],
                      duration_seconds=60).status_code == 404
     assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+
+
+# --- Product events --------------------------------------------------------------------------------
+
+
+def test_each_fill_transition_counts_once_with_only_the_thread_and_minutes(world, monkeypatch):
+    """One `saved_login` event per transition; never the site, username, domain or any id but the thread."""
+    from infra import product_events
+    from infra.accounts import issue_token
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    session, _ = issue_token(PERSON, kind="session")
+
+    first = fills.request_fill(AGENT_THREAD, world["login"])
+    fills.request_fill(AGENT_THREAD, world["login"])  # the same request again: no second event
+    with _client() as client:
+        pending = _listed(client, session)
+        assert _post(client, session, pending, "approve", pending["decision_capability"],
+                     duration_seconds=900).status_code == 200
+        active = _listed(client, session)
+        assert _post(client, session, active, "revoke", active["decision_capability"]).status_code == 200
+        second = fills.request_fill(AGENT_THREAD, world["login"])
+        again = _listed(client, session)
+        assert _post(client, session, again, "reject", again["decision_capability"]).status_code == 200
+        assert _post(client, session, again, "reject", again["decision_capability"]).status_code == 404
+        third = fills.request_fill(AGENT_THREAD, world["login"])
+        fresh = _listed(client, session)
+        assert _post(client, session, fresh, "approve", fresh["decision_capability"],
+                     duration_seconds=60).status_code == 200
+        clock = fills.time.monotonic
+        monkeypatch.setattr(fills.time, "monotonic", lambda: clock() + 61)
+        client.get("/api/host-access/leases", headers={"Authorization": f"Bearer {session}"})  # the read that drops it
+        fills.listed(PERSON)  # already dropped: counted once
+
+    assert [(args, sorted(kwargs)) for args, kwargs in events] == [
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_approved"), ["properties", "thread_id"]),
+        (("saved_login", "fill_revoked"), ["properties", "thread_id"]),
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_denied"), ["properties", "thread_id"]),
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_approved"), ["properties", "thread_id"]),
+        (("saved_login", "fill_expired"), ["properties", "thread_id"]),
+    ]
+    assert all(kwargs["thread_id"] == AGENT_THREAD for _, kwargs in events)
+    approvals = [kwargs["properties"] for args, kwargs in events if args[1] == "fill_approved"]
+    assert approvals == [{"duration_minutes": 15}, {"duration_minutes": 1}]
+    assert all(kwargs["properties"] is None for args, kwargs in events if args[1] != "fill_approved")
+    payloads = repr(events)
+    for private in ("example.com", "example.org", "example", "me@example.com", world["login"], world["other_login"],
+                    first["id"], second["id"], third["id"]):
+        assert private not in payloads

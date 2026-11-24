@@ -435,10 +435,10 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 
 		await dialog.getByRole('button', { name: 'Approve' }).click();
-		await expect(page.locator('.active-chip .countdown')).toContainText(':');
+		await expect(page.locator('.active-chip .countdown')).toContainText('min left');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
 		// The chip's words are its name, the time left included.
-		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access \d+:\d{2}$/ });
+		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access · \d+ min left$/ });
 		const revokeHostAccess = page.getByRole('button', { name: 'Revoke host access' });
 		await expect(hostAccessDisclosure).toBeVisible();
 		await expect(revokeHostAccess).toHaveCount(0);
@@ -548,5 +548,52 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			body: { revision: 5, application_hash: 'hash-e2e-1' },
 		});
 		expect(consoleErrors).toEqual([]);
+	});
+
+	test('fits a long saved-login site on one line on a phone, cut between whole segments with the domain whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login entry ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const scheme = 'https:' + '//';
+		const site = `${scheme}accounts.northwind-regional-supply-cooperative.example.com`;
+		const fill = {
+			id: 'fill-e2e-1', kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
+			agent: 'Bookkeeper', site, domain: 'example.com', username: 'accounts-payable@example.com',
+			revision: 1, application_hash: 'hash-fill-e2e-1', decision_capability: 'decision-fill-e2e-1',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00.000Z', updated_at: '2026-07-18T16:00:00.000Z',
+		};
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect(shown).toBeVisible();
+		await expect(shown).toHaveAttribute('title', site);
+		await expect.poll(() => shown.textContent()).not.toBe(site);
+		const label = (await shown.textContent()) ?? '';
+		const [head, tail, ...more] = label.split('…');
+		expect(more, label).toEqual([]);
+		// The head is whole segments from the front: the scheme, then whole labels, never part of one.
+		expect([scheme, `${scheme}accounts`], label).toContain(head);
+		// The tail ends in the whole registrable domain, after whole labels only.
+		expect(tail.endsWith('example.com'), label).toBe(true);
+		expect(tail === 'example.com' || site.endsWith(`.${tail}`), label).toBe(true);
+		// One line, nothing clipped.
+		const box = await shown.evaluate((element) => ({
+			fits: element.scrollWidth <= element.clientWidth,
+			lines: element.getClientRects().length,
+			height: element.getBoundingClientRect().height,
+			lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+		}));
+		expect(box.fits, JSON.stringify(box)).toBe(true);
+		expect(box.lines).toBe(1);
+		if (box.lineHeight) expect(box.height).toBeLessThanOrEqual(box.lineHeight + 1);
 	});
 });

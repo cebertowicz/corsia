@@ -5,7 +5,7 @@ import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
 import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
 import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
 import { approvalReady, fillDurations, owner, pendingLabel } from '$lib/hostAccess/leaseFormat';
-import { decideHostAccessLease, type HostAccessFill } from '$lib/api/hostAccess';
+import { decideHostAccessLease, type HostAccessFill, type HostAccessItem } from '$lib/api/hostAccess';
 
 vi.mock('$lib/api/request', () => ({ apiFetch: vi.fn() }));
 
@@ -15,7 +15,7 @@ afterEach(() => { for (const target of targets.splice(0)) target.remove(); });
 function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
 	return {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
-		agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
 		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -114,6 +114,27 @@ it('cannot be approved when stale or incomplete, and says why', async () => {
 	expect(approvalReady(fill({ state: 'active' }))).toBe(false);
 });
 
+it('draws the lease and script entries as the same plain line: a sentence-case kind, no pill, the status as text', () => {
+	const lease = { id: 'lease-1', kind: 'lease', state: 'awaiting_user', root_thread_id: 'agent',
+		root_thread_title: 'Bookkeeper', requested_duration_seconds: 900 } as unknown as HostAccessItem;
+	const script = { id: 'script-1', kind: 'script', state: 'awaiting_user', root_thread_id: 'agent',
+		script_name: 'check.py' } as unknown as HostAccessItem;
+	for (const [request, kind, name] of [[lease, 'Temporary host access', 'Bookkeeper'], [script, 'Script approval', 'check.py']] as const) {
+		for (const stale of [false, true]) {
+			const host = target();
+			const component = mount(HostAccessPendingTrigger, { target: host, props: { request, stale, open: false, onclick: vi.fn() } });
+			flushSync();
+			expect(host.querySelector('.pending-kind')?.textContent).toBe(kind);
+			expect(host.querySelector('.pending-owner')?.textContent).toBe(name);
+			expect(host.querySelector('.pending-status')?.textContent).toBe(stale ? 'Couldn’t check' : 'Needs approval');
+			expect(host.querySelector('.pending-action')?.textContent).toBe('Review →');
+			expect(host.querySelector('.pill, .eyebrow, .pending-site')).toBeNull();
+			expect(host.textContent).not.toContain('15 minutes');
+			void unmount(component);
+		}
+	}
+});
+
 it('shows a pending fill on the strip as the agent and site, with status as text', async () => {
 	const host = target();
 	const onclick = vi.fn();
@@ -125,7 +146,9 @@ it('shows a pending fill on the strip as the agent and site, with status as text
 	expect(button.getAttribute('aria-label')).toBe('Review a request to sign in with a saved login');
 	expect(pendingLabel(fill())).toBe('Review a request to sign in with a saved login');
 	expect(button.textContent).toContain('Saved login');
-	expect(button.textContent).toContain('Bookkeeper · https://example.com');
+	expect(button.querySelector('.pending-owner')?.textContent).toBe('Bookkeeper');
+	expect(button.querySelector('.pending-site')?.getAttribute('title')).toBe(fill().site);
+	expect(button.querySelector('.pending-site')?.textContent).toBe(fill().site);
 	expect(button.textContent).toContain('Needs approval');
 	expect(host.querySelector('.pill')).toBeNull();
 	button.click();
@@ -167,7 +190,7 @@ it('labels a live grant chip as a saved login, not host access', async () => {
 	const trigger = host.querySelector('.active-chip-trigger')!;
 	// Its words are its name, time included: no static label, nothing hidden, no decorative icon.
 	expect(trigger.hasAttribute('aria-label')).toBe(false);
-	expect(trigger.textContent?.replace(/\s+/g, ' ').trim()).toBe('Saved login 5:00');
+	expect(trigger.textContent?.replace(/\s+/g, ' ').trim()).toBe('Saved login · 5 min left');
 	expect(trigger.querySelector('[aria-hidden="true"]')).toBeNull();
 	expect(trigger.querySelector('svg')).toBeNull();
 	await unmount(component);
