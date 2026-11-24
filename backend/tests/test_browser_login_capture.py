@@ -8,7 +8,7 @@ import asyncio
 import json
 import pathlib
 import re
-import sys
+import threading
 import types
 from types import SimpleNamespace
 
@@ -20,6 +20,7 @@ from host_access import browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_cli import CommandResult
 from host_access.browser_control import PageAccess
+from infra import saved_login_offers
 from tests.test_browser_pane import FakePane, screencast  # noqa: F401 - autouse fixture: no real page screencast
 from ws import browser_stream
 
@@ -31,17 +32,22 @@ MARKER = "zq-marker-7c41e0b9-only-in-the-offer"
 
 
 class Holder:
-    """The offer holder's four calls, recorded."""
+    """The offer holder's four calls, stubbed on the real module and recorded; offer_login answers `offered`."""
 
-    def __init__(self) -> None:
+    def __init__(self, monkeypatch) -> None:
         self.calls: list[tuple] = []
-        self.module = types.ModuleType(capture.OFFERS_MODULE)
+        self.offered = True
+        self.offer_threads: list[int] = []
         for name in ("offer_login", "confirm_offer", "drop_offer", "note_username"):
-            setattr(self.module, name, self._recorder(name))
+            monkeypatch.setattr(saved_login_offers, name, self._recorder(name))
 
     def _recorder(self, name):
         def record(*args):
             self.calls.append((name, *args))
+            if name == "offer_login":
+                self.offer_threads.append(threading.get_ident())
+                return self.offered
+            return None
         return record
 
     def names(self) -> list[str]:
@@ -107,9 +113,7 @@ class FakeCdp:
 
 @pytest.fixture
 def holder(monkeypatch) -> Holder:
-    made = Holder()
-    monkeypatch.setitem(sys.modules, capture.OFFERS_MODULE, made.module)
-    return made
+    return Holder(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
@@ -351,7 +355,7 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
     def refuse(*args):
         raise ValueError(f"refused {args}")
 
-    holder.module.offer_login = refuse
+    monkeypatch.setattr(saved_login_offers, "offer_login", refuse)
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await capture.person_submit(THREAD, KEY, "ws://page")
@@ -361,16 +365,24 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
 
 
 @pytest.mark.asyncio
-async def test_a_missing_holder_means_no_offer_and_the_browser_carries_on(monkeypatch, caplog):
-    caplog.set_level("DEBUG")
-    monkeypatch.setitem(sys.modules, capture.OFFERS_MODULE, None)
+async def test_offer_login_runs_off_the_event_loop(monkeypatch, holder):
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await capture.person_submit(THREAD, KEY, "ws://page")
+    assert holder.names() == ["offer_login"]
+    assert holder.offer_threads and threading.get_ident() not in holder.offer_threads
+
+
+@pytest.mark.asyncio
+async def test_an_offer_the_holder_didnt_make_is_never_confirmed_or_dropped(monkeypatch, holder):
+    holder.offered = False
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    await capture.person_submit(THREAD, KEY, "ws://page")
+    assert capture._pending == {}
     capture.step_decided(THREAD, probe(), "settle", None)
     capture.session_ended(THREAD)
-    assert "saved-login offers aren't available, so no login is offered" in caplog.text
-    assert MARKER not in caplog.text and capture._pending == {}
+    assert holder.names() == ["offer_login"]
 
 
 @pytest.mark.asyncio

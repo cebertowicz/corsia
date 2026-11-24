@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import sys
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -47,11 +46,23 @@ TWO_STEP = """<!doctype html><title>Sign in</title>
 </form>
 <script>user.addEventListener('input', () => { pw.hidden = false; });</script>"""
 WELCOME = """<!doctype html><title>Welcome</title><p>Signed in</p>"""
+# A sign-in that asks for the username on one page and the password on the next.
+FIRST_PAGE = """<!doctype html><title>Sign in</title>
+<form method=post action=/next>
+<input id=user name=user type=email autocomplete=username>
+<button type=submit>Next</button>
+</form>"""
+SECOND_PAGE = """<!doctype html><title>Sign in</title>
+<form method=post action=/login>
+<input id=pw name=pw type=password autocomplete=current-password>
+<button type=submit>Sign in</button>
+</form>"""
 
 
 @contextmanager
 def sign_in_server():
-    pages = {"/login.html": LOGIN, "/two.html": TWO_STEP, "/welcome.html": WELCOME}
+    pages = {"/login.html": LOGIN, "/two.html": TWO_STEP, "/welcome.html": WELCOME,
+             "/first.html": FIRST_PAGE, "/second.html": SECOND_PAGE}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -63,13 +74,18 @@ def sign_in_server():
 
         def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
             form = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode())
-            if form.get("pw") == [MARKER]:
-                self.send_response(303)
-                self.send_header("Location", "/welcome.html")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            self._page(LOGIN)  # A failed sign-in comes back with its password field.
+            if self.path == "/next":
+                self._see_other("/second.html")
+            elif form.get("pw") == [MARKER]:
+                self._see_other("/welcome.html")
+            else:
+                self._page(LOGIN)  # A failed sign-in comes back with its password field.
+
+        def _see_other(self, location: str) -> None:
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def _page(self, body: str) -> None:
             data = body.encode()
@@ -156,8 +172,7 @@ async def wait_for_new_document(endpoint: str, path: str) -> None:
 @contextmanager
 def wired(monkeypatch, owner: BrowserSessionOwner, origin: str):
     """The offer holder stub, the pane's page endpoint and session identity, and the one http origin allowed."""
-    holder = Holder()
-    monkeypatch.setitem(sys.modules, capture.OFFERS_MODULE, holder.module)
+    holder = Holder(monkeypatch)
     monkeypatch.setattr(capture, "_secure_site", lambda site: site == origin)
     monkeypatch.setattr(browser_pane, "session_identity", owner.session_identity)
 
@@ -209,6 +224,45 @@ async def test_the_persons_sign_in_is_offered_then_confirmed_and_the_value_goes_
             assert MARKER not in caplog.text
             assert MARKER not in repr(vars(step))
             assert MARKER not in repr(capture._pending) + repr(capture._marks)
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_two_page_sign_in_notes_the_username_then_offers_the_password(monkeypatch, caplog):
+    _skip_without_browser()
+    caplog.set_level("DEBUG")
+    thread_id = f"login-capture-two-page-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-login-capture", instance_key=uuid4().hex)
+    _quiet_password_steps(monkeypatch, [])
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with sign_in_server() as origin, wired(monkeypatch, owner, origin) as holder:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/first.html"), show_window=False,
+                                        session="new")).startswith("Error:")
+            assert lifecycle.password_step(thread_id) is None
+            endpoint = await owner.page_endpoint(thread_id)
+            key = f"{thread_id}:{owner.session_identity(thread_id)}"
+            person = Person(owner, thread_id, endpoint)
+            await person.click("#user")
+            await person.type(ACCOUNT)
+            await page_value(endpoint, "window.__old = true")
+            await person.enter()
+            await wait_for_new_document(endpoint, "/second.html")
+            assert holder.calls == [("note_username", key, origin, ACCOUNT)]
+            with pytest.raises(BrowserSessionError, match="asks for a password"):
+                await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            await person.click("#pw")
+            await person.type(MARKER)
+            await page_value(endpoint, "window.__old = true")
+            await person.enter()
+            await wait_for_new_document(endpoint, "/welcome.html")
+            assert "Signed in" in await owner.run(thread_id, ("snapshot",), session="existing")
+            # No username on the password page: the holder takes the one noted for this session and site.
+            assert holder.calls[1:] == [("offer_login", key, origin, "", MARKER), ("confirm_offer", key)]
+            assert MARKER not in caplog.text
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.shutdown()

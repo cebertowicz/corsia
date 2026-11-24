@@ -16,7 +16,6 @@ import importlib
 import logging
 import shlex
 from dataclasses import dataclass
-from types import ModuleType
 from typing import Mapping, Sequence
 from urllib.parse import urlsplit
 
@@ -27,10 +26,9 @@ from host_access import browser_cdp_frames
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect, protocol_int
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
+from infra import saved_login_offers
 
 log = logging.getLogger(__name__)
-# Governance's in-memory offer holder; the one place this module names it.
-OFFERS_MODULE = "infra.saved_login_offers"
 # A read that takes longer than this is dropped, so the person's click or Enter is never held up for long.
 CAPTURE_TIMEOUT = 1.5
 _WORLD = "corsia-login-capture"
@@ -162,15 +160,16 @@ async def _submit(thread_id: str, session_key: str, endpoint: str) -> None:
             return
         if step is None:
             account = await _read_account(cdp, frames)
-            if account is not None and (offers := _offers()) is not None:
-                offers.note_username(session_key, account[0], account[1])
+            if account is not None:
+                saved_login_offers.note_username(session_key, account[0], account[1])
             return
         login = await _read_login(cdp, step.nodes, frames)
     # The step may have ended while the page was read; an offer only goes to a step still open.
-    if login is None or lifecycle.password_step(thread_id) is not step or (offers := _offers()) is None:
+    if login is None or lifecycle.password_step(thread_id) is not step:
         return
-    offers.offer_login(session_key, login[0], login[1], login[2])
-    _pending[thread_id] = _Pending(session_key, _site_domain(login[0]))
+    # offer_login reads the database, so it runs off the event loop.
+    if await asyncio.to_thread(saved_login_offers.offer_login, session_key, login[0], login[1], login[2]):
+        _pending[thread_id] = _Pending(session_key, _site_domain(login[0]))
 
 
 async def _frame_tree(cdp: CdpClient) -> tuple[str, list[tuple[str, str]]]:
@@ -289,27 +288,23 @@ def step_decided(thread_id: str, result: PasswordProbe | None, end: str | None, 
 
 
 def session_ended(thread_id: str) -> None:
-    """The browser session ended: drop any waiting offer and forget the agent's marks."""
+    """The browser session ended: drop any waiting offer and forget the agent's marks.
+
+    The holder's own drop when the browser closes (`browser_control.browser_closed` calling
+    `saved_login_offers.drop_thread`) is the safety net; this clears what capture keeps.
+    """
     _resolve(thread_id, confirm=False)
     _marks.pop(thread_id, None)
 
 
 def _resolve(thread_id: str, *, confirm: bool) -> None:
-    if (pending := _pending.pop(thread_id, None)) is None or (offers := _offers()) is None:
+    if (pending := _pending.pop(thread_id, None)) is None:
         return
     try:
         if confirm:
-            offers.confirm_offer(pending.session_key)
+            saved_login_offers.confirm_offer(pending.session_key)
         else:
-            offers.drop_offer(pending.session_key)
+            saved_login_offers.drop_offer(pending.session_key)
     except Exception:
         log.warning("saved-login capture couldn't %s an offer", "confirm" if confirm else "drop")
 
-
-def _offers() -> ModuleType | None:
-    """The offer holder; while it isn't installed, no offer is made and the browser carries on."""
-    try:
-        return importlib.import_module(OFFERS_MODULE)
-    except ImportError:
-        log.info("saved-login offers aren't available, so no login is offered")
-        return None

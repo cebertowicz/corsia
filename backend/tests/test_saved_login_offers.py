@@ -37,6 +37,9 @@ SEAM_ALLOWLIST = frozenset({
     "infra/saved_logins.py",
     "api/saved_logins.py",
     "host_access/browser_login_capture.py",
+    # The capture's own tests stub the seam to record what capture hands it.
+    "tests/test_browser_login_capture.py",
+    "tests/test_browser_login_capture_e2e.py",
     "tests/test_saved_login_offers.py",
     "tests/test_saved_logins_leaks.py",
 })
