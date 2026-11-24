@@ -8,6 +8,8 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- Browse a project's documents from its pane even when no chat is open.
+
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
 
 Released 2026-11-24.

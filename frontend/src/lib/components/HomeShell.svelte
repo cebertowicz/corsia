@@ -286,6 +286,7 @@
 			{protectArtifactSplit}
 			onPickProject={onPickProjectAndClosePane}
 			onBrowseDocuments={browseDocumentsForThread}
+			onBrowseProjectDocuments={() => onDocuments('all')}
 		/>
 	{/if}
 	</div>
