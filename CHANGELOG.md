@@ -207,6 +207,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The "This write is still settling" notice now appears only if a write stays unsettled for 2 seconds; before, it appeared at every save and pushed the document down and back up while you typed.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - Turning on Deliver immediately now always sends the open document's held comments; before, whether it did depended on timing.
+- Usage sharing in setup and Settings now says that nothing is sent yet.
 - In version history, Restore on a read-only file is unavailable, and the version you open says the file is read-only, instead of failing when you press it.
 - When a browser sign-in task cannot be recorded, an agent can still use an ordinary page and is told about the missing task. Password pages and steps already waiting for you remain protected.
 - When a provider doesn't report how many tokens it read from its cache, CORSIA now records that count as unreported instead of a measured zero.
