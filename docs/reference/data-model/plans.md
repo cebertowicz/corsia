@@ -60,6 +60,7 @@ Source: `backend/infra/activity_ranking_schema.py`.
 | `user_id` | TEXT | Yes | Yes | — | — |
 | `scope` | TEXT | Yes | Yes | — | — |
 | `last_enqueued_at` | TEXT | No | Yes | — | — |
+| `seen_keys` | TEXT | No | Yes | '[]' | — |
 
 Indexes: `sqlite_autoindex_activity_rank_nudges_1` (user_id, scope, unique).
 

@@ -8,15 +8,10 @@ from __future__ import annotations
 import json
 
 from doceditor.feedback_state import unread_comment_rows
+from infra.activity_queue_base import TITLE_MAX_CHARS, clip_title, flat as _flat
+from infra.auth import may_access_artifact
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
 from plans.public import UNKNOWN_THREAD_SOURCE, thread_sources
-
-# Activity rows share one title cap with review rows (plans/activity_rows.py).
-_TITLE_CAP = 160
-
-
-def _flat(text: str | None) -> str:
-    return " ".join((text or "").split())
 
 
 def _agent(source: dict) -> str:
@@ -30,18 +25,16 @@ def _quoted(prefix: str, text: str | None) -> str | None:
     text = _flat(text)
     if not text:
         return None
-    room = _TITLE_CAP - len(prefix) - 2
+    room = TITLE_MAX_CHARS - len(prefix) - 2
     if room < 2:
         return None
-    if len(text) > room:
-        text = text[:room - 1].rstrip() + '…'
-    return f'{prefix}“{text}”'
+    return f'{prefix}“{clip_title(text, room)}”'
 
 
 def _reply_title(agent: str, row) -> str:
     """Say who answered which of the person's comments; a document's file name is not that."""
     quoted = _quoted(f'{agent} replied to your comment ', row['root_body']) if row['root_kind'] == 'user' else None
-    return quoted or _flat(f"{agent} replied in your comment thread on {_flat(row['artifact_title']) or 'a document'}")[:_TITLE_CAP]
+    return quoted or clip_title(f"{agent} replied in your comment thread on {_flat(row['artifact_title']) or 'a document'}")
 
 
 def _chat_note(metadata: str | None, cid: str) -> str | None:
@@ -84,14 +77,14 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
       AND EXISTS (SELECT 1 FROM doc_comments person WHERE person.artifact_id=root.artifact_id
                    AND person.author_kind='user' AND (person.id=root.id OR person.parent_id=root.id))
     )
-    SELECT u.*, i.title AS artifact_title FROM unread u
+    SELECT u.*, i.title AS artifact_title, own.parent_thread_id AS owner_thread FROM unread u
     JOIN artifact_identities i ON i.id=u.artifact_id AND i.state='active'
     JOIN owner_candidates own ON own.artifact_id=i.id AND own.pos=1
-    LEFT JOIN threads owner ON owner.id=own.parent_thread_id
     WHERE u.pos=1 AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
-      AND (own.parent_thread_id='ui' OR substr(own.parent_thread_id,1,8)='project:' OR owner.user_id=?)
     """
-    documents = db.execute(document_sql, (*unread_params, user_id, user_id)).fetchall()
+    # Access is the artifact routes' own predicate, so a change to it governs these rows too.
+    documents = [row for row in db.execute(document_sql, (*unread_params, user_id)).fetchall()
+                 if may_access_artifact(row['owner_thread'], user_id, db=db)]
     chats = db.execute(f"""
       WITH unread AS (
         SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id,

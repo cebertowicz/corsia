@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS activity_rank_nudges (
     user_id TEXT NOT NULL,
     scope TEXT NOT NULL,
     last_enqueued_at TEXT NOT NULL,
+    seen_keys TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (user_id, scope)
 );
 """

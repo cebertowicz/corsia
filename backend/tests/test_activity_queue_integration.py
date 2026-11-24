@@ -29,3 +29,5 @@ def test_activity_view_and_scope_order(db, monkeypatch):
     assert ordered['current']['key'] == f'task:{task.id}'
     assert ordered['current']['rank']['reason'] == 'Ready first'
     assert client.get('/api/attention/queue?view=activity&project_id=missing').status_code == 404
+    # An unknown view is refused, never served as the dock's list.
+    assert client.get('/api/attention/queue?view=activty').status_code == 422

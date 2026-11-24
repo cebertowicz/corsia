@@ -39,6 +39,58 @@ def test_ranker_set_is_authorized_atomic_and_replaces(db, monkeypatch):
     assert read['items'][0]['rank']['reason'] == 'Ready'
 
 
+def test_set_composes_the_queue_outside_the_write_lock(db, monkeypatch):
+    from api import attention
+    from tools import attention_rank
+    key = seed(db)
+    monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
+    actual_queue = attention.activity_queue
+    def read_without_write_lock(connection, *args, **kwargs):
+        assert not connection.in_transaction
+        return actual_queue(connection, *args, **kwargs)
+    monkeypatch.setattr(attention, 'activity_queue', read_without_write_lock)
+    events = []
+    monkeypatch.setattr(attention_rank, 'emit_product_event', lambda *a, **k: events.append((a, k['properties'])))
+    actor = {'user_id':'user-1', 'project_id':'project-1'}
+    assert 'Ranked 1' in attention_rank._run('root', actor, 'set', [{'key':key,'reason':'Ready'}])
+    assert events == [(('activity_rank', 'set'), {'scope_kind':'project', 'ranked':1, 'unranked':0})]
+
+
+def test_set_refuses_when_the_ranker_changes_before_the_write(db, monkeypatch):
+    from api import attention
+    from tools import attention_rank
+    key = seed(db)
+    monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
+    actual_queue = attention.activity_queue
+    def reassign_during_read(connection, *args, **kwargs):
+        result = actual_queue(connection, *args, **kwargs)
+        connection.execute("UPDATE projects SET conductor_thread_id='child' WHERE id='project-1'")
+        connection.commit()
+        return result
+    monkeypatch.setattr(attention, 'activity_queue', reassign_during_read)
+    result = attention_rank._run('root', {'user_id':'user-1', 'project_id':'project-1'}, 'set', [{'key':key,'reason':'Ready'}])
+    assert result.startswith('Error:') and 'not you' in result
+    assert db.execute('SELECT count(*) FROM activity_ranks').fetchone()[0] == 0
+
+
+def test_read_is_capped_like_the_activity_list_and_counts_everything(db, monkeypatch):
+    from api import attention
+    from tools import attention_rank
+    seed(db)
+    _add_task(db, '2026-01-01T00:01:00+00:00')
+    monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
+    monkeypatch.setattr(attention, 'QUEUE_ITEMS_CAP', 1)
+    read = json.loads(attention_rank._run('root', {'user_id':'user-1', 'project_id':'project-1'}, 'read', None))
+    assert read['count'] == 2 and len(read['items']) == 1
+
+
+def test_no_ranker_refusal_says_no_thread_ranks_the_scope(db, monkeypatch):
+    from tools import attention_rank
+    monkeypatch.setattr(attention_rank, 'ranker_for', lambda *_a, **_k: ('workspace', None))
+    result = attention_rank._run('root', {'user_id':'user-1', 'project_id':None}, 'read', None)
+    assert result == 'Error: no thread ranks this scope; it has no conductor or workspace agent.'
+
+
 def _unread_wakes(db):
     return db.execute("SELECT count(*) FROM messages WHERE thread_id='root' AND delivery_state='queued' "
                       "AND write_started_at IS NULL "
@@ -105,7 +157,7 @@ def test_concurrent_nudge_recheck_prevents_duplicate(db, monkeypatch):
     seed(db)
     def nudge_during_read(connection, *args, **kwargs):
         result = original_queue(connection, *args, **kwargs)
-        connection.execute('INSERT INTO activity_rank_nudges VALUES (?,?,?)',
+        connection.execute('INSERT INTO activity_rank_nudges(user_id,scope,last_enqueued_at) VALUES (?,?,?)',
                            ('user-1', 'project-1', '2026-01-01T00:00:00+00:00'))
         connection.commit()
         return result
@@ -187,3 +239,23 @@ def test_a_scope_that_keeps_failing_logs_once_until_it_changes(db, monkeypatch):
     failure['text'] = ''
     source.prepare('2026-01-01T00:02:00+00:00', db=db)
     assert len(infos) == 1 and activity_ranking._failing == {}
+
+
+def test_an_old_task_that_falls_due_after_the_last_wake_wakes_the_ranker(db):
+    from automation.continuation.sources import activity_ranking
+    seed(db)
+    plan = service.ensure_plan('thread', 'root', db=db)
+    waiting = service.add_node(plan.id, kind='task', title='Later step', acceptance_criteria='Done',
+                               assignee='user', later=True, db=db)
+    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?', ('2025-12-01T00:00:00+00:00', waiting.id))
+    db.commit()
+    source = activity_ranking.ActivityRankingSource()
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
+    _read_wakes(db)
+    assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == []
+    # Created long before the last wake, it is new to the queue once it leaves Later.
+    db.execute('UPDATE plan_nodes SET later=0 WHERE id=?', (waiting.id,))
+    db.commit()
+    assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == ['root']
+    seen = json.loads(db.execute('SELECT seen_keys FROM activity_rank_nudges').fetchone()[0])
+    assert f'task:{waiting.id}' in seen

@@ -18,6 +18,7 @@ receive a typed surface or stop being raised.
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -254,8 +255,11 @@ def _queue_response(user_id: str, project_id: str | None, view: str | None):
 
 @router.get("/queue")
 async def get_queue(user: dict = Depends(require_user), project_id: str | None = None,
-                    view: str | None = None):
-    """Read the selected view of the person's ordered queue."""
+                    view: Literal['activity'] | None = None):
+    """Read the selected view of the person's ordered queue; no view is the dock's.
+
+    An unknown view is refused (422), never served as the dock's list.
+    """
     return await run_in_db(lambda: _queue_response(user['id'], project_id, view))
 
 

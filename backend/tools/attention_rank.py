@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 from infra.database import get_db, write_transaction
+from infra.product_events import emit_product_event
 from infra.db_async import run_in_db
 from infra.activity_rank_scope import ranker_for
 from infra.activity_ranking import REASON_MAX_CHARS, replace_ranks, validate_order
@@ -15,52 +15,75 @@ from tools.base import Tool
 from tools.delegation import _require_context
 
 
+def _age_seconds(raised_at: str | None, now: datetime) -> int | None:
+    try:
+        raised = datetime.fromisoformat(str(raised_at).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if raised.tzinfo is None:
+        raised = raised.replace(tzinfo=timezone.utc)
+    return max(0, int((now - raised).total_seconds()))
+
+
+def _refusal(ranker: dict | None) -> str:
+    if not ranker:
+        return 'Error: no thread ranks this scope; it has no conductor or workspace agent.'
+    return f"Error: {ranker['label']} ranks this scope, not you."
+
+
+def _read(scope: str, rows: list[dict]) -> str:
+    """The first QUEUE_ITEMS_CAP items in the person's order, as the Activity list sends them."""
+    from api.attention import QUEUE_ITEMS_CAP
+
+    now = datetime.now(timezone.utc)
+    readable = [{key: row[key] for key in ('key', 'kind', 'title', 'source', 'rank')}
+                | {'age_seconds': _age_seconds(row.get('raised_at'), now)}
+                for row in rows[:QUEUE_ITEMS_CAP]]
+    return json.dumps({'scope': scope, 'count': len(rows), 'items': readable})
+
+
+def _set(db, thread_id: str, user_id: str, project_id: str | None, scope: str,
+         rows: list[dict], items: Any) -> str:
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        return 'Error: set requires items, a list of {key, reason}.'
+    try:
+        validate_order(items, {row['key'] for row in rows})
+    except ValueError as exc:
+        return f'Error: {exc}'
+    # The queue is composed outside the lock; the write re-checks only the ranker. A key that
+    # leaves the queue meanwhile is ignored on read and dropped on the next set.
+    with write_transaction(db, scope='attention_rank') as tx:
+        locked_scope, ranker = ranker_for(tx, user_id, project_id)
+        if locked_scope != scope or not ranker or ranker['thread_id'] != thread_id:
+            return _refusal(ranker)
+        replace_ranks(tx, user_id, scope, thread_id, items, datetime.now(timezone.utc).isoformat())
+    remaining = len(rows) - len(items)
+    logger.info('activity rank set scope={} count={} ranker={}', scope, len(items), thread_id)
+    emit_product_event('activity_rank', 'set', thread_id=thread_id, user_id=user_id,
+                       properties={'scope_kind': 'workspace' if scope == 'workspace' else 'project',
+                                   'ranked': len(items), 'unranked': remaining})
+    return (f'Ranked {len(items)} for {scope}; the person sees this order now.'
+            + (f' {remaining} remain unranked.' if remaining else ''))
+
+
 def _run(thread_id: str, actor: dict, operation: str, items: list | None) -> str:
     from api.attention import activity_queue
 
+    if operation not in ('read', 'set'):
+        return 'Error: operation must be read or set.'
     db = get_db()
     try:
-        project_id = actor['project_id']
-        # A read takes no write lock; set validates and replaces in one write transaction.
-        lock = nullcontext(db) if operation == 'read' else write_transaction(db, scope='attention_rank')
-        with lock as connection:
-            scope, ranker = ranker_for(connection, actor['user_id'], project_id)
-            if not ranker or ranker['thread_id'] != thread_id:
-                label = ranker['label'] if ranker else 'No ranker is assigned'
-                return f"Error: {label} ranks this scope."
-            # A project without a conductor reads the workspace order. The workspace
-            # ranker ranks the whole workspace, never replaces it with a filtered list.
-            if project_id and scope == 'workspace':
-                project_id = None
-            rows, _, _ = activity_queue(connection, actor['user_id'], project_id=project_id, view='activity')
-            if operation == 'read':
-                now = datetime.now(timezone.utc)
-                readable = []
-                for row in rows:
-                    try:
-                        raised = datetime.fromisoformat(row['raised_at'].replace('Z', '+00:00'))
-                        if raised.tzinfo is None:
-                            raised = raised.replace(tzinfo=timezone.utc)
-                        age_seconds = max(0, int((now - raised).total_seconds()))
-                    except (AttributeError, TypeError, ValueError):
-                        age_seconds = None
-                    readable.append({key: row[key] for key in ('key', 'kind', 'title', 'source', 'rank')}
-                                    | {'age_seconds': age_seconds})
-                return json.dumps({'scope': scope, 'items': readable})
-            if operation != 'set':
-                return 'Error: operation must be read or set.'
-            if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
-                return 'Error: set requires items, a list of {key, reason}.'
-            try:
-                validate_order(items, {row['key'] for row in rows})
-            except ValueError as exc:
-                return f'Error: {exc}'
-            replace_ranks(connection, actor['user_id'], scope, thread_id, items,
-                          datetime.now(timezone.utc).isoformat())
-            logger.info('activity rank set scope={} count={} ranker={}', scope, len(items), thread_id)
-            remaining = len(rows) - len(items)
-            return (f'Ranked {len(items)} for {scope}; the person sees this order now.'
-                    + (f' {remaining} remain unranked.' if remaining else ''))
+        user_id, project_id = actor['user_id'], actor['project_id']
+        scope, ranker = ranker_for(db, user_id, project_id)
+        if not ranker or ranker['thread_id'] != thread_id:
+            return _refusal(ranker)
+        # A project without a conductor reads the workspace order. The workspace
+        # ranker ranks the whole workspace, never replaces it with a filtered list.
+        queue_project = None if scope == 'workspace' else project_id
+        rows, _, _ = activity_queue(db, user_id, project_id=queue_project, view='activity')
+        if operation == 'read':
+            return _read(scope, rows)
+        return _set(db, thread_id, user_id, project_id, scope, rows, items)
     finally:
         db.close()
 
