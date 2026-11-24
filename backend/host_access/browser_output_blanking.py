@@ -73,7 +73,7 @@ def _whitespace_forms(value: str) -> set[str]:
     forms, todo = {value}, [value]
     while todo:
         text = todo.pop()
-        for form in (text.replace(" ", ""), _COLLAPSIBLE.sub(" ", text), text.strip(_ASCII_SPACE), text.strip()):
+        for form in (text.replace("\u00a0", ""), _COLLAPSIBLE.sub(" ", text), text.strip(_ASCII_SPACE), text.strip()):
             if form not in forms:
                 forms.add(form)
                 todo.append(form)
