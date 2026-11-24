@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Mapping, Sequence, cast
+from typing import Any, Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -18,6 +18,8 @@ from host_access.browser_session_state import BrowserSessionError
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
 log = logging.getLogger(__name__)
+# Every CDP socket's logger: outside the logging tree and above CRITICAL, so no frame ever reaches a log.
+SILENT = logging.Logger("corsia.cdp-socket", logging.CRITICAL + 1)
 # The CDP plain-text search matches tag names, attribute names and values, and text, in every
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
@@ -45,15 +47,16 @@ class PasswordProbe:
 class CdpClient:
     """Small request/response CDP client; the session owner supplies its endpoint."""
 
-    def __init__(self, endpoint: str, *, max_size: int | None = 2**20) -> None:
+    def __init__(self, endpoint: str, *, max_size: int | None = 2**20, logger: logging.Logger | None = None) -> None:
         self.endpoint = endpoint
-        self._max_size = max_size
+        self._max_size, self._logger = max_size, logger
         self._next_id = 0
         self.session_id: str | None = None
         self.parents: dict[int, int] = {}
         self._session_parents: dict[str, dict[int, int]] = {}
         # Every Target.attachedToTarget seen, with the session it attached under (parentSessionId).
         self.attached: list[dict] = []
+        self._logger = self._logger or SILENT
 
     def session_parents(self, session_id: str) -> dict[int, int]:
         return self._session_parents.setdefault(session_id, {})
@@ -82,15 +85,11 @@ class CdpClient:
             if response.get("id") != request_id:
                 self._event(response)
                 continue
-            if "error" in response:
-                error = response["error"]
-                if isinstance(error, dict):
-                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
-                else:
-                    log.debug("CDP %s failed with an invalid error response", method)
-                raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
-            if not isinstance(result, dict):
+            if "error" in response or not isinstance(result, dict):
+                code = response["error"].get("code") if isinstance(response.get("error"), dict) else None
+                # Method, id and numeric code only: an error's message can quote the request's params.
+                log.debug("CDP %s (id %s) failed with code %s", method, request_id, code if isinstance(code, int) else None)
                 raise BrowserSessionError("This page couldn't be checked")
             return result
 
@@ -108,7 +107,7 @@ class CdpClient:
                         parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1)
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, **cast(dict[str, Any], {"logger": self._logger} if self._logger is not None else {}))
         return self
 
     async def __aexit__(self, *_: object) -> None:

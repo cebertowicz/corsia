@@ -90,8 +90,9 @@ async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = 
     except BrowserSessionError as exc:
         raise BrowserOwnerError(await _blanked(f"Error: {exc}")) from exc
     except Exception as exc:
-        # The message names only the thread and the subcommand, never the other arguments; the traceback carries the exception's own text.
-        log.exception("browser command %s failed for thread %s", args[0] if args else "", thread_id)
+        # The subcommand, the thread and the exception's type only: its message and traceback can quote page
+        # text or a typed value, so neither reaches a log.
+        log.error("browser command %s failed for thread %s: %s", args[0] if args else "", thread_id, type(exc).__name__)
         raise BrowserOwnerError(f"Error: {COMMAND_FAILED}") from exc
     return await _blanked(result)
 
