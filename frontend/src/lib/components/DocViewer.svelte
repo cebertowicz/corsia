@@ -323,7 +323,7 @@
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
-		reading={reading.reading}
+		reading={reading.reading} touchReading={reading.touch}
 		readOnly={readonly || confirming || suggestionBusyId !== null}
 		imageBase={target && { ...target, imageCacheKey: imageKey.current }}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
