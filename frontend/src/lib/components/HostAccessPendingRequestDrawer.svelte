@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button, StatePill } from '$lib/components/ui';
 	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
+	import HostAccessFillRequestDrawer from './HostAccessFillRequestDrawer.svelte';
 	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
@@ -20,13 +21,14 @@
 		/** Mirrors the parent decide() guard so a visibly-enabled control never silently no-ops. */
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
-		onApprove: (event: MouseEvent) => void;
+		/** A fill approval passes the duration the person picked; nothing else does. */
+		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(lease));
-	const exceptions = $derived(lease.kind !== 'script' && Array.isArray(lease.requested_policy_exceptions)
+	const exceptions = $derived(lease.kind !== 'script' && lease.kind !== 'fill' && Array.isArray(lease.requested_policy_exceptions)
 		? lease.requested_policy_exceptions : []);
 	const external = $derived(exceptions.some((exception) => exception?.policy === 'external_agent'));
 </script>
@@ -72,6 +74,8 @@
 
 {#if lease.kind === 'script'}
 	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
+{:else if lease.kind === 'fill'}
+	<HostAccessFillRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
 {:else}
 <div class="pending-drawer">
 	<header class="decision-head">

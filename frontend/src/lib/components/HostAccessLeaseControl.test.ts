@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 import { token } from '$lib/stores/auth';
 import { emit } from '$lib/ws/events';
-import type { HostAccessLease } from '$lib/api/hostAccess';
+import type { HostAccessFill, HostAccessLease } from '$lib/api/hostAccess';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -193,6 +193,67 @@ describe('HostAccessLeaseControl', () => {
 			revision: 4,
 			application_hash: 'hash-1',
 		});
+	});
+
+	it('approves a saved-login fill for the picked duration, then revokes it from its chip', async () => {
+		const waitingFill: HostAccessFill = {
+			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+		};
+		let state: HostAccessFill | null = waitingFill;
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') {
+				state = String(input).endsWith('/approve')
+					? {
+						...waitingFill, state: 'active', revision: 2, duration_seconds: 1800,
+						expires_at: '2099-07-18T16:30:00Z', decision_capability: 'fill-revoke',
+					}
+					: null;
+				return response({});
+			}
+			return response({ leases: state ? [state] : [] });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		const trigger = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLButtonElement>('[aria-label="Review a request to sign in with a saved login"]');
+			expect(found).toBeTruthy();
+			return found!;
+		});
+		trigger.click();
+		flushSync();
+		await tick();
+		const dialog = host.querySelector('[role="dialog"]')!;
+		expect(dialog.textContent).toContain('Bookkeeper');
+		expect(dialog.textContent).toContain('me@example.com');
+		dialog.querySelector<HTMLButtonElement>('[data-seconds="1800"]')!.click();
+		flushSync();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+		await tick();
+
+		await vi.waitFor(() => expect(host.querySelector('.active-chip [aria-label="Saved login approval"]')).toBeTruthy());
+		const approve = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
+		expect(approve?.[0]).toBe('/api/host-access/leases/fills/fill-1/approve');
+		expect(JSON.parse(String(approve?.[1]?.body))).toEqual({
+			revision: 1, application_hash: 'fill-hash', duration_seconds: 1800,
+		});
+
+		host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Saved login approval"]')!.click();
+		flushSync();
+		await tick();
+		const activeDialog = host.querySelector('[role="dialog"]')!;
+		Array.from(activeDialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Revoke approval')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeNull());
+		const revoke = fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')[1];
+		expect(revoke?.[0]).toBe('/api/host-access/leases/fills/fill-1/revoke');
+		expect(JSON.parse(String(revoke?.[1]?.body))).toEqual({ revision: 2, application_hash: 'fill-hash' });
 	});
 
 	it('collapses active host access behind a stable compact disclosure', async () => {
