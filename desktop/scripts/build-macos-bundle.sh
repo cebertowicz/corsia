@@ -195,6 +195,8 @@ build_git_runtime
 fetch_agent_browser
 fetch_safehouse
 fetch_gws
+# The licence text of every package the app bundles, beside the per-tool licences above.
+install -m 0644 "$ROOT/THIRD-PARTY-NOTICES.md" "$BUNDLE_ROOT/licenses/THIRD-PARTY-NOTICES.md"
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
@@ -228,6 +230,8 @@ readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
 # scripts/corsia.d/app_mode.sh runs Contents/MacOS/CORSIA to stage, swap and roll back an update.
 [ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
+cmp -s "$ROOT/THIRD-PARTY-NOTICES.md" "$APP/Contents/Resources/licenses/THIRD-PARTY-NOTICES.md" \
+  || fail "$APP does not carry THIRD-PARTY-NOTICES.md in Resources/licenses"
 "$ROOT/desktop/scripts/stamp-bundle-version.sh" "$APP/Contents/Info.plist" "$macos_short_version" "$app_version"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
