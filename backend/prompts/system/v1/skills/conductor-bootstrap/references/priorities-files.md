@@ -24,7 +24,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 
 - Every line traces to the person's words or a decision they made, or reads `Not set yet`. Never fill a gap with what seems likely.
 - Use the person's words, not platform terms or jargon.
-- Propose goals, measures and counter-measures in plain words for the person to confirm. Never ask them to come up with one.
+- Propose goals, measures and counter-measures in plain words for the person to confirm. Never ask them to come up with one. Mark a proposed line as proposed until they confirm it.
 - The person approves each file. A file they have not approved does not count.
 
 ## What it starts
