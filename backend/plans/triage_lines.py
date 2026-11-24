@@ -112,16 +112,21 @@ def standing(db, plan) -> Standing:
         }
         for row in held
     }
+    only_checkback = {
+        str(row["id"]) for row in held
+        if causes[str(row["id"])]
+        and all(cause.get("artifact_id") is None
+                and str(cause.get("watch_id")) in checkbacks[str(row["id"])]
+                for cause in causes[str(row["id"])])
+    }
+    other_held_roots = {
+        root_of[str(row["id"])] for row in leaves
+        if blockers[str(row["id"])] is not None and str(row["id"]) not in only_checkback
+    }
     eligible = [
         str(row["id"]) for row in leaves
         if blockers[str(row["id"])] is None
-        or (
-            blockers[str(row["id"])] == validity.HELD
-            and bool(causes[str(row["id"])])
-            and all(cause.get("artifact_id") is None
-                    and str(cause.get("watch_id")) in checkbacks[str(row["id"])]
-                    for cause in causes[str(row["id"])])
-        )
+        or (str(row["id"]) in only_checkback and root_of[str(row["id"])] not in other_held_roots)
     ]
     # A task already holding its slot is running, and a delegated one is
     # started: neither is waiting to be picked.

@@ -105,6 +105,20 @@ def test_other_thread_is_exempt_from_order_refusal(db, other_actor):
     assert triage_lines.out_of_order(db, service._node_row(db, lower.id), actor_id=other_actor) is None
 
 
+def test_mixed_causes_under_phase_do_not_prevent_lower_start(db):
+    plan = owner_plan(db)
+    phase = service.add_node(plan.id, kind="phase", title="Mixed waits", acceptance_criteria="Done", db=db)
+    checkback = task(db, plan.id, "Check-back child", parent_id=phase.id)
+    blocked = task(db, plan.id, "Vendor child", parent_id=phase.id)
+    lower = task(db, plan.id, "Lower work")
+    _deadline(db, plan.id, checkback)
+    plan_update(db, plan.id, "block_node", {
+        "node_id": blocked.id, "expected_revision": revision(db, blocked.id),
+        "owner_kind": "external", "reason_key": "vendor", "reason": "Vendor reply",
+    })
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+
+
 def test_paused_checkback_does_not_prevent_lower_start(db):
     plan = owner_plan(db)
     top = task(db, plan.id, "Paused check-back")
