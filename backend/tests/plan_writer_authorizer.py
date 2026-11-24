@@ -110,6 +110,8 @@ _TRACKED: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDi
 _GUARDED: dict[type, type] = {}
 #: Per connection, the thread that opened it and the database file (None for memory or a URI).
 _OWNER: weakref.WeakKeyDictionary[sqlite3.Connection, tuple[int, str | None]] = weakref.WeakKeyDictionary()
+#: Per database file another thread's connection writes, the file state last judged.
+_JUDGED_FILES: dict[str, tuple] = {}
 
 
 def _guarded(base: type) -> type:
@@ -199,32 +201,64 @@ def _mismatches(connection: sqlite3.Connection) -> list[str]:
         connection.row_factory = row_factory
 
 
+def _file_state(path: str) -> tuple:
+    """The database file and its WAL as (mtime, size), so a committed write changes it."""
+    state: list[tuple[int, int] | None] = []
+    for name in (path, f"{path}-wal"):
+        try:
+            stat = os.stat(name)
+        except OSError:
+            state.append(None)
+        else:
+            state.append((stat.st_mtime_ns, stat.st_size))
+    return tuple(state)
+
+
 def recount_changed_plans() -> list[str]:
     """Mismatches of every plan on a connection that wrote since the last call.
 
-    A connection another thread opened may be mid-statement there (a job still running
-    as the test ends), and a read on it from here can deadlock against that job's own
-    database lock until the busy timeout. Those are judged through a fresh read-only
-    connection to the committed file instead, and skipped when the file is busy or the
-    database has none.
+    A connection another thread opened is never touched from here, not even for
+    ``total_changes`` (#3292). That thread may be mid-statement on it (a job still
+    running as the test ends), holding the connection's mutex while its progress
+    handler, SQL functions or authorizer wait for the GIL; ``total_changes`` waits
+    for that mutex while holding the GIL, so both wait forever. Instead, each file
+    such a connection opened is judged through a fresh read-only connection to its
+    committed state whenever the file changed since it was last judged; a busy file
+    is judged after a later test, and a database without plan tables has nothing to
+    compare.
     """
     found: list[str] = []
+    me = threading.get_ident()
+    other_files: set[str] = set()
     for connection in list(_TRACKED):
+        owner, path = _OWNER.get(connection, (me, None))
+        if owner != me:
+            if path is not None:
+                other_files.add(path)
+            continue
         try:
             changes = connection.total_changes
             if changes == _TRACKED.get(connection, 0):
                 continue
             _TRACKED[connection] = changes
-            owner, path = _OWNER.get(connection, (threading.get_ident(), None))
-            if owner == threading.get_ident():
-                found.extend(_mismatches(connection))
-            elif path is not None:
-                # A guarded subclass: ``aggregates.ready`` keeps a weak reference to its connection.
-                reader: sqlite3.Connection = _original_connect(
-                    f"file:{quote(path)}?mode=ro", uri=True, timeout=0, factory=_guarded(sqlite3.Connection)
-                )
-                with closing(reader):
-                    found.extend(_mismatches(reader))
+            found.extend(_mismatches(connection))
         except sqlite3.Error:
             continue  # closed, locked or without the plan tables: nothing to compare
+    for path in sorted(other_files):
+        state = _file_state(path)
+        if state[0] is None:
+            _JUDGED_FILES.pop(path, None)
+            continue
+        if _JUDGED_FILES.get(path) == state:
+            continue
+        try:
+            # A guarded subclass: ``aggregates.ready`` keeps a weak reference to its connection.
+            reader: sqlite3.Connection = _original_connect(
+                f"file:{quote(path)}?mode=ro", uri=True, timeout=0, factory=_guarded(sqlite3.Connection)
+            )
+            with closing(reader):
+                found.extend(_mismatches(reader))
+        except sqlite3.Error:
+            continue  # busy now: judged once a later test finds it free
+        _JUDGED_FILES[path] = state
     return found
