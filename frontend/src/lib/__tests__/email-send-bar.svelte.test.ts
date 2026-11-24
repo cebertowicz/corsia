@@ -31,7 +31,7 @@ describe('email send bar', () => {
 	});
 	it('names addresses the mail host did not deliver to after sending', async () => {
 		apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ state: 'sent', not_delivered_to: ['lee@example.com', 'sam@example.com'] }) });
-		render(); press('Send'); await settle(); expect(host.textContent?.trim()).toBe("Sent. lee@example.com, sam@example.com didn't get it."); expect(host.querySelectorAll('button')).toHaveLength(0);
+		render(); press('Send'); await settle(); expect(host.textContent?.trim()).toBe('Sent. lee@example.com, sam@example.com didn’t get it.'); expect(host.querySelectorAll('button')).toHaveLength(0);
 	});
 	it('confirms discard, keeps a draft on cancel, and sends the discard', async () => {
 		apiFetch.mockResolvedValue(response('discarded')); render(); press('Don’t send'); expect(host.textContent).toContain('Don’t send this email?'); press('Keep draft'); press('Don’t send'); press('Don’t send'); await settle();

@@ -112,7 +112,9 @@ async def _outcome(draft_id: str, account: str, result: str) -> SendResult:
         # Another click claimed this draft first; its own request reports what happened.
         return SendResult(IN_FLIGHT, account)
     state = await run_in_db(_draft_state, draft_id)
-    if state == "sent":
+    # The provider accepted it: it went out, even when marking the draft sent failed afterwards (the row stays 'sending',
+    # so the button can't send it twice).
+    if state == "sent" or _error_text(result) is None:
         return _sent(account, result)
     if state == "sending":
         return SendResult(UNCONFIRMED, account, _error_text(result))

@@ -299,7 +299,7 @@ async def test_mail_graph_400_releases_claim_with_named_refusal(microsoft, monke
     assert _row(saved["draft_id"])["state"] == "open"
 
 
-async def test_mail_delivery_is_unconfirmed_when_mark_sent_fails(microsoft, monkeypatch):
+async def test_mail_delivery_succeeds_when_mark_sent_fails(microsoft, monkeypatch):
     calls = _graph(monkeypatch, [Response(202, {})])
     saved = await _mail_draft(microsoft)
     db = get_db()
@@ -307,8 +307,10 @@ async def test_mail_delivery_is_unconfirmed_when_mark_sent_fails(microsoft, monk
                   WHEN NEW.state = 'sent' BEGIN SELECT RAISE(ABORT, 'database unavailable'); END""")
     db.commit()
 
-    assert await _send_mail(saved) == {"state": "unconfirmed"}
+    # Graph accepted it, so it went out; the row stays 'sending', so a second click can't send it again.
+    assert await _send_mail(saved) == {"state": "sent"}
     assert _row(saved["draft_id"])["state"] == "sending"
+    assert await _send_mail(saved) == {"state": "sending"}
     assert len(calls) == 1
 
 

@@ -66,7 +66,7 @@
 	{:else if step === 'sending'}
 		<span class="bar-text" role="status">Sending…</span>
 	{:else if step === 'sent'}
-		<span class="bar-text" role="status">Sent{notDeliveredTo.length ? `. ${notDeliveredTo.join(', ')} didn't get it.` : ''}</span>
+		<span class="bar-text" role="status">Sent{notDeliveredTo.length ? `. ${notDeliveredTo.join(', ')} didn’t get it.` : ''}</span>
 	{:else if step === 'failed'}
 		<span class="bar-text failed" role="alert">Couldn’t send. The email didn’t leave, and the draft is kept.</span>
 		<span class="bar-actions"><Button size="sm" variant="secondary" disabled={!connected || readOnly} onclick={() => (step = 'confirm')}>Don’t send</Button><Button size="sm" variant="primary" ariaDisabled={!canSend} describedby={canSend ? undefined : reasonId} onclick={startSend}>Retry</Button></span>
