@@ -134,20 +134,29 @@ def _add_untouched_orphan(path: Path) -> None:
     conn.close()
 
 
-def test_an_orphan_the_migration_did_not_create_does_not_block_it(tmp_path, ladder):
+def test_an_orphan_the_migration_did_not_create_does_not_block_it(
+    tmp_path, ladder, caplog
+):
     """A pre-existing orphan in an untouched table no longer rolls back updates."""
     ladder[1] = lambda conn: conn.execute("CREATE TABLE added (id INTEGER PRIMARY KEY)")
     path = _database(tmp_path, 1)
     _add_untouched_orphan(path)
 
     conn = sqlite3.connect(path)
+    # The app's connections return sqlite3.Row; the log must still name the table.
+    conn.row_factory = sqlite3.Row
     try:
-        assert migrate_to_current(conn, 2).migrated
+        with caplog.at_level("WARNING", logger="infra.database_migrations"):
+            assert migrate_to_current(conn, 2).migrated
         assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 2
         # The old orphan is kept as it was; the migration does not repair data.
-        assert conn.execute("PRAGMA foreign_key_check").fetchall() == [
+        assert [tuple(row) for row in conn.execute("PRAGMA foreign_key_check")] == [
             ("other_child", 5, "other_parent", 0)
         ]
+        kept = [r.getMessage() for r in caplog.records if "predate it" in r.getMessage()]
+        assert len(kept) == 1
+        assert "('other_child', 5, 'other_parent', 0)" in kept[0]
+        assert "sqlite3.Row" not in kept[0]
     finally:
         conn.close()
 
@@ -163,12 +172,14 @@ def test_an_orphan_the_migration_creates_still_fails_beside_an_old_one(tmp_path,
     before = _digest(path)
 
     conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(MigrationError) as raised:
             migrate_to_current(conn, 2)
         message = str(raised.value.__cause__)
         assert "foreign_key_check failed" in message
-        assert "'child', 10, 'parent'" in message
+        assert "('child', 10, 'parent', 0)" in message
+        assert "sqlite3.Row" not in message
         assert "other_child" not in message
     finally:
         conn.close()
