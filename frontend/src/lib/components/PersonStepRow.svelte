@@ -3,7 +3,8 @@
 	 * A person task in the transcript (corsia#687): the "Needs your review" tile itself (`NeedsYouTile`),
 	 * with the plan row's needs-you mark as its lead and the task's action ("Do →") where the tile has
 	 * its chevron. Do → opens what the plan row opens: the task's instructions document, a sign-in
-	 * page's shared browser, else its details in the plan.
+	 * page's shared browser, else its details in the plan. A task whose row does not read Needs you
+	 * (parked in Later) wears that row's mark and word instead, without the needs-you frame.
 	 *
 	 * Settled, the chip becomes the EventChip receipt in place. Several waiting tasks in one Focus
 	 * stretch read as one line, the first task's title and "+N more", and Do → opens that first task;
@@ -12,7 +13,8 @@
 	import { onMount, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import type { UpdateCard } from '$lib/api/threadUpdates';
-	import { doStep, moreLabel, stepState } from '$lib/personStepChip';
+	import { doStep, moreLabel, stepAsks, stepState } from '$lib/personStepChip';
+	import { nodeDisplayLabel, nodeDisplayState, nodeStateTone } from './plans/planDisplay';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import EventChip from './EventChip.svelte';
@@ -27,9 +29,15 @@
 	const nodes = $derived(new Map((query.payload?.plans.flatMap((plan) => plan.nodes) ?? []).map((node) => [node.id, node])));
 	const states = $derived(members.map((member) => stepState(member, member.node_id ? nodes.get(member.node_id) : undefined)));
 	const waiting = $derived(members.filter((_, index) => states[index] === 'open'));
+	// The line leads with a step that asks the person; with none (all parked in Later), it reads as the first step's plan row.
+	const nodeOf = (member: UpdateCard) => (member.node_id ? nodes.get(member.node_id) : undefined);
+	const lead = $derived(waiting.find((member) => stepAsks(nodeOf(member))) ?? waiting[0]);
+	const asks = $derived(!lead || stepAsks(nodeOf(lead)));
+	const leadNode = $derived(lead && !asks ? nodeOf(lead) : undefined);
+	const word = $derived(leadNode ? nodeDisplayLabel(leadNode) : 'Needs you');
 	const settled = $derived(members.flatMap((member, index) => (states[index] === 'open' ? [] : [{ member, state: states[index] }])));
 	// The line: the first waiting task's title; with more waiting, "+N more", and the count falls as they settle.
-	const title = $derived((waiting[0] ?? card).title || 'A task for you');
+	const title = $derived((lead ?? card).title || 'A task for you');
 	const more = $derived(waiting.length > 1 ? moreLabel(waiting.length) : null);
 	const single = $derived(members.length === 1);
 	const motion = $derived($prefersReducedMotion ? 0 : 200);
@@ -50,7 +58,7 @@
 	function press(event: MouseEvent): void {
 		// The chat column takes every click as "the chat is active" and would put the chat back over the document just opened (`AttachmentRow` stops it the same way).
 		event.stopPropagation();
-		if (waiting[0]) void doStep(waiting[0]);
+		if (lead) void doStep(lead);
 	}
 
 	// One step: both faces stay mounted, so the row keeps its height until the next face is measured, then
@@ -85,25 +93,30 @@
 </script>
 
 {#snippet mark()}
-	<span class="lead"><PlanStateIcon state="needs-you" tone="" label="Needs you"><span aria-hidden="true">!</span></PlanStateIcon></span>
+	{#if leadNode}
+		{@const state = nodeDisplayState(leadNode)}
+		<span class="lead"><PlanStateIcon {state} tone={nodeStateTone(leadNode)} label={word}><span aria-hidden="true">{state === 'waiting' ? '•' : ''}</span></PlanStateIcon></span>
+	{:else}
+		<span class="lead"><PlanStateIcon state="needs-you" tone="" label="Needs you"><span aria-hidden="true">!</span></PlanStateIcon></span>
+	{/if}
 {/snippet}
 {#snippet stateLine()}
-	<span class="state ask"><span class="dot" aria-hidden="true"></span>Needs you</span>
+	{#if asks}<span class="state ask"><span class="dot" aria-hidden="true"></span>Needs you</span>{:else}<span class="state">{word}</span>{/if}
 	<span class="sep" aria-hidden="true">·</span>
-	<OutcomeTime value={waiting[0]?.created_at ?? card.created_at} compact />
+	<OutcomeTime value={lead?.created_at ?? card.created_at} compact />
 	{#if more}<span class="sep" aria-hidden="true">·</span><span class="more">{more}</span>{/if}
 {/snippet}
 {#snippet doMark()}<span class="act" aria-hidden="true">Do →</span>{/snippet}
 {#snippet tile()}
 	<NeedsYouTile
-		needsYou
+		needsYou={asks}
 		{title}
 		lead={mark}
 		twoLine
 		ctx={stateLine}
 		trailing={doMark}
 		data-step-chip
-		aria-label={`Do: ${title}${more ? `, ${waiting.length - 1} more` : ''}, Needs you`}
+		aria-label={`Do: ${title}${more ? `, ${waiting.length - 1} more` : ''}, ${word}`}
 		onclick={press}
 	/>
 {/snippet}
