@@ -15,6 +15,7 @@ import shutil
 import sys
 from typing import Iterable
 
+from infra.log_files import logs_dir
 from tools.host_path_resolution import (
     canonical,
     contains,
@@ -277,11 +278,13 @@ class ProtectedHostPathPolicy:
         ssh = self.ssh_root
         launch_agents = self.home / "Library" / "LaunchAgents"
         denied_roots = (self.state_root, *self.private_roots)
+        instance_logs = logs_dir(self.state_root, home=self.home, platform="darwin")
         # Safehouse's base profile denies Library/Logs. Put the narrow read
         # grant before our floors so state and credential denials still win.
         lines = [
             f'(allow file-read-metadata (literal "{sandbox_literal(self.logs_root.parent)}"))',
-            f'(allow file-read* (subpath "{sandbox_literal(self.logs_root)}"))',
+            f'(allow file-read-metadata (literal "{sandbox_literal(self.logs_root)}"))',
+            f'(allow file-read* (subpath "{sandbox_literal(instance_logs)}"))',
             f'(deny file-write* (subpath "{sandbox_literal(self.logs_root)}"))',
             *(
                 f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))'
