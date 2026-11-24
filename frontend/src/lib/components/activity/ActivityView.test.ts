@@ -412,6 +412,8 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 		expect(alert()).toBe('Couldn’t send this message. Try again.');
 		expect(pane().querySelector('.reference')?.textContent).toBe('Reference: err-7f3a');
+		// The band is a wrapping flex row: the reference must share its line's flex item, or it lands beside the buttons.
+		expect(pane().querySelector('.act-failure-row > .act-failure + .reference')).toBeTruthy();
 	});
 
 	it('shows why an earlier Send didn’t go, with its reference, before any press', async () => {
@@ -424,6 +426,7 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 		expect(pane().querySelector('.act-failure')?.textContent).toBe('Couldn’t reach GitHub.');
 		expect(pane().querySelector('.reference')?.textContent).toBe('Reference: err-91c2');
+		expect(pane().querySelector('.act-failure-row > .act-failure + .reference')).toBeTruthy();
 		expect(buttonNamed('Send')).toBeTruthy();
 	});
 });

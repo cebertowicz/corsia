@@ -210,8 +210,9 @@
 </script>
 
 {#snippet failureLine()}
-	{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}
-	{:else if held?.error}<!-- Why the last Send didn't go, as the dock shows it until the next press. --><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}{/if}
+	<!-- One flex item, so the reference sits under its line on the band's wrapping row, not beside the buttons. -->
+	{#if failure}<div class="act-failure-row"><p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}</div>
+	{:else if held?.error}<!-- Why the last Send didn't go, as the dock shows it until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
 {#if doc}
@@ -391,9 +392,7 @@
 		color: var(--text-primary); font: inherit; font-size: var(--text-subhead); resize: vertical;
 	}
 	.unopenable { padding-top: var(--space-4); }
-	.act-failure {
-		flex: 1 0 100%; order: 10; margin: 0; text-align: right;
-		color: var(--red); font-size: var(--text-footnote);
-	}
+	.act-failure-row { flex: 1 0 100%; order: 10; text-align: right; }
+	.act-failure { margin: 0; color: var(--red); font-size: var(--text-footnote); }
 	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
