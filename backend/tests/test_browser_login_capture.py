@@ -373,6 +373,28 @@ async def test_offer_login_runs_off_the_event_loop(monkeypatch, holder):
     assert holder.offer_threads and threading.get_ident() not in holder.offer_threads
 
 
+@pytest.mark.parametrize("change", ["ended", "swapped"])
+@pytest.mark.asyncio
+async def test_a_step_that_ends_while_the_holder_checks_drops_the_offer(monkeypatch, holder, change):
+    recorded = saved_login_offers.offer_login
+
+    def offer_then_step_changes(*args):
+        lifecycle._steps.pop(THREAD)
+        if change == "swapped":
+            open_step(monkeypatch, visit="doc-9")
+        return recorded(*args)
+
+    monkeypatch.setattr(saved_login_offers, "offer_login", offer_then_step_changes)
+    use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
+    open_step(monkeypatch)
+    await capture.person_submit(THREAD, KEY, "ws://page")
+    assert capture._pending == {}
+    assert holder.calls == [("offer_login", KEY, SITE, "person@example.com", MARKER), ("drop_offer", KEY)]
+    open_step(monkeypatch, visit="doc-10")
+    capture.step_decided(THREAD, probe(), "settle", None)
+    assert holder.names() == ["offer_login", "drop_offer"]
+
+
 @pytest.mark.asyncio
 async def test_an_offer_the_holder_didnt_make_is_never_confirmed_or_dropped(monkeypatch, holder):
     holder.offered = False

@@ -168,8 +168,13 @@ async def _submit(thread_id: str, session_key: str, endpoint: str) -> None:
     if login is None or lifecycle.password_step(thread_id) is not step:
         return
     # offer_login reads the database, so it runs off the event loop.
-    if await asyncio.to_thread(saved_login_offers.offer_login, session_key, login[0], login[1], login[2]):
+    if not await asyncio.to_thread(saved_login_offers.offer_login, session_key, login[0], login[1], login[2]):
+        return
+    # The step may also have ended while the holder checked the database: its ending never saw this offer.
+    if lifecycle.password_step(thread_id) is step:
         _pending[thread_id] = _Pending(session_key, _site_domain(login[0]))
+    else:
+        _settle(session_key, confirm=False)
 
 
 async def _frame_tree(cdp: CdpClient) -> tuple[str, list[tuple[str, str]]]:
@@ -298,13 +303,16 @@ def session_ended(thread_id: str) -> None:
 
 
 def _resolve(thread_id: str, *, confirm: bool) -> None:
-    if (pending := _pending.pop(thread_id, None)) is None:
-        return
+    if (pending := _pending.pop(thread_id, None)) is not None:
+        _settle(pending.session_key, confirm=confirm)
+
+
+def _settle(session_key: str, *, confirm: bool) -> None:
     try:
         if confirm:
-            saved_login_offers.confirm_offer(pending.session_key)
+            saved_login_offers.confirm_offer(session_key)
         else:
-            saved_login_offers.drop_offer(pending.session_key)
+            saved_login_offers.drop_offer(session_key)
     except Exception:
         log.warning("saved-login capture couldn't %s an offer", "confirm" if confirm else "drop")
 
