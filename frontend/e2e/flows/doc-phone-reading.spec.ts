@@ -73,3 +73,31 @@ for (const width of [320, 393, 768, 1440]) {
 		});
 	}
 }
+
+// Edit is the person's choice and lasts until Done: the revision refresh the first save sets off replaces the tab object (same id) and must not end it.
+for (const width of [320, 393]) {
+	test.describe(`@flow:doc-phone-reading @surface:documents ${width} Edit survives the first save`, () => {
+		test.beforeEach(({}, info) => test.skip(info.project.name !== 'chromium-mobile', 'touch opening'));
+		test('Edit stays on after the revision refresh that follows the first typed key', async ({ page }) => {
+			const seeded = await openReadingDocument(page, width);
+			const content = page.locator('.doc .cm-content:not(.cm-md-cell-editor .cm-content)').first();
+			const latest = () => page.evaluate((id) => {
+				const stored = JSON.parse(localStorage.getItem('corsia:artifactWorkspace:v1') ?? '{}');
+				return Object.values<any>(stored.threads ?? {}).flatMap(thread => thread.tabs).find(tab => tab.instanceId === id)?.latestRevision ?? null;
+			}, seeded.tabs[0].instanceId);
+			await enterDocumentEdit(page);
+			await content.locator('.cm-line').filter({ hasText: 'Passage 2:' }).click();
+			const before = await latest();
+			const refreshed = page.waitForResponse(response => response.url().includes('/api/files/revision'));
+			await page.keyboard.type('Q');
+			await refreshed;
+			// The refresh has landed once the tab carries the new revision; two frames later its effects have run.
+			await expect.poll(latest, { message: 'the first save is followed by a revision refresh' }).not.toBe(before);
+			await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+			await expect(content, 'Edit is still on').toHaveAttribute('contenteditable', 'true');
+			await expect(page.getByRole('button', { name: 'Done', exact: true })).toBeVisible();
+			await page.keyboard.type('W');
+			await expect.poll(() => inEditorView(page, view => view.state.doc.toString(), null), { message: 'the second key lands next to the first' }).toContain('QW');
+		});
+	});
+}

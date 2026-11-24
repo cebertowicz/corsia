@@ -122,7 +122,9 @@
 	let resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 	const typingAvailable = () => docState === 'ready' && !readonly && !confirming && !openRefusal && suggestionBusyId === null;
-	const reading = createDocumentReading({ opening: () => target?.instanceId ?? null, offScreen: () => offScreen && !covered, available: typingAvailable,
+	// A primitive, for the reason targetKey is one: a revision refresh replaces the `target` object with the same id, and that must not end Edit.
+	const openingId = $derived(target?.instanceId ?? null);
+	const reading = createDocumentReading({ opening: () => openingId, offScreen: () => offScreen && !covered, available: typingAvailable,
 		clearSelection: () => { editorSurface?.clearInputSelection(); draftController.select(null); } });
 
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
