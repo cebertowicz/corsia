@@ -20,7 +20,7 @@ Use this when you write, review or suggest a change to a priorities file: at set
 ## How to fill one
 
 - Every line traces to the person's words or a decision they made, or reads `Not set yet`. Never fill a gap with what seems likely.
-- Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. Keep the words that say what is wrong; a topic alone is not a problem. No platform terms or jargon.
+- Use the person's own words, trimmed if needed but not reworded: a rewording can add something they never said. Keep the words that say what is wrong or what they want; a topic alone is not a problem. No platform terms or jargon.
 - For each new agent, ask the person what that agent should solve first. Its Now holds what they name, in their order, or reads `Not set yet` if they name nothing.
 - Each Now line serves a goal of the project or of the agent. When a line serves none, ask the person about it; never write it in silently.
 - The person approves each file. A file they have not approved does not count.
