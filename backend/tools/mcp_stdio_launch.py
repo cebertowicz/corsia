@@ -25,7 +25,7 @@ _LINE_BYTES = LINE_CHARS * 4 + 4096
 # An intentionally generous 64 KiB input-line limit bounds buffering before masking;
 # lines reaching the limit are dropped whole so a split credential cannot leak. Not traffic-derived.
 _FORWARD_LINE_BYTES = 65536
-_OVERSIZE_MARKER = "[REDACTED: stderr line over 65536 bytes]"
+_OVERSIZE_MARKER = f"[REDACTED: stderr line over {_FORWARD_LINE_BYTES} bytes]"
 
 
 class StderrTail:

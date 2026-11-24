@@ -3,7 +3,6 @@
 import subprocess
 import sys
 import threading
-import time
 
 import pytest
 
@@ -31,18 +30,26 @@ async def test_child_stderr_is_masked_across_writes_and_at_eof(capfd):
 
 
 @pytest.mark.asyncio
-async def test_long_unterminated_line_flushes_safely_and_drains(capfd):
+async def test_long_unterminated_line_flushes_safely_and_drains(capfd, monkeypatch):
+    from tools import mcp_stdio_launch
+
+    written = threading.Event()
+    write_all = mcp_stdio_launch._write_all
+
+    def observe_write(fd, data):
+        result = write_all(fd, data)
+        written.set()
+        return result
+
+    monkeypatch.setattr(mcp_stdio_launch, "_write_all", observe_write)
     secret = "long-line-secret-for-test"
     tail = StderrTail("test", [secret])
     # Place the secret across the cap: forwarding either fragment would leak it.
     prefix = b"x" * (_FORWARD_LINE_BYTES - 5) + secret.encode()[:5]
     tail.file.buffer.write(prefix)
     tail.file.flush()
-    deadline = time.monotonic() + 3
-    relayed = ""
-    while "[REDACTED:" not in relayed and time.monotonic() < deadline:
-        relayed += capfd.readouterr().err
-        time.sleep(0.01)
+    assert written.wait(3), "relay did not flush before EOF"
+    relayed = capfd.readouterr().err
     assert "[REDACTED: stderr line over 65536 bytes]" in relayed
     tail.file.buffer.write(secret.encode()[5:] + b"\nafter\n")
     tail.file.flush()
