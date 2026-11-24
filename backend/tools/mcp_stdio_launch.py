@@ -5,6 +5,7 @@ from collections import deque
 from collections.abc import Iterable
 from contextlib import AsyncExitStack
 import os
+from queue import Empty, Queue
 import sys
 import threading
 from types import TracebackType
@@ -21,39 +22,92 @@ LINE_CHARS = 200
 # or a key block spanning lines is still recognised; bytes past this point of a line can
 # never reach its kept part.
 _LINE_BYTES = LINE_CHARS * 4 + 4096
+_FORWARD_LINE_BYTES = 65536
+_OVERSIZE_MARKER = "[REDACTED: stderr line over 65536 bytes]"
 
 
 class StderrTail:
-    """Relay a child's stderr to ours unchanged, keeping its last lines in memory."""
+    """Relay masked child stderr without letting a slow destination block the child."""
 
     def __init__(self, name: str, secrets: Iterable[str]):
         self.name = name
         self._secrets = sorted({value for value in secrets if value}, key=len, reverse=True)
         self._lines: deque[str] = deque(maxlen=TAIL_LINES)
         self._lock = threading.Lock()
+        self._forward_queue: Queue[bytes] = Queue(maxsize=128)
+        self._reader_done = threading.Event()
         read_fd, write_fd = os.pipe()
-        # What the SDK hands the child as its stderr; the child gets its own copy at spawn.
         self.file = open(write_fd, "w", encoding="utf-8", closefd=True)
         try:
             forward: int | None = sys.stderr.fileno()
         except (AttributeError, OSError, ValueError):
             forward = None
-        self._reader = threading.Thread(
-            target=self._relay, args=(read_fd, forward), name=f"mcp-stderr:{name}", daemon=True,
+        self._writer = threading.Thread(
+            target=self._forward, args=(forward,), name=f"mcp-stderr-forward:{name}", daemon=True,
         )
+        self._reader = threading.Thread(
+            target=self._relay, args=(read_fd,), name=f"mcp-stderr:{name}", daemon=True,
+        )
+        self._writer.start()
         self._reader.start()
 
-    def _relay(self, read_fd: int, forward: int | None) -> None:
+    def _forward(self, fd: int | None) -> None:
+        while not self._reader_done.is_set() or not self._forward_queue.empty():
+            try:
+                data = self._forward_queue.get(timeout=0.05)
+            except Empty:
+                continue
+            if fd is not None:
+                try:
+                    fd = _write_all(fd, data)
+                except Exception:
+                    fd = None
+
+    def _relay(self, read_fd: int) -> None:
         partial = b""
-        with open(read_fd, "rb", buffering=0, closefd=True) as pipe:
-            while chunk := pipe.read(4096):
-                if forward is not None:
-                    forward = _write_all(forward, chunk)
-                *complete, partial = (partial + chunk).split(b"\n")
-                partial = partial[:_LINE_BYTES]
-                self._keep(line[:_LINE_BYTES] for line in complete)
-        if partial:
-            self._keep([partial])
+        tail_partial = b""
+        overflow = False
+        private_block = False
+
+        def emit(line: bytes, *, newline: bool, truncated: bool = False) -> None:
+            nonlocal private_block
+            try:
+                text = line.decode("utf-8", "replace")
+                begins_key = "-----BEGIN " in text and "PRIVATE KEY-----" in text
+                ends_key = "-----END " in text and "PRIVATE KEY-----" in text
+                hidden = truncated or private_block or begins_key or any("\n" in secret for secret in self._secrets)
+                private_block = (private_block or begins_key) and not ends_key
+                safe = _OVERSIZE_MARKER if truncated else REDACTION_MARKER if hidden else self.mask(text)
+                self._forward_queue.put_nowait((safe + ("\n" if newline else "")).encode("utf-8"))
+            except Exception:
+                # A broken sanitizer or full queue drops this output, never the child.
+                return
+
+        try:
+            with open(read_fd, "rb", buffering=0, closefd=True) as pipe:
+                while chunk := pipe.read(4096):
+                    *complete, tail_partial = (tail_partial + chunk).split(b"\n")
+                    tail_partial = tail_partial[:_LINE_BYTES]
+                    self._keep(line[:_LINE_BYTES] for line in complete)
+                    parts = chunk.split(b"\n")
+                    for index, data in enumerate(parts):
+                        ended = index < len(parts) - 1
+                        if not overflow:
+                            if len(partial) + len(data) >= _FORWARD_LINE_BYTES:
+                                emit((partial + data)[:_FORWARD_LINE_BYTES], newline=True, truncated=True)
+                                partial, overflow = b"", True
+                            else:
+                                partial += data
+                        if ended:
+                            if not overflow:
+                                emit(partial, newline=True)
+                            partial, overflow = b"", False
+            if partial:
+                emit(partial, newline=False)
+            if tail_partial:
+                self._keep([tail_partial])
+        finally:
+            self._reader_done.set()
 
     def _keep(self, lines: Iterable[bytes]) -> None:
         decoded = [line.decode("utf-8", "replace").rstrip("\r") for line in lines]
@@ -74,7 +128,10 @@ class StderrTail:
             raw = list(self._lines)
         if not raw:
             return []
-        return [line[:LINE_CHARS] for line in self.mask("\n".join(raw)).split("\n")]
+        try:
+            return [line[:LINE_CHARS] for line in self.mask("\n".join(raw)).split("\n")]
+        except Exception:
+            return [REDACTION_MARKER]
 
     async def close(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None,
@@ -84,10 +141,14 @@ class StderrTail:
         # The child is gone by now, so the reader is at end of file unless something it
         # started still holds the pipe; never wait long for that.
         await asyncio.to_thread(self._reader.join, 1.0)
+        await asyncio.to_thread(self._writer.join, 1.0)
         if exc_type is not None:
             # Name what ended the connection: it may be CORSIA rejecting a healthy app or
             # cancelling its start, not the app failing.
-            reason = self.mask(_describe(exc_type, exc))[:LINE_CHARS]
+            try:
+                reason = self.mask(_describe(exc_type, exc))[:LINE_CHARS]
+            except Exception:
+                reason = REDACTION_MARKER
             lines = self.lines()
             if lines:
                 logger.warning(
