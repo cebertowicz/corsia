@@ -24,7 +24,7 @@
     <img width="49%" alt="Cost per task and first-try rate for each model, by task size" src="docs/measurement-models-light.png">
   </picture>
 </p>
-<p align="center"><sub>Measured on the install that builds CORSIA, September 25 to October 8.</sub></p>
+<p align="center"><sub>Screenshots of the Measurement screen on the install that builds CORSIA, showing September 25 to October 8, 2026. The figures further down come from other periods, and each gives its own dates.</sub></p>
 
 <p align="center"><strong>CORSIA is built by its own agents:</strong> <a href="#built-by-its-own-agents">1,069 pull requests in the 30 days to November 22, 2026</a>, under one maintainer.</p>
 
@@ -32,7 +32,7 @@
   <img alt="macOS, Linux server" src="https://img.shields.io/badge/platform-macOS_·_Linux_server-000000?logo=apple&logoColor=white">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-D97757?logo=claude&logoColor=white">
   <img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-10a37f">
-  <img alt="Local models: oMLX on Apple Silicon" src="https://img.shields.io/badge/local_models-oMLX_·_Apple_Silicon-555555?logo=apple&logoColor=white">
+  <img alt="Local models on Apple Silicon" src="https://img.shields.io/badge/local_models-Apple_Silicon-555555?logo=apple&logoColor=white">
   <img alt="Self-hosted: plain files and SQLite" src="https://img.shields.io/badge/self--hosted-plain_files_+_SQLite-2ea44f?logo=sqlite&logoColor=white">
   <img alt="Built by its own agents" src="https://img.shields.io/badge/built_by-its_own_agents-7c3aed">
   <img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -50,17 +50,17 @@
 
 ## How it works
 
-Most agents do what you ask and remember more each time. A CORSIA agent answers for a result instead: it is measured on it, checked by an agent other than itself where it matters, and holds each lesson it learns as a trial with a review date.
+Most agents do what you ask and remember more each time. A CORSIA agent answers for a result instead: it is measured on it, checked by an agent other than itself where it matters, and keeps each lesson it learns on trial: on a set date, it decides whether to keep, change or drop it.
 
-**Pick a problem and let an agent own it.** The agent answers for a measurable outcome: your time, for an assistant that takes email, scheduling and follow-ups off your week; bugs that reach users; new users who quit during setup. It sets the KPIs for that problem and answers for them, on top of the two goals every agent starts with: less of your time, better results. Recording those KPIs beside CORSIA's own measures is being added. It carries work from decision to verified result, hands bounded steps to **temporary workers**, and messages other agents directly. Each deliverable has one accountable agent.
+**Pick a problem and let an agent own it.** The agent answers for a measurable outcome: your time, for an assistant that takes email, scheduling and follow-ups off your week; bugs that reach users; new users who quit during setup. It picks the numbers that show whether that problem is getting better, its KPIs (key performance indicators), and answers for them, on top of the two goals every agent starts with: less of your time, better results. Recording those KPIs beside CORSIA's own measures is being added. It carries work from decision to verified result, hands bounded steps to **temporary workers**, and messages other agents directly. Each deliverable has one accountable agent.
 
-Anything measured can be gamed, by agents as much as by people. So every agent is measured on the cost of its own shortcuts: rework and your corrections (recorded once the local corrections classifier is installed), taken from the work itself rather than from its own grading. When an outcome matters too much for the agent doing the work to be the only check, a separate agent owns the check. That is one reason for a **project**: agents whose problems check or pull against each other, such as a builder that wants to ship and a reviewer that owns what slips through. The project's **coordination model** says how they work together: who owns what, how work moves, what "done" means and when you are asked. [A default one](docs/coordination-models/corsia-default/) ships with CORSIA.
+Anything measured can be gamed, by agents as much as by people. So every agent is measured on the cost of its own shortcuts: rework and your corrections (recorded once the local corrections classifier is installed), taken from the work itself rather than from its own grading. When an outcome matters too much for the agent doing the work to be the only check, a separate agent owns the check. That is one reason for a **project**: agents whose problems check or pull against each other, such as a builder that wants to ship and a reviewer that owns what slips through. Each project has a **conductor**, an agent that keeps the project's way of working, written down as its **coordination model**: who owns what, how work moves, what "done" means and when you are asked. [A default one](docs/coordination-models/corsia-default/) ships with CORSIA.
 
 ```mermaid
 flowchart TD
     You([You]) -->|goals · decisions · corrections| O[Agents]
     O -->|results · decisions with a recommendation| You
-    O -->|a correction becomes| L[Lesson trial<br/>evidence · boundary · review date]
+    O -->|a correction becomes| L[Lesson trial<br/>evidence · when it applies · review date]
     O -->|every accepted task · area outcomes, being added| M[(Measurement<br/>your minutes · quality · cost)]
     O <-->|steps and evidence| W[Temporary workers]
     M -.->|being added: did it help?| L
@@ -118,14 +118,14 @@ CORSIA is for people willing to let agents make mistakes and learn from them, **
 
 Usage limits, outages and model regressions shouldn't take your work with them.
 
-- **One context, any harness.** Agents run on Claude Code, Codex, or CORSIA's own loop on an API or a local model on Apple Silicon. Every harness receives the same instructions, skills and tools. CORSIA runs Claude Code and Codex with their own memory, skills, hooks and tools switched off, so every turn uses CORSIA's own and is governed and counted the same way.
+- **One context, any harness.** A harness is the program that runs an agent's turns and tools: Claude Code, Codex, or CORSIA's own loop on an API or a local model on Apple Silicon. Every harness receives the same instructions, skills and tools. CORSIA runs Claude Code and Codex with their own memory, skills, hooks and tools switched off, so every turn uses CORSIA's own and is governed and counted the same way.
 - **Switching keeps the work.** CORSIA writes its own checkpoint of each conversation, so changing an agent's model or account from the model picker keeps its plan, history and documents. Optionally, when an account reaches its usage limit, the next turn moves to another ready account you allow.
 
 ## Built by its own agents
 
-Most open-source projects move at the pace of their maintainers' spare time. CORSIA tests what happens when agents do the maintaining and, in time, the community sets the direction. It is built and maintained by agents running on CORSIA, under the conductors that ship with it. Each agent watches the health and KPIs of its own problem, follows recent trends, and holds each lesson as a trial with a review date before keeping it. The agents write the issues, pull requests and reviews, merge their own work after CI and an independent LLM reviewer pass on the exact commit, and prepare each release.
+Most open-source projects move at the pace of their maintainers' spare time. CORSIA tests what happens when agents do the maintaining and, in time, the community sets the direction. It is built and maintained by agents running on CORSIA, under the conductors that ship with it. Each agent watches the health and KPIs of its own problem, follows recent trends, and keeps each lesson on trial until a set date, when it decides whether to keep it. The agents write the issues, pull requests and reviews, merge their own work after CI and an independent LLM reviewer pass on the exact commit, and prepare each release.
 
-Under one maintainer, the team merged 1,069 pull requests in the 30 days to 2026-11-22 ([how this is counted](docs/readme-evidence.md)).
+Under one maintainer, the team merged 1,069 pull requests in the 30 days to November 22, 2026 ([how this is counted](docs/readme-evidence.md)). The bars below are whole weeks starting on Monday, so they don't line up with that 30-day window, which starts mid-week.
 
 ```mermaid
 xychart-beta
@@ -135,9 +135,9 @@ xychart-beta
     bar [31, 59, 29, 56, 96, 125, 135, 236, 405, 302, 290, 364, 287, 265, 134]
 ```
 
-<sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. * Monday to Friday. The week of October 5, when work moved to this repository, is not shown.</sub>
+<sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. Weeks run Monday to Sunday, Pacific time; the last bar, November 16 to 22, is a full week. * Monday to Friday only. The week of October 5, when work moved to this repository, is not shown.</sub>
 
-Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
+Review at this volume is automated, so the reviewer is itself audited. The two checks below were each run once, on the dates given, and have not been repeated on newer work. Of the pull requests merged from October 1 to 9, 2026, about a third failed CI or review on their first push and were corrected before merging. Nightly audits on 14 days between September 10 and 27, 2026, confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
 
 ## Getting started
 
@@ -161,13 +161,13 @@ The installer opens CORSIA at `http://localhost:1956`, where setup continues in 
 
 An agent you don't watch needs real capabilities, or it stops to ask you at every step. So CORSIA lets agents get the work done and limits what a mistake can reach, in layers, rather than taking away tools and routing every action back to you.
 
-- **Sandboxed by default.** Shell commands run inside Agent Safehouse on a Mac and bubblewrap on Linux, and file tools reach only allowed paths.
-- **Leases for anything outside.** To reach beyond the workspace, an agent applies for a short **host-access lease** that states the purpose, the exact resources and the effects. A reviewer model checks the request, then every command run under it. It is instructed to block secret exposure, changes to access controls, needless destruction, and commands clearly unrelated to that purpose; as a model, it can miss them. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
+- **Sandboxed by default.** Shell commands run inside Agent Safehouse on a Mac and bubblewrap on Linux, open-source sandboxes that limit what a command can read and change, and file tools reach only allowed paths.
+- **Leases for anything outside.** To reach beyond the workspace, an agent applies for a **host-access lease**, a short-lived permission that states the purpose, the exact resources and the effects. A reviewer model checks the request, then every command run under it. It is instructed to block secret exposure, changes to access controls, needless destruction, and commands clearly unrelated to that purpose; as a model, it can miss them. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
 - **Some things no lease opens:** the keys CORSIA stores, the agents' browser sign-ins, and the sandbox itself.
 - **Agents can't approve their own access.** A lease is approved by a signed-in person or by the automatic reviewer, which is on for new installs and can be turned off. A lease that launches an outside agent always needs a person.
 - **Recognized credentials are masked.** Values with a credential-looking name or a known key shape are masked in tool results before they reach a model; other values aren't.
 
-In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. How each control works, what it doesn't stop, and every known limit: [security documentation](docs/security/README.md).
+In the week to October 2, 2026, on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. How each control works, what it doesn't stop, and every known limit: [security documentation](docs/security/README.md).
 
 ## Questions
 
@@ -184,7 +184,7 @@ In one week on the install building CORSIA, with automatic approval on, 471 of 5
 
 All three patches passed, and CORSIA's loop used the fewest model calls: 42% fewer than Claude Code and 17% fewer than Codex. One task cannot show a repeatable difference; fuller benchmarks are coming. See the [methods](docs/readme-evidence.md).
 
-**Where an agent's actions go.** One long-running agent on the install that builds CORSIA, over one night in November 2026: 196 of its actions (commands, file reads, plan updates and the like), counted by hand.
+**Where an agent's actions go.** One long-running agent on the install that builds CORSIA, over one night in November 2026: 196 of its actions (commands, file reads, plan updates and the like), each read and sorted into one of the categories below, rather than counted by a tool.
 
 | What the action was for | Share of actions | Share of text the agent wrote |
 |---|--:|--:|
@@ -195,7 +195,7 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 | Memory and lessons | 4% | 8% |
 | Messages to the person | 0% | 0% |
 
-These are rounded shares of actions, not of tokens or dollars, for one agent on one night. With 196 actions, the largest share is uncertain by about 6 points either way and the others by 3 to 4, and more than that because the actions were taken in ten groups. This hand count will be replaced by measured readings as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
+These are rounded shares of actions, not of tokens or dollars, for one agent on one night. With 196 actions, the largest share is uncertain by about 6 points either way and the others by 3 to 4, and by more than that, because they were taken as ten runs of back-to-back actions rather than picked one by one. This one-off count will be replaced by figures CORSIA computes from its own records as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
 
 </details>
 
@@ -248,14 +248,14 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Layered context (workspace, project, agent), the same in every harness, with a per-turn record of what each turn received
 - [x] Sourced decisions and preferences carried across sessions and models
 - [x] CORSIA-written checkpoints that move with the work between models
-- [x] <img src="https://cdn.simpleicons.org/claude" width="14" alt=""> Claude Code and Codex logins, Anthropic, OpenAI and OpenAI-compatible APIs, and <img src="https://cdn.simpleicons.org/apple" width="14" alt=""> local models through oMLX
+- [x] <img src="https://cdn.simpleicons.org/claude" width="14" alt=""> Claude Code and Codex logins, Anthropic, OpenAI and OpenAI-compatible APIs, and <img src="https://cdn.simpleicons.org/apple" width="14" alt=""> local models through oMLX, a model server for Apple Silicon
 - [x] Subscription usage per account, shown in the model picker before you choose
 - [x] Optional account rollover on usage limits, set for the workspace or per project
 
 **Measurement and learning**
 - [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent ([how to read them](docs/measurement.md))
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
-- [x] Versioned guidance and lesson trials with a boundary and review date
+- [x] Versioned guidance, and lesson trials that say when they apply and carry a review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*
 - [x] Agent KPIs: outcomes agents record for their problems, and <img src="https://cdn.simpleicons.org/opentelemetry" width="14" alt=""> OpenTelemetry logs from tools on the same computer
 - [ ] Agent KPIs on the Measurement screen *(being added)*
