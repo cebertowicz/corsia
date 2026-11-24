@@ -452,6 +452,41 @@ def test_later_user_task_is_absent_from_activity_and_returns(db):
         assert plan_row["display"]["label_key"] == full["display"]["label_key"] == ("waiting" if later else "needs_you")
 
 
+def test_later_user_task_leaves_activity_stillness_equal_to_the_full_read(db, monkeypatch):
+    from tests.test_plan_decisions import _task
+
+    displays: dict[str, dict] = {}
+    reduce_plan = activity_projection._reduce_plan
+
+    def spy(plan, rows, **facts):
+        result = reduce_plan(plan, rows, **facts)
+        displays[str(plan["id"])] = result[2]
+        return result
+
+    monkeypatch.setattr(activity_projection, "_reduce_plan", spy)
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    parked = _task(plan.id, "User task", assignee="user", db=db)
+    waiting = _task(plan.id, "Agent wait", db=db)
+    db.execute(
+        """INSERT INTO expected_event_watches
+           (id,owner_thread_id,plan_id,plan_node_id,condition_type,condition_value,
+            status,armed_at,created_at,updated_at)
+           VALUES ('overdue', 'owner', ?, ?, 'deadline', '2026-09-30T08:00:00+00:00', 'armed', 't', 't', 't')""",
+        (plan.id, waiting.id),
+    )
+    db.commit()
+    _set_later(db, plan.id, parked.id, True)
+    activity_projection.read_workspace(actor=_human(), db=db)
+    compact = displays[plan.id].get("not_moving")
+    full = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]["display"].get("not_moving")
+    assert compact is not None and full is not None
+    assert compact["overdue_waits"] == full["overdue_waits"] == 1
+    assert compact["need_you"] == full["need_you"] == 0
+    for key in ("next_wait_ends_at", "next_overdue_at", "paused_by_you"):
+        assert compact[key] == full[key]
+
+
 def test_later_document_ask_preserves_hold_and_restores_attention(db):
     from tests.test_plan_decisions import _task
 

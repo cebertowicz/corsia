@@ -103,7 +103,8 @@ def asks_user_from_facts(
 ) -> bool:
     """Whether the row asks the person, independently of a pause ``ask_deferred`` counts.
 
-    A task in Later asks no one (Later design PS1): look and attention.
+    Later is not read here: ``display_from_facts`` (look) and ``ask_deferred``
+    (attention) apply it, so a task in Later asks no one (Later design PS1).
 
     The person's own task still asks them while all that holds it is a pause
     (``ask_deferred`` defers its attention) or an agent's check-back watch: that
