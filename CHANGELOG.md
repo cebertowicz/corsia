@@ -69,6 +69,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A path an agent writes in a project chat now shows as a file you can open with one press, whether it was written from the project folder or from the workspace folder. A document link you press opens its tab at once, even while CORSIA is slow to answer, and if the file is missing or can't be opened, the tab says so; before, a slow press could show nothing for many seconds.
 - A plan's tasks can now be put in the order you want: drag a task (press and hold on a phone), or use Move up, Move down or Move to top in its menu. The plan's agent sees its plan in that order as its priorities and is told when you move something.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
+- A comment, reply or description box now tells iPhone Safari it is not a contact field, to keep the AutoFill Contact suggestion off it.
 - A pull request that is closed and then reopened is followed again: it returns to Files in its agent's chat, the agent is told it was reopened, and the agent's event rules fire on it again. Before, nothing about it reached the agent after the reopen.
 - A pull request whose checks all finish while CORSIA is briefly busy now still starts its review; before, it could wait at Waiting for checks until CORSIA restarted.
 - A queued message for a signed-out account now waits with its sign-in notice, which names the account, instead of looking ready when another account is chosen for the next turn.
@@ -197,6 +198,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Several new comments you leave on a document before an agent starts on it now reach the agent as one task, instead of one task for each.
 - Setup and Settings describe Claude Code and Codex as using your Claude or ChatGPT account, including accounts billed per use.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
+- Setup's community card now says when sharing begins, and the usage-sharing choice in Setup and Settings describes what it lets CORSIA send.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - Switching models now shows progress as soon as you choose in all chats. Sending a new message to a chat held by a Claude Code or Codex usage limit checks that account again; if usage has reset, queued messages resume in order.
 - Text inside a comment highlight can be edited again; a comment's card no longer takes focus or reopens on each keystroke, and on a phone only a tap opens it.
