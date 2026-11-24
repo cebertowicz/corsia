@@ -243,7 +243,7 @@
 				onBrowseSkills={openSkillDocumentsFromThreadSettings}
 			/>
 		{:else if activeView === 'activity'}
-			<ActivityView projectId={$uiScope?.id ?? null} {onSelectThread} />
+			<ActivityView projectId={$uiScope?.id ?? null} {onSelectThread} onHeaderInset={(width) => (artifactHeaderInset = width)} />
 		{:else if activeView === 'chat'}
 			<ChatArtifactSplit
 				bind:chatPanelRef

@@ -29,10 +29,12 @@
 		</div>
 	</div>
 	<div class="canvas">
-		<div class="scroll">
-			<div class="content">{@render body()}</div>
+		<div class="box">
+			<div class="scroll">
+				<div class="content">{@render body()}</div>
+			</div>
+			{#if band}{@render band()}{/if}
 		</div>
-		{#if band}{@render band()}{/if}
 	</div>
 </div>
 
@@ -63,6 +65,8 @@
 		--canvas-pad-inline: var(--space-5); --canvas-pad-bottom: var(--space-5);
 		padding: 0 var(--canvas-pad-inline) var(--canvas-pad-bottom);
 	}
+	/* The box the docked control is placed against, inside the canvas's padding, as the document's box is. */
+	.box { position: relative; height: 100%; }
 	.scroll { height: 100%; overflow-y: auto; }
 	/* The docked control covers the canvas bottom; the content keeps its last lines clear of it. */
 	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) 10rem; }

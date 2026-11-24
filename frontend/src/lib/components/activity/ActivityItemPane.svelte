@@ -305,7 +305,7 @@
 	<ActivityKindPanel label="Message">
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
-			<p class="dctx">To: {held.recipient}{#if held.provider} on {held.provider}{/if}</p>
+			<p class="dctx">To: {held.provider ? `${held.recipient} on ${held.provider}` : held.recipient}</p>
 			<blockquote class="pre">{held.text}</blockquote>
 		{/snippet}
 		{#snippet band()}

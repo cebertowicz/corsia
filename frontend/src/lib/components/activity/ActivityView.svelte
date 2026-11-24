@@ -20,10 +20,19 @@
 	let {
 		projectId = null,
 		onSelectThread,
+		onHeaderInset = () => {},
 	}: {
 		projectId?: string | null;
 		onSelectThread: (threadId: string) => void | Promise<void>;
+		/** The item pane's width, published as the chat's document column is, so the app header gives that segment to the pane's tab and tools. */
+		onHeaderInset?: (width: number | null) => void;
 	} = $props();
+
+	let paneWidth = $state(0);
+	$effect(() => {
+		onHeaderInset(!$isMobile && paneWidth > 0 ? paneWidth : null);
+		return () => onHeaderInset(null);
+	});
 
 	const store = createActivityQueue(() => projectId);
 	const workspaceKey = $derived(activityWorkspaceKey(projectId));
@@ -142,7 +151,7 @@
 			/>
 		</div>
 	</section>
-	<section class="pane-col" aria-label={openItem ? openItem.title : 'Open item'}>
+	<section class="pane-col" bind:offsetWidth={paneWidth} aria-label={openItem ? openItem.title : 'Open item'}>
 		{#if openItem}
 			{#key openItem.key}
 				<ActivityItemPane item={openItem} {workspaceKey} onActed={() => store.reload()} onOpenChat={openChat} />
@@ -168,5 +177,6 @@
 	.phone .list-col { width: 100%; border-right: 0; }
 	.phone .pane-col { display: none; }
 	.phone.phone-item .list-col { display: none; }
-	.phone.phone-item .pane-col { display: flex; }
+	/* On a phone the app bar carries back and Next, so the item's tab row sits below it rather than in it. */
+	.phone.phone-item .pane-col { display: flex; margin-top: var(--header-bottom); }
 </style>

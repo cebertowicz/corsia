@@ -114,7 +114,7 @@
 								<span class="rank">{index + 1}</span>
 								<strong class:one={!open}>{item.title}</strong>
 							</span>
-							<span class="sub">{item.source.thread_label} · {KIND_LABEL[item.kind]}{#if item.raised_at} · {ageLabel(item.raised_at)}{/if}</span>
+							<span class="sub">{item.source.thread_label} · {KIND_LABEL[item.kind]}{item.raised_at ? ` · ${ageLabel(item.raised_at)}` : ''}</span>
 							{#if open}
 								<span class="why">{item.rank ? `Why it’s here: ${item.rank.reason}` : 'Not ranked yet'}</span>
 							{/if}
