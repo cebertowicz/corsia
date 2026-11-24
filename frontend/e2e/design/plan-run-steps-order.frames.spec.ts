@@ -2,6 +2,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSession, openAppByUrl } from '../support/corsia';
+import { settleMotion, settleRect } from '../support/sheetSettle';
 import { expect, test } from '../support/test';
 import { operatorNode, withPlanContract } from '../../src/lib/__tests__/fixtures/operatorPlan';
 import type { OperatorNode } from '../../src/lib/api/plans';
@@ -37,6 +38,21 @@ const CHECK = step('check', 'review', 2, 'Check the result independently', 'chec
 	},
 } as Partial<OperatorNode>);
 
+/** A step sequenced behind an open one, as the server's full read sends it: blocked on a live prerequisite, shown as a wait. */
+function after(id: string, parent: string, depth: number, title: string, workflowStep: string, prerequisite: { id: string; title: string }): OperatorNode {
+	return step(id, parent, depth, title, workflowStep, {
+		state: 'pending',
+		unmet_dependencies: [prerequisite.id],
+		display: { label_key: 'waiting', tone_key: 'waiting' },
+		status_reason: `After ${prerequisite.title}`,
+		execution: {
+			...operatorNode().execution,
+			condition: 'blocked',
+			causes: [{ kind: 'blocked', reason_key: 'dependency', dependency_node_id: prerequisite.id, reason: `Waiting for ${prerequisite.title}`, owner_kind: 'system', owner_id: null }],
+		},
+	} as Partial<OperatorNode>);
+}
+
 const NODES: OperatorNode[] = [
 	RUN,
 	done('ground', 'run', 1, 'Understand the ask and what is known', 'ground', 50),
@@ -45,8 +61,8 @@ const NODES: OperatorNode[] = [
 	step('review', 'run', 1, 'Fresh check before you see it', 'review', { kind: 'phase', container: true, state: 'active', workflow_ref: 'review-work' } as Partial<OperatorNode>),
 	done('brief', 'review', 2, 'Brief a fresh reviewer', 'brief', 12),
 	CHECK,
-	step('weigh', 'review', 2, 'Weigh and address the findings', 'weigh'),
-	step('handover', 'run', 1, 'Hand over the result', 'handover'),
+	after('weigh', 'review', 2, 'Weigh and address the findings', 'weigh', { id: 'check', title: 'Check the result independently' }),
+	after('handover', 'run', 1, 'Hand over the result', 'handover', { id: 'review', title: 'Fresh check before you see it' }),
 ];
 
 const ORDER = [
@@ -108,6 +124,8 @@ for (const variant of VARIANTS) {
 			expect(titles.map((text) => text.trim()).filter((text) => ORDER.includes(text))).toEqual(ORDER);
 			if (OUT) {
 				fs.mkdirSync(OUT, { recursive: true });
+				await settleRect(page, '.plan-tree');
+				await settleMotion(page);
 				await page.screenshot({ path: path.join(OUT, `run-steps-order-${variant.width}-${variant.theme}.png`) });
 			}
 		});
