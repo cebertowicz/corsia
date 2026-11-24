@@ -24,8 +24,9 @@ from websockets.exceptions import WebSocketException
 from host_access import browser_cdp_frames
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, world as _world
+from host_access import browser_login_capture_queue as _queue_state
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue
-from host_access.browser_login_capture_queue import items as _items, tails as _tails, tasks as _tasks
+from host_access.browser_login_capture_queue import tasks as _tasks
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 from infra import saved_login_offers
@@ -108,11 +109,24 @@ class _Flight:
     probe_domains: set[str] = field(default_factory=set)
 
 
-_pending: dict[str, _Pending] = {}
-_flights: dict[str, list[_Flight]] = {}
-_groups: dict[str, _StepSubmits] = {}
-# Each thread's documents (main-frame loader ids) an agent command may have typed into.
-_marks: dict[str, dict[str, None]] = {}
+@dataclass
+class _ThreadCapture:
+    group: _StepSubmits | None = None
+    flights: list[_Flight] = field(default_factory=list)
+    pending: _Pending | None = None
+    marks: dict[str, None] = field(default_factory=dict)
+
+
+_threads: dict[str, _ThreadCapture] = {}
+
+
+def _state(thread_id: str) -> _ThreadCapture:
+    return _threads.setdefault(thread_id, _ThreadCapture())
+
+
+def _reset_for_tests() -> None:
+    _threads.clear()
+    _queue_state.reset_for_tests()
 
 
 def is_submit(kind: object, event: Mapping[str, object]) -> bool:
@@ -145,12 +159,12 @@ async def agent_writing(thread_id: str, endpoint: str) -> None:
                 loader, _ = await _frame_tree(cdp)
     except (BrowserSessionError, OSError, WebSocketException):
         log.info("saved-login capture couldn't read the page an agent typed into; no offer is made in this session")
-    marks = _marks.setdefault(thread_id, {})
+    marks = _state(thread_id).marks
     marks[loader] = None
 
 
 def _marked(thread_id: str, loader: str) -> bool:
-    marks = _marks.get(thread_id, {})
+    marks = _state(thread_id).marks
     return not loader or loader in marks or _ANY_DOCUMENT in marks
 
 
@@ -158,11 +172,7 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
     """Read before delivering input, then queue holder work without holding the input."""
     lifecycle = importlib.import_module("host_access.browser_step_lifecycle")
     step = lifecycle.password_step(thread_id)
-    item = _QueueItem(session_key)
-    _items.setdefault(thread_id, []).append(item)
-    previous = _tails.get(thread_id)
-    finished = asyncio.get_running_loop().create_future()
-    _tails[thread_id] = finished
+    item, previous, finished = _queue_state.begin(thread_id, session_key)
     flight = _start_submit(thread_id, session_key, step) if step is not None else None
     read = None
     try:
@@ -188,18 +198,19 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
 
 
 def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
-    group = _groups.get(thread_id)
+    state = _state(thread_id)
+    group = state.group
     if group is None or group.step is not step or group.session_key != session_key:
         group = _StepSubmits(step, session_key)
-        _groups[thread_id] = group
+        state.group = group
     else:
-        for earlier in _flights.get(thread_id, []):
+        for earlier in state.flights:
             if earlier.group is group:
                 earlier.verdict = None
     group.number += 1
     flight = _Flight(group, group.number, session_key)
-    _flights.setdefault(thread_id, []).append(flight)
-    _pending.pop(thread_id, None)
+    state.flights.append(flight)
+    state.pending = None
     return flight
 
 
@@ -230,11 +241,9 @@ async def _discard(thread_id: str, flight: _Flight | None) -> None:
 
 
 def _forget(thread_id: str, flight: _Flight) -> None:
-    flights = _flights.get(thread_id, [])
+    flights = _state(thread_id).flights
     if flight in flights:
         flights.remove(flight)
-    if not flights:
-        _flights.pop(thread_id, None)
 
 
 async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple[str, str, str]) -> None:
@@ -268,7 +277,7 @@ async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple
         _settle(flight.session_key, confirm=False)
         flight.group.offered = False
     else:
-        _pending[thread_id] = _Pending(flight.session_key, flight.domain or "")
+        _state(thread_id).pending = _Pending(flight.session_key, flight.domain or "")
 
 
 async def _read_login(cdp: CdpClient, nodes: frozenset[int],
@@ -332,8 +341,9 @@ def step_decided(thread_id: str, result: PasswordProbe | None, end: str | None, 
     settled, this event's page shows no password field, and no new step opened; any other ending drops it.
     """
     try:
-        group = _groups.get(thread_id)
-        flight = next((item for item in reversed(_flights.get(thread_id, []))
+        state = _state(thread_id)
+        group = state.group
+        flight = next((item for item in reversed(state.flights)
                        if item.group is group and item.number == group.number), None) if group else None
         if flight is not None:
             if result is not None:
@@ -345,7 +355,7 @@ def step_decided(thread_id: str, result: PasswordProbe | None, end: str | None, 
                 flight.verdict = (end == "settle" and result is not None and not result.visible_nodes
                                   and opened is None)
             return
-        if (pending := _pending.get(thread_id)) is None:
+        if (pending := state.pending) is None:
             return
         if result is not None and registrable_domain(result.host) != pending.domain:
             _resolve(thread_id, confirm=False)
@@ -362,26 +372,26 @@ def session_ended(thread_id: str, session_key: str | None = None) -> None:
     The holder's own drop when the browser closes (`browser_control.browser_closed` calling
     `saved_login_offers.drop_thread`) is the safety net; this clears what capture keeps.
     """
-    group = _groups.get(thread_id)
+    state = _state(thread_id)
+    group = state.group
     if session_key is None:
-        pending = _pending.get(thread_id)
-        session_key = group.session_key if group is not None else next(
-            (item.session_key for item in reversed(_items.get(thread_id, []))),
-            pending.session_key if pending is not None else None)
-    for item in _items.get(thread_id, []):
-        if item.session_key == session_key:
-            item.ended = True
+        pending = state.pending
+        session_key = (group.session_key if group is not None else
+                       _queue_state.latest_session(thread_id) or (pending.session_key if pending is not None else None))
+    _queue_state.end_session(thread_id, session_key)
     if group is not None and group.session_key == session_key:
-        _groups.pop(thread_id, None)
-    if (pending := _pending.get(thread_id)) is not None and pending.session_key == session_key:
+        state.group = None
+    if (pending := state.pending) is not None and pending.session_key == session_key:
         _resolve(thread_id, confirm=False)
-    _marks.pop(thread_id, None)
+    state.marks.clear()
 
 
 def _resolve(thread_id: str, *, confirm: bool) -> None:
-    if (pending := _pending.pop(thread_id, None)) is not None:
+    state = _state(thread_id)
+    if (pending := state.pending) is not None:
+        state.pending = None
         _settle(pending.session_key, confirm=confirm)
-        if (group := _groups.get(thread_id)) is not None and group.session_key == pending.session_key:
+        if (group := state.group) is not None and group.session_key == pending.session_key:
             group.offered = False
 
 

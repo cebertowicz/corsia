@@ -12,8 +12,32 @@ class QueueItem:
 
 
 tasks: set[asyncio.Task[None]] = set()
-tails: dict[str, asyncio.Future[None]] = {}
-items: dict[str, list[QueueItem]] = {}
+_tails: dict[str, asyncio.Future[None]] = {}
+_items: dict[str, list[QueueItem]] = {}
+
+
+def begin(thread_id: str, session_key: str):
+    item = QueueItem(session_key)
+    _items.setdefault(thread_id, []).append(item)
+    previous = _tails.get(thread_id)
+    finished = asyncio.get_running_loop().create_future()
+    _tails[thread_id] = finished
+    return item, previous, finished
+
+
+def latest_session(thread_id: str) -> str | None:
+    return next((item.session_key for item in reversed(_items.get(thread_id, []))), None)
+
+
+def end_session(thread_id: str, session_key: str | None) -> None:
+    for item in _items.get(thread_id, []):
+        if item.session_key == session_key:
+            item.ended = True
+
+
+def reset_for_tests() -> None:
+    _items.clear()
+    _tails.clear()
 
 
 def enqueue(thread_id, item, previous, finished, work, on_skip) -> None:
@@ -27,15 +51,15 @@ def enqueue(thread_id, item, previous, finished, work, on_skip) -> None:
             else:
                 await work
         finally:
-            queued = items.get(thread_id, [])
+            queued = _items.get(thread_id, [])
             if item in queued:
                 queued.remove(item)
             if not queued:
-                items.pop(thread_id, None)
+                _items.pop(thread_id, None)
             if not finished.done():
                 finished.set_result(None)
-            if tails.get(thread_id) is finished:
-                tails.pop(thread_id, None)
+            if _tails.get(thread_id) is finished:
+                _tails.pop(thread_id, None)
     task = asyncio.create_task(run())
     tasks.add(task)
     task.add_done_callback(tasks.discard)

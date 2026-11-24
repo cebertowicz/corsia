@@ -118,18 +118,9 @@ def holder(monkeypatch) -> Holder:
 
 @pytest.fixture(autouse=True)
 def _clean_capture_state():
-    capture._pending.clear()
-    capture._marks.clear()
-    capture._groups.clear()
-    capture._flights.clear()
-    capture._tails.clear()
-    capture._items.clear()
+    capture._reset_for_tests()
     yield
-    capture._pending.clear()
-    capture._marks.clear()
-    capture._groups.clear()
-    capture._flights.clear()
-    capture._tails.clear()
+    capture._reset_for_tests()
 
 
 async def drain_capture() -> None:
@@ -378,7 +369,7 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
     await settled_submit(THREAD, KEY, "ws://page")
     assert "saved-login capture skipped a submit it couldn't read" in caplog.text
     assert MARKER not in caplog.text
-    assert capture._pending == {}
+    assert capture._state(THREAD).pending is None
 
 
 @pytest.mark.asyncio
@@ -405,7 +396,7 @@ async def test_a_step_that_ends_while_the_holder_checks_drops_the_offer(monkeypa
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
-    assert capture._pending == {}
+    assert capture._state(THREAD).pending is None
     assert holder.calls == [("offer_login", KEY, SITE, "person@example.com", MARKER), ("drop_offer", KEY)]
     open_step(monkeypatch, visit="doc-10")
     capture.step_decided(THREAD, probe(), "settle", None)
@@ -418,7 +409,7 @@ async def test_an_offer_the_holder_didnt_make_is_never_confirmed_or_dropped(monk
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
-    assert capture._pending == {}
+    assert capture._state(THREAD).pending is None
     capture.step_decided(THREAD, probe(), "settle", None)
     capture.session_ended(THREAD)
     assert holder.names() == ["offer_login"]
@@ -463,19 +454,19 @@ async def test_a_step_that_ended_during_the_read_gets_no_offer(monkeypatch, hold
     (None, frozenset(), None, None),
 ])
 def test_rule5_only_a_settled_step_with_its_field_gone_confirms(holder, end, visible, opened, settled):
-    capture._pending[THREAD] = capture._Pending(KEY, "example.com")
+    capture._state(THREAD).pending = capture._Pending(KEY, "example.com")
     capture.step_decided(THREAD, probe(visible=visible), end, opened)
     assert holder.calls == ([(settled, KEY)] if settled else [])
-    assert (THREAD in capture._pending) is (settled is None)
+    assert (capture._state(THREAD).pending is not None) is (settled is None)
 
 
 def test_rule5_a_session_end_drops_the_offer(holder):
-    capture._pending[THREAD] = capture._Pending(KEY, "example.com")
+    capture._state(THREAD).pending = capture._Pending(KEY, "example.com")
     capture.step_decided(THREAD, None, "unsettled", None)
-    capture._pending[THREAD] = capture._Pending(KEY, "example.com")
+    capture._state(THREAD).pending = capture._Pending(KEY, "example.com")
     capture.session_ended(THREAD)
     assert holder.calls == [("drop_offer", KEY), ("drop_offer", KEY)]
-    assert capture._pending == {}
+    assert capture._state(THREAD).pending is None
 
 
 @pytest.mark.asyncio
@@ -506,7 +497,7 @@ async def test_rule5_a_failed_submit_that_comes_back_with_a_field_drops_through_
 
 @pytest.mark.parametrize(("host", "dropped"), [("other.example.org", True), ("www.example.com", False), ("", True)])
 def test_rule6_a_probe_of_another_registrable_domain_drops_the_offer(holder, host, dropped):
-    capture._pending[THREAD] = capture._Pending(KEY, "example.com")
+    capture._state(THREAD).pending = capture._Pending(KEY, "example.com")
     capture.step_decided(THREAD, probe(host=host, visible=frozenset({7})), None, None)
     assert holder.calls == ([("drop_offer", KEY)] if dropped else [])
 
@@ -708,7 +699,7 @@ async def test_later_non_login_submit_drops_earlier_offer(monkeypatch, holder, l
     await settled_submit(THREAD, KEY, "ws://page")
     capture.step_decided(THREAD, probe(), "settle", None)
     assert holder.names() == ["offer_login", "drop_offer"]
-    assert THREAD not in capture._pending
+    assert capture._state(THREAD).pending is None
 
 
 @pytest.mark.asyncio
@@ -739,7 +730,7 @@ async def test_step_and_session_events_while_holder_runs(monkeypatch, holder, ev
         release.set()
         await drain_capture()
         assert holder.names() == (["offer_login", expected] if expected else ["offer_login"])
-        assert (THREAD in capture._pending) is (event == "open")
+        assert (capture._state(THREAD).pending is not None) is (event == "open")
     finally:
         release.set()
         await drain_capture()
@@ -769,7 +760,7 @@ async def test_out_of_order_reads_still_call_holder_in_submit_order(monkeypatch,
     await first
     await drain_capture()
     assert [call[-1] for call in holder.calls] == ["first-value", "second-value"]
-    assert THREAD in capture._pending
+    assert capture._state(THREAD).pending is not None
 
 
 @pytest.mark.asyncio
@@ -793,7 +784,7 @@ async def test_failed_step_drops_prior_offer_when_latest_queued_call_is_skipped(
         release.set()
         await drain_capture()
         assert holder.names() == ["offer_login", "drop_offer"]
-        assert THREAD not in capture._pending
+        assert capture._state(THREAD).pending is None
     finally:
         release.set()
         await drain_capture()
@@ -807,7 +798,7 @@ async def test_any_document_mark_is_never_evicted(monkeypatch):
         page.loader = f"document-{number}"
         await capture.agent_writing(THREAD, "ws://page")
     assert capture._marked(THREAD, "another-document")
-    assert capture._ANY_DOCUMENT in capture._marks[THREAD]
+    assert capture._ANY_DOCUMENT in capture._state(THREAD).marks
 
 
 @pytest.mark.asyncio
@@ -882,7 +873,7 @@ async def test_real_holder_has_no_offer_after_slow_call_and_ending(monkeypatch, 
         await drain_capture()
         assert saved_login_offers.pending_offer(KEY) is None
         assert KEY not in saved_login_offers._offers
-        assert THREAD not in capture._pending
+        assert capture._state(THREAD).pending is None
     finally:
         release.set()
         await drain_capture()
