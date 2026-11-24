@@ -171,4 +171,38 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		// The page's own submit navigated it, and the tab label followed that main-frame navigation.
 		await page.getByRole('button', { name: /^Close .*browser-pane-probe\.html\?submitted$/ }).click();
 	});
+
+	test('pastes text copied in another app into a password field with the paste shortcut', async ({ page, context, request }, testInfo) => {
+		test.skip(testInfo.project.name === 'chromium-mobile', 'desktop keyboard proof; the phone pastes through its tapped field');
+		// No clipboard permission is granted: the native paste carries the text, as it must in the desktop app.
+		const title = `browser-paste-${Date.now()}`;
+		await createSession(request, title);
+		await loginByUrl(page);
+		await sidebarThread(page, title).click();
+		await page.getByRole('button', { name: 'Open browser', exact: true }).click();
+		const address = page.getByRole('textbox', { name: 'Browser address' });
+		await address.fill(`${probe.origin}/browser-pane-probe.html?password&single`);
+		const opened = page.waitForResponse(response => response.url().includes('/open') && response.url().includes('/api/browser/'));
+		await address.press('Enter');
+		expect((await opened).status()).toBe(200);
+		const canvas = page.locator('canvas[aria-label="Shared browser"]');
+		await expect.poll(() => colorAt(canvas, 0.5, 0.25, [240, 240, 240]), { timeout: 20_000 }).toEqual([240, 240, 240]);
+		// A password manager's copy, made on another page.
+		const other = await context.newPage();
+		await other.goto(`${probe.origin}/browser-pane-probe.html`);
+		await other.locator('#probe-input').fill('next');
+		await other.locator('#probe-input').selectText();
+		await other.keyboard.press('ControlOrMeta+C');
+		await other.close();
+		await page.bringToFront();
+		const bounds = (await canvas.boundingBox())!;
+		await canvas.click({ position: { x: bounds.width / 2, y: bounds.height * 0.25 } });
+		// The shortcut follows the platform the page reports, as a person's own keyboard does.
+		const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+		await page.keyboard.press(mac ? 'Meta+A' : 'Control+A');
+		await page.keyboard.press(mac ? 'Meta+V' : 'Control+V');
+		await page.keyboard.press('Enter');
+		await expect.poll(() => colorAt(canvas, 0.5, 0.5, [0, 160, 80]), { timeout: 15_000 }).toEqual([0, 160, 80]);
+		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-password-pasted');
+	});
 });
