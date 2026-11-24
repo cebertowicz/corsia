@@ -112,12 +112,14 @@ def sign_in_server():
 @pytest.fixture(autouse=True)
 def _fresh_state():
     for held in (lifecycle._steps, lifecycle._answers, lifecycle._sessions, lifecycle._probe_locks,
-                 browser_control._guarded_visits, capture._pending, capture._marks):
+                 browser_control._guarded_visits):
         held.clear()
+    capture._reset_for_tests()
     yield
     for held in (lifecycle._steps, lifecycle._answers, lifecycle._sessions, lifecycle._probe_locks,
-                 browser_control._guarded_visits, capture._pending, capture._marks):
+                 browser_control._guarded_visits):
         held.clear()
+    capture._reset_for_tests()
 
 
 class Person:
