@@ -179,7 +179,7 @@ def synthetic_browser(monkeypatch):
         argv = browser_chrome.chrome_argv(executable, 39400, target, headless=headless, ua=ua)
         fake.chrome_calls.append(argv)
         return SimpleNamespace(cdp_port=39400, endpoint='ws://127.0.0.1:39400/devtools/browser/fixture',
-                               stream_port=39401, release_stream=lambda: None, close=AsyncMock())
+                               stream_port=39401, release_stream=lambda: None, close=AsyncMock(), exited=False)
 
     monkeypatch.setattr(browser_chrome.ChromeProcess, 'launch', chrome_launch)
     monkeypatch.setattr(browser_session_launch, 'sys', SimpleNamespace(platform='darwin'))
