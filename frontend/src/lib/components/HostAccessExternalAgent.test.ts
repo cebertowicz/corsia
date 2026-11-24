@@ -156,7 +156,7 @@ it('preserves the stale Approve guard for an otherwise complete external request
 	expect(button('Reject')?.disabled).toBe(false);
 	const blocked = host.querySelector('.blocked-line')!;
 	expect(blocked.querySelector('span')!.textContent)
-		.toBe('Couldn’t check that this request is still current, so you can’t approve it yet.');
+		.toBe('Couldn’t check that this request is still current, so you can’t approve it.');
 	expect(blocked.querySelector('button')!.textContent?.trim()).toBe('Retry');
 	expect(blocked.querySelector('button')!.classList.contains('ghost')).toBe(true);
 	expect(host.textContent).not.toContain('Approval is blocked');

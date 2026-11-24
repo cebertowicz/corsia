@@ -51,7 +51,7 @@
 {/if}
 {#if stale}
 	<div class="blocked-line" role="status">
-		<span>Couldn’t check that this request is still current, so you can’t approve it yet.</span>
+		<span>Couldn’t check that this request is still current, so you can’t approve it.</span>
 		{#if onRetry}<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>{/if}
 	</div>
 {:else if incomplete}
