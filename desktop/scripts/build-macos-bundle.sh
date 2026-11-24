@@ -198,6 +198,9 @@ fetch_gws
 # The licence text of every package the app bundles, beside the per-tool licences above.
 install -m 0644 "$ROOT/THIRD-PARTY-NOTICES.md" "$BUNDLE_ROOT/licenses/THIRD-PARTY-NOTICES.md"
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
+# The published coordination models the System manifest declares. backend/infra/system_package.py
+# finds them at docs/coordination-models beside backend/, so they sit there in Resources too.
+rsync -a --delete "$ROOT/docs/coordination-models/" "$BUNDLE_ROOT/docs/coordination-models/"
 (
   cd "$ROOT/frontend"
   npm ci
@@ -232,6 +235,16 @@ readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
 cmp -s "$ROOT/THIRD-PARTY-NOTICES.md" "$APP/Contents/Resources/licenses/THIRD-PARTY-NOTICES.md" \
   || fail "$APP does not carry THIRD-PARTY-NOTICES.md in Resources/licenses"
+# Every file the System manifest declares must resolve, byte for byte, from the finished app's own
+# backend; a missing one is projected to no workspace and its readers find nothing.
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$APP/Contents/Resources/backend" "$PYTHON" -B -c '
+import hashlib, json, sys
+from infra.system_package import system_package_dir, system_resource_source
+entries = json.loads((system_package_dir() / "MANIFEST.json").read_text())["files"]
+bad = [e["path"] for e in entries if not system_resource_source(e["path"]).is_file()
+       or hashlib.sha256(system_resource_source(e["path"]).read_bytes()).hexdigest() != e["sha256"]]
+sys.exit("System sources missing or changed in the app: " + ", ".join(bad) if bad else 0)
+' || fail "$APP does not carry every System manifest source"
 "$ROOT/desktop/scripts/stamp-bundle-version.sh" "$APP/Contents/Info.plist" "$macos_short_version" "$app_version"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
