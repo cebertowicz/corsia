@@ -97,6 +97,43 @@ it('says an incomplete script request cannot be approved, and names Deny', async
 	}
 });
 
+it('hides the Purpose label when the purpose is empty, in every state of the script drawer', async () => {
+	const base = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: 'decision',
+		script_name: 'task.py', script_path: '/workspace/task.py',
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	} satisfies HostAccessScript;
+	const labels = (target: HTMLElement) =>
+		[...target.querySelectorAll('.decision-body .section-label')].map((label) => label.textContent?.trim());
+	const cases = [
+		// [request, stale, rejectDisabled, Purpose label shown]
+		[base, false, false, true],
+		[base, true, false, true],
+		[{ ...base, purpose: '' }, false, false, false],
+		[{ ...base, purpose: '   ' }, false, false, false],
+		[{ ...base, purpose: '' }, true, false, false],
+		[{ ...base, purpose: '', decision_capability: '' }, false, true, false],
+	] as const;
+	for (const [lease, stale, rejectDisabled, shown] of cases) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale, deciding: false, rejectDisabled, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		} });
+		flushSync();
+		expect(labels(target)).toEqual(shown
+			? ['File', 'When it runs', 'Purpose', 'Request (as the agent quoted it)', 'Reviewer’s reason']
+			: ['File', 'When it runs', 'Request (as the agent quoted it)', 'Reviewer’s reason']);
+		expect(target.querySelector('.decision-body .purpose') !== null).toBe(shown);
+		await unmount(component);
+		target.remove();
+	}
+});
+
 it('says when a script runs in plain words', () => {
 	expect(cadence(null)).toBe('When a matching event arrives');
 	expect(cadence(1)).toBe('Every second');

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
-	import { cadence, approvalReady, casReady } from '$lib/hostAccess/leaseFormat';
+	import { cadence, approvalReady, casReady, text } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessScript } from '$lib/api/hostAccess';
 
 	/**
@@ -42,7 +42,9 @@
 	<div class="decision-body">
 		<section><span class="section-label">File</span><p>{request.script_path}</p></section>
 		<section><span class="section-label">When it runs</span><p>{cadence(request.trigger?.cadence_seconds ?? null)}</p></section>
-		<section class="purpose"><span class="section-label">Purpose</span><p>{request.purpose}</p></section>
+		{#if text(request.purpose)}
+			<section class="purpose"><span class="section-label">Purpose</span><p>{request.purpose}</p></section>
+		{/if}
 		<section><span class="section-label">Request (as the agent quoted it)</span><p>{request.user_request}</p></section>
 		<section><span class="section-label">Reviewer’s reason</span><p>{request.reviewer_reason}</p></section>
 	</div>
