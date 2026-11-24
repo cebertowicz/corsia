@@ -34,6 +34,11 @@ def _step_logs(caplog):
     return [record for record in caplog.records if record.name == browser_control.__name__]
 
 
+def _logged_as(record, error: type) -> bool:
+    """The failure is logged by its type alone: no traceback, whose chained text could quote the page."""
+    return record.exc_info is None and f"({error.__name__})" in record.getMessage()
+
+
 def _fail_row_read(monkeypatch) -> None:
     def gone(_node_id):
         raise PlanError("unknown plan node: gone")
@@ -68,7 +73,7 @@ async def test_a_password_page_whose_row_cannot_be_opened_refuses_every_command(
     assert not lifecycle.has_step(THREAD)
     assert len(_step_logs(caplog)) == 3
     assert all(record.levelno == logging.WARNING for record in _step_logs(caplog))
-    assert all(record.exc_info and record.exc_info[0] is sqlite3.OperationalError for record in _step_logs(caplog))
+    assert all(_logged_as(record, sqlite3.OperationalError) for record in _step_logs(caplog))
 
 
 @pytest.mark.asyncio
@@ -82,7 +87,7 @@ async def test_a_password_page_whose_row_cannot_be_read_keeps_the_live_step_and_
         # The task exists, so the refusal is the normal one and never claims the task wasn't recorded.
         await _three_refusals(page, match="asks for a password")
     assert lifecycle._steps[THREAD] is step
-    assert _step_logs(caplog)[0].exc_info[0] is PlanError
+    assert _logged_as(_step_logs(caplog)[0], PlanError)
     monkeypatch.setattr(lifecycle, "_step_row_state", original)
     with pytest.raises(BrowserSessionError, match="person's to complete"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
@@ -118,7 +123,7 @@ async def test_a_held_person_step_refuses_every_command_when_its_row_cannot_be_r
                 await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
             assert raised.value.args[0] == browser_control.PERSON_STEP + browser_control.NO_PANE
     assert lifecycle._steps[THREAD] is step
-    assert _step_logs(caplog)[0].exc_info[0] is PlanError
+    assert _logged_as(_step_logs(caplog)[0], PlanError)
     monkeypatch.setattr(lifecycle, "_step_row_state", original)
     with pytest.raises(BrowserSessionError, match="person's to complete"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
@@ -136,7 +141,7 @@ async def test_a_held_password_step_refuses_every_command_when_its_field_is_gone
     with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
         await _three_refusals(page, match="asks for a password")
     assert lifecycle._steps[THREAD] is step
-    assert _step_logs(caplog)[0].exc_info[0] is sqlite3.OperationalError
+    assert _logged_as(_step_logs(caplog)[0], sqlite3.OperationalError)
     monkeypatch.setattr(lifecycle, "_plan_write", real)
     assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
     assert not lifecycle.has_step(THREAD)
@@ -154,7 +159,7 @@ async def test_a_page_with_no_step_and_no_password_field_runs_the_command_when_t
         notes = await _three_commands(page)
     assert notes == [NOTE] * 3
     assert not lifecycle.has_step(THREAD)
-    assert _step_logs(caplog)[0].exc_info[0] is RuntimeError
+    assert _logged_as(_step_logs(caplog)[0], RuntimeError)
 
 
 @pytest.mark.asyncio

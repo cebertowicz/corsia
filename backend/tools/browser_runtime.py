@@ -145,8 +145,8 @@ class BrowserCloseTool(Tool):
             return exc.tool_message
         except BrowserSessionError as exc:
             return f"Error: {exc}"
-        except Exception:
-            log.exception("browser close failed for thread %s", thread_id)
+        except Exception as exc:  # the type only: a chained error's text can quote what the page or CDP returned
+            log.error("browser close failed for thread %s: %s", thread_id, type(exc).__name__)
             return "Error: browser cleanup could not be verified. Stop retrying browser tools and inform the user."
 
 
