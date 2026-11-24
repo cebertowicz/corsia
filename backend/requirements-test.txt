@@ -10,7 +10,7 @@
 # never return -- errors no diff introduced and no local run reproduces.
 #
 # Only packages that are NOT already runtime dependencies belong here. Pillow
-# is deliberately absent: requirements.txt pins pillow==12.2.0 and is installed
+# is deliberately absent: requirements.txt pins pillow==12.3.0 and is installed
 # before this file in every one of those workflows, so declaring it again would
 # be a second owner that could drift from the pinned runtime version.
 #
