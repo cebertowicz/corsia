@@ -47,6 +47,7 @@ let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let offers: Array<typeof OFFER | null>;
 let saveStatus: number;
+let saveBody: unknown;
 let calls: string[];
 
 const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); flushSync(); };
@@ -79,15 +80,23 @@ beforeEach(() => {
 	FakeSocket.instances = [];
 	offers = [OFFER];
 	saveStatus = 200;
+	saveBody = { saved: true };
 	calls = [];
 	document.documentElement.style.setProperty('--dur-standard', '220ms');
+	document.documentElement.style.setProperty('--dur-tight', '120ms');
+	// jsdom has no Web Animations; a leaving dock only needs one that finishes at once (the motion tests below time it).
+	(Element.prototype as unknown as { animate: unknown }).animate = function () {
+		const animation = { finished: Promise.resolve(), cancel() {}, onfinish: null as null | (() => void) };
+		void Promise.resolve().then(() => animation.onfinish?.());
+		return animation;
+	};
 	vi.stubGlobal('WebSocket', FakeSocket);
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	vi.stubGlobal('Image', class { src = ''; decode() { return Promise.resolve(); } });
 	vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
 		calls.push(`${init?.method ?? 'GET'} ${input}${init?.body ? ` ${init.body}` : ''}`);
 		if (input.startsWith('/api/saved-logins/offer?')) return { ok: true, status: 200, json: async () => ({ offer: offers.length > 1 ? offers.shift() : offers[0] ?? null }) };
-		if (input.endsWith('/save')) return { ok: saveStatus === 200, status: saveStatus, json: async () => ({ saved: true }) };
+		if (input.endsWith('/save')) return { ok: saveStatus === 200, status: saveStatus, json: async () => saveBody };
 		return { ok: true, status: 200, json: async () => ({}) };
 	}));
 	vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
@@ -96,6 +105,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	document.documentElement.style.removeProperty('--dur-standard');
+	document.documentElement.style.removeProperty('--dur-tight');
 	vi.useRealTimers();
 	if (component) unmount(component);
 	component = null;
@@ -278,8 +288,10 @@ describe('save-login offer: what it shows', () => {
 		canvas.focus();
 		const before = document.activeElement;
 		await signIn(socket, canvas);
-		expect(liveText()).toContain('CORSIA can save this login');
-		expect(liveText().split('CORSIA can save this login')).toHaveLength(2);
+		// What the screen shows: the question with the site, then the username.
+		expect(liveText()).toContain('Save the github.com login for agents? jordan@example.com');
+		expect(liveText().split('jordan@example.com')).toHaveLength(2);
+		expect(liveText()).not.toContain('CORSIA can save');
 		expect(document.activeElement).toBe(before);
 		expect(dock()!.contains(document.activeElement)).toBe(false);
 	});
@@ -424,14 +436,45 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(host.querySelector('.browser-page')!.contains(document.activeElement)).toBe(true);
 	});
 
-	it('closes quietly when the server says the offer is gone', async () => {
-		saveStatus = 409;
+	const refuse = async (status: number, body: unknown) => {
+		saveStatus = status;
+		saveBody = body;
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
 		button('Save').click();
 		await settle();
-		expect(dock()).toBeNull();
-		expect(liveText()).not.toContain('Couldn’t save');
+	};
+	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
+
+	it.each([[409, 'There is no sign-in to save here.'], [404, 'The chat this login is for can\u2019t be found.'], [403, 'Only the person can save a login.']])('shows the server\u2019s own text for a %i refusal, in the error line and the live region, and keeps Not now', async (status, detail) => {
+		await refuse(status, { detail });
+		expect(dock()!.querySelector('.error')!.textContent).toBe(detail);
+		expect(liveText()).toContain(detail);
+		expect(dock()!.textContent).not.toContain('Couldn\u2019t save');
+		expect(button('Not now')).toBeTruthy();
+	});
+
+	it.each([[400, { detail: 'Couldn\u2019t do that: the request didn\u2019t name a valid chat. Send it again with the chat\u2019s id.' }], [500, { detail: 'internal' }], [503, {}]])('shows the pane\u2019s own line for a %i, whatever the body says', async (status, body) => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		await refuse(status, body);
+		expect(dock()!.querySelector('.error')!.textContent).toBe(PANE_LINE);
+		expect(liveText()).toContain(PANE_LINE);
+	});
+
+	it('shows the pane\u2019s own line when the save request throws', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => { if (input.endsWith('/save')) throw new Error('offline'); return base(input, init); }));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		expect(dock()!.querySelector('.error')!.textContent).toBe(PANE_LINE);
+	});
+
+	it('shows the pane\u2019s own line for a refusal whose body has no text', async () => {
+		await refuse(409, 'gone');
+		expect(dock()!.querySelector('.error')!.textContent).toBe(PANE_LINE);
 	});
 
 	it('shows the error line, announces it, keeps Save and Not now, and allows another try', async () => {
@@ -469,24 +512,22 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()).toBeNull();
 	});
 
-	it('keeps the agent viewport at its pre-dock size while the dock is up, and still sends a new target, density and theme', async () => {
+	it('lies over the bottom edge of the page, so the canvas keeps its size and a new target, density and theme go out as they are', async () => {
 		const { socket, canvas } = render();
 		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
-		expect(appearances()).toEqual([{ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' }]);
 		await signIn(socket, canvas);
-		// The dock takes the bottom of the pane, so the canvas is shorter now.
-		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 60));
+		expect(dock()!.parentElement!.classList.contains('browser-page')).toBe(true);
+		expect(dock()!.parentElement!.contains(canvas)).toBe(true);
+		const before = appearances().length;
 		socket.receive({ type: 'browser_target_changed' });
-		expect(appearances()).toHaveLength(2);
-		expect(appearances()[1]).toEqual({ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' });
+		expect(appearances()).toHaveLength(before + 1);
+		expect(appearances().at(-1)).toEqual({ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' });
 		vi.stubGlobal('devicePixelRatio', 2);
 		theme.set('light');
 		await new Promise(resolve => setTimeout(resolve, 0));
-		expect(appearances()).toHaveLength(3);
-		expect(appearances()[2]).toEqual({ type: 'appearance', width: 100, height: 100, scale: 2, scheme: 'light' });
+		expect(appearances().at(-1)).toEqual({ type: 'appearance', width: 100, height: 100, scale: 2, scheme: 'light' });
 		button('Not now').click();
 		await settle();
-		expect(dock()).toBeNull();
 		theme.set('dark');
 	});
 });
@@ -592,7 +633,6 @@ describe('save-login offer: motion', () => {
 	beforeEach(() => {
 		played = [];
 		const root = document.documentElement.style;
-		root.setProperty('--dur-tight', '120ms');
 		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
 		root.setProperty('--ease-entrance', 'cubic-bezier(0.22, 1, 0.36, 1)');
 		// jsdom has no Web Animations: record what the dock and the error line ask for.
@@ -610,28 +650,20 @@ describe('save-login offer: motion', () => {
 
 	afterEach(() => {
 		const root = document.documentElement.style;
-		['--dur-tight', '--ease-snap', '--ease-entrance'].forEach(name => root.removeProperty(name));
-		delete (Element.prototype as unknown as { animate?: unknown }).animate;
+		['--ease-snap', '--ease-entrance'].forEach(name => root.removeProperty(name));
 	});
 
-	it('grows the dock in from nothing with a fade on arrival, never popping', async () => {
+	it('fades the dock out on exit at 0.7 of the standard duration', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		const [arrival] = forDock();
-		expect(arrival.keyframes[0]).toMatchObject({ height: '0px', opacity: 0 });
-		expect(arrival.keyframes[1]).toMatchObject({ height: '64px', opacity: 1 });
-		expect(arrival.options.duration).toBe(220);
-	});
-
-	it('fades the dock and closes its gap on exit at 0.7 of the standard duration, on the snap easing', async () => {
-		const { socket, canvas } = render();
-		await signIn(socket, canvas);
+		expect(forDock()).toEqual([]);
 		button('Not now').click();
 		await settle();
+		await wait(20);
 		const exit = forDock().at(-1)!;
-		expect(exit.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
+		expect(exit.keyframes.at(-1)).toMatchObject({ opacity: '0' });
+		expect(exit.keyframes.every(frame => !('height' in frame))).toBe(true);
 		expect(exit.options.duration).toBeCloseTo(154);
-		expect(exit.options.easing).toBe('cubic-bezier(0.2, 0, 0, 1)');
 		expect(dock()).not.toBeNull();
 		await wait(300);
 		expect(dock()).toBeNull();
@@ -652,32 +684,16 @@ describe('save-login offer: motion', () => {
 		expect(forError().at(-1)!.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
 	});
 
-	it('only crossfades over the tight duration under reduced motion', async () => {
+	it('crossfades over the tight duration under reduced motion', async () => {
 		reducedMotion.value!.set(true);
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
-		const [arrival] = forDock();
-		expect(arrival.options.duration).toBe(120);
-		expect(Object.keys(arrival.keyframes[1])).toEqual(['opacity', 'offset'].filter(key => key in arrival.keyframes[1]));
-		expect(arrival.keyframes[1]).not.toHaveProperty('height');
-		reducedMotion.value!.set(false);
-	});
-
-	it('keeps the agent viewport at its pre-dock size until the dock has left, then sends the real size', async () => {
-		const { socket, canvas } = render();
-		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
-		await signIn(socket, canvas);
-		// Docked, the canvas is shorter; a theme change while the dock leaves still reports the pre-dock height.
-		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 70));
 		button('Not now').click();
 		await settle();
-		theme.set('light');
-		await wait(0);
-		expect(dock()).not.toBeNull();
-		expect(appearances().at(-1)).toMatchObject({ height: 100, scheme: 'light' });
-		await wait(300);
-		expect(dock()).toBeNull();
-		expect(appearances().at(-1)).toMatchObject({ height: 70, scheme: 'light' });
-		theme.set('dark');
+		await wait(20);
+		const exit = forDock().at(-1)!;
+		expect(exit.options.duration).toBeCloseTo(84);
+		expect(exit.keyframes.every(frame => Object.keys(frame).every(key => key === 'opacity' || key === 'offset'))).toBe(true);
+		reducedMotion.value!.set(false);
 	});
 });

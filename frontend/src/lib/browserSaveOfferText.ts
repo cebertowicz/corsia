@@ -1,15 +1,18 @@
 import type { SaveOffer } from '$lib/api/savedLoginOffer';
 
+const question = (offer: SaveOffer, domain: string) => offer.update ? `Update the saved ${domain} login with this password?` : `Save the ${domain} login for agents?`;
+
 /** Every string of the save-login offer, approved by Product Experience (Nov 24). */
 export const SAVE_OFFER_TEXT = {
-	announce: 'CORSIA can save this login',
 	save: 'Save',
 	update: 'Update',
 	notNow: 'Not now',
 	saved: 'Saved',
 	updated: 'Updated',
 	error: 'Couldn’t save the login. Try again.',
-	question: (offer: SaveOffer, domain: string) => offer.update ? `Update the saved ${domain} login with this password?` : `Save the ${domain} login for agents?`,
+	question,
+	/** What the screen reader hears as the dock appears: the question with the site, then the username, as the screen shows them. */
+	announce: (offer: SaveOffer) => `${question(offer, offer.domain)} ${offer.username}`,
 } as const;
 
 /** The username is cut in the middle, keeping both ends, only when the pane measures that it would not fit. The domain is never cut. */

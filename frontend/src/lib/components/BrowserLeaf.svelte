@@ -374,8 +374,8 @@
 		<canvas bind:this={canvas} tabindex="-1" aria-label="Shared browser" onfocus={() => { if (!touchFocus) keyTarget.focus({ preventScroll: true }); }} onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={event => sendKey(event)} onkeyup={event => sendKey(event)}></canvas>
 		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
+		<BrowserSaveOffer bind:this={saveOffer} {threadId} {passwordPage} onrestorefocus={() => canvas.focus()} />
 	</div>
-	<BrowserSaveOffer bind:this={saveOffer} {threadId} {passwordPage} onopenchange={open => appearance.holdSize(open)} onrestorefocus={() => canvas.focus()} />
 </div>
 
 <style>

@@ -10,15 +10,13 @@
 	import { blockSlot } from '$lib/slotMotion';
 
 	/**
-	 * The offer to save a login the person just made in this pane, docked below the page.
+	 * The offer to save a login the person just made in this pane, laid over the bottom edge of the page, never resizing it.
 	 * It asks the server only after the person typed or pasted into a password page, never polls,
 	 * and never shows or asks for a password.
 	 */
-	let { threadId, passwordPage, onopenchange, onrestorefocus }: {
+	let { threadId, passwordPage, onrestorefocus }: {
 		threadId: string;
 		passwordPage: boolean;
-		/** Called as the dock opens or closes, so the host can keep the agent's viewport still. */
-		onopenchange: (open: boolean) => void;
 		/** Called while focus is still in the dock, so it lands on the page and not on a removed button. */
 		onrestorefocus: () => void;
 	} = $props();
@@ -29,10 +27,10 @@
 
 	let offer = $state<SaveOffer | null>(null);
 	let phase = $state<'asking' | 'saved' | 'fading'>('asking');
-	let failed = $state(false);
+	// What the error line says: the server's own words for a refusal that is not a bad request, else the pane's line.
+	let failure = $state<string | null>(null);
 	let saving = $state(false);
 	let announcement = $state('');
-	let lockedHeight = $state(0);
 	let dock = $state<HTMLElement | undefined>();
 	let saveButton = $state<HTMLButtonElement | undefined>();
 	let typedInPasswordPage = false;
@@ -82,10 +80,9 @@
 		offer = next;
 		username = next.username;
 		phase = 'asking';
-		failed = false;
+		failure = null;
 		saving = false;
-		announcement = text.announce;
-		setHeld(true);
+		announcement = text.announce(next);
 	}
 
 	function close() {
@@ -94,16 +91,7 @@
 		timers = [];
 		offer = null;
 		saving = false;
-		failed = false;
-		lockedHeight = 0;
-	}
-
-	/** The host keeps the agent's viewport still from the moment the dock opens until it is gone, so its leaving never resizes the page frame by frame. */
-	let held = false;
-	function setHeld(next: boolean) {
-		if (held === next) return;
-		held = next;
-		onopenchange(next);
+		failure = null;
 	}
 
 	/** Forget everything about this stream: a new thread, a reconnect or a closed pane starts clean. */
@@ -113,7 +101,6 @@
 		askAgain = false;
 		announcement = '';
 		close();
-		setHeld(false);
 	}
 
 	/** The person typed or pasted in this pane; only input on a password page counts toward an offer. */
@@ -152,22 +139,20 @@
 	async function save() {
 		if (!offer || saving) return;
 		saving = true;
-		failed = false;
+		failure = null;
 		const mine = generation;
 		const result = await saveOffer(threadId);
 		if (mine !== generation || !offer) return;
 		saving = false;
-		if (result === 'gone') { close(); return; }
-		if (result === 'error') {
-			failed = true;
-			announcement = text.error;
+		if (!result.saved) {
+			failure = result.message ?? text.error;
+			announcement = failure;
 			// The button was disabled while saving; keyboard focus comes back to it.
 			void tick().then(() => saveButton?.focus());
 			return;
 		}
 		// The buttons are about to go, so focus moves to the page first.
 		onrestorefocus();
-		lockedHeight = dock?.offsetHeight ?? 0;
 		phase = 'saved';
 		announcement = offer.update ? text.updated : text.saved;
 		finishAfterHold();
@@ -180,6 +165,13 @@
 			phase = 'fading';
 			timers.push(setTimeout(close, ms(FADE_DURATION_VAR)));
 		}, CONFIRMATION_HOLD_MS));
+	}
+
+	/** On leaving the dock only fades, at 0.7 of the standard duration (the reduced-motion crossfade runs over the tight one); its arrival is the stylesheet's. */
+	function leave(node: Element) {
+		const duration = ms($prefersReducedMotion ? '--dur-tight' : '--dur-standard') * 0.7;
+		const from = Number.parseFloat(getComputedStyle(node).opacity) || 1;
+		return { duration, css: (t: number) => `opacity: ${t * from}` };
 	}
 
 	function notNow() {
@@ -196,10 +188,8 @@
 		bind:this={dock}
 		class="save-offer"
 		class:fading={phase === 'fading'}
-		style:min-height={lockedHeight ? `${lockedHeight}px` : undefined}
 		aria-busy={saving || undefined}
-		in:blockSlot out:blockSlot
-		onoutroend={() => { if (!offer) setHeld(false); }}
+		out:leave
 	>
 		{#if phase === 'asking'}
 			<div class="body">
@@ -207,7 +197,7 @@
 					<p class="question">{text.question(offer, offer.domain)}</p>
 					<p class="username probe" aria-hidden="true" bind:this={nameProbe}><span bind:this={nameProbeText}></span></p>
 					<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
-					{#if failed}<p class="error" in:blockSlot out:blockSlot>{text.error}</p>{/if}
+					{#if failure}<p class="error" in:blockSlot out:blockSlot>{failure}</p>{/if}
 				</div>
 				<div class="actions">
 					<span class="save"><Button variant="primary" loading={saving} bind:el={saveButton} onclick={() => void save()}>{offer.update ? text.update : text.save}</Button></span>
@@ -221,29 +211,34 @@
 {/if}
 
 <style>
-	.save-offer { container-type: inline-size; flex: none; border-top: 1px solid var(--border-subtle); background: var(--bg-primary); transition: opacity var(--dur-standard) var(--ease-snap); }
+	/* The docked card of the document review bar (.rb-dock): over the page's bottom edge, solid, top corners rounded, no divider line. */
+	.save-offer { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; container-type: inline-size; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); animation: dock-in var(--dur-standard) var(--ease-entrance) backwards; transition: opacity var(--dur-standard) var(--ease-snap); }
 	.save-offer.fading { opacity: 0; }
-	.body { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+	@keyframes dock-in { from { opacity: 0; transform: translateY(var(--space-4)); } }
+	@keyframes dock-fade { from { opacity: 0; } }
+	.body { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-3) var(--space-4) calc(var(--space-3) + var(--safe-bottom, 0px)); }
 	.copy { position: relative; display: flex; flex-direction: column; min-width: 0; }
 	p { margin: 0; }
 	.question { overflow-wrap: anywhere; font-size: var(--text-subhead); line-height: 1.4; color: var(--text-primary); }
 	.username { margin-top: var(--space-1); overflow: hidden; white-space: nowrap; font-size: var(--text-footnote); line-height: 1.4; color: var(--text-secondary); }
 	.probe { position: absolute; inset-inline: 0; top: 0; margin: 0; visibility: hidden; pointer-events: none; }
 	.error { margin-top: var(--space-1); font-size: var(--text-footnote); color: var(--red-text); }
-	/* Save and Not now do different things, so at least a target's width of room sits between them. */
-	.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) calc(var(--space-8) * 2); }
+	/* Save and Not now sit right-aligned as a pair. They do different things, so at least a target's width of room sits between them. */
+	.actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; margin-left: auto; gap: var(--space-2) calc(var(--space-8) * 2); }
 	/* While saving the spinner takes the label's place, so Save keeps its width and Not now stays under the person's thumb. */
 	.save { display: inline-flex; }
 	.save :global(.btn.loading) { color: transparent; }
 	.save :global(.spinner) { position: absolute; inset: 0; margin: auto; border-color: var(--accent-on-fill); border-right-color: transparent; }
 	.actions :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.done { padding: var(--space-3) var(--space-4); font-size: var(--text-subhead); color: var(--text-secondary); }
+	.done { padding: var(--space-3) var(--space-4) calc(var(--space-3) + var(--safe-bottom, 0px)); font-size: var(--text-subhead); color: var(--text-secondary); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-	/* Wide enough, the actions sit on the right of the question and username; narrower, they stack below. */
+	/* Wide enough, the pair sits on the right of the question and username; narrower, it takes its own row, still on the right. */
 	@container (min-width: 36em) {
-		.body { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
+		.body { flex-direction: row; align-items: center; gap: var(--space-4); }
 		.copy { flex: 1; }
 		.actions { flex: none; }
 	}
 	@media (max-width: 48em), (pointer: coarse) { .actions :global(.btn) { height: var(--touch-target); } }
+	/* The app's reduced-motion reset sets every animation to 0.01ms with !important; the crossfade keeps its tight duration by out-ranking it. */
+	@media (prefers-reduced-motion: reduce) { .save-offer { animation-name: dock-fade; animation-duration: var(--dur-tight) !important; animation-timing-function: var(--ease-snap); } }
 </style>

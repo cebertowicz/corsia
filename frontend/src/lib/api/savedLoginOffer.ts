@@ -8,8 +8,6 @@ export interface SaveOffer {
 	update: boolean;
 }
 
-export type SaveResult = 'saved' | 'gone' | 'error';
-
 const post = (path: string, threadId: string) => apiFetch(`/api/saved-logins/offer/${path}`, {
 	method: 'POST',
 	headers: { 'Content-Type': 'application/json' },
@@ -40,17 +38,32 @@ export async function fetchSaveOffer(threadId: string): Promise<SaveOffer | null
 	}
 }
 
-/** 409 means the offer was dropped or replaced meanwhile. Any other failure is shown to the person and also reported. */
+/**
+ * Saved, or refused. A refusal other than a bad request (400) or a server fault (5xx) carries the server's own
+ * sentence in the body's `detail`, which is what the person reads; any other failure, a network one included, has
+ * no message here, and the pane says its own line. Every failure is also reported to the console.
+ */
+export type SaveResult = { saved: true } | { saved: false; message: string | null };
+
 export async function saveOffer(threadId: string): Promise<SaveResult> {
 	try {
 		const response = await post('save', threadId);
-		if (response.ok) return 'saved';
-		if (response.status === 409) return 'gone';
+		if (response.ok) return { saved: true };
 		console.error('[saved login offer] save rejected', threadId, response.status);
-		return 'error';
+		if (response.status === 400 || response.status >= 500) return { saved: false, message: null };
+		return { saved: false, message: await serverText(response) };
 	} catch (error) {
 		console.error('[saved login offer] save failed', threadId, error);
-		return 'error';
+		return { saved: false, message: null };
+	}
+}
+
+async function serverText(response: Response): Promise<string | null> {
+	try {
+		const { detail } = (await response.json()) as { detail?: unknown };
+		return typeof detail === 'string' && detail.trim() ? detail : null;
+	} catch {
+		return null;
 	}
 }
 

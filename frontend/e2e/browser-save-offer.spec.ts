@@ -19,8 +19,9 @@ const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holding
 /** What the server answers; the spec changes these between steps. */
 /** The size of the page the agent's viewport shows, set when the pane opens. */
 const view = { width: 900, height: 600 };
-const server = { offer: null as Offer | null, save: 200, saves: 0, notNows: 0, gets: 0 };
+const server = { offer: null as Offer | null, save: 200, saveBody: {} as unknown, saves: 0, notNows: 0, gets: 0 };
 
+const SERVER_TEXT = 'There’s no sign-in to save here. It’s offered again the next time you sign in.';
 const PAGE_TITLE = 'Sign in to GitHub';
 const GITHUB_PAGE = { heading: PAGE_TITLE, footer: 'New to GitHub? Create an account' };
 // A company's own sign-in page, for the long site names: the tab, the address and the page itself belong to that site.
@@ -54,7 +55,7 @@ async function cleanData(page: Page, request: Parameters<typeof createSession>[0
 }
 
 async function openPane(page: Page, request: Parameters<typeof createSession>[0], scheme: 'light' | 'dark') {
-	Object.assign(server, { offer: null, save: 200, saves: 0, notNows: 0, gets: 0 });
+	Object.assign(server, { offer: null, save: 200, saveBody: {}, saves: 0, notNows: 0, gets: 0 });
 	await page.addInitScript((value) => localStorage.setItem('corsia_theme', value), scheme);
 	// The Saved line's hold and fade run on the page's clock, so a spec that wants to look at the fade steps that clock itself.
 	await page.clock.install();
@@ -69,19 +70,24 @@ async function openPane(page: Page, request: Parameters<typeof createSession>[0]
 	});
 	await page.route(/\/api\/browser\/[^/]+\/open/, (route: Route) => route.fulfill({ status: 200, json: {} }));
 	await page.route(/\/api\/saved-logins\/offer(\?|$)/, (route: Route) => { server.gets++; return route.fulfill({ status: 200, json: { offer: server.offer } }); });
-	await page.route(/\/api\/saved-logins\/offer\/save/, (route: Route) => { server.saves++; return route.fulfill({ status: server.save, json: server.save === 200 ? { saved: true } : {} }); });
+	await page.route(/\/api\/saved-logins\/offer\/save/, (route: Route) => { server.saves++; return route.fulfill({ status: server.save, json: server.save === 200 ? { saved: true } : server.saveBody }); });
 	await page.route(/\/api\/saved-logins\/offer\/not-now/, (route: Route) => { server.notNows++; return route.fulfill({ status: 200, json: {} }); });
 	const title = 'Sign in to GitHub for me';
 	await replacePreviousFixtureThread(request, await createSession(request, title));
 	await loginByUrl(page);
-	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	// The rail sits behind the main surface, which slides right to open it; wide windows start with it open, so toggle only a closed one.
+	const railOpen = async () => ((await page.locator('main.main').boundingBox())?.x ?? 0) > 40;
+	await page.waitForTimeout(600);
+	if (!(await railOpen())) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await expect.poll(railOpen).toBe(true);
 	await sidebarThread(page, title).click();
-	// The panel's open state outlives a test, so toggle it only when an earlier test left it closed.
+	// The panel's open state outlives a test, and a closed panel can still hold its button in the page where a click cannot reach it:
+	// click it, and when the click cannot land, toggle the panel once and click again.
 	const openBrowser = page.getByRole('button', { name: 'Open browser', exact: true });
-	if (!(await openBrowser.isVisible())) await page.getByRole('button', { name: 'Toggle panel' }).click();
-	// An earlier test can leave the panel closed with its button still in the page, which a click then cannot reach.
-	else if (!(await openBrowser.click({ trial: true, timeout: 1500 }).then(() => true, () => false))) await page.getByRole('button', { name: 'Toggle panel' }).click();
-	await openBrowser.click();
+	if (!(await openBrowser.click({ timeout: 4000 }).then(() => true, () => false))) {
+		await page.getByRole('button', { name: 'Toggle panel' }).click();
+		await openBrowser.click();
+	}
 	const address = page.getByRole('textbox', { name: 'Browser address' });
 	await address.fill('https://github.com/login');
 	await address.press('Enter');
@@ -166,10 +172,28 @@ test.describe('the pane save-login offer', () => {
 				await expect(dock(page)).toContainText('Save the github.com login for agents?');
 				await expect(dock(page)).toContainText('jordan@example.com');
 				await expect(dock(page).locator('input, textarea')).toHaveCount(0);
-				// Docked below the page: its top edge is at or under the canvas's bottom edge, and it never covers the page.
+				// It lies over the page's bottom edge: flush with it, over the canvas, which keeps its size.
+				await page.waitForTimeout(400);
 				const [dockBox, canvasBox] = await Promise.all([dock(page).boundingBox(), canvas.boundingBox()]);
-				expect(dockBox!.y).toBeGreaterThanOrEqual(canvasBox!.y + canvasBox!.height - 1);
-				// Wide enough, the actions sit to the right of the question; narrower, they stack below it.
+				expect(dockBox!.y + dockBox!.height).toBeCloseTo(canvasBox!.y + canvasBox!.height, 0);
+				expect(dockBox!.y).toBeLessThan(canvasBox!.y + canvasBox!.height);
+				expect(Math.abs(canvasBox!.width - view.width)).toBeLessThanOrEqual(1);
+				expect(Math.abs(canvasBox!.height - view.height)).toBeLessThanOrEqual(1);
+				// The surface of the document review bar's dock: secondary background, rounded top corners, no divider line.
+				const surface = await dock(page).evaluate((node) => {
+					const style = getComputedStyle(node);
+					const probe = document.createElement('i');
+					probe.style.cssText = 'background: var(--bg-secondary); border-radius: var(--radius-xl)';
+					document.body.append(probe);
+					const expected = { background: getComputedStyle(probe).backgroundColor, radius: getComputedStyle(probe).borderTopLeftRadius };
+					probe.remove();
+					return { background: style.backgroundColor, topLeft: style.borderTopLeftRadius, topRight: style.borderTopRightRadius, bottomLeft: style.borderBottomLeftRadius, top: style.borderTopWidth, expected };
+				});
+				expect(surface.background).toBe(surface.expected.background);
+				expect([surface.topLeft, surface.topRight]).toEqual([surface.expected.radius, surface.expected.radius]);
+				expect(surface.bottomLeft).toBe('0px');
+				expect(surface.top).toBe('0px');
+				// Save and Not now are a pair on the right. Wide enough, the pair sits to the right of the question; narrower, it takes its own row below, still on the right.
 				const [saveBox, notNowBox, copyBox] = await Promise.all([
 					dock(page).getByRole('button', { name: 'Save' }).boundingBox(),
 					dock(page).getByRole('button', { name: 'Not now' }).boundingBox(),
@@ -177,19 +201,28 @@ test.describe('the pane save-login offer', () => {
 				]);
 				if (dockBox!.width >= 576) expect(saveBox!.x).toBeGreaterThanOrEqual(copyBox!.x + copyBox!.width - 1);
 				else expect(saveBox!.y).toBeGreaterThanOrEqual(copyBox!.y + copyBox!.height - 1);
+				expect(dockBox!.x + dockBox!.width - (notNowBox!.x + notNowBox!.width)).toBeLessThanOrEqual(24);
 				// Each button is a touch target at 768 and under.
 				if (size.width <= 768) for (const box of [saveBox!, notNowBox!]) expect(box.height).toBeGreaterThanOrEqual(43.5);
-				// Save and Not now do different things: at least a target's width of room sits between them.
+				// Save and Not now do different things: at least the wider button's width of room sits between them.
 				expect(notNowBox!.x - (saveBox!.x + saveBox!.width)).toBeGreaterThanOrEqual(Math.max(saveBox!.width, notNowBox!.width));
-				// The agent's viewport did not resize because the dock appeared.
-				await page.waitForTimeout(400);
+				// The agent's viewport did not resize because the dock appeared, and the screen reader hears what the screen shows.
 				expect(resizes.length).toBe(settled);
+				await expect(page.locator('[aria-live="polite"]', { hasText: 'Save the github.com login for agents? jordan@example.com' }).first()).toBeAttached();
 				await shot(page, size.name, scheme, '1-ideal');
 
-				// A failed save keeps the offer, with Save and Not now still there.
+				// A refusal other than a bad request or a server fault says what the server said, in its own words.
+				server.save = 409;
+				server.saveBody = { detail: SERVER_TEXT };
+				await dock(page).getByRole('button', { name: 'Save' }).click();
+				await expect(dock(page).locator('.error')).toHaveText(SERVER_TEXT);
+				await expect(page.locator('[aria-live="polite"]', { hasText: SERVER_TEXT }).first()).toBeAttached();
+				// Any other failure says the pane's own line, and keeps the offer, with Save and Not now still there.
 				server.save = 500;
+				server.saveBody = { detail: 'internal' };
 				await dock(page).getByRole('button', { name: 'Save' }).click();
 				await expect(dock(page)).toContainText('Couldn’t save the login. Try again.');
+				await expect(dock(page)).not.toContainText(SERVER_TEXT);
 				await expect(dock(page).getByRole('button', { name: 'Save' })).toBeVisible();
 				await expect(dock(page).getByRole('button', { name: 'Not now' })).toBeVisible();
 				await shot(page, size.name, scheme, '2-error');
@@ -203,14 +236,14 @@ test.describe('the pane save-login offer', () => {
 				await page.clock.runFor(CONFIRMATION_HOLD_MS);
 				await expect(dock(page)).toHaveClass(/fading/);
 				// Hold the fade 100 ms in, so the frame shows it part-way.
-				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().forEach((animation) => { animation.pause(); animation.currentTime = 100; }));
+				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().filter((animation) => animation instanceof CSSTransition).forEach((animation) => { animation.pause(); animation.currentTime = 100; }));
 				const opacity = Number(await dock(page).evaluate((node) => getComputedStyle(node).opacity));
 				expect(opacity).toBeGreaterThan(0);
 				expect(opacity).toBeLessThan(1);
 				await shot(page, size.name, scheme, '3-saved-fading');
 				// The close timer waits exactly as long as the fade the stylesheet runs: the motion token.
 				const fadeMs = Number.parseFloat(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dur-standard')));
-				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().forEach((animation) => animation.play()));
+				await page.evaluate(() => document.querySelector('.save-offer')!.getAnimations().filter((animation) => animation instanceof CSSTransition).forEach((animation) => animation.play()));
 				await page.clock.runFor(fadeMs - 1);
 				await expect(dock(page)).toHaveCount(1);
 				await page.clock.runFor(1);
@@ -337,43 +370,79 @@ test.describe('the pane save-login offer', () => {
 		await expect(dock(page)).toContainText('Saved');
 	});
 
-	test('the dock grows in and out and the error line with it, never popping', async ({ page, request }, testInfo) => {
+	test('the dock slides and fades in, fades out, and the error line grows in, never popping', async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.setViewportSize({ width: 768, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
-		// One height per animation frame, for the dock and for the error line inside it.
+		// One sample per animation frame: the dock's opacity and offset, and the error line's height.
 		await page.evaluate(() => {
-			const w = window as unknown as { heights: { dock: number[]; error: number[] } };
-			w.heights = { dock: [], error: [] };
+			const w = window as unknown as { samples: { opacity: number[]; offset: number[]; error: number[] } };
+			w.samples = { opacity: [], offset: [], error: [] };
 			const sample = () => {
-				w.heights.dock.push(document.querySelector('.save-offer')?.getBoundingClientRect().height ?? 0);
-				w.heights.error.push(document.querySelector('.save-offer .error')?.getBoundingClientRect().height ?? 0);
+				const node = document.querySelector('.save-offer');
+				w.samples.opacity.push(node ? Number(getComputedStyle(node).opacity) : 0);
+				w.samples.offset.push(node ? new DOMMatrixReadOnly(getComputedStyle(node).transform).m42 : 0);
+				w.samples.error.push(document.querySelector('.save-offer .error')?.getBoundingClientRect().height ?? 0);
 				requestAnimationFrame(sample);
 			};
 			sample();
 		});
-		const rest = async (key: 'dock' | 'error') => (await page.evaluate((name) => (window as unknown as { heights: Record<string, number[]> }).heights[name], key));
-		const mark = () => page.evaluate(() => { const w = window as unknown as { heights: { dock: number[]; error: number[] } }; return [w.heights.dock.length, w.heights.error.length]; });
-		const between = (samples: number[], from: number) => { const part = samples.slice(from); const top = Math.max(...part); return part.some((value) => value > 1 && value < top - 1); };
+		const read = (key: 'opacity' | 'offset' | 'error') => page.evaluate((name) => (window as unknown as { samples: Record<string, number[]> }).samples[name], key);
+		const mark = () => page.evaluate(() => (window as unknown as { samples: { opacity: number[] } }).samples.opacity.length);
+		const between = (samples: number[], from: number, low: number, high: number) => samples.slice(from).some((value) => value > low && value < high);
 
-		let [from] = await mark();
+		let from = await mark();
 		server.offer = GITHUB;
 		await signIn(page, canvas, send);
 		await expect(dock(page)).toBeVisible();
 		await page.waitForTimeout(400);
-		expect(between(await rest('dock'), from)).toBe(true);
+		// It arrives part-way faded and part-way along its slide, and ends at rest.
+		expect(between(await read('opacity'), from, 0.05, 0.95)).toBe(true);
+		expect((await read('offset')).slice(from).some((value) => value > 0.5)).toBe(true);
+		expect((await read('offset')).at(-1)).toBe(0);
 
-		[from] = await mark();
+		from = await mark();
 		server.save = 500;
 		await dock(page).getByRole('button', { name: 'Save' }).click();
 		await expect(dock(page)).toContainText('Couldn’t save the login. Try again.');
 		await page.waitForTimeout(400);
-		expect(between(await rest('error'), from)).toBe(true);
+		const errorHeights = (await read('error')).slice(from);
+		expect(between(errorHeights, 0, 1, Math.max(...errorHeights) - 1)).toBe(true);
 
-		[from] = await mark();
+		from = await mark();
 		await dock(page).getByRole('button', { name: 'Not now' }).click();
 		await expect(dock(page)).toHaveCount(0);
-		expect(between(await rest('dock'), from)).toBe(true);
+		// It fades out where it stands: no slide on the way out.
+		expect(between(await read('opacity'), from, 0.05, 0.95)).toBe(true);
+		expect(Math.max(...(await read('offset')).slice(from))).toBeLessThan(0.5);
+	});
+
+	test('the arrival, caught part-way', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		const { canvas, send } = await openPane(page, request, 'light');
+		// The moment the dock is in the page, hold its arrival 40 ms in, so a frame can show it.
+		await page.evaluate(() => {
+			new MutationObserver(() => {
+				const node = document.querySelector('.save-offer');
+				if (!node || (node as HTMLElement).dataset.held) return;
+				(node as HTMLElement).dataset.held = '1';
+				node.getAnimations().forEach((animation) => { animation.pause(); animation.currentTime = 40; });
+			}).observe(document.body, { childList: true, subtree: true });
+		});
+		server.offer = GITHUB;
+		await signIn(page, canvas, send);
+		await expect(dock(page)).toBeVisible();
+		const midway = await dock(page).evaluate((node) => ({ opacity: Number(getComputedStyle(node).opacity), offset: new DOMMatrixReadOnly(getComputedStyle(node).transform).m42 }));
+		expect(midway.opacity).toBeGreaterThan(0.05);
+		expect(midway.opacity).toBeLessThan(0.95);
+		expect(midway.offset).toBeGreaterThan(0.5);
+		if (OUT) {
+			fs.mkdirSync(OUT, { recursive: true });
+			await page.mouse.move(2, 2);
+			await page.addStyleTag({ content: '[data-sheet-trigger][aria-label^="Context for"] { visibility: hidden; }' });
+			await page.screenshot({ path: path.join(OUT, '6-arriving-1440-light.png') });
+		}
 	});
 
 	test('a touch screen gets 44 px targets at any width', async ({ page, request }, testInfo) => {
@@ -389,16 +458,43 @@ test.describe('the pane save-login offer', () => {
 		for (const name of ['Save', 'Not now']) expect((await dock(page).getByRole('button', { name }).boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
 	});
 
-	test('reduced motion closes the dock without a fade', async ({ page, request }, testInfo) => {
+	test('reduced motion crossfades the dock in and out and slides nothing', async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own desktop viewport; the phone walks run on both projects.');
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const { canvas, send } = await openPane(page, request, 'light');
 		server.offer = GITHUB;
 		await signIn(page, canvas, send);
+		await expect(dock(page)).toBeVisible();
+		// The arrival is a crossfade over the tight duration, with no slide.
+		const arrival = await dock(page).evaluate((node) => { const style = getComputedStyle(node); return { name: style.animationName, duration: style.animationDuration, tight: getComputedStyle(document.documentElement).getPropertyValue('--dur-tight').trim() }; });
+		expect(arrival.name).toContain('dock-fade');
+		expect(Number.parseFloat(arrival.duration) * 1000).toBe(Number.parseFloat(arrival.tight));
 		await dock(page).getByRole('button', { name: 'Save' }).click();
 		await expect(dock(page)).toContainText('Saved');
 		await expect(dock(page)).toHaveCount(0, { timeout: 3000 });
 		expect(await dock(page).count()).toBe(0);
+	});
+
+	test.describe('on a phone', () => {
+		test.use({ hasTouch: true });
+		test('a phone with its keyboard up: the dock over a 516 px page', async ({ page, request }, testInfo) => {
+			test.skip(testInfo.project.name !== 'chromium-desktop', 'This test sets its own viewport; the phone walks run on both projects.');
+			await page.setViewportSize({ width: 393, height: 852 });
+			const { canvas, send } = await openPane(page, request, 'light');
+			server.offer = GITHUB;
+			await signIn(page, canvas, send, true);
+			await expect(dock(page)).toBeVisible();
+			await page.setViewportSize({ width: 393, height: 516 });
+			await page.waitForTimeout(500);
+			const box = (await canvas.boundingBox())!;
+			send({ type: 'frame', metadata: { deviceWidth: Math.round(box.width), deviceHeight: Math.round(box.height) }, data: await pageImage(page, Math.round(box.width), Math.round(box.height), 'light') });
+			await page.waitForTimeout(300);
+			const [dockBox, canvasBox] = await Promise.all([dock(page).boundingBox(), canvas.boundingBox()]);
+			// The page keeps the whole canvas under the dock; the dock takes its bottom edge.
+			expect(dockBox!.y + dockBox!.height).toBeCloseTo(canvasBox!.y + canvasBox!.height, 0);
+			expect(canvasBox!.height).toBeGreaterThan(dockBox!.height * 2);
+			await shot(page, '393x516', 'light', '7-keyboard');
+		});
 	});
 });
