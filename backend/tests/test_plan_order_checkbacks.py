@@ -105,6 +105,17 @@ def test_other_thread_is_exempt_from_order_refusal(db, other_actor):
     assert triage_lines.out_of_order(db, service._node_row(db, lower.id), actor_id=other_actor) is None
 
 
+def test_paused_checkback_does_not_prevent_lower_start(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Paused check-back")
+    lower = task(db, plan.id, "Lower work")
+    _deadline(db, plan.id, top)
+    plan_update(db, plan.id, "pause_node", {
+        "node_id": top.id, "expected_revision": revision(db, top.id), "reason": "Paused by person",
+    }, actor=HUMAN)
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+
+
 def test_person_can_start_below_checkback(db):
     plan = owner_plan(db)
     top = task(db, plan.id, "Top check-back")
