@@ -1,0 +1,102 @@
+"""Order holds count an agent's own deadline check-back above a named start."""
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from plans import service
+from tests.plan_close_next_helpers import HUMAN, owner_plan, plan_update, queue_active, revision, task
+from tests.plan_scene import _artifact
+from tests.test_plan_reconcile_release import db  # noqa: F401
+
+
+@pytest.mark.parametrize("reason", ["Revisit the plan", None], ids=["scheduled", "no-reason"])
+def test_checkback_above_refuses_lower_start(db, reason):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Top check-back")
+    lower = task(db, plan.id, "Lower work")
+    fields = {
+        "node_id": top.id, "expected_revision": revision(db, top.id),
+        "condition": {"type": "deadline", "value": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()},
+    }
+    if reason is None:
+        fields["expected_event"] = "test.checkback"
+    else:
+        fields["reason"] = reason
+    plan_update(db, plan.id, "arm_watch", fields)
+    with pytest.raises(service.PlanError, match="Top check-back"):
+        plan_update(db, plan.id, "start", {"node_id": lower.id, "expected_revision": revision(db, lower.id)})
+
+
+def _start(db, plan_id, node, *, actor=None):
+    kwargs = {} if actor is None else {"actor": actor}
+    return plan_update(db, plan_id, "start", {
+        "node_id": node.id, "expected_revision": revision(db, node.id),
+    }, **kwargs)
+
+
+def _deadline(db, plan_id, node):
+    plan_update(db, plan_id, "arm_watch", {
+        "node_id": node.id, "expected_revision": revision(db, node.id),
+        "condition": {"type": "deadline", "value": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()},
+        "expected_event": "test.checkback",
+    })
+
+
+def test_external_block_and_deadline_do_not_prevent_lower_start(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Wait for vendor")
+    lower = task(db, plan.id, "Lower work")
+    plan_update(db, plan.id, "block_node", {
+        "node_id": top.id, "expected_revision": revision(db, top.id),
+        "owner_kind": "external", "reason_key": "vendor", "reason": "Vendor reply",
+    })
+    _deadline(db, plan.id, top)
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+    assert service._node_row(db, top.id)["order_key"] < service._node_row(db, lower.id)["order_key"]
+
+
+def test_dependency_does_not_prevent_lower_start(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Wait for prerequisite")
+    lower = task(db, plan.id, "Lower work")
+    prerequisite = task(db, plan.id, "Prerequisite", later=True)
+    service.add_dependency(top.id, prerequisite.id, db=db)
+    db.commit()
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+
+
+def test_artifact_watch_does_not_prevent_lower_start(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Wait for PR")
+    lower = task(db, plan.id, "Lower work")
+    queue_active(db, top.id)
+    plan_update(db, plan.id, "arm_watch", {
+        "node_id": top.id, "expected_revision": revision(db, top.id),
+        "condition": {"type": "event", "value": "ci.complete"},
+        "artifact_id": _artifact(db, external_id="owner/repo#1", owner="owner"),
+        "expected_event": "github.check_suite.completed",
+    })
+    from plans import admission_projection
+    cause = admission_projection.causes_many([(service._node_row(db, top.id), service._plan_row(db, plan.id))], db=db)[top.id][0]
+    assert cause["artifact_id"] is not None
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+
+
+def test_reorder_above_checkback_allows_start(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Top check-back")
+    lower = task(db, plan.id, "Lower work")
+    _deadline(db, plan.id, top)
+    plan_update(db, plan.id, "reorder", {
+        "node_id": lower.id, "expected_revision": revision(db, lower.id), "order_key": 0,
+    })
+    assert _start(db, plan.id, lower)["admission"]["condition"] == "running"
+
+
+def test_person_can_start_below_checkback(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Top check-back")
+    lower = task(db, plan.id, "Lower work")
+    _deadline(db, plan.id, top)
+    assert _start(db, plan.id, lower, actor=HUMAN)["admission"]["condition"] == "running"

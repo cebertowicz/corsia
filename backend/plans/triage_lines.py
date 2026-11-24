@@ -29,9 +29,11 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import plans.admission_attempts as attempts
+import plans.admission_projection as projection
 import plans.aggregates as aggregates
 import plans.close_next_bounds as bounds
 import plans.node_order as node_order
+import plans.node_waits as node_waits
 import plans.selection_validity as validity
 import plans.service as service
 from prompts import plan_start_order as order_text
@@ -99,7 +101,28 @@ def standing(db, plan) -> Standing:
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])
-    eligible = [str(row["id"]) for row in leaves if blockers[str(row["id"])] is None]
+    held = [row for row in leaves if blockers[str(row["id"])] == validity.HELD]
+    causes = projection.causes_many([(row, plan) for row in held], db=db)
+    watches = node_waits.armed_watches(db, [str(row["id"]) for row in held], compact=True)
+    checkbacks = {
+        str(row["id"]): {
+            str(watch["id"]) for watch in watches.get(str(row["id"]), [])
+            if (cause := node_waits.watch_cause(watch))["reason_key"] == "deadline"
+            and node_waits.is_check_back(cause)
+        }
+        for row in held
+    }
+    eligible = [
+        str(row["id"]) for row in leaves
+        if blockers[str(row["id"])] is None
+        or (
+            blockers[str(row["id"])] == validity.HELD
+            and bool(causes[str(row["id"])])
+            and all(cause.get("artifact_id") is None
+                    and str(cause.get("watch_id")) in checkbacks[str(row["id"])]
+                    for cause in causes[str(row["id"])])
+        )
+    ]
     # A task already holding its slot is running, and a delegated one is
     # started: neither is waiting to be picked.
     running = attempts.open_attempts(eligible, db=db, compact=True)
