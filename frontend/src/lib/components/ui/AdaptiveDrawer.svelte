@@ -8,7 +8,6 @@
 	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import CloseButton from './CloseButton.svelte';
 	import { sheetFly } from '$lib/sheetMotion';
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 	import { liftSheetCap, sheetCapped } from '$lib/sheetClearance';
@@ -19,8 +18,8 @@
 		heading = null,
 		headingMeta = null,
 		contextLabel = null,
-		leading, actions, compact = false,
-		doneLabel = 'Done', doneIcon = false, onClose,
+		leading, actions,
+		doneLabel = 'Done', onClose,
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
@@ -52,11 +51,10 @@
 		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
-		/** Header options: `actions` are word buttons at the leading edge, apart from Close; `compact` draws the design system's drawer radius, not the 28px glass sheet. */
-		actions?: Snippet; compact?: boolean;
+		/** Word buttons at the leading edge, apart from Close. */
+		actions?: Snippet;
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
-		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`). */ doneIcon?: boolean;
 		onClose: () => void;
 		children: Snippet;
 		initialFocusSelector?: string;
@@ -181,7 +179,7 @@
 			bind:this={panel}
 			class="drawer-panel"
 			class:dragging={drag.dragging}
-			class:opaque class:compact
+			class:opaque
 			class:half={detent === 'half'}
 			style:--drawer-drag-y="{drag.y}px"
 			style:--drawer-pull="{drag.pull}px"
@@ -201,10 +199,10 @@
 				<div class="drawer-drag-region" aria-hidden="true" data-drawer-handle>
 					<span class="drawer-grabber"></span>
 				</div>
-				{#if !headless}<div class="drawer-head" class:centered={!!leading} class:has-actions={!!actions} class:icon-done={doneIcon}>
+				{#if !headless}<div class="drawer-head" class:centered={!!leading} class:has-actions={!!actions}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}{#if actions}<span class="drawer-actions">{@render actions()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
-					{#if doneIcon}<span class="drawer-done-icon"><CloseButton label={doneLabel} onclick={onClose} /></span>{:else}<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>{/if}
+					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
 				</div>{/if}
 			</div>
 			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>
@@ -276,7 +274,6 @@
 		box-shadow: 0 -18px 64px rgba(0, 0, 0, 0.32), var(--glass-rim);
 	}
 	.drawer-panel.dragging { transition: none; }
-	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(calc(46dvh + var(--drawer-pull)), 82dvh, calc(100dvh - max(16px, var(--safe-top)))); }
 	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull) + var(--drawer-half-extra, 0px)), calc(var(--drawer-h) * 0.82)); }
@@ -344,12 +341,12 @@
 		white-space: nowrap;
 	}
 	.drawer-lead { justify-self: start; }
-	/* 44px between neighbouring targets and before Close (the head's 8px gap is part of it), so a thumb aimed at one does not land on the next. */ .drawer-actions { display: inline-flex; align-items: center; gap: var(--touch-target); margin-right: calc(var(--space-7) + var(--space-1)); } .drawer-done-icon { display: inline-flex; margin-right: calc(var(--space-1) / -2); }
+	/* 44px between neighbouring targets and before Close (the head's 8px gap is part of it). */
+	.drawer-actions { display: inline-flex; align-items: center; gap: var(--touch-target); margin-right: calc(var(--space-7) - var(--space-1)); }
 	.drawer-head.centered .drawer-done { justify-self: end; }
 	/* The word control shares the content edge and leaves 44px between targets. */
-	.drawer-head.has-actions:not(.icon-done) { padding-right: calc(var(--space-3) - var(--space-1) / 2); }
-	.drawer-head.has-actions:not(.icon-done) .drawer-actions { margin-right: calc(var(--space-7) - var(--space-1)); }
-	.drawer-head.has-actions:not(.icon-done) .drawer-done { padding-inline: calc(var(--space-1) / 2); }
+	.drawer-head.has-actions { padding-right: calc(var(--space-3) - var(--space-1) / 2); }
+	.drawer-head.has-actions .drawer-done { padding-inline: calc(var(--space-1) / 2); }
 	/* Holds Done at the trailing edge when the content owns the title. */
 	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
 	.drawer-context { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
@@ -392,7 +389,6 @@
 			border-radius: 28px;
 			margin-bottom: max(16px, env(safe-area-inset-bottom, 0px));
 		}
-		.drawer-panel.compact { border-radius: var(--radius); }
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.drawer-panel {
