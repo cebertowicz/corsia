@@ -108,8 +108,11 @@ class _GuardedCursor(sqlite3.Cursor):
 
 _TRACKED: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDictionary()
 _GUARDED: dict[type, type] = {}
-#: Per connection, the thread that opened it and the database file (None for memory or a URI).
-_OWNER: weakref.WeakKeyDictionary[sqlite3.Connection, tuple[int, str | None]] = weakref.WeakKeyDictionary()
+#: Per connection: the thread that opened it, the database file (None for memory or a URI),
+#: and whether ``check_same_thread`` confines it to that thread.
+_OWNER: weakref.WeakKeyDictionary[sqlite3.Connection, tuple[int, str | None, bool]] = weakref.WeakKeyDictionary()
+#: Per database file, its own and its WAL's (mtime, size) when the recount last judged it.
+_STAMPS: dict[str, tuple[tuple[int, int] | None, ...]] = {}
 
 
 def _guarded(base: type) -> type:
@@ -145,6 +148,11 @@ def _file_path(args: tuple, kwargs: dict) -> str | None:
     return None
 
 
+def _confined(args: tuple, kwargs: dict) -> bool:
+    """Whether ``check_same_thread`` (fifth positional argument) keeps the connection on its thread."""
+    return bool(args[4]) if len(args) > 4 else bool(kwargs.get("check_same_thread", True))
+
+
 def _connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
     base = kwargs.get("factory") or sqlite3.Connection
     if len(args) <= 5:
@@ -152,7 +160,7 @@ def _connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
     connection = _original_connect(*args, **kwargs)
     connection.set_authorizer(authorize)
     _TRACKED[connection] = 0
-    _OWNER[connection] = (threading.get_ident(), _file_path(args, kwargs))
+    _OWNER[connection] = (threading.get_ident(), _file_path(args, kwargs), _confined(args, kwargs))
     return connection
 
 
@@ -199,26 +207,47 @@ def _mismatches(connection: sqlite3.Connection) -> list[str]:
         connection.row_factory = row_factory
 
 
+def _file_changed(path: str) -> bool:
+    """Whether the database file or its WAL changed since the recount last judged it."""
+    stamp: list[tuple[int, int] | None] = []
+    for name in (path, f"{path}-wal"):
+        try:
+            status = os.stat(name)
+        except OSError:
+            stamp.append(None)
+        else:
+            stamp.append((status.st_mtime_ns, status.st_size))
+    if stamp[0] is None or _STAMPS.get(path) == tuple(stamp):
+        return False
+    _STAMPS[path] = tuple(stamp)
+    return True
+
+
 def recount_changed_plans() -> list[str]:
     """Mismatches of every plan on a connection that wrote since the last call.
 
-    A connection another thread opened may be mid-statement there (a job still running
-    as the test ends), and a read on it from here can deadlock against that job's own
-    database lock until the busy timeout. Those are judged through a fresh read-only
-    connection to the committed file instead, and skipped when the file is busy or the
-    database has none.
+    Only a connection this thread opened with ``check_same_thread`` on is read here.
+    Any other (opened on another thread, or shareable across threads like the pool's)
+    may be mid-statement on a job thread as the test ends: even ``total_changes`` waits
+    for that statement's database mutex while holding the GIL, and the statement's
+    authorizer callback waits for the GIL, so neither returns. Those connections are
+    never touched; their committed file is judged through a fresh read-only connection
+    when the file or its WAL changed, and skipped when the file is busy or the database
+    has none. An in-memory one of those is not judged.
     """
     found: list[str] = []
+    judged: set[str] = set()
     for connection in list(_TRACKED):
         try:
-            changes = connection.total_changes
-            if changes == _TRACKED.get(connection, 0):
-                continue
-            _TRACKED[connection] = changes
-            owner, path = _OWNER.get(connection, (threading.get_ident(), None))
-            if owner == threading.get_ident():
+            owner, path, confined = _OWNER.get(connection, (threading.get_ident(), None, True))
+            if owner == threading.get_ident() and confined:
+                changes = connection.total_changes
+                if changes == _TRACKED.get(connection, 0):
+                    continue
+                _TRACKED[connection] = changes
                 found.extend(_mismatches(connection))
-            elif path is not None:
+            elif path is not None and path not in judged and _file_changed(path):
+                judged.add(path)
                 # A guarded subclass: ``aggregates.ready`` keeps a weak reference to its connection.
                 reader: sqlite3.Connection = _original_connect(
                     f"file:{quote(path)}?mode=ro", uri=True, timeout=0, factory=_guarded(sqlite3.Connection)
