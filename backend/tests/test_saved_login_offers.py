@@ -91,7 +91,7 @@ def test_an_unconfirmed_offer_is_not_shown_or_saved(sessions):
     key = _key(sessions)
     assert offers.offer_login(key, SITE, "me", "pw one 1") is True
     assert offers.pending_offer(key) is None
-    with pytest.raises(KeyStoreError, match="There’s no sign-in to save here"):
+    with pytest.raises(KeyStoreError, match="This login can’t be saved from here anymore"):
         offers.save_offer(key, saved_by=OWNER_USER)
     assert saved_logins.list_logins() == []
     offers.confirm_offer(key)
