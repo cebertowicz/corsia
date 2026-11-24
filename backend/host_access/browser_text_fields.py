@@ -90,18 +90,17 @@ def _inside(parents: dict[int, int], hit: object, node: int) -> bool:
 
 
 def _scroll_and_clip(metrics: dict, clip: tuple[float, float, float, float]) -> tuple[float, float, tuple[float, float, float, float]]:
-    """A document's scroll offset from its layout metrics, and `clip` cut to the viewport those metrics report."""
+    """A document's scroll offset from its layout metrics, and `clip` cut to the viewport those metrics report.
+
+    Without these numbers no point can be placed, so the read fails rather than guess an unscrolled page.
+    """
     viewport = metrics.get('cssVisualViewport')
-    viewport = viewport if isinstance(viewport, dict) else {}
-
-    def number(key: str) -> float | None:
-        value = viewport.get(key)
-        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-
-    width, height = number('clientWidth'), number('clientHeight')
-    right = clip[2] if width is None else min(clip[2], width)
-    bottom = clip[3] if height is None else min(clip[3], height)
-    return number('pageX') or 0, number('pageY') or 0, (clip[0], clip[1], right, bottom)
+    values = [viewport.get(key) if isinstance(viewport, dict) else None
+              for key in ('pageX', 'pageY', 'clientWidth', 'clientHeight')]
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
+        raise BrowserSessionError("This page couldn't be checked")
+    page_x, page_y, width, height = values
+    return page_x, page_y, (clip[0], clip[1], min(clip[2], width), min(clip[3], height))
 
 
 def _border(model: dict | None) -> Rect | None:
