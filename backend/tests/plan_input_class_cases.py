@@ -41,6 +41,17 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
 from tests.plan_writer_authorizer import raw_plan_seed
 
 
+def _later_with_live_helper(db, scene):
+    """Attach a child with open work through the real delegation producer."""
+    from plans import mutations
+
+    child_plan = service.ensure_plan("thread", "child", db=db)
+    mutations.attach_spawned_thread(scene.pending, "child", actor_id="root", db=db)
+    service.add_node(child_plan.id, kind="task", title="Child work", acceptance_criteria="Done", db=db)
+    db.commit()
+    return _operation("edit", {"node_id": NODE, "expected_revision": REV, "later": True})(db, scene)
+
+
 def _workflow_fields_before_migration(db, scene):
     """A mid-ladder database cannot persist the v51 workflow columns yet."""
     db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
@@ -728,6 +739,7 @@ _CASES = {
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
     ),
     # --- plans/later_fields.py ---
+    ("later_fields.py", 'HELPER_STILL_ON_TASK.format( thread=cause["child_thread_id"], title=node["title"], )'): _later_with_live_helper,
     ("later_fields.py", '"later must be true or false"'): _operation(
         "edit", {"node_id": NODE, "expected_revision": REV, "later": "yes"},
     ),
