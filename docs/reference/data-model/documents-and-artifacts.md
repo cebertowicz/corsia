@@ -367,6 +367,22 @@ Source: `backend/infra/doc_review_schema.py`.
 
 Indexes: `idx_doc_review_requests_reviewer` (reviewer_thread_id, created_at), `idx_doc_review_reviewer` (artifact_id, reviewer_thread_id, created_at), `sqlite_autoindex_doc_review_requests_1` (id, unique).
 
+### `doc_suggestion_history`
+
+Source: `backend/infra/suggestion_history_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `event_id` | TEXT | Yes | No | — | — |
+| `artifact_id` | TEXT | No | Yes | — | — |
+| `suggestion_ids` | TEXT | No | Yes | — | — |
+| `decision_metadata` | TEXT | No | Yes | — | — |
+| `before_sha256` | TEXT | No | Yes | — | — |
+| `after_sha256` | TEXT | No | Yes | — | — |
+| `state` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_doc_suggestion_history_1` (event_id, unique).
+
 ### `durable_write_intents`
 
 Source: `backend/infra/schema.py`.
