@@ -36,7 +36,11 @@ def register_new_person_owner(identity, existing, metadata, title, description, 
 
 
 def migrate_priorities_ownership(workspace: Path, *, db) -> int:
-    """Register and hand existing priorities files to the person once."""
+    """Give unregistered priorities files to the person at every start; hand registered ones over once.
+
+    Registered files are rehomed only on the first run, so a file the person later gives to an
+    agent stays with that agent.
+    """
     from core.workspace_layout import resolve_project_root
     from infra.settings import get_setting, set_setting
     from registry import service
@@ -44,8 +48,7 @@ def migrate_priorities_ownership(workspace: Path, *, db) -> int:
     from registry.shared_principals import UI_PRINCIPAL, artifact_owner
 
     marker = "priorities_person_ownership_v1"
-    if get_setting(marker, db=db):
-        return 0
+    handed_over = bool(get_setting(marker, db=db))
     roots = [(workspace.resolve(), False)]
     for row in db.execute("SELECT id FROM projects").fetchall():
         root = resolve_project_root(workspace, row["id"], db=db)
@@ -61,12 +64,14 @@ def migrate_priorities_ownership(workspace: Path, *, db) -> int:
                 continue
             artifact = service.find_file_identity(str(path), db=db)
             if artifact is None:
-                artifact = service.register_write_strict(UI_PRINCIPAL, str(path), db=db)
-            if artifact_owner(str(artifact["id"]), db=db) != UI_PRINCIPAL:
+                service.register_write_strict(UI_PRINCIPAL, str(path), db=db)
+                count += 1
+            elif not handed_over and artifact_owner(str(artifact["id"]), db=db) != UI_PRINCIPAL:
                 rehome_artifact(integration=artifact["integration"], type=artifact["type"],
                                 external_id=artifact["external_id"], new_owner_thread_id=UI_PRINCIPAL,
                                 actor_thread_id=None, authority="migration", reason="priorities belong to the person",
                                 source_path="registry.priorities_ownership", db=db, show_to_new_owner=False)
-            count += 1
-    set_setting(marker, {"done": True}, db=db)
+                count += 1
+    if not handed_over:
+        set_setting(marker, {"done": True}, db=db)
     return count

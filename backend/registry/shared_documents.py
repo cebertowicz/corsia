@@ -16,6 +16,7 @@ from registry.document_ownership import (
 )
 from registry.shared_document_messages import (
     missing_category_message,
+    owner_refusal,
     structure_owned_message,
 )
 from registry.shared_principals import (
@@ -122,6 +123,14 @@ def _creation_owner(
         raise DurableWritePolicyError(str(exc)) from exc
 
 
+def _refuse_priorities(candidate: Path, scope_root: Path, *, workspace: Path, db) -> None:
+    """Point any writer refused on a priorities file to a suggestion to the person."""
+    from registry.priorities_ownership import is_priorities_path
+
+    if is_priorities_path(candidate, workspace=workspace, db=db):
+        raise DurableWritePolicyError(owner_refusal(candidate, scope_root, UI_PRINCIPAL, db=db))
+
+
 def _shared_candidate(
     target: Path,
     *,
@@ -158,6 +167,7 @@ def _shared_candidate(
     if parts[0] == ".threads":
         if len(parts) >= 3 and (parts[1] == thread_id or structure_owner):
             return None
+        _refuse_priorities(candidate, scope_root, workspace=workspace, db=db)
         raise DurableWritePolicyError(
             "A thread may write anywhere inside its own .threads/<id>/ directory, "
             "but not inside another thread's directory."
@@ -165,6 +175,7 @@ def _shared_candidate(
     if parts[0] != "shared":
         if structure_owner:
             return None
+        _refuse_priorities(candidate, scope_root, workspace=workspace, db=db)
         raise DurableWritePolicyError(structure_owned_message(f"{parts[0]}/", conductor_id))
     return scope_root, candidate, authoritative_project, conductor_id, parts
 
