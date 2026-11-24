@@ -1,0 +1,175 @@
+<script lang="ts">
+	import { untrack } from 'svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { declineOffer, fetchSaveOffer, saveOffer, type SaveOffer } from '$lib/api/savedLoginOffer';
+	import { MAX_DOMAIN, MAX_USERNAME, SAVE_OFFER_TEXT as text, shortenMiddle } from '$lib/browserSaveOfferText';
+
+	/**
+	 * The offer to save a login the person just made in this pane, docked below the page.
+	 * It asks the server only after the person typed or pasted into a password page, never polls,
+	 * and never shows or asks for a password.
+	 */
+	let { threadId, passwordPage, onopenchange, onrestorefocus }: {
+		threadId: string;
+		passwordPage: boolean;
+		/** Called as the dock opens or closes, so the host can keep the agent's viewport still. */
+		onopenchange: (open: boolean) => void;
+		/** Called while focus is still in the dock, so it lands on the page and not on a removed button. */
+		onrestorefocus: () => void;
+	} = $props();
+
+	const HOLD_MS = 1200;
+	const FADE_MS = 200;
+
+	let offer = $state<SaveOffer | null>(null);
+	let phase = $state<'asking' | 'saved' | 'fading'>('asking');
+	let failed = $state(false);
+	let saving = $state(false);
+	let announcement = $state('');
+	let lockedHeight = $state(0);
+	let dock = $state<HTMLElement | undefined>();
+	let typedInPasswordPage = false;
+	// The server's confirmation can land a moment after the page settles, so one empty answer earns one more ask.
+	let askAgain = false;
+	let generation = 0;
+	let timers: ReturnType<typeof setTimeout>[] = [];
+	let wasPasswordPage = false;
+
+	const domain = $derived(offer ? shortenMiddle(offer.domain, MAX_DOMAIN) : '');
+	const username = $derived(offer ? shortenMiddle(offer.username, MAX_USERNAME) : '');
+
+	async function ask(retry = false) {
+		const mine = generation;
+		const next = await fetchSaveOffer(threadId);
+		if (mine !== generation) return;
+		askAgain = next === null && !retry;
+		if (!next || offer) return;
+		offer = next;
+		phase = 'asking';
+		failed = false;
+		saving = false;
+		announcement = text.announce;
+		onopenchange(true);
+	}
+
+	function close() {
+		if (dock?.contains(document.activeElement)) onrestorefocus();
+		timers.forEach(clearTimeout);
+		timers = [];
+		const wasOpen = offer !== null;
+		offer = null;
+		saving = false;
+		failed = false;
+		lockedHeight = 0;
+		if (wasOpen) onopenchange(false);
+	}
+
+	/** Forget everything about this stream: a new thread, a reconnect or a closed pane starts clean. */
+	export function reset() {
+		generation++;
+		typedInPasswordPage = false;
+		askAgain = false;
+		announcement = '';
+		close();
+	}
+
+	/** The person typed or pasted in this pane; only input on a password page counts toward an offer. */
+	export function typed() {
+		if (passwordPage) typedInPasswordPage = true;
+	}
+
+	/** A navigation settled; a page on another site ends the offer, and an earlier empty answer is asked once more. */
+	export function navigated(nextDomain: string | null) {
+		if (offer && nextDomain !== null && nextDomain !== offer.domain) { close(); return; }
+		if (!offer && askAgain) { askAgain = false; void ask(true); }
+	}
+
+	$effect(() => {
+		const visible = passwordPage;
+		untrack(() => {
+			if (wasPasswordPage && !visible && typedInPasswordPage) void ask();
+			if (wasPasswordPage && !visible) typedInPasswordPage = false;
+			wasPasswordPage = visible;
+		});
+	});
+
+	let lastThread = untrack(() => threadId);
+	$effect(() => {
+		const id = threadId;
+		if (id === lastThread) return;
+		lastThread = id;
+		untrack(reset);
+	});
+
+	$effect(() => () => untrack(reset));
+
+	async function save() {
+		if (!offer || saving) return;
+		saving = true;
+		failed = false;
+		const mine = generation;
+		const result = await saveOffer(threadId);
+		if (mine !== generation || !offer) return;
+		saving = false;
+		if (result === 'gone') { close(); return; }
+		if (result === 'error') { failed = true; announcement = text.error; return; }
+		// The buttons are about to go, so focus moves to the page first.
+		onrestorefocus();
+		lockedHeight = dock?.offsetHeight ?? 0;
+		phase = 'saved';
+		announcement = offer.update ? text.updated : text.saved;
+		finishAfterHold();
+	}
+
+	function finishAfterHold() {
+		const reduced = $prefersReducedMotion;
+		timers.push(setTimeout(() => {
+			if (reduced) { close(); return; }
+			phase = 'fading';
+			timers.push(setTimeout(close, FADE_MS));
+		}, HOLD_MS));
+	}
+
+	function notNow() {
+		if (!offer) return;
+		onrestorefocus();
+		void declineOffer(threadId);
+		close();
+	}
+</script>
+
+<span class="sr-only" role="status" aria-live="polite">{announcement}</span>
+{#if offer}
+	<div bind:this={dock} class="save-offer" class:fading={phase === 'fading'} style:min-height={lockedHeight ? `${lockedHeight}px` : undefined}>
+		{#if phase === 'asking'}
+			<div class="copy">
+				<p class="question" aria-hidden="true">{text.question(offer, domain)}</p>
+				<p class="sr-only">{text.question(offer, offer.domain)}</p>
+				<p class="username" title={offer.username}><span aria-hidden="true">{username}</span><span class="sr-only">{offer.username}</span></p>
+				{#if failed}<p class="error">{text.error}</p>{/if}
+			</div>
+			<div class="actions">
+				<Button variant="primary" ariaDisabled={saving} onclick={() => void save()}>{offer.update ? text.update : text.save}</Button>
+				<Button variant="ghost" onclick={notNow}>{text.notNow}</Button>
+			</div>
+		{:else}
+			<p class="done" aria-hidden="true">{offer.update ? text.updated : text.saved}</p>
+		{/if}
+	</div>
+{/if}
+
+<style>
+	.save-offer { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); flex: none; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-subtle); background: var(--bg-primary); transition: opacity 200ms ease; }
+	.save-offer.fading { opacity: 0; }
+	.copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+	p { margin: 0; }
+	.question { overflow-wrap: anywhere; font-size: var(--text-subhead); color: var(--text-primary); }
+	.username { overflow-wrap: anywhere; font-size: var(--text-footnote); color: var(--text-secondary); }
+	.error { font-size: var(--text-footnote); color: var(--red-text); }
+	.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+	.done { font-size: var(--text-subhead); color: var(--text-secondary); }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+	@media (max-width: 48em) { .save-offer { min-height: var(--touch-target); } }
+	@media (prefers-reduced-motion: reduce) { .save-offer { transition: none; } }
+</style>

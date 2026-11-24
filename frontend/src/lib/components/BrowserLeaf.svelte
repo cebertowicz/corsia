@@ -4,7 +4,7 @@
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
 	import { drawFrame, FrameScrollShift } from '$lib/browserPane';
-	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
+	import { paneAppearance, paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyMessage, wheelPixels } from '$lib/browserPaneInput';
 	import { BrowserPaneTouch } from '$lib/browserPaneTouch';
@@ -17,6 +17,7 @@
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import BrowserToolbar from '$lib/components/BrowserToolbar.svelte';
 	import BrowserPageStatus from '$lib/components/BrowserPageStatus.svelte';
+	import BrowserSaveOffer from '$lib/components/BrowserSaveOffer.svelte';
 	import { threads } from '$lib/stores/threads';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { on } from '$lib/ws/events';
@@ -47,16 +48,15 @@
 	let url = $state('');
 	// The page's registrable domain, named by the backend from the Public Suffix List.
 	let domain = $state<string | null>(null);
-	let width = $state(0);
-	let height = $state(0);
+	let width = $state(0), height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
 	let streaming = $state(false);
 	let opening = false;
+	let saveOffer: BrowserSaveOffer | undefined, offerOpen = false;
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
 	let lastAppearance = '';
 	let activePointer: number | null = null;
-	let decodeGeneration = 0;
-	let decodeWarned = false;
+	let decodeGeneration = 0, decodeWarned = false;
 	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const stats = new BrowserPaneStats(() => socket?.bufferedAmount ?? 0);
@@ -69,6 +69,7 @@
 	});
 
 	function resetInput() {
+		saveOffer?.reset();
 		stats.stop();
 		clipboard?.dispose();
 		paneErrors.resetUndo();
@@ -167,6 +168,7 @@
 			else {
 				applyPageMetadata(message.url, message.title, message.domain);
 				status = '';
+				saveOffer?.navigated(domain);
 			}
 			return;
 		}
@@ -220,13 +222,10 @@
 
 	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
 	function sendAppearance() {
-		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
-		const bounds = canvas.getBoundingClientRect();
-		if (bounds.width < 1 || bounds.height < 1) return;
-		const touch = window.matchMedia?.('(pointer: coarse)').matches === true;
-		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme), ...(touch ? { touch: true } : {}) };
-		const key = JSON.stringify(appearance);
-		if (key === lastAppearance) return;
+		if (!canvas || socket?.readyState !== WebSocket.OPEN || offerOpen) return;
+		const appearance = paneAppearance(canvas, get(theme));
+		const key = appearance && JSON.stringify(appearance);
+		if (!key || key === lastAppearance) return;
 		lastAppearance = key;
 		socket.send(key);
 	}
@@ -273,7 +272,7 @@
 	/** `editable` is true for the key target, where the native paste that follows fires pastePage with the text. */
 	function sendKey(event: KeyboardEvent, editable = false) {
 		if (socket?.readyState !== WebSocket.OPEN) return;
-		paneInput.flush();
+		paneInput.flush(); saveOffer?.typed();
 		if (editable && isPasteKey(event)) return;
 		event.preventDefault();
 		if (clipboardKey(event, () => clipboard ??= new BrowserPaneClipboard(
@@ -286,7 +285,7 @@
 	function pastePage(event: ClipboardEvent) {
 		event.preventDefault();
 		const text = event.clipboardData?.getData('text/plain');
-		if (text && socket?.readyState === WebSocket.OPEN) { paneErrors.set('clipboard', null); socket.send(JSON.stringify({ type: 'clipboard_paste', text })); }
+		if (text && socket?.readyState === WebSocket.OPEN) { paneErrors.set('clipboard', null); saveOffer?.typed(); socket.send(JSON.stringify({ type: 'clipboard_paste', text })); }
 	}
 
 	async function go(targetUrl = url) {
@@ -379,6 +378,7 @@
 		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
+	<BrowserSaveOffer bind:this={saveOffer} {threadId} {passwordPage} onopenchange={open => { offerOpen = open; }} onrestorefocus={() => canvas.focus()} />
 </div>
 
 <style>
