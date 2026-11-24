@@ -1,0 +1,5 @@
+[
+  {"type":"input_keyboard","eventType":"keyDown","key":"x","code":"","keyCode":0,"text":"x","modifiers":0},
+  {"type":"input_keyboard","eventType":"keyUp","key":"x","code":"","keyCode":0,"text":"","modifiers":0},
+  {"type":"clipboard_paste","text":"yz"}
+]

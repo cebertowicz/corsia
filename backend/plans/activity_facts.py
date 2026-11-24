@@ -14,9 +14,9 @@ from plans import (
 )
 
 
-_COMPACT_NODE_COLUMNS = """n.id,n.plan_id,n.parent_id,n.order_key,n.kind,n.state,
+_COMPACT_NODE_COLUMNS = """n.id,n.plan_id,n.parent_id,n.order_key,n.kind,n.workflow_step,n.state,
     n.assignee,n.spawned_thread_id,n.executor_thread_id,n.owner_thread_id,
-    n.requirements_revision,n.updated_at,p.owner_kind,p.owner_id"""
+    n.requirements_revision,n.updated_at,n.later,p.owner_kind,p.owner_id"""
 
 
 def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:
@@ -60,8 +60,8 @@ def compact_nodes(plan_ids: list[str], *, db) -> dict[str, list[dict]]:
 
     The open rows (``idx_plan_nodes_open``), whose ancestors are open too, never the settled
     history (#731 S2-2): a settled leaf is counted by the plan's stored counters
-    (``plans.top_done``, ``top_failed``), and a row with a child in work says so in
-    ``has_child_in_work``, which ``node_states`` reads for a parent whose children are not
+    (``plans.top_done``, ``top_failed``), and a row that is a parent says so in
+    ``is_parent`` (``node_states.stored_parent``), which ``node_states`` reads for a parent whose children are not
     loaded. A sent-back round and what is beneath it is history, never a row.
     """
     by_plan: dict[str, list[dict]] = defaultdict(list)
@@ -71,7 +71,7 @@ def compact_nodes(plan_ids: list[str], *, db) -> dict[str, list[dict]]:
         rows = [
             dict(row) for row in fetch_all(
                 db,
-                f"""SELECT {_COMPACT_NODE_COLUMNS},n.sent_back,n.child_in_work FROM plan_nodes n
+                f"""SELECT {_COMPACT_NODE_COLUMNS},n.sent_back,n.child_in_work,n.sub_open FROM plan_nodes n
                     JOIN plans p ON p.id=n.plan_id
                     WHERE n.plan_id IN ({marks}) AND {node_states.unarchived_sql('n')} AND n.folded=0
                     ORDER BY n.plan_id,n.order_key,n.id""",
@@ -79,7 +79,8 @@ def compact_nodes(plan_ids: list[str], *, db) -> dict[str, list[dict]]:
             )
         ]
         for row in _without_rounds(rows):
-            row["has_child_in_work"] = row.pop("child_in_work") > 0
+            row["is_parent"] = node_states.stored_parent(row)
+            del row["child_in_work"], row["sub_open"]
             del row["sent_back"]
             by_plan[str(row["plan_id"])].append(row)
     _apply_owner_facts(by_plan, db=db)

@@ -113,6 +113,17 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await page.keyboard.press('Escape');
 	await expect(card).toHaveCount(1);
 	await expect(card).not.toHaveClass(/selected/);
+
+	// Escape from a reply being written lets the card go the same way, and as in a document's margin the focus goes back to
+	// the text it came from, the highlight, so the resting card shows no focus; the unsent reply stays in its field.
+	await highlight.click();
+	await expect(card).toHaveClass(/selected/);
+	await replyField.fill('A reply not sent yet');
+	await page.keyboard.press('Escape');
+	await expect(card).not.toHaveClass(/selected/);
+	await expect(replyField).toHaveValue('A reply not sent yet');
+	await expect(replyField).not.toBeFocused();
+	await expect(highlight).toBeFocused();
 });
 
 for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark'] as const) test(`a long chat margin reply stays usable at ${width} in ${theme}`, async ({ page, request }, info) => {
@@ -264,10 +275,11 @@ test.describe('a touch screen wide enough for the margin column', () => {
 		if (!(await field.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false))) await card.tap();
 		await expect(field).toBeVisible();
 		// The field sits in the lower part of the screen, where an on-screen keyboard comes up, with the reader well above the live edge.
+		// It sits above the band the grown composer covers (top 770 at 1000 tall), so the composer growing gives the column nothing to reveal.
 		await field.evaluate((el) => {
 			const scroller = el.closest<HTMLElement>('.messages')!;
 			const box = el.getBoundingClientRect();
-			scroller.scrollTop += box.top + box.height / 2 - 780;
+			scroller.scrollTop += box.top + box.height / 2 - 650;
 		});
 		const still = () => expect.poll(() => field.evaluate((el) => new Promise<string>((resolve) => {
 			const scroller = el.closest<HTMLElement>('.messages')!;

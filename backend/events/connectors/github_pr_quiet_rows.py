@@ -2,20 +2,27 @@
 
 ``pr_quiet:<external_id>`` holds the head, when the sweep first saw it, the
 reasons already fired for it, whether it is settled and whether the reviewer
-holds it. ``prune_rows`` ends it, and the notice markers, once a PR is no
-longer owned and open. Whether a CI event arrived is not kept here: the
+holds it. While GitHub answers not found for the PR it also holds how many
+such answers came in a row and when to ask next (``record_unfound``).
+``prune_rows`` ends it, and the notice markers, once a PR is no longer owned
+and open. Whether a CI event arrived is not kept here: the
 webhook delivery log records it. Whether a wake reached the owner's FIFO is
 not kept either: ``wake_committed`` reads its message row.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 from events.connectors.github_pr_quiet_reasons import parse_time
 
+log = logging.getLogger(__name__)
+
 STATE_PREFIX = "pr_quiet:"
+#: The two fields a row carries only while GitHub answers not found for its PR.
+_UNFOUND_FIELDS = ("unfound", "unfound_until")
 
 
 def wake_committed(message_id: str) -> bool:
@@ -37,11 +44,18 @@ def wake_committed(message_id: str) -> bool:
 
 
 def head_state(external_id: str, head: str, now: datetime) -> dict[str, Any]:
-    """This PR's durable sweep row, reset when the head moves."""
+    """This PR's durable sweep row, reset when the head moves.
+
+    Reached only once GitHub has shown the PR, so a not-found wait ends here;
+    the reasons already fired for an unchanged head are kept.
+    """
     from infra.settings import get_setting, set_setting
 
     state = get_setting(f"{STATE_PREFIX}{external_id}") or {}
     if state.get("head") == head and parse_time(state.get("first_seen_at")):
+        if any(field in state for field in _UNFOUND_FIELDS):
+            state = {k: v for k, v in state.items() if k not in _UNFOUND_FIELDS}
+            set_setting(f"{STATE_PREFIX}{external_id}", state)
         return state
     state = {"head": head, "first_seen_at": now.isoformat(), "fired": [], "settled": None}
     set_setting(f"{STATE_PREFIX}{external_id}", state)
@@ -95,6 +109,42 @@ def record_review_hold(
         state["review_from"] = None if held else now.isoformat()
         set_setting(key, state, db=connection)
         return state
+
+
+def unfound_waiting(external_id: str, now: datetime) -> bool:
+    """Whether GitHub last answered not found for this PR and it is not yet time to ask again."""
+    from infra.settings import get_setting
+
+    until = parse_time((get_setting(f"{STATE_PREFIX}{external_id}") or {}).get("unfound_until"))
+    return until is not None and now < until
+
+
+def record_unfound(external_id: str, now: datetime, sweep_interval_s: float) -> datetime:
+    """Note that GitHub answered not found for this PR; return when to ask again.
+
+    The wait is the sweep interval doubled once per not-found answer in a row.
+    The first wait is therefore two intervals, the shortest that makes the next
+    sweep skip the PR. There is no cap: doubling alone keeps the reads
+    logarithmic in how long the PR has been gone, and a PR that comes back is
+    read within about as long again as it was gone, so no chosen limit is
+    needed. The rest of the row is kept, so a PR that comes back on the same
+    head is not woken again for a reason it already fired.
+    """
+    from infra.database import write_transaction
+    from infra.settings import get_setting, set_setting
+
+    key = f"{STATE_PREFIX}{external_id}"
+    with write_transaction(None, scope="pr_quiet_unfound") as connection:
+        state = get_setting(key, db=connection) or {}
+        answers = state.get("unfound")
+        answers = answers + 1 if isinstance(answers, int) and answers > 0 else 1
+        until = now + timedelta(seconds=sweep_interval_s) * 2 ** answers
+        state.update({"unfound": answers, "unfound_until": until.isoformat()})
+        set_setting(key, state, db=connection)
+    log.info(
+        "pr-quiet-watch: %s not found on GitHub; next read at %s", external_id, until.isoformat(),
+    )
+    return until
 
 
 def forget(external_id: str) -> None:

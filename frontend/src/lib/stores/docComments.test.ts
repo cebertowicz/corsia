@@ -16,7 +16,7 @@ vi.mock('$lib/api/docs', () => ({
 
 import { holdCommentArrival, prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment,
+	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment, EarlierVersionPosted,
 } from './docComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
 
@@ -39,6 +39,28 @@ describe('tagged comment requests', () => {
 		expect(mocks.postComment).toHaveBeenLastCalledWith('artifact', expect.objectContaining({ tagged_agent_ids: ['a'], tagged_agent_mentions: mentions, thread_id: 'viewer' }));
 		await addReply('artifact', 'c', '😀 @Agent', 'you', ['a'], 'viewer', mentions);
 		expect(mocks.postComment).toHaveBeenLastCalledWith('artifact', expect.objectContaining({ parent_id: 'c', tagged_agent_ids: ['a'], tagged_agent_mentions: mentions, thread_id: 'viewer' }));
+	});
+});
+
+describe('a reply posted under its draft’s one id', () => {
+	const thread = { id: 'c', anchor: 'q', author: 'you', text: 't', at: 'now', resolved: false, replies: [] };
+	const stored = (body: string) => ({ id: 'draft-1', author: 'you', author_kind: 'user', body, created_at: '2026-10-02T00:00:00Z' });
+
+	it('posts under that id, and a POST with no answer finds the reply it stored instead of posting it twice', async () => {
+		docComments.set({ artifact: [thread] });
+		mocks.postComment.mockRejectedValueOnce(new Error('timed out'));
+		mocks.fetchComments.mockResolvedValueOnce({ comments: [{ id: 'c', author: 'you', author_kind: 'user', body: 't', created_at: '2026-10-02T00:00:00Z', replies: [stored('half a reply')] }], feedback: {} });
+		await addReply('artifact', 'c', 'half a reply', 'you', [], null, [], 'draft-1', true);
+		expect(mocks.postComment).toHaveBeenCalledOnce();
+		expect(mocks.postComment).toHaveBeenCalledWith('artifact', expect.objectContaining({ client_id: 'draft-1', parent_id: 'c' }));
+		expect(get(docComments).artifact[0].replies.map((reply) => reply.id)).toEqual(['draft-1']);
+	});
+
+	it('shows the earlier version, and fails so the changes stay, when the reply under that id was posted from other text', async () => {
+		docComments.set({ artifact: [thread] });
+		mocks.postComment.mockResolvedValueOnce(stored('half a reply'));
+		await expect(addReply('artifact', 'c', 'half a reply, changed', 'you', [], null, [], 'draft-1', true)).rejects.toBeInstanceOf(EarlierVersionPosted);
+		expect(get(docComments).artifact[0].replies).toMatchObject([{ id: 'draft-1', text: 'half a reply' }]);
 	});
 });
 
@@ -73,10 +95,16 @@ describe('comment loading presentation', () => {
 	it('keeps whether the document has an owner a re-open can reach', async () => {
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: 'Documents' } });
 		await loadComments('artifact');
-		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents' });
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: [] });
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: null } });
 		await loadComments('artifact');
-		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: null });
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: null, goesTo: [] });
+	});
+
+	it('carries who a new comment goes to, by agent, from the document and not from the owner label', async () => {
+		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: 'Documents', goes_to: [{ id: 'sup', name: 'Supervisor' }, { id: 'docs', name: 'Documents' }] } });
+		await loadComments('artifact');
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: [{ id: 'sup', name: 'Supervisor' }, { id: 'docs', name: 'Documents' }] });
 	});
 
 	it('runs one more load for a burst of changes, after the one already running', async () => {
@@ -219,6 +247,16 @@ describe('comment-thread view projection', () => {
 		expect(fromServer({ ...row, acknowledged_by: [agent] })).toMatchObject({ acked: false, acknowledgedBy: [agent] });
 		expect(fromServer({ ...row, acknowledged_by: [agent, person] })).toMatchObject({ acked: true, acknowledgedBy: [agent, person] });
 		expect(fromServer(row)).toMatchObject({ acked: false, acknowledgedBy: [] });
+	});
+
+	it('keeps "the server did not say who a reply goes to" apart from "no agent", so a new comment shows no line instead of a wrong one', () => {
+		const row = {
+			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user' as const, body: 'Root', anchor_text: 'quote',
+			from_off: 0, to_off: 5, review: 0, resolved: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
+		};
+		expect(fromServer(row).replyGoesTo).toBeUndefined();
+		expect(fromServer({ ...row, reply_goes_to: [] }).replyGoesTo).toEqual([]);
+		expect(fromServer({ ...row, reply_goes_to: [{ id: 'docs', name: 'Docs lane' }] }).replyGoesTo).toEqual([{ id: 'docs', name: 'Docs lane' }]);
 	});
 
 	it('drops every acknowledgement as soon as a thread is re-opened, and restores them if the re-open fails', async () => {

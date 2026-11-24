@@ -174,6 +174,21 @@ async function expandCanvas(page: Page) {
 	}
 	await expect.poll(async () => (await box(page.locator('.doc'))).width).toBeGreaterThan(narrow + 100);
 	await waitForPanelsToSettle(page);
+	// The document holds the reader's place until its text has rewrapped at the new width, and lays back a scroll with no
+	// input that comes sooner (CodeMirror measures a resize 50 ms after it): wait until the width has held for at least
+	// 60 ms and then 2 frames more.
+	await page.locator('.cm-scroller').evaluate((scroller) => new Promise<void>((settled) => {
+		let width = Number.NaN;
+		let since = 0;
+		let frames = 0;
+		const frame = (now: number) => {
+			if (scroller.clientWidth !== width) [width, since, frames] = [scroller.clientWidth, now, 0];
+			else if (now - since >= 60) frames += 1;
+			if (frames >= 2) settled();
+			else requestAnimationFrame(frame);
+		};
+		requestAnimationFrame(frame);
+	}));
 }
 
 const layouts = [
@@ -257,6 +272,43 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			// A card opened at the click holds its place on screen (it is anchored to the pointer, not to the text) until the reader closes it.
 			await expect(popover(page)).toBeVisible();
 			expect((await box(popover(page))).y).toBeCloseTo(placed.y, 0);
+		});
+
+		if (layout === '1440') test('@flow:document-comments a reader can drag-select a comment\'s words to copy them, and Escape then closes the card and leaves the document open at 1440', async ({ page, request }) => {
+			const body = `Plain note on the ${SECTION} note.`;
+			const phrase = `note on the ${SECTION}`;
+			await openSuggestionDocument(page, request, TEXT, [{ quote: `The ${SECTION} note is`, body }], options);
+			await expect(page.locator('.cm-scroller')).toBeVisible();
+			await placeTarget(page, 0.5);
+			await highlight(page, `The ${SECTION} note is`).click();
+			await expect(popover(page)).toBeVisible();
+			const words = popover(page).getByText(body, { exact: true });
+			await expect(words).toBeVisible();
+			// The phrase's drawn ends, found in the comment's own text node.
+			const ends = await words.evaluate((element, phrase) => {
+				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+				for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+					const at = node.textContent!.indexOf(phrase);
+					if (at < 0) continue;
+					const span = document.createRange();
+					span.setStart(node, at); span.setEnd(node, at + 1);
+					const first = span.getBoundingClientRect();
+					span.setStart(node, at + phrase.length - 1); span.setEnd(node, at + phrase.length);
+					const last = span.getBoundingClientRect();
+					return { from: { x: first.left + 1, y: first.top + first.height / 2 }, to: { x: last.right - 1, y: last.top + last.height / 2 } };
+				}
+				throw new Error('the phrase is not in one text node of the comment');
+			}, phrase);
+			await page.mouse.move(ends.from.x, ends.from.y);
+			await page.mouse.down();
+			await page.mouse.move(ends.to.x, ends.to.y, { steps: 8 });
+			await page.mouse.up();
+			expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(phrase);
+			// The press left the focus on the card, so its Escape closes the card and not the document beneath.
+			expect(await page.evaluate(() => !!document.activeElement?.closest('[data-popover]'))).toBe(true);
+			await page.keyboard.press('Escape');
+			await expect(popover(page)).toHaveCount(0);
+			await expect(page.locator('.cm-scroller')).toBeVisible();
 		});
 
 		test(`@flow:document-comments the new-comment card stays with the selection when the canvas scrolls at ${layout}`, async ({ page, request }, testInfo) => {

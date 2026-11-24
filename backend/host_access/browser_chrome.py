@@ -39,7 +39,7 @@ def chrome_argv(executable: str, port: int, profile: Path, *, headless: bool, ua
     # a sign-in that set only session cookies is gone after any close of the saved profile.
     flags = [*CHROME_FLAGS, "--restore-last-session", f"--remote-debugging-port={port}",
              "--remote-debugging-address=127.0.0.1",
-             f"--user-data-dir={profile}", *browser_launch.stealth_args(ua, headless=headless).splitlines()]
+             f"--user-data-dir={profile}", *browser_launch.managed_launch_args(ua, headless=headless).splitlines()]
     if headless:
         flags.append("--headless=new")
     return [executable, *flags]
@@ -128,6 +128,11 @@ class ChromeProcess:
             elif temporary is not None:
                 shutil.rmtree(temporary)
             raise
+
+    @property
+    def exited(self) -> bool:
+        """Chrome ended without our close: it crashed, was killed, or the person quit its window."""
+        return not self.closed and self.process.returncode is not None
 
     def release_stream(self) -> None:
         if self.stream_reservation is not None:

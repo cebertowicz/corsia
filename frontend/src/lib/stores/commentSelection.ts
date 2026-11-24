@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { encodeUpdate, newClientId, textDigest } from './documentWire';
 import type { LiveDocumentSession } from './liveDocumentSession';
+import { DRAFT_KEPT } from './draftKept';
 
 export const SELECTION_LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
 export const SELECTION_RECONNECTED = 'The document reconnected, so this comment lost its place. Select the text again; your draft will carry over.';
@@ -31,19 +32,33 @@ export function selectionRange(selection: CommentSelection): { from: number; to:
 export const RESERVE_BUDGET_MS = 3000;
 /** After a refusal, how long a capture waits for the remote update the server already holds before it asks again. */
 export const CATCH_UP_MS = 50;
-const CHANGED = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
-const OFFLINE = 'You’re offline. Your comment draft is kept. Try again when connected.';
-const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try again.';
+/** Why a capture ended without a place for its comment; each is a reason the comment's box shows. */
+export const CAPTURE_FAILURE = {
+	changed: `The document changed before your comment could be attached. ${DRAFT_KEPT} Try again.`,
+	offline: `You’re offline. ${DRAFT_KEPT} Try again when connected.`,
+	unanswered: `Couldn’t attach your comment. ${DRAFT_KEPT} Try again.`,
+	settling: `Live updates are still settling. ${DRAFT_KEPT} Try again.`,
+} as const;
+const { changed: CHANGED, offline: OFFLINE, unanswered: UNANSWERED } = CAPTURE_FAILURE;
+/** The server already holds a comment, or another person's capture, under the id asked with (`identity_in_use`). */
+export class IdentityInUseError extends Error {
+	constructor() {
+		super(UNANSWERED);
+		this.name = 'IdentityInUseError';
+	}
+}
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
- * comment's own client id, which succeeds only when the server holds the state this browser hashed. A hash a
+ * comment's own client id, which succeeds when the server holds, or recently held, the state this browser hashed
+ * and the selection still holds the quote sent with it. A hash a
  * remote update interrupts is simply redone. After a refusal it waits for the next applied remote update (or
  * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort, refusal, or
- * an unanswered reservation gives the range back; abort also releases an in-progress hash.
+ * an unanswered reservation gives the range back; abort also releases an in-progress hash. `clientId` is the comment
+ * draft's own id, the same for every press of Comment on it.
  */
-export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal): Promise<CapturedComment> {
-	const { session } = selection, clientId = newClientId();
+export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal, clientId = newClientId()): Promise<CapturedComment> {
+	const { session } = selection;
 	return new Promise((resolve, reject) => {
 		const started = performance.now();
 		let done = false, requestId: string | null = null, sent: CapturedComment | null = null;
@@ -64,6 +79,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 			// No ask is out yet while hashing: a refusal without an id (an earlier capture's release) is not ours.
 			if (requestId === null || frame.request_id !== requestId) return;
 			if (frame.type === 'doc_error') {
+				if (frame.kind === 'identity_in_use') { finish(undefined, new IdentityInUseError()); return; }
 				finish(undefined, new Error((frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
 				return;
 			}
@@ -96,13 +112,13 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 				if (done) return;
 				if (generation !== session.textGeneration || before.localGeneration !== after.localGeneration
 					|| before.ackGeneration !== after.ackGeneration) { again(false); return; }
-				if (!session.durability.clean) { finish(undefined, new Error('Live updates are still settling. Your comment draft is kept. Try again.')); return; }
+				if (!session.durability.clean) { finish(undefined, new Error(CAPTURE_FAILURE.settling)); return; }
 				const range = selectionRange(selection);
 				if (!range) { finish(undefined, new Error(SELECTION_LOST)); return; }
 				const vector = encodeUpdate(Y.encodeStateVector(session.doc));
 				sent = { ...range, clientId };
 				requestId = session.requestPositions(seq, false, { client_id: clientId, from_off: range.from, to_off: range.to,
-					vector, digest, text_length_utf16: text.length });
+					vector, digest, text_length_utf16: text.length, quote: range.quote });
 				if (!requestId) finish(undefined, new Error(OFFLINE));
 			} catch (error) { finish(undefined, error instanceof Error ? error : new Error('Could not check the selection.')); }
 		}

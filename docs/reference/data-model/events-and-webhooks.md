@@ -17,6 +17,7 @@ Source: `backend/infra/schema.py`.
 | `payload_json` | TEXT | No | No | — | — |
 | `status` | TEXT | No | Yes | 'parked' | — |
 | `created_at` | TEXT | No | Yes | — | — |
+| `code_named` | INTEGER | No | Yes | 0 | — |
 
 Indexes: `idx_dead_letter_status` (status, created_at), `sqlite_autoindex_dead_letter_events_1` (id, unique).
 

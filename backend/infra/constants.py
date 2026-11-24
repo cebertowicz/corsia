@@ -1,6 +1,11 @@
 """Centralized constants."""
 
 DEFAULT_MEMORY_WINDOW = 250
+
+#: Why a delegator archived its own worker (``delegate_stop``).
+STOPPED_BY_DELEGATOR_REASON = "stopped_by_delegator"
+#: Archive reasons that make a thread unavailable until someone deliberately brings it back.
+EXPLICIT_ARCHIVE_REASONS = ("user", STOPPED_BY_DELEGATOR_REASON)
 HISTORY_LOAD_FRACTION = 0.6
 AVG_TOKENS_QA = 150
 AVG_TOKENS_TOOL_HEAVY = 600

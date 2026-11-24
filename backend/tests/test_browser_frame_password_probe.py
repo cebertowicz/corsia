@@ -233,5 +233,8 @@ async def test_a_read_that_lands_on_a_guarded_fields_frame_element_is_refused(mo
     for args in (("get", "value", "@frame"), ("get", "attr", "@frame", "value")):
         with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access("thread", probe, args, resolve=resolve)
+    # Other elements pass the frame read guard. The step ended on this visit, so the visit's own restriction
+    # still holds every value read until the page changes.
     for ref in ("@page-field", "@link"):
-        await browser_control.require_page_access("thread", probe, ("get", "value", ref), resolve=resolve)
+        with pytest.raises(BrowserSessionError, match="filled in a password field"):
+            await browser_control.require_page_access("thread", probe, ("get", "value", ref), resolve=resolve)

@@ -62,12 +62,12 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
     monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, visible: events.append(visible))
 
     with pytest.raises(BrowserSessionError, match="asks for a password"):
-        await browser_control.require_page_access("thread", probe, ("fill", "@password", "secret"))
+        await browser_control.require_page_access("thread", probe, ("fill", "@e1", "secret"))
     assert opened == ["visit-one"]
     assert browser_control.password_page("thread")
 
     # The field has gone and the code field is available; ordinary fixed actions resume.
-    await browser_control.require_page_access("thread", probe, ("fill", "@code", "123456"))
+    await browser_control.require_page_access("thread", probe, ("fill", "@e2", "123456"))
     assert settled == [("password-step", frozenset({42}))]
     assert events == [True, False]
     assert not browser_control.password_page("thread")
@@ -197,7 +197,9 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
 
 @pytest.mark.asyncio
 async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector_names(monkeypatch):
-    """AR2: a read is refused when its @ref or CSS selector locates a seen password node, or can't be located."""
+    """AR2: a read is refused when its @ref or CSS selector locates a seen password node, or can't be located.
+
+    The step ended on this visit, so a value read of any other node is refused too (it may hold what was typed)."""
     responses = iter((PasswordProbe("visit", "example.test", frozenset({42}), present_nodes=frozenset({42})),))
     hidden = PasswordProbe("visit", "example.test", frozenset(), present_nodes=frozenset({42}))
 
@@ -229,7 +231,8 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
     for selector in ("@e3", "#password", "#gone", "@broken"):
         with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access("thread", probe, ("get", "value", selector), resolve=resolve)
-    await browser_control.require_page_access("thread", probe, ("get", "value", "@e4"), resolve=resolve)
+    with pytest.raises(BrowserSessionError, match="filled in a password field"):
+        await browser_control.require_page_access("thread", probe, ("get", "value", "@e4"), resolve=resolve)
     await browser_control.require_page_access("thread", probe, ("get", "attr", "@e4", "href"), resolve=resolve)
 
 
@@ -333,25 +336,47 @@ async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_
 
 
 @pytest.mark.asyncio
-async def test_the_reprobe_keeps_the_step_open_while_the_field_shows_and_stops_when_the_pane_leaves(steps, monkeypatch):
+async def test_the_reprobe_keeps_the_step_open_while_the_field_shows_and_uses_the_agents_page_once_the_pane_leaves(
+        steps, monkeypatch):
     monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage()
     step, loop = await _agent_meets_password_page(page)
     await asyncio.wait_for(_probed(page, 3), 1)
     assert browser_control.password_page("thread") and steps["settled"] == []
+    agent_probes = page.agent_probes
     browser_control.pane_disconnected("thread", "pane")
+    # The same loop carries on over the agent's own probe of the step's page.
+    for _ in range(100):
+        if page.agent_probes >= agent_probes + 3:
+            break
+        await asyncio.sleep(0.01)
+    assert page.agent_probes >= agent_probes + 3
+    assert step.reprobe is loop and not loop.done()
+    assert browser_control.password_page("thread") and steps["settled"] == []
+    # A pane that comes back takes over the probing, and a closed browser stops it.
+    browser_control.pane_connected("thread", "pane", None, page.pane_probe)
+    await asyncio.wait_for(_probed(page, page.pane_probes + 2), 1)
+    assert step.reprobe is loop
+    await lifecycle.step_event("thread", lifecycle.Event("session_ended"))
     await asyncio.gather(loop, return_exceptions=True)
     assert loop.cancelled() and step.reprobe is None
-    # The step stays open; the agent's next command probes again.
-    assert browser_control.password_page("thread")
-    # A pane that comes back resumes the step's re-probe, and a closed browser stops it.
-    browser_control.pane_connected("thread", "pane", None, page.pane_probe)
-    await asyncio.sleep(0)
-    resumed = step.reprobe
-    assert resumed is not None and resumed is not loop
-    await lifecycle.step_event("thread", lifecycle.Event("session_ended"))
-    await asyncio.gather(resumed, return_exceptions=True)
-    assert resumed.cancelled() and step.reprobe is None
+
+
+@pytest.mark.asyncio
+async def test_a_sign_in_the_person_finishes_with_no_pane_open_settles_its_step(steps, monkeypatch):
+    """With no pane, the step re-probes over the agent's own probe of its page, so it ends with no Mark done."""
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
+    page = SignInPage()
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
+    step = lifecycle._steps["thread"]
+    loop = step.reprobe
+    assert loop is not None
+    page.submitted = True
+    await asyncio.wait_for(loop, 1)
+    assert steps["settled"] == ["password-step"] and page.pane_probes == 0
+    assert not browser_control.password_page("thread")
+    assert loop.done() and not loop.cancelled() and step.reprobe is None
 
 
 @pytest.mark.asyncio

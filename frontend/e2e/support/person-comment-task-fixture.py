@@ -14,7 +14,8 @@ from plans.boundary import PlanActor
 mode, artifact_id, thread_id = sys.argv[1:]
 db = get_db()
 try:
-    agent = PlanActor(thread_id, db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0], None)
+    identity = db.execute('SELECT user_id, project_id FROM threads WHERE id=?', (thread_id,)).fetchone()
+    agent = PlanActor(thread_id, identity['user_id'], identity['project_id'])
     if mode == 'ask':
         # The document's agent asks the person to review it, as block_node with ask_artifact_id does.
         with write_transaction(db, scope='seed_ask') as connection:
@@ -82,14 +83,15 @@ try:
                 feedback_batches.record_comment(connection, row, created=created,
                                                delivery_policy=feedback_batches.IMMEDIATE)
             person_comment_task.reconcile(connection, artifact_id)
-    elif mode == 'highlights':
+    elif mode in ('highlights', 'highlight'):
         # Three agent comments tagging the person, each on its own highlight of the document text the spec saves:
         # a one-word one, a longer one, and one left unread so the count stays on screen after both taps.
+        # 'highlight' seeds only the first, so one read clears every count of it.
         text = 'Launch plan details for review. The rollout waits on sign-off.'
         user_id = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0]
+        seeded = (('details', 'Which details?'), ('The rollout waits on sign-off', 'Who signs off?'), ('Launch', 'Launch when?'))
         with write_transaction(db, scope='seed_highlights') as connection:
-            for quote, body in (('details', 'Which details?'), ('The rollout waits on sign-off', 'Who signs off?'),
-                                ('Launch', 'Launch when?')):
+            for quote, body in seeded[:1] if mode == 'highlight' else seeded:
                 start = text.index(quote)
                 row, created = comments.create_with_status(
                     artifact_id, body=body, author='Reviewer', author_kind='agent', author_thread_id=thread_id,
@@ -142,6 +144,12 @@ try:
             'carried_comments': carried, 'comments_before': left,
             'comment_task': task_id, 'comment_task_plan_owner': task_plan_owner,
         }))
+    elif mode == 'file-gone':
+        # The document's file is deleted: its identity is retired, as when the file leaves the disk.
+        from registry import models
+
+        models.retire(artifact_id, tombstone=True, cause='file_gone', db=db)
+        print('FIXTURE_RESULT=' + json.dumps({'state': db.execute('SELECT state FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0]}))
     elif mode == 'agent-root':
         # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
         # them only through the agent's open ask on that document.

@@ -9,6 +9,7 @@ import {
 	TEST_TOKEN,
 } from '../support/corsia';
 import { openComments } from '../support/commentDrawer';
+import { openFilesButton } from '../support/documentBar';
 
 const MISSING_TOAST = "Couldn't find the linked workspace document";
 const WEB_LINK = 'https://example.invalid/guide/start';
@@ -103,7 +104,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				const press = (target: ReturnType<typeof link>) => (touch ? target.tap() : target.click());
 				const goToIndex = async () => {
 					if (touch) {
-						await page.getByRole('button', { name: /Files \(2\)/ }).click();
+						await openFilesButton(page, 2).click();
 						await page.getByRole('dialog', { name: 'Open side panel items' }).getByRole('button', { name: 'INDEX.md', exact: true }).click();
 					} else {
 						await page.getByRole('tab', { name: 'INDEX.md' }).click();
@@ -157,7 +158,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await page.getByRole('button', { name: 'Close tab', exact: true }).click();
 				await expect(content).toContainText('Read the decisions first');
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(1);
-				else await expect(page.getByRole('button', { name: /Files \(1\)/ })).toBeVisible();
+				else await expect(openFilesButton(page, 1)).toBeVisible();
 
 				// Follow the link at the bottom of a scrolled document into a second tab.
 				// The editor draws only the lines near the viewport, so scroll first and let the link render.
@@ -172,7 +173,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 					await expect(page.getByRole('tab', { name: 'DECISIONS.md' })).toHaveAttribute('aria-selected', 'true');
 					await expect(page.getByRole('tab')).toHaveCount(2);
 				} else {
-					await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
+					await expect(openFilesButton(page, 2)).toBeVisible();
 					await expect(page.locator('.shell-header')).toContainText('DECISIONS.md');
 				}
 				await shoot('second-tab');
@@ -189,7 +190,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await press(link(page, 'the decisions').first());
 				await expect(page.getByText('The decisions record body.')).toBeVisible();
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(2);
-				else await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
+				else await expect(openFilesButton(page, 2)).toBeVisible();
 
 				// No click wrote to the document.
 				expect(fs.readFileSync(indexPath, 'utf8')).toBe(INDEX);
@@ -238,7 +239,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				const drawer = page.locator('[data-doc-comments-drawer]');
 				await drawer.getByRole('link', { name: 'Open sibling' }).click();
 				await expect(page.getByText('The decisions record body.')).toBeVisible();
-				if (touch) await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
+				if (touch) await expect(openFilesButton(page, 2)).toBeVisible();
 				else await expect(page.getByRole('tab')).toHaveCount(2);
 				await expect(page.getByRole('status').filter({ hasText: MISSING_TOAST })).toHaveCount(0);
 			} finally {

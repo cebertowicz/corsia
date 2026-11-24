@@ -52,6 +52,7 @@ def _replay(connection, node, existing, feedback: str):
 def reject_submission(
     node_id: str, *, feedback: str, expected_revision: int | None = None,
     actor_id: str | None = None, provenance: str = "plan_mutation", db=None,
+    review_done_by: str | None = None, reason: str | None = None, correction: bool = True,
 ) -> tuple[PlanNode, PlanNode, bool]:
     """Send the reviewed submission back and create the one revision task it requires.
 
@@ -64,6 +65,10 @@ def reject_submission(
     the revision is the boundary's (``plan_wake.notify_revision``), after the
     release and reconciliation that follow. Returns the rejected task, its revision, and
     whether this was a replay.
+
+    ``review_done_by`` and ``reason`` are a review's own verdict (``plans.review_settle``;
+    see ``_settle_returned``) and the close reason it gives. ``correction`` False records
+    no correction fact, for work sent back without being judged wrong (it went stale).
     """
     feedback = service._required_text(feedback, "review feedback")
     with service._connection(db) as connection, service._write(connection):
@@ -102,18 +107,11 @@ def reject_submission(
         # The step's worker is not settled: the revision is attached to it below.
         rejected, rejection_event_id = _send_back(
             connection, node_id, feedback, actor_id, provenance, settles_worker=False,
+            reason=reason,
         )
-        # The worker's returned steps settle like any closed step: a nested
-        # delegation among them retires its own worker, which gets no revision.
-        # They carry the verdict for their own closure, but only the reviewed
-        # node above is its correction fact.
-        for leaf in returned:
-            _send_back(
-                connection, leaf["id"], feedback, actor_id, provenance, settles_worker=True,
-            )
-        worker_step_id = _attach_revision_and_seed_worker(
-            connection, revision, worker=worker, title=str(node["title"]), feedback=feedback,
-            actor_id=actor_id, provenance=provenance,
+        worker_step_id = _settle_returned(
+            connection, revision, returned, worker=worker, title=str(node["title"]), feedback=feedback,
+            actor_id=actor_id, provenance=provenance, review_done_by=review_done_by,
         )
         payload = {"source_node_id": node_id, "feedback": feedback}
         if worker_step_id is not None:
@@ -125,8 +123,38 @@ def reject_submission(
         from core.sent_back_corrections import record_rejection_correction
 
         # In this write: a fact that cannot be recorded fails the rejection.
-        record_rejection_correction(connection, rejection_event_id)
+        if correction:
+            record_rejection_correction(connection, rejection_event_id)
         return rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
+
+
+def _settle_returned(
+    connection, revision, returned, *, worker: str | None, title: str, feedback: str,
+    actor_id: str | None, provenance: str, review_done_by: str | None,
+) -> str | None:
+    """Settle the worker's returned steps and hand the revision on; the seeded worker step, if any.
+
+    The returned steps settle like any closed step: a nested delegation among
+    them retires its own worker, which gets no revision. They carry the verdict
+    for their own closure, but only the reviewed node is its correction fact.
+    A failed review's own steps (``review_done_by``, the reviewer) were done:
+    they are accepted as verified by it, and the revision stays unattached, the
+    author's to weigh before handing it back.
+    """
+    for leaf in returned:
+        if review_done_by is not None:
+            service._transition(
+                connection, leaf["id"], "accepted", actor_id=actor_id, provenance=provenance,
+                verification_result="passed", verified_by=review_done_by,
+            )
+        else:
+            _send_back(connection, leaf["id"], feedback, actor_id, provenance, settles_worker=True)
+    if review_done_by is not None:
+        return None
+    return _attach_revision_and_seed_worker(
+        connection, revision, worker=worker, title=title, feedback=feedback,
+        actor_id=actor_id, provenance=provenance,
+    )
 
 
 def _attach_revision_and_seed_worker(
@@ -159,6 +187,7 @@ SENT_BACK = "Sent back"
 
 def _send_back(
     connection, node_id: str, feedback: str, actor_id, provenance, *, settles_worker: bool,
+    reason: str | None = None,
 ) -> tuple[PlanNode, str]:
     """The verdict on one submission: rejected with this feedback, then closed.
 
@@ -178,7 +207,7 @@ def _send_back(
     sent_back = service._transition(
         connection, node_id, service.CLOSED, actor_id=actor_id, provenance=provenance,
         verification_result=None, verified_by=None, settles_worker=settles_worker,
-        payload={"reason": f"{SENT_BACK}: {feedback}"}, sent_back=True,
+        payload={"reason": reason or f"{SENT_BACK}: {feedback}"}, sent_back=True,
     )
     archival.release_held(
         connection, service._node_row(connection, node_id),

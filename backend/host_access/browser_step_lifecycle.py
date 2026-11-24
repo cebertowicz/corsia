@@ -25,6 +25,12 @@ Kind = Literal["password", "person"]
 class Answer:
     count: int
     declined: bool = False
+    # The password fields the person finished (a done answer only); they stay theirs until seen hidden (R14).
+    nodes: frozenset[int] = frozenset()
+    # A password step ended on this visit (done, declined, or its field hidden: R3, R4, R6), so what the person
+    # typed may still be on the page. Kept for the visit even once the field is gone: a show-password control can
+    # swap it for a text input holding what they typed (browser_control).
+    finished: bool = False
 
 
 @dataclass(frozen=True)
@@ -32,7 +38,6 @@ class Event:
     name: str
     result: PasswordProbe | None = None
     session: str | None = None
-    source: str = "agent"
     instruction: str = ""
 
 
@@ -55,6 +60,11 @@ class Decision:
     refusal: str | None = None
     guard_present: bool = False
     monitor: bool | None = None
+    # The visit whose done fields clear: this event saw no visible password field there. Count and decline stay.
+    forget_done: str | None = None
+    # The open password step's fields after this event: a field shown while the step is open (a confirm
+    # field, a page replacing its input) is one the person finishes with it, so a done answer holds it.
+    step_nodes: frozenset[int] | None = None
 
 
 def _kind(step: BrowserStep) -> Kind:
@@ -69,14 +79,23 @@ def _session_changed(state: StepState, event: Event) -> bool:
 
 
 def decide(state: StepState, event: Event) -> Decision:
-    """R1–R13 in precedence order. No writes, clock, task scheduling or plan reads."""
+    """R1-R14 in precedence order, plus one rule on every path: an event whose result shows no visible
+    password field names that visit in `forget_done`, so a field that shows again is asked about again.
+    No writes, clock, task scheduling or plan reads."""
+    decision = _decide_rules(state, event)
+    if (result := event.result) is not None and not result.visible_nodes:
+        decision = replace(decision, forget_done=result.visit)
+    return decision
+
+
+def _decide_rules(state: StepState, event: Event) -> Decision:
     step, result = state.open, event.result
     if event.name == "session_ended":  # R1: no page observation can prove completion across sessions.
         return Decision(("R1",), end="unsettled" if step else None, clear_answers=True)
     if event.name in {"pane_probe_available", "pane_probe_gone"}:
         return Decision(monitor=event.name == "pane_probe_available")
     if _session_changed(state, event):  # R2 also clears answers when the prior session had no open step.
-        following = decide(StepState(session=event.session), event)
+        following = _decide_rules(StepState(session=event.session), event)
         return replace(following, rules=("R2",) + following.rules,
                        end="unsettled" if step else None, clear_answers=True)
     end, rule = None, None
@@ -90,24 +109,38 @@ def decide(state: StepState, event: Event) -> Decision:
                 end, rule = "settle", "R6"
         if end is not None:
             assert rule is not None
-            answer = Answer(step.occurrence, end == "declined")
+            done_nodes = step.nodes if end == "done" and isinstance(step, PasswordStep) else frozenset()
+            # A password step that ends on its own visit (done, declined, or its field hidden) leaves what the
+            # person typed on that page; R5 means the visit changed, so it is gone with it.
+            finished = (isinstance(step, PasswordStep) and rule != "R5"
+                        or state.answers.get((_kind(step), step.visit), Answer(0)).finished)
+            answer = Answer(step.occurrence, end == "declined", done_nodes, finished)
             answers = dict(state.answers)
             answers[(_kind(step), step.visit)] = answer
-            following = decide(StepState(answers=answers, session=state.session), event)
+            following = _decide_rules(StepState(answers=answers, session=state.session), event)
             same_person_visit = isinstance(step, PersonStep) and result is not None and result.visit == step.visit
             return replace(following, rules=(rule,) + following.rules, end=end, answer=answer,
                            guard_present=same_person_visit)
         if event.name == "declare" and isinstance(step, PersonStep) and result is not None and result.visit == step.visit:
             return Decision(("R12",))
+        grown = None
+        if (isinstance(step, PasswordStep) and result is not None and result.target == step.target
+                and not result.visible_nodes <= step.nodes):
+            grown = step.nodes | result.visible_nodes
         return Decision(("R13", "R7") if event.name == "declare" else ("R7",),
-                        refusal="password" if isinstance(step, PasswordStep) else "person")
+                        refusal="password" if isinstance(step, PasswordStep) else "person", step_nodes=grown)
     if result is None:
         return Decision()
     if result.visible_nodes:
         answer = state.answers.get(("password", result.visit), Answer(0))
         if answer.declined:
             return Decision(("R8",), refusal="password_declined")
-        return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
+        if not result.visible_nodes <= answer.nodes:
+            return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
+        # R14: the person finished these fields, so the page is the agent's again. A declare asks for
+        # a different step (e-signature, MFA), so it goes on to R10/R11.
+        if event.name != "declare":
+            return Decision(("R14",))
     if event.name == "declare":
         answer = state.answers.get(("person", result.visit), Answer(0))
         if answer.declined:
@@ -123,8 +156,13 @@ _probe_locks: dict[str, asyncio.Lock] = {}
 
 
 async def step_event(thread_id: str, event: Event, *,
-                     observer: browser_pane_state.Observer | None = None) -> Decision:
-    """Decide under the transition lock; notify the caller once before applying lifecycle effects."""
+                     observer: browser_pane_state.Observer | None = None,
+                     page: browser_pane_state.PageProbe | None = None) -> Decision:
+    """Decide under the transition lock; notify the caller once before applying lifecycle effects.
+
+    ``page`` is the agent's own probe of the page this event observed; a step it opens keeps it to
+    re-probe its page while no pane can (AR6).
+    """
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
         step = _steps.get(thread_id)
         current_state = StepState(step, _answers.get(thread_id, {}), session=_sessions.get(thread_id))
@@ -152,17 +190,24 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
+        if decision.forget_done is not None:
+            answers = _answers.get(thread_id, {})
+            if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
+                answers[("password", decision.forget_done)] = replace(done, nodes=frozenset())
         if decision.open_kind is not None:
             assert result is not None
             if decision.open_kind == "password":
                 opened: BrowserStep = PasswordStep(result.visit, result.host, result.target,
-                                                  session=event.session, occurrence=decision.occurrence)
+                                                  session=event.session, occurrence=decision.occurrence,
+                                                  nodes=result.visible_nodes, page=page)
             else:
                 opened = PersonStep(result.visit, result.host, result.target, instruction=event.instruction,
-                                    session=event.session, occurrence=decision.occurrence)
+                                    session=event.session, occurrence=decision.occurrence, page=page)
             await _open_step(thread_id, opened)
         if (current := _steps.get(thread_id)) is not None:
-            if decision.monitor is False:
+            if decision.step_nodes is not None and isinstance(current, PasswordStep):
+                current.nodes = decision.step_nodes
+            if decision.monitor is False and current.page is None:
                 _stop_reprobe(current)
             elif decision.monitor is True and (current.reprobe is None or current.reprobe.done()):
                 _start_reprobe(thread_id, current)
@@ -199,8 +244,14 @@ def person_input(thread_id: str) -> None:
         step.input_seen.set()
 
 
+def _page_sources(thread_id: str, step: BrowserStep) -> list[browser_pane_state.PageProbe]:
+    """Every connected pane's probe; with none, the agent's own probe of the step's page, so a sign-in the
+    person finishes with no pane open still ends its step."""
+    return browser_pane_state.pane_probes(thread_id) or ([step.page] if step.page is not None else [])
+
+
 def _start_reprobe(thread_id: str, step: BrowserStep) -> None:
-    if browser_pane_state.pane_probes(thread_id) and (step.reprobe is None or step.reprobe.done()):
+    if _page_sources(thread_id, step) and (step.reprobe is None or step.reprobe.done()):
         step.reprobe = asyncio.create_task(_reprobe_loop(thread_id, step))
 
 
@@ -232,7 +283,7 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
 
 async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
     """Deliver only this step's own target observations through the same transition."""
-    probes = browser_pane_state.pane_probes(thread_id)
+    probes = _page_sources(thread_id, step)
     current = _steps.get(thread_id)
     if current is None or current is not step or not probes:
         return False
@@ -252,7 +303,8 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
         if session == step.session:
             return True
         result = None
-    await step_event(thread_id, Event("probe", result, session=session, source="pane"), observer=source.observer)
+    # A step this probe opens (a new visit's password field) keeps the agent's own probe of the same page.
+    await step_event(thread_id, Event("probe", result, session=session), observer=source.observer, page=step.page)
     return _steps.get(thread_id) is step and current.reprobe is not None
 
 
@@ -333,3 +385,8 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
+
+
+def finished_visit(thread_id: str, visit: str) -> bool:
+    """Whether a password step ended on this visit, so what the person typed may still be there (Answer.finished)."""
+    return _answers.get(thread_id, {}).get(("password", visit), Answer(0)).finished

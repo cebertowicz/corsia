@@ -7,11 +7,11 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from core.skill_validation import is_skill_file
 from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
+from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside
 from doceditor.document_scope import (
     MAX_TEXT_BYTES,
     UI_THREAD,
@@ -35,7 +35,7 @@ from registry.shared_document_events import report_plain_write
 from tools.file_write_completion import record_context_source_change
 
 _log = logging.getLogger(__name__)
-STALE_MESSAGE = "The document changed while these suggestions were being applied. Nothing was changed; try again."
+STALE_MESSAGE = "Couldn’t accept these suggestions because this document changed while they were being accepted. Try again."
 
 
 @dataclass(frozen=True)
@@ -46,16 +46,6 @@ class DocumentSave:
     project_id: str | None = None
     thread_id: str | None = None
     create: bool = False
-
-
-class DocumentSaveError(ValueError):
-    """A domain refusal mapped by each transport adapter."""
-
-    def __init__(self, kind: str, message: str, detail: Any = None) -> None:
-        self.kind = kind
-        self.message = message
-        self.detail = detail
-        super().__init__(message)
 
 
 def _invalid_skill_save_error(errors: tuple[str, ...], line: str) -> DocumentSaveError:
@@ -75,14 +65,6 @@ def _refuse_invalid_skill(path: Path, text: str) -> None:
 
     if (refusal := invalid_skill_write({path: text.encode()})) is not None:
         raise _invalid_skill_save_error(refusal.errors, refusal.line)
-
-
-class FileChangedOutside(DocumentSaveError):
-    """The file no longer holds the bytes a live write was built on; nothing was replaced."""
-
-    def __init__(self) -> None:
-        super().__init__("stale", "The document changed outside CORSIA while this write was saving."
-                                  " Nothing was replaced; try again.")
 
 
 def _saved_payload(resolved: Path, actor_thread_id: str, extra: dict) -> dict:
@@ -129,15 +111,15 @@ def _guided_write(
 ) -> dict:
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
-    ``expected_sha256`` is checked once, by the history lock's compare-and-swap; ``history_required``
-    writes nothing unless the version is recorded. The owner report's diff runs after the save, never
-    under the history lock."""
+    ``expected_sha256`` is checked by the history writer and passed to the file writer for its
+    publication check, including on the unrecorded fallback. ``history_required`` writes nothing unless the version is recorded. The owner
+    report's diff runs after the save, never under the history lock."""
     payloads: list[dict] = []
     reports: list[Callable[[], None]] = []
     saved = save_with_history(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
-        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
+        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, expected_sha256, reports)),
         accepted_suggestions=accepted,
     )
     if saved.outcome == "refused":
@@ -146,6 +128,12 @@ def _guided_write(
             raise DocumentSaveError("lesson-outside-placement", saved.line, {"errors": list(saved.errors), "line": saved.line})
         raise _invalid_skill_save_error(saved.errors, saved.line)
     if saved.outcome == "stale":
+        from registry.durable_write_preconditions import check_expected_content
+
+        try:
+            check_expected_content(path, expected_sha256)
+        except FileChangedOutside:
+            pass
         raise DocumentSaveError("stale", STALE_MESSAGE)
     if history_required and saved.outcome not in {"written", "unchanged"}:
         kind = "history_off" if saved.outcome in {"history-off", "ordinary"} else "save_failed"
@@ -181,7 +169,8 @@ def _validate_document_write(body: DocumentSave, user_id: str, *, moved_notice: 
         except OSError as exc:
             # Only inside this scope's roots, so a probe outside them learns nothing about promotes.
             moved = moved_save_message(path, db=db) if moved_notice and path_write_allowed(path.resolve(strict=False), bases) else None
-            raise DocumentSaveError("moved" if moved else "no_such_file", moved or f"No such file: {exc}") from exc
+            from doceditor.document_save_errors import MISSING_DOCUMENT_MESSAGE
+            raise DocumentSaveError("moved" if moved else "no_such_file", moved or MISSING_DOCUMENT_MESSAGE) from exc
         # Workspace context and System projection files are injected into every prompt.
         # They remain read-only through the document API so this endpoint
         # cannot become a system-prompt-injection vector.
@@ -234,20 +223,19 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
     Validation and registration stay with the document save owner. The stage
     name is deterministic so recovery can remove it after a killed process.
     With ``prior_sha256``, the file is compared with it immediately before the
-    rename, in this same synchronous call, and a changed file is never replaced.
+    rename, in this same synchronous call. A writer can still race the check and rename.
     """
-    from tools.filesystem_effects import (
-        bound_file_mode, replace_bound_file, stage_bound_bytes, unlink_bound_file,
-    )
+    from tools.filesystem_effects import stage_bound_bytes, unlink_bound_file
 
     leaf = f".corsia-live-{path.name}.stage"
     stage = path.with_name(leaf)
     unlink_bound_file(stage, missing_ok=True)
     try:
-        stage_bound_bytes(path, text.encode("utf-8"), leaf=leaf, mode=bound_file_mode(path))
-        if prior_sha256 is not None and hashlib.sha256(path.read_bytes()).hexdigest() != prior_sha256:
-            raise FileChangedOutside()
-        replace_bound_file(stage, path)
+        from registry.durable_write_preconditions import checked_file_mode, replace_if_expected
+
+        mode = checked_file_mode(path, prior_sha256)
+        stage_bound_bytes(path, text.encode("utf-8"), leaf=leaf, mode=mode)
+        replace_if_expected(stage, path, prior_sha256)
     finally:
         unlink_bound_file(stage, missing_ok=True)
 
@@ -259,9 +247,12 @@ def _write_document(
     """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
     owner report is left there for the caller to run once it holds no lock."""
     if expected_sha256 is not None:
-        current_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
-        if current_sha256 != expected_sha256:
-            raise DocumentSaveError("stale", STALE_MESSAGE)
+        from registry.durable_write_preconditions import check_expected_content
+
+        try:
+            check_expected_content(resolved, expected_sha256)
+        except FileChangedOutside as exc:
+            raise DocumentSaveError("stale", STALE_MESSAGE) from exc
     try:
         decision = write_text(
             resolved,
@@ -272,6 +263,7 @@ def _write_document(
             description=body.description,
             direct_user=direct_user,
             notify=False,
+            expected_sha256=expected_sha256,
         )
     except DurableWritePolicyError as exc:
         raise DocumentSaveError("durable_write_policy", str(exc)) from exc

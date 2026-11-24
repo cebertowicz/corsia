@@ -54,5 +54,7 @@ def claim_and_deliver(
             (delivered.node_id, delivered.outcome, now, batch_id),
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
+        # Delivery may have re-keyed the batch to its document's live identity, where its review request now sits.
+        batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
         review_woken = settle_for_batch(db, batch)
     return True, delivered.woken_threads + review_woken

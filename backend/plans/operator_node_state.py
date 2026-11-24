@@ -169,6 +169,7 @@ def _display(
         str(execution["condition"]),
         None if review is None else str(review["kind"]),
         asks_user=asks_user,
+        later=bool(node.get("later")),
         child_working=_child_plan_working(execution),
         # A stopped selected executor makes an otherwise-running row wait.
         executor_stopped=stopped is not None,
@@ -261,13 +262,13 @@ def project(
                 stops.get(executor_id), node, item.plan, execution,
             )
             asks_user = row_asks_user(node, review, execution)
-            deferred_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
+            paused_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
             states[node["id"]] = {
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
-                    execution, sequenced_after, stopped, deferred_ask=deferred_ask) or _sent_back(node),
+                    execution, sequenced_after, stopped, deferred_ask=paused_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
@@ -276,7 +277,7 @@ def project(
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
-                "requires_user_action": asks_user and not deferred_ask,
+                "requires_user_action": asks_user and not (paused_ask or ask_deferred(later=bool(node.get("later")))),
             }
     return states
 
@@ -332,13 +333,14 @@ def leaf_bucket_from_facts(
     unactionable_user_block: bool = False,
     plan_paused: bool = False,
     node_paused: bool = False,
+    later: bool = False,
 ) -> str:
     """Reduce compact lifecycle facts into the canonical distribution bucket."""
     if state in service._ACCEPTED_STATES:
         return "done"
     if state == "failed":
         return state
-    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused, later=later):
         return "paused"
     if condition == "review":
         return "review_human" if review_kind in _HUMAN_REVIEWS else "review_parent_agent"
@@ -353,7 +355,7 @@ def leaf_bucket_from_facts(
     return "pending_ready"
 
 
-def leaf_bucket(node: dict) -> str:
+def leaf_bucket(node: dict, *, later: bool = False) -> str:
     """Name the one bucket a leaf counts in, by its canonical lifecycle/condition."""
     review, label = node["review"] or {}, str(node["display"]["label_key"])
     return leaf_bucket_from_facts(
@@ -366,6 +368,7 @@ def leaf_bucket(node: dict) -> str:
         unactionable_user_block=unactionable_user_hold(node),
         plan_paused=plan_paused(node["execution"]),
         node_paused=node_paused(node["execution"]),
+        later=later,
     )
 
 

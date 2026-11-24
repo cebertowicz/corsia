@@ -22,6 +22,10 @@ log = logging.getLogger(__name__)
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
 _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
+# One browser-wide call (Storage.getCookies/setCookies, Target.getTargets) is answered by the browser
+# process, not a page, so a stuck tab can't hold it; a live browser answers in milliseconds even with
+# thousands of cookies. Past 5 s the browser itself isn't answering and the caller gives up on it.
+BROWSER_CALL_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)
@@ -342,16 +346,14 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
 
 
 def list_targets(browser_endpoint: str) -> list[dict]:
-    """The targets with a socket that Chrome lists over HTTP beside the endpoint it answers, of any type."""
+    """The targets of any type with a socket that Chrome lists beside the endpoint; none if the reply isn't a list."""
     listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
     try:
         with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
             targets = json.load(response)
     except (OSError, ValueError) as exc:
         raise BrowserSessionError("This page couldn't be checked") from exc
-    if not isinstance(targets, list):
-        raise BrowserSessionError("This page couldn't be checked")
-    return [target for target in targets if isinstance(target, dict)
+    return [target for target in (targets if isinstance(targets, list) else ()) if isinstance(target, dict)
             and isinstance(target.get("webSocketDebuggerUrl"), str) and target["webSocketDebuggerUrl"].startswith("ws")]
 
 
@@ -359,8 +361,7 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
     pages = [target for target in list_targets(browser_endpoint) if target.get("type") == "page"]
     if expected_url:
-        pages.sort(key=lambda target: (target.get("url") != expected_url,
-                                       expected_title is not None and target.get("title") != expected_title))
+        pages.sort(key=lambda page: (page.get("url") != expected_url, expected_title not in (None, page.get("title"))))
     if not pages:
         raise BrowserSessionError("This page couldn't be checked")
     return pages[0]["webSocketDebuggerUrl"]

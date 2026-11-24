@@ -16,6 +16,7 @@ from automation.continuation.sources.later_review import LaterReviewSource
 from plans import later_review, lifecycle, service, status, status_cursor, wake_currency
 from plans.errors import PlanError
 from plans.plan_wake import LATER_REVIEW
+from prompts.later_review import LATER_REVIEW_MOVES
 from tests.plan_close_next_helpers import (
     OWNER, owner_plan, plan_update, revision, row, task,
 )
@@ -301,7 +302,7 @@ def test_a_review_wake_is_current_when_the_open_work_is_all_later(db):
 # --- the wake text ---------------------------------------------------------
 
 
-def test_the_wake_lists_the_pile_inside_two_kilobytes(db):
+def test_the_wake_lists_the_first_rows_of_the_pile_and_counts_the_rest(db):
     plan = owner_plan(db)
     pile = _pile_below(db, plan.id, 40, reason="Not before the launch cut")
     _arm(db, plan.id, DUE)
@@ -309,10 +310,10 @@ def test_the_wake_lists_the_pile_inside_two_kilobytes(db):
     _sweep(db)
 
     content = _wakes(db)[0]["content"]
-    assert len(content.encode()) <= later_review.WAKE_MAX_BYTES <= 2048
     assert "40" in content
     assert pile[0]["title"] in content and pile[0]["id"] in content
-    omitted = 40 - content.count("\n- ")
+    assert content.count("\n- ") == later_review.WAKE_ROWS
+    omitted = 40 - later_review.WAKE_ROWS
     assert f"+{omitted} more: plan_read(section='later')" in content
 
 
@@ -343,7 +344,7 @@ def test_the_wake_names_the_three_moves_it_offers(db):
     assert "edit later=false" in content and "reorder" in content and "close_node" in content
     assert "Not before the launch cut" in content
     # No dated Later row shows no date, and a dated one does.
-    assert " until " not in content
+    assert " until " not in content.replace(LATER_REVIEW_MOVES, "")
     dated = task(db, plan.id, "Dated set-aside")
     plan_update(db, plan.id, "arm_watch", {
         "node_id": dated.id, "expected_revision": revision(db, dated.id),

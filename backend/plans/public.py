@@ -247,6 +247,7 @@ from plans.wake_currency import KINDS as WAKE_KINDS, is_current as wake_is_curre
 from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
+from plans.person_comment_recovery import run as recover_person_comments
 from plans.artifact_links import link as link_node_artifact
 # The task a PR's review starts from (Agent Substrate's review start, with intent_of).
 from plans.artifact_links import linked_node_for_artifact
@@ -325,6 +326,8 @@ from plans.admission import release as release_attempt
 from plans.delegation_harvest import returned_steps as returned_worker_steps
 from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdict_ages, owed_verdicts
 from plans.later_review import due as later_reviews_due, reviews as review_later_piles
+# A plan call that takes a task out of Later says to read the priorities first.
+from plans.later_pull import tell_left_later, titles_in_later
 from plans import automated_mutation_keys
 from plans.hierarchy import shown_worker_plan
 from plans.service import _transition as transition_node_in
@@ -344,3 +347,7 @@ from plans.workflow_fields import reader_titles
 # Measurement's Workflows section: each ended run's record, and the plan-node cost rollup it reads.
 from plans.run_end import records as run_end_records
 from plans.node_cost_scoped import working_seconds as node_working_seconds
+# A review step's settle script reports its verdict (Agent Substrate's step-script runner).
+from plans.review_settle_script import (
+    bind_settle_run, record_pending_settle, settle_step_from_script, step_settle_script,
+)

@@ -20,7 +20,7 @@ afterEach(() => {
 describe('BrowserPaneStats', () => {
 	it('uses the backend histogram buckets, so the server can add the pane counts to its own', () => {
 		const source = readFileSync(resolve(process.cwd(), '../backend/infra/request_timing.py'), 'utf8');
-		const declared = /_BUCKET_UPPERS = \(([^)]*)\)/.exec(source)![1].split(',').map(part => part.replace(/[^\d_]/g, '').replace(/_/g, '')).filter(Boolean).map(Number);
+		const declared = /\bBUCKET_UPPERS = \(([^)]*)\)/.exec(source)![1].split(',').map(part => part.replace(/[^\d_]/g, '').replace(/_/g, '')).filter(Boolean).map(Number);
 		expect([...STATS_BUCKET_UPPERS]).toEqual(declared);
 	});
 

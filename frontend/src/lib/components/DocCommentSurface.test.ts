@@ -22,6 +22,8 @@ import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { sidebarCollapsed } from '$lib/stores/ui';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { createMentionSelection } from './comments/mentionSelection';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -63,13 +65,14 @@ function noRoomCanvas(): HTMLElement {
 	canvases.push(app);
 	return box(doc, 'bounds', new DOMRect(0, 0, 600, 800));
 }
-/** The resolved drawer's two bound props, as the viewer holds them for its header control. */
+/** The drawer's Open/Resolved answer, as the viewer holds it: only the open answer is shared out now. */
 function resolvedDrawerProps() {
 	const open = writable(false), liveOpen = fromStore(open);
-	let count = 0;
 	return {
-		props: Object.getOwnPropertyDescriptors({ get resolvedOpen() { return liveOpen.current; }, set resolvedOpen(value: boolean) { open.set(value); }, get resolvedCount() { return count; }, set resolvedCount(value: number) { count = value; } }),
-		set: (value: boolean) => open.set(value), isOpen: () => get(open), count: () => count,
+		props: Object.getOwnPropertyDescriptors({ get resolvedOpen() { return liveOpen.current; }, set resolvedOpen(value: boolean) { open.set(value); } }),
+		set: (value: boolean) => open.set(value), isOpen: () => get(open),
+		/** The count the drawer's Resolved answer shows; it is kept inside the surface, so read it from the control. */
+		count: () => Number(document.body.querySelector<HTMLElement>('[data-resolved-entry]')?.textContent?.match(/Resolved · (\d+)/)?.[1] ?? 0),
 	};
 }
 afterEach(() => {
@@ -79,6 +82,8 @@ afterEach(() => {
 	canvases.forEach((canvas) => canvas.remove()); canvases = [];
 	vi.unstubAllGlobals();
 	suggestionRefusals.set({});
+	// Replies being typed outlive a surface, as on a page; each test is a fresh page.
+	keptCommentDrafts.reset();
 	vi.clearAllMocks();
 });
 
@@ -102,16 +107,16 @@ describe('DocCommentSurface suggestions', () => {
 		drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]')!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
 		expect(drawer!.querySelector('[data-drawer-filter]')).toBeNull();
-		// No heading or close in the column: the header's control opens the resolved drawer.
+		// The switch changes the existing column in place.
 		expect(drawer!.querySelector('.drawer-heading')).toBeNull();
 		expect(document.body.querySelector('[data-resolved-column]')).toBeNull();
-		open.set(true); flushSync();
+		drawer!.querySelector<HTMLButtonElement>('[data-resolved-entry]')!.click(); flushSync();
 		const list = document.body.querySelector('[data-resolved-column]')!;
 		expect([...list.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 		// It takes the column's place, with no sheet or scrim, and the cards are back once it closes.
 		expect(document.body.querySelector('[data-adaptive-drawer], [data-popover]')).toBeNull();
-		expect(list.querySelector('.drawer-heading')?.textContent).toContain('Resolved 1');
-		open.set(false); flushSync();
+		expect(drawer!.querySelector('[data-resolved-entry]')?.getAttribute('aria-pressed')).toBe('true');
+		drawer!.querySelector<HTMLButtonElement>('button[aria-pressed="false"]')!.click(); flushSync();
 		expect(document.body.querySelector('[data-resolved-column]')).toBeNull();
 		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]')).not.toBeNull();
 	});
@@ -131,7 +136,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('gives the column back to the picked card when a highlight is picked while the resolved list holds the place of a column at rest', () => {
 		const open = resolvedDrawerProps();
-		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const surface = createCommentSurfaceState(() => {}, () => true);
 		const focused = fromStore(focusedDocComment);
 		surface.state = { kind: 'list' };
 		try {
@@ -176,27 +181,36 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector(`.canvas-comment-drawer.margin [data-comment-id="${suggestion.id}"]`)).not.toBeNull();
 	});
 
-	it('opens the resolved list and the comment list as popovers from their controls on a desktop canvas with no room for the column', () => {
+	it('switches the comments popover to resolved on a desktop canvas with no room for the column', () => {
 		const bounds = noRoomCanvas();
-		const control = bounds.appendChild(document.createElement('button'));
-		control.setAttribute('data-resolved-entry', '');
+		const pill = bounds.appendChild(document.createElement('button'));
 		const open = resolvedDrawerProps();
-		render(Object.defineProperties({ bounds, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
-		open.set(true); flushSync();
+		render(Object.defineProperties({ bounds, anchor: pill, state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
 		const pop = document.body.querySelector('[data-popover]')!;
+		expect(pop.querySelector('[data-doc-comments-drawer] [data-comment-id="comment-1"]')).not.toBeNull();
+		expect(pop.querySelector('.drawer-heading')?.textContent).toContain('Comments 1');
+		const control = pop.querySelector<HTMLButtonElement>('[data-resolved-entry]')!;
+		expect(control.hasAttribute('aria-haspopup')).toBe(false);
+		control.click(); flushSync();
 		expect([...pop.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
-		expect(document.body.querySelector('[data-adaptive-drawer], [data-resolved-column]')).toBeNull();
-		// A press on its own control is the control's toggle, not an outside press.
-		control.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
-		expect(open.isOpen()).toBe(true);
-		document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
-		expect(open.isOpen()).toBe(false);
-		unmount(component!); component = null; host.remove();
-		const pill = document.createElement('button');
-		render({ bounds, anchor: pill, state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-popover] [data-doc-comments-drawer] [data-comment-id="comment-1"]')).not.toBeNull();
-		expect(document.body.querySelector('[data-popover] .drawer-heading')?.textContent).toContain('Comments 1');
 		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
+		expect(control.getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('hangs the comments popover from the bar control and closes it from resolved', () => {
+		const bounds = noRoomCanvas();
+		const onClose = vi.fn();
+		const comments = document.body.appendChild(document.createElement('button'));
+		render({ bounds, anchor: null, commentsEntry: comments, onClose, state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
+		const pop = document.body.querySelector<HTMLElement>('[data-popover]')!;
+		expect(pop.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
+		pop.querySelector<HTMLButtonElement>('[data-resolved-entry]')!.click(); flushSync();
+		expect(pop.querySelector('[data-resolved-column]')).not.toBeNull();
+		comments.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
+		expect(onClose).not.toHaveBeenCalled();
+		pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); flushSync();
+		expect(onClose).toHaveBeenCalled();
+		comments.remove();
 	});
 
 	it('brings the picked thread into view in the list popover after the popover has moved to the page body, once', async () => {
@@ -314,17 +328,20 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('Comments 1');
 		expect(open.count()).toBe(2);
 		open.set(true); flushSync(); await tick();
-		expect(ids('.resolved-drawer')).toEqual(['new', 'old']);
-		expect(document.body.querySelector('[data-doc-comments-drawer] .resolved-drawer')).toBeNull();
+		expect(ids('[data-resolved-column]')).toEqual(['new', 'old']);
+		expect(document.body.querySelector('[data-doc-comments-drawer] [data-resolved-column]')).not.toBeNull();
 	});
 
-	it('opens the resolved drawer with no comment surface up, so a narrow canvas reaches it from the header control alone', async () => {
+	it('shows resolved comments in the sheet after the comments surface opens', async () => {
 		const open = resolvedDrawerProps();
-		render(Object.defineProperties({ narrow: true, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		const state = writable<{ kind: 'list' } | null>(null), liveState = fromStore(state);
+		render(Object.defineProperties({ narrow: true, get state() { return liveState.current; }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
 		expect(document.body.querySelector('[data-doc-comments-drawer]')).toBeNull();
+		// The count lives with the switch the list shows, so it is read once the surface is open.
+		state.set({ kind: 'list' }); flushSync();
 		expect(open.count()).toBe(1);
-		open.set(true); flushSync(); await tick();
-		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
+		document.body.querySelector<HTMLButtonElement>('[data-resolved-entry]')!.click(); flushSync(); await tick();
+		expect([...document.body.querySelectorAll('[data-resolved-column] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});
 
 	it('has no empty-resolved text in the sheet while nothing is resolved', () => {
@@ -633,7 +650,7 @@ describe('DocCommentSurface suggestions', () => {
 		accept().click();
 		await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')).not.toBeNull());
 		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
-		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': 'The text changed on the server' } });
+		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': { message: 'The text changed on the server', kind: 'stale' } } });
 		// The card's note changed, but the card did not move: anything typed in it stays where it was.
 		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
@@ -700,7 +717,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ get state() { return liveState.current; }, get artifactId() { return liveArtifact.current; } });
 		const refuse = async () => {
 			document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!.click();
-			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': 'The text changed on the server' }));
+			await vi.waitFor(() => expect(get(suggestionRefusals)['artifact-1']).toEqual({ 'comment-1': { message: 'The text changed on the server', kind: 'stale' } }));
 		};
 		await refuse();
 		state.set(null); flushSync();
@@ -743,7 +760,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('shows accept-all only when an author has at least two open suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.textContent).not.toContain('Accept all from agent-1');
+		expect(document.body.textContent).not.toContain('Accept suggestions');
 	});
 
 	it.each([true, false])('accepts all, re-seeds without a stale banner, and shows skipped reasons (sheet: %s)', async (narrow) => {
@@ -755,14 +772,14 @@ describe('DocCommentSurface suggestions', () => {
 			revision: 'r3',
 		});
 		mocks.loadComments.mockResolvedValue(undefined);
-		// Accept all is the sheet list's first item, and the margin column's.
+		// Accept suggestions sits at the top of the list in both layouts.
 		const { onSuggestionAccepted } = render({
 			narrow,
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 		});
-		const button = Array.from(document.body.querySelectorAll(narrow ? 'button' : '[data-margin-head] button')).find(
-			(candidate) => candidate.textContent === 'Accept all from agent-1',
+		const button = Array.from(document.body.querySelectorAll('.list-accept-all button')).find(
+			(candidate) => candidate.textContent === 'Accept suggestions',
 		) as HTMLButtonElement;
 		button.click();
 		await vi.waitFor(() => expect(mocks.loadComments).toHaveBeenCalledWith('artifact-1'));
@@ -780,8 +797,8 @@ describe('DocCommentSurface suggestions', () => {
 		mocks.decideSuggestion.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
 		mocks.loadComments.mockResolvedValue(undefined);
 		render({ narrow, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
-		const acceptAll = () => document.body.querySelector<HTMLButtonElement>(`${narrow ? '' : '[data-margin-head] '}.suggestion-status button`)!;
-		expect(acceptAll().textContent).toBe('Accept all from agent-1');
+		const acceptAll = () => document.body.querySelector<HTMLButtonElement>('.list-accept-all .suggestion-status button')!;
+		expect(acceptAll().textContent).toBe('Accept suggestions');
 		acceptAll().click(); acceptAll().click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		flushSync();
@@ -792,7 +809,7 @@ describe('DocCommentSurface suggestions', () => {
 		await vi.waitFor(() => expect(document.body.querySelector('.suggestion-error[role="alert"]')?.textContent).toBe('Couldn’t accept the suggestions. Try again.'));
 		expect(mocks.decideSuggestion).toHaveBeenCalledExactlyOnceWith('comment-1', 'accept', true);
 		expect(mocks.loadComments).not.toHaveBeenCalled();
-		expect(acceptAll().textContent).toBe('Accept all from agent-1');
+		expect(acceptAll().textContent).toBe('Accept suggestions');
 		expect(acceptAll().disabled).toBe(false);
 	});
 
@@ -803,7 +820,7 @@ describe('DocCommentSurface suggestions', () => {
 			comments: [suggestion, secondSuggestion],
 			readOnly: true,
 		});
-		expect(document.body.textContent).not.toContain('Accept all from agent-1');
+		expect(document.body.textContent).not.toContain('Accept suggestions');
 	});
 });
 
@@ -1041,5 +1058,78 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const decided = (id: string) => ({ ...suggestion, id, decision: 'accepted' as const, replies: [{ id: 'r', author: 'you', text: 'Thanks', at: 'now' }] });
 		render({ state: { kind: 'list' }, comments: [decided('a'), decided('b')] });
 		expect(document.body.textContent).not.toMatch(/accept all/i);
+	});
+});
+
+describe('DocCommentSurface: a reply being typed', () => {
+	const plain = { ...suggestion, replacement: undefined };
+	const scope = documentDraftKey(target);
+	const field = () => document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+	function type(text: string, caret: [number, number]) {
+		const input = field();
+		input.value = text; input.setSelectionRange(...caret);
+		input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	}
+	function again(overrides: Record<string, unknown> = {}) {
+		unmount(component!); component = null; host.remove();
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+	afterEach(() => { delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollIntoView; });
+	function open(overrides: Record<string, unknown> = {}) {
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', comments: [plain], draftScope: scope, ...overrides });
+	}
+
+	// Every exit that loses a reply on dev (another conversation, another tab, the pane closed, Back on a phone) unmounts this surface.
+	it('keeps its text and caret when the surface goes away and comes back', () => {
+		open();
+		type('half a reply', [2, 6]);
+		again();
+		expect(field().value).toBe('half a reply');
+		expect([field().selectionStart, field().selectionEnd]).toEqual([2, 6]);
+	});
+
+	it('shows why it did not post under its field, and keeps the text', () => {
+		keptCommentDrafts.fail(replyDraftKey(scope, 'comment-1'), 'half a reply', createMentionSelection(), 'Couldn’t post the comment. Your draft is kept. Try again.');
+		open();
+		expect(field().value).toBe('half a reply');
+		expect(document.body.querySelector('[data-comment-id="comment-1"] [role="alert"]')?.textContent).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+	});
+
+	it('posts under its own key, and text typed while it posted stays in the field', async () => {
+		let finish!: () => void;
+		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+		open({ onReply });
+		type('first', [5, 5]);
+		field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); flushSync();
+		type('first and more', [14, 14]);
+		finish(); await tick(); await tick(); flushSync();
+		expect(field().value).toBe('first and more');
+		expect(onReply).toHaveBeenCalledWith('comment-1', 'first', [], [], replyDraftKey(scope, 'comment-1'));
+	});
+
+	// A failed post says why under the field only while that field is on screen, so the field registers under its kept key.
+	it('counts as the box that says why a post failed while it is mounted, under its own key', () => {
+		const key = replyDraftKey(scope, 'comment-1');
+		open();
+		const box = document.body.querySelector<HTMLElement>('[data-comment-id="comment-1"] [data-reply-composer]')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 80);
+		expect(keptCommentDrafts.onScreen(key)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(key)).toBe(false);
+	});
+});
+
+describe('DocCommentSurface: a new comment being typed', () => {
+	it('counts its composer as the box that says why a post failed while it is mounted, under the document\'s key', async () => {
+		const scope = documentDraftKey(target);
+		// Drawn beside its text in the window, so its Popover is placed and shows it.
+		render({ state: { kind: 'draft' }, draft: { text: 'old text' }, comments: [], draftScope: scope, anchor: () => new DOMRect(520, 100, 20, 20) });
+		const box = document.body.querySelector<HTMLElement>('.composer')!;
+		box.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);
+		await vi.waitFor(() => expect(box.closest<HTMLElement>('[data-popover]')!.style.clipPath).toBe(''));
+		expect(keptCommentDrafts.onScreen(scope)).toBe(true);
+		unmount(component!); component = null;
+		expect(keptCommentDrafts.onScreen(scope)).toBe(false);
 	});
 });

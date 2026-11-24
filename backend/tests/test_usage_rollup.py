@@ -429,6 +429,8 @@ def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
         "migration_146_to_147_measure_breaks.py": False,
         # The turn index changes no usage rows or rollup values.
         "migration_193_to_194_llm_usage_turn_index.py": False,
+        # Adds the per-node usage groups and their triggers; no ledger row or rollup value changes.
+        "migration_201_to_202_node_usage_groups.py": False,
     }
     pattern = re.compile(r"\bllm_usage\b")
     found = set()

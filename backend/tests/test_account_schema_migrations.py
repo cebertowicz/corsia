@@ -856,6 +856,24 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 196 -> 197 drops a closing-text answer a sent message already gave.
         from infra.migration_196_to_197_closing_text_answers import migrate_196_to_197
         migrate_194_to_195(db)
+        # 198 -> 199 adds dead_letter_events.code_named.
+        from infra.migration_198_to_199_restart_dead_letter_codes import migrate_198_to_199
+        migrate_198_to_199(db)
+        # 199 -> 200 adds the ledger of comment state moved off retired identities.
+        from infra.migration_199_to_200_comments_off_retired_identities import migrate_199_to_200
+        migrate_199_to_200(db)
+        # 200 -> 201 adds update replacement notice timestamps.
+        from infra.migration_200_to_201_update_notice_at import migrate_200_to_201
+        migrate_200_to_201(db)
+        # 201 -> 202 adds the per-node usage group tables.
+        from infra.migration_201_to_202_node_usage_groups import migrate_201_to_202
+        migrate_201_to_202(db)
+        # 202 -> 203 normalizes legacy feedback recipients.
+        from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
+        migrate_202_to_203(db)
+        # 203 -> 204 adds the chat-comment search index and its two triggers.
+        from infra.migration_203_to_204_comment_search import migrate_203_to_204
+        migrate_203_to_204(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -989,7 +1007,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 198
+    assert SCHEMA_VERSION == 204
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

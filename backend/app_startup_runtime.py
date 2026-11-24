@@ -15,9 +15,12 @@ from subagents.cc_idle_retirement import idle_retirement_loop
 from thread.idle_checkpoint import rearm_idle_checkpoints
 
 
-# sqlite3 releases the GIL for each fetched row, so contended fetches otherwise
-# wait a full Python thread-switch interval at every handoff.
-SQLITE_FETCH_SWITCH_INTERVAL_SECONDS = 0.0001
+# sqlite3 releases the GIL around every prepare and every fetched row, so a
+# database read on a busy server waits about one switch interval per handoff
+# for each thread competing for the GIL. At 0.1 ms, a Measurement read that
+# takes 1.3 s on a quiet server took 19 s with four busy Python threads; at
+# 0.02 ms it took 4-5 s, and four CPU-bound threads lost about 8% throughput.
+SQLITE_FETCH_SWITCH_INTERVAL_SECONDS = 0.00002
 
 
 def configure_sqlite_fetch_switch_interval() -> None:
@@ -183,6 +186,14 @@ def _schedule_pinned_harness_install() -> None:
     app_loop.submit(install_used_harnesses())
 
 
+def _schedule_comment_search_fill() -> None:
+    """Index chat comments stored before their search index existed, off the startup path, in short batches."""
+    import infra.app_loop as app_loop
+    from infra.comment_search_fill import run_fill
+
+    app_loop.submit(run_fill())
+
+
 def _schedule_current_corrections_classifier() -> None:
     """Reconcile off the startup path: verifying the installed asset hashes its files, and nothing waits on the result."""
     import infra.app_loop as app_loop
@@ -231,6 +242,7 @@ async def _start_runtime_services() -> None:
     recover_interrupted_install()
     _schedule_current_corrections_classifier()
     _schedule_pinned_harness_install()
+    _schedule_comment_search_fill()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 

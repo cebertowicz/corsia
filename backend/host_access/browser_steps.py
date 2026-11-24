@@ -38,6 +38,8 @@ class BrowserStep:
     reprobe: asyncio.Task | None = field(default=None, repr=False)
     last_input: float | None = None
     input_seen: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    # The agent's own probe of the step's page target, re-probed while no pane can (browser_step_lifecycle).
+    page: browser_pane_state.PageProbe | None = field(default=None, repr=False, kw_only=True)
 
     provenance: ClassVar[str]
     event_prefix: ClassVar[str]
@@ -76,6 +78,8 @@ class PasswordStep(BrowserStep):
     provenance = "browser.password_guard"
     event_prefix = "password_step"
     settlement_evidence = "Password field no longer on the page"
+    # The visible password fields the step was opened for; a done answer keeps them (browser_step_lifecycle R14).
+    nodes: frozenset[int] = field(default=frozenset(), kw_only=True)
 
     def title(self) -> str:
         return self._titled("Enter your password in the shared browser")

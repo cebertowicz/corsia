@@ -266,9 +266,61 @@ def group_assistant_steps(
     return tuple(grouped)
 
 
-def assistant_step_batches(
-    turn: PortableTurn,
-) -> tuple[AssistantStepBatch, ...]:
+def _row_boundary(turn: PortableTurn, message: PortableMessage) -> HistoryBoundary:
+    """The Turn's boundary at one of its own rows."""
+    return HistoryBoundary(
+        thread_id=turn.boundary.thread_id,
+        history_epoch=turn.boundary.history_epoch,
+        seq=message.seq,
+        message_id=message.message_id,
+    )
+
+
+def _group_partition_facts(
+    groups: Sequence[Sequence[PortableMessage]],
+) -> list[tuple[int | None, bool, bool]]:
+    """Per group: its assistant row index, and whether its anchor and end rows may become boundaries.
+
+    Both tests are about rows in *other* groups, so both come from aggregates over the
+    group sequence -- a suffix minimum and a prefix maximum of ``seq`` -- the way
+    :func:`turn_interior_cut_points` already does them. Reading the rows of every later
+    group for every group cost ``O(rows²)`` per call, and this runs several times at every
+    tool boundary of a Turn, so a long Turn re-read tens of thousands of rows per step.
+    """
+    facts: list[tuple[int | None, bool, bool]] = []
+    group_min_seqs = [min(message.seq for message in group) for group in groups]
+    # suffix_min[index] is the lowest seq anywhere in groups[index:].
+    suffix_min = list(group_min_seqs)
+    for index in range(len(suffix_min) - 2, -1, -1):
+        suffix_min[index] = min(suffix_min[index], suffix_min[index + 1])
+    # head_max is the highest seq anywhere in groups[:index]; None when there is none.
+    head_max: int | None = None
+    for index, group in enumerate(groups):
+        assistant_index = next(
+            (position for position, message in enumerate(group) if message.role == "assistant"),
+            None,
+        )
+        group_max = max(message.seq for message in group)
+        # The Turn's last group ends at the Turn itself, so nothing later can interleave.
+        end_ok = index == len(groups) - 1 or group_max < suffix_min[index + 1]
+        # An anchor exists only when it is the highest covered seq and every exact row
+        # (this group's assistant/tool rows and any later group) starts after it.
+        anchor_ok = assistant_index is not None and assistant_index > 0
+        if anchor_ok:
+            anchor_seq = max(message.seq for message in group[:assistant_index])
+            exact_min = min(message.seq for message in group[assistant_index:])
+            if index + 1 < len(groups):
+                exact_min = min(exact_min, suffix_min[index + 1])
+            if head_max is not None and head_max > anchor_seq:
+                anchor_ok = False
+            elif anchor_seq >= exact_min:
+                anchor_ok = False
+        facts.append((assistant_index, anchor_ok, end_ok))
+        head_max = group_max if head_max is None else max(head_max, group_max)
+    return facts
+
+
+def assistant_step_batches(turn: PortableTurn) -> tuple[AssistantStepBatch, ...]:
     """Project complete Assistant Step batches and their legal resume anchors.
 
     A resume anchor is the final initiating user row immediately before the
@@ -276,71 +328,32 @@ def assistant_step_batches(
     partitions checkpoint-covered input from exact assistant/tool replay.
     """
     groups = group_assistant_steps(turn.messages)
+    facts = _group_partition_facts(groups)
     batches: list[AssistantStepBatch] = []
-    prior_messages: list[PortableMessage] = []
     for group_index, group in enumerate(groups):
-        assistant_index = next(
-            (
-                index
-                for index, message in enumerate(group)
-                if message.role == "assistant"
-            ),
-            None,
-        )
+        assistant_index, anchor_ok, end_ok = facts[group_index]
         if assistant_index is None:
-            prior_messages.extend(group)
             continue
         initiating_inputs = tuple(group[:assistant_index])
         assistant_and_tools = tuple(group[assistant_index:])
-        group_end = max(group, key=lambda message: message.seq)
-        later_messages = tuple(
-            message
-            for later_group in groups[group_index + 1 :]
-            for message in later_group
-        )
-        end_is_legal = group_index == len(groups) - 1 or group_end.seq < min(
-            message.seq for message in later_messages
-        )
         resume_anchor = None
-        if initiating_inputs:
-            anchor_message = max(
-                initiating_inputs,
-                key=lambda message: message.seq,
-            )
-            covered = (*prior_messages, *initiating_inputs)
-            exact_and_later = (*assistant_and_tools, *later_messages)
-            if anchor_message.seq == max(
-                message.seq for message in covered
-            ) and anchor_message.seq < min(message.seq for message in exact_and_later):
-                resume_anchor = HistoryBoundary(
-                    thread_id=turn.boundary.thread_id,
-                    history_epoch=turn.boundary.history_epoch,
-                    seq=anchor_message.seq,
-                    message_id=anchor_message.message_id,
-                )
-
+        if anchor_ok:
+            anchor = max(initiating_inputs, key=lambda message: message.seq)
+            resume_anchor = _row_boundary(turn, anchor)
+        end_boundary = None
+        if group_index == len(groups) - 1:
+            end_boundary = turn.boundary
+        elif end_ok:
+            group_end = max(group, key=lambda message: message.seq)
+            end_boundary = _row_boundary(turn, group_end)
         batches.append(
             AssistantStepBatch(
                 initiating_inputs=initiating_inputs,
                 assistant_and_tools=assistant_and_tools,
                 resume_anchor=resume_anchor,
-                end_boundary=(
-                    turn.boundary
-                    if group_index == len(groups) - 1
-                    else (
-                        HistoryBoundary(
-                            thread_id=turn.boundary.thread_id,
-                            history_epoch=turn.boundary.history_epoch,
-                            seq=group_end.seq,
-                            message_id=group_end.message_id,
-                        )
-                        if end_is_legal
-                        else None
-                    )
-                ),
+                end_boundary=end_boundary,
             )
         )
-        prior_messages.extend(group)
     return tuple(batches)
 
 
@@ -379,12 +392,5 @@ def turn_interior_cut_points(turn: PortableTurn) -> tuple[HistoryBoundary, ...]:
                 head_max = message
         if head_max is None or head_max.seq >= suffix_min[index + 1]:
             continue
-        cuts.append(
-            HistoryBoundary(
-                thread_id=turn.boundary.thread_id,
-                history_epoch=turn.boundary.history_epoch,
-                seq=head_max.seq,
-                message_id=head_max.message_id,
-            )
-        )
+        cuts.append(_row_boundary(turn, head_max))
     return tuple(cuts)

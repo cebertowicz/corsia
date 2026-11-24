@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -44,7 +45,7 @@ const preview = (digest: string, slots: unknown[], callId = 'call-1', kind?: str
 	({ type: 'doc_preview', call_id: callId, thread_id: 'thread-a', name: 'Alpha', digest, slots, ...(kind ? { kind } : {}) });
 const end = (outcome: string) => ({ type: 'doc_preview_end', call_id: 'call-1', thread_id: 'thread-a', outcome });
 
-afterEach(() => { vi.useRealTimers(); [...disposers].forEach((dispose) => dispose()); document.body.innerHTML = ''; });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); [...disposers].forEach((dispose) => dispose()); document.body.innerHTML = ''; });
 
 describe('live preview feed', () => {
 	it('places a slot when the frame was computed on the text this editor shows', async () => {
@@ -53,6 +54,17 @@ describe('live preview feed', () => {
 		h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 3, text: 're' }]));
 		await settle();
 		expect(previews(h.view)).toMatchObject([{ callId: 'call-1', threadId: 'thread-a', from: 6, to: 11, text: 'there' }]);
+	});
+
+	it('checks a frame’s digest by software when the browser has no WebCrypto, so a slot is still placed', async () => {
+		const doc = 'Héllo wörld 🙂. The rest stays.';
+		const wire = createHash('sha256').update(doc, 'utf8').digest('hex').slice(0, 16);
+		vi.stubGlobal('crypto', {});
+		const h = harness(doc);
+		h.send(preview(wire, [{ slot: 0, from: 6, to: 11, at: 0, text: 'the' }]));
+		h.send(preview(wire, [{ slot: 0, from: 6, to: 11, at: 3, text: 're' }]));
+		await settle();
+		expect(previews(h.view)).toMatchObject([{ callId: 'call-1', from: 6, to: 11, text: 'there' }]);
 	});
 
 	it('holds a slot back while the texts differ, then places it with everything received so far', async () => {

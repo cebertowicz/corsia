@@ -20,8 +20,13 @@ from infra.product_events import analytics_disabled
 
 log = logging.getLogger(__name__)
 
-_BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
-                  8_192, 16_384, 32_768, 60_000)
+#: Upper edges (ms) of the timing histogram; the browser's copy is STATS_BUCKET_UPPERS in
+#: frontend/src/lib/browserPaneStats.ts, tied to this one by a test.
+BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
+                 8_192, 16_384, 32_768, 60_000)
+#: Browser-side timing is a diagnostic reading, taken over days; two weeks covers it (see
+#: infra/client_request_timing.py), so it is kept for less time than the route timing above.
+CLIENT_TIMING_RETENTION_DAYS = 14
 _FLUSH_SECONDS = 60
 _SLOW_MS = 1_000
 #: A request this slow is also logged, so it can be read where the analytics database can't.
@@ -30,6 +35,8 @@ _UNMATCHED_ROUTE = "<unmatched>"
 #: Recorded for a request whose caller gave up first (the handler was cancelled): the client-closed status.
 CLIENT_CLOSED = 499
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+#: Every method label a route entry can carry (``_normalized_method``); the browser capture accepts exactly these.
+METHOD_LABELS = _HTTP_METHODS | {"OTHER"}
 
 
 @dataclass
@@ -57,7 +64,7 @@ class Aggregate:
     max_ms: float = 0.0
     sum_bytes: int | None = 0
     max_bytes: int | None = 0
-    buckets: list[int] = field(default_factory=lambda: [0] * len(_BUCKET_UPPERS))
+    buckets: list[int] = field(default_factory=lambda: [0] * len(BUCKET_UPPERS))
 
     def add(self, duration_ms: float, response_bytes: int | None = None) -> None:
         """Add one completed request's duration and emitted body length."""
@@ -70,7 +77,7 @@ class Aggregate:
         elif self.sum_bytes is not None:
             self.sum_bytes += response_bytes
             self.max_bytes = max(self.max_bytes or 0, response_bytes)
-        for index, upper in enumerate(_BUCKET_UPPERS):
+        for index, upper in enumerate(BUCKET_UPPERS):
             if duration_ms <= upper:
                 self.buckets[index] += 1
                 return
@@ -128,13 +135,13 @@ def bucket_percentile(buckets: list[int], percentile: float) -> float:
     target = total * percentile
     cumulative = 0
     lower = 0.0
-    for upper, count in zip(_BUCKET_UPPERS, buckets, strict=True):
+    for upper, count in zip(BUCKET_UPPERS, buckets, strict=True):
         if cumulative + count >= target and count:
             fraction = (target - cumulative) / count
             return lower + (upper - lower) * fraction
         cumulative += count
         lower = float(upper)
-    return float(_BUCKET_UPPERS[-1])
+    return float(BUCKET_UPPERS[-1])
 
 
 def route_template(scope: dict) -> str:
@@ -150,10 +157,24 @@ def _normalized_method(method: object) -> str:
     return method if method in _HTTP_METHODS else "OTHER"
 
 
-def _server_timing(started_at: float, timing: DbTiming) -> bytes:
+def _route_entry(scope: dict | None) -> str:
+    """Return the ``route`` Server-Timing entry naming the matched template, or an empty string.
+
+    The browser reads it from its resource timing entry, so a client-side sample joins the
+    server's own aggregate on the same method and template without guessing from a client path.
+    """
+    if scope is None:
+        return ""
+    route = route_template(scope)
+    if route == _UNMATCHED_ROUTE or '"' in route or "\\" in route:
+        return ""
+    return f'route;desc="{_normalized_method(scope.get("method"))} {route}", '
+
+
+def _server_timing(started_at: float, timing: DbTiming, scope: dict | None = None) -> bytes:
     app_ms = (time.perf_counter() - started_at) * 1_000
     return (
-        f"app;dur={app_ms:.1f}, dbq;dur={timing.queue_ms:.1f}, "
+        f"{_route_entry(scope)}app;dur={app_ms:.1f}, dbq;dur={timing.queue_ms:.1f}, "
         f"db;dur={timing.execution_ms:.1f}, "
         f"dbq_read;dur={timing.read_queue_ms:.1f}, db_read;dur={timing.read_execution_ms:.1f}, "
         f"dbq_bulk;dur={timing.bulk_queue_ms:.1f}, db_bulk;dur={timing.bulk_execution_ms:.1f}"
@@ -188,7 +209,7 @@ class RequestTimingMiddleware:
             if message_type == "http.response.start":
                 status = message["status"]
                 headers = list(message.get("headers", ()))
-                headers.append((b"server-timing", _server_timing(started_at, timing)))
+                headers.append((b"server-timing", _server_timing(started_at, timing, scope)))
                 message = {**message, "headers": headers}
                 response_started = True
             elif message_type == "http.response.body":
@@ -341,7 +362,7 @@ def window_start(days: int) -> date:
 def query_route_timing(conn, days: int) -> list[tuple]:
     """Return route timing rows for the inclusive UTC day window."""
     return conn.execute(
-        "SELECT day, method, route, status_class, count, max_ms, buckets, sum_bytes, max_bytes "
+        "SELECT day, method, route, status_class, count, max_ms, buckets, sum_bytes, max_bytes, sum_ms "
         "FROM request_timing_daily WHERE day >= ?", (window_start(days),),
     ).fetchall()
 
@@ -360,6 +381,10 @@ def prune_retention(now: datetime | None = None) -> None:
         cur.execute(
             "DELETE FROM request_timing_daily WHERE day < ?",
             ((now - timedelta(days=90)).date(),),
+        )
+        cur.execute(
+            "DELETE FROM client_request_timing_daily WHERE day < ?",
+            ((now - timedelta(days=CLIENT_TIMING_RETENTION_DAYS)).date(),),
         )
     except Exception:
         log.exception("request timing analytics retention failed")

@@ -138,21 +138,25 @@ class DelegateTaskTool(Tool):
 
 
 def with_task_line(message: str, step, parent_thread_id: str) -> str:
-    """Append the line naming the handed plan task, or return ``message`` unchanged.
+    """Add the line naming the handed plan task, or return ``message`` unchanged.
 
-    The task is named by reference, never copied: its intent can be revised
-    after dispatch, so a copy goes stale and a read stays current. The task is
-    in the parent's plan, so the worker reads it with the parent's ``thread_id``
-    (same user and project is the whole access rule), and that read does not
-    depend on the attach, so a failed attach leaves the line true.
+    The task is named by reference: its intent can be revised after dispatch,
+    so the line points to a live read. One exception is copied: a reviewer
+    step's brief states the run's intent and the step's check as of hand-over,
+    so the reviewer judges against the step and not the author's framing; the
+    task line follows the brief, outside the author's text, and the live read it
+    names wins if the step changed. The task is in the parent's plan, so the
+    worker reads it with the parent's ``thread_id`` (same user and project is
+    the whole access rule), and that read does not depend on the attach, so a
+    failed attach leaves the line true.
     """
     if step is None:
         return message
-    return (
-        f'{message}\n\nYour plan task: "{step.title}" ({step.node_id}). Read its intent and '
+    return step.lead(message, (
+        f'Your plan task: "{step.title}" ({step.node_id}). Read its intent and '
         f"acceptance criteria with plan_read(thread_id='{parent_thread_id}', "
         f"node_id='{step.node_id}') before you start, and again if you're told it changed."
-    )
+    ))
 
 
 async def _spawn(
@@ -162,8 +166,7 @@ async def _spawn(
     """Start the worker; its receipt, or an error string with nothing started.
 
     ``rule_start`` is a rule-started worker's (R23), never a caller's: it records the
-    worker before its first turn, and a full Claude Code cap raises
-    ``LiveSpawnCapExceeded`` so the rule's runner can queue the start again.
+    worker before its first turn.
     """
     from infra.delegation import DelegationModelRequired, require_explicit_thread_model
 
@@ -344,7 +347,6 @@ async def _spawn_claude_code_child(
     """Spawn a Claude Code child."""
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
-    from infra.subagent_caps import LiveSpawnCapExceeded
     from subagents import cc_runtime
     from subagents.cc_runtime_helpers import CCWorkingDirMissing
     from infra.fresh_threads import resolve_spawn_working_dir
@@ -387,10 +389,6 @@ async def _spawn_claude_code_child(
             confinement=confinement, read_dirs=read_dirs, rule_start=rule_start,
             effort=effort, max_turns=max_turns,
         )
-    except LiveSpawnCapExceeded as e:
-        if rule_start is not None:
-            raise
-        return str(e)
     except CCWorkingDirMissing as e:
         return f"Cannot delegate to Claude Code: {e}"
     except Exception as e:

@@ -19,12 +19,14 @@ import uuid
 
 import pytest
 
+import plans.close_next_bounds as bounds
 from plans import service
+from prompts.plan_start_order import start_out_of_order_compact
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     CRITERIA_MARKER,
+    MARKER,
     NEXT_BLOCK_CAP,
-    REASON_CAP,
     TITLE_CAP,
     WAIT_CAP,
     assert_block_shape,
@@ -138,8 +140,24 @@ def test_the_worst_case_block_keeps_every_row_and_cuts_text_by_serialized_bytes(
         assert_truncated(item["wait"], "paused: " + reason, WAIT_CAP)
     named = block["named"]
     assert (named["started"], named["refusal"]) == (False, "not_ready")
-    assert_truncated(named["reason"], "paused: " + reason, REASON_CAP)
+    assert_truncated(named["reason"], "paused: " + reason, WAIT_CAP)
     _assert_criteria_fill_the_block(block, "z" * 5000)
+
+
+def test_an_out_of_order_named_start_stays_inside_the_worst_case_block(db, monkeypatch):
+    actor, plan, task_a, queued, _others, titles, _reason = _worst_case_scene(db, monkeypatch)
+    named = task(db, plan.id, "Named below ready work")
+
+    block = next_block(close(
+        db, plan.id, "request_review", task_a.id, next_node_id=named.id, actor=actor,
+    ))
+
+    assert size(block) <= NEXT_BLOCK_CAP
+    assert (block["named"]["started"], block["named"]["refusal"]) == (False, "out_of_order")
+    assert block["named"]["reason"] == start_out_of_order_compact(
+        bounds.title(titles[queued.id]),
+    )
+    assert block["selected"]["id"] == queued.id
 
 
 def _assert_criteria_fill_the_block(block: dict, stored: str) -> None:
@@ -244,3 +262,33 @@ def test_rows_drop_from_the_tail_until_the_block_fits_and_the_label_follows(
     assert row_ids(block) == [node.id for node in pending[:shown]]
     assert block["open_tasks_listed"] == listed(shown, 4)
     assert_rows_exact(db, block)
+
+
+def test_a_title_the_plan_accepts_is_never_cut_and_a_longer_one_is():
+    from plans import close_next_bounds
+
+    at_limit = "x" * service.MAX_NODE_TITLE
+    assert close_next_bounds.title(at_limit) == at_limit
+    longer = at_limit + "y" * 10
+    cut = close_next_bounds.title(longer)
+    assert cut != longer and cut.endswith(MARKER)
+    assert close_next_bounds.json_bytes(cut) <= TITLE_CAP
+
+
+def test_a_title_the_platform_shortens_keeps_its_suffix():
+    from plans import close_next_bounds
+    from plans.feedback_titles import trim_title
+
+    suffix = " left 3 comments on plan.md"
+    shortened = trim_title("A" * 80 + suffix, suffix)
+    assert len(shortened) == service.MAX_NODE_TITLE
+    assert close_next_bounds.title(shortened) == shortened
+
+
+def test_a_title_with_several_escaped_characters_near_the_limit_is_cut_to_the_same_bytes():
+    from plans import close_next_bounds
+
+    accented = "é" * service.MAX_NODE_TITLE
+    cut = close_next_bounds.title(accented)
+    assert cut.endswith(MARKER) and accented.startswith(cut[:-1])
+    assert close_next_bounds.json_bytes(cut) <= TITLE_CAP

@@ -79,6 +79,7 @@ async function loadLost() {
 }
 
 afterEach(() => {
+	vi.unstubAllGlobals();
 	liveDocumentBindings.set({});
 	docComments.set({});
 	commentLoads.set({});
@@ -99,6 +100,13 @@ describe('comment placement in a live document (4.2)', () => {
 		await expect(capture).resolves.toMatchObject({ quote: 'beta' });
 		expect(row().placement).toBe('placing');
 		doc.answer(placement);
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
+	});
+
+	it('places a row from a matching answer by software hash when the browser has no WebCrypto', async () => {
+		const doc = await opened('älpha beta 🙂 gamma');
+		vi.stubGlobal('crypto', {});
+		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
 	});
 
@@ -173,8 +181,10 @@ describe('comment placement in a live document (4.2)', () => {
 		const doc = await placedQuote();
 		doc.remote(text => { text.delete(4, 5); text.insert(4, 'H'); });
 		expect(doc.asks()).toHaveLength(2); // the edit inside the row asks for its flags
+		// The row already agrees with the answer; its next placement write proves the digest finished.
+		const placementWrite = vi.spyOn(docComments, 'update');
 		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 4, to_off: 5 }] });
-		await settled();
+		await vi.waitFor(() => expect(placementWrite).toHaveBeenCalledTimes(1));
 		doc.remote(text => text.insert(5, 'a'));
 		expect(row()).toMatchObject({ from: 4, to: 6 });
 	});
@@ -281,11 +291,12 @@ describe('comment placement in a live document (4.2)', () => {
 		await loadComments('artifact');
 		// The server's answer for an unresolved quote names only the rows its resolution placed.
 		doc.answer(doc.asks()[1]);
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placed', drawn: true, from: 6, to: 10 });
-		expect(row('c2')).toMatchObject({ placement: undefined, drawn: false, orphaned: true });
-		expect(commentsInDocumentOrder(rows(), doc.session.text.toString()).filter(comment => comment.orphaned).map(comment => comment.id))
-			.toEqual(['c2', 'lost']);
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placed', drawn: true, from: 6, to: 10 });
+			expect(row('c2')).toMatchObject({ placement: undefined, drawn: false, orphaned: true });
+			expect(commentsInDocumentOrder(rows(), doc.session.text.toString()).filter(comment => comment.orphaned).map(comment => comment.id))
+				.toEqual(['c2', 'lost']);
+		});
 	});
 
 	it('re-queues an older Reload after a newer refresh completes while its digest is delayed', async () => {
@@ -312,9 +323,13 @@ describe('comment placement in a live document (4.2)', () => {
 		release();
 		await vi.waitFor(() => expect(doc.asks()).toHaveLength(4));
 		expect(doc.asks()[3]).toMatchObject({ reload: true });
+		// The newer refresh already put the row here; wait for this Reload's own placement write.
+		const placementWrite = vi.spyOn(docComments, 'update');
 		doc.answer(doc.asks()[3], { ranges: [{ id: 'c1', from_off: 0, to_off: 5 }] });
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placed', from: 0, to: 5 });
+		await vi.waitFor(() => {
+			expect(placementWrite).toHaveBeenCalledTimes(1);
+			expect(row()).toMatchObject({ placement: 'placed', from: 0, to: 5 });
+		});
 		await loadLost(); // the re-queued reload settled
 		expect(doc.asks()).toHaveLength(5);
 	});
@@ -650,16 +665,40 @@ describe('placement classification by cleanliness (4.2 revision 13)', () => {
 		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 		overtake(doc);
 		release();
-		await settled();
-		expect(row()).toMatchObject({ placement: 'placing', drawn: false });
-		expect(errors).not.toHaveBeenCalled();
-		expect(doc.asks()).toHaveLength(2);
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placing', drawn: false });
+			expect(errors).not.toHaveBeenCalled();
+			expect(doc.asks()).toHaveLength(2);
+		});
 	});
 });
 
 describe('lost comments are placed again on comments load', () => {
 	const lostRow = (id: string, anchor: string) => ({ ...serverRow(id, anchor, 0, 0), orphaned: true });
 	const reloads = (doc: ReturnType<typeof live>) => doc.asks().filter(ask => ask.reload);
+	/** Holds the next answer's hash until `release()`, so a load lands while that answer is still being checked. */
+	function holdDigest() {
+		const digest = crypto.subtle.digest.bind(crypto.subtle);
+		let release: (() => void) | undefined;
+		let finish!: () => void;
+		const finished = new Promise<void>(resolve => { finish = resolve; });
+		vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(async (algorithm, data) => {
+			await new Promise<void>(resolve => { release = resolve; });
+			const result = await digest(algorithm, data);
+			finish();
+			return result;
+		});
+		return {
+			held: () => release !== undefined,
+			release: () => release!(),
+			/** Releases the hash and returns once the store has taken that answer's result: the hash is done, then its follow-up work runs before the next event-loop turn. */
+			async releaseAndTake() {
+				release!();
+				await finished;
+				await new Promise<void>(resolve => setTimeout(resolve, 0));
+			},
+		};
+	}
 
 	it('places a lost comment whose words are present on load', async () => {
 		const doc = await opened('alpha beta gamma', [lostRow('c2', 'gamma')]);
@@ -694,27 +733,52 @@ describe('lost comments are placed again on comments load', () => {
 		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
 		doc.answer(reloads(doc)[0]); // names only c1: the reload can't place c2
-		await settled();
-		expect(row('c2')).toMatchObject({ orphaned: true, drawn: false });
-		await loadComments('artifact');
-		await settled();
-		expect(reloads(doc)).toHaveLength(2);
-	});
-
-	it('asks on a later load when more comments are lost', async () => {
-		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
-		doc.answer(doc.asks()[0]);
-		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
-		doc.answer(reloads(doc)[0]);
-		await settled();
-		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
+		await vi.waitFor(() => {
+			expect(row()).toMatchObject({ placement: 'placed' });
+			expect(row('c2')).toMatchObject({ orphaned: true, drawn: false });
+		});
 		await loadComments('artifact');
 		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
-		doc.answer(reloads(doc)[1]);
-		await settled();
+	});
+
+	it('asks on a later load when more comments are lost, even while the last answer is still being checked', async () => {
+		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
+		expect(reloads(doc)).toHaveLength(1);
+		const hash = holdDigest();
+		doc.answer(reloads(doc)[0]);
+		await vi.waitFor(() => expect(hash.held()).toBe(true));
+		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
 		await loadComments('artifact');
-		await settled();
-		expect(reloads(doc)).toHaveLength(3);
+		await hash.releaseAndTake(); // the superseded answer is discarded before the newer one arrives
+		expect(reloads(doc)).toHaveLength(2);
+		doc.answer(reloads(doc)[1]);
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed' }));
+		await loadComments('artifact');
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(3));
+	});
+
+	it.each([
+		['its answer is still being checked', true],
+		['it is still in flight', false],
+	])('asks again for a comment lost on a later load while the last reload %s', async (_name, answered) => {
+		const doc = await opened('alpha beta gamma', [lostRow('c2', 'gamma')]);
+		expect(reloads(doc)).toHaveLength(1);
+		const hash = holdDigest();
+		if (answered) {
+			doc.answer(reloads(doc)[0]);
+			await vi.waitFor(() => expect(hash.held()).toBe(true));
+		}
+		mocks.fetchComments.mockResolvedValue({ comments: [lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
+		await loadComments('artifact');
+		if (answered) await hash.releaseAndTake(); // the superseded answer is discarded before the newer one arrives
+		else {
+			doc.answer(reloads(doc)[0]);
+			await vi.waitFor(() => expect(hash.held()).toBe(true));
+			hash.release();
+		}
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
+		doc.answer(reloads(doc)[1], { ranges: [{ id: 'c3', from_off: 0, to_off: 5 }], states: [{ id: 'c3', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row('c3')).toMatchObject({ orphaned: false, placement: 'placed', from: 0, to: 5 }));
 	});
 
 	it('does not reload when edits bring lost words back', async () => {

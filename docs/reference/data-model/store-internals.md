@@ -118,6 +118,64 @@ Source: `backend/infra/db_fts.py`.
 
 Indexes: `sqlite_autoindex_checkpoints_fts_idx_1` (segid, term, unique).
 
+### `comment_fts`
+
+Source: `backend/infra/db_fts.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `words` |  | No | No | — | — |
+| `comment_fts` |  | No | No | — | — |
+| `rank` |  | No | No | — | — |
+
+Indexes: None.
+
+### `comment_fts_config`
+
+Source: `backend/infra/db_fts.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `k` |  | Yes | Yes | — | — |
+| `v` |  | No | No | — | — |
+
+Indexes: `sqlite_autoindex_comment_fts_config_1` (k, unique).
+
+### `comment_fts_data`
+
+Source: `backend/infra/db_fts.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | INTEGER | Yes | No | — | — |
+| `block` | BLOB | No | No | — | — |
+
+Indexes: None.
+
+### `comment_fts_docsize`
+
+Source: `backend/infra/db_fts.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | INTEGER | Yes | No | — | — |
+| `sz` | BLOB | No | No | — | — |
+| `origin` | INTEGER | No | No | — | — |
+
+Indexes: None.
+
+### `comment_fts_idx`
+
+Source: `backend/infra/db_fts.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `segid` |  | Yes | Yes | — | — |
+| `term` |  | Yes | Yes | — | — |
+| `pgno` |  | No | No | — | — |
+
+Indexes: `sqlite_autoindex_comment_fts_idx_1` (segid, term, unique).
+
 ### `messages_fts`
 
 Source: `backend/infra/db_fts.py`.

@@ -191,16 +191,14 @@
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
 			use:settleHeight={{ enabled: open && !drag.dragging, reduced: $prefersReducedMotion }}
+			onpointerdown={drag.press}
+			onpointermove={drag.move}
+			onpointerup={drag.finish}
+			onpointercancel={drag.finish}
 		>
+			<!-- The grabber is a handle; a headless sheet's content may mark its own head row `data-drawer-handle` too. -->
 			<div class="drawer-chrome">
-				<div
-					class="drawer-drag-region"
-					aria-hidden="true"
-					onpointerdown={drag.start}
-					onpointermove={drag.move}
-					onpointerup={drag.finish}
-					onpointercancel={drag.finish}
-				>
+				<div class="drawer-drag-region" aria-hidden="true" data-drawer-handle>
 					<span class="drawer-grabber"></span>
 				</div>
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
@@ -281,7 +279,7 @@
 	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(calc(46dvh + var(--drawer-pull)), 82dvh, calc(100dvh - max(16px, var(--safe-top)))); }
-	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull)), calc(var(--drawer-h) * 0.82)); }
+	.within .drawer-panel.half { max-height: min(calc(var(--drawer-h) * 0.46 + var(--drawer-pull) + var(--drawer-half-extra, 0px)), calc(var(--drawer-h) * 0.82)); }
 	.drawer-panel:focus {
 		outline: none;
 	}
@@ -303,8 +301,8 @@
 		place-items: start center;
 		padding-bottom: 8px;
 		cursor: grab;
-		touch-action: none;
 	}
+	.drawer-panel :global([data-drawer-handle]) { touch-action: none; }
 	.drawer-panel.half .drawer-drag-region { padding-bottom: var(--space-3); }
 	.drawer-drag-region:active {
 		cursor: grabbing;

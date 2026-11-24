@@ -139,7 +139,7 @@ async def test_real_script_with_no_agents_account_runs_in_the_locked_state(sandb
     )
     run = await _run(path)
     assert run.returncode == 0, run.stderr
-    assert run.github_locked == "scripts get no GitHub login: there is no agents' GitHub account"
+    assert run.github_locked.startswith("scripts get no GitHub login: this script isn't approved to use GitHub")
 
 
 def _account(monkeypatch, state: str, home: Path | None = None) -> None:
@@ -356,8 +356,8 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
     original = script_sandbox.github_proxy
 
     @asynccontextmanager
-    async def proxy(path, credential):
-        async with original(path, credential, transport=httpx.MockTransport(upstream)):
+    async def proxy(path, credential, **kwargs):
+        async with original(path, credential, transport=httpx.MockTransport(upstream), **kwargs):
             yield
 
     monkeypatch.setattr(script_sandbox, "github_proxy", proxy)

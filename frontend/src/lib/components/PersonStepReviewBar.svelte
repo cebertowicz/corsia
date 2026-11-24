@@ -5,9 +5,8 @@
 	import { token as authToken } from '$lib/stores/auth';
 	import { mutateUserTask } from '$lib/api/plans';
 	import { dismissCommentAttention } from '$lib/api/docs';
-	import { feedbackLine } from '$lib/api/messageCards';
 	import type { PersonStepInstruction } from '$lib/api/reviewBar';
-	import { DISMISS_ALL, isCommentTask } from './comments/commentTask';
+	import { DISMISS_ALL, isCommentTask, personStepAsk } from './comments/commentTask';
 
 	/**
 	 * A person step whose instructions are this document: the agent's ask, answered Done or Won't do from the reading, through the review ask's shell.
@@ -18,6 +17,7 @@
 		personStep,
 		receipt = $bindable<Receipt | null>(null),
 		suppressed = false,
+		docked = false,
 		capsuleClearance = $bindable(0),
 		onAnswered,
 		onConflict,
@@ -26,6 +26,8 @@
 		personStep: PersonStepInstruction | null;
 		receipt?: Receipt | null;
 		suppressed?: boolean;
+		/** Answered from the card docked to the document canvas's bottom edge (ReviewBarShell). */
+		docked?: boolean;
 		capsuleClearance?: number;
 		onAnswered?: () => void;
 		onConflict?: () => void;
@@ -37,7 +39,7 @@
 	let failure = $state('');
 	const busy = $derived(action === 'sending');
 	const commentTask = $derived(isCommentTask(personStep));
-	const waiting = $derived(feedbackLine(personStep?.comment_attention ?? {}));
+	const asks = $derived(personStep ? personStepAsk(personStep) : '');
 
 	async function dismiss() {
 		const attention = personStep?.comment_attention;
@@ -83,7 +85,7 @@
 <ReviewBarShell
 	view={receipt ? 'receipt' : 'ask'}
 	who={personStep ? { name: personStep.owner_name, id: personStep.owner_thread_id } : undefined}
-	full={!personStep ? '' : commentTask ? (waiting ? `${waiting} to review` : '') : `Needs you to do this: ${personStep.node_title}`}
+	full={asks} docked={docked && !commentTask} named={commentTask}
 	askLabel="Task for you" {busy} status={busy ? (commentTask ? 'Dismissing…' : 'Recording your answer…') : failure} {suppressed} bind:capsuleClearance
 	receipt={receipt ? { icon: receipt === 'done' ? 'check' : 'dash', label: 'Task answered', segments: [receipt === 'done' ? 'Done' : 'Won’t do'] } : null}
 >

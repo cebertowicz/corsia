@@ -286,15 +286,15 @@ for (const [width, height] of LAYOUTS) {
 				await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-${name.replace(/ /g, '-')}-after.png`) });
 				results.push(result);
 			}
-			// The document's agent asks for a review while the person reads: the review bar eases open in the header above
-			// the text. The bar reads the ask on the document's next change.
+			// The document's agent asks for a review while the person reads: the ask's card docks to the canvas's bottom edge
+			// over the text. The card reads the ask on the document's next change.
 			await readAt(live.reader, '## Section 30');
 			const anchor = await anchorLine(live.reader);
 			await startSampling(live.reader, anchor.text, 5_000);
 			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-before.png`) });
 			raiseAsk(document.threadId, document.artifactId, 'Is this right?');
 			await writerEdits(live.writer, { find: '## Section 55\n', insert: 'A late line far below.\n\n' });
-			await expect(live.reader.locator('.review-bar')).toBeVisible({ timeout: 4_000 });
+			await expect(live.reader.locator('[data-ask-card]')).toBeVisible({ timeout: 4_000 });
 			const result = await drift(live.reader, 'review ask raised', anchor);
 			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-after.png`) });
 			results.push(result);
@@ -400,8 +400,8 @@ async function firstLine(page: Page): Promise<{ text: string; offset: number; sc
 }
 
 for (const [width, height] of LAYOUTS) {
-	// The review bar reads its ask after the editor opens. A reader still at the start keeps the title in view as the bar
-	// arrives; the text moves down with the header instead of being scrolled up under it.
+	// The ask's card reads its ask after the editor opens. A reader still at the start keeps the title in view as the card
+	// arrives at the canvas's bottom edge; the text is not scrolled.
 	test(`@surface:live-document a review ask that arrives after the editor opens leaves the start of the document in view at ${width}`, async ({ browser, request }, testInfo) => {
 		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
 		test.setTimeout(120_000);
@@ -418,13 +418,13 @@ for (const [width, height] of LAYOUTS) {
 			});
 			await openLiveDocument(reader, document, '# Anchor document');
 			await installPaintedFrames(reader);
-			await expect(reader.locator('.review-bar')).toHaveCount(0);
+			await expect(reader.locator('[data-ask-card]')).toHaveCount(0);
 			const opened = await firstLine(reader);
 			expect(opened.text).toBe('Anchor document');
 			expect(opened.scrollTop).toBe(0);
 			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-before-ask.png`) });
 			answer();
-			await expect(reader.locator('.review-bar')).toBeVisible({ timeout: 10_000 });
+			await expect(reader.locator('[data-ask-card]')).toBeVisible({ timeout: 10_000 });
 			await reader.waitForTimeout(800);
 			const shown = await firstLine(reader);
 			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-ask-shown.png`) });

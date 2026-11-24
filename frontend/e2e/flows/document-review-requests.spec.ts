@@ -7,6 +7,8 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { expectContrast, TEXT } from '../support/contrast';
 import { headerSend } from '../support/heldComments';
+import { detailsPanel, openDetails } from '../support/documentBar';
+import { closeComments, openComments } from '../support/commentDrawer';
 import { settled } from '../support/reviewFixtures';
 import { demoteAgent } from '../support/sharedLiveDocument';
 import { injectMessage, readMockCallCount, releaseMockGate, seedMockResponses } from '../support/mock';
@@ -60,8 +62,11 @@ async function openDocument(page: Page, doc: DocumentFixture, splitWidth = 500) 
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	await expect(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true })).toBeVisible();
+	// Request review, the reviewers, Send and the delivery toggle are in the document's Details panel.
+	await openDetails(page);
+	await expect(reviewTrigger(page)).toBeVisible();
 }
+const reviewTrigger = (page: Page) => detailsPanel(page).getByRole('button', { name: 'Request review', exact: true });
 async function requestReview(request: APIRequestContext, doc: DocumentFixture, reviewer: string) {
 	const response = await request.post('/api/doc-reviews', { headers: auth(), data: {
 		artifact_id: doc.artifactId, thread_id: doc.threadId, reviewer, client_id: crypto.randomUUID(),
@@ -101,13 +106,28 @@ async function reviewSurface(page: Page) {
 		const style = getComputedStyle(element);
 		return element.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
 	});
-	const narrow = contentWidth <= 600;
+	// ReviewSurface renders the component's current narrow state as a drawer or popover.
+	const drawer = page.locator('[data-adaptive-drawer]:has([data-review-surface])');
+	const popover = page.locator('.popover:has([data-review-surface])');
+	await expect.poll(async () => (await drawer.isVisible()) || (await popover.isVisible())).toBe(true);
+	const narrow = await drawer.isVisible();
 	return {
 		contentWidth,
 		narrow,
-		panel: page.locator(narrow ? '[data-adaptive-drawer]' : '.popover'),
+		panel: narrow ? drawer : popover,
 		close: closeReviewControls(page, narrow),
 	};
+}
+
+function expectReviewPopoverPlacement(geometry: { panel: DOMRect; leaf: DOMRect; trigger: DOMRect }) {
+	const { panel, leaf, trigger } = geometry, gutter = 8;
+	expect(panel.left).toBeGreaterThanOrEqual(leaf.left + gutter - 0.5);
+	expect(panel.right).toBeLessThanOrEqual(leaf.right - gutter + 0.5);
+	expect(panel.top).toBeGreaterThanOrEqual(leaf.top + gutter - 0.5);
+	expect(panel.bottom).toBeLessThanOrEqual(leaf.bottom - gutter + 0.5);
+	if (trigger.left + panel.width <= leaf.right - gutter) expect(Math.abs(panel.left - trigger.left)).toBeLessThanOrEqual(2);
+	else if (trigger.right - panel.width >= leaf.left + gutter) expect(Math.abs(panel.right - trigger.right)).toBeLessThanOrEqual(2);
+	else { expect(panel.left).toBeLessThanOrEqual(trigger.left); expect(panel.right).toBeGreaterThanOrEqual(trigger.right); }
 }
 
 // Layout fixtures affect only the disposable CI mock database. Review creation,
@@ -135,8 +155,9 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 		const header = root.querySelector('.document-header')!.getBoundingClientRect();
 		const editor = root.querySelector('.doc-main')!.getBoundingClientRect();
 		const canvas = root.getBoundingClientRect();
-		const row = root.querySelector('.document-status-row')!;
-		const tools = root.querySelector('.document-tools')!;
+		// The Details panel holds what the status and tools rows held; Comments and Details are in the bar outside the canvas.
+		const row = root.querySelector('.doc-panel')!;
+		const barTools = [...document.querySelectorAll<HTMLButtonElement>('[data-comments-entry], [data-document-details]')];
 		const retry = row.querySelector<HTMLButtonElement>('.undelivered > .btn');
 		const retryInset = retry ? getComputedStyle(retry, '::after').inset : null;
 		const geometry = (element: Element) => {
@@ -157,12 +178,12 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			root: geometry(root), header: geometry(root.querySelector('.document-header')!),
 			row: geometry(row), retryInset, descendants: [...row.querySelectorAll('*')].map(geometry),
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
-			// The status row is the tools row, so a button reached through both is one control, never two.
-			controls: [...new Set([...tools.querySelectorAll('button'), ...row.querySelectorAll('button')])].map((button) => {
+			controls: [...new Set([...barTools, ...row.querySelectorAll('button')])].map((button) => {
 				// A Toggle's target is the hit area inside its button.
 				const rect = (button.querySelector('.hit') ?? button).getBoundingClientRect();
-				// Toolbar controls and phone actions are 44px; desktop Toggle and small Button keep their own sizes.
-				const minimum = window.innerWidth <= 768 || button.matches('.doc-tool') ? 44 : button.matches('.tg') ? 17 : 28;
+				// Phone actions are 44px; with a pointer the bar's Comments and Details are 36px (IconButton lg), and Toggle and small
+				// Button keep their own sizes.
+				const minimum = window.innerWidth <= 768 ? 44 : button.matches('.bar-comments, .bar-details') ? 36 : button.matches('.tg') ? 17 : 28;
 				return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height, minimum };
 			}),
 		};
@@ -184,9 +205,40 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 	}
 }
 
+test('review surface switches at the document width boundary', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop');
+	await page.setViewportSize({ width: 1232, height: 900 });
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	const doc = await seedDocument(request, `review-boundary-${Date.now()}`);
+	await openDocument(page, doc, 820);
+	await settled(page);
+	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(600);
+	await saveEvidenceScreenshot(page, info, 'review-boundary-600-trigger', { fullPage: false });
+	await reviewTrigger(page).click();
+	const drawer = page.locator('[data-adaptive-drawer]:has([data-review-surface])');
+	await expect(drawer).toBeVisible();
+	await settled(page);
+	const narrowBounds = await drawer.evaluate(panel => ({ panel: panel.getBoundingClientRect().toJSON(), leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(), trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON() }));
+	console.info('Review boundary 600:', JSON.stringify(narrowBounds));
+	await saveEvidenceScreenshot(page, info, 'review-boundary-600', { fullPage: false });
+	expect(narrowBounds.panel.right).toBeLessThanOrEqual(narrowBounds.leaf.right);
+	await page.getByRole('button', { name: 'Close', exact: true }).click();
+	await page.setViewportSize({ width: 1233, height: 900 });
+	await settled(page);
+	await expect.poll(() => page.locator('.doc').evaluate(element => element.getBoundingClientRect().width)).toBe(601);
+	await reviewTrigger(page).click();
+	const popover = page.locator('.popover:has([data-review-surface])');
+	await expect(popover).toBeVisible();
+	await settled(page);
+	const wideBounds = await popover.evaluate(panel => ({ panel: panel.getBoundingClientRect().toJSON(), leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(), trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON() }));
+	console.info('Review boundary 601:', JSON.stringify(wideBounds));
+	await saveEvidenceScreenshot(page, info, 'review-boundary-601', { fullPage: false });
+	expectReviewPopoverPlacement(wideBounds);
+});
+
 const composedFixtures = [
-	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: true },
-	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: true },
+	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: false },
+	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: false },
 	{ viewport: 'phone-393', width: 393, height: 852, splitWidth: 500, expectedNarrow: true },
 	{ viewport: 'wide-desktop-1920', width: 1920, height: 1000, splitWidth: 820, expectedNarrow: false },
 ] as const;
@@ -204,32 +256,47 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		// A narrow canvas, whatever the screen, gives the delivery Toggle its 44px target; a wide one keeps the desktop Toggle.
-		if (expectedNarrow) {
-			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
-			// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
-			const hit = toggle.locator('.hit');
-			const targetBox = (await hit.boundingBox())!;
-			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
-			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
-			console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
-			expect(track).toEqual({ width: 30, height: 17 });
-			expect(targetBox.height, 'actual delivery hit area').toBe(44);
-			expect(targetBox.width).toBe(44);
-			// The hit area outside the painted track activates the same single control.
-			const pressPadding = () => info.project.name === 'chromium-mobile' ? hit.tap({ position: { x: 4, y: 22 } }) : hit.click({ position: { x: 4, y: 22 } });
-			await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-		} else {
-			const box = (await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).boundingBox())!;
-			expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
+		// The drawer's delivery Toggle is one labelled row control at every width: the label and the track share the button,
+		// so the row is the touch target and the painted track keeps its size.
+		await openComments(page);
+		const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
+		await expect(toggle, 'the row is named by its visible label').toHaveAccessibleName('Deliver immediately');
+		const row = (await toggle.boundingBox())!;
+		const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
+		await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox: row, track }), contentType: 'application/json' });
+		console.info('Delivery button bounds:', JSON.stringify({ targetBox: row, track }));
+		expect(track).toEqual({ width: 30, height: 17 });
+		expect(Math.min(row.width, row.height), 'the whole row is a touch target').toBeGreaterThanOrEqual(44);
+		// A press on the label half of the row, far from the painted track, activates the same single control.
+		const pressLabel = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 8, y: row.height / 2 } }) : toggle.click({ position: { x: 8, y: row.height / 2 } });
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await closeComments(page);
+		// Keep the overlaid Workspace case at 1280; close it at 1440 to exercise the wide document popover.
+		if (viewport === 'desktop-1440' && !(await page.locator('.pane').evaluate(element => element.classList.contains('collapsed')))) {
+			await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+			await settled(page);
 		}
-		const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
+		await openDetails(page);
+		const trigger = reviewTrigger(page);
 		await trigger.click();
 		const surface = await reviewSurface(page);
 		expect(surface.narrow, `${viewport} document content width ${surface.contentWidth}`).toBe(expectedNarrow);
 		await expect(surface.panel).toBeVisible();
+		if (viewport === 'desktop-1280' || viewport === 'desktop-1440') {
+			await settled(page);
+			const geometry = await surface.panel.evaluate(panel => ({
+				panel: panel.getBoundingClientRect().toJSON(),
+				document: document.querySelector('.doc')!.getBoundingClientRect().toJSON(),
+				leaf: document.querySelector('.leaf-body')!.getBoundingClientRect().toJSON(),
+				workspace: document.querySelector('.pane')!.getBoundingClientRect().toJSON(),
+				trigger: document.querySelector('.review-request')!.getBoundingClientRect().toJSON(),
+			}));
+			await info.attach('review-geometry', { body: JSON.stringify(geometry), contentType: 'application/json' });
+			console.info('Review geometry:', JSON.stringify({ viewport, theme, ...geometry }));
+			expectReviewPopoverPlacement(geometry);
+		}
 		const search = page.getByRole('combobox', { name: 'Add reviewers' });
 		await expect(search).toBeFocused();
 		// With all ten reviewers listed, each row leads with the agent's name and the footer stays inside the panel.
@@ -254,7 +321,7 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		if (surface.narrow) expect((await surface.close.button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-selected`, { fullPage: false });
 		await surface.panel.getByRole('button', { name: 'Send', exact: true }).click();
-		// Sending closes the surface, confirms with a toast and leaves the new reviewer in the header.
+		// Sending closes the surface, confirms with a toast and leaves the new reviewer in Details.
 		await expect(page.getByText(/^Review requested from /)).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toBeVisible();
 		await expect(trigger).toBeFocused();
@@ -300,7 +367,7 @@ test('@flow:document-review-requests generated metadata does not interrupt an op
 	const doc = await seedDocument(request, `review-${stamp}`);
 	const agents = await reviewers(request, stamp);
 	await openDocument(page, doc, 820);
-	const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
+	const trigger = reviewTrigger(page);
 	await trigger.click();
 	const search = page.getByRole('combobox', { name: 'Add reviewers' });
 	await search.fill(agents[0].name); await search.press('Home'); await search.press('Enter');
@@ -342,7 +409,7 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	// Exercise summary → cancel where the Workspace pane overlays a compact artifact canvas.
 	if (!mobile) await page.setViewportSize({ width: 1280, height: 1000 });
 	await openDocument(page, doc, mobile ? 500 : 820);
-	const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
+	const trigger = reviewTrigger(page);
 	await trigger.click();
 	const surface = await reviewSurface(page);
 	await expect(surface.panel).toBeVisible();
@@ -487,18 +554,21 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 		setFeedbackFixture(doc.artifactId, state);
 		await openDocument(page, doc);
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
+		await openComments(page);
 		if (state !== 'undelivered') {
-			// The held comment waits for the header's Send, whole inside the screen beside the review control.
+			// The held comment waits for Send in the drawer, whole inside the screen.
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('[data-drawer-unsent]')).toHaveCount(0);
-			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toHaveCount(1);
+			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(mobile ? 1 : 0);
 		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
-		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (state === 'undelivered') await expectContrast(page, info, `reviews-${count}-retry-${mobile ? 'phone' : 'desktop-narrow'}`, {
 			retry: { target: page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true }), min: TEXT },
 		});
+		await closeComments(page);
+		await openDetails(page);
+		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (count) {
 			await page.locator('.reviewer-group').click();
 			const surface = await reviewSurface(page);

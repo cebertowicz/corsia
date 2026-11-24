@@ -504,6 +504,7 @@ async def test_startup_drive_settles_unconfirmed_update_even_when_drive_fails(is
     from loguru import logger
 
     from automation import update_verification
+    from plans import public as plans
 
     operation_id = await run_in_db(operation_in)
     monkeypatch.setattr(update_verification, "UNCONFIRMED_UPDATE_SECONDS", 0)
@@ -516,7 +517,12 @@ async def test_startup_drive_settles_unconfirmed_update_even_when_drive_fails(is
     async def no_harness():
         return None
 
+    async def no_recovery():
+        return None
+
     monkeypatch.setattr(restart_startup, "drive_startup_continuity", broken_drive)
+    # The drive also starts the marker-gated comment-recovery pass; not this test's subject.
+    monkeypatch.setattr(plans, "recover_person_comments", no_recovery)
     with pytest.raises(RuntimeError, match="drive failed"):
         await restart_startup.run_startup_drive(no_harness(), None, (), None, logger)
     assert self_restart.operation_by_id(operation_id)["status"] == "complete"

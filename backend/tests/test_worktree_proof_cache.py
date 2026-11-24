@@ -159,3 +159,103 @@ def test_intermediate_symlink_retarget_is_reverified(tmp_path):
     alias.symlink_to(alternate, target_is_directory=True)
     (alternate / "gitdir").write_text(f"{repo / 'other' / '.git'}\n")
     assert list_repo_worktrees(repo) == []
+
+
+@pytest.mark.parametrize("change", ["add", "remove", "marker", "reciprocal", "entry_symlink", "marker_symlink", "leftover"])
+def test_has_worktree_agrees_with_listing_after_changes(tmp_path, change):
+    from tools.sandbox_config import repo_has_verified_worktree
+
+    repo = (tmp_path / "repo").resolve()
+    worktree, gitdir = linked(repo, "one")
+    assert list_repo_worktrees(repo) == [worktree]
+    assert repo_has_verified_worktree(repo)
+    if change == "add":
+        linked(repo, "two")
+    elif change == "remove":
+        shutil.rmtree(worktree)
+    elif change == "marker":
+        _, other_gitdir = linked(tmp_path / "other", "other")
+        (worktree / ".git").write_text(f"gitdir: {other_gitdir}\n")
+    elif change == "reciprocal":
+        (gitdir / "gitdir").write_text(f"{repo / 'other' / '.git'}\n")
+    elif change == "entry_symlink":
+        moved = tmp_path / "moved"
+        worktree.rename(moved)
+        worktree.symlink_to(moved, target_is_directory=True)
+    elif change == "marker_symlink":
+        marker = worktree / ".git"
+        marker.unlink()
+        marker.symlink_to(gitdir / "gitdir")
+    else:
+        shutil.rmtree(worktree)
+        (repo / ".worktrees" / "leftover").mkdir()
+    # Answer before listing, so a stale cached proof cannot be pruned first.
+    assert repo_has_verified_worktree(repo) == bool(list_repo_worktrees(repo))
+
+
+def test_has_worktree_runs_one_proof_per_call_at_400_worktrees(tmp_path, monkeypatch):
+    from tools import sandbox_config
+
+    repo = (tmp_path / "repo").resolve()
+    for index in range(400):
+        linked(repo, f"tree-{index:03d}")
+    calls = []
+    verify = sandbox_config.verified_worktree_marker
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        return verify(*args, **kwargs)
+
+    monkeypatch.setattr(sandbox_config, "verified_worktree_marker", counted)
+    # Cold: the folder is read, and the first verified entry answers.
+    assert sandbox_config.repo_has_verified_worktree(repo)
+    assert len(calls) == 1
+    # Warm: a cached proof answers with no marker proof at all.
+    calls.clear()
+    assert sandbox_config.repo_has_verified_worktree(repo)
+    assert calls == []
+    # The full listing (no longer used per shell command) proves every entry.
+    calls.clear()
+    from tools import sandbox_worktree_cache
+    sandbox_worktree_cache._worktree_proofs.clear()
+    assert len(list_repo_worktrees(repo)) == 400
+    assert len(calls) == 400
+
+
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("failure", ["open", "after-first-entry"])
+def test_listing_error_fails_closed_with_no_git_grant(tmp_path, monkeypatch, warm, failure):
+    from pathlib import Path
+
+    from infra.project_repo_policy import RepoPolicy
+    from tools import shell_guard
+    from tools.sandbox_config import repo_has_verified_worktree
+
+    repo = (tmp_path / "repo").resolve()
+    first, _ = linked(repo, "one")
+    linked(repo, "two")
+    policy = RepoPolicy("project", "repo", repo, "main", True)
+    monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
+
+    def profile():
+        return shell_guard.pinned_repo_sandbox_profile(
+            "printf probe", str(first), policies=[policy], grant_policies=[policy],
+        )
+
+    grant = shell_guard._git_dir_grant(repo)
+    if warm:
+        assert grant in profile()  # leaves a cached proof for "one"
+    real_iterdir = Path.iterdir
+
+    def failing_iterdir(path):
+        if path != repo / ".worktrees":
+            yield from real_iterdir(path)
+            return
+        if failure == "after-first-entry":
+            yield first
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(Path, "iterdir", failing_iterdir)
+    assert not repo_has_verified_worktree(repo)
+    assert list_repo_worktrees(repo) == []
+    assert grant not in profile()

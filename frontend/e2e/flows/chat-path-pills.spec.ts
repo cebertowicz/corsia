@@ -1,3 +1,4 @@
+import { backToChat } from '../support/documentBar';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from '../support/test';
@@ -130,7 +131,7 @@ test('@surface:chat-cards a chat link that cannot open says why in its own tab w
 		new URL(route.request().url()).searchParams.get('path') === fromWorkspaceRoot
 			? route.fulfill({ status: 500, body: 'read failed' }) : route.continue()));
 	// On a phone the open tab covers the chat; Chat hands the canvas back, with the tab kept.
-	if (phone) await page.getByRole('button', { name: 'Chat', exact: true }).click();
+	if (phone) await backToChat(page).click();
 	await press('Elsewhere');
 	const elsewhere = page.getByText("Couldn't open elsewhere.md.");
 	await expect(elsewhere).toBeInViewport();

@@ -25,7 +25,12 @@ class CommentSelectionChanged(ValueError):
 
 def diagram_changed() -> CommentSelectionChanged:
     """The diagram a pin was drawn on is not the one the document holds now."""
-    return CommentSelectionChanged('Place the pin on the current diagram; your draft is kept.', 'diagram_changed')
+    return CommentSelectionChanged('Place the pin on the current diagram. Your draft is kept.', 'diagram_changed')
+
+
+def not_active_message(artifact_id: str) -> str:
+    """The sentence every caller gives an artifact_id that no longer names an active document."""
+    return f"artifact_id does not resolve to an active artifact: {artifact_id}"
 
 
 def decision_only_error(*, decision: str | None, all_from_author: bool, reason: str | None) -> str | None:

@@ -20,6 +20,8 @@ _call_count: int = 0
 _consumed_targeted_replies: set[int] = set()
 _last_targeted_replies: dict[bool, dict] = {}
 _last_thread_replies: dict[str, dict] = {}
+_delivery_delay: float = 0.0
+_prepare_batch_original: Any = None
 
 _DEFAULT_REPLY: dict = {
     "role": "assistant",
@@ -45,6 +47,8 @@ def _reset_mock_state(replies: list[dict] | None = None) -> None:
     _last_targeted_replies = {}
     _last_thread_replies = {}
     mock_calls.reset()
+    if _prepare_batch_original is not None:
+        _set_delivery_delay(0.0)
 
 
 def _thread_reply(thread_id: str) -> dict:
@@ -162,6 +166,8 @@ async def _mock_acompletion(**kwargs: Any) -> Any:
     """Drop-in replacement for ``llm.base.acompletion``."""
     reply = _next_reply(stream=bool(kwargs.get("stream")))
     await _wait_for_gate(reply, "response_gate")
+    if reply.get("raise"):  # a provider call that fails outright, with this text
+        raise RuntimeError(str(reply["raise"]))
     if kwargs.get("stream"):
         return _streaming_iter(reply)
     delay_ms = reply.get("delay_ms", 0) or 0
@@ -312,6 +318,38 @@ async def release_mock_gate(gate_name: str) -> dict:
     if not _release_mock_gate(gate_name):
         raise HTTPException(404, f"Unknown mock gate: {gate_name}")
     return {"ok": True, "gate": gate_name}
+
+
+def _set_delivery_delay(seconds: float) -> None:
+    """Slow the step between an input's admission and its provider start, as a slow start does."""
+    global _delivery_delay, _prepare_batch_original
+    import infra.thread_execution as thread_execution
+
+    _delivery_delay = seconds
+    if _prepare_batch_original is not None:
+        return
+    _prepare_batch_original = thread_execution._prepare_batch
+
+    async def delayed(batch, **kwargs):
+        if _delivery_delay > 0:
+            await asyncio.sleep(_delivery_delay)
+        return await _prepare_batch_original(batch, **kwargs)
+
+    thread_execution._prepare_batch = delayed
+
+
+@router.post("/mock-delivery-delay")
+async def set_mock_delivery_delay(body: dict) -> dict:
+    """Delay every later input's delivery by ``seconds`` after it is stored; 0 clears it.
+
+    ``response_gate`` holds the model's reply, not the send that precedes it, so it cannot
+    show what a slow start does to a request that waits for it.
+    """
+    seconds = body.get("seconds", 0)
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 <= seconds <= 30:
+        raise HTTPException(400, "seconds must be a number from 0 to 30")
+    _set_delivery_delay(float(seconds))
+    return {"ok": True, "seconds": float(seconds)}
 
 
 @router.get("/mock-gates/{gate_name}/wait")

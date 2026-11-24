@@ -12,7 +12,8 @@ from host_access.browser_cdp import CdpClient, Rect, RunCommand, border_rect, pr
 from host_access.browser_dom_frames import FrameTargets, locate_in_frames, shifted
 from host_access.browser_dom_hit import (
     Located, box_matches as _box_matches, cover_tag as _cover, in_viewport as _in_viewport,
-    is_empty as _is_empty, isolated_context as _isolated_context, node_for_box as _node_for_box,
+    is_empty as _is_empty, isolated_context as _isolated_context, node_at_centre as _node_at_centre,
+    node_for_box as _node_for_box,
     remote_object_id as _object_id, page_viewport as _viewport, read_box as _box,
 )
 from host_access.browser_session_state import BrowserSessionError
@@ -100,6 +101,32 @@ async def target_node(run: RunCommand, endpoint: str, selector: str) -> int | No
     """
     async with CdpClient(endpoint) as cdp:
         return (await _locate_in_page(run, cdp, selector, scroll=False))[0]
+
+
+async def is_dropdown(run: RunCommand, endpoint: str, selector: str) -> bool:
+    """Whether an agent's ref or CSS selector names a native <select>, read through the DOM domain only.
+
+    It runs no page script and reads no value. A target it can't hit-test (no box, covered, or still off
+    screen after a scroll) is not reported as a dropdown, and neither is one it couldn't check.
+    """
+    box = await _box(run, selector)
+    if box is None or _is_empty(box):
+        return False
+    async with CdpClient(endpoint) as cdp:
+        try:
+            if not _in_viewport(await _viewport(cdp), box):
+                # With no pane open nobody sees the scroll, and the native fill scrolls its target the same way.
+                await run(("scrollintoview", selector), 10)
+                box = await _box(run, selector)
+                if box is None or _is_empty(box):
+                    return False
+            node = await _node_at_centre(cdp, box)
+            if not node or not await _box_matches(cdp, node, box):
+                return False
+            name = (await cdp.call("DOM.describeNode", backendNodeId=node)).get("node", {}).get("nodeName")
+        except BrowserSessionError:
+            return False
+    return name == "SELECT"
 
 
 async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str,

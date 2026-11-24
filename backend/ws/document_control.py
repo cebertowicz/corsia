@@ -16,6 +16,7 @@ from doceditor.live_lane import Operation
 from doceditor.live_publication_record import WriteActor
 from doceditor.live_runtime import LiveEntry, get_documents
 from doceditor.live_store import BrowserMessage, StoreRefused
+from doceditor.live_text import utf16_length
 from infra.db_async import run_in_db
 from infra.state import send_to_client
 from ws import document_email, section_turn
@@ -199,7 +200,7 @@ def _offset(value) -> int:
 
 
 def _reserved(live, socket, user_id: str, ask) -> bool:
-    """Track the capture's selection under its comment's client id when the browser's state is the live one.
+    """Track the capture's selection under its comment's client id, made in the live state or a recent one.
 
     Everything is read and decided without yielding.
     """
@@ -207,10 +208,17 @@ def _reserved(live, socket, user_id: str, ask) -> bool:
         raise ValueError("A comment range request must be an object")
     identifier, start, end = _client_id(ask.get("client_id")), _offset(ask.get("from_off")), _offset(ask.get("to_off"))
     digest, length = ask.get("digest"), _offset(ask.get("text_length_utf16"))
+    quote = ask.get("quote")
     if start >= end or not isinstance(digest, str) or not isinstance(ask.get("vector"), str):
         raise ValueError("A comment range needs a selection and the browser's state")
+    if quote is not None and not isinstance(quote, str):
+        raise ValueError("A comment range's quote must be text")
+    # A quote is the selection's own text, so it is never longer than the span. The character count, never
+    # more than the UTF-16 count, refuses an oversized quote before it is encoded or compared.
+    if quote is not None and (len(quote) > end - start or utf16_length(quote) > end - start):
+        raise ValueError("A comment range's quote is longer than its selection")
     return live.reserve(identifier, start, end, user_id, socket, vector=base64.b64decode(ask["vector"], validate=True),
-                        digest=digest, length=length)
+                        digest=digest, length=length, quote=quote)
 
 
 async def _operate(socket, user: dict, data: dict) -> None:
@@ -301,13 +309,18 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
         else:
             await _operate(socket, user, data)
     except (HTTPException, ValueError, PermissionError, StoreRefused, OSError) as exc:
+        from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
+
         title = getattr(exc, "title", None)
+        message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        if data["type"] == "doc_flush" and getattr(exc, "kind", None) == "no_such_file":
+            message = MISSING_SAVE_MESSAGE
         await send_to_client(socket, {"type": "doc_error", "artifact_id": data.get("artifact_id"),
                                     "request_id": data.get("request_id"),
                                     "kind": getattr(exc, "kind", "store_refused" if isinstance(exc, StoreRefused) else "refused"),
                                     "blocking": isinstance(exc, StoreRefused) or getattr(exc, "blocking", False),
                                     **({"title": title} if title else {}),
-                                    "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
+                                    "message": message})
     except Exception as error:
         if closed_socket_error(error):
             log.debug("Live-document frame not delivered to a closed socket: %s", error)

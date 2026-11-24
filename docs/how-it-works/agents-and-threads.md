@@ -44,13 +44,12 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 - **Completion returns to the parent.** For an unstructured child with a final reply, the reply can be admitted to the parent in the transaction that settles the completed turn. Structured delegation uses the plan's harvest path instead. A fenced parent, a rule-started worker, or a turn without a final reply also does not produce that completion message; an error does not send one this way (`backend/infra/thread_driver.py`, `backend/plans/delegation.py`).
 - **Skills inherit down the ancestry.** A child sees its ancestors' thread-level skills; a skill in the child overrides the parent's of the same name, unless a System skill has that name (`backend/core/skill_resolution.py`).
 
-### Limits on live processes
+### Idle Claude Code processes
 
-Claude Code runs as a separate process per thread. The backend caps how many are working at once and periodically retires eligible idle processes by age and count. Defaults are seeded into settings and can be changed there: 8 working, a 600-second idle threshold, and 8 idle (`backend/infra/subagent_caps.json`, `backend/infra/subagent_caps.py`). Only working processes count against the cap. At the cap, a new Claude Code spawn from a tool call is refused with an error naming up to five working threads and a count of any others, rather than queueing or spawning more. A worker an event rule starts is not refused: its start waits in the queue at its place until a slot frees (`backend/automation/worker_runner.py`). A retired thread cold-resumes on its next input, as after a backend restart (`backend/subagents/cc_idle_retirement.py`).
+Claude Code runs as a separate process per thread. Nothing limits how many work at once. The backend periodically retires eligible idle processes by age and count. Defaults are seeded into settings and can be changed there: a 600-second idle threshold and 8 idle (`backend/infra/subagent_caps.json`, `backend/infra/subagent_caps.py`). A retired thread cold-resumes on its next input, as after a backend restart (`backend/subagents/cc_idle_retirement.py`).
 
 ## What can go wrong
 
-- **Claude Code spawn refused at the cap.** The tool returns the error with working-thread details. The caller can wait or retry; the refused spawn is not queued. A rule-started worker waits in the queue instead.
 - **A worker with no model.** `delegate_task` refuses without an explicit model. An unavailable model can hold input for recovery or fail it with a visible reason; it is not replaced. See [Models and harnesses](models-and-harnesses.md).
 - **Roster edits from another thread.** A tool edit from a thread that is not the designated coordinator of the target's scope is refused.
 - **Parent and child drift.** A child is its own thread with its own history. It knows what its brief and its own context sources tell it; a brief that leaves out something the child needs produces work that misses it.

@@ -17,6 +17,7 @@ from api.files_roots import (
     walk,
 )
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
+from doceditor.document_save_errors import EDITOR_STALE_CODE, EDITOR_STALE_MESSAGE
 from doceditor.document_scope import UI_THREAD
 from infra import config
 from infra.auth import authenticate, owns_thread
@@ -36,7 +37,8 @@ async def tree(token: str, project_id: str | None = None, nodes: bool = True):
     A chat link only resolves its target against the root paths, so it asks for
     these and the walk, the artifact index and the annotation never run.
     """
-    if not authenticate(token):
+    user = authenticate(token)
+    if not user:
         raise HTTPException(401)
 
     def _tree():
@@ -46,7 +48,7 @@ async def tree(token: str, project_id: str | None = None, nodes: bool = True):
             if not nodes:
                 return {"roots": roots}
             by_path = artifact_index(db)
-            project = shared_projector(db)
+            project = shared_projector(db, user_id=user["id"])
             for r in roots:
                 path = Path(r["path"])
                 walked, capped = walk(path)
@@ -139,6 +141,9 @@ class WriteBody(BaseModel):
     project_id: str | None = None
     thread_id: str | None = None
     create: bool = False  # allow creating a new file (New document)
+    #: SHA-256 of the bytes the editor's tab started from. Optional: an
+    #: older client omits it and keeps the plain-overwrite behavior it always had.
+    expected_sha256: str | None = None
 
 
 DOCUMENT_SAVE_HTTP_STATUS = {
@@ -171,15 +176,28 @@ def document_save_http_exception(exc: DocumentSaveError) -> HTTPException:
 
 @router.put("/content")
 async def write_content(token: str, body: WriteBody):
-    """Persist the editor's autosave (plain overwrite — CRDT merge is a later
-    layer; the doc editor is single-writer today). Registers the write to the
-    session when one is in scope (register-on-write, registry §0.0 1.4)."""
+    """Persist the editor's autosave. With ``expected_sha256`` the save is refused
+    (409 ``stale_base``) unless the file still holds those bytes, so an outside edit
+    is never overwritten; without it (an older client, or a base the client cannot
+    hash) the write is a plain overwrite, as it always was. Registers the write to the
+    session when one is in scope (register-on-write, registry §0.0 1.4).
+    """
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    fields = body.model_dump()
+    expected_sha256 = fields.pop("expected_sha256")
     try:
-        return await save_document_text(DocumentSave(**body.model_dump()), user["id"])
+        return await save_document_text(DocumentSave(**fields), user["id"], expected_sha256=expected_sha256)
     except DocumentSaveError as exc:
+        if exc.kind == "no_such_file":
+            from doceditor.document_save_errors import MISSING_SAVE_MESSAGE
+
+            raise HTTPException(404, MISSING_SAVE_MESSAGE) from exc
+        if exc.kind == "stale":
+            # The writer's own stale lines are worded for suggestion batches and live writes.
+            # Typed text is different: nothing retries, the tab keeps it, and the person decides.
+            raise HTTPException(409, {"code": EDITOR_STALE_CODE, "message": EDITOR_STALE_MESSAGE}) from exc
         raise document_save_http_exception(exc) from exc
 
 

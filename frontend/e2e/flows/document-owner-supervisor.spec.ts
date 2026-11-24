@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/heldComments';
+import { detailsPanel, openDetails, togglePanel } from '../support/documentBar';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
@@ -12,7 +13,7 @@ import { LONG_NAME, overlaps, ownerItem, rolePicker, seedOwnedDocument, supervis
  * The person sees who owns and who supervises a document and changes each one on the document, at wide and phone
  * widths: two separate items, each opening a picker for that role only; a pick saves; a failed save says so; the
  * person can take the document over, after which an agent's edit is refused and it suggests instead; and Request
- * review never covers the owner and supervisor items, nor they it.
+ * review never covers the owner and supervisor items, nor they it. All three are in the document's Details panel.
  */
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
@@ -44,6 +45,7 @@ async function atRest(page: Page, touch: boolean, step: string) {
 type Seeded = Awaited<ReturnType<typeof seedOwnedDocument>>;
 
 async function pick(page: Page, seeded: Seeded, role: 'owner' | 'supervisor', name: string) {
+	await openDetails(page);
 	const item = role === 'owner' ? ownerItem(page) : supervisorItem(page);
 	await item.click();
 	const picker = rolePicker(page);
@@ -81,7 +83,8 @@ async function agentEditIsRefused(page: Page, request: APIRequestContext, owner:
 
 /** Opens Request review and checks it never covers the owner and supervisor items; returns which surface it used. */
 async function reviewLeavesOwnershipReachable(page: Page): Promise<'drawer' | 'popover'> {
-	await page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }).click();
+	await openDetails(page);
+	await detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }).click();
 	const reviews = page.locator('[data-review-surface]');
 	await expect(reviews).toBeVisible();
 	await page.waitForTimeout(400);
@@ -130,10 +133,15 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		// Each item opens a picker for its own role only; "You" is offered only as owner.
 		await ownerItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'owner');
+		await expect(page.getByRole('combobox', { name: 'Owner' })).toHaveAttribute('placeholder', 'Search');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toBeVisible();
-		await reachable(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true }), 'owner picker leaves Request review reachable');
+		// The opaque picker can cover the next row; dismiss it before checking that row takes a tap.
+		await ownerItem(page).click();
+		await expect(rolePicker(page)).toHaveCount(0);
+		await reachable(detailsPanel(page).getByRole('button', { name: 'Request review', exact: true }), 'Request review reachable after closing the owner picker');
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveAttribute('data-role', 'supervisor');
+		await expect(page.getByRole('combobox', { name: 'Supervisor' })).toHaveAttribute('placeholder', 'Search agents');
 		await expect(rolePicker(page).getByRole('option', { name: /^You/ })).toHaveCount(0);
 		await supervisorItem(page).click();
 		await expect(rolePicker(page)).toHaveCount(0);
@@ -241,6 +249,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 			"connection.execute(\"UPDATE threads SET agent_responsibility='Neighbourhood outreach and the volunteer rota for every weekend of the season' WHERE id=?\", (sys.argv[4],))",
 		], twin, seeded.agents[3], seeded.agents[1]);
 		await seeded.open(page);
+		await openDetails(page);
 		await supervisorItem(page).click();
 		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Planning specialist');
 		// This test's own two agents; earlier tests on the same server may have left agents with the same name.
@@ -276,19 +285,19 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 			const made = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: path.join(dir, file), text: '# Notes\n', thread_id: owner, description: text, create: true } });
 			expect(made.ok(), await made.text()).toBeTruthy();
 		}
-		// A document two people share has no single owner: its row reads "Owner: Not set".
+		// A person-owned document still shows its owner when two people use the installation.
 		isolatedDb([
 			"connection.execute(\"INSERT OR IGNORE INTO users (id,password_hash,created_at,password_changed_at) VALUES ('second-person','x','2026-01-01','2026-01-01')\")",
 			"connection.execute(\"UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?\", (sys.argv[2],))",
 		], seeded.artifact);
 		await seeded.open(page);
 		const browse = page.getByRole('button', { name: 'Browse documents…' });
-		if (!(await browse.isVisible())) await page.getByRole('button', { name: 'Toggle panel' }).click();
+		if (!(await browse.isVisible())) await togglePanel(page);
 		await browse.evaluate((button: HTMLElement) => button.click());
 		await page.getByPlaceholder('Search docs…').fill('Project planning');
 		// This test's own rows: earlier tests on the same server seed documents with the same names.
 		const rows = page.locator('.body .row').filter({ hasText: `${path.basename(dir)}/` });
-		for (const [file, owner] of [['Project planning.md', 'Owner: Not set'], ['Project planning notes.md', 'Owner: Release planning'], ['Project planning rota.md', `Owner: ${LONG_NAME}`]]) {
+		for (const [file, owner] of [['Project planning.md', 'Owner: You'], ['Project planning notes.md', 'Owner: Release planning'], ['Project planning rota.md', `Owner: ${LONG_NAME}`]]) {
 			const row = rows.filter({ hasText: file });
 			await expect(row.locator('.row-desc-owner'), `${label}: ${file}`).toHaveText(owner, { timeout: 20_000 });
 			const fit = await row.locator('.row-desc').evaluate((line) => {

@@ -32,23 +32,24 @@ from infra.packed_rows import fetch_all
 from plans import (
     later_fields, node_order, node_waits, plan_wake, service, status_time,
 )
-from plans.close_next_bounds import bounded
+from plans.close_next_bounds import CRITERIA_MIN_BYTES, bounded, json_bytes, title as _title
 from plans.errors import PlanError
 from plans.node_waits import encoded_ids
+from prompts import later_pull
 from prompts import later_review as text
+from prompts.plan_tools import bounded_text
 
 #: One week between reviews of the same pile. A plan's review weekday is set by
 #: its first task below the cut, so plans spread across the week on their own.
 REVIEW_DAYS = 7
-#: The whole wake's cap, once per plan per week: about 600 tokens. It bounds the
-#: message, not each row, and rows are dropped from the end until it holds.
-WAKE_MAX_BYTES = 2048
 #: A row inside the wake identifies the task; reading it is the section read's
-#: job, so both are shorter than their status counterparts.
-WAKE_TITLE_BYTES = 60
+#: job, so its reason is shorter than its status counterpart. A title is cut
+#: like every plan title (``close_next_bounds.TITLE_MAX_BYTES``).
 WAKE_REASON_BYTES = 60
-#: Rows one wake lists before it points at the section read instead. Enough to
-#: decide under the cap, too few to be a list to work through.
+#: Rows one wake lists before it points at the section read instead. The wake
+#: needs no byte cap of its own: it is at most this many rows, each bounded by
+#: its title and reason cuts and its done-when line (``CRITERIA_MIN_BYTES``),
+#: plus the count and the moves.
 WAKE_ROWS = 8
 
 #: The latest move below the cut, including a move with no reason, per row.
@@ -151,8 +152,32 @@ def row_facts(db, node_ids) -> dict[str, dict]:
     return facts
 
 
-def _line(row: dict, extra: dict) -> str:
-    """One row of the wake: identity to act on, then its date or its reason."""
+def criteria_text(criteria, node_id: str) -> str:
+    """What a Later task must deliver, as the line where its fit is judged.
+
+    Bounded like a selected task's criteria in a wake, and never cut silently:
+    a cut ends by naming the read that returns the whole task.
+    """
+    marker = later_pull.CRITERIA_CUT.format(node_id=node_id)
+    return later_pull.CRITERIA.format(criteria=bounded_text(
+        str(criteria or "").strip() or later_pull.NO_CRITERIA.format(node_id=node_id),
+        CRITERIA_MIN_BYTES, measure=json_bytes, marker=marker,
+    ))
+
+
+def _criteria(db, node_ids) -> dict[str, str]:
+    """The listed rows' acceptance criteria, read for those rows and no others."""
+    return {
+        str(row["id"]): row["acceptance_criteria"]
+        for row in fetch_all(
+            db, "SELECT id, acceptance_criteria FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))",
+            (encoded_ids(list(node_ids)),),
+        )
+    }
+
+
+def _line(row: dict, extra: dict, criteria=None) -> str:
+    """One row of the wake: identity to act on, its date or its reason, then what it delivers."""
     reason = extra.get("reason")
     if extra.get("date"):
         tail = text.LATER_REVIEW_UNTIL.format(until=extra["date"])
@@ -160,35 +185,28 @@ def _line(row: dict, extra: dict) -> str:
         tail = text.LATER_REVIEW_REASON.format(reason=bounded(str(reason), WAKE_REASON_BYTES))
     else:
         tail = ""
-    return text.LATER_REVIEW_ROW.format(
-        title=bounded(str(row["title"]), WAKE_TITLE_BYTES),
+    line = text.LATER_REVIEW_ROW.format(
+        title=_title(str(row["title"])),
         node_id=row["id"], revision=row["revision"], tail=tail,
     )
-
-
-def _bytes(lines: list[str]) -> int:
-    return len("\n".join(lines).encode())
+    return f"{line}\n  {criteria_text(criteria, row['id'])}"
 
 
 def wake_text(db, rows: list[dict]) -> str:
     """The wake itself: the count, the rows in plan order, the rest, the three moves.
 
-    The count is the whole pile's and the rows are the first ones in plan order,
-    so a wake cut short by the cap still says how big the pile is and names
-    where the remainder is. Rows are dropped from the end until the cap holds,
-    and at least the count and the moves always travel.
+    The count is the whole pile's and the rows are the first ``WAKE_ROWS`` in
+    plan order, so a wake past that still says how big the pile is and names
+    where the remainder is.
     """
     head = text.LATER_REVIEW_HEAD.format(
         count=len(rows), task="task" if len(rows) == 1 else "tasks",
     )
-    extra = row_facts(db, [row["id"] for row in rows[:WAKE_ROWS]])
-    shown = [_line(row, extra.get(row["id"], {})) for row in rows[:WAKE_ROWS]]
-    for taken in range(len(shown), -1, -1):
-        closing = [text.LATER_REVIEW_MORE.format(count=len(rows) - taken)] if taken < len(rows) else []
-        lines = [head, *shown[:taken], *closing, text.LATER_REVIEW_MOVES]
-        if _bytes(lines) <= WAKE_MAX_BYTES:
-            return "\n".join(lines)
-    return "\n".join([head, text.LATER_REVIEW_MOVES])
+    ids = [row["id"] for row in rows[:WAKE_ROWS]]
+    extra, criteria = row_facts(db, ids), _criteria(db, ids)
+    shown = [_line(row, extra.get(row["id"], {}), criteria.get(row["id"])) for row in rows[:WAKE_ROWS]]
+    closing = [text.LATER_REVIEW_MORE.format(count=len(rows) - len(shown))] if len(shown) < len(rows) else []
+    return "\n".join([head, *shown, *closing, text.LATER_REVIEW_MOVES])
 
 
 def reviews(connection, *, now: str, plan_ids) -> None:

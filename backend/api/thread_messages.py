@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import authenticate
@@ -19,6 +23,7 @@ from api.thread_focus_page import (
     InvertedRange,
     read_authorized_focus_page,
     read_authorized_run_range,
+    read_authorized_run_ranges,
 )
 from api.thread_cards import attach_result_cards
 from api.thread_paging import (
@@ -30,8 +35,8 @@ from api.thread_paging import (
 router = APIRouter(prefix="/api", tags=["threads"])
 
 
-def _attach_page_extras(db, thread_id, user_id, result):
-    attach_result_cards(db, thread_id, user_id, result)
+def _attach_page_extras(db, thread_id, user_id, result, thread=None):
+    attach_result_cards(db, thread_id, user_id, result, thread)
     if result is not None:
         page = result['messages'] if isinstance(result, dict) else result[0]
         attach_comments(db, thread_id, user_id, page)
@@ -159,6 +164,80 @@ async def get_messages(
         "turn_summaries": turn_summaries,
         **({'chat_reply_items': chat_replies} if chat_replies else {}),
     }
+
+
+# Basis for the two bounds: none is recorded. Both first appeared as frontend constants in
+# 1d69ec257 (2026-10-10): `max_carded` with the comment "the newest carded messages re-read
+# per nudge" and `turn_range_limit` as the `limit` of the ranged page read, with no
+# measurement or server-side cap behind either; ab0ade2e7 (#393) then clamped a completed
+# turn's selected rows to the same 50. They are working limits, not derived ones; the
+# measured cost of a request at these limits is in tests/test_card_refresh_scale.py. The
+# frontend imports this file, so one definition governs both sides.
+_CARD_REFRESH_LIMITS = json.loads(Path(__file__).with_name("card_refresh_limits.json").read_text())
+
+
+class CardRefreshRange(BaseModel):
+    from_id: str
+    to_id: str
+
+
+class CardRefreshRequest(BaseModel):
+    message_ids: list[str] = Field(default_factory=list)
+    turn_range: CardRefreshRange | None = None
+
+
+@router.post("/threads/{thread_id}/messages/refresh")
+async def refresh_message_cards(thread_id: str, body: CardRefreshRequest, token: str):
+    """Read the same individual ranges as card refresh, in one request.
+
+    Each range reads exactly as the separate ranged GET does, except that a range the
+    GET would answer with an empty page (an id that is not a sequenced display anchor,
+    spec §3.6) or with 400 (inverted ends) reads empty here rather than ending the
+    batch: one stale range must not lose the cards of the messages beside it.
+    """
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    if len(body.message_ids) > _CARD_REFRESH_LIMITS["max_carded"]:
+        raise HTTPException(400, detail="Too many carded message IDs")
+
+    def _query():
+        db = get_db()
+        try:
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            if thread is None:
+                return None
+            restriction = transcript_restriction(Reader.from_user(user), thread)
+            if restriction is not None:
+                return restriction
+            ranges = []
+            if body.turn_range is not None:
+                ranges.append((body.turn_range.from_id, body.turn_range.to_id))
+            ranges.extend((mid, mid) for mid in body.message_ids)
+            # One authorization and one snapshot for the whole batch; a range whose ends
+            # do not resolve, or are inverted, comes back empty among the pages instead
+            # of failing the ranges beside it.
+            pages = read_authorized_run_ranges(
+                db, thread_id, _CARD_REFRESH_LIMITS["turn_range_limit"], ranges, user_id=user["id"],
+            )
+            if pages is None:
+                return None
+            rows = []
+            for page in pages:
+                if page is None:
+                    continue
+                _attach_page_extras(db, thread_id, user["id"], page, thread)
+                rows.extend(page["messages"])
+            return rows
+        finally:
+            db.close()
+
+    result = await run_read(_query)
+    if result is None:
+        raise HTTPException(404)
+    if isinstance(result, RestrictedRead):
+        return {"messages": [], **result.payload()}
+    return {"messages": result}
 
 
 @router.get(

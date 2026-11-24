@@ -377,9 +377,15 @@ def test_root_review_allows_owner_settlement_and_authenticated_human_fallback(db
         plan.id, kind="task", title="Human fallback",
         acceptance_criteria="Review passes", db=db,
     )
+    # The follow-up just added ranks above; the owner ranks this work first.
+    _mutate(
+        db, plan.id, "reorder",
+        {"node_id": human_task.id, "expected_revision": human_task.revision, "order_key": 0},
+    )
     active = _mutate(
         db, plan.id, "activate",
-        {"node_id": human_task.id, "expected_revision": human_task.revision},
+        {"node_id": human_task.id,
+         "expected_revision": service.get_node(human_task.id, db=db).revision},
     )["node"]
     waiting = _mutate(
         db, plan.id, "request_review",

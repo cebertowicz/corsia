@@ -25,12 +25,14 @@
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { WHOLE_REPLIES } from './CommentReplyList.svelte';
-	import { createOpenedReplies, createThreadOpen } from './threadOpen';
+	import { createOpenedReplies, createThreadEngagement, notEngaging } from './threadOpen';
 	import { createReplyStamps } from './replyStamps';
 	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
+	import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+	import { failedLine } from '$lib/stores/draftKept';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -38,6 +40,8 @@
 		/** Keep resolved threads in the drawer's card presentation. */
 		drawerCard?: boolean;
 		focused?: boolean;
+		/** The pointer rests on its text: the card wears the focused ring and nothing else (no opening, no reading, no hold). */
+		ringed?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
 		linked?: boolean;
 		/** An image comment in the drawer: its number is a button that selects its tag. */
@@ -99,14 +103,19 @@
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		replyText?: string;
 		replyPending?: boolean;
+		/** Why the kept reply didn't post; shown under its field until the next press of Send. */
 		replyError?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
 		onReplySelection?: (selection: [number, number] | null) => void;
+		/** The kept reply's key (`replyDraftKey`), so its field counts as the box that says why a post failed. */
+		replyKey?: string;
 	} = $props();
 
 	/** The number chip's fill: the viewer disc's, so a pin's digit reads the same in the drawer. */
 	const chipFill = $derived(tagColor ? badgeFill(tagColor) : null);
+	// Why the reply didn't post, and that this device does not keep it while it does not: one line under its field.
+	const replyLine = $derived(failedLine(replyError, keptCommentDrafts.notKept(replyKey)));
 	const me = $derived($userParticipant);
 	const who = (id: string, kind?: 'user' | 'agent') => resolveParticipant(id, me, kind);
 	// CommentMeta draws the author's avatar in this colour.
@@ -115,8 +124,8 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
-	// A chat card keeps its answers showing at rest.
-	const preview = $derived(hideReply && !chatSurface);
+	// An unpicked margin card, on a document or in chat, is a short preview.
+	const preview = $derived(hideReply);
 	// A suggestion may have no text of its own; its tags still show.
 	const hasBody = $derived(!!(comment.text || comment.taggedPerson || comment.taggedAgents?.length));
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
@@ -144,21 +153,39 @@
 	const heldNewComment = $derived.by(() => (seenNewComment ||= !!comment.newComment));
 	const { stamp } = createReplyStamps(() => comment, () => chatSurface, () => onViewed);
 
-	const { openThread, openFromFocus, focusQuietly } = createThreadOpen(() => comment, () => chatSurface, stamp);
+	/** Counts engagements, so the close below also runs on one that leaves the thread at rest. */
+	let engagements = $state(0);
+	const { engage, openFromFocus, focusQuietly, close } = createThreadEngagement(() => comment, () => chatSurface, stamp, () => { engagements += 1; });
+	// Closing a thread the person opened reads what arrived while it was open: its card resting again (a margin card let go,
+	// a chat thread no longer opened, a document card no longer the focused one: another thread picked in its list or margin, or
+	// none), or the thread leaving the page (its popover, sheet or drawer closed, another document or chat). An engagement the
+	// pick did not follow (a press on an unplaced or resolved card) leaves the thread at rest, so it is closed straight away.
+	$effect(() => { engagements; if (chatSurface ? !opened : preview || !focused) untrack(close); });
+	$effect(() => () => untrack(close));
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	$effect(() => { if (flat && !inMargin && !inList && newestReply && el) openAtNewestReply(el, newestReply); });
+	/** A thread opened on its own, in a sheet or popover: not a margin card, nor one row of a list. */
+	const onItsOwn = $derived(flat && !inMargin && !inList);
+	// Once per open of its sheet or popover, not once per card: resolving, re-opening or deciding swaps the card inside the
+	// same open, and none of these opens it.
+	let atNewestDone = false;
+	const atNewest = () => { if (onItsOwn && newestReply && el) { atNewestDone = true; openAtNewestReply(el, newestReply); } };
+	$effect(() => { if (!atNewestDone) atNewest(); });
+	/** Zero-length, on one mark outside the card's branches: only its sheet or popover closing over it and opening again plays it, a reopen during the close included. */
+	const withSurface = (_mark: Element) => ({});
+	let closedOver = false;
+	const reopened = () => { if (closedOver) atNewest(); closedOver = false; };
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
 	// Opening reads what is unread at that moment: a chat thread its caller opened, or a thread the person picked (a click
 	// or tap on its highlight, its marker, the jump control, its image tag), consumed by the card that shows it.
 	// A reply arriving while it stays open waits for the next press, which reads it the same way on either surface.
-	$effect(() => { if (opened) untrack(openThread); });
+	$effect(() => { if (opened) untrack(engage); });
 	const pickedAs = $derived(pickKey ?? (chatSurface ? null : comment.id));
 	$effect(() => {
 		const key = pickedAs;
 		if (!key || !onViewed || !$pickedComments.has(key)) return;
-		untrack(openThread);
+		untrack(engage);
 		pickedComments.update((ids) => { const remaining = new Set(ids); remaining.delete(key); return remaining; });
 	});
 
@@ -170,17 +197,22 @@
 		try {
 			const mentions = replyField?.mentions() ?? [];
 			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
-			if (!chatSurface) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
+			// Text typed while the reply posted is a new reply: it stays.
+			if (!chatSurface && replyText === submittedText) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
 		} finally {
 			replyPosting = false;
 		}
 	}
-	/** A press on the card focuses it; a link in the body or a press that ends a text selection keeps the press (controls stop their own). */
+	/** A press on the card reads and focuses it (controls stop their own); a link or a selection's end does neither. */
 	function pressCard(event: MouseEvent) {
-		if ((event.target as Element).closest('a') || !window.getSelection()?.isCollapsed) return;
+		if (notEngaging(event)) return;
+		engage();
 		onFocus?.();
+	}
+	function pressResolved(event: MouseEvent) {
+		if (!notEngaging(event)) engage();
 	}
 </script>
 
@@ -198,7 +230,7 @@
 
 {#if isSuggestion && comment.decision && !decidedOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}" onclick={openThread} onfocusin={openFromFocus}>
+	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}" onclick={pressResolved} onfocusin={openFromFocus}>
 		{@render resolvedMeta()}
 		{@render header?.()}
 		{@render resolvedHead(comment.decision === 'accepted' ? 'check' : 'cross', `${comment.decision === 'accepted' ? 'Accepted' : 'Rejected'} by ${comment.decidedBy ?? 'you'}`)}
@@ -212,7 +244,7 @@
 	</div>
 {:else if comment.resolved && !kept && !leaving}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct resolved" data-comment-card class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }} onclick={openThread} onfocusin={openFromFocus}>
+	<div class="ct resolved" data-comment-card class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }} onclick={pressResolved} onfocusin={openFromFocus}>
 		{@render resolvedMeta()}
 		{@render header?.()}
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
@@ -221,7 +253,7 @@
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -231,10 +263,10 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" data-comment-card data-thread-id={comment.id} class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} class:preview bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}, ${comment.createdAt ? formatDateTime(comment.createdAt) : comment.at}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
+	<div class="ct" data-comment-card data-thread-id={comment.id} class:flat class:focused class:ringed class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} class:preview bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}, ${comment.createdAt ? formatDateTime(comment.createdAt) : comment.at}`} onclick={pressCard} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
-			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
+			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); engage(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<CommentMeta {author} color={avatarColor} at={comment.at} createdAt={comment.createdAt} />
 			{#if (preview && collapseReplyIds.size) || newCommentShown}<NewMarker />{/if}
@@ -242,12 +274,12 @@
 				<span class="ct-reply-count" title={replyCount} data-count-long={comment.replies.length >= 100 || undefined}><svg class="ct-count-mark" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{comment.replies.length}<span class="ct-count-unit">{` ${replyNoun}`}</span></span>
 			{/if}
 			{#if !actionsAbove && !isSuggestion && !comment.resolved && (onAgree || !chatSurface)}
-				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree with this comment" aria-pressed={comment.acked} title="Agree with this comment">
+				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); engage(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree with this comment" aria-pressed={comment.acked} title="Agree with this comment">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
 			{/if}
 			{#if !actionsAbove && ((!isSuggestion && !comment.resolved) || decidedOpen) && (onResolve || !chatSurface)}
-				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
+				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); engage(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
 			{/if}
@@ -261,7 +293,7 @@
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else if isSuggestion}
 			<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />
-			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
+			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned && comment.refusalKind !== 'no_such_file'}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
 			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} {preview} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
@@ -281,13 +313,14 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
-			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} goesTo={comment.replyGoesTo} />
+			{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
-		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />{/if}
+		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} refusalKind={comment.refusalKind} {readOnly} {decisionError} onDecide={(decision) => { engage(); return onDecision?.(comment.id, decision); }} />{/if}
 	</div>
 {/if}
+{#if onItsOwn}<span hidden data-surface-mark transition:withSurface|global onoutrostart={() => (closedOver = true)} onintrostart={reopened}></span>{/if}
 
 <style>
 	.ct {
@@ -303,11 +336,11 @@
 		background: none; border: 0; border-radius: 0; box-shadow: none;
 		padding: 0; gap: var(--space-1);
 	}
-	.ct.flat.focused, .ct.flat.linked, .ct.flat.acked, .ct.flat.orphaned { background: none; border-color: transparent; box-shadow: none; }
+	.ct.flat.focused, .ct.flat.ringed, .ct.flat.linked, .ct.flat.acked, .ct.flat.orphaned { background: none; border-color: transparent; box-shadow: none; }
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
-	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
+	.ct.linked:not(.focused, .ringed) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
 	.ct.read-only .ct-act, .ct.read-only .ct-res-acts { display: none; }
-	.ct.focused { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
+	.ct.focused, .ct.ringed { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
 	.ct.acked { border-color: color-mix(in srgb, var(--green) 30%, transparent); }
 	.ct.orphaned { border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
 	/* Its text was deleted outright: the edge is dashed, as the card says "This text isn’t in the document". */
@@ -322,7 +355,9 @@
 	/* CommentMeta draws the avatar (Avatar owns the shared initials presentation); the Agree and Resolve boxes are in comment-link.css. */
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
-	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-decision-error, .ct-reply-error { font-size: var(--text-caption); color: var(--red-text); }
+	/* The card's gap spaces it, as it spaces the field above it: no paragraph margin of its own. */
+	.ct-reply-error { margin: 0; }
 	.ct-decided { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {

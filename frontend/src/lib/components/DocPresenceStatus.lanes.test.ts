@@ -56,7 +56,7 @@ function mountStatus() {
 		target: document.body,
 		props: {
 			target: { instanceId: 'tab', path: 'p.md', name: 'p.md', projectId: null, threadId: 'owner', artifactId: ART },
-			get artifactId() { return id.current; }, docState: 'ready', onPrepareCleanReload: async () => null, onFeedback: () => {},
+			get artifactId() { return id.current; }, onPrepareCleanReload: async () => null, onFeedback: () => {},
 		},
 	});
 	flushSync();

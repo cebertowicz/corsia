@@ -120,7 +120,7 @@ def wake_summary(db, watch) -> str | None:
     if watch.plan_node_id is None or watch.condition.get("type") != "deadline":
         return None
     row = db.execute(
-        """SELECT n.title, e.payload_json, w.armed_at FROM plan_node_events e
+        """SELECT n.title, n.later, n.acceptance_criteria, e.payload_json, w.armed_at FROM plan_node_events e
            JOIN plan_nodes n ON n.id=e.node_id
            JOIN expected_event_watches w ON w.id=?
            WHERE e.node_id=? AND e.event='watch_armed'
@@ -133,11 +133,20 @@ def wake_summary(db, watch) -> str | None:
         return None
     reason = json.loads(row["payload_json"])["scheduled"]["reason"]
     aside = _parse(watch.condition["value"]) - _parse(row["armed_at"])
-    return (
-        f'Scheduled task "{row["title"]}" is due (task {watch.plan_node_id}). '
-        f"You set it aside {_duration(aside.total_seconds())} ago: {reason}. "
+    from plans.later_review import criteria_text
+    from prompts.later_pull import DUE_IN_LATER
+
+    # The done-when is a sentence before "Judge fit on that", so it ends with a full stop.
+    criteria = criteria_text(row["acceptance_criteria"], watch.plan_node_id)
+    moves = DUE_IN_LATER.format(
+        criteria=criteria if criteria.endswith((".", "!", "?")) else f"{criteria}.",
+    ) if row["later"] else (
         "Start it now, schedule it again with a reason, close it, move it to Later, "
         "or raise a decision."
+    )
+    return (
+        f'Scheduled task "{row["title"]}" is due (task {watch.plan_node_id}). '
+        f"You set it aside {_duration(aside.total_seconds())} ago: {reason}. {moves}"
     )
 
 

@@ -10,6 +10,7 @@ from plans import (
     not_moving,
     operator_display_state,
     operator_node_state,
+    operator_nodes,
     operator_stopped,
     projections,
     service,
@@ -104,7 +105,7 @@ def reduce_node(
         causes=causes,
     )
     needs_user = asks_user and not operator_display_state.ask_deferred(
-        plan_paused=paused, node_paused=node_paused,
+        plan_paused=paused, node_paused=node_paused, later=bool(row["later"]),
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,
@@ -118,6 +119,7 @@ def reduce_node(
         condition,
         review_kind,
         asks_user=asks_user,
+        later=bool(row["later"]),
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
     )
@@ -135,6 +137,7 @@ def reduce_node(
         unactionable_user_block=bool(row["has_user_block"]) and not needs_user,
         plan_paused=paused,
         node_paused=node_paused,
+        later=bool(row["later"]),
     )
     return ReducedNode(
         condition=condition,
@@ -155,12 +158,26 @@ def reduce_node(
     )
 
 
+def distribution_counts(rows: list[dict], reduced: dict[str, ReducedNode]):
+    """Share canonical node facts and avoid unused branch summaries."""
+    buckets = {node_id: item.bucket for node_id, item in reduced.items()}
+    work = node_states.work_ids(rows)
+    parents = node_states.parent_ids(rows, work=work)
+    leaves = node_states.leaves(rows, work=work, parents=parents)
+    counts = operator_nodes.distribution_from_buckets(
+        rows, buckets, work=work, parents=parents, include_branches=False,
+    )[1]
+    return leaves, parents, counts
+
+
 def plan_state(
-    plan: dict, rows: list[dict], reduced: dict[str, ReducedNode],
+    plan: dict, rows: list[dict], reduced: dict[str, ReducedNode], *,
+    leaves: list[dict] | None = None, parents: set[str] | None = None,
 ) -> PlanState:
     """Reduce compact node states into canonical plan progress and motion."""
-    counted = node_states.in_play(rows)
-    leaves = node_states.leaves(rows)
+    if leaves is None:
+        leaves = node_states.leaves(rows)
+    counted = node_states.in_play(rows, leaf_rows=leaves, parents=parents)
     incomplete = [
         reduced[str(row["id"])]
         for row in leaves

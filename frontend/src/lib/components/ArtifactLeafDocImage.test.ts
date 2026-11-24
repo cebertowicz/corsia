@@ -404,7 +404,7 @@ describe('an image of a document opened in the canvas', () => {
 		await settle();
 		await commentOnWholeImage('Too dark');
 		expect(mocks.addDocImageComment).toHaveBeenCalledWith(
-			expect.objectContaining({ artifactId: 'art-doc', from: 12, to: 39 }), { x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], THREAD, [],
+			expect.objectContaining({ artifactId: 'art-doc', from: 12, to: 39 }), { x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], THREAD, [], { clientId: expect.any(String), again: false },
 		);
 	});
 
@@ -424,9 +424,12 @@ describe('an image of a document opened in the canvas', () => {
 		notesTab().click();
 		await settle();
 		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 15, to: 42 });
+		// The edit is still being written when the tab comes back (its write now reads a digest of the file's text first), so the
+		// viewer waits for that write to end before it takes comments again.
+		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
 		await commentOnWholeImage('Moved');
 		expect(mocks.addDocImageComment).toHaveBeenCalledWith(
-			expect.objectContaining({ artifactId: 'art-doc', from: 15, to: 42 }), { x: 0, y: 0, w: 1, h: 1 }, 'Moved', [], THREAD, [],
+			expect.objectContaining({ artifactId: 'art-doc', from: 15, to: 42 }), { x: 0, y: 0, w: 1, h: 1 }, 'Moved', [], THREAD, [], { clientId: expect.any(String), again: false },
 		);
 	});
 

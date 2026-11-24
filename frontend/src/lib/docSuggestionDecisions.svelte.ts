@@ -95,11 +95,11 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 				await submitSuggestionDecision(id, decision);
 				if (artifact) clearRefusal(artifact, id);
 			} catch (error) {
-				// The saved file no longer has the quote: the card stays orphaned with this reason until it is decided or the surface resets.
-				const stale = decision === 'accept' && error instanceof SuggestionRefused && error.kind === 'stale';
+				// Changed text or a missing file keeps the card orphaned with this reason until it is decided or the surface resets.
+				const kind = decision === 'accept' && error instanceof SuggestionRefused && (error.kind === 'stale' || error.kind === 'no_such_file') ? error.kind : null;
 				const text = reason(error, `Couldn’t ${decision} this suggestion. Try again.`, { id, decision });
 				settle(started, (current) => {
-					if (stale && artifact) recordRefusal(artifact, id, text);
+					if (kind && artifact) recordRefusal(artifact, id, text, kind);
 					else current.errors = { ...current.errors, [id]: text };
 				});
 			}
@@ -112,15 +112,17 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			if (!taken) settle(started, (current) => { current.errors = { ...current.errors, [id]: 'Couldn’t resolve this. Try again.' }; });
 			return taken;
 		}
-		async function acceptAllFrom(author: string, id: string) {
-			if (acceptAllBusy !== null) return;
+		async function acceptAllFrom(author: string, id: string): Promise<boolean> {
+			if (acceptAllBusy !== null) return false;
 			const started = outcome;
 			acceptAllBusy = author; started.acceptAllShownBusy = author; started.acceptAllError = '';
 			try {
 				await submitSuggestionDecision(id, 'accept', true);
+				return true;
 			} catch (error) {
 				const text = reason(error, 'Couldn’t accept the suggestions. Try again.', { id, decision: 'accept', allFromAuthor: true });
 				settle(started, (current) => { current.acceptAllError = text; });
+				return false;
 			} finally {
 				acceptAllBusy = null;
 				settle(started, (current) => { current.acceptAllShownBusy = null; });

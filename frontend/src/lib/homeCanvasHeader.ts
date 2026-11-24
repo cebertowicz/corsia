@@ -71,18 +71,17 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 	// header returns as soon as chat is the active surface again.
 	if (input.activeView === 'chat' && input.compactArtifact) {
 		const { title, tabCount, anyChanged, onBack, onTabs } = input.compactArtifact;
+		// The name opens the open-files list (a ⌄ after it says so); the document's own controls join the bar from its header.
 		canvasHeader.set({
 			title,
 			backLabel: 'Chat',
 			onBack,
-			actions: [{
-				id: 'artifact-tabs',
-				label: `Files (${tabCount})`,
+			titleAction: {
+				label: `Open files, ${tabCount}`,
 				title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
 				onClick: onTabs,
-				active: anyChanged,
-				primary: true,
-			}],
+				changed: anyChanged,
+			},
 		});
 		return;
 	}
