@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
@@ -56,6 +57,7 @@ Released 2026-11-24.
 - A comment card resting in a chat's margin now shows the same short preview a document's does; before, a long thread filled the margin and an unread answer had no mark. Pressing it still opens the whole thread.
 - A comment list full of comments and long threads now stays usable on a phone and a computer: Accept all stays at the top while the list scrolls, a long thread shows a replies row and opens whole with Back, unread comments and replies always show in full, and nothing inside a comment card scrolls on its own, the reply field included. Before, controls could sit off screen and text was cut off inside small scrolling boxes.
 - A comment list on a phone now grows, settles or closes when you drag anywhere on its top row, not only on the small grabber; a press on a button in that row still just presses the button.
+- A comment list on a phone now shows its Open and Resolved switch, with their counts, beside its title instead of in a row of its own, and while the keyboard is up its footer and Accept suggestions scroll with the list, so more of the list stays in view as you type a reply.
 - A comment thread opened from the phone list returns to the list when you resolve it; a reply you are writing stays open.
 - A comment on a live document now attaches while someone else keeps typing elsewhere in it, on text and on image regions; before, it could fail with "The document changed before your comment could be attached" until the typing paused. It is still refused when the text you selected itself changed.
 - A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
@@ -116,7 +118,7 @@ Released 2026-11-24.
 ### Documents
 
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
-- A document on a touch screen opens for reading and commenting, with Edit in its menu and Done to end typing. Selecting text offers Comment as it does on a computer, and changing modes keeps your writing and unfinished comments.
+- A document on a touch screen opens for reading and commenting, with Edit in its menu and Done to end typing. Selecting text offers Comment in a bar fixed at the bottom of the screen, above the keyboard when it is open, instead of next to the selection where it covers the phone's own handles and menu; the document leaves room so a selected line never sits under the bar. Changing modes keeps your writing and unfinished comments.
 - A document promoted to a new place keeps its comments, and the task that held them for you follows it; before, it opened with no comments and the task closed saying they couldn't be shown.
 - A document that is open live no longer refuses other reads and writes of it while a save is in progress on a busy disk; before, they could fail with a database error.
 - A document with no owner shows Owner: None.

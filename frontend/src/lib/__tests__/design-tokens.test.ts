@@ -59,6 +59,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--status-banners-height',
 	// DocViewerStatus's `style:--panel-max` on the Details panel: the height left below its top edge.
 	'--panel-max',
+	// DocTouchCommentBar measures its own height and writes it on the document column, so the end room can clear the bar.
+	'--document-comment-room',
 ]);
 
 /**
