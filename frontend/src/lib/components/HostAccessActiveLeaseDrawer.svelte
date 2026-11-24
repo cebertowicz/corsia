@@ -44,7 +44,7 @@
 	</div>
 	<div class="active-drawer-actions">
 		<Button
-			variant="danger"
+			variant="ghost"
 			size="sm"
 			loading={deciding}
 			{disabled}

@@ -109,7 +109,9 @@ export function approvalReady(lease: HostAccessItem | null): boolean {
 	if (lease?.kind === 'fill') {
 		return lease.state === 'awaiting_user' && casReady(lease)
 			&& text(lease.agent) && text(lease.site) && text(lease.username)
-			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= 1
+			// The server always offers the shortest choice; a request that doesn't is not approvable, and the
+			// drawer says so rather than dropping Approve with no word.
+			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= FILL_DURATIONS_SECONDS[0]
 			&& validTime(lease.created_at);
 	}
 	if (lease?.kind === 'script') {

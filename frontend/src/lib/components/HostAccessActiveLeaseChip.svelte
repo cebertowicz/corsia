@@ -5,8 +5,9 @@
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	/**
-	 * One active lease, as the compact shield-and-countdown chip that occupies
-	 * the attention rail's narrow slot, plus the drawer it opens. Open state
+	 * One active approval, as the composer-style chip that names it in words with
+	 * its time remaining ("Host access 14:52", "Saved login 14:52"), plus the
+	 * drawer it opens. The words are its accessible name, time included. Open state
 	 * stays with the control that owns it, so only one chip is open at a time
 	 * and focus can be restored to the trigger after the drawer closes.
 	 */
@@ -37,34 +38,12 @@
 	<button
 		type="button"
 		class="active-chip-trigger"
-		aria-label={fill ? 'Saved login approval' : 'Host access'}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={onOpen}
 	>
-		<svg
-			class="host-access-icon"
-			aria-hidden="true"
-			width="14"
-			height="14"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.8"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-		>
-			{#if fill}
-				<circle cx="7.5" cy="15.5" r="5.5" />
-				<path d="m21 2-9.6 9.6" />
-				<path d="m15.5 7.5 3 3L22 7l-3-3" />
-			{:else}
-				<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-				<path d="M12 8v4" />
-				<path d="M12 16h.01" />
-			{/if}
-		</svg>
-		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
+		<!-- One inline run, so the space between the words and the time stays in the accessible name. -->
+		<span class="chip-text">{fill ? 'Saved login' : 'Host access'} <span class="countdown">{remaining(lease, nowMs)}</span></span>
 	</button>
 	{#key lease.id}
 		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
@@ -84,33 +63,35 @@
 		flex: 0 0 auto;
 		pointer-events: auto;
 	}
+	/* The composer chip (DESIGN-SYSTEM §0.1): no fill and no border, secondary text. */
 	.active-chip-trigger {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: var(--space-1);
 		min-height: 32px;
-		padding: 0 var(--space-2);
-		border: 1px solid var(--amber-line);
-		border-radius: var(--radius-pill);
-		background: var(--bg-secondary);
-		/* The lease track scrolls, so it clips any glow; the border carries the edge. */
-		box-shadow: none;
+		padding: var(--space-1) var(--chip-inline-padding);
+		border: none;
+		border-radius: var(--radius-sm);
+		background: none;
 		font: inherit;
 		font-size: var(--text-footnote);
-		color: var(--amber);
+		font-weight: var(--fw-medium);
+		color: var(--text-secondary);
+		white-space: nowrap;
 		cursor: pointer;
+		transition: background var(--dur-tight), color var(--dur-tight);
+	}
+	.active-chip-trigger:hover, .active-chip-trigger[aria-expanded='true'] {
+		color: var(--text-primary);
+		background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
 	}
 	.active-chip-trigger:focus-visible {
 		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
-	.host-access-icon {
-		flex-shrink: 0;
-		color: var(--amber);
-	}
 	.countdown {
+		display: inline-block;
 		font-variant-numeric: tabular-nums;
-		color: var(--amber);
 		min-width: 3.2em;
 		text-align: right;
 	}
