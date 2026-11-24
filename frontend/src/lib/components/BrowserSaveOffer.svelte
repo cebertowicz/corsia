@@ -152,6 +152,8 @@
 		if (!offer || saving) return;
 		saving = true;
 		failure = null;
+		// Emptied while the save runs, so the same failure line twice in a row is still a change the live region reads out.
+		announcement = '';
 		const mine = generation;
 		const result = await saveOffer(threadId);
 		if (mine !== generation || !offer) return;

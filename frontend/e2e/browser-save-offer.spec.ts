@@ -16,9 +16,9 @@ const EXAMPLE: Offer = { site: 'https://example.com', domain: 'example.com', use
 const TWO_LINE_DOMAIN = 'login.accounts.my-example-company.example.com';
 const LONG_DOMAIN = 'sso.regional-operations.internal.my-example-company-holdings-international.example.com';
 
-/** What the server answers; the spec changes these between steps. */
 /** The size of the page the agent's viewport shows, set when the pane opens. */
 const view = { width: 900, height: 600 };
+/** What the server answers; the spec changes these between steps. */
 const server = { offer: null as Offer | null, save: 200, saveBody: {} as unknown, saves: 0, notNows: 0, gets: 0 };
 
 const SERVER_TEXT = 'Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in.';

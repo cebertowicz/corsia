@@ -587,6 +587,24 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()!.textContent).toContain('Saved');
 	});
 
+	it('announces a second failed save in a row, by emptying the live region while the retry runs', async () => {
+		saveStatus = 500;
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		expect(liveText()).toContain(PANE_LINE);
+		let release: (value: unknown) => void = () => {};
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.endsWith('/save') ? new Promise((resolve) => { release = resolve; }) : base(input, init)));
+		button('Save').click();
+		await settle();
+		expect(liveText()).not.toContain(PANE_LINE);
+		release({ ok: false, status: 500, json: async () => ({}) });
+		await settle();
+		expect(liveText()).toContain(PANE_LINE);
+	});
+
 	it('closes when the tab moves to another site, and stays for the same site', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
