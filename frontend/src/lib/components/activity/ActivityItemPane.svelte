@@ -100,14 +100,14 @@
 		}
 		lookup = { status: 'resolving' };
 		let current = true;
-		void findDocument(thread, artifactId).then((found) => {
+		void findDocument(artifactId).then((found) => {
 			if (!current || key !== itemKey) return;
 			lookup = found;
 			if (found.status !== 'found') return;
 			openArtifactTab(workspaceKey, {
 				artifactId,
 				path: found.path,
-				title: found.title,
+				title: found.title ?? found.path.split('/').pop() ?? found.path,
 				...(landOnReplies ? { landOn: 'new-replies' as const, landOnCommentId: commentId } : {}),
 			});
 			const open = get(threadWorkspaces)[workspaceKey]?.activeTabId ?? null;
@@ -197,7 +197,7 @@
 	function reply() {
 		if (lookup?.status !== 'found' || !doc) return;
 		openArtifactTab(workspaceKey, {
-			artifactId: doc.artifactId, path: lookup.path, title: lookup.title, landOn: 'new-replies', landOnCommentId: replyThread,
+			artifactId: doc.artifactId, path: lookup.path, title: lookup.title ?? lookup.path.split('/').pop() ?? lookup.path, landOn: 'new-replies', landOnCommentId: replyThread,
 		});
 	}
 
