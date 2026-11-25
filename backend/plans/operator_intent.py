@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 
-from plans import node_states
+from plans import intent_creation
+from infra.thread_title_constants import DEFAULT_THREAD_TITLE
 
 EMPTY = {
     "intent": None, "intent_is_person_comment": False, "intent_parent_title": None,
@@ -19,26 +20,21 @@ def read(node_ids: list[str], *, db) -> dict[str, dict]:
         f"""WITH RECURSIVE
         opened AS (
           SELECT n.id, n.workflow_step, n.parent_id,
-                 (SELECT parent.id FROM plan_nodes parent
-                  WHERE parent.spawned_thread_id = p.owner_id AND p.owner_kind = 'thread'
-                    AND {node_states.unarchived_sql('parent')}
-                  ORDER BY parent.updated_at DESC LIMIT 1) AS delegated_from
+                 CASE WHEN p.owner_kind = 'thread'
+                   THEN ({intent_creation.delegated_parent_sql('p.owner_id')}) END AS delegated_from
           FROM json_each(?) wanted CROSS JOIN plan_nodes n ON n.id = wanted.value
           JOIN plans p ON p.id = n.plan_id
         ),
-        chain(opened_id, source_id) AS (
+        intent_roots(opened_id, source_id) AS (
           SELECT opened.id, COALESCE(run.id, selected.id)
           FROM opened
           JOIN plan_nodes selected ON selected.id = COALESCE(opened.delegated_from, opened.id)
           LEFT JOIN plan_nodes run ON run.id = selected.parent_id AND selected.workflow_step IS NOT NULL
             AND run.kind = 'phase' AND run.workflow_ref IS NOT NULL
-          UNION
-          SELECT chain.opened_id, n.intent_node_id FROM chain
-          JOIN plan_nodes n ON n.id = chain.source_id
-          WHERE n.intent_node_id IS NOT NULL
-        )
+        ),
+        {intent_creation.CANONICAL_CHAIN_SQL}
         SELECT opened.id, source.intent, parent.title AS parent_title,
-               CASE WHEN parent.id IS NULL THEN NULL ELSE COALESCE(owner.title, 'New Chat') END AS owner_name,
+               CASE WHEN parent.id IS NULL THEN NULL ELSE COALESCE(owner.title, ?) END AS owner_name,
                CASE WHEN parent.id IS NULL AND opened.workflow_step IS NOT NULL
                     THEN run.title ELSE NULL END AS run_title
         FROM opened
@@ -48,7 +44,7 @@ def read(node_ids: list[str], *, db) -> dict[str, dict]:
         LEFT JOIN plans source_plan ON source_plan.id = source.plan_id
         LEFT JOIN threads owner ON source_plan.owner_kind = 'thread' AND owner.id = source_plan.owner_id
         LEFT JOIN plan_nodes run ON run.id = opened.parent_id AND run.kind = 'phase' AND run.workflow_ref IS NOT NULL
-        """, (json.dumps(node_ids),),
+        """, (json.dumps(node_ids), DEFAULT_THREAD_TITLE),
     ).fetchall()
     result = {}
     for row in rows:

@@ -1,7 +1,10 @@
 """The operator shows the reading and the opened task's own done test."""
-from plans import followups, mutations, operator_intent, operator_projection, service
+import pytest
+
+from plans import followups, intent_creation, mutations, operator_intent, operator_projection, service
 from plans.boundary import PlanActor
 from tests.test_operator_envelope_contract import _db
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _node(db, thread, node_id):
@@ -93,6 +96,42 @@ def test_worker_inherits_legacy_comment_label_and_own_done_test():
     assert shown["intent"] == "User document feedback: exact words"
     assert shown["intent_is_person_comment"] is True
     assert (shown["intent_parent_title"], shown["intent_owner_name"], shown["acceptance_criteria"]) == ("Feedback", "Plan owner", "Child done")
+    db.close()
+
+
+def test_creation_and_projection_choose_same_parent_among_multiple_spawns():
+    db = _db()
+    plan = service.ensure_plan("thread", "owner", db=db)
+    older = service.add_node(plan.id, kind="task", title="Older", acceptance_criteria="Done", intent="Older reading", db=db)
+    root = service.add_node(plan.id, kind="task", title="Root", acceptance_criteria="Done", intent="Selected reading", db=db)
+    newer = service.add_node(plan.id, kind="task", title="Newer", acceptance_criteria="Done", intent_node_id=root.id, db=db)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='worker', updated_at='2020-01-01' WHERE id=?", (older.id,))
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='worker', updated_at='2021-01-01' WHERE id=?", (newer.id,))
+    worker = service.ensure_plan("thread", "worker", db=db)
+    task = service.add_node(worker.id, kind="task", title="Worker task", acceptance_criteria="Done", db=db)
+    assert intent_creation.inherited_node_id(db, worker.id) == root.id
+    shown = _node(db, "worker", task.id)
+    assert (shown["intent"], shown["intent_parent_title"]) == ("Selected reading", "Newer")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='2022-01-01' WHERE id=?", (newer.id,))
+    assert intent_creation.inherited_node_id(db, worker.id) == older.id
+    shown = _node(db, "worker", task.id)
+    assert (shown["intent"], shown["intent_parent_title"]) == ("Older reading", "Older")
+    db.close()
+
+
+def test_canonical_reports_a_cycle_and_unknown_node():
+    db = _db()
+    plan = service.ensure_plan("thread", "owner", db=db)
+    first = service.add_node(plan.id, kind="task", title="First", acceptance_criteria="Done", intent="Reading", db=db)
+    second = service.add_node(plan.id, kind="task", title="Second", acceptance_criteria="Done", intent_node_id=first.id, db=db)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET intent_node_id=? WHERE id=?", (second.id, first.id))
+    with pytest.raises(service.PlanError, match="intent node reference cycle"):
+        intent_creation.canonical(db, first.id)
+    with pytest.raises(service.PlanError, match="unknown plan node: missing"):
+        intent_creation.canonical(db, "missing")
     db.close()
 
 

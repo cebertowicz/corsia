@@ -233,7 +233,7 @@ def project(
     list's facts (``execution``, ``display``, ``requires_user_action``). It
     skips the reads behind the rest: ``executor.label``, ``evidence`` and
     ``last_transition_at`` are None, a settled node's recorded reason is not in
-    ``status_reason``, and ``execution`` has no attempts and zero counts.
+    ``status_reason``; intent fields are empty; ``execution`` has no attempts and zero counts.
     """
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
     intent_by_node = {} if lean else operator_intent.read([str(node["id"]) for node, _plan in node_plans], db=db)
