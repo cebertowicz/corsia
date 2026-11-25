@@ -44,10 +44,10 @@
     "backend/tools/shell.py": 490,
     "backend/tools/shell_guard.py": 1159,
     "frontend/src/lib/components/DocumentsView.svelte": 519,
-    "frontend/src/lib/components/HostAccessLeaseControl.svelte": 491,
+    "frontend/src/lib/components/HostAccessLeaseControl.svelte": 462,
     "frontend/src/lib/ws/handlersTurns.ts": 452,
     "frontend/src/routes/+page.svelte": 473,
-    "frontend/src/routes/_design/+page.svelte": 608
+    "frontend/src/routes/_design/+page.svelte": 595
   },
   "function_limits": {
     "backend/api/delegation.py::create_thread": 140,

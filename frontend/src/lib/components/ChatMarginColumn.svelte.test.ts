@@ -7,7 +7,7 @@ import ChatMarginColumn from './ChatMarginColumn.svelte';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 
-vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('$lib/stores/attentionQueueState.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
 let host: HTMLElement;
 let scroller: HTMLElement;

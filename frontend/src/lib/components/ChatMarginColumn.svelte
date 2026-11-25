@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { messages, type ChatComment, type Message } from '$lib/stores/threads';
-	import { sendCommentReply, type ChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
+	import { sendCommentReply, type SendableChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
 	import type { MarginAnchorSource, MarginComposer } from '$lib/docMarginSource';
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import DocMarginStack from './DocMarginStack.svelte';
@@ -84,7 +84,7 @@
 			<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard, and moving into it picks the card, as a document card does, so the stack keeps it in view. A link in its body, or a press that ends a selection, picks nothing (`notEngaging`), since a pick reads it; a focus a press brings in waits for the press's release (`focusIn`). -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={(event) => { if (!notEngaging(event)) onSelect(entry.id); }} onpointerdown={() => { pressing = true; }} onfocusin={(event) => focusIn(event, entry.id)}>
-				<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin picked={selectedId === entry.id} onReply={(text) => sendCommentReply(entry.message, entry.comment, text, onSendReply)} />
+				<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin picked={selectedId === entry.id} onReply={(text, inputId) => sendCommentReply(entry.message, entry.comment, text, onSendReply, inputId)} />
 			</div>
 		{/snippet}
 	</DocMarginStack>

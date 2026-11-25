@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp_frames, browser_pane_state, browser_step_lifecycle
+from host_access import browser_cdp_frames, browser_pane_state, browser_saved_fills, browser_step_lifecycle
+from host_access.browser_saved_fills import (mark_saved_fill as mark_saved_fill, saved_fill_document as _saved_fill_document,
+                                         saved_fill_session as saved_fill_session)
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
@@ -67,6 +69,16 @@ FILLED_FIELD_REFUSED = (
 FILLED_FIELD_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. The person filled in a password field on this page, and "
     "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
+)
+# A saved-login fill's own lines for the filled page (the server filled the field, not the person).
+SAVED_FILL_REFUSED = (
+    "A saved login was filled on this page, so until you open another page or reload this one, screenshots are "
+    "refused here and each element must be named by its @ref from a snapshot, not by a CSS selector. The rest of "
+    "this browser session still runs only the commands its saved-login limit allows, on every page."
+)
+SAVED_FILL_SNAPSHOT_WITHHELD = (
+    "Error: this snapshot was withheld. A saved login was filled on this page, and the browser's output wasn't a "
+    "snapshot whose field values could be hidden. Run snapshot again."
 )
 # Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
 # display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
@@ -135,10 +147,12 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
 
 @dataclass(frozen=True)
 class PageAccess:
-    """What a command the guard let through must carry: its note, and whether a snapshot hides field values."""
+    """What a command the guard let through must carry: its note, whether a snapshot hides field values, and
+    whether this is a document a saved login was filled in (its lines are then the SAVED_FILL ones)."""
 
     note: str | None
     filled_field_visit: bool
+    saved_fill: bool = False
 
 
 async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
@@ -163,10 +177,11 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
     result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
-    filled = bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
+    saved = _saved_fill_document(thread_id, session, result.visit)
+    filled = saved or bool(result.visible_nodes) or browser_step_lifecycle.finished_visit(thread_id, result.visit)
     if filled and not _filled_field_allows(args):
-        raise BrowserSessionError(FILLED_FIELD_REFUSED)
-    return PageAccess(note, filled)
+        raise BrowserSessionError(SAVED_FILL_REFUSED if saved else FILLED_FIELD_REFUSED)
+    return PageAccess(note, filled, saved)
 
 
 def _filled_field_allows(args: tuple[str, ...]) -> bool:
@@ -266,7 +281,7 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
             raise
-        log.warning("browser page check failed for thread %s", thread_id, exc_info=True)
+        log.warning("browser page check failed for thread %s: %s", thread_id, type(exc).__name__)
         raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
     event = browser_step_lifecycle.Event(
         "declare" if instruction is not None else "probe", result,
@@ -276,9 +291,9 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         decision = await browser_step_lifecycle.step_event(
             thread_id, event, observer=partial(_observe_read_guard, thread_id),
             page=_page_source(thread_id, probe, current_session))
-    except Exception:
-        log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
-                    thread_id, exc_info=True)
+    except Exception as exc:  # the type only: a chained error's text can quote what the page or CDP returned
+        log.warning("browser step for thread %s could not be recorded (%s); a live step is kept for the next call",
+                    thread_id, type(exc).__name__)
         _observe_read_guard(thread_id, result, False, False)
         # A held step means its task exists (a failed row read, settle or emit leaves it), so the page is the
         # person's and its normal refusal is true; the kind comes from in-memory state, not the store that failed.
@@ -344,9 +359,10 @@ def person_input(thread_id: str) -> None:
 
 
 def browser_closed(thread_id: str) -> None:
-    """Clear read guards, agent presence and any save-login offer; the session hook owns step cleanup."""
+    """Clear read guards, saved-fill scope, agent presence and any save-login offer; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
+    browser_saved_fills.drop_thread(thread_id)
     saved_login_offers.drop_thread(thread_id)
 
 

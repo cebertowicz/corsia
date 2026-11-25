@@ -171,6 +171,9 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const target = Math.min(from, view.state.doc.length);
 	const widget = widgetTarget(view, target);
 	const quote = origin === 'quote-tap';
+	// A host can reserve more breathing room beneath its own controls without changing other document surfaces.
+	const requestedMargin = Number.parseFloat(getComputedStyle(view.dom).getPropertyValue('--comment-jump-margin'));
+	const quoteMargin = Number.isFinite(requestedMargin) && requestedMargin >= 0 ? requestedMargin : QUOTE_MARGIN;
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
 	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
 	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
@@ -185,7 +188,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				write: ({ box, band, scroller }, current) => {
 					if (done) return;
 					widget.reveal(current);
-					if (box) scroller.scrollTop += box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
+					if (box) scroller.scrollTop += box.top - (quote ? band.top + quoteMargin : (band.top + band.bottom - (box.bottom - box.top)) / 2);
 				},
 			});
 			// The reader's place is taken again from where this lands.
@@ -202,7 +205,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 			releasePlace(view);
 			return;
 		}
-		view.dispatch({ effects: EditorView.scrollIntoView(widget?.start ?? target, quote || widget ? { y: 'start', yMargin: QUOTE_MARGIN } : { y: 'center' }) });
+		view.dispatch({ effects: EditorView.scrollIntoView(widget?.start ?? target, quote || widget ? { y: 'start', yMargin: quoteMargin } : { y: 'center' }) });
 	};
 	const nextFrame = (run: () => void) => view.dom.ownerDocument.defaultView?.requestAnimationFrame(() => {
 		if (view.dom.isConnected) run();

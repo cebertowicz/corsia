@@ -1,54 +1,71 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
-	import { duration, remaining } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
+	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
+	import { duration, owner, remaining } from '$lib/hostAccess/leaseFormat';
+	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	let {
 		lease,
 		nowMs,
 		disabled,
 		deciding,
+		notice = null,
 		onRevoke,
+		onClose,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessTimed;
 		nowMs: number;
 		disabled: boolean;
 		deciding: boolean;
+		/** The server's line when it refused the last Revoke. */
+		notice?: string | null;
 		onRevoke: (event: MouseEvent) => void;
+		/** Done, on the sheet's own head row. */
+		onClose: () => void;
 	} = $props();
 </script>
 
+<!-- The same head as the pending request (kind label over the agent's name) and the same §0.1
+     rows: a section label over plain text. -->
 <div class="active-drawer">
+	<HostAccessDrawerHead label={lease.kind === 'fill' ? 'Sign in with a saved login' : 'Temporary host access'} title={owner(lease)} {onClose} />
 	<div class="active-drawer-body">
-		<p>{lease.purpose}</p>
-		<dl>
-			<dt>Approved duration</dt>
-			<dd>{duration(lease.requested_duration_seconds)}</dd>
-			<dt>Reviewer</dt>
-			<dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd>
-			<dt>Approval</dt>
-			<dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd>
-			<dt>Time remaining</dt>
-			<dd>{remaining(lease, nowMs)}</dd>
-		</dl>
+		{#if lease.kind === 'fill'}
+			<p>CORSIA types the password into this site for the agent. The agent never sees it.</p>
+			<dl>
+				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
+				<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>
+				<div><dt class="section-label">For how long</dt><dd>{duration(lease.duration_seconds)}</dd></div>
+				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
+			</dl>
+		{:else}
+			<p>{lease.purpose}</p>
+			<dl>
+				<div><dt class="section-label">For how long</dt><dd>{duration(lease.requested_duration_seconds)}</dd></div>
+				<div><dt class="section-label">Reviewer</dt><dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd></div>
+				<div><dt class="section-label">Approval</dt><dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd></div>
+				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
+			</dl>
+		{/if}
 	</div>
 	<div class="active-drawer-actions">
+		<HostAccessBlockedLine {notice} />
 		<Button
-			variant="danger"
-			size="sm"
+			variant="secondary"
 			loading={deciding}
 			{disabled}
 			onclick={onRevoke}
 		>
-			Revoke host access
+			{lease.kind === 'fill' ? 'Revoke approval' : 'Revoke host access'}
 		</Button>
 	</div>
 </div>
 
 <style>
 	/* Sticky within AdaptiveDrawer's own .drawer-body scroll, not a second
-	   nested scroller — the same technique DecisionChip already uses for its
-	   header in this exact shared drawer. A percentage/flex height chain
+	   nested scroller, so the header stays in this shared drawer's one
+	   scroll. A percentage/flex height chain
 	   through .drawer-body's max-height-capped flex item does not reliably
 	   resolve (verified empirically), so sticky is the robust fix. */
 	.active-drawer {
@@ -56,9 +73,18 @@
 		flex-direction: column;
 		min-height: 0;
 	}
+	/* The head is HostAccessDrawerHead, the same opaque sticky row as the request sheets'. */
+	.section-label {
+		display: block;
+		color: var(--text-tertiary);
+		font-size: var(--text-footnote);
+		font-weight: var(--fw-semibold);
+	}
+	/* The last row clears the sticky footer by the same step as the pending sheets. */
 	.active-drawer-body {
 		display: grid;
 		gap: var(--space-3);
+		padding-bottom: var(--space-4);
 	}
 	.active-drawer-body p {
 		margin: 0;
@@ -69,15 +95,16 @@
 	.active-drawer-body dl {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--space-1) var(--space-3);
+		gap: var(--space-3);
 		margin: 0;
 	}
-	.active-drawer-body dt { color: var(--text-tertiary); }
+	.active-drawer-body dl > div { min-width: 0; }
+	/* A site or username can be long: each takes the full row, as on the request sheet. */
+	.active-drawer-body dl > .wide { grid-column: 1 / -1; }
 	.active-drawer-body dd {
 		min-width: 0;
-		margin: 0;
-		color: var(--text-primary);
-		text-align: right;
+		margin: var(--space-1) 0 0;
+		color: var(--text-secondary);
 		overflow-wrap: anywhere;
 	}
 	.active-drawer-actions {
@@ -85,15 +112,13 @@
 		bottom: 0;
 		z-index: 2;
 		display: flex;
-		justify-content: flex-end;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--space-2);
 		/* Flush-bottom sheet: the footer carries the bottom inset itself. */
 		padding: var(--space-3) 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
-		background: var(--glass-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
+		border-top: 1px solid var(--border-subtle);
+		background: var(--bg-secondary);
 	}
-
-	@media (max-width: 720px) {
-		.active-drawer-body dl { grid-template-columns: 1fr 1fr; }
-	}
+	.active-drawer-actions :global(.blocked-line) { align-self: stretch; }
 </style>

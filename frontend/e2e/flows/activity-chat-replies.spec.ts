@@ -35,16 +35,17 @@ for (const width of [1440, 393]) {
     isolatedDb(['connection.execute("UPDATE doc_comments SET author_kind=\'agent\', author_thread_id=? WHERE id=?", (sys.argv[2],sys.argv[3]))'], thread, replyId);
     const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } });
     expect(response.ok()).toBeTruthy();
-    const items = (await response.json()).items;
-    expect(items.some((item: { key: string }) => item.key.startsWith('chat-reply:'))).toBe(false);
-    expect(items.some((item: { key: string }) => item.key.startsWith('doc-reply:'))).toBe(true);
+    const queue = await response.json();
+    expect([...queue.items, ...queue.notifications.items].some((item: { key: string }) => item.key.startsWith('chat-reply:'))).toBe(false);
+    expect(queue.notifications.items.some((item: { detail: { artifact_id: string } }) => item.detail.artifact_id === artifact)).toBe(true);
     await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
     await openAppPastLanding(page);
     if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
     await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
-    await expect(page.getByText('Document question', { exact: false }).first()).toBeVisible();
+    await page.getByRole('tab', { name: /Notifications/ }).click();
+    await expect(page.locator('[data-activity-row]').filter({ hasText: 'activity-reply.md' })).toBeVisible();
     await expect(page.getByText('Chat question', { exact: false })).toHaveCount(0);
-    await page.locator('[data-activity-row]').filter({ hasText: 'Document question' }).click();
+    await page.locator('[data-activity-row]').filter({ hasText: 'activity-reply.md' }).click();
     await expect(page.getByText('Document context', { exact: false }).first()).toBeVisible();
   });
 }

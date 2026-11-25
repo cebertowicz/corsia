@@ -19,6 +19,8 @@ export interface DocCommentSurfaceProps {
 	anchorAtClick?: boolean;
 	/** The canvas the card stays inside. */
 	bounds?: HTMLElement | null;
+	/** Keep the focused reply landing visible when a host notice sits above this canvas. */
+	protectReplyLanding?: boolean;
 	/** The pane is a drawer over the canvas: the margin column has no room. */
 	narrow: boolean;
 	/** A phone: a card or the composer is the sheet. Anywhere else with no margin they are a popover at the click; a surface that does not say follows `narrow`. */

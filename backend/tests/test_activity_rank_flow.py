@@ -1,4 +1,4 @@
-"""Ranking authority, and at most one unread ranking wake per ranker."""
+"""Ranking authority and passive notes for new unranked items."""
 import json
 from plans import service
 from tests.test_attention_queue import db  # noqa: F401
@@ -97,10 +97,9 @@ def _unread_wakes(db):
                       "AND json_extract(metadata,'$.event_type')='activity.unranked'").fetchone()[0]
 
 
-def _read_wakes(db):
-    db.execute("UPDATE messages SET write_started_at='2026-01-01T00:00:01+00:00' WHERE thread_id='root' "
-               "AND json_extract(metadata,'$.event_type')='activity.unranked'")
-    db.commit()
+def _notes(db):
+    return db.execute("SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
+                      "AND object_id='root' AND json_extract(details_json,'$.kind')='activity_rank' ORDER BY seq").fetchall()
 
 
 def _add_task(db, created_at):
@@ -111,33 +110,24 @@ def _add_task(db, created_at):
     return f'task:{node.id}'
 
 
-def test_no_second_wake_while_the_first_is_unread_and_items_raised_meanwhile_wake_once_after(db, monkeypatch):
+def test_one_note_per_sweep_with_new_keys_and_none_for_seen_keys(db, monkeypatch):
     from api import attention
     from automation.continuation.sources import activity_ranking
 
-    key = seed(db)
-    db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?',
-               ('2025-12-31T23:59:00+00:00', key.removeprefix('task:')))
-    db.commit()
+    first = seed(db)
     actual_queue = attention.activity_queue
     def read_without_write_lock(connection, *args, **kwargs):
         assert not connection.in_transaction
         return actual_queue(connection, *args, **kwargs)
     monkeypatch.setattr(attention, 'activity_queue', read_without_write_lock)
     source = activity_ranking.ActivityRankingSource()
-    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    # Unread: a new item raised now does not stack a second wake.
-    _add_task(db, '2026-01-01T00:01:00+00:00')
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert len(_notes(db)) == 1 and first in _notes(db)[0]['summary']
+    second = _add_task(db, '2026-01-01T00:01:00+00:00')
     assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == []
-    assert _unread_wakes(db) == 1
-    # Read, with an item raised since the last wake: exactly one more wake.
-    _read_wakes(db)
-    assert source.prepare('2026-01-01T00:03:00+00:00', db=db) == ['root']
-    assert source.prepare('2026-01-01T00:04:00+00:00', db=db) == []
-    # Read, nothing raised since: the ranker is not woken again for items it already saw.
-    _read_wakes(db)
-    assert source.prepare('2026-01-01T00:05:00+00:00', db=db) == []
-    assert _unread_wakes(db) == 0
+    assert len(_notes(db)) == 2 and second in _notes(db)[1]['summary']
+    assert source.prepare('2026-01-01T00:03:00+00:00', db=db) == []
+    assert len(_notes(db)) == 2 and _unread_wakes(db) == 0
 
 
 def test_a_ranked_queue_sends_no_wake(db):
@@ -163,35 +153,49 @@ def test_concurrent_nudge_recheck_prevents_duplicate(db, monkeypatch):
         return result
     original_queue = attention.activity_queue
     monkeypatch.setattr(attention, 'activity_queue', nudge_during_read)
-    wakes = []
-    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', lambda *args, **kwargs: wakes.append(args))
     assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
-    assert wakes == []
+    assert _notes(db) == []
 
 
-def test_nudge_enqueues_real_system_input(db):
-    from automation.continuation.sources.activity_ranking import ActivityRankingSource
-    seed(db)
-    assert ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    row = db.execute("SELECT content FROM messages WHERE thread_id='root' AND delivery_state='queued' "
-                     "AND json_extract(metadata,'$.event_type')='activity.unranked'").fetchone()
-    assert row and 'attention_rank' in row['content']
+def test_nudge_records_passive_note(db, monkeypatch):
+    from automation.continuation.sources import activity_ranking
+    events = []
+    monkeypatch.setattr(activity_ranking, 'emit_product_event', lambda *a, **k: events.append((a, k)))
+    key = seed(db)
+    assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert events[0][0] == ('activity_rank', 'digest')
+    assert events[0][1]['properties'] == {'scope_kind': 'project', 'unranked': 1, 'new': 1}
+    assert _notes(db)[0]['summary'] == (
+        f'Activity: 1 new item waiting on the person, auto-ordered by urgency (keys: {key}). '
+        'Review the order with attention_rank (tools_load names=["attention_rank"]) '
+        'when you next work through Activity.'
+    )
+    assert _unread_wakes(db) == 0
 
 
-def test_the_runners_own_sweep_with_no_connection_wakes_the_ranker(db, monkeypatch):
+def test_the_runners_own_sweep_with_no_connection_records_note(db, monkeypatch):
     """The continuation loop sweeps with db=None; reads then take the pooled connection."""
     import infra.database
     from automation.continuation import runner
     from automation.continuation.sources import activity_ranking
-    seed(db)
+    first = seed(db)
+    second = _add_task(db, '2026-01-01T00:00:00+00:00')
     pooled = lambda: _DbProxy(db)  # noqa: E731
     for module in (infra.database, runner, activity_ranking):
         monkeypatch.setattr(module, 'get_db', pooled)
     errors = []
     monkeypatch.setattr(runner.logger, 'exception', lambda *a, **k: errors.append(a))
-    woken = runner._prepare('2026-01-01T00:00:00+00:00', [activity_ranking.ActivityRankingSource()], None)
-    assert errors == [] and woken == ['root']
-    assert _unread_wakes(db) == 1
+    before = db.execute('SELECT count(*) FROM messages').fetchone()[0]
+    source = activity_ranking.ActivityRankingSource()
+    assert runner._prepare('2026-01-01T00:00:00+00:00', [source], None) == []
+    assert errors == [] and len(_notes(db)) == 1
+    assert all(key in _notes(db)[0]['summary'] for key in (first, second))
+    assert runner._prepare('2026-01-01T00:01:00+00:00', [source], None) == []
+    assert len(_notes(db)) == 1
+    third = _add_task(db, '2026-01-01T00:02:00+00:00')
+    assert runner._prepare('2026-01-01T00:03:00+00:00', [source], None) == []
+    assert len(_notes(db)) == 2 and third in _notes(db)[1]['summary']
+    assert _unread_wakes(db) == 0 and db.execute('SELECT count(*) FROM messages').fetchone()[0] == before
 
 
 def test_nudge_failed_enqueue_does_not_throttle(db, monkeypatch):
@@ -199,7 +203,7 @@ def test_nudge_failed_enqueue_does_not_throttle(db, monkeypatch):
     seed(db)
     def fail(*args, **kwargs):
         raise RuntimeError('delivery failed')
-    monkeypatch.setattr(activity_ranking, 'enqueue_event_wake', fail)
+    monkeypatch.setattr(activity_ranking, 'append_thread_context_note', fail)
     assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
     assert db.execute('SELECT count(*) FROM activity_rank_nudges').fetchone()[0] == 0
 
@@ -209,15 +213,18 @@ def test_one_failed_scope_does_not_skip_the_next(db, monkeypatch):
     monkeypatch.setattr(activity_ranking, '_scopes', lambda db: [
         ('user-1', 'bad', 'first'), ('user-1', 'good', 'second'),
     ])
+    visited = []
     def enqueue(read_db, db, user_id, project_id, thread_id, now):
+        visited.append(project_id)
         if project_id == 'bad':
             raise RuntimeError('scope failed')
         return True
     monkeypatch.setattr(activity_ranking, '_enqueue_if_due', enqueue)
-    assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == ['second']
+    assert activity_ranking.ActivityRankingSource().prepare('2026-01-01T00:00:00+00:00', db=db) == []
+    assert visited == ['bad', 'good']
 
 
-def test_paused_ranker_is_not_woken_and_wakes_once_after_unpause(db, monkeypatch):
+def test_paused_ranker_gets_one_note_after_unpause(db, monkeypatch):
     from automation.continuation.sources import activity_ranking
     seed(db)
     paused = {'root': '2026-01-01T00:00:00+00:00'}
@@ -227,9 +234,9 @@ def test_paused_ranker_is_not_woken_and_wakes_once_after_unpause(db, monkeypatch
     assert source.prepare('2026-01-01T01:00:00+00:00', db=db) == []
     assert db.execute('SELECT count(*) FROM activity_rank_nudges').fetchone()[0] == 0
     paused.clear()
-    assert source.prepare('2026-01-01T02:00:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T02:00:00+00:00', db=db) == []
     assert source.prepare('2026-01-01T02:01:00+00:00', db=db) == []
-    assert _unread_wakes(db) == 1
+    assert len(_notes(db)) == 1 and _unread_wakes(db) == 0
 
 
 def test_a_scope_that_keeps_failing_logs_once_until_it_changes(db, monkeypatch):
@@ -257,7 +264,7 @@ def test_a_scope_that_keeps_failing_logs_once_until_it_changes(db, monkeypatch):
     assert len(infos) == 1 and activity_ranking._failing == {}
 
 
-def test_an_old_task_that_falls_due_after_the_last_wake_wakes_the_ranker(db):
+def test_an_old_task_that_falls_due_after_the_last_note_is_new(db):
     from automation.continuation.sources import activity_ranking
     seed(db)
     plan = service.ensure_plan('thread', 'root', db=db)
@@ -266,26 +273,25 @@ def test_an_old_task_that_falls_due_after_the_last_wake_wakes_the_ranker(db):
     db.execute('UPDATE plan_nodes SET created_at=? WHERE id=?', ('2025-12-01T00:00:00+00:00', waiting.id))
     db.commit()
     source = activity_ranking.ActivityRankingSource()
-    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    _read_wakes(db)
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == []
     assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == []
-    # Created long before the last wake, it is new to the queue once it leaves Later.
+    # Created long before the last note, it is new to the queue once it leaves Later.
     db.execute('UPDATE plan_nodes SET later=0 WHERE id=?', (waiting.id,))
     db.commit()
-    assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == []
+    assert len(_notes(db)) == 2
     seen = json.loads(db.execute('SELECT seen_keys FROM activity_rank_nudges').fetchone()[0])
     assert f'task:{waiting.id}' in seen
 
 
-def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_wakes_the_ranker(db, monkeypatch):
+def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_is_noted(db, monkeypatch):
     from automation.continuation.sources import activity_ranking
     from tools import attention_rank
     key = seed(db)
     monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
     node_id = key.split(':', 1)[1]
     source = activity_ranking.ActivityRankingSource()
-    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
-    _read_wakes(db)
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == []
     # The item goes into Later; the ranker's set reads the queue without it, dropping its rank.
     db.execute('UPDATE plan_nodes SET later=1 WHERE id=?', (node_id,))
     db.commit()
@@ -293,4 +299,5 @@ def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_wakes_the_ranke
     db.execute('UPDATE plan_nodes SET later=0 WHERE id=?', (node_id,))
     db.commit()
     # Back in the queue unranked, it is new again.
-    assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == ['root']
+    assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == []
+    assert len(_notes(db)) == 2

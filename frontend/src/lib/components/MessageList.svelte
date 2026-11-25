@@ -109,7 +109,7 @@
 	let landedVisit: string | null = null;
 	let landedDivider: string | null = null;
 	let landedOpening: string | null = null;
-	let holdingOpeningReveal = false;
+	let holdingOpeningReveal = $state(false); // reactive, so the effect below releases a held opening landing
 	// A gesture can arrive before a deferred divider/opening intent exists; keep
 	// that cancellation for this open rather than treating the later arrival as automatic.
 	let initialLandingCancelledByUserFor: string | null = null;
@@ -160,6 +160,7 @@
 		} else {
 			landedOpening = landing.threadId;
 			holdingOpeningReveal = false;
+			requestAnimationFrame(() => scrollControl.syncNearBottom()); // held-back rows land with no scroll event
 		}
 	});
 	const renderedCards = new RenderedUpdateCards();

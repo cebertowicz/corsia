@@ -5,19 +5,21 @@ import { activeThreadId, messages, type ChatComment } from '$lib/stores/threads'
 
 import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
 import { CommentSendRefused } from '$lib/chatCommentAnchors';
 
 const comment = { id: 'root', cid: 'c1', from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', user_message_id: 'sender', created_at: '2026-10-27T00:00:00Z', note: 'Why?', quote: 'selected', delivery_state: 'delivered', answers: [] } as ChatComment;
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const send = vi.fn();
-function show(comments: ChatComment[] = [comment]) {
+function show(comments: ChatComment[] = [comment], extra: Record<string, unknown> = {}) {
 	host = document.createElement('div'); document.body.append(host);
-	component = mount(ChatCommentThreads, { target: host, props: { messageId: 'target', threadId: 'thread', comments, onReply: send, keepReplyVisible: true } });
+	component = mount(ChatCommentThreads, { target: host, props: { messageId: 'target', threadId: 'thread', comments, onReply: send, keepReplyVisible: true, ...extra } });
 	flushSync();
 }
 async function settle() { for (let i = 0; i < 3; i++) { await tick(); flushSync(); } }
-afterEach(() => { if (component) unmount(component as never); component = null; host?.remove(); chatCommentDrafts.set('root', ''); activeThreadId.set(null); messages.set([]); send.mockReset(); vi.unstubAllGlobals(); });
+afterEach(() => { if (component) unmount(component as never); component = null; host?.remove(); chatCommentDrafts.set('root', ''); keptCommentDrafts.reset(); localStorage.clear(); activeThreadId.set(null); messages.set([]); send.mockReset(); vi.unstubAllGlobals(); });
 
 it('keeps a refused reply across a thread switch, then clears it once a retry is stored', async () => {
 	let refuse!: (error: unknown) => void;
@@ -85,4 +87,31 @@ it('retries a failed reply without putting its row in the transcript', async () 
 	expect(String(fetchMock.mock.calls[0][0])).toBe('/api/threads/thread/chat-comments');
 	expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ retry_of: 'stored-1' });
 	expect(get(messages).map(row => [row.id, row.role])).toEqual([['target', 'assistant']]);
+});
+
+// The same thread is a card in the margin column, or the body of the popover and the phone sheet: one draft, one key.
+it.each([['a margin card', { margin: true, picked: true }], ['the popover or phone sheet', { opened: true }]])('a reply typed in %s and not sent is in its field again after a reload', async (_where, props) => {
+	user.set({ id: 'person-1', name: 'person-1' });
+	activeThreadId.set('thread'); show([comment], props);
+	const field = host.querySelector<HTMLTextAreaElement>('textarea')!;
+	field.value = 'A reply I did not send'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	unmount(component! as never); component = null; host.remove();
+	// The app is left and opened again over the same device storage.
+	keptCommentDrafts.reset(); user.set({ id: 'person-1', name: 'person-1' });
+	show([comment], props); await settle();
+	expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('A reply I did not send');
+});
+
+it('hands the reply’s kept client id to the send, the same on a press again', async () => {
+	send.mockRejectedValueOnce(new CommentSendRefused('no')).mockResolvedValueOnce(undefined);
+	user.set({ id: 'person-1', name: 'person-1' });
+	activeThreadId.set('thread'); show();
+	const field = host.querySelector<HTMLTextAreaElement>('textarea')!;
+	field.value = 'Under one id'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[data-send-reply]')?.getAttribute('aria-busy')).toBe('false'); });
+	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	expect(send).toHaveBeenCalledTimes(2);
+	expect(send.mock.calls[0][1]).toBeTruthy();
+	expect(send.mock.calls[1][1]).toBe(send.mock.calls[0][1]);
 });
