@@ -1,5 +1,6 @@
 import { Marked, type RendererObject, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
+import { CONFIRMATION_HOLD_MS } from './confirmationHold';
 
 const LANG_CONFIG: Record<string, { keywords: string[]; commentSingle: string; commentMultiStart: string; commentMultiEnd: string }> = {
 	js: { keywords: ['const','let','var','function','return','if','else','for','while','class','import','export','from','default','async','await','new','this','typeof','interface','type','extends','implements','try','catch','throw','switch','case','break','continue','null','undefined','true','false','of','in'], commentSingle: '//', commentMultiStart: '/*', commentMultiEnd: '*/' },
@@ -173,7 +174,7 @@ function ensureClientSetup(): void {
 		if (!code) return;
 		void navigator.clipboard.writeText(code.textContent ?? '').then(() => {
 			btn.textContent = 'Copied';
-			setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+			setTimeout(() => { btn.textContent = 'Copy'; }, CONFIRMATION_HOLD_MS);
 		});
 	});
 }
