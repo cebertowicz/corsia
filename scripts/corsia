@@ -326,13 +326,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-ok() { echo -e "  ${GREEN}✅ $1${NC}"; }
-warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
+ok() { echo -e "$(lifecycle_log_prefix)  ${GREEN}✅ $1${NC}"; }
+warn() { echo -e "$(lifecycle_log_prefix)  ${YELLOW}⚠️  $1${NC}"; }
 fail() {
     if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-false}" = true ] && [ -z "${_corsia_lifecycle_refusal_reason:-}" ]; then
         _corsia_lifecycle_refusal_reason="$1"
     fi
-    echo -e "  ${RED}❌ $1${NC}"
+    echo -e "$(lifecycle_log_prefix)  ${RED}❌ $1${NC}"
 }
 
 status() {
