@@ -65,6 +65,7 @@ class FakePage:
         self.calls: list[tuple[str, dict]] = []
         self.hang = False
         self.watchers: list[asyncio.Queue] = []
+        self.pages = {"page-1"}  # the browser's page targets: this one, plus any a click opens
 
     def client(self, _endpoint: str) -> FakeCdp:
         return FakeCdp(self)
@@ -171,6 +172,7 @@ async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> Non
 def use_page(monkeypatch, page: FakePage) -> FakePage:
     monkeypatch.setattr(capture, "_QuietCdp", page.client)
     monkeypatch.setattr(capture_writes, "quiet_cdp", page.client)
+    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
     return page
 
 
@@ -697,6 +699,69 @@ async def test_rule7_every_document_a_batch_passes_through_is_marked_and_no_othe
 
 
 @pytest.mark.asyncio
+async def test_rule7_a_batch_that_opens_a_popup_then_types_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def click_opens_popup():
+        # agent-browser moves to the popup, so the fill lands in a document this page's watch never sees.
+        page.pages.add("page-2")
+
+    agent, finish = _agent_path(monkeypatch, page, run=click_opens_popup)
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value")) == "ok"
+    assert capture._ANY_DOCUMENT in finish[0]
+    assert not await person_offered_on(monkeypatch, holder, page, "popup-doc")
+
+
+@pytest.mark.asyncio
+async def test_rule7_an_unreadable_page_list_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent, finish = _agent_path(monkeypatch, page)
+    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: no_page(_endpoint))
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert capture._ANY_DOCUMENT in finish[0]
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_watch_that_fails_to_close_still_settles_and_restarts_the_pane(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def close_fails(*_args):
+        raise RuntimeError("socket state")
+
+    monkeypatch.setattr(FakeCdp, "__aexit__", close_fails)
+    agent, finish = _agent_path(monkeypatch, page, "doc-2")
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert set(finish[0]) == {"doc-1", "doc-2"}
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_session_that_ends_during_a_watch_keeps_its_marks_out_of_the_next(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def session_ends_then_watch_breaks():
+        capture.session_ended(THREAD)
+        for queue in page.watchers:
+            queue.put_nowait(OSError("Chrome exited"))
+        page.navigate("doc-2")
+
+    agent, _finish = _agent_path(monkeypatch, page, run=session_ends_then_watch_breaks)
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert capture._state(THREAD).marks == {} and capture._state(THREAD).watches == 0
+    assert await person_offered_on(monkeypatch, holder, page, "doc-3")
+
+
+@pytest.mark.asyncio
+async def test_rule7_an_open_watch_keeps_its_thread_through_a_prune(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    writes = await capture.agent_writes(THREAD, "ws://page", ("fill", "@e1", "x"))
+    capture._state(THREAD).marks.clear()  # an open watch with nothing marked yet
+    capture._prune(THREAD)
+    page.navigate("doc-2")
+    await writes.settle()
+    assert not await person_offered_on(monkeypatch, holder, page, "doc-2")
+
+
+@pytest.mark.asyncio
 async def test_rule7_a_frame_load_or_a_cache_restore_marks_by_the_main_document(monkeypatch, holder):
     page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
 
@@ -728,7 +793,7 @@ async def test_rule7_a_watch_that_breaks_mid_command_marks_every_document(monkey
 @pytest.mark.parametrize("failure", ["unreadable", "hangs", "strange"])
 async def test_rule7_a_watch_that_fails_to_start_or_settle_marks_every_document_and_never_raises(monkeypatch, failure):
     page = use_page(monkeypatch, FakePage())
-    monkeypatch.setattr(capture, "CAPTURE_TIMEOUT", 0.02)
+    monkeypatch.setattr(capture, "WATCH_TIMEOUT", 0.02)
 
     async def hang_at_settle():
         page.hang = True

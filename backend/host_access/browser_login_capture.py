@@ -41,6 +41,10 @@ log = logging.getLogger(__name__)
 # Measured on PR #3242 (figures in its body); one second bounds a delay that can interrupt a person's thought
 # (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
 CAPTURE_TIMEOUT = 1.0
+# An agent typing command's page watch (rule 7) opened in about 2 ms and settled in 1-5 ms on Chrome for Testing
+# 152 (PR #3242). Waiting holds the agent's command, then the pane; expiring marks every document, so the
+# session makes no offer and the person's sign-in still goes through. Five seconds is three orders above that.
+WATCH_TIMEOUT = 5.0
 _WORLD = "corsia-login-capture"
 session_key = saved_login_offers.session_key
 
@@ -78,6 +82,7 @@ class _ThreadCapture:
     flights: list[_Flight] = field(default_factory=list)
     pending: _Pending | None = None
     marks: dict[str, None] = field(default_factory=dict)
+    watches: int = 0  # open rule 7 watches: their marks go to this session's `marks`, so the state stays
 
 
 _threads: dict[str, _ThreadCapture] = {}
@@ -94,7 +99,7 @@ def _reset_for_tests() -> None:
 
 def _prune(thread_id: str) -> None:
     state = _threads.get(thread_id)
-    if state is not None and not (state.group or state.flights or state.pending or state.marks):
+    if state is not None and not (state.group or state.flights or state.pending or state.marks or state.watches):
         _threads.pop(thread_id, None)
 
 
@@ -112,9 +117,21 @@ async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> Ag
     if switches_tab(args):
         _mark(thread_id, _ANY_DOCUMENT)
         return NoWrites()
-    writes = AgentWrites(partial(_mark, thread_id), CAPTURE_TIMEOUT)
-    await writes.start(endpoint)
+    state = _state(thread_id)
+    marks, state.watches = state.marks, state.watches + 1  # a late settle can't mark the next session
+    writes = AgentWrites(marks.setdefault, WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
+    try:
+        await writes.start(endpoint)
+    except BaseException:
+        await writes.settle()
+        raise
     return writes
+
+
+def _watch_done(thread_id: str) -> None:
+    if (state := _threads.get(thread_id)) is not None:
+        state.watches -= 1
+        _prune(thread_id)
 
 
 def _marked(thread_id: str, loader: str) -> bool:
@@ -356,7 +373,7 @@ def session_ended(thread_id: str, session_key: str | None = None) -> None:
         state.group = None
     if (pending := state.pending) is not None and pending.session_key == session_key:
         _resolve(thread_id, confirm=False)
-    state.marks.clear()
+    state.marks = {}
     _prune(thread_id)
 
 
