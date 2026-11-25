@@ -316,6 +316,7 @@ def create_feedback_node(
         title=_title([author], document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
         intent=_document_comment_intent(count, document) if count else None,
+        person=batch_value(batch, "author_kind") == "user",
     )
 
 
@@ -335,12 +336,17 @@ def _document_comment_intent(count: int, document: str) -> str:
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description, intent=None, intent_node_id=None) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None,
+                        person=False) -> FeedbackNodeResult:
+    from plans import comment_task_spot
+
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
+    # It lands under the task the document belongs to, never on top (plan order is priority).
+    _placed, parent_id, position = comment_task_spot.spot(db, plan.id, artifact_id, person=person)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
         description=description, intent=intent, intent_node_id=intent_node_id,
-        actor_id=None, provenance=provenance, db=db,
+        parent_id=parent_id, order_key=position, actor_id=None, provenance=provenance, db=db,
     )
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
