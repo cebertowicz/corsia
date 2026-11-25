@@ -2,11 +2,12 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
 	import { owner, remaining } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
+	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	/**
 	 * One active lease, as the compact shield-and-countdown chip that occupies
-	 * the attention rail's narrow slot, plus the drawer it opens. Open state
+	 * the attention rail's narrow slot, plus the drawer it opens. A saved-login approval is the same chip
+	 * with the password padlock (the browser pane's password notice) in place of the shield. Open state
 	 * stays with the control that owns it, so only one chip is open at a time
 	 * and focus can be restored to the trigger after the drawer closes.
 	 */
@@ -16,26 +17,31 @@
 		open,
 		deciding,
 		disabled,
+		notice = null,
 		onOpen,
 		onClose,
 		onRevoke,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessTimed;
 		nowMs: number;
 		open: boolean;
 		deciding: boolean;
 		disabled: boolean;
+		/** The line for the last failed Revoke. */
+		notice?: string | null;
 		onOpen: (event: MouseEvent) => void;
 		onClose: () => void;
 		onRevoke: (event: MouseEvent) => void;
 	} = $props();
+
+	const fill = $derived(lease.kind === 'fill');
 </script>
 
 <div class="active-chip">
 	<button
 		type="button"
 		class="active-chip-trigger"
-		aria-label="Host access"
+		aria-label={fill ? 'Saved login' : 'Host access'}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={onOpen}
@@ -52,20 +58,26 @@
 			stroke-linecap="round"
 			stroke-linejoin="round"
 		>
-			<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-			<path d="M12 8v4" />
-			<path d="M12 16h.01" />
+			{#if fill}
+				<path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" />
+			{:else}
+				<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+				<path d="M12 8v4" />
+				<path d="M12 16h.01" />
+			{/if}
 		</svg>
 		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
 	{#key lease.id}
-		<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
+		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom opaque headless {open} onClose={onClose}>
 			<HostAccessActiveLeaseDrawer
 				{lease}
 				{nowMs}
 				{deciding}
 				{disabled}
+				{notice}
 				onRevoke={onRevoke}
+				{onClose}
 			/>
 		</AdaptiveDrawer>
 	{/key}

@@ -31,6 +31,7 @@ READER_ALLOWLIST = frozenset({
     "tests/test_saved_logins.py",
     "tests/test_saved_logins_leaks.py",
     "tests/test_saved_logins_keys_routes.py",
+    "tests/test_saved_login_fills_leaks.py",
 })
 READERS = ("password_for_fill", "blanking_values")
 
