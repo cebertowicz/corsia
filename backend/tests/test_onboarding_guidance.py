@@ -647,9 +647,9 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
     ask = "Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve."
-    # The first post says what approving does: the answers become the profile every agent and chat loads, and what a cloud model receives.
-    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " Approve also accepts every suggestion you haven't rejected.`") == 1
-    assert doc.count(ask) == 2  # the post and the ask's reason
+    # The first post explains where approved facts go; the ask retains its review instructions.
+    assert doc.count("`Here's your About you doc. What you approve goes into your profile, which every agent reads.`") == 1
+    assert doc.count(ask) == 1  # the ask's reason
     assert "including agents on a cloud model" not in doc
     # The saved line says agents keep adding to it and where to edit it.
     assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
