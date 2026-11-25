@@ -23,7 +23,7 @@ const geometry = (page: Page) => page.evaluate(() => {
 		focusInCard: card.contains(document.activeElement),
 		field: box(card.querySelector('textarea')!),
 		line: box(card.querySelector('[data-reply-composer] .field')!),
-		send: card.querySelector('[data-send-reply]') ? box(card.querySelector('[data-send-reply]')!) : null,
+		send: card.querySelector('button[aria-label="Send reply"]') ? box(card.querySelector('button[aria-label="Send reply"]')!) : null,
 	};
 });
 

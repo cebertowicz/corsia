@@ -24,6 +24,8 @@ function render(comment: CommentThreadData, readOnly = false, extra: Record<stri
 	component = mount(CommentThread, { target: host, props: { comment, readOnly, onReply, onResolve, onAgree, ...extra } });
 	flushSync(); return { onReply, onResolve, onAgree };
 }
+/** The reply Send: the shared Button primitive, found by its name. */
+const SEND = 'button[aria-label="Send reply"]';
 const reply = { author: 'agent-1', authorKind: 'agent' as const, text: 'Could we keep the old wording?', at: 'later' };
 function type(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
 	input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
@@ -48,7 +50,7 @@ describe('CommentThread', () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, '  looks right  ');
-		button('.ct-send').click();
+		button(SEND).click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
@@ -80,9 +82,9 @@ describe('CommentThread', () => {
 		render(thread());
 		const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
 		type(input, 'looks right');
-		button('.ct-send').focus();
-		button('.ct-send').click();
-		await vi.waitFor(() => expect(host.querySelector('.ct-send')).toBeNull());
+		button(SEND).focus();
+		button(SEND).click();
+		await vi.waitFor(() => expect(host.querySelector(SEND)).toBeNull());
 		expect(document.activeElement).toBe(input);
 	});
 
@@ -128,12 +130,33 @@ describe('CommentThread', () => {
 		render(thread(), false, { onReply, chatSurface: true });
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'first');
-		button('.ct-send').click();
+		button(SEND).click();
 		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'first', [], []));
 		type(input, 'second thought');
 		finish();
-		await vi.waitFor(() => expect(button('.ct-send').getAttribute('aria-busy')).toBe('false'));
+		await vi.waitFor(() => expect(button(SEND).getAttribute('aria-busy')).toBeNull());
 		expect(input.value).toBe('second thought');
+	});
+
+	it('draws reply Send with the shared small primary button, and shows a busy Send while the reply goes', async () => {
+		let finish!: () => void;
+		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+		render(thread(), false, { onReply, chatSurface: true });
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'hello');
+		const send = button(SEND);
+		expect([...send.classList]).toEqual(expect.arrayContaining(['btn', 'primary', 'sm']));
+		expect(host.querySelector('.ct-send')).toBeNull();
+		expect(send.querySelector('svg')).not.toBeNull();
+		send.click();
+		await vi.waitFor(() => expect(button(SEND).getAttribute('aria-busy')).toBe('true'));
+		expect(button(SEND).disabled).toBe(true);
+		expect(button(SEND).querySelector('.spinner')).not.toBeNull();
+		expect(button(SEND).querySelector('svg')).toBeNull();
+		type(input, 'and more');
+		finish();
+		await vi.waitFor(() => expect(button(SEND).getAttribute('aria-busy')).toBeNull());
+		expect(button(SEND).querySelector('svg')).not.toBeNull();
 	});
 
 	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
@@ -159,7 +182,7 @@ describe('CommentThread', () => {
 		type(input, 'ship it');
 		input.setSelectionRange(1, 4);
 		input.dispatchEvent(new Event('select', { bubbles: true }));
-		button('.ct-send').click();
+		button(SEND).click();
 		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it', [], []));
 		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
 	});
@@ -543,7 +566,7 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-replies')?.textContent).toContain('Could we keep the old wording?');
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, ' fine by me ');
-		button('.ct-send').click();
+		button(SEND).click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
 		expect(onReply).toHaveBeenCalledWith('c1', 'fine by me', [], []);
 		expect(host.querySelector('.ct-act.ack')).toBeNull();
@@ -765,7 +788,7 @@ describe('a decided suggestion that has replies', () => {
 		const { onResolve, onReply } = render(accepted(), false, { showReply: true });
 		await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
 		type(host.querySelector<HTMLInputElement>('.ct-input')!, 'Thanks');
-		button('.ct-send').click();
+		button(SEND).click();
 		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Thanks', [], []));
 		button('.ct-act.resolve').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', true);

@@ -25,7 +25,7 @@ it('keeps a refused reply across a thread switch, then clears it once a retry is
 	activeThreadId.set('thread'); show();
 	const field = host.querySelector<HTMLTextAreaElement>('textarea')!;
 	field.value = 'keep my reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
 	expect(chatCommentDrafts.reply('root')?.posting).toBe(true);
 	unmount(component! as never); component = null; host.remove(); activeThreadId.set('other');
 	refuse(new CommentSendRefused('Please try again.')); await settle();
@@ -33,7 +33,7 @@ it('keeps a refused reply across a thread switch, then clears it once a retry is
 	activeThreadId.set('thread'); show();
 	expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('keep my reply');
 	expect(host.querySelector('[role="alert"]')?.textContent).toContain('Please try again');
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(chatCommentDrafts.get('root')).toBe('');
 });
