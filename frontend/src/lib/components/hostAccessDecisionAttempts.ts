@@ -2,6 +2,14 @@ import { get as getStoreValue, writable } from 'svelte/store';
 
 export const inFlightDecisionAttempts = writable(new Map<string, symbol>());
 
+export function failureLeaseIds(leases: { id: string }[], failedId: string): Set<string> {
+	return new Set([...leases.map((lease) => lease.id), failedId]);
+}
+
+export function hasNewLease(leases: { id: string }[], existingIds: Set<string>): boolean {
+	return leases.some((lease) => !existingIds.has(lease.id));
+}
+
 export function claimDecision(leaseId: string): symbol | null {
 	const attempt = Symbol(leaseId);
 	let claimed = false;

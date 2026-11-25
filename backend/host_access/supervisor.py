@@ -13,11 +13,10 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from host_access.browser_isolation import _close_user_model_browsers
-from host_access.errors import HostAccessSupervisorError, ReviewerUnavailableError
+from host_access.errors import HostAccessSupervisorError
 from host_access.owner_snapshot import _application_payload, _as_utc, _decoded, _encoded
 from host_access.failure_reasons import (
     HostAccessBrowserIsolationError,
-    REVIEWER_UNAVAILABLE_REASON,
     lease_failure_reason,
 )
 from host_access.redaction import validate_action_descriptor
@@ -1064,7 +1063,7 @@ async def request_reviewed_lease(
 
 
 async def _activation_failed(lease_id: str, exc: Exception) -> dict[str, Any]:
-    reason = REVIEWER_UNAVAILABLE_REASON if isinstance(exc, ReviewerUnavailableError) else "activation_failed"
+    reason = lease_failure_reason(exc, review_recorded=True)
     logger.error("host-access activation failed for lease {}: {} ({})", lease_id, reason, type(exc).__name__)
     return await _safe_block(lease_id, reason)
 

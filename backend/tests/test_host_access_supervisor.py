@@ -233,7 +233,7 @@ async def test_approval_activation_failure_is_bounded_and_logged(isolated_db, mo
         )
     finally:
         logger.remove(sink)
-    reason = "reviewer_unavailable" if outage else "activation_failed"
+    reason = "activation_reviewer_unavailable" if outage else "activation_failed"
     assert result["state"] == "blocked"
     assert result["terminal_reason"] == reason
     assert result["user_decision"] == "approved"

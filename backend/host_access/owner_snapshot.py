@@ -1,4 +1,4 @@
-"""Serialization helpers for host-access owner snapshots."""
+"""Encode and decode owner snapshots, normalize UTC, and build application payloads."""
 
 from __future__ import annotations
 

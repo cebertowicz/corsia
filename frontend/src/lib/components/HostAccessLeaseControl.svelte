@@ -1,5 +1,5 @@
 <script module lang="ts">
-	import { claimDecision, inFlightDecisionAttempts, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
+	import { claimDecision, failureLeaseIds, hasNewLease, inFlightDecisionAttempts, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
 
 	/*
 	 * "A lease is asking the user right now" is deliberately NOT a module
@@ -58,6 +58,7 @@
 	let stale = $state(false);
 	let error = $state('');
 	let activationFailure = $state('');
+	let failureIds = new Set<string>();
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
 	let nowMs = $state(Date.now());
 	let generation = 0;
@@ -130,10 +131,6 @@
 		openActiveTrigger = null;
 	}
 
-	function openPendingDrawer(): void {
-		pendingOpen = true;
-	}
-
 	function closePendingDrawer(): void {
 		pendingOpen = false;
 		pendingTriggerEl?.focus();
@@ -148,6 +145,7 @@
 			&& intent.threadId === requestedThreadId
 			&& !nextLeases.some((lease) => lease.id === intent.leaseId);
 		leases = nextLeases;
+		if (activationFailure && hasNewLease(nextLeases, failureIds)) activationFailure = '';
 		if (!leaseWasRemoved || !intent) return;
 		focusRestoreIntent = null;
 		await restoreComposerFocusAfterLeaseRemoval(
@@ -234,7 +232,8 @@
 			const result = await decideHostAccessLease(lease, decision);
 			if (decision === 'approve' && result.state === 'blocked'
 				&& isCurrentDecision(lease.id, decisionAttempt) && threadId === decisionThreadId) {
-				activationFailure = result.terminal_reason === 'reviewer_unavailable'
+				failureIds = failureLeaseIds(leases, lease.id);
+				activationFailure = result.terminal_reason === 'activation_reviewer_unavailable'
 					? REVIEWER_UNAVAILABLE_MESSAGE : ACTIVATION_FAILED_MESSAGE;
 			}
 		} catch (caught) {
@@ -383,7 +382,7 @@
 				{stale} deciding={decidingLeaseId === currentPending.id}
 				open={pendingOpen}
 				bind:element={pendingTriggerEl}
-				onclick={openPendingDrawer}
+				onclick={() => { pendingOpen = true; }}
 			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
