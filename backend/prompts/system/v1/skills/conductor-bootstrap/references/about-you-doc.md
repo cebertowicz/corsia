@@ -44,7 +44,7 @@ When every `About you: <heading>` task is settled and every suggestion is in, ad
 
 ## 4. When they approve
 
-First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then write the profile (section 5), and follow the handover and messages in step 5 of `references/first-run-app.md` before step 6.
+First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then write the profile (section 5). If the person already owns the profile (the hand-off gave it to them), section 5 suggests each change for them to decide, with no handover and no message. Otherwise follow the handover and messages in step 5 of `references/first-run-app.md`, then go on to step 6 if setup is still running.
 
 ## 5. Write the profile
 

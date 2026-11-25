@@ -667,6 +667,8 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert all(line in app_step for line in lines)
     assert [app_step.index(line) for line in lines] == sorted(app_step.index(line) for line in lines)
     assert "follow the handover and messages in step 5" in doc
+    # A late Approve, after the hand-off gave the profile to the person, never re-runs the handover.
+    assert "If the person already owns the profile (the hand-off gave it to them), section 5 suggests each change for them to decide, with no handover and no message." in doc
     assert "`artifact_rehome` on that artifact with `new_owner_thread_id` `user`" in app_step
     assert "If handover fails, report the problem and do not say the profile is theirs." in app_step
     # A helper's brief carries the same per-fact form and quotes only its own heading.
