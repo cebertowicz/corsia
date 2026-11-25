@@ -71,6 +71,16 @@ export async function setDeliverCommentsImmediately(value: boolean): Promise<boo
 }
 
 /**
+ * The "Deliver immediately" switch, wherever it is drawn (the document header row, the phone comments sheet's footer): saves the
+ * choice, and turning it on asks the server to send the document's held lane, since another client may have held a comment this
+ * one has not synced yet. An empty lane delivers nothing and shows nothing.
+ */
+export async function changeImmediateDelivery(value: boolean, feedback?: { sendDocument(): unknown }): Promise<void> {
+	if (!(await setDeliverCommentsImmediately(value))) return;
+	if (value) void feedback?.sendDocument();
+}
+
+/**
  * Keeps the toggle in step with the person's other clients: a change made elsewhere arrives as a frame, and every connect
  * re-reads what a dropped connection missed. Returns one stop.
  */

@@ -319,6 +319,15 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
 	});
 
+	it('reports how many threads are resolved to the viewer, so the document row can offer Resolved', () => {
+		let reported = -1;
+		const comments = writable([suggestion, { ...secondSuggestion, resolved: true }]), liveComments = fromStore(comments);
+		render(Object.defineProperties({ state: { kind: 'list' }, get comments() { return liveComments.current; } }, Object.getOwnPropertyDescriptors({ get resolvedCount() { return reported; }, set resolvedCount(value: number) { reported = value; } })));
+		expect(reported).toBe(1);
+		comments.set([suggestion]); flushSync();
+		expect(reported).toBe(0);
+	});
+
 	it('lists only the open threads in the sheet that has no margin; the resolved ones, newest first, open in their own drawer from the header control', async () => {
 		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
 		const open = resolvedDrawerProps();
@@ -1107,6 +1116,18 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		render({ narrow: true, phone: true, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id } });
 		expect(document.body.querySelector('[data-adaptive-drawer]')).not.toBeNull();
 		expect(document.body.querySelector('[data-popover]')).toBeNull();
+	});
+
+	it('closes the list with Deliver immediately and Send on the phone sheet only; above the phone width they are in the document header row', () => {
+		const foot = () => document.body.querySelector('.drawer-foot');
+		render({ narrow: true, phone: true, bounds: noRoomCanvas(), state: { kind: 'list' }, comments: [suggestion], feedback: undefined });
+		expect(document.body.querySelector('[data-adaptive-drawer]')).not.toBeNull();
+		expect(foot()?.textContent).toContain('Deliver immediately');
+		unmount(component!); component = null; host.remove();
+		render({ narrow: true, phone: false, bounds: noRoomCanvas(), state: { kind: 'list' }, comments: [suggestion], feedback: undefined });
+		expect(document.body.querySelector('[data-popover]')).not.toBeNull();
+		expect(foot()).toBeNull();
+		expect(document.body.textContent).not.toContain('Deliver immediately');
 	});
 
 	it('does not offer accept-all for suggestions that were already decided', () => {

@@ -4,6 +4,7 @@
 </script>
 
 <script lang="ts">
+	import './ReviewBarHeader.css';
 	import { getContext, tick, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
 	import { cubicIn } from 'svelte/easing';
@@ -283,7 +284,7 @@
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	/* A name cut in the middle keeps its first letter, the ellipsis, its last four characters and the colon (MiddleName's floor), whatever the row leaves it. */
 	.rb-who:has(:global(.name.cut)) { min-width: calc(1.8em + 6ch); }
-	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. */
+	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. Where the header cannot hold both floors beside the tools, the header stacks (headerStack). */
 	.rb-ask { flex: 1 1 0; min-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
 	.review-bar.expanded .rb-chev { transform: rotate(180deg); }

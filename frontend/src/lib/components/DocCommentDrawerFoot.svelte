@@ -1,21 +1,15 @@
 <script lang="ts">
 	import { Toggle } from '$lib/components/ui';
-	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
+	import { deliverCommentsImmediately, changeImmediateDelivery } from '$lib/commentDeliveryPreference';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 
 	let { feedback }: { feedback?: DocFeedback } = $props();
-
-	async function changeImmediateDelivery(value: boolean): Promise<void> {
-		if (!(await setDeliverCommentsImmediately(value))) return;
-		// A remote client may have held a comment that has not synced here yet.
-		if (value) void feedback?.sendDocument();
-	}
 </script>
 
 <div class="drawer-foot">
 	{#if feedback}<div class="send"><DocFeedbackControls {feedback} lane="document-held" countSep=" · " announce={false} /></div>{/if}
-	<div class="delivery" title="When off, comments send when you close the document or pause for two minutes."><Toggle size="sm" label="Deliver immediately" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} /></div>
+	<div class="delivery" title="When off, comments send when you close the document or pause for two minutes."><Toggle size="sm" label="Deliver immediately" checked={$deliverCommentsImmediately} onchange={(value) => changeImmediateDelivery(value, feedback)} /></div>
 </div>
 
 <style>

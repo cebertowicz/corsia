@@ -31,6 +31,10 @@ export interface DocViewerStatusProps {
 	reviewTargetKey?: string | null;
 	onReload?: () => void;
 	onOpenComments: (opener: HTMLElement) => void;
+	/** Resolved threads behind the text control that opens the drawer on its Resolved view, above the phone width; zero hides it. */
+	resolvedCount?: number;
+	resolvedOpen?: boolean;
+	onOpenResolved?: (opener: HTMLElement) => void;
 	freshness: DocumentFreshness | null;
 	/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
 	ownership?: DocOwnership | null;

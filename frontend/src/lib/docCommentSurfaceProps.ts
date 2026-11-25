@@ -83,6 +83,8 @@ export interface DocCommentSurfaceProps {
 	opened?: number;
 	/** The drawer shows the resolved list rather than the open one: set by its Open | Resolved switch and by the viewer's jump to a resolved reply. */
 	resolvedOpen?: boolean;
+	/** How many resolved threads the document has, for the row's Resolved control: set by the surface, zero for an image. */
+	resolvedCount?: number;
 	/** The document's Comments button, drawn in the app bar or tab strip outside the canvas: a list the canvas opened hangs from it. */
 	commentsEntry?: HTMLElement | null;
 }

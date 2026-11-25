@@ -18,6 +18,14 @@ import { canvasCompact } from '$lib/stores/artifactCanvas';
 import { patchDraft, seedDraft } from '$lib/stores/docSaveDrafts';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 
+const phone = vi.hoisted(() => ({ isMobile: null as unknown as import('svelte/store').Writable<boolean>, isShortTouch: null as unknown as import('svelte/store').Writable<boolean> }));
+vi.mock('$lib/stores/viewport', async importOriginal => {
+	const { writable: store } = await import('svelte/store');
+	phone.isMobile = store(false);
+	phone.isShortTouch = store(false);
+	return { ...await importOriginal<typeof import('$lib/stores/viewport')>(), isMobile: phone.isMobile, isShortTouch: phone.isShortTouch };
+});
+
 let host: HTMLElement;
 let bar: ReturnType<typeof mount> | null = null;
 let component: ({ commentCreated: () => void; feedback: () => DocFeedback | undefined; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
@@ -62,9 +70,13 @@ function render(freshness: DocumentFreshness, onMarkVerified = vi.fn().mockResol
 	// Comments and Details are drawn by the bar that holds the canvas; a stand-in draws them here.
 	bar = mount(DocumentBarTestHost, { target: host });
 	flushSync();
-	if (component?.feedback()) renderFoot(overrides);
+	// The comments footer is the phone sheet's; above the phone width its controls are in the row (DocCommentSurface draws no footer there).
+	if (component?.feedback() && get(phone.isMobile)) renderFoot(overrides);
 	return onMarkVerified;
 }
+
+// The bar, Details and comments-footer suites below are the phone's: the same controls above the phone width are in the document column's row (the last suite).
+beforeEach(() => { phone.isMobile.set(true); phone.isShortTouch.set(false); });
 
 afterEach(() => {
 	foot?.$destroy(); foot = null;
@@ -550,5 +562,194 @@ describe('File changed · Reload beside a refused typing save', () => {
 		patchDraft('tab-1', { status: 'error', error: 'network', stale: false });
 		render(value(), undefined, { stale: true });
 		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
+	});
+});
+
+describe('DocViewerStatus above the phone width', () => {
+	const held = (document_held_count: number, image_held_count: number) => ({
+		open_count: document_held_count + image_held_count, document_held_count, image_held_count, owner_label: 'Style', undelivered_batches: [],
+	}) as unknown as CommentFeedback;
+	const fetchMock = vi.fn();
+	const inBar = (selector: string) => host.querySelector(`[data-test-document-bar] ${selector}`);
+	const inPanel = (selector: string) => host.querySelector(`.doc-panel ${selector}`);
+	const send = () => [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''));
+
+	beforeEach(() => {
+		phone.isMobile.set(false);
+		fetchMock.mockReset();
+		fetchMock.mockImplementation((url: string) => Promise.resolve(new Response(JSON.stringify(
+			String(url).startsWith('/api/doc-feedback/')
+				? { woken: [], undelivered_batches: [], sent_count: 1, open_count: 0, document_held_count: 0, image_held_count: 0 }
+				: { reviews: [], reviewers: [] },
+		), { status: 200 })));
+		vi.stubGlobal('fetch', fetchMock);
+	});
+	afterEach(() => { vi.unstubAllGlobals(); token.set(null); });
+
+	it('closes the row\'s metadata on scoped Escape, restores its toggle, and leaves other controls alone', () => {
+		render(value({ state: 'overdue' }));
+		const toggle = host.querySelector<HTMLButtonElement>('.identity-details')!;
+		expect(toggle.getAttribute('aria-label')).toBe('Document details');
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		toggle.click(); flushSync();
+		expect(toggle.getAttribute('aria-expanded')).toBe('true');
+		expect(host.querySelector('.document-metadata')!.classList.contains('expanded')).toBe(true);
+		const escape = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+		host.querySelector<HTMLButtonElement>('.comment-status')!.dispatchEvent(escape()); flushSync();
+		expect(toggle.getAttribute('aria-expanded')).toBe('true');
+		const event = escape();
+		host.querySelector<HTMLButtonElement>('.verification-action button')!.dispatchEvent(event); flushSync();
+		expect(event.defaultPrevented).toBe(true);
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		expect(document.activeElement).toBe(toggle);
+	});
+
+	it('draws Overdue in the identity row and the metadata row, with the age line holding the freshness phrase', () => {
+		render(value({ state: 'overdue' }));
+		const header = host.querySelector('header')!;
+		expect([...header.querySelectorAll('.document-identity, .document-metadata')].map((row) => row.textContent?.includes('Overdue'))).toEqual([true, true]);
+		expect(header.querySelector('.identity-age .identity-verified')!.textContent).toBe('verified 18 days ago');
+		expect(header.querySelector('.identity-age .identity-owner')!.textContent).toBe('Owner: Structured Plans');
+	});
+
+	it('offers Resolved beside the count while threads are resolved, and opens the drawer on it from the control', () => {
+		const onOpenResolved = vi.fn();
+		render(value(), undefined, { resolvedCount: 2, onOpenResolved });
+		const control = () => host.querySelector<HTMLButtonElement>('.document-status-row [data-resolved-tool]')!;
+		expect(control().textContent?.trim()).toBe('Resolved · 2');
+		expect(control().previousElementSibling).toBe(host.querySelector('.comment-status'));
+		expect(control().getAttribute('aria-expanded')).toBe('false');
+		control().click();
+		expect(onOpenResolved).toHaveBeenCalledWith(control());
+	});
+
+	it.each([
+		[1, true, true, 'true'],
+		[1, true, false, 'false'],
+		[1, false, true, 'false'],
+	])('marks Resolved expanded only while the drawer is open on its Resolved view (%s resolved, drawer %s, resolved view %s)', (resolvedCount, commentsOpen, resolvedOpen, expanded) => {
+		render(value(), undefined, { resolvedCount, onOpenResolved: vi.fn(), commentsOpen, resolvedOpen });
+		expect(host.querySelector('[data-resolved-tool]')!.getAttribute('aria-expanded')).toBe(expanded);
+	});
+
+	it('hides Resolved with nothing resolved', () => {
+		render(value(), undefined, { resolvedCount: 0, onOpenResolved: vi.fn() });
+		expect(host.querySelector('[data-resolved-tool]')).toBeNull();
+	});
+
+	it('keeps the count, Deliver immediately and the owner in the document column row, with no Comments or Details in the bar', async () => {
+		token.set('test-token');
+		render(value());
+		const header = host.querySelector('header')!;
+		expect(header.textContent).toContain('Owner: Structured Plans');
+		const pill = header.querySelector('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe('0 comments');
+		expect(pill.hasAttribute('data-comments-entry')).toBe(true);
+		expect(host.querySelector('[data-test-document-bar] [data-comments-entry]')).toBeNull();
+		expect(host.querySelector('[data-document-details]')).toBeNull();
+		const delivery = header.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!;
+		expect(delivery.textContent).toBe('');
+		expect(header.textContent).toContain('Deliver immediately');
+		expect(delivery.getAttribute('aria-pressed')).toBe('true');
+		delivery.click(); flushSync();
+		expect(delivery.getAttribute('aria-pressed')).toBe('false');
+		await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/doc-feedback/delivery-preference' && init?.method === 'PUT' && init.body === '{"immediate":false}')).toBe(true));
+	});
+
+	it('shows each control once: the panel holds none of what the row holds', () => {
+		render(value({ state: 'overdue' }), undefined, { viewingThreadId: 'thread-1', historyAvailable: true, onOpenHistory: vi.fn(), saveStatus: 'saved', readonly: true, ownership: null });
+		const header = host.querySelector('header')!;
+		expect(header.querySelectorAll('.review-request')).toHaveLength(1);
+		expect(header.querySelector('.review-request')!.closest('.tool-review')).not.toBeNull();
+		expect(header.querySelectorAll('.history-tool')).toHaveLength(1);
+		expect(header.querySelector('.history-tool')!.closest('.tool-review')).not.toBeNull();
+		expect(header.querySelector('.save-ghost')!.textContent).toBe('✓ Saved');
+		expect(header.querySelector('.readonly-note')!.textContent).toBe('Read-only.');
+		expect(header.querySelector('.verification-action button')!.closest('.document-metadata')).not.toBeNull();
+		for (const selector of ['.review-request', '.history-tool', '.verification-action', '.p-owner', '.p-quiet', '.readonly-note', '.p-review']) expect(inPanel(selector), selector).toBeNull();
+		expect(inPanel('.p-row')).toBeNull();
+		expect(host.querySelector('[data-test-document-bar] [data-comments-entry]')).toBeNull();
+	});
+
+	it('draws the owner and supervisor picker in the metadata row, not the panel', () => {
+		render(value(), undefined, { ownership: { owner: { kind: 'person', id: 'user', label: 'Steve' }, supervisor: { kind: 'agent', id: 'agent-1', label: 'Plans' } } });
+		const row = host.querySelector('.document-metadata')!;
+		expect(row.hasAttribute('data-ownership-row')).toBe(true);
+		expect(row.querySelector('.metadata-owner .ownership')).not.toBeNull();
+		expect(host.querySelectorAll('[data-ownership-row]')).toHaveLength(1);
+		expect(inPanel('[data-ownership-row]')).toBeNull();
+	});
+
+	it('shows Send before the tool cluster in the row, and the count beside it', () => {
+		render(value(), undefined, { commentCount: 2 });
+		component!.sync('artifact-1', held(3, 2));
+		flushSync();
+		const identity = host.querySelector('.document-identity')!;
+		expect(identity.contains(send()!)).toBe(true);
+		expect(send()!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 3 comments');
+		expect(send()!.getAttribute('aria-label')).toBe('Send 3 comments to Style');
+		expect(host.querySelector('.comment-status')!.getAttribute('aria-label')).toContain('5 waiting for Send');
+		// The comments footer is not drawn here, so Send is not repeated.
+		expect([...host.querySelectorAll('button')].filter((button) => /^Send/.test(button.textContent?.trim() ?? ''))).toHaveLength(1);
+	});
+
+	it('shows Sent beside the count, so neither hides the other', () => {
+		render(value(), undefined, { commentCount: 2 });
+		component!.sync('artifact-1', held(1, 0));
+		flushSync();
+		const pill = host.querySelector<HTMLElement>('.comment-status')!;
+		expect(pill.querySelector('.count')!.textContent).toBe('2');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('comments');
+		expect(pill.closest('header')!.querySelector('.bar-sent-container')).toBeNull();
+		expect(pill.querySelector('.receipt-hidden')).toBeNull();
+	});
+
+	it('puts File changed · Reload in the row once, and nothing after the name in the bar', () => {
+		render(value(), undefined, { stale: true });
+		canvasCompact.set(true); flushSync();
+		expect(host.querySelectorAll('[data-file-changed]')).toHaveLength(1);
+		expect(host.querySelector('[data-file-changed]')!.closest('.document-status-row')).not.toBeNull();
+		expect(host.querySelector('[data-file-changed]')!.textContent).toContain('File changed · Reload');
+		expect(host.querySelector('[data-test-document-bar] [data-file-changed]')).toBeNull();
+	});
+
+	it('shows Details in the bar only while something waits behind it, and then without Overdue in its name', () => {
+		render(value({ state: 'overdue' }));
+		expect(host.querySelector('[data-document-details]')).toBeNull();
+		component!.$set({ ask: { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false } }); flushSync();
+		const details = host.querySelector<HTMLElement>('[data-test-document-bar] [data-document-details]')!;
+		expect(details.getAttribute('aria-label')).toBe('Document details · Is this skill ready?');
+		expect(inPanel('[data-details-ask]')).not.toBeNull();
+		details.click(); flushSync();
+		expect(details.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('keeps Mark verified on the overdue row beside the freshness phrase', async () => {
+		const mark = render(value({ state: 'overdue' }));
+		const row = host.querySelector('.document-metadata')!;
+		expect(row.querySelector('.verification-action button')!.textContent!.trim()).toBe('Mark verified');
+		expect(row.textContent).toContain('verified');
+		row.querySelector<HTMLButtonElement>('.verification-action button')!.click();
+		await vi.waitFor(() => expect(mark).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(host.querySelector('.metadata-status[role="status"]')?.textContent).toBe('Document marked verified.'));
+	});
+
+	it('names unsent feedback in the count button and clears it when nothing is held', () => {
+		render(value(), undefined, { commentCount: 1 });
+		const pill = host.querySelector('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe('1 comment');
+		component!.sync('artifact-1', { open_count: 1, image_held_count: 1, owner_label: 'Style', undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 comment, 1 waiting for Send');
+		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
+		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 comment');
+	});
+
+	it('hangs the comments list from the row\'s count button', () => {
+		render(value());
+		const comments = (component as unknown as { commentsButton: () => HTMLButtonElement | null }).commentsButton;
+		expect(comments()).toBe(host.querySelector('header .comment-status'));
 	});
 });

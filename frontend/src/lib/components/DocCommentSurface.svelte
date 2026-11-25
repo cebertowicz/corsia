@@ -43,7 +43,7 @@
 	import { refusalMessage, suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocCommentSurfaceProps } from '$lib/docCommentSurfaceProps';
-	let { commentTaskBar, state: surfaceState, anchor, anchorAtClick = false, bounds = null, protectReplyLanding = false, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedOpen = $bindable(false), commentsEntry = null }: DocCommentSurfaceProps = $props();
+	let { commentTaskBar, state: surfaceState, anchor, anchorAtClick = false, bounds = null, protectReplyLanding = false, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedOpen = $bindable(false), resolvedCount = $bindable(0), commentsEntry = null }: DocCommentSurfaceProps = $props();
 	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
@@ -130,6 +130,8 @@
 	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : surfaceState?.kind === 'thread' && cardMode() === 'sheet' ? draftSheet : null, surfaceState?.kind === 'draft' ? onRevealDraft : onRevealCard && ((opening) => onRevealCard(opening, draftSheet))));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
+	/** Deliver immediately and the document-held Send close the phone sheet's list; above phone width (`phone` false) they are in the document header's row, so no popover or margin column repeats them. */
+	const footerHere = $derived(!isImage && !!artifactId && phone !== false);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
 	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
@@ -143,8 +145,9 @@
 	/** With the column up a new comment is written in it, level with its selection, so the text it is on stays uncovered. */
 	const marginDraft = $derived(margin && surfaceState?.kind === 'draft' ? { id: 'draft', anchor: () => anchorRect(anchor), body: content } : null);
 	const resolvedList = $derived(comments.filter((comment) => comment.resolved && !held.kept(comment) && !held.leaving.has(comment.id) && !comment.review).sort(byNewest));
-	/** The count the drawer's Resolved answer shows. Nothing outside the surface reads it, so it stays here. */
-	const resolvedCount = $derived(image ? 0 : resolvedList.length);
+	/** The count the drawer's Resolved answer shows, and the one the document's row shows beside the Comments count (resolvedCount, bound out). */
+	const resolvedTotal = $derived(image ? 0 : resolvedList.length);
+	$effect.pre(() => { resolvedCount = resolvedTotal; });
 	/** The phone sheet's switch is the heading's meta, beside the title, so it takes no row of its own; the popover and the margin column keep the row. */
 	const switchInHeading = $derived(!margin && !isImage && !openedComment && sheet.state?.kind === 'list' && !!sheetDrawer);
 	const displayed = $derived.by(() => {
@@ -275,7 +278,7 @@
 {/snippet}
 {#snippet threadActions()}{#if threadHead}<ThreadSheetActions head={threadHead} onAgree={onAgree} onResolve={(id) => ownClose.resolving(id, resolveThread(id, true))} />{/if}{/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
-{#snippet statusSwitch()}<div class="drawer-switch" class:in-heading={switchInHeading} role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedCount}</button></div>{/snippet}
+{#snippet statusSwitch()}<div class="drawer-switch" class:in-heading={switchInHeading} role="group" aria-label="Comment status"><button type="button" aria-pressed={!resolvedOpen} onclick={() => resolvedOpen = false}>Open · {openCount}</button><button type="button" data-resolved-entry aria-pressed={resolvedOpen} onclick={() => resolvedOpen = true}>Resolved · {resolvedTotal}</button></div>{/snippet}
 {#snippet acceptAllBar()}
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
 {/snippet}
@@ -297,16 +300,16 @@
 	<!-- Accept suggestions sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. On the phone sheet it is the scroller's first row, pinned to its top, so it looks and stays where it was; under the keyboard the footer scrolls to give the list room (documentFooterRoom) and the row scrolls with it. The thread view gives that room to its one thread. -->
 	{#if acceptAllShown && !acceptInScroller}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
 	{#if openedComment}<DocCommentThreadBack onBack={threadView.back} />{/if}
-	{#if margin && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
+	{#if margin && footerHere}<DocCommentDrawerFoot {feedback} />{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
 		{#if acceptAllShown && acceptInScroller}<div class="list-accept-all in-scroller" class:pinned={!footerScrolls}>{@render acceptAllBar()}</div>{/if}
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
 		{#if !isImage && resolvedOpen}<DocResolvedComments>{#snippet list()}{#if resolvedList.length}{@render threadList(resolvedList, true, true, false, true)}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">No resolved comments.</p>{/if}{/snippet}</DocResolvedComments>{:else if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} focusComposer={!form.redrawn} head={isImage && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError) ? acceptAllBar : null}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if openedComment}{@render threadList([openedComment], true, false, false, true, 'all')}{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
-		{#if footerScrolls && !isImage && artifactId}<DocCommentDrawerFoot {feedback} />{/if}
+		{#if footerScrolls && footerHere}<DocCommentDrawerFoot {feedback} />{/if}
 	</div>
-	{#if !margin && !isImage && artifactId && !footerScrolls}<DocCommentDrawerFoot {feedback} />{/if}
+	{#if !margin && footerHere && !footerScrolls}<DocCommentDrawerFoot {feedback} />{/if}
 {/snippet}
 {#snippet cardPopover()}<Popover fill anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={form.handoff ?? (image && !readOnly ? '.ct-input' : undefined)} takeFocus={form.redrawn ? !!form.handoff : !(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => isShellControl(target) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
 

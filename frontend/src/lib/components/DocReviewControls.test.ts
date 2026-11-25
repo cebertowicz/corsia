@@ -11,6 +11,12 @@ vi.mock('$lib/ws/events', () => ({ on: (name: string, handler: (frame: unknown) 
 	return () => listeners.delete(handler);
 } }));
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: toastShow } }));
+const phone = vi.hoisted(() => ({ isMobile: null as unknown as import('svelte/store').Writable<boolean> }));
+vi.mock('$lib/stores/viewport', async importOriginal => {
+	const { writable: store } = await import('svelte/store');
+	phone.isMobile = store(false);
+	return { ...await importOriginal<typeof import('$lib/stores/viewport')>(), isMobile: phone.isMobile };
+});
 let host: HTMLElement;
 let component: { $destroy(): void; $set(props: Record<string, unknown>): void } | undefined;
 let bar: ReturnType<typeof mount> | null = null;
@@ -66,6 +72,7 @@ beforeEach(() => {
 	});
 	vi.stubGlobal('fetch', fetchMock);
 });
+beforeEach(() => { phone.isMobile.set(false); });
 afterEach(() => { if (bar) { unmount(bar); bar = null; } component?.$destroy(); host?.remove(); events.clear(); vi.unstubAllGlobals(); });
 
 describe('document review toolbar and popover', () => {
@@ -75,6 +82,15 @@ describe('document review toolbar and popover', () => {
 		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 comments')).toBeTruthy();
 	});
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
+		render({ commentCount: 1, stale: true }); await settle();
+		expect(document.body.querySelector('.reviewer-group')).toBeNull();
+		expect([...document.body.querySelectorAll<HTMLElement>('.document-tools button')].map(nameOf)).toEqual(['File changed · Reload', '1 comment', 'Deliver comments immediately', 'Request review']);
+		// The delivery switch is a Toggle, not a text tool: every other control shares the one style.
+		expect([...document.body.querySelectorAll('.document-tools button:not(.tg)')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
+		expect(document.body.querySelector('.doc-panel button')).toBeNull();
+	});
+	it('on a phone keeps Request review as a text action in Details, with the bar holding Comments and Details', async () => {
+		phone.isMobile.set(true);
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		expect([...document.body.querySelectorAll<HTMLElement>('[data-test-document-bar] button')].map(nameOf)).toEqual(['File changed · Reload', '1 comment', 'Document details']);
@@ -204,7 +220,17 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('.status')?.textContent).toBe('Ended without comments');
 		expect(maybeButton('Cancel request to Quality Gate')).toBeUndefined();
 	});
-	it('returns focus to Details when cancelling the last request removed its trigger', async () => {
+	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {
+		rows = [row('review-1')];
+		render({ viewingThreadId: null, commentCount: 1 }); await settle();
+		(document.body.querySelector<HTMLButtonElement>('.reviewer-group')!).click(); await settle();
+		button('Cancel request to Quality Gate').click(); await settle();
+		expect(document.body.querySelector('.reviewer-group')).toBeNull();
+		key(document.activeElement as HTMLElement ?? document.body, 'Escape'); await settle();
+		expect(document.activeElement).toBe(button('1 comment'));
+	});
+	it('on a phone returns focus to Details when cancelling the last request removed its trigger', async () => {
+		phone.isMobile.set(true);
 		rows = [row('review-1')];
 		render({ viewingThreadId: null, commentCount: 1 }); await settle();
 		(document.body.querySelector<HTMLButtonElement>('.reviewer-group')!).click(); await settle();

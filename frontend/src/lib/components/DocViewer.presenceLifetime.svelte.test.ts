@@ -24,6 +24,11 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 	destroy = async () => {};
 	subscribe(listener: (copy: unknown) => void) { listener(this); return () => {}; }
 } }));
+// Presence lives in the app bar on a phone (above phone width it is in the document's own row), which is the case this test moves.
+vi.mock('$lib/stores/viewport', async importOriginal => {
+	const { readable } = await import('svelte/store');
+	return { ...await importOriginal<typeof import('$lib/stores/viewport')>(), isMobile: readable(true) };
+});
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
 const presence = vi.hoisted(() => ({ detach: vi.fn(), attached: 0 }));
 vi.mock('$lib/docPresenceRuntime', async importOriginal => {

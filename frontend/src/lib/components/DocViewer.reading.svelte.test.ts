@@ -22,6 +22,11 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 	ready = Promise.resolve(); saved = true; error = ''; destroy = async () => {};
 	subscribe(listener: (copy: unknown) => void) { listener(this); return () => {}; }
 } }));
+// The bar (Comments, Details, presence) is the phone header's form, which these tests read: above phone width the row is in the document.
+vi.mock('$lib/stores/viewport', async original => {
+	const { readable } = await import('svelte/store');
+	return { ...await original<typeof import('$lib/stores/viewport')>(), isMobile: readable(true) };
+});
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
 const target = { instanceId: 'reading-viewer', path: '/documents/read.md', name: 'read.md', projectId: 'project', threadId: 'thread', artifactId: 'artifact' };
 const DOC = 'intro\n\n| Item | Owner |\n|---|---|\n| Alpha | Dana |\n\nafter\n';

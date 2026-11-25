@@ -1,5 +1,6 @@
 <script lang="ts">
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
+	import DocViewerRow from './DocViewerRow.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import DocOwnerControl from './DocOwnerControl.svelte';
 	import MiddleName from './MiddleName.svelte';
@@ -12,12 +13,14 @@
 	import { formatFreshness, freshnessStatusText, shouldOfferVerification } from '$lib/docFreshness';
 	import { detailsNeedsUp } from '$lib/docDetailsNeeds';
 	import { observeFit } from '$lib/observeFit';
+	import { headerStack } from '$lib/actions/headerStack';
+	import { dismissDetailsOnOutside } from '$lib/docDetailsDismiss';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import { publishDocumentBar } from '$lib/stores/documentBar';
 	import { canvasCompact } from '$lib/stores/artifactCanvas';
-	import { isMobile } from '$lib/stores/viewport';
+	import { isMobile, isShortTouch } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
 	import DocViewerDone from './DocViewerDone.svelte';
@@ -40,7 +43,7 @@
 		viewingThreadId = null,
 		reviewTargetKey = null,
 		onReload,
-		onOpenComments,
+		onOpenComments, resolvedCount = 0, resolvedOpen = false, onOpenResolved,
 		freshness,
 		ownership = null,
 		headerStandIn = false,
@@ -64,6 +67,9 @@
 	}: DocViewerStatusProps = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
+	/** The row's count button; it is the Comments button the drawer hangs from while the row is drawn, and the bar's own is otherwise. */
+	let pillEl = $state<HTMLButtonElement>();
+	$effect(() => { if (desktopRow) commentsEntry = pillEl ?? null; });
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
@@ -80,6 +86,8 @@
 	const changeInBar = $derived($canvasCompact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
+	/** Above the phone width (the pair of tests the ask's dock and the comments sheet use) the document column keeps its own labelled row: Send and Sent, the count, Deliver immediately, Request review, History, then the owner and freshness line. They are in that row and not in Details, the bar or the comments footer, so each shows once. */
+	const desktopRow = $derived(!($isMobile || $isShortTouch));
 	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
 	 * entry, so the control says what is waiting rather than how many: Overdue, an ask whose card is hidden, an ask
 	 * with no reason text named by its asker rather than leaving an empty leg, and comments waiting for your decision
@@ -88,12 +96,15 @@
 	let panelOpen = $state(false);
 	const taskStep = $derived(commentTaskBar && isCommentTask(commentTaskBar.read?.person_step) ? commentTaskBar.read?.person_step : null);
 	const needsUp = $derived(detailsNeedsUp(
-		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard, hiddenTask: !!taskStep && !panelOpen },
+		{ overdue: !desktopRow && !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard, hiddenTask: !!taskStep && !panelOpen },
 		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '', hiddenTask: taskStep ? personStepAsk(taskStep) : '' }));
 	const needsCount = $derived(needsUp.length);
+	/** In the row Details holds only Edit (touch reading), an ask that is not on screen and the comment task's Dismiss all, so its button is there only while one waits (or its panel is open). */
+	const detailsHere = $derived(!desktopRow || panelOpen || touchReading || (!!ask && !ask.onCard) || !!taskStep);
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	const sent = $derived((feedbackStatus?.controller().sent ?? 0) > 0);
+	const heldFeedback = $derived(feedbackStatus?.controller());
 	let receiptBox = $state<HTMLElement>(), receiptMeasure = $state<HTMLElement>();
 	let receiptTextFits = $state(false);
 	$effect(() => {
@@ -140,32 +151,11 @@
 	});
 
 	// A press outside the panel and its button closes it; Escape closes it and returns to the button.
-	$effect(() => {
-		if (!panelOpen) return;
-		const outside = (event: PointerEvent) => {
-			const node = event.target as Node | null;
-			if (!node || panelEl?.contains(node) || detailsEntry?.contains(node)) return;
-			// A picker or review list opened from a row is drawn at the page's top level; pressing in it keeps the panel and that row.
-			if ((node instanceof Element ? node : node.parentElement)?.closest('[data-popover], [data-adaptive-drawer]')) return;
-			panelOpen = false;
-		};
-		// Escape closes it only from the panel or its button; anywhere else it belongs to that control (a composer, a sheet).
-		const keys = (event: KeyboardEvent) => {
-			const node = event.target as Node | null;
-			if (event.key !== 'Escape' || !node || !(panelEl?.contains(node) || detailsEntry?.contains(node))) return;
-			event.preventDefault();
-			event.stopPropagation();
-			panelOpen = false;
-			detailsEntry?.focus();
-		};
-		document.addEventListener('pointerdown', outside, true);
-		document.addEventListener('keydown', keys, true);
-		return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keys, true); };
-	});
+	$effect(() => panelOpen ? dismissDetailsOnOutside(() => panelEl, () => detailsEntry, () => { panelOpen = false; }) : undefined);
 
 	// The bar that holds the canvas draws this document's controls (barTools, barChange): one instance, wherever they show. Off
 	// screen the document publishes nothing, so the bar never offers a list or panel for a document the person can't see.
-	$effect(() => offScreen ? undefined : publishDocumentBar({ tools: barTools, titleEnd: urgent ? barChange : null }));
+	$effect(() => offScreen ? undefined : publishDocumentBar({ tools: barTools, titleEnd: urgent && !desktopRow ? barChange : null }));
 
 	function closeThen(fn?: () => void) { panelOpen = false; fn?.(); }
 
@@ -220,6 +210,7 @@
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
 	{#if touchReading && editing}<DocViewerDone {onDone} />{/if}
+	{#if !desktopRow}
 	<span class="bar-presence" hidden={touchReading && editing} style:display={touchReading && editing ? 'none' : 'contents'}>{#if presence}{@render presence()}{/if}</span>
 	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
 		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
@@ -241,12 +232,13 @@
 			<span class="bar-sent-measure" bind:this={receiptMeasure}><svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg><svg class="sent-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg><span>Sent</span></span>
 		</span>{/if}
 	</button>
+	{/if}
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
-	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
+	{#if detailsHere}<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
 		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
-	</button>
+	</button>{/if}
 </span>{/snippet}
 
 <!-- File changed after the document's name in the app bar: the reload mark alone, amber, its name read out and on hover. -->
@@ -257,8 +249,14 @@
 {/snippet}
 
 {#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
-<header class="document-header" class:ask-covered={askCovered} bind:this={headerEl}>
+<header class="document-header" class:desk={desktopRow} class:ask-covered={askCovered} bind:this={headerEl} use:headerStack={reviewTargetKey}>
 	{#if reviewBar}{@render reviewBar()}{/if}
+	{#if desktopRow}
+	<DocViewerRow {presence} {heldFeedback} {artifactId} {urgent} {onReload} {saveStatus} {offScreen} {commentCount} {unreadCount} {unsent}
+		{commentsLoading} {ready} {commentsOpen} {onOpenComments} {resolvedCount} {resolvedOpen} {onOpenResolved} bind:pillEl {viewingThreadId} reviewKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => commentsEntry}
+		{historyAvailable} {historyOpen} {onOpenHistory} {freshness} {freshnessPresentation} {ownership} {headerStandIn} {onOwnershipChanged}
+		{markVerified} {verifying} {readonly} />
+	{/if}
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
@@ -268,21 +266,21 @@
 				<span class="p-full">{ask.text}</span>
 				{#each ask.others as other (other.name)}<span class="p-full"><strong>{other.name}</strong>: {other.reason}</span>{/each}
 			</div>{/if}
-			{#if freshnessPresentation}<div class="p-row" class:amber={freshnessPresentation.overdue}>
+			{#if !desktopRow && freshnessPresentation}<div class="p-row" class:amber={freshnessPresentation.overdue}>
 				<span class="p-text"><span class="p-label">Status:</span> <time datetime={freshnessPresentation.datetime}>{statusText}{#if freshnessPresentation.dateText && !statusText.includes(freshnessPresentation.dateText)}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time></span>
 				{#if freshness && shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>{/if}
 			</div>{/if}
 			<!-- The bar says Saving… while it saves; Details keeps the settled state. -->
-			{#if saveStatus === 'saved'}<div class="p-row p-quiet" role="status">Saved</div>{/if}
-			{#if readonly && ready}<div class="p-row readonly-note">Read-only</div>{/if}
+			{#if !desktopRow && saveStatus === 'saved'}<div class="p-row p-quiet" role="status">Saved</div>{/if}
+			{#if !desktopRow && readonly && ready}<div class="p-row readonly-note">Read-only</div>{/if}
 		</div>
-		{#if ownership && artifactId}<div class="p-section p-owner" class:held={headerStandIn} data-ownership-row>{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
-		{:else if freshness}<div class="p-section"><div class="p-row">Owner: {freshness.owner_name}</div></div>{/if}
-		{#if artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
+		{#if !desktopRow && ownership && artifactId}<div class="p-section p-owner" class:held={headerStandIn} data-ownership-row>{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
+		{:else if !desktopRow && freshness}<div class="p-section"><div class="p-row">Owner: {freshness.owner_name}</div></div>{/if}
+		{#if desktopRow ? !!taskStep : artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
 			<span class="p-label-row">Review</span>
-			{#if artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
+			{#if !desktopRow && artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
 			{#if commentTaskBar && isCommentTask(commentTaskBar.read?.person_step)}<div class="p-row"><CommentTaskDismiss bar={commentTaskBar} menu /></div>{/if}
-			{#if historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
+			{#if !desktopRow && historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
 		</div>{/if}
 		{#if paneHere}<div class="p-section"><button type="button" class="p-row" onclick={() => closeThen(() => paneOpen.set(true))}>Show panel</button></div>{/if}
 	</div>
@@ -395,4 +393,7 @@
 		.p-row { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		.doc-panel :global(button:not(.tg)), .p-review :global(.review-request) { min-height: var(--touch-target); min-width: var(--touch-target); }
 	}
+
+	/* The document column's row above the phone width (desktopRow): shipped as before the one-row header, the cluster keeping one row while it fits and wrapping inside the header when it cannot. */
+	.document-header.desk { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); container: doc-header / inline-size; }
 </style>

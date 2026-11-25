@@ -1,0 +1,75 @@
+/* The document header above the phone width: the review ask shares the header's first line with the tools, or stacks under them (actions/headerStack.ts). As it was before the one-row header, scoped to the document's own header row. */
+/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or an ended notice takes the first column at the same height and keeps its text on line 1. */
+.document-header.desk .rb-slot { grid-template-columns: subgrid; }
+.document-header.desk .rb-slot > .review-bar { grid-area: 1 / 1 / 2 / 2; }
+.document-header.desk .rb-slot > .review-bar.ask { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.document-header.desk .review-bar.ask .rb-head { display: contents; }
+.document-header.desk .review-bar.ask .rb-line { grid-column: 1; }
+.document-header.desk .review-bar.ask .rb-ask-full, .document-header.desk .review-bar.ask .rb-others, .document-header.desk .review-bar.ask .rb-row2 { grid-column: 1 / -1; }
+.document-header.desk .review-bar.receipt, .document-header.desk .review-bar.stale { align-items: flex-start; }
+.document-header.desk .review-bar.receipt .rb-icon, .document-header.desk .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
+.document-header.desk .review-bar.stale .rb-text, .document-header.desk .review-bar.stale .rb-sub { line-height: var(--space-7); }
+/* The receipt spans the header's columns, under the tools, as the ask's line 2 does: the verdict and the rest flow as one text of whole segments, one line where it fits and two where it does not, centred beside its icon in a row as tall as the single-line receipt. */
+.document-header.desk .rb-slot > .review-bar.receipt { --rb-recrow: var(--space-7); grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: minmax(var(--rb-recrow), auto); align-items: center; }
+.document-header.desk .review-bar.receipt .rb-icon { grid-area: 1 / 1; margin-block: 0; }
+.document-header.desk .review-bar.receipt .rb-receipt { grid-area: 1 / 1 / 2 / -1; padding-left: calc(var(--text-subhead) + var(--space-2)); line-height: 1.4; padding-block: var(--space-1); }
+	/* A person step has no one-line ask beside its name: let its existing column wrap the full name at every width. */
+.document-header.desk .review-bar.ask.static .rb-who { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.document-header.desk .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
+.document-header.desk .review-bar.ask.static .rb-who .name { display: inline; white-space: normal; }
+.document-header.desk .review-bar.ask.static .rb-who .name-head { overflow: visible; }
+/* A 16ch ask needs more room than the prior 48px floor. When the header cannot hold the review line at its floors (avatar, name down to its floor, a 16-character ask, chevron, gaps) beside the tools as drawn, the header is marked `rb-stack` (actions/headerStack.ts): the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. The point is read from the tools as drawn, not from a fixed width. An ask with no one-line text (the person step) has no third row. */
+/* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
+.document-header.desk:where(.rb-stack) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-who { max-width: none; }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-content: center; }
+.document-header.desk:where(.rb-stack) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
+.document-header.desk:where(.rb-stack) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
+
+
+/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */
+@media (any-pointer: coarse) {
+	@container doc-canvas (max-width: 37.5rem) {
+		/* A closed ask keeps its existing requester/ask markup in one 44px line: the requester has a bounded natural width and the ask end-ellipsizes in the remaining space. With no one-line ask, the requester takes the line. */
+		.document-header.desk .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
+		.document-header.desk .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
+		.document-header.desk .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 auto; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
+		.document-header.desk .review-bar.ask.static .rb-lead { flex: 1 1 auto; max-width: 100%; }
+		.document-header.desk .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
+		/* The person step's name may wrap, so its touch row grows with it. */
+		.document-header.desk .review-bar.ask.static:not(.expanded) { grid-template-rows: minmax(var(--rb-hit), auto); }
+		/* The request wraps to two lines beside the name, centred in the touch row (two lines of the footnote size fit inside it, so the row does not grow); past two lines it ends in an ellipsis and the chevron opens the whole text. */
+		.document-header.desk .review-bar.ask:not(.expanded) .rb-ask { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-self: center; flex: 1 1 0; min-width: 0; line-height: var(--lh-normal); }
+		.document-header.desk .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
+		/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
+		.document-header.desk .review-bar.ask .rb-ask-full, .document-header.desk .review-bar.ask .rb-others { padding-right: var(--space-3); }
+		.document-header.desk .review-bar.receipt, .document-header.desk .review-bar.stale { align-items: center; }
+		.document-header.desk .review-bar.receipt .rb-icon, .document-header.desk .review-bar.stale .rb-icon { margin-block: 0; }
+		.document-header.desk .review-bar.stale .rb-text, .document-header.desk .review-bar.stale .rb-sub { line-height: inherit; }
+		.document-header.desk .rb-slot > .review-bar.receipt { --rb-recrow: var(--rb-hit); }
+	}
+}
+
+/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
+.document-header.desk:has(.rb-slot) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
+.document-header.desk:has(.rb-slot) > * { grid-column: 1 / -1; }
+.document-header.desk:has(.rb-slot) > .rb-slot { grid-column: 1 / -1; grid-row: 1 / 3; }
+/* A receipt is its own row under the tools at every width (the ask shares its first line with them). */
+.document-header.desk:has(.review-bar.receipt) > .rb-slot { grid-row: 2 / 3; }
+.document-header.desk:has(.rb-slot) > .document-identity { display: contents; }
+.document-header.desk:has(.rb-slot) .identity-details { grid-column: 1 / -1; grid-row: 3; }
+.document-header.desk:has(.rb-slot) .presence-row { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+.document-header.desk:has(.rb-slot) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+.document-header.desk:has(.rb-slot) .doc-tool { min-height: var(--space-7); }
+/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. `rb-stack` is set by headerStack when the review line cannot keep its floors beside the tools. */
+.document-header.desk:where(.rb-stack):has(.rb-slot) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
+.document-header.desk:where(.rb-stack):has(.rb-slot) > .rb-slot { grid-row: 2 / 3; }
+@media (any-pointer: coarse) {
+	@container doc-canvas (max-width: 37.5rem) {
+		.document-header.desk:has(.rb-slot) { align-items: center; }
+		.document-header.desk:has(.rb-slot) .doc-tool { min-height: var(--touch-target); }
+	}
+}

@@ -119,6 +119,8 @@ describe('where an open document shows the review ask', () => {
 		}
 
 		it('carries the header ask, which the panel covers, and hands it back when it closes', async () => {
+			// Above phone width Details is in the row only while something waits behind it: here a touch screen's Edit.
+			vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query === '(pointer: coarse)', media: query, addEventListener() {}, removeEventListener() {} })));
 			await open(1440);
 			layOut('header');
 			expect(detailsAsk()).toBeNull();
