@@ -28,6 +28,28 @@ async def test_cdp_error_logs_diagnostics_and_keeps_person_facing_error(caplog):
 
 
 @pytest.mark.asyncio
+async def test_cdp_connect_keeps_max_size_and_passes_only_a_supplied_logger(monkeypatch):
+    calls = []
+
+    class Socket:
+        async def close(self):
+            pass
+
+    async def connect(endpoint, **kwargs):
+        calls.append((endpoint, kwargs))
+        return Socket()
+
+    monkeypatch.setattr(browser_cdp.websockets, "connect", connect)
+    logger = logging.getLogger("capture-test")
+    async with browser_cdp.CdpClient("ws://one", max_size=123):
+        pass
+    async with browser_cdp.CdpClient("ws://two", max_size=456, logger=logger):
+        pass
+    assert calls[0] == ("ws://one", {"max_size": 123, "open_timeout": 3, "close_timeout": 1})
+    assert calls[1] == ("ws://two", {"max_size": 456, "open_timeout": 3, "close_timeout": 1, "logger": logger})
+
+
+@pytest.mark.asyncio
 async def test_cdp_records_parent_links_from_pushed_search_paths():
     class Socket:
         def __init__(self):

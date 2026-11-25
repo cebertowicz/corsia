@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Literal, Mapping
 
-from host_access import browser_pane_state
+from host_access import browser_login_capture, browser_pane_state
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep
 from infra.database import get_db
@@ -190,6 +190,7 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
+        browser_login_capture.step_decided(thread_id, result, decision.end, decision.open_kind)
         if decision.forget_done is not None:
             answers = _answers.get(thread_id, {})
             if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
@@ -342,10 +343,8 @@ def _step_row_state(node_id: str | None) -> str | None:
 async def _settle_step(thread_id: str, step: BrowserStep) -> None:
     if step.node_id is None:
         return
-    await asyncio.to_thread(
-        _plan_write, "settle_user_step", step.node_id,
-        evidence=step.settlement_evidence, provenance=step.provenance,
-    )
+    await asyncio.to_thread(_plan_write, "settle_user_step", step.node_id,
+                            evidence=step.settlement_evidence, provenance=step.provenance)
     await _emit(f"{step.event_prefix}_settled", thread_id)
 
 
@@ -385,6 +384,10 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
+
+
+def password_step(thread_id: str) -> PasswordStep | None:
+    return step if isinstance(step := _steps.get(thread_id), PasswordStep) else None
 
 
 def held_pages(thread_id: str) -> bool:
