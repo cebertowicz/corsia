@@ -485,7 +485,7 @@ describe('save-login offer: Save, Not now and closing', () => {
 	};
 	const PANE_LINE = 'Couldn\u2019t save the login. Try again.';
 
-	it.each([[409, 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat, so no login can be saved for it.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
+	it.each([[409, 'Saving isn\u2019t available for this sign-in. Unless the login is already saved, it\u2019s offered again the next time you sign in.'], [404, 'Couldn’t find this chat. Sign in again in another chat to save the login.']])('a %i refusal puts the server’s sentence in the question’s place and announces it, removes Save, and leaves only Close', async (status, detail) => {
 		await refuse(status, { detail });
 		expect(dock()!.querySelector('.question')!.textContent).toBe(detail);
 		expect(dock()!.textContent).not.toContain('Save the');
