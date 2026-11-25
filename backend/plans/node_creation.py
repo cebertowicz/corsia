@@ -278,10 +278,19 @@ def _creation_values(
     )
 
 
-def _mark_born_later(connection: sqlite3.Connection, plan_id: str, node_id: str) -> None:
-    """Mark the new task Later and arm its plan's first review."""
-    from plans import later_review
+def _mark_born_later(
+    connection: sqlite3.Connection, plan_id: str, node_id: str, *,
+    kind: str, parent_id: str | None, requested: bool | None,
+) -> None:
+    """Mark a new task Later when it is born there, and arm its plan's first review.
 
+    A node joining an item with open tasks takes the item's side; otherwise the
+    side the caller named (``later_fields.birth_flag``).
+    """
+    from plans import later_fields, later_review
+
+    if not later_fields.birth_flag(connection, node_id, kind, parent_id, requested):
+        return
     service.touch_node(connection, node_id, later=1)
     later_review.arm(connection, plan_id)
 
@@ -312,7 +321,7 @@ def create_node(
     intent: str | None = None,
     intent_node_id: str | None = None,
     commitment_id: str | None = None,
-    later: bool = False,
+    later: bool | None = None,
     person_step: bool = True,
     announce: bool = True,
     required_step: bool = False,
@@ -326,6 +335,7 @@ def create_node(
     ``required_step`` marks a workflow run's required step in its creation
     event, the one record ``plans.workflow_fields.refuse_required_skip`` reads.
     ``workflow_settle`` is a review step's settle script name (``plans.review_settle_script``).
+    ``later`` is the side of the cut the caller named, or None (``_mark_born_later``).
     """
     (
         base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
@@ -341,8 +351,7 @@ def create_node(
     )
     _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
                      intent, intent_node_id)
-    if later:
-        _mark_born_later(connection, plan_id, node_id)
+    _mark_born_later(connection, plan_id, node_id, kind=kind, parent_id=parent_id, requested=later)
     from plans.conductor_add import ADD_PROVENANCE, coordinator_kind
 
     service._event(

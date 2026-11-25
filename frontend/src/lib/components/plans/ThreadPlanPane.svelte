@@ -3,7 +3,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
 	import PlanDrillView from './PlanDrillView.svelte';
-	import { requestFocus } from '$lib/stores/attentionDock.svelte';
+	import { checkDecision, type DecisionCheck } from '$lib/stores/attentionQueueState.svelte';
+	import { openActivity } from '$lib/stores/activityOpen';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
@@ -12,7 +13,7 @@
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId } from '$lib/stores/threads';
-	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { visibleQueue } from '$lib/stores/attentionQueueState.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorNodeAction } from '$lib/api/plans';
@@ -153,8 +154,8 @@
 		openPlanAsk(threadId, artifact, nodeTitle, () => { void openDecisions(); });
 	}
 
-	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
-		if (outcome === 'requested') return;
+	function showDecisionOutcome(outcome: DecisionCheck): void {
+		if (outcome === 'live') return;
 		if (outcome === 'empty') {
 			decisionMessage = 'That decision is closed. Refreshing the plan.';
 			query.retry();
@@ -163,12 +164,14 @@
 		decisionMessage = 'The item couldn’t open. Try again.';
 	}
 
+	/** A decision is answered in Activity: a row still waiting opens Activity with that decision open. */
 	async function openDecision(item: AttentionQueueItem): Promise<void> {
 		if (decisionBusy) return;
 		decisionBusy = true;
 		decisionMessage = null;
-		const outcome = await requestFocus(item.external_id);
+		const outcome = await checkDecision(item.external_id);
 		decisionBusy = false;
+		if (outcome === 'live') openActivity(item.external_id);
 		showDecisionOutcome(outcome);
 	}
 
@@ -176,8 +179,9 @@
 		if (decisionBusy) return;
 		decisionBusy = true;
 		decisionMessage = null;
-		const outcome = await requestFocus();
+		const outcome = await checkDecision();
 		decisionBusy = false;
+		if (outcome === 'live') openActivity();
 		showDecisionOutcome(outcome);
 	}
 

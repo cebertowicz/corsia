@@ -31,7 +31,6 @@
 	import ChatWarmToast from './ChatWarmToast.svelte';
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 	import ChatScrollControl from './ChatScrollControl.svelte';
-	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
 	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
 	import ChatThreadBindings from './ChatThreadBindings.svelte';
@@ -55,14 +54,11 @@
 		isDraggingOver = false,
 		onOpenLightbox,
 		onAutoCreateThread,
-		onOpenDocuments = () => {},
 		visibleDocumentArtifactId = null,
 		artifactPaneOpen = false,
 	}: {
 		isDraggingOver?: boolean;
 		onOpenLightbox: (url: string) => void;
-		/** Where an external review in the attention dock hands off. */
-		onOpenDocuments?: (documentId?: string) => void;
 		/** The document whose own header Send is on screen, so this chat does not offer a second sender for it. */
 		visibleDocumentArtifactId?: string | null;
 		artifactPaneOpen?: boolean;
@@ -76,14 +72,6 @@
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
 	let inputBarRef: InputBar;
-	/**
-	 * Precedence for the shared attention slot. `leaseAwaitingUser` is written
-	 * only by the mounted `HostAccessLeaseControl`; gating it on the thread too
-	 * means an unmounted control can never suppress the dock, and a new thread
-	 * never inherits the previous thread's pending lease.
-	 */
-	let leaseAwaitingUser = $state(false);
-	const attentionSuppressed = $derived(!!$activeThreadId && leaseAwaitingUser);
 
 	const MSG_PAGE_SIZE = 50;
 	let pager = $state(createPager());
@@ -351,19 +339,8 @@
 				<ConductorSourcesPanel threadId={$activeThreadId} />
 			{/if}
 			{#if $activeThreadId}
-				<HostAccessLeaseControl
-					threadId={$activeThreadId}
-					stacked
-					bind:awaitingUser={leaseAwaitingUser}
-				/>
+				<HostAccessLeaseControl threadId={$activeThreadId} stacked />
 			{/if}
-			<AttentionDock
-				suppressed={attentionSuppressed}
-				onOpenDestination={(destination) => {
-					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
-					if (destination.pane === 'documents') onOpenDocuments(destination.id);
-				}}
-			/>
 			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} onJumpToReply={jumpToChatReply} scroller={messagesEl} />
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl

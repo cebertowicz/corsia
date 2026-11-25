@@ -74,8 +74,9 @@
 	@media (prefers-reduced-motion: reduce) { .btn:not(:disabled):active { transform: none; } }
 	@media (max-width: 768px) {
 		.btn::after { content: ''; position: absolute; border-radius: inherit; }
-		.btn.md::after { inset: -6px; }
-		.btn.sm::after { inset: -8px; }
+		/* The inset counts from inside the 1px border, so the area is height - 2 + 2 * inset: sm 28 - 2 + 18 = 44, md 32 - 2 + 14 = 44. */
+		.btn.md::after { inset: -7px; }
+		.btn.sm::after { inset: -9px; }
 	}
 
 	.btn.md { height: 32px; padding: 0 13px; font-size: var(--text-subhead); }

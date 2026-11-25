@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import * as foldWave from '$lib/components/plans/foldWave';
-import { STAGGER_MS, newlyMatching } from '$lib/components/plans/foldWave';
+import { FOLD_BEAT_MS, STAGGER_MS, newlyLater, newlyMatching } from '$lib/components/plans/foldWave';
 import { heldIds, type PaneView } from '$lib/components/plans/foldMotion.svelte';
 import type { FoldedWork } from '$lib/components/plans/planFoldLevels';
 import { node } from './fixtures/planTreeNode';
@@ -23,6 +23,7 @@ let animate: ReturnType<typeof vi.fn>;
 let reducedMotion = false;
 const originalAnimate = Element.prototype.animate;
 const originalMatchMedia = window.matchMedia;
+const originalRect = HTMLElement.prototype.getBoundingClientRect;
 
 beforeEach(() => {
 	host = document.createElement('div');
@@ -43,6 +44,7 @@ afterEach(() => {
 	host.remove();
 	Element.prototype.animate = originalAnimate;
 	window.matchMedia = originalMatchMedia;
+	HTMLElement.prototype.getBoundingClientRect = originalRect;
 });
 
 function finished(count: number, folded: boolean): OperatorNode[] {
@@ -190,6 +192,210 @@ describe('PlanTree — the fold wave', () => {
 	});
 });
 
+/**
+ * An agent moves one task below the cut and back. It is neither folded nor
+ * removed -- it stays on screen at a new place -- so it rides the same wave as a
+ * sinking row: captured before the DOM moves, glided after it, and never
+ * ghosted into a count. (`foldMotion`, `foldWave`.)
+ */
+describe('PlanTree — a task crossing the Later cut', () => {
+	const ROW = 38;
+
+	/** jsdom lays nothing out: give every row a top from its order in the tree, so a real move is measurable. */
+	function layOutRowsByOrder() {
+		HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+			const index = [...host.querySelectorAll<HTMLElement>('[data-flip-key]')].indexOf(this);
+			const top = index < 0 ? 0 : index * ROW;
+			return { top, bottom: top + ROW, left: 0, right: 300, width: 300, height: ROW, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+		};
+	}
+
+	const rowTitles = () => [...host.querySelectorAll<HTMLElement>('.tree-row')].map((row) =>
+		row.classList.contains('scheduled-row') ? `{${row.querySelector('.row-title')?.textContent}}` : row.querySelector('.row-title')?.textContent ?? '?');
+
+	/** The glide played on one row's own element: its keyframes and options, or undefined. */
+	const glideOf = (title: string) => animate.mock.contexts
+		.map((el, index) => ({ el: el as HTMLElement, keyframes: animate.mock.calls[index][0] as Keyframe[], options: animate.mock.calls[index][1] as KeyframeAnimationOptions }))
+		.filter(({ el, keyframes }) => el.querySelector(':scope > .row-body .row-title')?.textContent === title
+			&& typeof keyframes[0]?.transform === 'string' && keyframes[0].transform.startsWith('translateY'))
+		.at(-1);
+
+	/** 'Task B' above the cut, then below it; 'Task C' is already Later, so the group exists and stays open. */
+	const withLater = (bLater: boolean): OperatorNode[] => [
+		node({ id: 'a', title: 'Task A' }),
+		node({ id: 'b', title: 'Task B', later: bLater }),
+		node({ id: 'c', title: 'Task C', later: true }),
+	];
+
+	async function openTreeWithGroupShown() {
+		const props = $state({ nodes: withLater(false) });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
+		await tick();
+		flushSync();
+		host.querySelector<HTMLButtonElement>('.scheduled-row button.details-toggle')!.click();
+		await tick();
+		flushSync();
+		expect(rowTitles()).toEqual(['Task A', 'Task B', '{Later}', 'Task C']);
+		return props;
+	}
+
+	it('glides it down into the group and back up out of it, with no ghost', async () => {
+		layOutRowsByOrder();
+		const captureSpy = vi.spyOn(foldWave, 'captureFold');
+		const props = await openTreeWithGroupShown();
+
+		captureSpy.mockClear();
+		animate.mockClear();
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+		expect(rowTitles()).toEqual(['Task A', '{Later}', 'Task B', 'Task C']);
+		expect(captureSpy).toHaveBeenCalledTimes(1);
+		expect(host.querySelectorAll('.fold-ghost')).toHaveLength(0);
+		// It left row 2 for the first row under the group's own row: one row down,
+		// so it starts one row above where it now sits and slides into place.
+		const down = glideOf('Task B');
+		expect(down?.keyframes).toEqual([{ transform: `translateY(-${ROW}px)` }, { transform: 'none' }]);
+		expect(down?.options).toMatchObject({ duration: FOLD_BEAT_MS.slide, delay: FOLD_BEAT_MS.check, fill: 'backwards' });
+
+		captureSpy.mockClear();
+		animate.mockClear();
+		props.nodes = withLater(false);
+		await tick();
+		flushSync();
+		expect(rowTitles()).toEqual(['Task A', 'Task B', '{Later}', 'Task C']);
+		expect(captureSpy).toHaveBeenCalledTimes(1);
+		expect(host.querySelectorAll('.fold-ghost')).toHaveLength(0);
+		expect(glideOf('Task B')?.keyframes).toEqual([{ transform: `translateY(${ROW}px)` }, { transform: 'none' }]);
+	});
+
+	it('collapses it into the collapsed group: a ghost into the group row, which is never re-created', async () => {
+		layOutRowsByOrder();
+		const props = $state({ nodes: withLater(false) });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
+		await tick();
+		flushSync();
+		expect(rowTitles()).toEqual(['Task A', 'Task B', '{Later}']); // collapsed: its members have no rows of their own
+		const header = host.querySelector('.scheduled-row')!;
+
+		animate.mockClear();
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+
+		expect(rowTitles()).toEqual(['Task A', '{Later}']);
+		// The group row is the same element throughout: the count changes inside it.
+		expect(host.querySelector('.scheduled-row')).toBe(header);
+		const played = animate.mock.contexts
+			.map((el, index) => ({ el: el as HTMLElement, keyframes: animate.mock.calls[index][0] as Keyframe[] }))
+			.filter(({ el }) => el.classList.contains('fold-ghost'));
+		// The leaving row is cloned and flown into the group's own row. A clone is only
+		// ever added once a target is found, so this also proves the group row is that target.
+		expect(played).toHaveLength(1);
+		expect(played[0].el.textContent).toContain('Task B');
+		expect(played[0].keyframes.at(-1)).toMatchObject({ transform: 'translateY(0px) scaleY(0.2)', opacity: 0 });
+		// And it slides with the rows above rather than fading in, which is what left
+		// an empty gap where it had been.
+		const onHeader = animate.mock.contexts
+			.map((el, index) => ({ el: el as HTMLElement, keyframes: animate.mock.calls[index][0] as Keyframe[] }))
+			.filter(({ el }) => el === header).map(({ keyframes }) => keyframes);
+		expect(onHeader).toEqual([[{ transform: `translateY(${ROW}px)` }, { transform: 'none' }]]);
+	});
+
+	it('aims the ghost at where the group row settles, not where its glide starts', async () => {
+		layOutRowsByOrder();
+		const rowRect = HTMLElement.prototype.getBoundingClientRect;
+		// A gliding row measures where its FLIP transform draws it, as a browser does.
+		HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+			const rect = rowRect.call(this);
+			const index = animate.mock.contexts.lastIndexOf(this);
+			const from = index < 0 ? undefined : (animate.mock.calls[index][0] as Keyframe[])[0]?.transform;
+			const dy = typeof from === 'string' ? Number(from.match(/^translateY\((-?[\d.]+)px\)$/)?.[1] ?? 0) : 0;
+			return { ...rect, top: rect.top + dy, bottom: rect.bottom + dy, y: rect.top + dy, toJSON: () => ({}) } as DOMRect;
+		};
+		const props = $state({ nodes: withLater(false) });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
+		await tick();
+		flushSync();
+
+		animate.mockClear();
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+
+		const ghost = animate.mock.contexts.findIndex((el) => (el as HTMLElement).classList.contains('fold-ghost'));
+		// Task B left from the second slot (top ROW); the group row settles in that slot.
+		expect((animate.mock.calls[ghost][0] as Keyframe[]).at(-1)).toMatchObject({ transform: 'translateY(0px) scaleY(0.2)' });
+	});
+
+	it('keeps the group row drawn over the arriving ghost, then lets it go', async () => {
+		layOutRowsByOrder();
+		let finish = () => {};
+		const finished = new Promise<void>((resolve) => { finish = resolve; });
+		animate.mockImplementation(() => ({ cancel: vi.fn(), finished }) as unknown as Animation);
+		const props = $state({ nodes: withLater(false) });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
+		await tick();
+		flushSync();
+		const header = host.querySelector<HTMLElement>('.scheduled-row')!;
+
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+
+		// The ghost slides in under the group row rather than over it.
+		expect(header.style.zIndex).toBe('2');
+		expect(header.style.position).toBe('relative');
+		expect(header.style.background).not.toBe('');
+		finish();
+		await finished;
+		await tick();
+		expect(header.getAttribute('style') ?? '').not.toMatch(/z-index|position|background/);
+	});
+
+	it('keeps the shrinking tree tall until the group row has slid up, so the surface never clips it', async () => {
+		layOutRowsByOrder();
+		const rowRect = HTMLElement.prototype.getBoundingClientRect;
+		// The tree is as tall as its rows, as the surface around it measures it.
+		HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+			if (!this.classList.contains('plan-tree')) return rowRect.call(this);
+			const height = this.querySelectorAll('[data-flip-key]').length * ROW;
+			return { top: 0, bottom: height, left: 0, right: 300, width: 300, height, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+		};
+		const props = $state({ nodes: withLater(false) });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
+		await tick();
+		flushSync();
+		const tree = host.querySelector('.plan-tree')!;
+
+		animate.mockClear();
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+
+		const onTree = animate.mock.contexts
+			.map((el, index) => ({ el, keyframes: animate.mock.calls[index][0] as Keyframe[], options: animate.mock.calls[index][1] as KeyframeAnimationOptions }))
+			.filter(({ el }) => el === tree);
+		expect(onTree.map(({ keyframes }) => keyframes)).toEqual([[{ height: `${3 * ROW}px` }, { height: `${2 * ROW}px` }]]);
+		// It eases on the rows' own beat, so the group row's bottom and the tree's arrive together.
+		expect(onTree[0].options).toMatchObject({
+			duration: foldWave.FOLD_BEAT_MS.slide, delay: foldWave.FOLD_BEAT_MS.check, fill: 'backwards',
+		});
+	});
+
+	it('honours reduced motion: the crossing settles in place with no animation', async () => {
+		layOutRowsByOrder();
+		reducedMotion = true;
+		const props = await openTreeWithGroupShown();
+		animate.mockClear();
+		props.nodes = withLater(true);
+		await tick();
+		flushSync();
+		expect(animate).not.toHaveBeenCalled();
+		expect(rowTitles()).toEqual(['Task A', '{Later}', 'Task B', 'Task C']);
+	});
+});
+
 describe('newlyMatching', () => {
 	it('returns rows whose predicate flipped from false to true since the last render', () => {
 		const previous = new Map([['a', false], ['b', true]]);
@@ -199,6 +405,20 @@ describe('newlyMatching', () => {
 
 	it('replays nothing on the first render (no previous map)', () => {
 		expect(newlyMatching(null, [node({ id: 'a', title: 'A' })], () => true)).toEqual([]);
+	});
+});
+
+describe('newlyLater', () => {
+	const rows = (bLater: boolean) => [node({ id: 'a', title: 'A' }), node({ id: 'b', title: 'B', later: bLater })];
+
+	it('names rows that crossed into or out of Later since the last render', () => {
+		expect(newlyLater(new Map([['a', false], ['b', false]]), rows(true)).map((n) => n.id)).toEqual(['b']);
+		expect(newlyLater(new Map([['a', false], ['b', true]]), rows(false)).map((n) => n.id)).toEqual(['b']);
+	});
+
+	it('replays nothing on the first render, and never a row it has not seen', () => {
+		expect(newlyLater(null, rows(true))).toEqual([]);
+		expect(newlyLater(new Map([['a', false]]), rows(true))).toEqual([]);
 	});
 });
 

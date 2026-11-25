@@ -179,6 +179,27 @@ def branch_display(
     return {"label_key": "waiting", "tone_key": "waiting"}
 
 
+def later_branches(nodes: list[dict], parents: set[str] | frozenset[str], later: frozenset[str]) -> set[str]:
+    """Return the parents whose every open task beneath is in Later, at least one.
+
+    Only a task carries the stored flag (``plans.later_fields``); a branch is Later
+    by this roll-up, so the sheet folds a phase whose open work is all below the cut
+    into its level's Later row. Children come after their parent in ``nodes``.
+    """
+    ids = {node["id"] for node in nodes}
+    # Per node: (some open task beneath, every open task beneath is Later).
+    seen: dict[str, tuple[bool, bool]] = {}
+    for node in reversed(nodes):
+        if node["id"] not in parents:
+            open_task = node["state"] not in service._TERMINAL_STATES
+            seen[node["id"]] = (open_task, not open_task or node["id"] in later)
+        has_open, all_later = seen.get(node["id"], (False, True))
+        if node["parent_id"] in ids:
+            above = seen.get(node["parent_id"], (False, True))
+            seen[node["parent_id"]] = (above[0] or has_open, above[1] and all_later)
+    return {node_id for node_id in parents if seen.get(node_id, (False, True)) == (True, True)}
+
+
 def _apply_branches(
     nodes: list[dict], raw: list[dict], tree: open_tree.OpenTree | None = None,
 ) -> dict[str, int]:
@@ -194,9 +215,12 @@ def _apply_branches(
     fold = tree.shape.folded if tree is not None else folded_ids(raw)
     parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     ids = {node["id"] for node in nodes}
+    later_parents = later_branches(nodes, parents, later)
     for node, row in zip(nodes, raw):
         node["folded"] = node["id"] in fold
         node["scheduled_until"] = scheduled[node["id"]]
+        if node["id"] in parents:
+            node["later"] = node["id"] in later_parents
         # A parent with its own ask on the user has an obligation of its own, so it
         # reads as itself and its ask is counted once, here; its leaves count theirs.
         node["container"] = (
@@ -242,6 +266,25 @@ def oversize(nodes: list[dict]) -> dict[str, int] | None:
     if open_nodes <= OPEN_NODE_BUDGET:
         return None
     return {"open": open_nodes, "budget": OPEN_NODE_BUDGET}
+
+
+def _roll_waits_up(nodes: list[dict]) -> None:
+    """Give a waiting branch its steps' earliest outside wait, so its own row says when.
+
+    A branch with nothing running and nothing asking the person stays closed; the
+    row that stands for it names the check-back its steps wait on.
+    """
+    below: dict[str, list[dict]] = {}
+    by_id = {node["id"]: node for node in nodes}
+    for node in nodes:
+        parent = by_id.get(node["parent_id"])
+        while parent is not None:
+            below.setdefault(parent["id"], []).append(node)
+            parent = by_id.get(parent["parent_id"])
+    for node in nodes:
+        if node.get("container") and node["display"]["label_key"] == "waiting" and not node.get("wait"):
+            if wait := wait_summary.from_nodes(below.get(node["id"], [])):
+                node["wait"] = wait
 
 
 def _leaf_ids(nodes: list[dict], tree: open_tree.OpenTree | None = None) -> set[str]:
@@ -295,6 +338,7 @@ def present_plan(
     for node in nodes:
         if node_wait := wait_summary.from_nodes([node]):
             node["wait"] = node_wait
+    _roll_waits_up(nodes)
     if wait := wait_summary.from_nodes(nodes):
         display["wait"] = wait
     elif until := wait_summary.set_aside_until(nodes):

@@ -19,7 +19,7 @@ def test_rows_and_comment_overlap(isolated_db):
         projected = projection.rows(db, 'owner-token', [])
         assert any(r['detail']['node_id'] == task for r in projected if r['kind'] == 'task')
         assert len(projection.dedupe_comment_tasks(db, 'owner-token', projected, [])) == 1
-        shown_reply = {'kind': 'reply', 'detail': {'artifact_id': doc, 'root_id': root['id'], 'reply_id': reply['id']}}
+        shown_reply = {'kind': 'document', 'detail': {'artifact_id': doc, 'threads': [{'root_id': root['id'], 'reply_id': reply['id']}]}}
         assert not projection.dedupe_comment_tasks(db, 'owner-token', projected, [shown_reply])
         with write_transaction(db, scope='test_ask') as conn:
             node = _ask_node(conn, 'owner')

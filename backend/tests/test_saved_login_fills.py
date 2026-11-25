@@ -259,8 +259,12 @@ def test_no_agent_tool_names_the_fill_approval_module():
         if ".venv" not in path.parts and "tests" not in path.parts
         and "saved_login_fills" in path.read_text(encoding="utf-8", errors="replace")
     }
-    # The person's approval routes, the person's login delete route, and the rejected-fill recorder.
-    assert callers == {"api/host_access.py", "api/saved_logins.py", "infra/saved_login_results.py"}
+    # The person's approval routes, the person's login delete route, the fill executor and the rejected-fill
+    # recorder.
+    assert callers == {
+        "api/host_access.py", "api/saved_logins.py",
+        "host_access/browser_login_fill.py", "infra/saved_login_results.py",
+    }
 
 
 # --- The person's routes -------------------------------------------------------------------------

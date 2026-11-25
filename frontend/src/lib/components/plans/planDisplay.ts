@@ -11,7 +11,7 @@ import type {
 	ThreadPlanStateEntry,
 } from '$lib/api/plans';
 import { formatMoment, parseWsTimestamp } from '$lib/time';
-import { outsideWaitReason, scheduledLine, timedWait, waitCountdown } from './planWaits';
+import { outsideWaitReason, scheduledLine, setAsideLine, timedWait, waitCountdown } from './planWaits';
 
 /** An ISO 8601 instant inside plan prose ("Waiting until 2026-09-25T12:00:00+00:00"). */
 const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?/g;
@@ -139,6 +139,8 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	const running = node.display.label_key === 'working';
 	const scheduled = scheduledLine(node, now, running || view === 'reason', view === 'clock');
 	if (scheduled) return scheduled;
+	// A branch whose open steps are all set aside says when the first comes back, without opening.
+	if (node.container && node.scheduled_until) return setAsideLine(node.scheduled_until, now);
 	const countdown = running ? null : waitCountdown(node, now);
 	const parts: string[] = [];
 	if (countdown) parts.push(countdown);
@@ -157,6 +159,12 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 /** Scheduled-row time: `clock` keeps a far-date clock; `reason` leaves its cluster line to name the moment. */
 export type ScheduledView = 'clock' | 'reason';
 
+/** A place in line as bare English: 1st, 2nd, 3rd, 11th, 21st, 111th. */
+export function ordinal(n: number): string {
+	const teens = n % 100 >= 11 && n % 100 <= 13;
+	return `${n}${teens ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
 /** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
 export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: ScheduledView): string | null {
 	const { lead, moment } = nodeSublineParts(node, now, view);
@@ -168,9 +176,14 @@ export function nodeSublineParts(
 	node: OperatorNode,
 	now: Date = new Date(),
 	view?: ScheduledView,
+	rank?: { n: number },
 ): { lead: string | null; moment: string | null } {
 	const parts: string[] = [];
-	if (node.display.label_key === 'finished') {
+	if (rank) {
+		// A Later member's place in the set-aside line leads, so a narrow row cuts the reason first.
+		parts.push(ordinal(rank.n));
+		if (node.later_reason) parts.push(node.later_reason);
+	} else if (node.display.label_key === 'finished') {
 		parts.push(finishedOutcome(node));
 	} else {
 		// The round or attempt leads: a long reason is what a narrow row cuts.

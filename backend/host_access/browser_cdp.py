@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Mapping, Sequence, cast
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -18,6 +18,8 @@ from host_access.browser_session_state import BrowserSessionError
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
 log = logging.getLogger(__name__)
+# Every CDP socket's logger: outside the logging tree and above CRITICAL, so no frame ever reaches a log.
+SILENT = logging.Logger("corsia.cdp-socket", logging.CRITICAL + 1)
 # The CDP plain-text search matches tag names, attribute names and values, and text, in every
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
@@ -47,7 +49,9 @@ class CdpClient:
 
     def __init__(self, endpoint: str, *, max_size: int | None = 2**20, logger: logging.Logger | None = None) -> None:
         self.endpoint = endpoint
-        self._max_size, self._logger = max_size, logger
+        self._max_size = max_size
+        # Silent unless a caller passes a logger, so websocket frame contents never reach a log.
+        self._logger = logger or SILENT
         self._next_id = 0
         self.session_id: str | None = None
         self.parents: dict[int, int] = {}
@@ -82,15 +86,11 @@ class CdpClient:
             if response.get("id") != request_id:
                 self._event(response)
                 continue
-            if "error" in response:
-                error = response["error"]
-                if isinstance(error, dict):
-                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
-                else:
-                    log.debug("CDP %s failed with an invalid error response", method)
-                raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
-            if not isinstance(result, dict):
+            if "error" in response or not isinstance(result, dict):
+                code = response["error"].get("code") if isinstance(response.get("error"), dict) else None
+                # Method, id and numeric code only: an error's message can quote the request's params.
+                log.debug("CDP %s (id %s) failed with code %s", method, request_id, code if isinstance(code, int) else None)
                 raise BrowserSessionError("This page couldn't be checked")
             return result
 
@@ -108,7 +108,7 @@ class CdpClient:
                         parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, **cast(dict[str, Any], {"logger": self._logger} if self._logger is not None else {}))
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, logger=self._logger)
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -126,8 +126,8 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
     """
     async with CdpClient(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
-        loader = _loader_id(frame)
-        host = _host(frame)
+        loader = loader_id(frame)
+        host = main_host(frame)
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
         known_here = known.get(loader, frozenset())
@@ -288,8 +288,7 @@ async def dispatch_key_event(endpoint: str, event: dict) -> None:
         # Chrome applies modifier shortcuts only to a keyDown event; rawKeyDown carries
         # the bit but does not consistently update the page's shortcut state.
         "type": "keyDown" if event_type == "keyDown" else event_type,
-        "key": key,
-        "code": code,
+        "key": key, "code": code,
         "windowsVirtualKeyCode": key_code,
         "modifiers": modifiers,
     }
@@ -385,12 +384,13 @@ async def _visible(cdp: browser_cdp_frames.Session, node: int) -> bool:
     return rect is not None and rect["width"] > 0 and rect["height"] > 0
 
 
-def _loader_id(tree: dict) -> str:
-    return str(tree.get("frameTree", {}).get("frame", {}).get("loaderId", ""))
+def loader_id(tree: dict) -> str:  # The main frame's loader id (its document) in a getFrameTree result, or "".
+    loader = ((tree.get("frameTree") or {}).get("frame") or {}).get("loaderId")
+    return loader if isinstance(loader, str) else ""
 
 
-def _host(tree: dict) -> str:
-    url = tree.get("frameTree", {}).get("frame", {}).get("url")
+def main_host(tree: dict) -> str:
+    url = ((tree.get("frameTree") or {}).get("frame") or {}).get("url")
     return urlparse(url).hostname or "" if isinstance(url, str) else ""
 
 

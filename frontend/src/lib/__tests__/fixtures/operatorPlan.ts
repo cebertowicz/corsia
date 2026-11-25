@@ -46,7 +46,7 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 			? 'running'
 			: state === 'review_requested'
 				? 'review'
-				: state === 'accepted' || state === 'accepted_with_followup' || state === 'failed'
+				: state === 'accepted' || state === 'accepted_with_followup' || state === 'failed' || state === 'closed'
 					? 'terminal'
 					: blocked
 						? 'blocked'
@@ -76,6 +76,11 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		description: null,
 		waiting_on: [],
 		acceptance_criteria: 'DOD',
+		intent: null,
+		intent_is_person_comment: false,
+		intent_parent_title: null,
+		intent_owner_name: null,
+		intent_run_title: null,
 		state,
 		unmet_dependencies: [],
 		held_by: null,
@@ -107,6 +112,8 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		status_reason: null,
 		branch_progress: null,
 		scheduled_until: null,
+		later: false,
+		later_reason: null,
 		attention_path: [],
 		completion: null,
 		child: null,

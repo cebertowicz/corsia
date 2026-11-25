@@ -47,9 +47,12 @@ export function waitChecksBack(until: string, now: Date = new Date()): string {
 	return at ? `checks back ${at}` : '';
 }
 
-/** A plan wait the server names on this row: a watch with a deadline, apart from set-aside, dependency and worker waits (EW11). */
+/**
+ * A plan wait the server names on this row: a watch with a deadline, apart from set-aside, dependency and worker waits (EW11).
+ * A waiting branch carries its steps' earliest such wait, so it says when without opening.
+ */
 export function isOutsideWait(node: OperatorNode): boolean {
-	return node.execution.condition === 'waiting' && !node.child && !!node.wait;
+	return (node.execution.condition === 'waiting' || node.container) && !node.child && !!node.wait;
 }
 
 /**
@@ -94,5 +97,8 @@ export function scheduledLine(node: OperatorNode, now: Date, running: boolean, c
 	const why = timedWait(node)?.scheduled_reason;
 	const when = endMoment(node, now, clock);
 	if (!why || when === null) return null;
-	return running ? why : `${when} · ${why}`;
+	if (running) return why;
+	// A plain return-day reason repeats the day already named by the date.
+	const day = when.match(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/)?.[1];
+	return day && why.trim().toLowerCase() === `return ${day.toLowerCase()}` ? when : `${when} · ${why}`;
 }

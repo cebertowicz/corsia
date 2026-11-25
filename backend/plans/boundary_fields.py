@@ -285,7 +285,7 @@ def node_fields(
     if missing_intent:
         raise PlanInputError("task creation requires intent")
     size = require_task_size(params.get("size")) if kind == "task" or run else validate_size(params.get("size"))
-    later = later_fields.creation_flag(kind, params.get("later", False))
+    later = later_fields.creation_flag(kind, params.get("later"))
     return {
         "kind": kind,
         "title": text(params, "title"),

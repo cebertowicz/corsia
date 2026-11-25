@@ -81,8 +81,11 @@ class TouchFields:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     break
+                # Not asyncio.wait_for: on Python 3.11 it returns normally when a frame lands in the same loop
+                # pass as a cancel, so a closing pane's watcher would never stop (#3209).
                 try:
-                    await asyncio.wait_for(self.changed.wait(), timeout=min(_SETTLE_SECONDS, remaining))
+                    async with asyncio.timeout(min(_SETTLE_SECONDS, remaining)):
+                        await self.changed.wait()
                 except TimeoutError:
                     break
             if not self.touch or self.size is None:

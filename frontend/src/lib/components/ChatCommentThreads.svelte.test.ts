@@ -5,7 +5,7 @@ import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 import { messages } from '$lib/stores/threads';
 
-vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('$lib/stores/attentionQueueState.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 const openAtNewest = vi.hoisted(() => vi.fn());
 vi.mock('./comments/openAtNewestReply', () => ({ openAtNewestReply: openAtNewest }));
 

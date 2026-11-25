@@ -92,11 +92,11 @@ def select(
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
     if _below_cut(node):
-        # A running row never sits inside Later: taking the task up ends the
-        # set-aside, whatever route started it (Later design §2).
+        # A running row never sits inside Later: taking the task up brings its
+        # whole item back, whatever route started it (Later design §2).
         from plans import later_fields
 
-        later_fields.flip(
+        later_fields.set_item(
             db, node_id, later=False, reason="started",
             actor_id=actor_id, provenance=provenance,
         )

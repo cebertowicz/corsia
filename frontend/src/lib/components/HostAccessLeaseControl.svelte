@@ -45,14 +45,9 @@
 		/** Laid out by a slot owner (`ChatAttentionStack`) rather than floating
 		 *  itself. Every other layout fact stays this control's own. */
 		stacked = false,
-		/** Whether a lease is asking the user right now. Bound out so the slot
-		 *  owner has ONE precedence rule, and cleared on teardown so the flag
-		 *  can never outlive this control. */
-		awaitingUser = $bindable(false),
 	}: {
 		threadId: string | null;
 		stacked?: boolean;
-		awaitingUser?: boolean;
 	} = $props();
 
 	let leases = $state<HostAccessItem[]>([]);
@@ -81,13 +76,6 @@
 	const currentPending = $derived(
 		leases.find((lease) => lease.state === 'awaiting_user') ?? null,
 	);
-	$effect(() => {
-		awaitingUser = !!currentPending;
-		// Teardown runs on unmount, so an ended session, a cleared thread, or a
-		// sign-out can never leave a consumer suppressed by a control that is no
-		// longer on screen.
-		return () => { awaitingUser = false; };
-	});
 	// The drawer never springs open on its own: it only opens from a tap, and
 	// only stays open across a refresh while it is still the same request.
 	$effect(() => {

@@ -19,9 +19,9 @@ import { planFoldFields } from './fixtures/planFolds';
 import { childState } from './fixtures/planFolds';
 
 /**
- * Every place the plan tree mounts must gather scheduled work: the thread pane,
+ * Every place the plan tree mounts must gather Later work: the thread pane,
  * the drill view, the Activity plan row and a nested subagent plan. The group is
- * built inside the tree from the nodes' `scheduled_until` and the shared minute clock, so a mount
+ * built inside the tree from the nodes' server `later` flag, so a mount
  * needs to pass nothing else; these prove each one does.
  */
 
@@ -32,8 +32,9 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let head: Record<string, unknown> | null = null;
 
-/** A task its agent scheduled until `hours` from the real now. */
+/** A task the server set below the cut, its agent's check-back `hours` from the real now. */
 function scheduled<T extends OperatorNode>(base: T, hours: number): T {
+	base.later = true;
 	base.display = { label_key: 'waiting', tone_key: 'waiting' };
 	base.scheduled_until = new Date(Date.now() + hours * HOUR).toISOString();
 	base.execution = {
@@ -111,28 +112,29 @@ describe('the thread pane', () => {
 		component = mount(ThreadPlanPane, { target: host, props: { threadId: 't1' } });
 	}
 
-	it('gathers scheduled work into the group', async () => {
+	it('gathers Later work into the group', async () => {
 		const nodes = [operatorNode({ id: 'open', title: 'Open work', state: 'active' }), op('A', 48), op('B', 72)];
 		vi.stubGlobal('fetch', vi.fn(async () => respond(threadEnvelope(nodes, 3))));
 		mountPane();
 		await settle();
-		expect(titles()).toEqual(['Open work', '{Scheduled}']);
+		expect(titles()).toEqual(['Open work', '{Later}']);
 	});
 
-	it('never says "Nothing open" while the only open work is scheduled, and still counts it', async () => {
+	it('never says "Nothing open" while the only open work is Later, and still counts it', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => respond(threadEnvelope([op('A', 48), op('B', 72)], 2))));
 		mountPane();
 		await settle();
 		expect(host.textContent).not.toContain('Nothing open');
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		expect(host.querySelector('.progress')?.textContent).toBe('2 left');
 	});
 
-	it('shows ordinary paused rows, not a group, while the plan is paused', async () => {
+	it('shows ordinary paused rows, not a group, while the plan is paused and nothing is Later', async () => {
 		const paused = ['A', 'B'].map((id) => {
 			const row = op(id, 48);
 			row.execution = { ...row.execution, condition: 'paused', causes: [] };
 			row.scheduled_until = null;
+			row.later = false;
 			return row;
 		});
 		vi.stubGlobal('fetch', vi.fn(async () => respond(threadEnvelope(paused, 2, 'paused'))));
@@ -143,7 +145,7 @@ describe('the thread pane', () => {
 });
 
 describe('the drill view', () => {
-	it('gathers the focused subtree\'s scheduled children', () => {
+	it('gathers the focused subtree\'s Later children', () => {
 		const nodes = [
 			operatorNode({ id: 'root', title: 'Root', kind: 'phase', depth: 2 }),
 			op('A', 48, { parent_id: 'root', depth: 3 }),
@@ -151,7 +153,7 @@ describe('the drill view', () => {
 		];
 		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes, rootId: 'root', onBack: () => {} }) });
 		flushSync();
-		expect(titles()).toContain('{Scheduled}');
+		expect(titles()).toContain('{Later}');
 		expect(titles()).not.toContain('A');
 	});
 });
@@ -169,7 +171,7 @@ describe('a nested subagent plan', () => {
 			}),
 		});
 		flushSync();
-		expect(titles()).toEqual(['Delegated step', '{Scheduled}']);
+		expect(titles()).toEqual(['Delegated step', '{Later}']);
 		expect(host.querySelector('.child-tree .scheduled-row')?.getAttribute('data-depth')).toBe('1');
 	});
 });

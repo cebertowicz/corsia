@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from plans import admission, node_states, node_time, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
-from plans import operator_node_facts as facts
+from plans import operator_node_facts as facts, operator_intent
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
     ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
@@ -233,11 +233,12 @@ def project(
     list's facts (``execution``, ``display``, ``requires_user_action``). It
     skips the reads behind the rest: ``executor.label``, ``evidence`` and
     ``last_transition_at`` are None, a settled node's recorded reason is not in
-    ``status_reason``, and ``execution`` has no attempts and zero counts.
+    ``status_reason``; intent fields are empty; ``execution`` has no attempts and zero counts.
     """
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
+    intent_by_node = {} if lean else operator_intent.read([str(node["id"]) for node, _plan in node_plans], db=db)
     executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
-    labels, history, attempt_counts, evidence, changed, settled_because = (
+    labels, history, attempt_counts, evidence, changed, settled_because, later_because = (
         facts.NO_DETAIL if lean else facts.detail(
             projected, node_plans, executor_by_node, limit=ATTEMPT_HISTORY_LIMIT, db=db,
             scoped=detail_ids is not None,
@@ -252,7 +253,6 @@ def project(
         detail_ids=detail_ids, stable=stable,
     ), named=stable and costs)
     states: dict[str, dict] = {}
-
     for item in projected:
         for node in item.nodes:
             execution = executions[node["id"]]
@@ -267,15 +267,16 @@ def project(
             asks_user = row_asks_user(node, review, execution)
             paused_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
             states[node["id"]] = {
+                **intent_by_node.get(node["id"], operator_intent.EMPTY),
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
                     execution, sequenced_after, stopped, deferred_ask=paused_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
-                # The commitment total is true only at its one root; every
-                # other node in the tree would otherwise repeat the whole
-                # commitment's figure on its own row.
+                "later_reason": later_because.get(node["id"]),
+                # The commitment total is true only at its one root; every other node in the tree
+                # would otherwise repeat the whole commitment's figure on its own row.
                 "commitment_cost": commitment_costs.get(commitment_id) if is_commitment_root else None,
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),

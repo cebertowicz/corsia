@@ -68,6 +68,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 	return {
 		id: item.id, parent_id: parentId, depth, kind: item.kind, title: item.title,
 		description: null, waiting_on: [], acceptance_criteria: '', state: item.state,
+		intent: null, intent_is_person_comment: false, intent_parent_title: null, intent_owner_name: null, intent_run_title: null,
 		unmet_dependencies: [], held_by: null, assignee: null,
 		revision: 0, requirements_revision: 0, commitment_id: '',
 		updated_at: item.folded_at, last_transition_at: item.folded_at, folded: true, container: false, requires_user_action: false,
@@ -78,7 +79,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 		},
 		display: item.display, status_reason: item.status_reason, evidence: null, commitment_cost: null,
 		node_cost: { own: EMPTY_AMOUNT, rolled: EMPTY_AMOUNT }, initiative: null,
-		branch_progress: null, scheduled_until: null, attention_path: [], completion: null,
+		branch_progress: null, scheduled_until: null, later: false, later_reason: null, attention_path: [], completion: null,
 		child: null, review: null, user_actions: [], discussion_artifact_id: null, artifacts: [],
 	};
 }

@@ -10,9 +10,13 @@ from __future__ import annotations
 
 #: Refusal of an owner's named start that passes ready top-level work.
 START_OUT_OF_ORDER = (
-    "Not started: '{title}' ({node}) is above this in plan order and ready. Start it "
-    "first, or if this outranks it, reorder {mover}node_id={top} order_key={key}, then "
-    "start this with {revision}."
+    "Not started: '{title}' ({node}) is above this in plan order and is ready or held only "
+    "by your own deadline check-back. Start it first, or reorder {mover}node_id={top} "
+    "order_key={key}, then start this with {revision}. If it really waits on someone or "
+    "something, set a wait that names it: block_node with an owner, a dependency, or a watch "
+    "on the PR or event. Scheduling never puts off work you could move now. Reorder only if "
+    "your priorities and the project's, read now, rank this higher. Otherwise start the "
+    "item above."
 )
 #: A top-level task is the node the reorder moves, so its revision changes; a
 #: step inside a phase is not moved, so its own revision still holds.
@@ -23,7 +27,7 @@ _REVISION_KEPT = "its own expected_revision, unchanged by the reorder"
 #: The same refusal in a ``next`` block, no longer than ``_SLOT_HELD``'s fixed text.
 #: Rank is judged at the top-level item, so a step inside a phase names its
 #: phase: a reorder moves a node only among its siblings.
-_START_OUT_OF_ORDER_COMPACT = "start {title} first (ready, above this task) or reorder {mover} above it"
+_START_OUT_OF_ORDER_COMPACT = "start {title} first, reorder {mover} above it, or name its wait"
 
 
 def start_out_of_order_compact(title: str, *, root_kind: str | None = None) -> str:

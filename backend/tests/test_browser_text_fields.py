@@ -93,7 +93,28 @@ async def test_animated_page_reports_fields_within_max_settle():
     finally:
         animation.cancel()
         task.cancel()
-        await asyncio.gather(animation, task, return_exceptions=True)
+        async with asyncio.timeout(2):
+            await asyncio.gather(animation, task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_frame_in_the_same_pass_as_a_cancel_still_stops_the_watcher():
+    """A closing pane cancels the watcher; a frame landing in that same loop pass must not keep it alive (#3209)."""
+    async def read(_width, _height):
+        return [], None
+    watcher = TouchFields('thread-1', read, lambda _message: None)
+    watcher.appearance({'touch': True, 'width': 200, 'height': 100})
+    task = asyncio.create_task(watcher.run())
+    await asyncio.sleep(0.05)  # Inside the settle wait.
+    watcher.frame('frame data is not parsed')
+    task.cancel()
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.gather(task, return_exceptions=True)
+    finally:
+        stopped = task.done()
+        task.cancel()
+    assert stopped and task.cancelled()
 
 
 @pytest.mark.asyncio
@@ -297,7 +318,7 @@ async def test_in_view_fields_get_boxes_behind_many_off_screen_fields(monkeypatc
 async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them(caplog):
     """call_many sends the whole batch, then answers each entry, None where one failed, recording pushed parents.
 
-    A failed entry is logged with its CDP code and message, as call_in logs one.
+    A failed entry is logged with its method, id and CDP code but never its message, as call_in logs one.
     """
     caplog.set_level(logging.DEBUG, logger=browser_cdp_batch.__name__)
     sent: list[dict] = []
@@ -323,7 +344,7 @@ async def test_a_batch_reads_every_reply_and_keeps_the_events_between_them(caplo
     assert results == [None, {'model': {'border': [0, 0, 1, 0, 1, 1, 0, 1]}}]
     assert [message['params'] for message in sent] == [{'nodeId': 5}, {'nodeId': 6}]
     assert client.parents == {2: 1}
-    assert 'DOM.getBoxModel' in caplog.text and '-32000' in caplog.text and 'Could not compute box model.' in caplog.text
+    assert 'DOM.getBoxModel (id 1) failed with code -32000' in caplog.text and 'Could not compute box model.' not in caplog.text
 
 
 @pytest.mark.asyncio

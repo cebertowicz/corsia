@@ -49,7 +49,7 @@ it('says why a reply on a comment that left the chat is refused, and keeps the d
 	field!.value = 'keep this draft';
 	field!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
-	document.querySelector<HTMLButtonElement>('[role="dialog"] [data-send-reply]')!.click();
+	document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Send reply"]')!.click();
 	await tick();
 	flushSync();
 	const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';

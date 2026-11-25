@@ -1,0 +1,310 @@
+"""Which agent commands mark a document, a site or a whole session against a saved-login fill (browser_fill_marks)."""
+from __future__ import annotations
+
+import pytest
+
+from host_access import browser_cdp, browser_fill_marks as marks
+from tests.browser_process_fixture import synthetic_browser  # noqa: F401
+
+THREAD = "thread-marks"
+
+
+@pytest.fixture(autouse=True)
+def _fresh():
+    marks._scripted.clear()
+    marks._session_marks.clear()
+    marks._site_marks.clear()
+    yield
+    marks._scripted.clear()
+    marks._session_marks.clear()
+    marks._site_marks.clear()
+
+
+@pytest.fixture
+def on_page(monkeypatch):
+    """The page's document and site as before_agent_command reads them; None stands for an unreadable page."""
+    current = {"page": ("L1", "example.com")}
+
+    async def page(_endpoint):
+        return current["page"]
+
+    monkeypatch.setattr(marks, "_page", page)
+    return current
+
+
+@pytest.mark.parametrize(("args", "document", "session"), [
+    (("snapshot", "-i"), False, False),
+    (("click", "@e2"), False, False),
+    (("fill", "@e3", "text"), False, False),
+    (("get", "text", "@e1"), False, False),
+    (("wait", "--load", "networkidle"), False, False),
+    (("eval", "document.title"), True, False),
+    (("wait", "--fn", "window.ready"), True, False),
+    (("get", "text", "@e1", "--frame"), True, False),
+    (("network", "route", "https://example.com/*"), True, True),
+    (("addinitscript", "x"), True, True),
+    (("set", "headers", "{}"), True, True),
+    (("batch", "click @e1", "eval 1"), True, False),
+    (("batch", "click @e1", "network route *"), True, True),
+    (("batch", "click 'unclosed"), True, True),
+])
+def test_scripts_mark_their_document_and_lasting_changes_mark_the_session(args, document, session):
+    assert marks.runs_script(args) is document
+    assert marks.outlives_document(args) is session
+
+
+@pytest.mark.asyncio
+async def test_a_script_marks_the_document_it_ran_in_and_its_site_for_this_session(on_page):
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
+    assert marks.scripted(THREAD, "L1") and not marks.scripted(THREAD, "L2")
+    assert marks.site_marked(THREAD, "s1", "example.com") and not marks.site_marked(THREAD, "s1", "other.test")
+    assert not marks.site_marked(THREAD, "s2", "example.com")
+    assert not marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_new_document_on_a_scripted_site_is_still_marked_by_its_site(on_page):
+    # A reload commits a new loader, but a service worker or storage the script left still reaches the site.
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
+    on_page["page"] = ("L2", "example.com")
+    assert not marks.scripted(THREAD, "L2")
+    assert marks.site_marked(THREAD, "s1", "example.com")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", [
+    ("batch", "open https://example.com/b", "eval 1"),
+    ("batch", "tab 2", "eval 1"),
+    ("batch", "click @e1", "wait --fn window.ready"),
+    ("batch", "--bail", "back", "eval 1"),
+])
+async def test_a_batch_that_can_run_script_marks_the_whole_session(on_page, args):
+    # An earlier step can navigate or switch tabs, so the document a later script runs in isn't known in advance.
+    await marks.before_agent_command(THREAD, "s1", "ws://page", args)
+    assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
+
+
+@pytest.mark.asyncio
+async def test_a_batch_without_a_script_step_marks_nothing(on_page):
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("batch", "click @e1", "snapshot -i"))
+    assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+    assert not marks.site_marked(THREAD, "s1", "example.com")
+
+
+@pytest.mark.asyncio
+async def test_a_page_whose_document_or_address_cant_be_read_marks_the_session(on_page):
+    on_page["page"] = None
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tree", [
+    {},
+    {"frameTree": None},
+    {"frameTree": {"frame": None}},
+    {"frameTree": {"frame": {"loaderId": "L1"}}},
+    {"frameTree": {"frame": {"loaderId": "L1", "url": "about:blank"}}},
+    {"frameTree": {"frame": {"url": "https://example.com/"}}},
+])
+async def test_an_unreadable_frame_tree_gives_no_page(monkeypatch, tree):
+    class Client:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def call(self, method):
+            assert method == "Page.getFrameTree"
+            return tree
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", Client)
+    assert await marks._page("ws://page") is None
+
+
+@pytest.mark.asyncio
+async def test_a_readable_frame_tree_gives_its_document_and_registrable_domain(monkeypatch):
+    class Client:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def call(self, _method):
+            return {"frameTree": {"frame": {"loaderId": "L9", "url": "https://login.example.com/a"}}}
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", Client)
+    assert await marks._page("ws://page") == ("L9", "example.com")
+
+
+@pytest.mark.asyncio
+async def test_a_route_marks_its_session_until_the_browser_closes(on_page):
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("network", "route", "*"))
+    await marks.before_agent_command(THREAD, "s1", "ws://page", ("eval", "1"))
+    assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
+    assert not marks.session_marked("other-thread", "s1")
+    marks.forget(THREAD)
+    assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+    assert not marks.site_marked(THREAD, "s1", "example.com")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after", [("L2", "example.com"), ("L2", "other.test"), None])
+async def test_a_script_whose_page_changed_or_went_unreadable_during_it_marks_the_session(on_page, after):
+    # A navigation that commits before the script runs (an open that didn't wait, a self-redirect, `wait --fn`
+    # evaluating across loads) puts the script in a document the read before it never saw.
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        on_page["page"] = after
+        finished(True)
+    assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
+    # A later script that finishes on one document never clears the session mark.
+    on_page["page"] = ("L3", "example.com")
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        finished(True)
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_script_that_finished_in_the_document_it_marked_leaves_the_session_unmarked(on_page):
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("wait", "--fn", "window.ready")) as finished:
+        finished(True)
+    assert marks.scripted(THREAD, "L1") and not marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", [None, False])
+async def test_a_script_that_didnt_finish_marks_the_session(on_page, report):
+    # A timed-out command may still be running in the browser, in whatever document it reaches next.
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        if report is not None:
+            finished(report)
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_script_command_that_raised_marks_the_session(on_page):
+    with pytest.raises(RuntimeError):
+        async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")):
+            raise RuntimeError("down")
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_command_with_no_script_is_not_read_again(on_page):
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("click", "@e1")):
+        on_page["page"] = None
+    assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+
+
+def test_an_unread_document_counts_as_scripted():
+    assert marks.scripted(THREAD, "")
+
+
+def test_a_fill_without_a_session_id_counts_as_marked():
+    assert marks.session_marked(THREAD, None)
+
+
+# browser_open's own navigation, through the real tool and session-command path on a synthetic browser.
+NAVIGATION = "location.href = \"https://example.com/login\"; 'navigating'"
+
+
+@pytest.fixture
+def tool_path(synthetic_browser, monkeypatch, on_page):
+    """The browser tools wired to a synthetic browser in a disposable session; records each mark call."""
+    from host_access import browser_launch
+    from host_access.processes import ProcessOwner
+    from tools import browser_runtime
+
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda _: None)
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    process_owner = ProcessOwner.__new__(ProcessOwner)
+    process_owner._browser_owner = synthetic_browser.owner
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", process_owner)
+    calls: list[tuple] = []
+    real = marks.before_agent_command
+
+    async def recording(thread_id, session, endpoint, args, *, navigation=False):
+        calls.append((session, tuple(args), navigation))
+        return await real(thread_id, session, endpoint, args, navigation=navigation)
+
+    monkeypatch.setattr(marks, "before_agent_command", recording)
+    return calls
+
+
+def _clean(calls) -> bool:
+    """What browser_login_fill._clean asks of the marks, for the session the commands ran in."""
+    session = calls[-1][0]
+    assert session is not None
+    return not (marks.scripted(THREAD, "L1") or marks.site_marked(THREAD, session, "example.com")
+                or marks.session_marked(THREAD, session))
+
+
+@pytest.mark.asyncio
+async def test_browser_open_navigates_without_marking_the_page_it_leaves(tool_path, synthetic_browser):
+    from tools.browser import BrowserOpenTool
+
+    try:
+        opened = await BrowserOpenTool().execute("https://example.com/login", wait_for_load=False, _thread_id=THREAD)
+        assert opened.startswith("ok"), opened
+        assert tool_path[-1][1:] == (("eval", NAVIGATION), True)
+        assert _clean(tool_path)
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_eval_of_the_same_navigation_text_still_marks(tool_path, synthetic_browser):
+    from tools import browser_runtime
+
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        assert await browser_runtime._run(["eval", NAVIGATION], thread_id=THREAD) == "ok"
+        assert tool_path[-1][1:] == (("eval", NAVIGATION), False)
+        assert not _clean(tool_path) and marks.scripted(THREAD, "L1")
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_eval_whose_page_navigated_during_it_marks_the_session(tool_path, synthetic_browser, monkeypatch):
+    from tools import browser_runtime
+
+    reads = iter([("L1", "example.com"), ("L2", "example.com")])
+
+    async def page(_endpoint):
+        return next(reads)
+
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        monkeypatch.setattr(marks, "_page", page)
+        assert await browser_runtime._run(["eval", "1"], thread_id=THREAD) == "ok"
+        assert marks.session_marked(THREAD, tool_path[-1][0])
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_javascript_navigation_url_still_marks(tool_path, synthetic_browser, monkeypatch):
+    # The address check refuses a javascript: URL before anything runs; with it out of the way, the
+    # navigation test refuses it too, so its eval marks like any agent script.
+    from host_access import browser_navigation
+    from tools import browser_runtime
+
+    script_url = "javascript:alert(1)"
+    script_navigation = f"location.href = \"{script_url}\"; 'navigating'"
+    monkeypatch.setattr(browser_navigation, "normalize_url", lambda value: value)
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        await browser_runtime._run(["eval", script_navigation], thread_id=THREAD, navigation_url=script_url)
+        assert tool_path[-1][1:] == (("eval", script_navigation), False)
+        assert not _clean(tool_path) and marks.scripted(THREAD, "L1")
+    finally:
+        await synthetic_browser.owner.shutdown()
