@@ -84,11 +84,11 @@ def read(db: sqlite3.Connection, snapshot_id: int) -> str:
     return read_many(db, [snapshot_id])[snapshot_id]
 
 
-def adopt_existing(path: Path) -> bytes | None:
+def adopt_existing(path: Path, *, artifact_id: str | None = None) -> bytes | None:
     """Read and adopt existing bytes before replacing the file."""
     before = path.read_bytes() if path.exists() else None
     if before is not None:
-        adopt_before_write(path, before=before)
+        adopt_before_write(path, before=before, artifact_id=artifact_id)
     return before
 
 

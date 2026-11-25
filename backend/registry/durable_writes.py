@@ -382,7 +382,7 @@ def _publish_bytes(
     claim = source_claim(source, intent_id)
     content_hash = hashlib.sha256(content).hexdigest() if content is not None else ""
     stage = shared.path.parent / f".corsia-write-{intent_id}.stage"
-    before = comment_snapshots.adopt_existing(shared.path)
+    before = comment_snapshots.adopt_existing(shared.path, artifact_id=shared.authority.artifact_id if shared.authority else None)
     backup = (
         shared.path.parent / f".corsia-write-{intent_id}.backup"
         if shared.path.exists()

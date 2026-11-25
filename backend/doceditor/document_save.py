@@ -276,7 +276,7 @@ def _write_document(
     reaches_owner = decision is not None and decision.reaches_owner
     before = resolved.read_bytes() if reaches_owner or (not body.thread_id and resolved.is_file()) else None
     from doceditor.comment_snapshots import adopt_before_write
-    adopt_before_write(resolved, before=before)
+    adopt_before_write(resolved, before=before, artifact_id=decision.artifact_id if decision else None)
     # Only the thread-less save compares against the file's prior bytes; a threaded
     # save compares against its registration's last_written_sha256.
     prior_sha256 = hashlib.sha256(before).hexdigest() if before is not None and not body.thread_id else None
