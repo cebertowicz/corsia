@@ -616,6 +616,50 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(dock()).toBeNull();
 	});
 
+	it('shows the newer login after a second sign-in on the same site, so Save stores only what the person saw', async () => {
+		const second = { ...OFFER, username: 'alex@example.com' };
+		offers = [OFFER, second];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		expect(dock()!.textContent).toContain('sam@example.com');
+		await signIn(socket, canvas);
+		expect(dock()!.textContent).toContain('alex@example.com');
+		expect(dock()!.textContent).not.toContain('sam@example.com');
+		expect(liveText()).toContain('alex@example.com');
+	});
+
+	it('ignores a save answer that lands after a newer login replaced the one being saved', async () => {
+		let release: (value: unknown) => void = () => {};
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.endsWith('/save') ? new Promise((resolve) => { release = resolve; }) : base(input, init)));
+		offers = [OFFER, { ...OFFER, username: 'alex@example.com' }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		await signIn(socket, canvas);
+		release({ ok: true, status: 200, json: async () => ({ saved: true }) });
+		await settle();
+		expect(dock()!.textContent).toContain('alex@example.com');
+		expect(dock()!.textContent).not.toContain('Saved');
+		expect(button('Save').disabled).toBe(false);
+	});
+
+	it('steps aside while a password page shows, so the page notice stays visible, and comes back if no sign-in follows', async () => {
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').focus();
+		passwordPage(socket, true);
+		await settle();
+		expect(dock()).toBeNull();
+		expect(host.querySelector('.password-notice')).not.toBeNull();
+		expect(host.querySelector('.browser-page')!.contains(document.activeElement)).toBe(true);
+		passwordPage(socket, false);
+		await settle();
+		expect(dock()!.textContent).toContain('sam@example.com');
+		expect(gets()).toHaveLength(1);
+	});
+
 	it('closes when the pane disconnects', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);
