@@ -28,7 +28,9 @@
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 	/** A document holds the canvas: its name opens the open-files list and its own controls join this bar. */
 	const titleAction = $derived(isTakeover ? h?.titleAction ?? null : null);
-	const docBar = $derived(titleAction ? $documentBar : null);
+	/** The compact document header, whichever form (the name that opens the files, or Files (n) above the phone width), holds the document's own controls. */
+	const holdsDocument = $derived(titleAction != null || (isTakeover && !!h?.actions?.some((a) => a.id === 'artifact-tabs')));
+	const docBar = $derived(holdsDocument ? $documentBar : null);
 	/** On a phone a document is left by Back, not the sidebar: the sidebar toggle goes, and Back carries its needs-you dot. */
 	const phoneDocument = $derived($isMobile && titleAction != null);
 	// A phone hides the menu, so its toggle carries the menu rows' needs-you dot.

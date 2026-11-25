@@ -12,6 +12,12 @@ const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 
+// A phone keeps Approve and "Also accepts N suggestions"; the same bar above the phone width is covered in the matching Desktop file, as shipped at f51bbda8e.
+vi.mock('$lib/stores/viewport', async (importOriginal) => {
+	const { readable } = await import('svelte/store');
+	return { ...(await importOriginal<typeof import('$lib/stores/viewport')>()), isMobile: readable(true) };
+});
+
 const counts = (comments = 0) => ({ comments, suggestions: 0, edits: 0 });
 function read(comments = 0): ReviewBarRead {
 	return {
@@ -46,7 +52,7 @@ afterEach(() => {
 	host.remove();
 });
 
-describe('ReviewBar accept all and approve', () => {
+describe('ReviewBar accept all and approve on a phone', () => {
 	it('keeps plain Approve when no suggestion is open', async () => {
 		await render(0, vi.fn());
 		expect(button('Approve')).toBeTruthy();

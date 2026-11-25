@@ -21,7 +21,7 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, docked = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', hint = '', suppressed = false, docked = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
 		/** The ask answers from a card docked to the document canvas's bottom edge: at rest the question on one line above the answers; a tap opens it to the asker and the full question. The caller docks only on a phone or a short touch screen; elsewhere the ask keeps its row. */
 		docked?: boolean;
@@ -38,6 +38,8 @@
 		noting?: boolean;
 		busy?: boolean;
 		status?: string;
+		/** A neutral line shown in the status slot while there is no status. */
+		hint?: string;
 		suppressed?: boolean;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
@@ -197,7 +199,7 @@
 		<span class="rb-row2">
 			<div class="rb-capsule" class:suppressed class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
-				<span class="rb-status" class:busy={busy} role="status">{status}</span>
+				<span class="rb-status" class:busy={busy} class:hint={!status && hint !== ''} role="status">{status || hint}</span>
 				{@render actions()}
 			</div>
 		</span>
@@ -297,15 +299,12 @@
 	.rb-others strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
-	.rb-status.busy { color: var(--text-secondary); }
+	.rb-status.busy, .rb-status.hint { color: var(--text-secondary); }
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
 	/* While a comment sheet is up, one verdict group is on screen at a time: the answer row is not drawn, and gives up its height, so no blank band is left where it was and a landscape sheet does not cover the text under the bar. The phone capsule below slides away instead. */
 	.review-bar.ask.suppressed .rb-row2 { display: none; }
-	/* In the header, what Approve also accepts is the status slot's neutral line beside the buttons, as it was: it takes the room the buttons leave, and the empty status gives it up. */
-	.rb-capsule :global(.rb-derived) { flex: 1 1 0; min-width: 0; margin: 0; color: var(--text-secondary); }
-	.rb-capsule:has(:global(.rb-derived)) .rb-status:empty { flex: 0 0 0; }
 	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
 	/* The note grows at every width, with the same bounded scrolling used by the narrow canvas. */
 	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-input); line-height: var(--space-6); resize: none; overflow-y: auto; }
@@ -332,14 +331,14 @@
 	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
 	@container doc-canvas (max-width: 37.5rem) {
 		.review-bar.ask .rb-row2 { flex-wrap: wrap; }
-		.review-bar.ask .rb-status:not(:empty) { flex-basis: 100%; }
+		.review-bar.ask .rb-status:not(:empty):not(.hint) { flex-basis: 100%; }
 		.review-bar.noting :global(.rb-note) { flex: 1 0 100%; order: 1; height: auto; min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
 	}
 
-	/* What Approve also accepts is short and belongs to that button, so it keeps the buttons' row until the canvas is too narrow for both. A refusal or a sending message still takes its own row. 32rem is 512px here (a container query's rem is 16px whatever the root size), a round width above the measured need at the app's 15px root: the row's insets (44px + 24px), Send back + Approve (153px), the two 8px gaps and the longest line, 'Also accepts 99 suggestions' (157px; 150px at 2) come to 395px (387px at 2), so the line keeps the buttons' row from 395px up. */
+	/* The hint beside Approve all is short and belongs to that button, so it keeps the buttons' row (wrapping in the room they leave, which is no taller than the buttons) until the canvas is too narrow for both. A refusal or a sending message still takes its own row. A landscape phone's header would otherwise spend a third of its height on one sentence. */
 	@container doc-canvas (max-width: 32rem) {
-		.review-bar.ask .rb-capsule :global(.rb-derived) { flex-basis: 100%; }
+		.review-bar.ask .rb-status.hint:not(:empty) { flex-basis: 100%; }
 	}
 
 	/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */

@@ -4,6 +4,14 @@ import { canvasHeader } from '$lib/stores/canvasHeader';
 import { syncCanvasHeader } from '$lib/homeCanvasHeader';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 
+const phone = vi.hoisted(() => ({ isMobile: null as unknown as import('svelte/store').Writable<boolean>, isShortTouch: null as unknown as import('svelte/store').Writable<boolean> }));
+vi.mock('$lib/stores/viewport', async (importOriginal) => {
+	const { writable: store } = await import('svelte/store');
+	phone.isMobile = store(false);
+	phone.isShortTouch = store(false);
+	return { ...(await importOriginal<typeof import('$lib/stores/viewport')>()), isMobile: phone.isMobile, isShortTouch: phone.isShortTouch };
+});
+
 type Input = Parameters<typeof syncCanvasHeader>[0];
 
 function makeInput(overrides: Partial<Input> = {}): Input {
@@ -27,6 +35,8 @@ function makeInput(overrides: Partial<Input> = {}): Input {
 beforeEach(() => {
 	canvasHeader.set(null);
 	activityPhoneItem.set(null);
+	phone.isMobile.set(false);
+	phone.isShortTouch.set(false);
 });
 
 function compact(overrides: Record<string, unknown> = {}) {
@@ -41,7 +51,35 @@ function compact(overrides: Record<string, unknown> = {}) {
 }
 
 describe('syncCanvasHeader — compact artifact', () => {
-	it('takes over with Back to chat and the tab title, which opens the open-files list', () => {
+	it('above the phone width takes over with Back to chat, the tab title, and a tab-count action', () => {
+		const onBack = vi.fn();
+		const onTabs = vi.fn();
+		syncCanvasHeader(makeInput({
+			compactArtifact: compact({ onBack, onTabs }),
+			activeView: 'chat',
+			activeThreadId: 's1',
+		}));
+		const h = get(canvasHeader);
+		expect(h?.title).toBe('Design.md');
+		expect(h?.backLabel).toBe('Chat');
+		expect(h?.titleAction).toBeUndefined();
+		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Files (2)', title: 'Show open files', active: false });
+		h?.onBack?.();
+		expect(onBack).toHaveBeenCalledOnce();
+		h?.actions?.[0].onClick();
+		expect(onTabs).toHaveBeenCalledOnce();
+	});
+
+	it('above the phone width marks the tabs action when any tab has changed', () => {
+		syncCanvasHeader(makeInput({
+			compactArtifact: compact({ anyChanged: true }),
+			activeView: 'chat',
+		}));
+		expect(get(canvasHeader)?.actions?.[0]).toMatchObject({ active: true });
+	});
+
+	it.each(['isMobile', 'isShortTouch'] as const)('on a phone (%s) the tab title opens the open-files list', (query) => {
+		phone[query].set(true);
 		const onBack = vi.fn();
 		const onTabs = vi.fn();
 		syncCanvasHeader(makeInput({
@@ -60,7 +98,8 @@ describe('syncCanvasHeader — compact artifact', () => {
 		expect(onTabs).toHaveBeenCalledOnce();
 	});
 
-	it('marks the title action when any tab has changed', () => {
+	it('on a phone marks the title action when any tab has changed', () => {
+		phone.isMobile.set(true);
 		syncCanvasHeader(makeInput({
 			compactArtifact: compact({ anyChanged: true }),
 			activeView: 'chat',

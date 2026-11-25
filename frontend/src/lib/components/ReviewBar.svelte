@@ -3,6 +3,7 @@
 	import { getContext, onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { on } from '$lib/ws';
+	import { isMobile, isShortTouch } from '$lib/stores/viewport';
 	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
 	import { isCommentTask } from './comments/commentTask';
 	import ReviewBarShell from './ReviewBarShell.svelte';
@@ -33,11 +34,14 @@
 	const ACCEPT_FAILED = 'Couldn’t accept the suggestions. Try again.';
 	let noteInput = $state<HTMLTextAreaElement>();
 	let requestButton = $state<HTMLButtonElement>();
-	/** The two answers: Approve, and Send back, which asks for another review (named for what it does with the document, so it is never read as the suggestion Reject). */
-	const SEND_BACK = 'Send back';
+	let changesButton = $state<HTMLButtonElement>();
+	/** Send back asks for another review; approval with changes does not. Named for what it does with the document, so it is never read as the suggestion Reject. */
+	const LABELS = { changes_requested: 'Send back', approved_with_changes: 'Approve with changes' } as const;
+	/** A phone or short touch screen keeps the two answers, Approve and Send back; above the phone width the ask is as shipped before the one-row header (f51bbda8e): three answers, and Approve all with what it accepts. */
+	const compact = $derived(docked || $isMobile || $isShortTouch);
 	let approveButton = $state<HTMLButtonElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-	/** How many suggestions the last Approve accepted along with it ("Also accepts N suggestions"), for the receipt. */
+	/** How many suggestions the last Approve accepted along with it, for the receipt. */
 	let acceptedCount = $state(0);
 
 	const read = $derived(bar.read);
@@ -57,6 +61,7 @@
 	const label = $derived(
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
 	);
+	const alsoSends = $derived(round > 0 ? `Also sends your ${pending} to ${asker}` : undefined);
 	const approveSends = $derived(round > 0 ? `Your ${pending} ${round === 1 ? 'goes' : 'go'} to ${asker}` : undefined);
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
@@ -118,7 +123,7 @@
 		return true;
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
-	async function settle(verdict: 'approved' | 'changes_requested') {
+	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
 		const targetId = artifactId;
 		if (!targetId) return;
 		const targetHoldIds = [...holdIds];
@@ -139,8 +144,10 @@
 		else if (bar.phase === 'ask') approveButton?.focus();
 	}
 	const acceptFirst = $derived(pendingSuggestions > 0 && onAcceptAll !== undefined);
-	/** Beside Approve: what it also does with the suggestions still open. */
+	/** Beside Approve on a phone: what it also does with the suggestions still open. */
 	const alsoAccepts = $derived(acceptFirst ? `Also accepts ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'}` : '');
+	const approveText = $derived(acceptFirst && !compact ? 'Approve all' : 'Approve');
+	const acceptHint = $derived(acceptFirst && !compact ? (pendingSuggestions === 1 ? 'Approve all accepts the open suggestion.' : `Approve all accepts the ${pendingSuggestions} open suggestions.`) : '');
 	const approveDescription = $derived(acceptFirst ? `Accepts the ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'}, then approves` : approveSends);
 	async function approve() {
 		if (round > 0 && blocked()) return;
@@ -152,8 +159,18 @@
 		}
 		void settle('approved');
 	}
+	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Send back. */
+	async function approveWithChanges() {
+		if (blocked()) return;
+		if (round > 0) { void settle('approved_with_changes'); return; }
+		bar.noteFor = 'approved_with_changes';
+		bar.openNote();
+		await tick();
+		noteInput?.focus();
+	}
 	async function requestChanges() {
 		if (blocked()) return;
+		bar.noteFor = 'changes_requested';
 		bar.openNote();
 		await tick();
 		noteInput?.focus();
@@ -161,11 +178,11 @@
 	async function cancelNote() {
 		bar.cancelNote();
 		await tick();
-		requestButton?.focus();
+		(bar.noteFor === 'approved_with_changes' ? changesButton : requestButton)?.focus();
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle('changes_requested');
+		void settle(bar.noteFor);
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
@@ -178,7 +195,7 @@
 {:else if !isCommentTask(personStep) && bar.visible}
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
-		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
+		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure} hint={noting ? '' : acceptHint}
 		{suppressed} {docked} bind:capsuleClearance
 		receipt={{ icon: bar.receipt?.verdict === 'changes_requested' ? 'changes' : 'check', label: 'Review answered', segments: receiptText }}
 		stale={{ label: 'Review request ended', text: 'This review request has ended', sub: 'Refreshing' }}
@@ -189,13 +206,14 @@
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
 				<div class="rb-actions">
 					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
-					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{SEND_BACK}</Button>
+					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{LABELS[bar.noteFor]}</Button>
 				</div>
 			{:else}
-				{#if alsoAccepts}<p class="rb-derived">{alsoAccepts}</p>{/if}
+				{#if alsoAccepts && compact}<p class="rb-derived">{alsoAccepts}</p>{/if}
 				<div class="rb-actions">
-					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>{SEND_BACK}</Button>
-					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={approveDescription} title={approveDescription} onclick={approve}>Approve</Button>
+					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>{LABELS.changes_requested}</Button>
+					{#if !compact}<Button size="sm" variant="secondary" disabled={busy} bind:el={changesButton} description={alsoSends} title={alsoSends} onclick={approveWithChanges}>{LABELS.approved_with_changes}</Button>{/if}
+					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={approveDescription} title={approveDescription} onclick={approve}>{approveText}</Button>
 				</div>
 			{/if}
 		{/snippet}

@@ -5,12 +5,16 @@ import type { ContextAttachTarget } from '$lib/stores/contextAttach';
 import type { View } from '$lib/homePaneConfig';
 import type { SettingsDrill } from '$lib/stores/settingsNavigation';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+import { isMobile, isShortTouch } from '$lib/stores/viewport';
 
 /**
  * On a phone, the Activity item open on screen: back to the list, and Next. Read here, not passed in, so the effect
  * that calls syncCanvasHeader re-runs when it changes.
  */
 const phoneItem = fromStore(activityPhoneItem);
+/** Read here for the same reason: the header re-syncs when the screen crosses the phone width. */
+const phone = fromStore(isMobile);
+const shortTouch = fromStore(isShortTouch);
 
 export interface CompactArtifactHeader {
 	title: string;
@@ -87,7 +91,24 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 	// header returns as soon as chat is the active surface again.
 	if (input.activeView === 'chat' && input.compactArtifact) {
 		const { title, tabCount, anyChanged, onBack, onTabs } = input.compactArtifact;
-		// The name opens the open-files list (a ⌄ after it says so); the document's own controls join the bar from its header.
+		// Above the phone width the header is as shipped before the one-row header (f51bbda8e): the name, and Files (n) beside the panel toggle.
+		if (!(phone.current || shortTouch.current)) {
+			canvasHeader.set({
+				title,
+				backLabel: 'Chat',
+				onBack,
+				actions: [{
+					id: 'artifact-tabs',
+					label: `Files (${tabCount})`,
+					title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
+					onClick: onTabs,
+					active: anyChanged,
+					primary: true,
+				}],
+			});
+			return;
+		}
+		// On a phone the name opens the open-files list (a ⌄ after it says so); the document's own controls join the bar from its header.
 		canvasHeader.set({
 			title,
 			backLabel: 'Chat',

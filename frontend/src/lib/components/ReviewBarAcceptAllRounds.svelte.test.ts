@@ -14,6 +14,12 @@ vi.mock('$lib/ws', () => ({
 	on: vi.fn((event: string, handler: () => void) => { handlers.map.set(event, handler); return () => {}; }),
 }));
 
+// A phone keeps Approve and "Also accepts N suggestions"; the same bar above the phone width is covered in the matching Desktop file, as shipped at f51bbda8e.
+vi.mock('$lib/stores/viewport', async (importOriginal) => {
+	const { readable } = await import('svelte/store');
+	return { ...(await importOriginal<typeof import('$lib/stores/viewport')>()), isMobile: readable(true) };
+});
+
 const counts = { comments: 0, suggestions: 0, edits: 0 };
 const read = (raisedAt: string): ReviewBarRead => ({
 	ask_raised: true, hold_ids: ['h1'], ask_reason: 'Is the rollout plan right?', ask_raised_at: raisedAt,
@@ -40,7 +46,7 @@ afterEach(() => {
 	host.remove();
 });
 
-describe('ReviewBar accepted count across rounds', () => {
+describe('ReviewBar accepted count across rounds on a phone', () => {
 	it('keeps round 1’s accepted count out of round 2’s receipt', async () => {
 		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 2, onAcceptAll: vi.fn(async () => 2) });
 		component = mount(ReviewBar, { target: host, props });
