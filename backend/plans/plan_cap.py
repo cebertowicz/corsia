@@ -34,7 +34,7 @@ import plans.service as service
 CAP = 5
 
 #: The reason a spilled task shows on its Later row.
-REASON = f"Moved to Later: more than {CAP} items were waiting to start"
+REASON = f"More than {CAP} items were waiting to start"
 PROVENANCE = "plans.plan_cap"
 STARTUP_MARKER = "plans:plan_cap:first_spill"
 

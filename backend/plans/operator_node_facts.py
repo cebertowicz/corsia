@@ -137,7 +137,7 @@ def detail(
         labels, history, counts,
         review_evidence.latest_by_node(plan_ids, db=db, node_ids=node_ids), changed,
         closure.settled_reasons(db, [node for node, _plan in node_plans], labels=labels),
-        later_fields.latest_reasons(db, [node for node, _plan in node_plans]),
+        later_fields.latest_reasons(db, [str(node["id"]) for node, _plan in node_plans if node.get("later")]),
     )
 
 

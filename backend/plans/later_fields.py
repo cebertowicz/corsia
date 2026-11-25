@@ -229,34 +229,35 @@ def record_event(
         later_review.arm_node(connection, node_id)
 
 
-def latest_reasons(db, nodes) -> dict[str, str]:
-    """The reason each Later task's row shows: the one its latest crossing recorded, by node id.
-
-    Reads only tasks in Later, so a plan with none costs no query. A task whose
-    latest crossing gave no reason is absent.
+#: The latest move below the cut, including a move with no reason, per row.
+_REASON_SQL = """SELECT e.node_id AS node_id,
+        json_extract(e.payload_json,'$.reason') AS reason
+    FROM plan_node_events AS e
+    WHERE e.event=? AND e.node_id IN (SELECT value FROM json_each(?))
+      AND e.rowid=(SELECT MAX(l.rowid) FROM plan_node_events AS l
+                   WHERE l.node_id=e.node_id AND l.event=?
+                     AND json_extract(l.payload_json,'$.later')=1)
     """
-    import json
 
-    from plans.operator_node_facts import id_chunks
 
-    ids = sorted(str(node["id"]) for node in nodes if node["kind"] == "task" and node.get("later"))
-    reasons: dict[str, str] = {}
-    for chunk in [part for part in id_chunks(ids) if part]:
-        marks = ",".join("?" for _ in chunk)
-        rows = db.execute(
-            f"""SELECT node_id, payload_json FROM (
-                  SELECT node_id, payload_json,
-                         ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC, rowid DESC) AS latest
-                  FROM plan_node_events INDEXED BY idx_plan_node_events_node
-                  WHERE node_id IN ({marks}) AND event=?
-                ) WHERE latest=1""",
-            (*chunk, EVENT),
-        ).fetchall()
-        for row in rows:
-            reason = json.loads(row["payload_json"] or "{}").get("reason")
-            if reason:
-                reasons[str(row["node_id"])] = str(reason)
-    return reasons
+def latest_reasons(db, node_ids) -> dict[str, str]:
+    """The reason each listed task is in Later: the one its latest move below the cut recorded.
+
+    The one reader of that reason, for the pane's Later rows and the agent's
+    Later wake and status alike. A task whose latest move gave no reason is absent;
+    no ids cost no query.
+    """
+    from infra.packed_rows import fetch_all
+    from plans.node_waits import encoded_ids
+
+    ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
+    if not ids:
+        return {}
+    return {
+        str(row["node_id"]): str(row["reason"])
+        for row in fetch_all(db, _REASON_SQL, (EVENT, encoded_ids(ids), EVENT))
+        if row["reason"] is not None
+    }
 
 
 def validate_later_edit(connection, node, later: object, *, actor_id: str | None) -> None:
