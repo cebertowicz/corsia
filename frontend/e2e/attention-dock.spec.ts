@@ -62,6 +62,24 @@ for (const width of [1440, 393]) {
   await page.getByRole('button', { name: 'Answer', exact: true }).click();
   await expect(page.getByText('Showing last known items.')).toHaveCount(0);
  });
+ test(`@surface:attention the shared queue failure and recovery show in Activity at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+  await openActivity(page, width);
+  let fail = true;
+  await page.route('**/api/attention/queue', route => fail
+   ? route.fulfill({ status: 503, json: {} })
+   : route.fulfill({ json: { current: null, count: 0, items: [] } }));
+  const reload = () => page.evaluate(async () => {
+   const state = await import('/src/lib/stores/attentionQueueState.svelte.ts');
+   await state.reload();
+  });
+  await reload();
+  await expect(page.getByText('Showing last known items.').filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: first.title })).toBeVisible();
+  fail = false;
+  await reload();
+  await expect(page.getByText('Showing last known items.')).toHaveCount(0);
+ });
  test(`@surface:attention a decision draft survives changing items at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
   await openActivity(page, width);

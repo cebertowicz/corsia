@@ -48,6 +48,28 @@ def test_queue_answers_both_lists_and_the_ranker_sees_tasks_only(isolated_db, mo
         db.close()
 
 
+def test_done_clears_newer_tagged_top_level_comment(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('tagged',?,'agent','agent','owner','look','owner-token','9999','9999')", (doc,))
+        db.commit()
+        client = _client(monkeypatch)
+        [row] = client.get('/api/attention/queue?view=activity').json()['notifications']['items']
+        assert row['detail']['unread'] == 2
+        assert row['detail']['latest_reply_id'] == 'tagged'
+        response = client.post('/api/attention/notifications/read', json={'documents': [
+            {'artifact_id': doc, 'through_reply_id': row['detail']['latest_reply_id']},
+        ]})
+        assert response.status_code == 200
+        assert client.get('/api/attention/queue?view=activity').json()['notifications']['count'] == 0
+        from doceditor.feedback_state import unread_item_ids
+        assert doc not in unread_item_ids(db, 'owner-token', [doc])
+    finally:
+        db.close()
+
+
 def test_notifications_are_newest_reply_first(isolated_db, monkeypatch):
     db = get_db()
     try:

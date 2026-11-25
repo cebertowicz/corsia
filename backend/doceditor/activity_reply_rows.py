@@ -48,9 +48,12 @@ def document_rows(db, user_id: str) -> list[dict]:
              ) AS qualifies
       {unread_sql}
     ), counted AS (
-      SELECT u.*, COUNT(*) OVER (PARTITION BY u.artifact_id) AS unread FROM unread u
+      SELECT u.*, COUNT(*) OVER (PARTITION BY u.artifact_id) AS unread,
+             FIRST_VALUE(u.reply_id) OVER (PARTITION BY u.artifact_id
+               ORDER BY u.created_at DESC, u.reply_id DESC) AS latest_unread_id
+      FROM unread u
     )
-    SELECT c.root_id, c.reply_id, c.artifact_id, c.created_at, c.author_thread_id, c.unread,
+    SELECT c.root_id, c.reply_id, c.artifact_id, c.created_at, c.author_thread_id, c.unread, c.latest_unread_id,
            i.title AS artifact_title, own.parent_thread_id AS owner_thread
     FROM counted c
     JOIN artifact_identities i ON i.id=c.artifact_id AND i.state='active'
@@ -88,7 +91,7 @@ def document_rows(db, user_id: str) -> list[dict]:
             'title': clip_title(_flat(latest['artifact_title'])) or 'A document',
             'raised_at': latest['created_at'], 'source': sources[latest['author_thread_id']],
             'open': {'artifact_id': artifact, 'comment_id': latest['root_id']},
-            'detail': {'artifact_id': artifact, 'unread': latest['unread'], 'latest_reply_id': latest['reply_id'],
+            'detail': {'artifact_id': artifact, 'unread': latest['unread'], 'latest_reply_id': latest['latest_unread_id'],
                        'agents': agents, 'threads': [{'root_id': root, 'reply_id': reply} for root, reply in threads.items()]},
             'priority': 0,
         })
