@@ -206,6 +206,41 @@ async def _reviewed_request(monkeypatch, supervisor, **overrides):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outage", [True, False])
+async def test_approval_activation_failure_is_bounded_and_logged(isolated_db, monkeypatch, outage):
+    from loguru import logger
+    from host_access import supervisor
+    from host_access.errors import ReviewerOutage, ReviewerUnavailableError
+
+    _seed_session(isolated_db, "root")
+    monkeypatch.setattr(supervisor, "_close_user_model_browsers", lambda _user: asyncio.sleep(0))
+    reviewed = await _reviewed_request(monkeypatch, supervisor)
+    secret = "secret-looking-message-do-not-log"
+    exc = (ReviewerUnavailableError(secret, outage=ReviewerOutage("reviewer", "rate_limit"))
+           if outage else RuntimeError(secret))
+
+    async def fail(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(supervisor.reviewer_target, "resolve_bound_reviewer_target", fail)
+    lines = []
+    sink = logger.add(lines.append, format="{message}")
+    try:
+        result = await supervisor.approve_and_activate(
+            reviewed["id"], user_id=reviewed["user_id"], expected_revision=reviewed["revision"],
+            application_hash=reviewed["application_hash"],
+        )
+    finally:
+        logger.remove(sink)
+    reason = "activation_reviewer_unavailable" if outage else "activation_failed"
+    assert result["state"] == "blocked"
+    assert result["terminal_reason"] == reason
+    assert result["user_decision"] == "approved"
+    assert any(reviewed["id"] in line and reason in line and type(exc).__name__ in line for line in lines)
+    assert all(secret not in line for line in lines)
+
+
 def _seed_project_policy(
     isolated_db,
     *,

@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Mapping, Sequence, cast
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 

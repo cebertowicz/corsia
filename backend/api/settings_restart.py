@@ -24,7 +24,7 @@ from api.update_preflight import fresh_update_target
 from api.update_preflight import restamp_staged_target
 from api.update_preflight import with_failure_code as _with_failure_code
 from infra.log_files import nofollow_log_opener
-from infra.update_prepare_output import clean_update_output, terminal_update_summary
+from infra.update_prepare_output import clean_update_output, run_logged_prepare, terminal_update_summary
 
 logger = logging.getLogger(__name__)
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -54,15 +54,9 @@ def _update_log_path(operation_id: str | None = None) -> Path:
 
 def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
     """Pull, validate, and stage the serving checkout before any restart."""
+    log_path = _update_log_path(restart_env.get("CORSIA_RESTART_OPERATION_ID"))
     try:
-        result = subprocess.run(
-            [str(corsia_script), "prepare-redeploy"],
-            capture_output=True,
-            text=True,
-            env=restart_env,
-            timeout=600,
-            check=False,
-        )
+        result, log_error = run_logged_prepare(corsia_script, restart_env, log_path)
     except subprocess.TimeoutExpired as exc:
         raise _with_failure_code(
             HTTPException(504, "Update timed out before restart; CORSIA is still running."),
@@ -75,21 +69,15 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
 
     stdout = clean_update_output(result.stdout)
     stderr = clean_update_output(result.stderr)
-    log_path = _update_log_path(restart_env.get("CORSIA_RESTART_OPERATION_ID"))
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "w", encoding="utf-8", opener=nofollow_log_opener) as log:
-            log.write("\n".join(part.rstrip() for part in (stdout, stderr) if part.strip()) + "\n")
-    except OSError as exc:
-        if result.returncode != 0:
-            raise _with_failure_code(
-                HTTPException(
-                    500,
-                    "Update stopped before restart, and its full log could not be written; "
-                    "CORSIA is still running.",
-                ),
-                _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"),
-            ) from exc
+    if log_error is not None and result.returncode != 0:
+        raise _with_failure_code(
+            HTTPException(
+                500,
+                "Update stopped before restart, and its full log could not be written; "
+                "CORSIA is still running.",
+            ),
+            _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"),
+        ) from log_error
     if result.returncode == 0:
         return
 

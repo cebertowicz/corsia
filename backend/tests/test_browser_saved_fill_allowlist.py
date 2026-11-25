@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_access import (
-    browser_cdp, browser_cli, browser_control, browser_pane_state, browser_session_commands,
+    browser_cdp, browser_cli, browser_control, browser_pane_state, browser_saved_fills, browser_session_commands,
     browser_step_lifecycle as lifecycle,
 )
 from host_access.browser_cdp import PasswordProbe
@@ -25,7 +25,7 @@ FILLED, OTHER = "loader-filled", "loader-other"
 @pytest.fixture(autouse=True)
 def _fresh():
     held = (lifecycle._steps, lifecycle._answers, lifecycle._sessions, lifecycle._probe_locks,
-            browser_control._guarded_visits, browser_control._saved_fills)
+            browser_control._guarded_visits, browser_saved_fills._saved_fills)
     for each in held:
         each.clear()
     yield
@@ -139,10 +139,10 @@ async def test_a_new_document_in_the_tab_hands_over_from_the_page_rule_to_the_se
         await _run(monkeypatch, ("screenshot", "shot.png"), visit=FILLED)
     assert str(refused.value) == browser_control.SAVED_FILL_REFUSED
     # ...and the session's own rule still refuses scripts and every other unlisted command on it.
-    for args in (("eval", "1"), ("get", "text", "@e1"), ("press", "Enter"), ("network", "route", "**/*")):
+    for args in (("eval", "1"), ("get", "text", "@e1"), ("dblclick", "@e1"), ("network", "route", "**/*")):
         with pytest.raises(BrowserSessionError) as refused:
             await _run(monkeypatch, args, visit=OTHER)
-        assert str(refused.value) == browser_session_commands.SAVED_FILL_SESSION_REFUSED, args
+        assert str(refused.value) == browser_saved_fills.SAVED_FILL_SESSION_REFUSED, args
 
 
 @pytest.mark.asyncio
@@ -178,7 +178,7 @@ async def test_a_snapshot_whose_values_cant_be_hidden_is_withheld_with_its_own_l
 
 def test_the_saved_fill_lines_say_what_holds_and_until_when():
     page, withheld, session = (browser_control.SAVED_FILL_REFUSED, browser_control.SAVED_FILL_SNAPSHOT_WITHHELD,
-                               browser_session_commands.SAVED_FILL_SESSION_REFUSED)
+                               browser_saved_fills.SAVED_FILL_SESSION_REFUSED)
     for line in (page, withheld, session):
         # The server filled the field, so no line says the person did.
         assert "A saved login was filled" in line and "person filled" not in line

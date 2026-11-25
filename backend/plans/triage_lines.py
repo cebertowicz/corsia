@@ -5,8 +5,15 @@ A named start (``activate``, ``start``, or a closing operation's
 above it is ready: neither started nor waiting. The refusal names that item and
 the two ways on: start it, or reorder this item above it so the plan says so.
 A user's write, a conductor's write to another agent's plan and a delegating
-parent's write are never refused here; the person can always override. An add
-gets the top of the plan and a landing line instead (``plans.plan_top``).
+parent's write are never refused here; the person can always override, by
+starting a task by name or moving it up. An add gets the top of the plan and a
+landing line instead (``plans.plan_top``).
+
+The app's own pick (``in_plan_order``) follows the same order whoever's write
+caused it: a task made active without a start, such as a comment or review
+task, or a task a person's answer unblocks, is not given the slot while ready
+work ranks above it. Its owner is woken to take the top of its plan or move
+that task up.
 
 Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
@@ -101,6 +108,23 @@ def standing(db, plan) -> Standing:
         [row for row in roots if row["state"] in RANKED_STATES],
         ready,
         root_of,
+    )
+
+
+def in_plan_order(db, plan, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop a candidate for the app's own pick that passes ready work ranked above it.
+
+    The pick follows the same order as a named start (``out_of_order``): a task
+    made active without a start, such as a comment task, is not given the slot
+    while higher work is ready. The owner starts the higher work, or moves this
+    one up and starts it. Only a thread's own plan is ordered this way.
+    """
+    if plan["owner_kind"] != "thread" or not candidates:
+        return candidates
+    where = standing(db, plan)
+    return tuple(
+        node_id for node_id in candidates
+        if (root_id := where.root_of.get(node_id)) is None or not where.ready_above(root_id)
     )
 
 

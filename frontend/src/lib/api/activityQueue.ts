@@ -8,11 +8,8 @@ import type { AttentionRenderer, AttentionSource, DecisionDetail, HeldReplyDetai
  */
 export type ActivityKind = 'review' | 'decision' | 'task' | 'reply' | 'message';
 
-/** What the pane opens: a document (at a comment), a chat reply in its chat, or nothing (the kind's own panel). */
-export type ActivityOpen =
-	| { artifact_id: string; comment_id?: string }
-	| { thread_id: string; message_id: string }
-	| null;
+/** What the pane opens: a document (at a comment), or nothing (the kind's own panel). */
+export type ActivityOpen = { artifact_id: string; comment_id?: string } | null;
 
 export interface ActivityRank {
 	position: number;
@@ -52,13 +49,6 @@ export interface ActivityDocReplyDetail {
 	reply?: string | null;
 }
 
-/** An agent answered the person's comment in chat; it opens in its chat. */
-export interface ActivityChatReplyDetail {
-	thread_id: string;
-	message_id: string;
-	text?: string | null;
-}
-
 export interface ActivityQueueItem {
 	/** Stable across reads; what the ranker writes. */
 	key: string;
@@ -75,8 +65,7 @@ export interface ActivityQueueItem {
 		| HeldReplyDetail
 		| ActivityReviewDetail
 		| ActivityTaskDetail
-		| ActivityDocReplyDetail
-		| ActivityChatReplyDetail;
+		| ActivityDocReplyDetail;
 }
 
 export interface ActivityQueue {

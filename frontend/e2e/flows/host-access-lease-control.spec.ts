@@ -1,5 +1,5 @@
 import { test } from '../support/test';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -370,6 +370,23 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByText('home-assistant: Protected base checkout', { exact: true })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
+		// Approve is the one solid action; Reject is today's secondary button beside it.
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toHaveClass(/\bsecondary\b/);
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toHaveClass(/\bprimary\b/);
+		// Every section is a label over plain text, with no card border or fill.
+		const sections = dialog.locator('.risk-grid section, .repo-policy-context, .policy-exceptions, .review');
+		expect(await sections.count()).toBeGreaterThanOrEqual(3);
+		for (const section of await sections.all()) {
+			await expect(section).toHaveCSS('border-top-width', '0px');
+			await expect(section).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+		}
+		// With no box, the exceptions label keeps the warning colour the pending status uses.
+		const warningColor = await dialog.locator('.decision-head .status').evaluate((element) => getComputedStyle(element).color);
+		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
+		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
+		// The header carries the state; the asked duration is body text, not a second amber.
+		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('For how long');
+		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
 		// The sheet slides up from below on open; its bounds are read where it comes to rest.
@@ -405,26 +422,59 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
+		// Reject sits beside Approve, not across the footer from it: the app's button gap, a finger's width on a phone.
+		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
+		const expectedGap = viewport!.width <= 720 ? 44 : 12;
+		expect(besideGap).toBeGreaterThanOrEqual(expectedGap);
+		expect(besideGap).toBeLessThanOrEqual(expectedGap + 1);
+		// The pinned head keeps 12px under its title at every width; both pinned strips end at a hairline
+		// over the scrolling content, as the decision drawer's do.
+		await expect(dialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(dialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(dialog.locator('.decision-actions')).toHaveCSS('border-top-width', '1px');
+		// The keyboard reaches Reject, then Approve, and each shows a focus ring.
+		await dialog.getByRole('button', { name: 'Reject' }).focus();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeFocused();
+		for (const name of ['Approve', 'Reject']) {
+			if (name === 'Reject') await page.keyboard.press('Shift+Tab');
+			const ring = await dialog.getByRole('button', { name }).evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { visible: element.matches(':focus-visible'), style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+			});
+			expect(ring, `${name} shows a focus ring`).toMatchObject({ visible: true });
+			expect(ring.style, `${name} outline`).not.toBe('none');
+			expect(ring.width, `${name} outline width`).toBeGreaterThan(0);
+		}
 
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 
 		await dialog.getByRole('button', { name: 'Approve' }).click();
-		await expect(page.locator('.active-chip .countdown')).toContainText('min left');
+		await expect(page.locator('.active-chip .countdown')).toContainText(':');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
-		// The chip's words are its name, the time left included.
-		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access · \d+ min left$/ });
+		const hostAccessDisclosure = page.getByRole('button', { name: 'Host access', exact: true });
 		const revokeHostAccess = page.getByRole('button', { name: 'Revoke host access' });
 		await expect(hostAccessDisclosure).toBeVisible();
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			// A composer chip: no fill and no border at rest; it sits clear of the messages instead.
+			// The solid material is the trigger's; the wrapper only lays it out.
 			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
-				const style = getComputedStyle(element);
-				return { background: style.backgroundColor, border: style.borderTopWidth };
+				const solidProbe = document.createElement('div');
+				solidProbe.style.background = 'var(--bg-secondary)';
+				document.body.appendChild(solidProbe);
+				const solidBackground = getComputedStyle(solidProbe).backgroundColor;
+				solidProbe.remove();
+				return {
+					actualBackground: getComputedStyle(element).backgroundColor,
+					solidBackground,
+				};
 			});
-			expect(chipMaterial).toEqual({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
+			expect(chipMaterial.actualBackground).toBe(chipMaterial.solidBackground);
 
 			const messages = page.locator('.messages');
 			await messages.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -502,6 +552,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(revokeBoxAtRest).toBeTruthy();
 		expect(revokeBoxAtRest!.y).toBeGreaterThanOrEqual(0);
 		expect(revokeBoxAtRest!.y + revokeBoxAtRest!.height).toBeLessThanOrEqual(viewport!.height);
+		// Revoke ends where a request sheet's Approve ends: the content's right edge.
+		expect(Math.abs(revokeBoxAtRest!.x + revokeBoxAtRest!.width - (activeBodyBox!.x + activeBodyBox!.width))).toBeLessThanOrEqual(1);
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(activeDialog.locator('.active-drawer-actions')).toHaveCSS('border-top-width', '1px');
 		await footerSitsOnScrollerEdge(activeDialog, '.active-drawer-actions');
 
 		// Escape closes the drawer without revoking, and returns focus to the
@@ -550,17 +605,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		}));
 	}
 
-	/** The entry's row: the site ends before the status, and the status and Review stay inside the entry and the screen. */
+	/** The card's row: the site ends before Review, and Review stays inside the card and the screen. */
 	async function expectRowFits(page: Page) {
 		const row = await page.locator('.pending-request-trigger').first().evaluate((button) => {
 			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
 			const entry = button.getBoundingClientRect();
-			return { siteRight: box('.pending-site').right, statusLeft: box('.pending-status').left,
+			return { siteRight: box('.pending-site').right, actionLeft: box('.pending-action').left,
 				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth,
-				ownerWidth: box('.pending-owner').width, whatWidth: box('.pending-what').width,
-				entryWidth: entry.width, parentWidth: button.parentElement!.getBoundingClientRect().width };
+				ownerWidth: box('.pending-owner').width, entryWidth: entry.width };
 		});
-		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.statusLeft);
+		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.actionLeft);
 		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
 		expect(row.entryRight, JSON.stringify(row)).toBeLessThanOrEqual(row.screen);
 	}
@@ -598,37 +652,6 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expectRowFits(page);
 	});
 
-	test('stacks a long agent name over the site on a wide screen, so the site stays whole', async ({ page, request }, testInfo) => {
-		await page.setViewportSize({ width: 1440, height: 900 });
-		const title = `Saved login long name ${testInfo.project.name}-${Date.now()}`;
-		const threadId = await createSession(request, title);
-		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
-		const fill = fillRequest(threadId, 1, { agent });
-		await page.route('**/api/host-access/leases**', async (route) => {
-			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
-			await route.fulfill({
-				status: 200, contentType: 'application/json',
-				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
-			});
-		});
-		await loginByUrl(page, { waitForComposer: false });
-		await selectThread(page, title);
-
-		const name = page.locator('.pending-request-trigger .pending-owner');
-		const shown = page.locator('.pending-request-trigger .pending-site');
-		await expect(shown).toBeVisible();
-		await expect(name).toHaveText(agent);
-		// The site is never shortened for the name: it is whole, on a line of its own under the name.
-		await expect.poll(() => shown.textContent()).toBe(LONG_SITE_SHOWN);
-		const box = await siteLine(shown);
-		expect(box.fits, JSON.stringify(box)).toBe(true);
-		expect(box.lines).toBe(1);
-		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
-		expect(siteBox!.y, 'the site sits under the name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
-		expect(siteBox!.width).toBeGreaterThan(0);
-		await expectRowFits(page);
-	});
-
 	test('keeps Review on screen on a phone when the agent name is long', async ({ page, request }, testInfo) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		const title = `Saved login long name phone ${testInfo.project.name}-${Date.now()}`;
@@ -647,6 +670,151 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
 		await expectRowFits(page);
+	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`cuts a long agent name before the site at ${viewport.width} px, so the registrable domain stays whole`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login long name ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+			const fill = fillRequest(threadId, 1, { agent });
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			const shown = page.locator('.pending-request-trigger .pending-site');
+			await expect(shown).toBeVisible();
+			await expect(page.locator('.pending-request-trigger .pending-owner')).toHaveText(agent);
+			// fitLabel sets the label after a frame; wait until the site's minimum is measured.
+			await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+			const label = (await shown.textContent()) ?? '';
+			// Whole, or cut once at the front between whole labels, and always ending in the whole domain.
+			expect(label === LONG_SITE_SHOWN || (label.startsWith('…') && LONG_SITE_SHOWN.endsWith(`.${label.slice(1)}`)), label).toBe(true);
+			expect(label.endsWith('example.com'), label).toBe(true);
+			const box = await siteLine(shown);
+			expect(box.fits, JSON.stringify(box)).toBe(true);
+			// The name gives way first but stays readable: on screen, one line, cut at its end.
+			const name = await page.locator('.pending-request-trigger .pending-owner').evaluate((element) => ({
+				width: element.clientWidth, height: element.getBoundingClientRect().height,
+				lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+			}));
+			expect(name.width, JSON.stringify(name)).toBeGreaterThan(40);
+			if (name.lineHeight) expect(name.height, JSON.stringify(name)).toBeLessThanOrEqual(name.lineHeight + 1);
+			await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
+			await expectRowFits(page);
+			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`) });
+		});
+	}
+
+	/**
+	 * What the saved-login card must hold at any width, stale or not: "Review →" and the stale badge wholly inside
+	 * the card and the screen, the site ending in its whole registrable domain, nothing scrolled or clipped, and
+	 * the agent's name never an empty column.
+	 */
+	async function expectEntryHolds(page: Page, tail: string) {
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+		const label = (await shown.textContent()) ?? '';
+		expect(label.endsWith(tail), label).toBe(true);
+		expect(label === tail || label.endsWith(`.${tail}`) || label === `…${tail}`, label).toBe(true);
+		const card = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (element: Element | null) => {
+				if (!element) return null;
+				const { left, right, top, bottom, width } = element.getBoundingClientRect();
+				return { left, right, top, bottom, width };
+			};
+			const site = button.querySelector('.pending-site') as HTMLElement;
+			return {
+				entry: box(button), action: box(button.querySelector('.pending-action')), pill: box(button.querySelector('.pill')),
+				owner: box(button.querySelector('.pending-owner')), screen: window.innerWidth,
+				row: { scroll: button.scrollWidth, client: button.clientWidth },
+				site: { scroll: site.scrollWidth, client: site.clientWidth },
+				layout: { stacked: button.hasAttribute('data-stacked'), row: button.getAttribute('style'), site: site.getAttribute('style') },
+			};
+		});
+		const detail = JSON.stringify(card);
+		for (const part of [card.action, card.pill]) {
+			if (!part) continue;
+			expect(part.left, detail).toBeGreaterThanOrEqual(card.entry!.left - 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.entry!.right + 0.5);
+			expect(part.top, detail).toBeGreaterThanOrEqual(card.entry!.top - 0.5);
+			expect(part.bottom, detail).toBeLessThanOrEqual(card.entry!.bottom + 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.screen);
+		}
+		expect(card.action, detail).not.toBeNull();
+		expect(card.row.scroll, detail).toBeLessThanOrEqual(card.row.client);
+		expect(card.site.scroll, detail).toBeLessThanOrEqual(card.site.client);
+		expect(card.owner!.width, detail).toBeGreaterThan(0);
+		return card;
+	}
+
+	/** One fill in the entry, served from the list read; `stale` then fails the next read, as a dropped connection does. */
+	async function showFill(page: Page, request: APIRequestContext, title: string, overrides: Record<string, unknown>, stale = false) {
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1, overrides);
+		let reads = 0;
+		await page.route('**/api/host-access/leases**', async (route) => {
+			if (route.request().method() === 'POST') {
+				await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'lease revision is stale' }) });
+				return;
+			}
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			if (root === threadId && stale && reads++ > 0) {
+				await route.abort('failed');
+				return;
+			}
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+		await expect(page.locator('.pending-request-trigger .pending-site')).toBeVisible();
+		if (!stale) return;
+		// A Reject the server refuses as changed makes the control read the list again; that read fails, so the request is out of date.
+		await page.locator('.pending-request-trigger').click();
+		await page.getByRole('dialog').getByRole('button', { name: 'Reject' }).click();
+		await expect(page.getByRole('dialog').getByRole('button', { name: 'Reject' })).toBeEnabled();
+		await page.keyboard.press('Escape');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('.pending-request-trigger .pill')).toBeVisible();
+	}
+
+	const LONG_AGENT = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+
+	test('keeps Review and the out-of-date badge inside the card on a phone, with a long agent name', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await showFill(page, request, `Saved login stale phone ${testInfo.project.name}-${Date.now()}`, { agent: LONG_AGENT }, true);
+		await expectEntryHolds(page, 'example.com');
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-stale-393.png') });
+	});
+
+	test('puts a long registrable domain on its own line on a phone, whole, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A registrable domain is one label under a public suffix, so a long one is a long label before ".com".
+		const domain = 'northwind-regional-supply-cooperative-accounts.com';
+		await showFill(page, request, `Saved login long domain ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${SCHEME}login.${domain}`, domain,
+		});
+		await expectEntryHolds(page, domain);
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-long-domain-393.png') });
+	});
+
+	test('keeps a site with a port whole to its port on a phone, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A saved login's site is an https origin: it can carry a port other than 443, never a path.
+		await showFill(page, request, `Saved login port ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${LONG_SITE}:8443`,
+		});
+		await expectEntryHolds(page, 'example.com:8443');
 	});
 
 	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {

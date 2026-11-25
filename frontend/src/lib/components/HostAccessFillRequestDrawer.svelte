@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
-	import { approvalReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
+	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
+	import { approvalReady, casReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessFill } from '$lib/api/hostAccess';
 
 	/**
@@ -15,18 +17,22 @@
 		deciding,
 		rejectDisabled,
 		approveDisabled,
+		notice = null,
 		onApprove,
 		onReject,
 		onRetry,
+		onClose,
 	}: {
 		request: HostAccessFill;
 		stale: boolean;
 		deciding: boolean;
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
+		notice?: string | null;
 		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
+		onClose: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(request));
@@ -47,10 +53,7 @@
 </script>
 
 <div class="pending-drawer">
-	<header class="decision-head">
-		<div><div class="section-label">Sign in with a saved login</div><h2 title={owner(request)}>{owner(request)}</h2></div>
-		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
-	</header>
+	<HostAccessDrawerHead label="Sign in with a saved login" title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body fill-body">
 		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke this approval at any time.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
@@ -73,22 +76,15 @@
 				{/each}
 			</div>
 		</section>
-		{#if stale || !ready}
-			<div class="blocked-line" role="status">
-				<span>{stale
-					? 'Couldn’t check that this request is still current, so you can’t approve it.'
-					: 'This request arrived without everything needed to approve it. Retry to load it again.'}</span>
-				<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
-			</div>
-		{/if}
 	</div>
 	<footer class="decision-actions">
-		<span class="decision-spacer"></span>
-		<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
-		{#if ready}
-			<Button variant="primary" loading={deciding} disabled={approveDisabled}
+		<HostAccessBlockedLine {stale} incomplete={!ready} kind="fill" rejectable={casReady(request)} {notice} {onRetry} />
+		<div class="decision-buttons">
+			<span class="decision-spacer"></span>
+			<Button variant="secondary" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready}
 				onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
-		{/if}
+		</div>
 	</footer>
 </div>
 
@@ -102,23 +98,9 @@
 	/* The last control clears the sticky footer by the same step at every width. */
 	.fill-body { padding-bottom: var(--space-4); }
 	.explainer { margin: 0; }
-	.status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.status.stale, .blocked-line { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
 	/* A finger-sized target on any touch pointer; the sheet sets it on a phone-width sheet too. */
 	@media (pointer: coarse) {
 		.durations .segment { min-height: var(--touch-target); }
 	}
-	.blocked-line {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-footnote);
-	}
-	.blocked-line span { flex: 1; min-width: 0; }
 </style>

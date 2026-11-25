@@ -32,7 +32,7 @@ def _bundle_revision(writes: Mapping[Path, bytes | None]) -> str:
 
 def _undelivered_error(kind: str) -> str:
     """Explain why the saved instruction did not reach the target's next turn."""
-    if kind == "responsibility":
+    if kind in {"responsibility", "priorities"}:
         return (
             "Saved but not delivered: the bootloader attachment was not included; "
             "read the destination before retrying"
@@ -62,11 +62,12 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
     tray = resolve_thread_root(scope_root, target["id"])
     if not tray.resolve().is_relative_to(scope_root.resolve()):
         raise RosterChangeError("target thread tray escapes its scope root")
-    if kind == "responsibility":
+    if kind in {"responsibility", "priorities"}:
+        filename = "RESPONSIBILITY.md" if kind == "responsibility" else "PRIORITIES.md"
         if name or supporting_files:
-            raise RosterChangeError("responsibility uses the fixed RESPONSIBILITY.md path; omit name and supporting_files")
+            raise RosterChangeError(f"{kind} uses the fixed {filename} path; omit name and supporting_files")
         root = tray / "context"
-        writes = {root / "RESPONSIBILITY.md": content.encode()}
+        writes = {root / filename: content.encode()}
     elif kind == "skill":
         if not name:
             raise RosterChangeError("skill name is required")
@@ -90,7 +91,7 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
         if valid.name != name:
             raise RosterChangeError(f"SKILL.md name {valid.name!r} must match the skill name {name!r}")
     else:
-        raise RosterChangeError("kind must be responsibility or skill")
+        raise RosterChangeError("kind must be responsibility, priorities or skill")
     for path in writes:
         if not path.resolve().is_relative_to(tray.resolve()) or path.is_symlink():
             raise RosterChangeError("instruction destination escapes the target thread tray")
@@ -130,12 +131,23 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
         before = {path: path.read_bytes() if path.exists() else None for path in writes}
         current_revision = "absent" if all(value is None for value in before.values()) else _bundle_revision(before)
         changed = before != writes
+        if kind == "priorities" and changed and current_revision != "absent":
+            raise RosterChangeError("priorities file already exists; suggest changes to its owner")
         if changed and expected_revision != current_revision:
             raise RosterChangeError(f"instruction bundle changed; current revision is {current_revision}; read current files and retry")
     # The guidance save closes its own pooled connection, which rolls back this thread's open
     # transaction, so it runs between the check and the attach, as the replace tool's save does.
     history = _save_bundle(writes, before, actor, kwargs) if changed else {}
     primary = next(iter(writes))
+    if kind == "priorities" and before[primary] is None:
+        from registry import service
+
+        try:
+            service.register_write_strict(actor, str(primary))
+        except Exception as exc:
+            if primary.is_file() and not primary.is_symlink() and primary.read_bytes() == writes[primary]:
+                primary.unlink()
+            raise RosterChangeError("priorities registration failed; inspect the destination before retrying") from exc
     with write_transaction(None, scope="conductor_instruction_file_attach") as db:
         if kind == "responsibility":
             files = thread_bootloader_files(target_id, db=db)
@@ -146,6 +158,13 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
                     user_id=user_id, action="attach", files=[*files, str(primary)], expected_files=files,
                 )
             delivered = str(primary.resolve()) in _instruction_paths(target, db)
+        elif kind == "priorities":
+            from core.dynamic_context_registry import _thread_bootloader_sources
+
+            sources = _thread_bootloader_sources(target_id, target["project_id"], Path(config.WORKSPACE), db)
+            delivered = any(row.stable_reference == str(primary.resolve()) and row.inclusion == "included"
+                            for row in sources)
+            attached = delivered
         else:
             skills = resolve_effective_skills(
                 thread_id=target_id, project_id=target["project_id"], workspace=Path(config.WORKSPACE), db=db,
@@ -164,7 +183,7 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
         return {
             "ok": delivered, "thread_id": target_id, "kind": kind, "path": str(primary),
             "revision": _bundle_revision(writes), "changed": changed or not attached,
-            "delivery": {"next_turn": delivered, "surface": "bootloader" if kind == "responsibility" else "skills-list"},
+            "delivery": {"next_turn": delivered, "surface": "bootloader" if kind in {"responsibility", "priorities"} else "skills-list"},
             "supporting_files": [str(path) for path in writes if path != primary],
             **history,
             "error": None if delivered else _undelivered_error(kind),
@@ -182,7 +201,7 @@ class ConductorInstructionFileCreateTool(Tool):
     def description(self) -> str:
         return (
             "Load skill coordination-api for setup. For the CORSIA agent or a project conductor in the same scope: create and attach a target thread's "
-            "RESPONSIBILITY.md, or install its thread skill with optional corsia.yaml and scripts/references. "
+            "RESPONSIBILITY.md or PRIORITIES.md, or install its thread skill with optional corsia.yaml and scripts/references. "
             "Use expected_revision='absent' for creation; copy the returned bundle revision "
             "for later edits. Same desired state retries are idempotent. Returns verified next-turn "
             "bootloader or skills-list delivery; support scripts are available, never executed. "
@@ -196,7 +215,7 @@ class ConductorInstructionFileCreateTool(Tool):
             "required": ["target_thread_id", "kind", "expected_revision", "content"],
             "properties": {
                 "target_thread_id": {"type": "string", "minLength": 1},
-                "kind": {"type": "string", "enum": ["responsibility", "skill"]},
+                "kind": {"type": "string", "enum": ["responsibility", "priorities", "skill"]},
                 "expected_revision": {"type": "string", "pattern": "^(absent|[0-9a-f]{64})$"},
                 "content": {"type": "string", "minLength": 1},
                 "name": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},

@@ -848,12 +848,15 @@ describe('save-login offer: touch typing and failures', () => {
 describe('save-login offer: motion', () => {
 	type Played = { node: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions };
 	let played: Played[];
+	// Each stubbed animation finishes on a timer; any still pending when a test ends is cleared, so none fires after jsdom is gone.
+	let finishTimers: ReturnType<typeof setTimeout>[];
 	const forDock = () => played.filter(entry => entry.node.classList.contains('save-offer'));
 	const forError = () => played.filter(entry => entry.node.classList.contains('error'));
 	const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 	beforeEach(() => {
 		played = [];
+		finishTimers = [];
 		const root = document.documentElement.style;
 		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
 		root.setProperty('--ease-entrance', 'cubic-bezier(0.22, 1, 0.36, 1)');
@@ -864,13 +867,14 @@ describe('save-login offer: motion', () => {
 			return {
 				finished: Promise.resolve(),
 				cancel() {},
-				set onfinish(done: () => void) { setTimeout(done, Number(options.duration)); },
+				set onfinish(done: () => void) { finishTimers.push(setTimeout(done, Number(options.duration))); },
 			};
 		};
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 64));
 	});
 
 	afterEach(() => {
+		finishTimers.forEach(timer => clearTimeout(timer));
 		const root = document.documentElement.style;
 		['--ease-snap', '--ease-entrance'].forEach(name => root.removeProperty(name));
 	});

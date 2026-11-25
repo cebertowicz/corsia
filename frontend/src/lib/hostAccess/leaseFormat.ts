@@ -207,11 +207,3 @@ export function remaining(lease: HostAccessTimed, nowMs: number): string {
 	const seconds = total % 60;
 	return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
-
-/** The chip's time: whole minutes left, rounded up ("15 min left"), so it never reads as a clock time. */
-export function minutesLeft(lease: HostAccessTimed, nowMs: number): string {
-	if (lease.expires_at === null) return 'activating';
-	if (!validTime(lease.expires_at)) return 'unknown';
-	const seconds = Math.max(0, Math.ceil((Date.parse(lease.expires_at) - nowMs) / 1000));
-	return `${Math.ceil(seconds / 60)} min left`;
-}

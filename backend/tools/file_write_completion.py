@@ -119,6 +119,8 @@ def managed_write(
     else:
         # An ordinary path: the registry decided ownership before this write and the owner hears of it after.
         before = path.read_bytes() if decision is not None and decision.reaches_owner else None
+        from doceditor.comment_snapshots import adopt_before_write
+        adopt_before_write(path, before=before, artifact_id=decision.artifact_id if decision else None)
         if handle is not None:
             handle.seek(0)
             handle.write(text)

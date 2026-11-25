@@ -1,5 +1,4 @@
 import type {
-	ActivityChatReplyDetail,
 	ActivityDocReplyDetail,
 	ActivityKind,
 	ActivityQueueItem,
@@ -7,8 +6,7 @@ import type {
 	ActivityTaskDetail,
 } from '$lib/api/activityQueue';
 import type { DecisionDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
-import { fetchArtifactPane } from '$lib/api/docs';
-import type { ArtifactNode, PaneNode } from '$lib/api/artifactPane';
+export { findDocument } from '$lib/findDocument';
 import { parseWsTimestamp } from '$lib/time';
 
 export const KIND_LABEL: Record<ActivityKind, string> = {
@@ -74,9 +72,8 @@ export function followerOf(
 }
 
 /**
- * The list with the item the person is still reading after the server let it go (its press was refused and it left),
- * at the place it held in the order they last saw. Once they move on it is no longer kept, and the list is the
- * server's alone.
+ * The list with the item the person is still reading after a refusal or departure, at the place it held in the order
+ * they last saw. Once they move on it is no longer kept, and the list is the server's alone.
  */
 export function keepInPlace(
 	items: readonly ActivityQueueItem[],
@@ -96,10 +93,6 @@ export function documentOf(item: ActivityQueueItem): { artifactId: string; comme
 	return null;
 }
 
-export function chatOf(item: ActivityQueueItem): { threadId: string; messageId: string } | null {
-	if (item.open && 'message_id' in item.open) return { threadId: item.open.thread_id, messageId: item.open.message_id };
-	return null;
-}
 
 export const decisionOf = (item: ActivityQueueItem) =>
 	item.kind === 'decision' ? (item.detail as DecisionDetail) : null;
@@ -131,29 +124,5 @@ export function taskSteps(text: string): TaskSteps {
 	return { kind: 'text', text };
 }
 
-export const chatReplyOf = (item: ActivityQueueItem) =>
-	item.kind === 'reply' && chatOf(item) ? (item.detail as ActivityChatReplyDetail) : null;
 
-export type DocumentLookup =
-	| { status: 'found'; path: string; title: string }
-	| { status: 'missing' }
-	| { status: 'failed' };
-
-/**
- * The app opens a document by its path, so an item's artifact id is looked up in the files of the chat it came
- * from, the same lookup an outside wait's document uses.
- */
-export async function findDocument(threadId: string, artifactId: string): Promise<DocumentLookup> {
-	let nodes: PaneNode[];
-	try {
-		nodes = (await fetchArtifactPane(threadId)).nodes;
-	} catch {
-		return { status: 'failed' };
-	}
-	const found = nodes
-		.flatMap((node): ArtifactNode[] => (node.kind === 'artifact' ? [node] : node.children))
-		.find((node) => node.id === artifactId);
-	const path = found?.path ?? found?.external_id;
-	if (!found || !path) return { status: 'missing' };
-	return { status: 'found', path, title: found.title ?? found.name };
-}
+export type { DocumentLookup } from '$lib/findDocument';
