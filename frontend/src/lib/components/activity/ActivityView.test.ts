@@ -552,6 +552,8 @@ describe('a reply row in a document with two replied threads', () => {
 		render();
 		await settle();
 		expect(activityTab()).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'c-first' });
+		expect(buttonNamed('Reply')).toBeDefined();
+		expect(buttonNamed('Open in chat')).toBeUndefined();
 
 		rows()[1].click();
 		await settle();
