@@ -170,7 +170,7 @@ async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> Non
 
 
 def use_page(monkeypatch, page: FakePage) -> FakePage:
-    monkeypatch.setattr(capture, "_QuietCdp", page.client)
+    monkeypatch.setattr(capture, "_quiet_cdp", page.client)
     monkeypatch.setattr(capture_writes, "quiet_cdp", page.client)
     monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
     return page
@@ -269,6 +269,19 @@ def test_rule1_only_the_pane_input_path_reaches_the_capture():
                 callers.setdefault(name, set()).add(path.relative_to(backend).as_posix())
     assert callers == {"person_submit": {"host_access/browser_pane.py"},
                        "before_person_input": {"host_access/browser_pane.py", "ws/browser_stream.py"}}
+
+
+def test_capture_reads_the_open_step_without_importing_the_lifecycle():
+    """The lifecycle imports capture; capture reads the step registry from browser_steps, so there is no cycle."""
+    text = pathlib.Path(capture.__file__).read_text(encoding="utf-8")
+    assert "browser_step_lifecycle" not in text and "importlib" not in text
+    assert lifecycle._steps is browser_steps.open_steps
+    step = browser_steps.PasswordStep("doc-1", "accounts.example.com", "ws://page")
+    lifecycle._steps[THREAD] = step
+    try:
+        assert browser_steps.password_step(THREAD) is step
+    finally:
+        lifecycle._steps.pop(THREAD, None)
 
 
 @pytest.mark.asyncio
