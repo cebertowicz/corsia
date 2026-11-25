@@ -6,31 +6,22 @@ a duration they chose, at most :data:`MAX_GRANT_SECONDS`, or until they turn it
 off. There is no automatic approval of any kind, and the host-access reviewer
 never decides a fill.
 
-- :func:`request_fill` raises a pending approval. Server code calls it, never
-  an agent: no route or tool reaches it. It names the agent from the server's
-  own thread record and the site and username from the login's public view.
-  It may carry the duration the agent's task needs, which the person's drawer
-  starts on; that is a timed duration within the cap and nothing else, so an
-  agent can never ask for a standing grant.
+- :func:`request_fill` raises a pending approval; server code calls it, no
+  route or tool reaches it. It may carry the timed duration the agent's task
+  needs, which the drawer starts on; an agent can never ask for a standing grant.
 - :func:`approve_fill`, :func:`deny_fill` and :func:`revoke_fill` are the
-  person's, reached only through routes behind ``require_human_user``. Only
-  :func:`approve_fill` makes a standing grant (``until_turned_off``): it has no
-  deadline and lasts until the person revokes it, the login is deleted or goes
-  out of date (:func:`end_for_login`), or the server restarts.
+  person's, behind ``require_human_user``. Only :func:`approve_fill` makes a
+  standing grant (``until_turned_off``): no deadline; it ends on revoke, when
+  the login is deleted or out of date (:func:`end_for_login`), or at a restart.
 - :func:`may_fill` is the fill executor's check: true only under a live grant
-  for exactly that thread and login.
+  for exactly that thread and login. A grant is not a host-access lease.
 
-A grant is not a host-access lease. It opens :func:`may_fill` and nothing else.
+Thread identity (C3): the thread id comes from the call's server-side context,
+never a tool argument; inside an agent's turn any other thread is refused.
 
-Thread identity (C3): the thread id comes from the server-side context of the
-call, never from a tool argument. When one of these functions runs inside an
-agent's turn, the thread id it is given must be that turn's own thread; a
-different one is refused, so a caller cannot act for another thread.
-
-Requests and grants live in this process's memory only, a standing grant
-included: it is deliberately not persisted. A restart drops them all, so the
-server comes back failing closed: :func:`may_fill` is false until the person
-approves again. Nothing here reads or holds a password.
+Requests and grants live in this process's memory only, standing grants
+included, so a restart fails closed until the person approves again. Nothing
+here reads or holds a password.
 """
 
 from __future__ import annotations
@@ -163,11 +154,7 @@ def _prune(now: float) -> list[_Approval]:
 
 
 def _emit(action: str, item: _Approval, properties: dict[str, Any] | None = None) -> None:
-    """Count a fill transition: the thread and, on approve, the minutes picked. Never the site, username or id.
-
-    Called outside the lock. A route runs these functions in a worker thread, so the write never blocks
-    the event loop.
-    """
+    """Count a fill transition (thread, minutes; never site, username or id). Called outside the lock."""
     product_events.emit_product_event("saved_login", action, thread_id=item.thread_id, properties=properties)
 
 
@@ -197,10 +184,7 @@ def _remove(predicate) -> list[_Approval]:
 
 
 def _end_unusable_grants() -> None:
-    """End every grant whose login is gone or out of date, so no list shows it live and a re-save can't revive it.
-
-    :func:`end_for_login` ends them when the change goes through the server's own paths; this catches any other.
-    """
+    """End grants whose login is gone or out of date by any path, so a re-save can't revive them."""
     with _lock:
         login_ids = {item.login_id for item in _approvals.values() if item.state == ACTIVE}
     unusable = {login_id for login_id in login_ids if not _login_usable(login_id)}
@@ -209,11 +193,8 @@ def _end_unusable_grants() -> None:
 
 
 def end_for_login(login_id: str, *, deleted: bool) -> None:
-    """The login was deleted or went out of date: end what it allowed, standing grants included.
-
-    A delete is the person's and ends every request and grant for the login (``fill_revoked``). Out of
-    date ends its grants (``fill_expired``); a waiting request stays, and approving it fills nothing.
-    """
+    """A delete ends every request and grant for the login (``fill_revoked``); out of date ends its
+    grants, standing ones included (``fill_expired``), and a waiting request stays."""
     ended = _remove(lambda item: item.login_id == login_id and (deleted or item.state == ACTIVE))
     for item in ended:
         _emit("fill_revoked" if deleted else "fill_expired", item)
@@ -260,14 +241,9 @@ def _notify(item: _Approval) -> None:
 def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = None) -> dict[str, Any]:
     """Ask the person to approve this thread filling this saved login; return the request.
 
-    Called by server code only, with the thread id from the executing turn's
-    context. ``requested_seconds`` is the time the agent's task needs, which the
-    person's drawer starts on: ``None``, or whole seconds within
-    :data:`MIN_GRANT_SECONDS`..:data:`MAX_GRANT_SECONDS`. Anything else, a
-    standing grant included, raises :class:`FillDurationError` and requests
-    nothing; it is refused, not clamped, as a host-access lease's duration is.
-    A request already waiting, or a grant still live, for the same thread and
-    login is returned as it is rather than raising another.
+    ``requested_seconds`` is ``None`` or whole seconds within the cap; anything else, a standing
+    grant included, raises :class:`FillDurationError` (refused, not clamped, as a lease's is).
+    A request waiting or grant live for the same thread and login is returned as it is.
     """
     requested = None if requested_seconds is None else _duration(requested_seconds)
     clean_thread = _own_thread(thread_id)
@@ -279,7 +255,6 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     user_id, root, agent = _thread_record(clean_thread)
     now_iso = utc_now_iso()
-    existing: _Approval | None = None
     with _lock:
         expired = _prune(time.monotonic())
         existing = next(
@@ -304,13 +279,8 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
 
 
 def may_fill(thread_id: str, login_id: str) -> bool:
-    """True only while the person's grant for exactly this thread and login is live.
-
-    False before approval, after it runs out, after a deny or a revoke, for any
-    other thread or login, for a thread other than the running turn's own, and
-    once the login is missing or out of date, so a live grant never retries a
-    password the site already refused.
-    """
+    """True only while the person's grant for exactly this thread and login is live, the running
+    turn is that thread, and the login is usable, so a grant never retries a refused password."""
     if not isinstance(thread_id, str) or not isinstance(login_id, str) or not thread_id or not login_id:
         return False
     running = _context_thread()
@@ -360,9 +330,7 @@ def get(approval_id: str, *, user_id: str) -> dict[str, Any]:
 
 def _current(approval_id: str, user_id: str, state: str, revision: int, application_hash: str) -> _Approval:
     item = _approvals.get(approval_id)
-    if item is None or item.user_id != user_id or not item.live(time.monotonic()):
-        raise FillApprovalNotFound(_NO_REQUEST if state == AWAITING_USER else _NO_GRANT)
-    if item.state != state:
+    if item is None or item.user_id != user_id or item.state != state or not item.live(time.monotonic()):
         raise FillApprovalNotFound(_NO_REQUEST if state == AWAITING_USER else _NO_GRANT)
     if item.revision != revision or item.application_hash != application_hash:
         raise FillApprovalError(_NOT_CURRENT)
@@ -370,9 +338,7 @@ def _current(approval_id: str, user_id: str, state: str, revision: int, applicat
 
 
 def _duration(seconds: object) -> int:
-    if isinstance(seconds, bool) or not isinstance(seconds, int):
-        raise FillDurationError(_DURATION)
-    if not MIN_GRANT_SECONDS <= seconds <= MAX_GRANT_SECONDS:
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or not MIN_GRANT_SECONDS <= seconds <= MAX_GRANT_SECONDS:
         raise FillDurationError(_DURATION)
     return seconds
 
@@ -381,11 +347,7 @@ def approve_fill(
     approval_id: str, *, user_id: str, revision: int, application_hash: str, duration_seconds: object = None,
     until_turned_off: object = False,
 ) -> dict[str, Any]:
-    """The person's yes: for ``duration_seconds`` (refused above :data:`MAX_GRANT_SECONDS`), or until turned off.
-
-    Exactly one of the two: ``until_turned_off=True`` with no duration makes a standing grant with no
-    deadline, which ends only on revoke, when its login is deleted or out of date, or at a restart.
-    """
+    """The person's yes: exactly one of ``duration_seconds`` within the cap, or ``until_turned_off=True``."""
     if until_turned_off is True and duration_seconds is None:
         seconds = None
     elif until_turned_off is False:
