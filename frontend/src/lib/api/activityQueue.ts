@@ -44,7 +44,7 @@ export interface ActivityTaskDetail {
 
 /**
  * A document where agents answered the person's comments. `unread` is the document's unread set, the one its pane
- * and jump button count; Done marks it read up to `latest_reply_id`, so a reply that lands after stays unread.
+ * and jump button count; Done marks through `latest_reply_id`, the newest counted unread comment or reply, so later items stay unread.
  */
 export interface ActivityDocumentDetail {
 	artifact_id: string;

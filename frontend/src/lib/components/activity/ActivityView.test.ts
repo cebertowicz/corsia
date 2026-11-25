@@ -332,6 +332,28 @@ describe('Activity list', () => {
 		expect(host.textContent).not.toContain('Showing last known items.');
 	});
 
+	it('does not mark fresh Activity rows stale when the separate attention queue read fails', async () => {
+		const attention = await import('$lib/stores/attentionQueueState.svelte');
+		attention.__reset();
+		token.set('test-token');
+		render();
+		await settle();
+		const count = rows().length;
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('view=activity')
+			? base(input, init) : respond(503, {}));
+		await attention.reload();
+		await settle();
+		expect(rows()).toHaveLength(count);
+		expect(host.textContent).not.toContain('Showing last known items.');
+		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('view=activity')
+			? base(input, init) : respond(200, { current: null, count: 0, items: [] }));
+		await attention.reload();
+		await settle();
+		expect(host.textContent).not.toContain('Showing last known items.');
+		attention.__reset();
+	});
+
 	it('no longer shows the old sections', async () => {
 		render();
 		await settle();
