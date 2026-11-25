@@ -77,7 +77,7 @@ async def test_every_cdp_socket_gets_a_logger_that_records_nothing_unless_a_call
 
 
 @pytest.mark.asyncio
-async def test_cdp_connect_keeps_max_size_and_passes_only_a_supplied_logger(monkeypatch):
+async def test_cdp_connect_keeps_max_size_and_passes_a_supplied_logger_or_the_silent_one(monkeypatch):
     calls = []
 
     class Socket:
@@ -94,7 +94,7 @@ async def test_cdp_connect_keeps_max_size_and_passes_only_a_supplied_logger(monk
         pass
     async with browser_cdp.CdpClient("ws://two", max_size=456, logger=logger):
         pass
-    assert calls[0] == ("ws://one", {"max_size": 123, "open_timeout": 3, "close_timeout": 1})
+    assert calls[0] == ("ws://one", {"max_size": 123, "open_timeout": 3, "close_timeout": 1, "logger": browser_cdp.SILENT})
     assert calls[1] == ("ws://two", {"max_size": 456, "open_timeout": 3, "close_timeout": 1, "logger": logger})
 
 
