@@ -79,7 +79,12 @@ def session_key_for(thread_id: str) -> str | None:
     from host_access import browser_pane
 
     session = browser_pane.session_identity(thread_id)
-    return f"{thread_id}:{session}" if session else None
+    return session_key(thread_id, session) if session else None
+
+
+def session_key(thread_id: str, session: str) -> str:
+    """The one format of an offer's session key; capture, session end and the routes all build it here."""
+    return f"{thread_id}:{session}"
 
 
 def _key(session_key: object) -> str:

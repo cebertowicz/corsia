@@ -221,8 +221,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
-        if browser_login_capture.writes_value(args):
-            await browser_login_capture.agent_writing(thread_id, endpoint)
+        await browser_login_capture.agent_writing(thread_id, endpoint, args)
     if shared_write:
         try:
             return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
@@ -243,6 +242,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     finally:
         # A held pane shows nothing until this restart, so it runs however the command ends.
         await browser_pane_state.page_command_finished(thread_id, tuple(args))
+        if not pane:
+            await browser_login_capture.agent_batch_done(thread_id, args, command)
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
@@ -364,7 +365,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
-        browser_login_capture.session_ended(thread_id, f"{thread_id}:{session}")
+        browser_login_capture.session_ended(thread_id, browser_login_capture.session_key(thread_id, session))
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

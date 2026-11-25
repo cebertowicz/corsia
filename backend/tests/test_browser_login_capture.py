@@ -367,7 +367,9 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
-    assert "saved-login capture skipped a submit it couldn't read" in caplog.text
+    # The holder failed, not the page read, and the line says which.
+    assert "saved-login capture couldn't hand a submit to the offer holder" in caplog.text
+    assert "couldn't read" not in caplog.text
     assert MARKER not in caplog.text
     assert capture._state(THREAD).pending is None
 
@@ -562,8 +564,9 @@ async def test_rule7_the_agent_command_path_marks_before_a_writing_command_runs(
     async def check_page_access(*_args, **_kwargs):
         return PageAccess(None, False)
 
-    async def agent_writing(thread_id, endpoint):
-        order.append(("mark", thread_id, endpoint))
+    async def agent_writing(thread_id, endpoint, args=None):
+        if args is None or capture.writes_value(args):
+            order.append(("mark", thread_id, endpoint))
 
     async def run_admitted(_runtime, ran, **_kwargs):
         order.append(("run", ran[0]))
@@ -587,6 +590,103 @@ async def test_rule7_the_agent_command_path_marks_before_a_writing_command_runs(
                                                      shared=False))
     assert await browser_session_commands._run_action(owner, runtime, THREAD, args, None, 10, False) == "ok"
     assert order == ([("mark", THREAD, "ws://page")] if marked else []) + [("run", args[0])]
+
+
+@pytest.mark.parametrize(("args", "between"), [
+    (("batch", "click @e1", "fill @e2 x"), False), (("batch", "fill @e1 x", "click @e2"), False),
+    (("batch", "fill @e1 x", "fill @e2 y", "click @e3"), False), (("batch", "snapshot", "fill @e1 x", "get url"), False),
+    (("batch", "click @e1", "fill @e2 x", "click @e3"), True), (("batch", "open https://a.example", "fill @e1 x", "press Enter"), True),
+    (("batch", "click @e1", "press a"), True), (("batch", "click @e1", "wait --fn x"), True),
+    (("batch", "click @e1", "get url"), False), (("fill", "@e1", "x"), False), (("batch", "'unclosed"), True),
+])
+def test_rule7_which_batches_can_type_into_a_document_between_two_loads(args, between):
+    assert capture.types_between_documents(args) is between
+
+
+def _agent_path(monkeypatch, page: FakePage, loads_to: str | None):
+    """The real agent command path, with a run that moves the page to `loads_to` as a batch's click or open would."""
+
+    async def page_endpoint(_command):
+        return "ws://page"
+
+    async def check_page_access(*_args, **_kwargs):
+        return PageAccess(None, False)
+
+    async def run_admitted(_runtime, _ran, **_kwargs):
+        if loads_to is not None:
+            page.loader = loads_to
+        return CommandResult(0, "{}", ""), False
+
+    async def finished(*_args):
+        return None
+
+    monkeypatch.setattr(browser_session_commands.browser_cdp, "page_endpoint", page_endpoint)
+    monkeypatch.setattr(browser_session_commands.browser_control, "check_page_access", check_page_access)
+    monkeypatch.setattr(browser_session_commands.browser_pane_state, "has_pane", lambda _thread: False)
+    monkeypatch.setattr(browser_session_commands.browser_pane_state, "page_command_finished", finished)
+    owner = SimpleNamespace(_run_admitted=run_admitted, _model_result=lambda _result, _record: "ok",
+                            session_identity=lambda _thread: "session-1")
+    runtime = SimpleNamespace(record=SimpleNamespace(binding="bound", session="session-1", profile=None, copy_of=None,
+                                                     shared=False))
+    return lambda args: browser_session_commands._run_action(owner, runtime, THREAD, args, None, 10, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["click @e1", "open https://accounts.example.com/next"])
+async def test_rule7_a_batch_that_loads_a_document_then_types_marks_the_new_document(monkeypatch, holder, first):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent = _agent_path(monkeypatch, page, loads_to="doc-2")
+    assert await agent(("batch", first, "fill @e2 agent-value")) == "ok"
+    # The person submits on the document the batch typed into: nothing is offered.
+    open_step(monkeypatch, visit="doc-2")
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == []
+    # Only the documents the batch was on are marked: the next document offers again.
+    page.loader = "doc-3"
+    open_step(monkeypatch, visit="doc-3")
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.names() == ["offer_login"]
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_batch_that_types_between_two_loads_marks_every_document_until_the_session_ends(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent = _agent_path(monkeypatch, page, loads_to="doc-3")
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value", "click @e3")) == "ok"
+    # The batch passed through a document it typed into; a back navigation could restore that one.
+    page.loader = "doc-2"
+    open_step(monkeypatch, visit="doc-2")
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == []
+    capture.session_ended(THREAD)
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.names() == ["offer_login"]
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_batch_whose_end_page_cant_be_found_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent = _agent_path(monkeypatch, page, loads_to="doc-2")
+    calls = []
+
+    async def page_endpoint(_command):
+        calls.append(None)
+        if len(calls) > 1:
+            raise OSError("the page target went away")
+        return "ws://page"
+
+    monkeypatch.setattr(browser_session_commands.browser_cdp, "page_endpoint", page_endpoint)
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value")) == "ok"
+    assert len(calls) == 2
+    page.loader = "doc-5"
+    open_step(monkeypatch, visit="doc-5")
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == []
+
+
+def test_every_session_key_is_built_by_one_function():
+    assert capture.session_key("thread-1", "session-1") == saved_login_offers.session_key("thread-1", "session-1")
+    assert capture.session_key("thread-1", "session-1") == "thread-1:session-1"
 
 
 # Rule 8 -----------------------------------------------------------------------------------------------------

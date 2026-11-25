@@ -145,7 +145,7 @@ async def before_person_input(thread_id: str, kind: object, event: dict, connect
         # The capture never stops the person's input; the input's own delivery reports an unreachable page.
         log.info("saved-login capture couldn't find the pane's page")
         return
-    await browser_login_capture.person_submit(thread_id, f"{thread_id}:{identity}", endpoint)
+    await browser_login_capture.person_submit(thread_id, browser_login_capture.session_key(thread_id, identity), endpoint)
 
 
 async def mouse_event(thread_id: str, event: dict, connection_token: str) -> None:

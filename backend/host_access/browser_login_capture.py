@@ -22,14 +22,16 @@ import asyncio
 import importlib
 import logging
 from dataclasses import dataclass, field
+from typing import Sequence
 from urllib.parse import urlsplit
 
 from websockets.exceptions import WebSocketException
 
-from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
+from host_access import browser_cdp, browser_cdp_frames, browser_login_capture_queue as _queue_state
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _QuietCdp, world as _world
-from host_access.browser_login_capture_policy import is_submit, writes_value
+from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
+from host_access.browser_login_capture_policy import is_submit, types_between_documents, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
@@ -42,33 +44,7 @@ CAPTURE_TIMEOUT = 1.0
 _WORLD = "corsia-login-capture"
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
 _ANY_DOCUMENT = ""
-
-# The isolated-world read of a password field and a username beside it, as [typed, username]; null when the node
-# isn't an input of this world's document. Username: an autocomplete~=username input in the field's form (or the
-# document), else a type=email one, else the last visible text, email or tel input before the field.
-_READ_LOGIN = """function() {
-  if (!(this instanceof HTMLInputElement) || this.ownerDocument !== document) return null;
-  const field = this;
-  const inputs = Array.from((field.form || document).querySelectorAll('input')).filter(el => el !== field);
-  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
-  const shows = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  const before = inputs.filter(el => ['text', 'email', 'tel'].includes(el.type) && shows(el)
-    && (el.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING));
-  const account = inputs.find(el => tokens(el).includes('username'))
-    || inputs.find(el => el.type === 'email') || before[before.length - 1];
-  return [field.value, account ? account.value : ''];
-}"""
-# The isolated-world read of a username the person filled in: the focused input, else one in the focused
-# element's form, that is type=email or autocomplete~=username/email and not empty; null otherwise.
-_READ_ACCOUNT = """(() => {
-  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
-  const named = el => el instanceof HTMLInputElement && el.value !== ''
-    && (el.type === 'email' || tokens(el).includes('username') || tokens(el).includes('email'));
-  const active = document.activeElement;
-  if (named(active)) return active.value;
-  const found = active && active.form ? Array.from(active.form.elements).find(named) : undefined;
-  return found ? found.value : null;
-})()"""
+session_key = saved_login_offers.session_key
 
 
 @dataclass(frozen=True)
@@ -124,17 +100,34 @@ def _prune(thread_id: str) -> None:
         _threads.pop(thread_id, None)
 
 
-async def agent_writing(thread_id: str, endpoint: str) -> None:
-    """Mark the page's current document before an agent command that can type into it runs (rule 7)."""
+async def agent_writing(thread_id: str, endpoint: str, args: Sequence[str] | None = None) -> None:
+    """Mark the page's current document before an agent command that can type into it runs (rule 7).
+
+    With the command's args, a command that can't type marks nothing, and a batch that can type into a
+    document between two loads marks every document of the session.
+    """
+    if args is not None and not writes_value(args):
+        return
     loader = _ANY_DOCUMENT
     try:
-        if endpoint:
+        if endpoint and not (args is not None and types_between_documents(args)):
             async with _QuietCdp(endpoint) as cdp:
                 loader, _ = await _frame_tree(cdp)
     except (BrowserSessionError, OSError, WebSocketException):
         log.info("saved-login capture couldn't read the page an agent typed into; no offer is made in this session")
     marks = _state(thread_id).marks
     marks[loader] = None
+
+
+async def agent_batch_done(thread_id: str, args: Sequence[str], run: browser_cdp.RunCommand) -> None:
+    """After a batch that can type, mark the document it ended on too: it may have loaded that one first."""
+    if args and args[0] == "batch" and writes_value(args):
+        try:
+            endpoint = await browser_cdp.page_endpoint(run)
+        except Exception:
+            log.info("saved-login capture couldn't find the page a batch ended on; no offer is made in this session")
+            endpoint = ""
+        await agent_writing(thread_id, endpoint)
 
 
 def _marked(thread_id: str, loader: str) -> bool:
@@ -246,7 +239,7 @@ async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple
     try:
         made = await asyncio.to_thread(saved_login_offers.offer_login, flight.session_key, login[0], login[1], login[2])
     except Exception:
-        log.warning("saved-login capture skipped a submit it couldn't read")
+        log.warning("saved-login capture couldn't hand a submit to the offer holder")
         made = False
     flight.group.offered = made
     _forget(thread_id, flight)
