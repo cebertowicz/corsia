@@ -51,8 +51,8 @@ REFUSED = {
     "gone": "The saved login wasn't filled: it's no longer saved.",
     "page": ("The saved login for {site} wasn't filled: the page didn't respond as expected. Take a snapshot to see "
              "where it is."),
-    "uncertain": ("The saved login for {site} ({username}) may be in the page, and its form may have been sent: the "
-                  "page didn't respond as expected. Take a snapshot to see where the page is."),
+    "uncertain": ("The saved login for {site} ({username}) may have been typed into the page, and its form may have "
+                  "been sent: the page didn't respond as expected. Take a snapshot to see where the page is."),
     "unsubmitted": ("The saved login for {site} was filled, but its form couldn't be sent. Take a snapshot and "
                     "use the page's sign-in button."),
 }
