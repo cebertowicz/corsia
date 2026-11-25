@@ -559,3 +559,55 @@ def test_the_pane_reads_which_rows_sit_below_the_cut(db):
 
     assert nodes[someday.id]["later"] is True
     assert nodes[now.id]["later"] is False
+
+
+def _phase(db, plan_id: str, title: str):
+    node = service.add_node(
+        plan_id, kind="phase", title=title, acceptance_criteria=f"{title} is verified", db=db,
+    )
+    db.commit()
+    return node
+
+
+def _pane_nodes(db) -> dict[str, dict]:
+    from plans import operator_projection
+    from tests.plan_close_next_helpers import HUMAN
+
+    return {
+        node["id"]: node
+        for node in operator_projection.read_thread("owner", actor=HUMAN, db=db)["plans"][0]["nodes"]
+    }
+
+
+def test_a_phase_whose_open_tasks_are_all_later_reads_later(db):
+    """A branch carries no stored flag; the pane rolls it up so the sheet folds it into Later."""
+    plan = owner_plan(db)
+    phase = _phase(db, plan.id, "Launch follow-ups")
+    task(db, plan.id, "Write the recap", parent_id=phase.id, later=True)
+    task(db, plan.id, "Archive the drafts", parent_id=phase.id, later=True)
+    finished = task(db, plan.id, "Send the notes", parent_id=phase.id)
+    plan_update(db, plan.id, "mark_done", {
+        "node_id": finished.id, "expected_revision": revision(db, finished.id), "evidence": "Sent",
+    })
+
+    assert _pane_nodes(db)[phase.id]["later"] is True
+
+
+def test_a_phase_with_one_open_task_above_the_cut_does_not(db):
+    plan = owner_plan(db)
+    phase = _phase(db, plan.id, "Launch")
+    task(db, plan.id, "Someday", parent_id=phase.id, later=True)
+    task(db, plan.id, "Ship it", parent_id=phase.id)
+
+    assert _pane_nodes(db)[phase.id]["later"] is False
+
+
+def test_a_phase_with_nothing_open_is_not_later(db):
+    plan = owner_plan(db)
+    phase = _phase(db, plan.id, "Done phase")
+    finished = task(db, plan.id, "Only task", parent_id=phase.id)
+    plan_update(db, plan.id, "mark_done", {
+        "node_id": finished.id, "expected_revision": revision(db, finished.id), "evidence": "Done",
+    })
+
+    assert _pane_nodes(db)[phase.id]["later"] is False
