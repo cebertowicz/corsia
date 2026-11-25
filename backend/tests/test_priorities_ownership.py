@@ -164,3 +164,23 @@ def test_later_starts_register_missed_files_but_keep_the_persons_reassignment(ow
     assert migrate_priorities_ownership(scope['workspace'], db=db) == 1
     assert artifact_owner(service.find_file_identity(str(missed), db=db)['id'], db=db) == 'ui'
     assert artifact_owner(artifact['id'], db=db) == scope['conductor']
+
+
+def test_startup_repair_skips_symlinked_folders_leading_elsewhere(ownership_scope, tmp_path):
+    from registry import service
+    from registry.priorities_ownership import migrate_priorities_ownership
+    scope = ownership_scope
+    db = scope['db']
+    outside = tmp_path / 'outside-thread'
+    (outside / 'context').mkdir(parents=True)
+    (outside / 'context' / 'PRIORITIES.md').write_text('content\n')
+    (scope['root'] / '.threads').mkdir(parents=True, exist_ok=True)
+    (scope['root'] / '.threads' / 'linked-out').symlink_to(outside, target_is_directory=True)
+    inside = scope['root'] / 'shared' / 'notes'
+    inside.mkdir(parents=True)
+    (inside / 'PRIORITIES.md').write_text('content\n')
+    linked_context = scope['root'] / '.threads' / 'linked-in'
+    linked_context.mkdir(parents=True)
+    (linked_context / 'context').symlink_to(inside, target_is_directory=True)
+    assert migrate_priorities_ownership(scope['workspace'], db=db) == 0
+    assert service.find_file_identity(str(inside / 'PRIORITIES.md'), db=db) is None

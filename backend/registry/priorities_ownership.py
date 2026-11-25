@@ -4,18 +4,23 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def _at_priorities_location(path: Path, root: Path, *, project: bool) -> bool:
+    """True when the resolved path sits at a priorities location under the resolved root."""
+    try:
+        parts = path.resolve(strict=False).relative_to(root).parts
+    except ValueError:
+        return False
+    return ((project and parts == ("context", "PRIORITIES.md"))
+            or (len(parts) == 4 and parts[0] == ".threads" and bool(parts[1])
+                and parts[2:] == ("context", "PRIORITIES.md")))
+
+
 def is_priorities_path(path: Path, *, workspace: Path, db) -> bool:
     """Identify only priorities files at the two instruction-file locations."""
     from registry.shared_principals import document_project
 
     root, project_id = document_project(path, workspace=workspace, db=db)
-    try:
-        parts = path.resolve(strict=False).relative_to(root).parts
-    except ValueError:
-        return False
-    return ((project_id is not None and parts == ("context", "PRIORITIES.md"))
-            or (len(parts) == 4 and parts[0] == ".threads" and bool(parts[1])
-                and parts[2:] == ("context", "PRIORITIES.md")))
+    return _at_priorities_location(path, root, project=project_id is not None)
 
 
 def register_new_person_owner(identity, existing, metadata, title, description, retention, *, db) -> None:
@@ -60,9 +65,8 @@ def migrate_priorities_ownership(workspace: Path, *, db) -> int:
         if project:
             paths.append(root / "context" / "PRIORITIES.md")
         for path in paths:
-            # The glob and the project roots above already place each path at one of the two
-            # priorities locations, so no per-file projects scan is needed here.
-            if not path.is_file() or path.is_symlink():
+            if (not path.is_file() or path.is_symlink()
+                    or not _at_priorities_location(path, root, project=project)):
                 continue
             artifact = service.find_file_identity(str(path), db=db)
             if artifact is None:
