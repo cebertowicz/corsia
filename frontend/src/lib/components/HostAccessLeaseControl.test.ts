@@ -1847,18 +1847,29 @@ describe('HostAccessLeaseControl — fixed sentences, never raw errors', () => {
 	// those cases are pinned by the decision-failure tests above.
 });
 
-it('never offers Until I turn it off on a host-access lease request, only its asked-for duration', async () => {
+it('offers Until I turn it off on a saved-login request only, never on a host-access lease request', async () => {
 	const { default: HostAccessPendingRequestDrawer } = await import('./HostAccessPendingRequestDrawer.svelte');
-	const target = document.createElement('div');
-	document.body.appendChild(target);
-	const drawer = mount(HostAccessPendingRequestDrawer, { target, props: {
-		lease: waitingLease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: false,
-		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
-	} });
-	flushSync();
-	expect(target.textContent).toContain('5 minutes');
-	expect(target.textContent).not.toContain('Until I turn it off');
-	expect(target.querySelector('[data-seconds="until_turned_off"]')).toBeNull();
-	await unmount(drawer);
-	target.remove();
+	const fill: HostAccessFill = {
+		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		revision: 1, application_hash: 'hash-fill', decision_capability: 'decision-fill',
+		max_duration_seconds: 1800, requested_duration_seconds: 900, duration_seconds: null, standing: false, expires_at: null,
+		created_at: '2026-07-18T16:00:00+00:00', updated_at: '2026-07-18T16:00:00+00:00',
+	};
+	const seen: Record<string, string> = {};
+	for (const lease of [waitingLease, fill] as HostAccessItem[]) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const drawer = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
+		} });
+		flushSync();
+		seen[lease.kind ?? 'lease'] = target.textContent ?? '';
+		await unmount(drawer);
+		target.remove();
+	}
+	expect(seen.lease).toContain('5 minutes');
+	expect(seen.lease).not.toContain('Until I turn it off');
+	expect(seen.fill).toContain('Until I turn it off');
 });

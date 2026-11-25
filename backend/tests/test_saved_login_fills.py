@@ -439,6 +439,9 @@ def test_an_agent_may_ask_for_the_time_its_task_needs_and_it_is_kept_on_the_requ
     assert longest["requested_duration_seconds"] == 1800
     # The person picks; the request's duration is only where the drawer starts.
     assert _approve(row, seconds=300)["duration_seconds"] == 300
+    # The duration is keyword-only, so no positional slip can set it.
+    with pytest.raises(TypeError):
+        fills.request_fill(OTHER_THREAD, world["other_login"], 900)  # type: ignore[misc]
 
 
 @pytest.mark.parametrize("requested", [
@@ -451,12 +454,6 @@ def test_an_agent_cannot_ask_for_a_standing_or_out_of_range_duration(world, requ
     assert fills.listed(PERSON) == []
     assert fills._approvals == {}
     assert world["nudges"] == []
-
-
-def test_request_fill_takes_the_duration_by_keyword_only(world):
-    with pytest.raises(TypeError):
-        fills.request_fill(AGENT_THREAD, world["login"], 900)  # type: ignore[misc]
-    assert fills.listed(PERSON) == []
 
 
 def test_until_turned_off_stays_live_past_the_cap_until_revoked(world, monkeypatch):

@@ -281,6 +281,11 @@ it('adds the asked-for time when it is not one of the usual choices, within the 
 	expect(fillDurations(900, 1800)).toEqual([300, 900]);
 	expect(fillDurations(1800, 0)).toEqual([300, 900, 1800]);
 	expect(fillDurations(1800, 90.5)).toEqual([300, 900, 1800]);
+	// Below the shortest time there is no choice at all, Until I turn it off included.
+	const none = pending(fill({ max_duration_seconds: 120 }));
+	expect(radios(none.host)).toEqual([]);
+	expect(none.host.textContent).not.toContain('Until I turn it off');
+	await unmount(none.component);
 	// Over the cap or not a whole number of seconds: today's default, the shortest.
 	for (const requested of [3600, 0, -1, 90.5, null]) {
 		const view = pending(fill({ requested_duration_seconds: requested as number | null, max_duration_seconds: 1800 }));
@@ -314,13 +319,6 @@ it('reaches Until I turn it off by the arrow keys only stepping forward from the
 	expect(key('ArrowDown')).toBe('Until I turn it off');
 	expect(key('ArrowLeft')).toBe('30 minutes');
 	expect(key('Enter')).toBe('30 minutes');
-	await unmount(component);
-});
-
-it('offers no choice at all, Until I turn it off included, when the cap is below the shortest time', async () => {
-	const { host, component } = pending(fill({ max_duration_seconds: 120 }));
-	expect(radios(host)).toEqual([]);
-	expect(host.textContent).not.toContain('Until I turn it off');
 	await unmount(component);
 });
 
