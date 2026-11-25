@@ -104,6 +104,23 @@ def standing(db, plan) -> Standing:
     )
 
 
+def in_plan_order(db, plan, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop a candidate for the app's own pick that passes ready work ranked above it.
+
+    The pick follows the same order as a named start (``out_of_order``): a task
+    made active without a start, such as a comment task, is not given the slot
+    while higher work is ready. The owner starts the higher work, or moves this
+    one up and starts it. Only a thread's own plan is ordered this way.
+    """
+    if plan["owner_kind"] != "thread" or not candidates:
+        return candidates
+    where = standing(db, plan)
+    return tuple(
+        node_id for node_id in candidates
+        if (root_id := where.root_of.get(node_id)) is None or not where.ready_above(root_id)
+    )
+
+
 def _owns(plan, actor_id: str | None) -> bool:
     """Whether ``actor_id`` is the thread whose own plan this is."""
     return (

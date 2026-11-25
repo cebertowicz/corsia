@@ -12,7 +12,7 @@ from __future__ import annotations
 from plans import admission, service
 from plans.turn_admission import snapshot_after_admission
 from tests.plan_close_next_helpers import (
-    open_attempt, owner_plan, plan_update, revision, task,
+    close, open_attempt, owner_plan, plan_update, queue_active, revision, select, task,
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
@@ -69,6 +69,20 @@ def test_the_owner_moves_it_up_and_starts_it(db):
     })
 
     assert open_attempt(db, comment) is not None
+
+
+def test_a_close_that_names_nothing_does_not_pass_ready_work_either(db):
+    plan = owner_plan(db)
+    current = task(db, plan.id, "Current work")
+    task(db, plan.id, "Ship the release")
+    queued = task(db, plan.id, "Answer the comments")
+    select(db, plan.id, current.id)
+    queue_active(db, queued.id)
+
+    result = close(db, plan.id, "mark_done", current.id)
+
+    assert result["next"]["selected"] is None
+    assert open_attempt(db, queued.id) is None
 
 
 def test_a_comment_task_on_an_empty_plan_is_picked(db):
