@@ -259,7 +259,7 @@ def test_no_agent_tool_names_the_fill_approval_module():
         if ".venv" not in path.parts and "tests" not in path.parts
         and "saved_login_fills" in path.read_text(encoding="utf-8", errors="replace")
     }
-    assert callers == {"api/host_access.py"}
+    assert callers == {"api/host_access.py", "host_access/browser_login_fill.py"}
 
 
 # --- The person's routes -------------------------------------------------------------------------

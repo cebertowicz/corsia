@@ -8,6 +8,7 @@ on standard input:
     seed-login <https-site> <username>   save a login with a random password (never printed); prints its id
     request <thread-id> <login-id>       raise a fill request, as the fill executor would; prints it
     may-fill <thread-id> <login-id>      print whether a live grant allows the fill
+    fill <thread-id> <login-id>          run the fill executor on the thread's open browser; prints its text only
 
 Use it only for a test build on a disposable instance, never on a live one:
 
@@ -17,6 +18,7 @@ Use it only for a test build on a disposable instance, never on a live one:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 import secrets
@@ -32,7 +34,7 @@ def _refuse_unless(ok: bool, why: str) -> None:
         raise SystemExit(f"FILL_PROOF_REFUSED {why}")
 
 
-def _commands(fills, saved_logins) -> None:
+def _commands(fills, saved_logins, fill) -> None:
     for line in sys.stdin:
         words = line.split()
         try:
@@ -45,11 +47,15 @@ def _commands(fills, saved_logins) -> None:
                 print("REQUEST " + json.dumps(fills.request_fill(words[1], words[2]), sort_keys=True), flush=True)
             elif len(words) == 3 and words[0] == "may-fill":
                 print(f"MAY_FILL {fills.may_fill(words[1], words[2])}", flush=True)
+            elif len(words) == 3 and words[0] == "fill":
+                print(fill(words[1], words[2]), flush=True)
             elif words:
-                print("ERROR commands: seed-login <site> <username> | request <thread> <login> | may-fill <thread> <login>",
-                      flush=True)
+                print("ERROR commands: seed-login <site> <username> | request <thread> <login> | may-fill <thread> <login>"
+                      " | fill <thread> <login>", flush=True)
         except ValueError as exc:
             print(f"ERROR {exc}", flush=True)
+        except TimeoutError:
+            print("ERROR the fill didn't finish in time", flush=True)
 
 
 def main() -> None:
@@ -69,11 +75,21 @@ def main() -> None:
     print("FILL_PROOF_RUNTIME " + json.dumps(paths), flush=True)
 
     import uvicorn
+    from host_access import browser_login_fill
     from infra import saved_login_fills, saved_logins
     from main import app
 
-    threading.Thread(target=_commands, args=(saved_login_fills, saved_logins), daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    # The fill runs on the server's own loop, where the browser sessions live.
+    loop = asyncio.new_event_loop()
+
+    def fill(thread_id: str, login_id: str) -> str:
+        coroutine = browser_login_fill.fill_saved_login(thread_id, login_id)
+        # No limit of its own: the fill bounds itself, COMMAND_TIMEOUT up to the submit and SETTLE_LIMIT after it.
+        return asyncio.run_coroutine_threadsafe(coroutine, loop).result()
+
+    threading.Thread(target=_commands, args=(saved_login_fills, saved_logins, fill), daemon=True).start()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=args.port))
+    loop.run_until_complete(server.serve())
 
 
 if __name__ == "__main__":
