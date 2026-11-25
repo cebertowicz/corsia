@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { duration, owner, remaining } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
@@ -11,6 +12,7 @@
 		deciding,
 		notice = null,
 		onRevoke,
+		onClose,
 	}: {
 		lease: HostAccessTimed;
 		nowMs: number;
@@ -19,16 +21,15 @@
 		/** The server's line when it refused the last Revoke. */
 		notice?: string | null;
 		onRevoke: (event: MouseEvent) => void;
+		/** Done, on the sheet's own head row. */
+		onClose: () => void;
 	} = $props();
 </script>
 
 <!-- The same head as the pending request (kind label over the agent's name) and the same §0.1
      rows: a section label over plain text. -->
 <div class="active-drawer">
-	<header class="active-drawer-head">
-		<div class="section-label">{lease.kind === 'fill' ? 'Sign in with a saved login' : 'Temporary host access'}</div>
-		<h2 title={owner(lease)}>{owner(lease)}</h2>
-	</header>
+	<HostAccessDrawerHead label={lease.kind === 'fill' ? 'Sign in with a saved login' : 'Temporary host access'} title={owner(lease)} {onClose} />
 	<div class="active-drawer-body">
 		{#if lease.kind === 'fill'}
 			<p>CORSIA types the password into this site for the agent. The agent never sees it.</p>
@@ -51,8 +52,7 @@
 	<div class="active-drawer-actions">
 		<HostAccessBlockedLine {notice} />
 		<Button
-			variant="ghost"
-			size="sm"
+			variant="secondary"
 			loading={deciding}
 			{disabled}
 			onclick={onRevoke}
@@ -73,24 +73,7 @@
 		flex-direction: column;
 		min-height: 0;
 	}
-	/* Opaque strips in the sheet's own fill, as the pending sheet's. */
-	.active-drawer-head {
-		position: sticky;
-		top: 0;
-		z-index: 2;
-		padding: var(--space-2) 0 var(--space-3);
-		border-bottom: 1px solid var(--border-subtle);
-		background: var(--bg-secondary);
-	}
-	.active-drawer-head h2 {
-		margin: var(--space-1) 0 0;
-		overflow: hidden;
-		color: var(--text-primary);
-		font-size: var(--text-title3);
-		letter-spacing: -0.02em;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+	/* The head is HostAccessDrawerHead, the same opaque sticky row as the request sheets'. */
 	.section-label {
 		display: block;
 		color: var(--text-tertiary);
@@ -138,6 +121,4 @@
 		background: var(--bg-secondary);
 	}
 	.active-drawer-actions :global(.blocked-line) { align-self: stretch; }
-	/* The ghost action's word ends where a request sheet's Approve ends: pull it out of its own padding. */
-	.active-drawer-actions > :global(.btn.ghost) { margin-right: calc(-1 * (var(--button-pad-x-sm) + 1px)); }
 </style>

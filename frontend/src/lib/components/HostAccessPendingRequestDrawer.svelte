@@ -3,6 +3,7 @@
 	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
 	import HostAccessFillRequestDrawer from './HostAccessFillRequestDrawer.svelte';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { text, duration, policyLabel, approvalReady, casReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
@@ -15,6 +16,7 @@
 		onApprove,
 		onReject,
 		onRetry,
+		onClose,
 	}: {
 		lease: HostAccessItem;
 		stale: boolean;
@@ -29,6 +31,8 @@
 		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
+		/** Done, on the sheet's own head row. */
+		onClose: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(lease));
@@ -77,18 +81,12 @@
 {/snippet}
 
 {#if lease.kind === 'script'}
-	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} />
+	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} {onClose} />
 {:else if lease.kind === 'fill'}
-	<HostAccessFillRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} />
+	<HostAccessFillRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {notice} {onApprove} {onReject} {onRetry} {onClose} />
 {:else}
 <div class="pending-drawer">
-	<header class="decision-head">
-		<div>
-			<div class="eyebrow">Temporary host access</div>
-			<h2 title={owner(lease)}>{owner(lease)}</h2>
-		</div>
-		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
-	</header>
+	<HostAccessDrawerHead label="Temporary host access" title={owner(lease)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 
 	<div class="decision-body">
 		{#if !external}
@@ -178,7 +176,7 @@
 		<!-- Approve is always there, disabled when it can't be used, so Reject never moves. -->
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>
-			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+			<Button variant="secondary" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
 			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready} onclick={onApprove}>Approve</Button>
 		</div>
 	</footer>
@@ -193,38 +191,9 @@
 		flex-direction: column;
 		min-height: 0;
 	}
-	/* Sticky within AdaptiveDrawer's own .drawer-body scroll, not a second
-	   nested scroller — the same technique DecisionChip already uses for its
-	   header in this exact shared drawer. A percentage/flex height chain
-	   through .drawer-body's max-height-capped flex item does not reliably
-	   resolve (verified empirically), so sticky is the robust fix, not a
-	   nested `.decision-body { overflow-y: auto }` region. */
-	:global(.pending-drawer .decision-head) {
-		position: sticky;
-		top: 0;
-		z-index: 2;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 18px;
-		padding: var(--space-2) 0 var(--space-3);
-		/* A hairline under the pinned head and over the pinned footer, as the decision drawer draws them,
-		   so content scrolling under either ends at a rule instead of a hard cut. */
-		border-bottom: 1px solid var(--border-subtle);
-		/* The sheet is opaque and so are its strips, in the sheet's own fill: no lighter inset
-		   band, and nothing scrolled shows behind the title or the decision. */
-		background: var(--bg-secondary);
-	}
-	:global(.pending-drawer .decision-head > div) { min-width: 0; }
-	:global(.pending-drawer .decision-head h2) {
-		margin: 4px 0 0;
-		overflow: hidden;
-		color: var(--text-primary);
-		font-size: var(--text-title3);
-		letter-spacing: -0.02em;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+	/* The head (HostAccessDrawerHead) and the footer are sticky within AdaptiveDrawer's own .drawer-body
+	   scroll, not a second nested scroller: a flex height chain through .drawer-body's max-height-capped
+	   flex item does not reliably resolve, so sticky is the robust fix. */
 	:global(.pending-drawer .decision-body) {
 		display: grid;
 		gap: 18px;
@@ -250,7 +219,9 @@
 		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
 		   and sits on the scroller's edge instead of above a strip of padding the
 		   content scrolls through. */
-		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		padding: var(--space-3) 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		/* A hairline over the pinned footer, as the decision drawer draws it, so content scrolling
+		   under it ends at a rule instead of a hard cut. */
 		border-top: 1px solid var(--border-subtle);
 		background: var(--bg-secondary);
 		/* Its own paint layer: without it Chromium leaves the footer's lowest strip unpainted when a tall
@@ -258,27 +229,21 @@
 		   scrolls visibly through it. Unlike paint containment, this does not clip the buttons' focus rings. */
 		will-change: transform;
 	}
-	/* A finger's width between Reject and Approve at every width, so one is never pressed for the other. */
+	/* Reject sits beside Approve, a button's gap apart; on a phone a finger's width, so one is never
+	   pressed for the other. */
 	:global(.pending-drawer .decision-buttons) {
 		display: flex;
 		align-items: center;
-		gap: var(--touch-target);
+		gap: var(--space-3);
 	}
 	:global(.pending-drawer .decision-spacer) { flex: 1; }
 
-	.eyebrow, .label {
+	.label {
 		color: var(--text-tertiary);
 		font-size: var(--text-footnote);
 		font-weight: var(--fw-semibold);
 	}
 	.decision-body .explainer { margin: 0; }
-	.status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.status.stale { color: var(--red-text); }
 	ol {
 		margin: 7px 0 0;
 		padding-left: 22px;
@@ -351,6 +316,7 @@
 		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
+		:global(.pending-drawer .decision-buttons) { gap: var(--touch-target); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);

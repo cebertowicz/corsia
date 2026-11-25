@@ -362,7 +362,7 @@
 			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel={pendingLabel(currentPending)} flushBottom opaque
+					ariaLabel={pendingLabel(currentPending)} flushBottom opaque headless
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>
@@ -376,6 +376,7 @@
 						onApprove={(event, durationSeconds) => { void decide(currentPending, 'approve', event, durationSeconds); }}
 						onReject={(event) => { void decide(currentPending, 'reject', event); }}
 						onRetry={() => { void refresh(); }}
+						onClose={closePendingDrawer}
 					/>
 				</AdaptiveDrawer>
 			{/key}
@@ -385,12 +386,7 @@
 
 <style>
 	.thread-host-access {
-		--host-access-available-height: calc(
-			100dvh
-			- var(--header-bottom)
-			- var(--input-bar-height, 100px)
-			- 24px
-		);
+		--host-access-available-height: calc(100dvh - var(--header-bottom) - var(--input-bar-height, 100px) - 24px);
 		position: absolute;
 		z-index: 11;
 		left: 0;
@@ -459,6 +455,7 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
+			--host-access-owner-wrap: normal;
 			--host-access-eyebrow-display: none;
 		}
 	}

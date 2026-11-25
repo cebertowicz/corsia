@@ -20,7 +20,7 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	document.body.appendChild(target);
 	const component = mount(HostAccessPendingRequestDrawer, { target, props: {
 		lease, stale: false, deciding: false, rejectDisabled: false,
-		approveDisabled: !approvalReady(lease), onApprove: approve, onReject: deny, onRetry: vi.fn(),
+		approveDisabled: !approvalReady(lease), onApprove: approve, onReject: deny, onRetry: vi.fn(), onClose: vi.fn(),
 	} });
 	flushSync();
 	expect(target.textContent).toContain('task.py');
@@ -55,7 +55,7 @@ it('names a stale script request as the lease names it', async () => {
 	document.body.appendChild(target);
 	const component = mount(HostAccessPendingRequestDrawer, { target, props: {
 		lease, stale: true, deciding: false, rejectDisabled: false, approveDisabled: true,
-		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 	} });
 	flushSync();
 	expect(target.textContent).toContain('Couldn’t check');
@@ -86,11 +86,11 @@ it('says an incomplete script request cannot be approved, and names Deny', async
 		document.body.appendChild(target);
 		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
 			lease, stale: false, deciding: false, rejectDisabled, approveDisabled: false,
-			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 		} });
 		flushSync();
 		expect(target.querySelector('.blocked-line')?.textContent?.trim()).toBe(line);
-		const buttons = [...target.querySelectorAll<HTMLButtonElement>('button')];
+		const buttons = [...target.querySelectorAll<HTMLButtonElement>('.decision-buttons button')];
 		expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([['Deny', rejectDisabled], ['Approve', true]]);
 		await unmount(component);
 		target.remove();
@@ -122,7 +122,7 @@ it('hides the Purpose label when the purpose is empty, in every state of the scr
 		document.body.appendChild(target);
 		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
 			lease, stale, deciding: false, rejectDisabled, approveDisabled: false,
-			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 		} });
 		flushSync();
 		expect(labels(target)).toEqual(shown
@@ -134,7 +134,7 @@ it('hides the Purpose label when the purpose is empty, in every state of the scr
 	}
 });
 
-it('puts Deny beside Approve as Reject sits in the other drawers: a ghost text action, no red, no spacer between', async () => {
+it('puts Deny beside Approve as Reject sits in the other drawers: a secondary button, no red, no spacer between', async () => {
 	const lease: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
@@ -148,13 +148,13 @@ it('puts Deny beside Approve as Reject sits in the other drawers: a ghost text a
 		document.body.appendChild(target);
 		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
 			lease, stale: false, deciding: false, rejectDisabled, approveDisabled: false,
-			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 		} });
 		flushSync();
 		const row = [...target.querySelector('.decision-buttons')!.children];
 		expect(row.map((child) => child.classList.contains('decision-spacer') ? 'spacer' : child.textContent?.trim()))
 			.toEqual(['spacer', 'Deny', 'Approve']);
-		expect(row[1].classList.contains('ghost')).toBe(true);
+		expect(row[1].classList.contains('secondary')).toBe(true);
 		expect(row[1].classList.contains('danger')).toBe(false);
 		expect((row[1] as HTMLButtonElement).disabled).toBe(rejectDisabled);
 		await unmount(component);

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { approvalReady, casReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessFill } from '$lib/api/hostAccess';
 
@@ -20,6 +21,7 @@
 		onApprove,
 		onReject,
 		onRetry,
+		onClose,
 	}: {
 		request: HostAccessFill;
 		stale: boolean;
@@ -30,6 +32,7 @@
 		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
+		onClose: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(request));
@@ -50,10 +53,7 @@
 </script>
 
 <div class="pending-drawer">
-	<header class="decision-head">
-		<div><div class="section-label">Sign in with a saved login</div><h2 title={owner(request)}>{owner(request)}</h2></div>
-		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
-	</header>
+	<HostAccessDrawerHead label="Sign in with a saved login" title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body fill-body">
 		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke this approval at any time.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
@@ -81,7 +81,7 @@
 		<HostAccessBlockedLine {stale} incomplete={!ready} kind="fill" rejectable={casReady(request)} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>
-			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
+			<Button variant="secondary" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Reject</Button>
 			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready}
 				onclick={(event: MouseEvent) => onApprove(event, seconds ?? undefined)}>Approve</Button>
 		</div>
@@ -98,13 +98,6 @@
 	/* The last control clears the sticky footer by the same step at every width. */
 	.fill-body { padding-bottom: var(--space-4); }
 	.explainer { margin: 0; }
-	.status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.status.stale { color: var(--red-text); }
 	.durations { margin-top: var(--space-2); }
 	/* A finger-sized target on any touch pointer; the sheet sets it on a phone-width sheet too. */
 	@media (pointer: coarse) {

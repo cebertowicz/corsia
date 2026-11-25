@@ -34,12 +34,13 @@ function pending(request: HostAccessFill, props: Record<string, unknown> = {}) {
 	const host = target();
 	const onApprove = vi.fn();
 	const onReject = vi.fn();
+	const onClose = vi.fn();
 	const component = mount(HostAccessPendingRequestDrawer, { target: host, props: {
 		lease: request, stale: false, deciding: false, rejectDisabled: false,
-		approveDisabled: !approvalReady(request), onApprove, onReject, onRetry: vi.fn(), ...props,
+		approveDisabled: !approvalReady(request), onApprove, onReject, onRetry: vi.fn(), onClose, ...props,
 	} });
 	flushSync();
-	return { host, component, onApprove, onReject };
+	return { host, component, onApprove, onReject, onClose };
 }
 
 it('names the agent, site and username, and approves for the duration the person picks', async () => {
@@ -65,12 +66,27 @@ it('names the agent, site and username, and approves for the duration the person
 	const reject = buttons.find((button) => button.textContent?.trim() === 'Reject')!;
 	reject.click();
 	expect(onReject).toHaveBeenCalledOnce();
-	// Approve is the one solid action; Reject is a text action right beside it.
+	// Approve is the one solid action; Reject is today's secondary button, the same size, right beside it.
 	const approve = buttons.find((button) => button.textContent?.trim() === 'Approve')!;
 	expect(approve.classList.contains('primary')).toBe(true);
-	expect(reject.classList.contains('ghost')).toBe(true);
+	expect(reject.classList.contains('secondary')).toBe(true);
+	expect(reject.classList.contains('md') && approve.classList.contains('md')).toBe(true);
 	expect(reject.nextElementSibling).toBe(approve);
 	expect(buttons.filter((button) => button.classList.contains('primary'))).toHaveLength(1);
+	await unmount(component);
+});
+
+it('puts the status and Done on the title row, with Done closing the sheet', async () => {
+	const { host, component, onClose } = pending(fill());
+	const head = host.querySelector('.decision-head')!;
+	expect(head.hasAttribute('data-drawer-handle')).toBe(true);
+	expect(head.querySelector('.head-label')?.textContent).toBe('Sign in with a saved login');
+	expect(head.querySelector('h2')?.textContent).toBe('Bookkeeper');
+	expect(head.querySelector('.status')?.textContent).toBe('Needs approval');
+	const done = head.querySelector<HTMLButtonElement>('button.head-done')!;
+	expect(done.textContent).toBe('Done');
+	done.click();
+	expect(onClose).toHaveBeenCalledOnce();
 	await unmount(component);
 });
 
@@ -116,28 +132,22 @@ it('cannot be approved when stale or incomplete, and says why', async () => {
 	expect(approvalReady(fill({ state: 'active' }))).toBe(false);
 });
 
-it('draws the lease and script entries as the same plain line: a sentence-case kind, no pill, the status as text', () => {
+it('keeps today’s request card for host access, with its duration badge, and says Couldn’t check when out of date', () => {
 	const lease = { id: 'lease-1', kind: 'lease', state: 'awaiting_user', root_thread_id: 'agent',
 		root_thread_title: 'Bookkeeper', requested_duration_seconds: 900 } as unknown as HostAccessItem;
-	const script = { id: 'script-1', kind: 'script', state: 'awaiting_user', root_thread_id: 'agent',
-		script_name: 'check.py' } as unknown as HostAccessItem;
-	for (const [request, kind, name] of [[lease, 'Temporary host access', 'Bookkeeper'], [script, 'Script approval', 'check.py']] as const) {
-		for (const stale of [false, true]) {
-			const host = target();
-			const component = mount(HostAccessPendingTrigger, { target: host, props: { request, stale, open: false, onclick: vi.fn() } });
-			flushSync();
-			expect(host.querySelector('.pending-kind')?.textContent).toBe(kind);
-			expect(host.querySelector('.pending-owner')?.textContent).toBe(name);
-			expect(host.querySelector('.pending-status')?.textContent).toBe(stale ? 'Couldn’t check' : 'Needs approval');
-			expect(host.querySelector('.pending-action')?.textContent).toBe('Review →');
-			expect(host.querySelector('.pill, .eyebrow, .pending-site')).toBeNull();
-			expect(host.textContent).not.toContain('15 minutes');
-			void unmount(component);
-		}
+	for (const stale of [false, true]) {
+		const host = target();
+		const component = mount(HostAccessPendingTrigger, { target: host, props: { request: lease, stale, open: false, onclick: vi.fn() } });
+		flushSync();
+		expect(host.querySelector('.eyebrow')?.textContent).toBe('Temporary host access');
+		expect(host.querySelector('.pending-owner')?.textContent).toBe('Bookkeeper');
+		expect(host.querySelector('.pill')?.textContent?.trim()).toBe(stale ? 'Couldn’t check' : '15 minutes');
+		expect(host.querySelector('.pending-action')?.textContent).toBe('Review →');
+		void unmount(component);
 	}
 });
 
-it('shows a pending fill on the strip as the agent and site, with status as text', async () => {
+it('shows a pending fill as one more request in the same card: its kind, the agent and the site', async () => {
 	const host = target();
 	const onclick = vi.fn();
 	const component = mount(HostAccessPendingTrigger, { target: host, props: {
@@ -147,17 +157,27 @@ it('shows a pending fill on the strip as the agent and site, with status as text
 	const button = host.querySelector('button')!;
 	expect(button.getAttribute('aria-label')).toBe('Review a request to sign in with a saved login');
 	expect(pendingLabel(fill())).toBe('Review a request to sign in with a saved login');
-	expect(button.textContent).toContain('Saved login');
+	expect(button.classList.contains('pending-request-trigger')).toBe(true);
+	expect(button.querySelector('.eyebrow')?.textContent).toBe('Saved login');
 	expect(button.querySelector('.pending-owner')?.textContent).toBe('Bookkeeper');
 	expect(button.querySelector('.pending-site')?.getAttribute('title')).toBe(fill().site);
 	// The entry shows the site without its scheme; the title and the drawer keep the full address.
 	expect(button.querySelector('.pending-site')?.textContent).toBe(fill().site.replace(/^https:\/\//, ''));
 	expect(button.querySelector('.pending-site')?.textContent).not.toContain('://');
-	expect(button.textContent).toContain('Needs approval');
+	// It asks for no duration (the person picks one), so there is no duration badge.
 	expect(host.querySelector('.pill')).toBeNull();
+	expect(button.querySelector('.pending-action')?.textContent).toBe('Review →');
 	button.click();
 	expect(onclick).toHaveBeenCalledOnce();
 	await unmount(component);
+	// Out of date, it shows the same error badge as any request.
+	const staleHost = target();
+	const stale = mount(HostAccessPendingTrigger, { target: staleHost, props: {
+		request: fill(), stale: true, open: false, onclick: vi.fn(),
+	} });
+	flushSync();
+	expect(staleHost.querySelector('.pill')?.textContent?.trim()).toBe('Couldn’t check');
+	await unmount(stale);
 	expect(owner(fill({ agent: ' ' }))).toBe('An agent');
 });
 
@@ -168,7 +188,7 @@ it('shows a live grant with its time left and revokes it', async () => {
 		state: 'active', revision: 2, duration_seconds: 900, expires_at: '2026-01-01T00:15:00Z',
 	});
 	const component = mount(HostAccessActiveLeaseDrawer, { target: host, props: {
-		lease: active, nowMs: Date.parse('2026-01-01T00:05:00Z'), disabled: false, deciding: false, onRevoke,
+		lease: active, nowMs: Date.parse('2026-01-01T00:05:00Z'), disabled: false, deciding: false, onRevoke, onClose: vi.fn(),
 	} });
 	flushSync();
 	const text = host.textContent ?? '';
@@ -178,7 +198,7 @@ it('shows a live grant with its time left and revokes it', async () => {
 	expect(text).toContain('10:00');
 	expect(text).not.toContain('Reviewer');
 	const revoke = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revoke approval');
-	expect(revoke?.classList.contains('ghost')).toBe(true);
+	expect(revoke?.classList.contains('secondary')).toBe(true);
 	revoke?.click();
 	expect(onRevoke).toHaveBeenCalledOnce();
 	await unmount(component);
@@ -193,11 +213,13 @@ it('labels a live grant chip as a saved login, not host access', async () => {
 	} });
 	flushSync();
 	const trigger = host.querySelector('.active-chip-trigger')!;
-	// Its words are its name, time included: no static label, nothing hidden, no decorative icon.
-	expect(trigger.hasAttribute('aria-label')).toBe(false);
-	expect(trigger.textContent?.replace(/\s+/g, ' ').trim()).toBe('Saved login · 5 min left');
-	expect(trigger.querySelector('[aria-hidden="true"]')).toBeNull();
-	expect(trigger.querySelector('svg')).toBeNull();
+	// Today's chip: its kind is its name, the countdown beside the icon; the padlock tells it from host access's shield.
+	expect(trigger.getAttribute('aria-label')).toBe('Saved login');
+	expect(trigger.querySelector('.countdown')?.textContent).toBe('5:00');
+	expect(trigger.querySelector('.countdown')?.getAttribute('aria-hidden')).toBe('true');
+	const icon = trigger.querySelector('svg.host-access-icon')!;
+	expect(icon.getAttribute('aria-hidden')).toBe('true');
+	expect(icon.querySelector('path')?.getAttribute('d')).toBe('M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z');
 	await unmount(component);
 });
 

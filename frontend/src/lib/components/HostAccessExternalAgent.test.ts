@@ -22,7 +22,7 @@ function show(lease: HostAccessLease, stale = false) {
 		// As the control passes them: a stale read blocks Approve, never Reject.
 		lease, stale, deciding: false, rejectDisabled: false,
 		approveDisabled: stale || !approvalReady(lease),
-		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 	} });
 	flushSync();
 }

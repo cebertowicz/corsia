@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
+	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { cadence, approvalReady, casReady, text } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessScript } from '$lib/api/hostAccess';
 
@@ -19,6 +20,7 @@
 		onApprove,
 		onReject,
 		onRetry,
+		onClose,
 	}: {
 		request: HostAccessScript;
 		stale: boolean;
@@ -29,16 +31,14 @@
 		onApprove: (event: MouseEvent) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
+		onClose: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(request));
 </script>
 
 <div class="pending-drawer">
-	<header class="decision-head">
-		<div><div class="section-label">Allow this script to act as your agent and use the agents’ GitHub account</div><h2 title={request.script_name}>{request.script_name}</h2></div>
-		<span class="status" class:stale>{stale ? 'Couldn’t check' : 'Needs approval'}</span>
-	</header>
+	<HostAccessDrawerHead label="Allow this script to act as your agent and use the agents’ GitHub account" title={request.script_name} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body">
 		<section><span class="section-label">File</span><p>{request.script_path}</p></section>
 		<section><span class="section-label">When it runs</span><p>{cadence(request.trigger?.cadence_seconds ?? null)}</p></section>
@@ -52,7 +52,7 @@
 		<HostAccessBlockedLine {stale} incomplete={!ready} kind="script" rejectable={casReady(request)} {notice} {onRetry} />
 		<div class="decision-buttons">
 			<span class="decision-spacer"></span>
-			<Button variant="ghost" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
+			<Button variant="secondary" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
 			<Button variant="primary" loading={deciding} disabled={approveDisabled || !ready} onclick={onApprove}>Approve</Button>
 		</div>
 	</footer>
@@ -64,11 +64,4 @@
 		font-size: var(--text-footnote);
 		font-weight: var(--fw-semibold);
 	}
-	.status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.status.stale { color: var(--red-text); }
 </style>

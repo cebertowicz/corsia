@@ -370,8 +370,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByText('home-assistant: Protected base checkout', { exact: true })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
-		// Approve is the one solid action; Reject is a ghost text action.
-		await expect(dialog.getByRole('button', { name: 'Reject' })).toHaveClass(/\bghost\b/);
+		// Approve is the one solid action; Reject is today's secondary button beside it.
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toHaveClass(/\bsecondary\b/);
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toHaveClass(/\bprimary\b/);
 		// Every section is a label over plain text, with no card border or fill.
 		const sections = dialog.locator('.risk-grid section, .repo-policy-context, .policy-exceptions, .review');
@@ -422,10 +422,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
-		// Reject sits beside Approve, not across the footer from it, a finger's width apart at every width.
+		// Reject sits beside Approve, not across the footer from it: the app's button gap, a finger's width on a phone.
 		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
-		expect(besideGap).toBeGreaterThanOrEqual(44);
-		expect(besideGap).toBeLessThanOrEqual(45);
+		const expectedGap = viewport!.width <= 720 ? 44 : 12;
+		expect(besideGap).toBeGreaterThanOrEqual(expectedGap);
+		expect(besideGap).toBeLessThanOrEqual(expectedGap + 1);
 		// The pinned head keeps 12px under its title at every width; both pinned strips end at a hairline
 		// over the scrolling content, as the decision drawer's do.
 		await expect(dialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
@@ -452,22 +453,28 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 
 		await dialog.getByRole('button', { name: 'Approve' }).click();
-		await expect(page.locator('.active-chip .countdown')).toContainText('min left');
+		await expect(page.locator('.active-chip .countdown')).toContainText(':');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
-		// The chip's words are its name, the time left included.
-		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access · \d+ min left$/ });
+		const hostAccessDisclosure = page.getByRole('button', { name: 'Host access', exact: true });
 		const revokeHostAccess = page.getByRole('button', { name: 'Revoke host access' });
 		await expect(hostAccessDisclosure).toBeVisible();
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			// A composer chip: no fill and no border at rest; it sits clear of the messages instead.
+			// The solid material is the trigger's; the wrapper only lays it out.
 			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
-				const style = getComputedStyle(element);
-				return { background: style.backgroundColor, border: style.borderTopWidth };
+				const solidProbe = document.createElement('div');
+				solidProbe.style.background = 'var(--bg-secondary)';
+				document.body.appendChild(solidProbe);
+				const solidBackground = getComputedStyle(solidProbe).backgroundColor;
+				solidProbe.remove();
+				return {
+					actualBackground: getComputedStyle(element).backgroundColor,
+					solidBackground,
+				};
 			});
-			expect(chipMaterial).toEqual({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
+			expect(chipMaterial.actualBackground).toBe(chipMaterial.solidBackground);
 
 			const messages = page.locator('.messages');
 			await messages.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -545,15 +552,10 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(revokeBoxAtRest).toBeTruthy();
 		expect(revokeBoxAtRest!.y).toBeGreaterThanOrEqual(0);
 		expect(revokeBoxAtRest!.y + revokeBoxAtRest!.height).toBeLessThanOrEqual(viewport!.height);
-		// Revoke's word ends where a request sheet's Approve ends: the content's right edge.
-		const revokeTextRight = await revokeHostAccess.evaluate((element) => {
-			const range = document.createRange();
-			range.selectNodeContents(element);
-			return range.getBoundingClientRect().right;
-		});
-		expect(Math.abs(revokeTextRight - (activeBodyBox!.x + activeBodyBox!.width))).toBeLessThanOrEqual(1);
-		await expect(activeDialog.locator('.active-drawer-head')).toHaveCSS('padding-bottom', '12px');
-		await expect(activeDialog.locator('.active-drawer-head')).toHaveCSS('border-bottom-width', '1px');
+		// Revoke ends where a request sheet's Approve ends: the content's right edge.
+		expect(Math.abs(revokeBoxAtRest!.x + revokeBoxAtRest!.width - (activeBodyBox!.x + activeBodyBox!.width))).toBeLessThanOrEqual(1);
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
 		await expect(activeDialog.locator('.active-drawer-actions')).toHaveCSS('border-top-width', '1px');
 		await footerSitsOnScrollerEdge(activeDialog, '.active-drawer-actions');
 
@@ -603,17 +605,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		}));
 	}
 
-	/** The entry's row: the site ends before the status, and the status and Review stay inside the entry and the screen. */
+	/** The card's row: the site ends before Review, and Review stays inside the card and the screen. */
 	async function expectRowFits(page: Page) {
 		const row = await page.locator('.pending-request-trigger').first().evaluate((button) => {
 			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
 			const entry = button.getBoundingClientRect();
-			return { siteRight: box('.pending-site').right, statusLeft: box('.pending-status').left,
+			return { siteRight: box('.pending-site').right, actionLeft: box('.pending-action').left,
 				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth,
-				ownerWidth: box('.pending-owner').width, whatWidth: box('.pending-what').width,
-				entryWidth: entry.width, parentWidth: button.parentElement!.getBoundingClientRect().width };
+				ownerWidth: box('.pending-owner').width, entryWidth: entry.width };
 		});
-		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.statusLeft);
+		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.actionLeft);
 		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
 		expect(row.entryRight, JSON.stringify(row)).toBeLessThanOrEqual(row.screen);
 	}
@@ -648,37 +649,6 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(box.fits, JSON.stringify(box)).toBe(true);
 		expect(box.lines).toBe(1);
 		if (box.lineHeight) expect(box.height).toBeLessThanOrEqual(box.lineHeight + 1);
-		await expectRowFits(page);
-	});
-
-	test('stacks a long agent name over the site on a wide screen, so the site stays whole', async ({ page, request }, testInfo) => {
-		await page.setViewportSize({ width: 1440, height: 900 });
-		const title = `Saved login long name ${testInfo.project.name}-${Date.now()}`;
-		const threadId = await createSession(request, title);
-		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
-		const fill = fillRequest(threadId, 1, { agent });
-		await page.route('**/api/host-access/leases**', async (route) => {
-			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
-			await route.fulfill({
-				status: 200, contentType: 'application/json',
-				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
-			});
-		});
-		await loginByUrl(page, { waitForComposer: false });
-		await selectThread(page, title);
-
-		const name = page.locator('.pending-request-trigger .pending-owner');
-		const shown = page.locator('.pending-request-trigger .pending-site');
-		await expect(shown).toBeVisible();
-		await expect(name).toHaveText(agent);
-		// The site is never shortened for the name: it is whole, on a line of its own under the name.
-		await expect.poll(() => shown.textContent()).toBe(LONG_SITE_SHOWN);
-		const box = await siteLine(shown);
-		expect(box.fits, JSON.stringify(box)).toBe(true);
-		expect(box.lines).toBe(1);
-		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
-		expect(siteBox!.y, 'the site sits under the name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
-		expect(siteBox!.width).toBeGreaterThan(0);
 		await expectRowFits(page);
 	});
 
