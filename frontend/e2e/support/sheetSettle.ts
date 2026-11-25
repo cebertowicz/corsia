@@ -1,8 +1,7 @@
 import { type Page } from '@playwright/test';
 
-/** Settle a surface's own motion (sheet slide, slot transitions) before anything is read. */
-export const settleMotion = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
-	.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))).then(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))));
+/** Settle a surface's own motion (sheet slide, slot transitions) before anything is read: the shared `settled`. */
+export { settled as settleMotion } from './reviewFixtures';
 
 /** Wait until the surface's box has not moved for six frames (a sheet still rising or resizing makes every box read stale). */
 export const settleRect = (page: Page, root: string) => page.evaluate(async (selector) => {
