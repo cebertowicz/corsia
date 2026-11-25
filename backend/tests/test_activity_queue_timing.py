@@ -25,6 +25,9 @@ def test_read_300_items(db, monkeypatch):
                      acceptance_criteria='Done', assignee='user', db=db)
     db.commit()
     from tests.test_attention_queue_api import _attention_client
+    import api.attention
+    # The cap is 3,000 per list; pin a smaller one so the uncapped count is still proven here.
+    monkeypatch.setattr(api.attention, 'QUEUE_ITEMS_CAP', 300)
     response = _attention_client(db, monkeypatch).get('/api/attention/queue?view=activity').json()
     assert response['count'] == 301
     assert len(response['items']) == 300

@@ -9,6 +9,7 @@ Thin endpoints over the tested attention lifecycle (S6a), parent disposition
 - ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
 - ``GET  /api/attention/queue``             — the one queue the user works through
 - ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
+- ``POST /api/attention/notifications/read`` — mark Activity notifications read
 
 ``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
 semantics remain covered by backend tests while #921 decides whether raised rows
@@ -23,7 +24,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from infra.auth import authenticate, may_access_artifact, owns_thread, require_user
+from infra.auth import authenticate, may_access_artifact, owns_thread, require_user, require_user_header_only
 from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
@@ -157,12 +158,12 @@ def _summarize_raised(thread_id: str | None, user_id: str, *, db=None) -> list[d
             _db.close()
 
 
-# Upper bound on the ordered `items` the queue response carries. The approved Activity design
-# shows the whole list, not the first few (its frames draw forty items). Expected volume is tens
-# of items waiting on a person; 300 is ten times that, and 300 task rows read at p95 6.8 ms in memory
-# (test_activity_queue_timing.py).
+# Upper bound on the rows each list in the queue response carries (Your tasks, and Notifications).
+# The approved Activity design shows the whole list, not the first few. The scale budget is 300
+# items per list; 3,000 is ten times that (test_activity_queue_timing.py), so a list's count and
+# its rows agree everywhere inside the budget.
 # `count` stays uncapped, so anything past the cap is still counted.
-QUEUE_ITEMS_CAP = 300
+QUEUE_ITEMS_CAP = 3000
 
 
 def _queue_for(user_id: str, *, db=None, raw: bool = False, annotated=None) -> list[dict]:
@@ -209,7 +210,16 @@ async def get_raised(user: dict = Depends(require_user), thread_id: str | None =
 
 
 def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
-    """Compose and rank one authorized view; return uncapped rows, ranker and scope."""
+    """Compose and rank one authorized view's tasks; return uncapped rows, ranker and scope.
+
+    Activity's Notifications list is never ranked, so the ranker and its wake see tasks only.
+    """
+    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view)
+    return rows, ranker, scope
+
+
+def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+    """Return (ranked tasks, notifications newest first, ranker, scope), both lists uncapped."""
     from collections import Counter
     from loguru import logger
     from infra.activity_queue_base import shape
@@ -221,15 +231,28 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
         public.check_operator_project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
     annotated = public.annotate_attention(_authorized_raised(None, user_id, db=db), db=db)
     rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
+    notifications: list[dict] = []
     if view == 'activity':
-        from doceditor.activity_reply_rows import reply_rows
+        from doceditor.activity_reply_rows import document_rows
         projected = public.activity_plan_rows(db, user_id, annotated)
-        reviews = {r['detail']['artifact_id'] for r in projected if r['kind'] == 'review'}
-        replies = reply_rows(db, user_id, reviewed_artifact_ids=reviews)
-        rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, replies))
-        rows.extend(replies)
+        documents = document_rows(db, user_id)
+        rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
+        # A reviewed document's replies ride on its review row; Approve ends the review and
+        # the next read lists the document in Notifications.
+        unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}
+        reviewed = set()
+        for row in rows:
+            if row['kind'] == 'review' and row['detail']['artifact_id'] in unread:
+                row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
+                reviewed.add(row['detail']['artifact_id'])
+        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]
     if project_id:
         rows = [r for r in rows if r['source'].get('project_id') == project_id]
+        notifications = [r for r in notifications if r['source'].get('project_id') == project_id]
+    notifications.sort(key=lambda r: r['key'])
+    notifications.sort(key=lambda r: r['raised_at'] or '', reverse=True)
+    for row in notifications:
+        row.pop('priority', None)
     rows.sort(key=sort_key)
     scope, ranker = ranker_for(db, user_id, project_id)
     rows = apply_ranks(db, user_id, scope, rows)
@@ -237,19 +260,24 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
         row.pop('priority', None)
     counts = dict(Counter(row['kind'] for row in rows))
     ranked = sum(row['rank'] is not None for row in rows)
-    logger.info('activity queue scope={} kinds={} ranked={} unranked={}', scope, counts, ranked, len(rows)-ranked)
-    return rows, ranker, scope
+    logger.info('activity queue scope={} kinds={} ranked={} unranked={} notifications={}',
+                scope, counts, ranked, len(rows)-ranked, len(notifications))
+    return rows, notifications, ranker, scope
 
 
 def _queue_response(user_id: str, project_id: str | None, view: str | None):
     db = get_db()
     try:
         try:
-            rows, ranker, _ = activity_queue(db, user_id, project_id=project_id, view=view)
+            rows, notifications, ranker, _ = activity_lists(db, user_id, project_id=project_id, view=view)
         except public.OperatorNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {'current': rows[0] if rows else None, 'count': len(rows),
-                'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}
+        response = {'current': rows[0] if rows else None, 'count': len(rows),
+                    'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}
+        if view == 'activity':
+            response['notifications'] = {'count': len(notifications),
+                                         'items': notifications[:QUEUE_ITEMS_CAP]}
+        return response
     finally:
         db.close()
 
@@ -329,6 +357,42 @@ async def post_clear(artifact_id: str, body: ClearBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await public.drive_threads(woken)
     return asdict(result)
+
+
+class NotificationDocument(BaseModel):
+    artifact_id: str
+    through_reply_id: str
+
+
+class NotificationsReadBody(BaseModel):
+    documents: list[NotificationDocument]
+
+
+def _mark_notifications_read(user_id: str, documents: list[NotificationDocument]) -> None:
+    from api.doc_comment_access import _artifact_for_read
+    from doceditor import comment_thread_views
+
+    db = get_db()
+    try:
+        # The artifact routes' own gate, for every document before anything is written.
+        live = [(_artifact_for_read(doc.artifact_id, user_id, db), doc.through_reply_id) for doc in documents]
+    finally:
+        db.close()
+    try:
+        comment_thread_views.mark_documents_read(user_id, live)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="reply not found") from exc
+
+
+@router.post("/notifications/read")
+async def post_notifications_read(body: NotificationsReadBody,
+                                  user: dict = Depends(require_user_header_only)):
+    """Mark Activity notifications read: Done, dismiss, and Mark all read share this one call.
+
+    Each document is read up to the reply the person was shown; a later reply stays unread.
+    """
+    await run_in_db(lambda: _mark_notifications_read(user["id"], body.documents))
+    return {"read": len(body.documents)}
 
 
 class DisposeBody(BaseModel):
