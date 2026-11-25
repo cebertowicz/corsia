@@ -3,11 +3,12 @@ import { createSession, openAppByUrl } from './support/corsia';
 import { operatorNode, withPlanContract } from '../src/lib/__tests__/fixtures/operatorPlan';
 import type { Page, APIRequestContext } from '@playwright/test';
 
-async function openPlan(page: Page, request: APIRequestContext, width: number, refusal = false, nested = false) {
+async function openPlan(page: Page, request: APIRequestContext, width: number, refusal = false, nested = false, long = false) {
   await page.setViewportSize({ width, height: 900 });
   const title = `drag-reorder-${Date.now()}`;
   const threadId = await createSession(request, title);
-  const nodes = ['First task', 'Second task', 'Third task'].map((title, i) => operatorNode({
+  const titles = ['First task', 'Second task', 'Third task', ...(long ? Array.from({ length: 40 }, (_, i) => `Additional task ${i}`) : [])];
+  const nodes = titles.map((title, i) => operatorNode({
     id: `task-${i}`, title, user_actions: ['reorder'], updated_at: '2026-08-13T00:00:00Z',
     ...(nested ? { parent_id: 'parent', depth: 1 } : {}),
   }));
@@ -15,7 +16,7 @@ async function openPlan(page: Page, request: APIRequestContext, width: number, r
   const entry = withPlanContract({
     plan: { id: `plan-${threadId}`, owner_kind: 'thread', owner_id: threadId, state: 'active', revision: 1, updated_at: '2026-08-13T00:00:00Z' },
     owner: { label: 'Conversation', project_id: null, thread_id: threadId },
-    progress: { done: 0, total: 3, open: 3, liveness: 'advancing' },
+    progress: { done: 0, total: nodes.length, open: nodes.length, liveness: 'advancing' },
     current_node_ids: [], next_node_ids: [], nodes,
   });
   let calls: unknown[] = [];
@@ -93,6 +94,26 @@ for (const width of [1440, 393]) {
         await page.getByText(title).first().click();
         await expect.poll(() => tree.locator('[data-node-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-node-id')))).toEqual(['task-1', 'task-2', 'task-0']);
       }
+    });
+    if (width === 393) test('a short touch swipe scrolls the plan without starting a reorder', async ({ page, request, context }) => {
+      const { tree, calls } = await openPlan(page, request, width, false, false, true);
+      const source = tree.locator('[data-node-id="task-0"]');
+      await source.hover({ trial: true });
+      const box = (await source.boundingBox())!;
+      await source.evaluate((row) => row.addEventListener('pointercancel', () => row.setAttribute('data-test-cancelled', 'yes')));
+      const scroller = await tree.evaluateHandle((element) => {
+        let parent = element.parentElement;
+        while (parent && parent.scrollHeight <= parent.clientHeight) parent = parent.parentElement;
+        if (!parent) throw new Error('No plan scroll container');
+        return parent;
+      });
+      const cdp = await context.newCDPSession(page);
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      await cdp.send('Input.synthesizeScrollGesture', { x, y, yDistance: -200, speed: 800, gestureSourceType: 'touch' });
+      await expect(source).toHaveAttribute('data-test-cancelled', 'yes');
+      await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(calls).toHaveLength(0);
+      await expect(source).not.toHaveClass(/dragging/);
     });
     test('refusal restores the dragged order without overlapping rows', async ({ page, request, context }, info) => {
       const { tree } = await openPlan(page, request, width, true);
