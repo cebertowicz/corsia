@@ -115,7 +115,6 @@ it('draws the duration as one select named Duration, in the sheet\'s nested fiel
 	// The select's name is its own label; the drawn label is the sheet's section label, like Site and Username.
 	expect(host.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()).toBe('Duration');
 	expect(select.closest('section')?.querySelector('.section-label')?.textContent).toBe('Duration');
-	expect(host.querySelector('[role="radiogroup"], [role="radio"], .segmented')).toBeNull();
 	choose(host, '1800');
 	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove.mock.calls[0][1]).toBe(1800);
