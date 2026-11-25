@@ -5,6 +5,8 @@ export type DetailsNeeds = {
 	overdue: boolean;
 	/** An ask whose card is hidden (under the comment sheet). */
 	hiddenAsk: boolean;
+	/** Comments waiting for the reader's decision, whose Dismiss all row is only reachable by opening Details. */
+	hiddenTask: boolean;
 };
 
 /** What each source is called, in the words the Details panel itself uses for that entry. Keyed by the same required

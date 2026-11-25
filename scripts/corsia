@@ -349,6 +349,14 @@ status() {
     print_endpoints
 }
 
+corsia_logs_dir() {
+    "$PYTHON" -I -c 'import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from infra.log_files import logs_dir
+print(logs_dir(Path(sys.argv[2])))' "$BACKEND_DIR" "$CORSIA_STATE_DIR"
+}
+
 source "$SCRIPT_DIR/corsia.d/runtime.sh"
 if [ "$(uname -s)" = Linux ]; then
     source "$SCRIPT_DIR/corsia.d/systemd.sh"
@@ -375,10 +383,14 @@ if is_mutating_lifecycle_command "$@"; then
 elif [ "${1:-status}" = logs ]; then
     [ -n "${BACKEND_LOG:-}" ] || resolve_runtime_identity || exit 1
 fi
-# The backend log lives with this instance's state, so two checkouts on one
-# machine never write, truncate, or tail the same file.
+# Keep each instance's backend log separate; an explicit override wins.
 if [ -z "${BACKEND_LOG:-}" ] && [ -n "${CORSIA_STATE_DIR:-}" ]; then
-    BACKEND_LOG="$CORSIA_STATE_DIR/backend.log"
+    if [ "$(uname -s)" = Darwin ]; then
+        LOGS_DIR="$(corsia_logs_dir)" || exit 1
+        BACKEND_LOG="$LOGS_DIR/backend.log"
+    else
+        BACKEND_LOG="$CORSIA_STATE_DIR/backend.log"
+    fi
 fi
 
 case "${1:-status}" in

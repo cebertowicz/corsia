@@ -880,8 +880,8 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 205 -> 206 adds the Activity rank and nudge tables.
         from infra.migration_205_to_206_activity_ranking import migrate_205_to_206
         migrate_205_to_206(db)
-        # 206 -> 207 adds saved-login fill history.
-        from infra.migration_206_to_207_saved_login_fill_audit import migrate_206_to_207
+        # 206 -> 207 adds the suggestion-history receipt table.
+        from infra.migration_206_to_207_suggestion_history import migrate_206_to_207
         migrate_206_to_207(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:

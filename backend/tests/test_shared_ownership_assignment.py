@@ -314,6 +314,30 @@ def test_startup_keeps_the_claim_for_a_preexisting_unenforced_scope(assignment_s
     ).fetchone() is not None
 
 
+def test_startup_skips_a_project_whose_folder_is_gone_quietly(assignment_scope, caplog):
+    from infra.settings import get_setting
+    from registry.shared_ownership_assignment import run_startup_assignment
+
+    scope = assignment_scope
+    _build_rule_tree(scope)
+    scope["db"].execute(
+        "INSERT INTO projects (id,name,path,status,created_at,updated_at) "
+        "VALUES ('project-gone','Gone',NULL,'archived','t','t')",
+    )
+    scope["db"].commit()
+    assert not (scope["workspace"] / "projects" / "gone").exists()
+
+    with caplog.at_level("INFO", logger="registry.shared_ownership_assignment"):
+        run_startup_assignment(scope["workspace"])
+
+    assert [
+        r for r in caplog.records
+        if r.name == "registry.shared_ownership_assignment" and r.levelno >= 30
+    ] == []
+    assert get_setting("shared_ownership:project-gone", db=scope["db"]) is None
+    assert get_setting("shared_ownership:project-alpha", db=scope["db"])
+
+
 def test_claim_instructions_reference_a_scoped_standard_when_present(assignment_scope):
     from registry.shared_ownership_assignment import apply_shared_ownership
 

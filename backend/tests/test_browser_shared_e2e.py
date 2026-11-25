@@ -24,7 +24,8 @@ import pytest
 import websockets
 
 from host_access import (
-    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
+    browser_cdp, browser_cdp_frames, browser_control, browser_dom_frames, browser_dom_write, browser_pane_state, browser_screencast,
+    browser_session_commands, browser_steps,
     browser_step_lifecycle as lifecycle,
 )
 from tools import browser_runtime, browser_run_steps
@@ -90,6 +91,43 @@ window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# A link inside a frame, 40px from the frame's left and 30px from its top; the page above it holds other
+# elements at the same distance from the page's corner, which is where a frame-relative box wrongly lands.
+FRAME_LINK = """<!doctype html><title>Frame inner</title><body style="margin:0">
+<a id=go href="#" style="position:absolute;left:40px;top:30px;display:block;width:100px;height:20px">Go</a>
+<script>
+window.clicks = 0;
+document.querySelector('#go').addEventListener('click', event => { event.preventDefault(); window.clicks++; });
+</script>"""
+# The same link under a white sheet that fills the frame.
+FRAME_COVERED = FRAME_LINK + '<div style="position:fixed;inset:0;background:white"></div>'
+FRAME_OUTER = """<!doctype html><title>Frame outer</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:600px;height:240px;border:0"></iframe>"""
+# Two frames laid out alike, side by side; the second one's link is under the sheet that fills that frame.
+FRAME_TWINS = """<!doctype html><title>Frame twins</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0"></iframe>
+<iframe src="/frame-covered.html" style="width:300px;height:120px;border:0"></iframe>"""
+# Two embeds laid out alike, the second below the fold, as repeated video players or payment widgets are.
+FRAME_TWINS_OFF_SCREEN = """<!doctype html><title>Frame twins off screen</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>
+<div style="height:3000px">spacer</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+# Two embeds laid out alike, both in view, the second only 20px tall: its link sits below its own fold.
+FRAME_TWINS_SCROLLED = """<!doctype html><title>Frame twins scrolled</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="/frame-link.html" style="width:300px;height:20px;border:0;display:block"></iframe>"""
+# The same embed twice: once in the page, and once inside a cross-site wrapper at its corner, as embed wrappers
+# and ad slots nest it. __WRAP__ is the wrapper's address.
+FRAME_NESTED = """<!doctype html><title>Frame nested</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="__WRAP__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+FRAME_WRAP = """<!doctype html><title>Frame wrapper</title><body style="margin:0">
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
 # Controls under a full-page layer that lets clicks through (pointer-events: none), as toast and
 # overlay containers do, and one control under a layer that really covers it.
 LAYER = """<!doctype html><title>Layer fixture</title>
@@ -138,12 +176,31 @@ def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode(),
+             "/frame-twins.html": FRAME_TWINS.encode(), "/frame-twins-scrolled.html": FRAME_TWINS_SCROLLED.encode(),
              "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
              "/layer.html": LAYER.encode(), "/keep.html": KEEP.encode(), "/storage.html": STORAGE.encode()}
+    frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered",
+                   "/frame-twins-off-same.html": "same", "/frame-twins-off-cross.html": "cross"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
             body = pages.get(self.path)
+            port = self.server.server_port
+            if self.path in ("/frame-nested-same.html", "/frame-nested-cross.html"):
+                # The wrapper is on another site (localhost); its own frame is on the wrapper's site, in the
+                # wrapper's process, or back on the page's site, in a process of its own.
+                inner = "same" if self.path.endswith("-same.html") else "cross"
+                body = FRAME_NESTED.replace("__WRAP__", f"http://localhost:{port}/frame-wrap-{inner}.html").encode()
+            elif self.path in ("/frame-wrap-same.html", "/frame-wrap-cross.html"):
+                inner = "/frame-link.html" if self.path.endswith("-same.html") else f"http://127.0.0.1:{port}/frame-link.html"
+                body = FRAME_WRAP.replace("__FRAME__", inner).encode()
+            if body is None and self.path in frame_pages:
+                # localhost is another site than 127.0.0.1, so Chrome runs that frame in its own process.
+                frame = {"same": "/frame-link.html", "covered": "/frame-covered.html",
+                         "cross": f"http://localhost:{self.server.server_port}/frame-link.html"}[frame_pages[self.path]]
+                outer = FRAME_TWINS_OFF_SCREEN if self.path.startswith("/frame-twins-off-") else FRAME_OUTER
+                body = outer.replace("__FRAME__", frame).encode()
             if body is None:
                 self.send_error(404)
                 return
@@ -541,6 +598,36 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
         await owner.close_thread(thread_id)
 
 
+async def frame_link_ref(owner: BrowserSessionOwner, thread_id: str, *, links: int = 1) -> str:
+    """The agent's ref for the link inside the frame (the last of ``links``), once the frames have loaded."""
+    for _ in range(50):
+        snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+        found = re.findall(r'link \\?"Go\\?" \[ref=(e\d+)\]', snapshot)
+        if len(found) >= links:
+            return f"@{found[-1]}"
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"the frame's link never appeared in the snapshot: {snapshot}")
+
+
+async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site: bool) -> int:
+    """How many times the page inside the frame saw its link clicked."""
+    if not cross_site:
+        return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
+    # Cross-site frames are flattened sessions on the page connection.
+    seen = []
+    async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+        pending = [cdp]
+        while pending:
+            parent = pending.pop()
+            for child, _owner, _loader in await browser_cdp_frames.child_frames(cdp, parent):
+                href = (await child.call("Runtime.evaluate", expression="location.href", returnByValue=True))["result"].get("value")
+                seen.append(href)
+                if isinstance(href, str) and href.endswith("/frame-link.html"):
+                    return (await child.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+                pending.append(child)
+    raise AssertionError(f"no frame target shows the fixture's frame: {seen}")
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option():
@@ -619,6 +706,212 @@ async def _shared_page_reaches(owner: BrowserSessionOwner, thread_id: str, path:
             break
         await asyncio.sleep(0.25)
     return seen, tabs
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("page", "cross_site"), [("frame-same.html", False), ("frame-cross.html", True)])
+async def test_a_click_on_a_link_inside_a_frame_applies_to_that_link(page, cross_site):
+    """A link in a same-origin frame and in a cross-site frame (its own process) is clicked, not refused as covered."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            assert await owner.run(thread_id, ("click", ref), session="existing") == "ok"
+            assert await frame_clicks(owner, thread_id, cross_site=cross_site) == 1
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_probe_and_write_walk_find_the_same_documents():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-walk-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-walk", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/frame-cross.html"), session="new")).startswith("Error:")
+            await frame_link_ref(owner, thread)
+            endpoint = await owner.page_endpoint(thread)
+            async with browser_cdp.CdpClient(endpoint) as page:
+                _, documents = await browser_cdp_frames.search_page(page, browser_cdp._password_inputs, browser_cdp._visible)
+                probe_ids = set()
+                for session, _shown in documents.values():
+                    tree = (await session.call("Page.getFrameTree"))["frameTree"]
+                    probe_ids.add(tree["frame"]["id"])
+                    probe_ids.update(browser_dom_frames._descendants(tree))
+            async with browser_cdp.CdpClient(endpoint) as page:
+                tree = (await page.call("Page.getFrameTree"))["frameTree"]
+                walk = await browser_dom_frames.walk_frames(page)
+                write_ids = {tree["frame"]["id"]}
+                cross_owner = None
+                for frame in walk.frames:
+                    if frame.cross_process:
+                        cross_owner = frame.owner
+                        await frame.session.call(
+                            "Runtime.evaluate", expression="document.body.insertAdjacentHTML('beforeend', '<input type=password>')")
+                    frame_id = frame.frame_id
+                    if frame_id is None:
+                        frame_id = (await frame.session.call("Page.getFrameTree"))["frameTree"]["frame"]["id"]
+                    write_ids.add(frame_id)
+            assert len(probe_ids) >= 2 and probe_ids == write_ids
+            probe = await browser_cdp.page_password_probe(endpoint, {})
+            assert cross_owner is not None
+            assert any(browser_cdp_frames.frame_owner(key) == cross_owner for key in probe.present_nodes)
+    finally:
+        await owner.close_thread(thread)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_holds_cap_counts_an_unchecked_document_as_a_match(monkeypatch):
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-cap-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-cap", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/plain.html"), session="new")).startswith("Error:")
+            await cdp_value(owner, thread, "document.body.insertAdjacentHTML('beforeend', '<div></div>'.repeat(20)); null")
+            box = {"x": 900000, "y": 900000, "width": 11, "height": 13}
+            async with browser_cdp.CdpClient(await owner.page_endpoint(thread)) as page:
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 100)
+                assert await browser_dom_frames._holds(page, None, box) is False
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 5)
+                assert await browser_dom_frames._holds(page, None, box) is True
+    finally:
+        await owner.close_thread(thread)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_inside_a_frame_is_still_refused():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-covered-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-covered", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-covered-outer.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            assert await frame_clicks(owner, thread_id, cross_site=False) == 0
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_in_one_of_two_frames_laid_out_alike_is_refused_as_ambiguous():
+    """The ref names the covered frame's link; the other frame's uncovered look-alike is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+            assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-twins-off-same.html", "frame-twins-off-cross.html"])
+async def test_a_link_in_an_embed_below_the_fold_with_a_look_alike_in_view_is_refused_as_ambiguous(page):
+    """The ref names the lower embed's link; the look-alike in view is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-off-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-off", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            if page == "frame-twins-off-same.html":
+                clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+                assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_link_below_its_own_frames_fold_is_never_written_in_a_look_alike_frame():
+    """The ref names the short frame's link, out of that frame's own view; the taller twin's link is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-scrolled-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-scrolled", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins-scrolled.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            refused = None
+            try:
+                await owner.run(thread_id, ("click", ref), session="existing")
+            except browser_dom_write.DomWriteRefused as exc:
+                refused = exc
+            clicks = await cdp_value(owner, thread_id, "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)")
+            # Refused as ambiguous, or written in the short frame if measuring the box scrolled it into its view.
+            assert (refused is not None and refused.reason == "ambiguous" and clicks == [0, 0]) or (
+                refused is None and clicks == [0, 1]), (refused, clicks)
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-nested-same.html", "frame-nested-cross.html"])
+async def test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike(page):
+    """The ref names the nested embed's link; the page's own look-alike embed, laid out alike, is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-nested-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-nested", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            try:
+                # The snapshot lists the page's embed first and the nested one last.
+                ref = await frame_link_ref(owner, thread_id, links=2)
+            except AssertionError:
+                # agent-browser 0.31.2 lists the page's own embed's link but not the nested one's, so no ref can
+                # name the nested link.
+                snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+                assert len(re.findall(r'link \\?"Go\\?"', snapshot)) == 1, snapshot
+            else:
+                with pytest.raises(browser_dom_write.DomWriteRefused):
+                    await owner.run(thread_id, ("click", ref), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks") == 0
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
 
 
 @pytest.mark.integration
