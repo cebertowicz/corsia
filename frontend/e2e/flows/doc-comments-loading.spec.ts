@@ -22,8 +22,15 @@ for (const width of [393, 1440]) {
 		await expect(button).toHaveCount(1);
 		await expect(button).toBeVisible();
 		await expect(button).toBeDisabled();
-		await expect(button).toHaveAttribute('aria-busy', 'true');
-		await expect(button.locator('.spinner[aria-hidden="true"]')).toBeVisible();
+		// The bar's button (phone width) says it is busy and shows a spinner; the document row's button above the phone width is as it was
+		// before #3083: its name and disabled state say it is loading, with no spinner and no aria-busy.
+		if (width <= 768) {
+			await expect(button).toHaveAttribute('aria-busy', 'true');
+			await expect(button.locator('.spinner[aria-hidden="true"]')).toBeVisible();
+		} else {
+			await expect(button).not.toHaveAttribute('aria-busy', /.*/);
+			await expect(button.locator('.spinner')).toHaveCount(0);
+		}
 		for (const theme of ['light', 'dark'] as const) {
 			await page.emulateMedia({ colorScheme: theme });
 			await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

@@ -582,7 +582,8 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 			// The held comment waits for Send in the drawer, whole inside the screen.
 			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toHaveCount(1);
+			// Above phone width the row carries Send, so the comments surface has no footer; the phone sheet keeps its footer.
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toHaveCount(mobile ? 1 : 0);
 			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(mobile ? 1 : 0);
 		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
