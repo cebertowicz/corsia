@@ -6,7 +6,6 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import inspect
-import json
 from pathlib import Path
 import time
 from typing import Any, Awaitable, Callable
@@ -15,6 +14,7 @@ from loguru import logger
 
 from host_access.browser_isolation import _close_user_model_browsers
 from host_access.errors import HostAccessSupervisorError
+from host_access.owner_snapshot import _application_payload, _as_utc, _decoded, _encoded
 from host_access.failure_reasons import (
     HostAccessBrowserIsolationError,
     lease_failure_reason,
@@ -125,29 +125,6 @@ _owners: dict[str, _LeaseOwner] = {}
 _application_locks: dict[str, asyncio.Lock] = {}
 _activation_locks: dict[str, asyncio.Lock] = {}
 _terminal_callback: Callable[[dict[str, Any]], Any] | None = None
-
-
-def _encoded(value: dict[str, Any]) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def _decoded(value: str) -> dict[str, Any]:
-    result = json.loads(value)
-    if not isinstance(result, dict):
-        raise HostAccessSupervisorError("host-access owner snapshot is invalid")
-    return result
-
-
-def _as_utc(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _owner_public(owner: _LeaseOwner) -> dict[str, Any]:
@@ -409,27 +386,6 @@ async def _run_terminal_cleanup(lease: dict[str, Any]) -> None:
             exc,
         )
         raise
-
-
-def _application_payload(lease: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "lease_id": lease["id"],
-        "application_hash": lease["application_hash"],
-        "root_thread_id": lease["root_thread_id"],
-        "purpose": lease["purpose"],
-        "plan": lease["plan"],
-        "duration_seconds": lease["requested_duration_seconds"],
-        "expected_resources": lease["expected_resources"],
-        "persistent_effects": lease["persistent_effects"],
-        "rollback_plan": lease["rollback_plan"],
-        "forbidden_effects": lease["forbidden_effects"],
-        "requesting_project_id": lease["requesting_project_id"],
-        "repo_policy_snapshot": lease["repo_policy_snapshot"],
-        "repo_policy_hash": lease["repo_policy_hash"],
-        "requested_policy_exceptions": lease[
-            "requested_policy_exceptions"
-        ],
-    }
 
 
 async def _repo_policy_is_current(lease: dict[str, Any]) -> bool:
@@ -1106,6 +1062,12 @@ async def request_reviewed_lease(
             _application_locks.pop(lease["id"], None)
 
 
+async def _activation_failed(lease_id: str, exc: Exception) -> dict[str, Any]:
+    reason = lease_failure_reason(exc, review_recorded=True)
+    logger.error("host-access activation failed for lease {}: {} ({})", lease_id, reason, type(exc).__name__)
+    return await _safe_block(lease_id, reason)
+
+
 async def approve_and_activate(
     lease_id: str,
     *,
@@ -1266,8 +1228,8 @@ async def approve_and_activate(
             except asyncio.CancelledError:
                 await _safe_block(lease_id, "activation_interrupted")
                 raise
-            except Exception:
-                return await _safe_block(lease_id, "activation_failed")
+            except Exception as exc:
+                return await _activation_failed(lease_id, exc)
     finally:
         if _activation_locks.get(lease_id) is lock:
             _activation_locks.pop(lease_id, None)

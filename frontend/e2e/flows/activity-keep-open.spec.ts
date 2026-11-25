@@ -91,8 +91,10 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	};
 	const frame = async (step: string) => { if (out) { fs.mkdirSync(out, { recursive: true }); await page.screenshot({ path: path.join(out, `reply-${step}-${width}.png`), animations: 'disabled' }); } };
 	await checkPane();
-	if (width === 393) await page.getByRole('button', { name: 'Close comments' }).click();
-	else await page.keyboard.press('Escape');
+	if (width === 393) {
+		await page.getByRole('button', { name: 'Close comments' }).click();
+		await expect(field).toBeHidden();
+	} else await page.keyboard.press('Escape');
 	await frame('opened');
 	if (width === 393) {
 		await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
