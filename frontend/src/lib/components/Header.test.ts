@@ -294,8 +294,8 @@ describe('Header for an open Activity item on a phone', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	function openItem(nextDisabled = false) {
-		activityPhoneItem.set({ position: 2, count: 7, nextDisabled, nextTitle: nextDisabled ? null : 'Next one', onBack: () => {}, onNext: () => {} });
+	function openItem() {
+		activityPhoneItem.set({ backLabel: 'Notifications', onBack: () => {} });
 		syncCanvasHeader({
 			threadSettingsOpen: false, compactArtifact: null, contextAttachTarget: null, activeView: 'activity',
 			uiScopeName: null, activeThreadId: null, conductorThreadId: null, threads: [],
@@ -306,26 +306,21 @@ describe('Header for an open Activity item on a phone', () => {
 
 	afterEach(() => activityPhoneItem.set(null));
 
-	it('reads ‹ Activity, with its label kept at phone width', () => {
+	it('reads ‹ Notifications, with its label kept at phone width', () => {
 		openItem();
 		const header = host.querySelector('.shell-header')!;
 		expect(header.classList.contains('links')).toBe(true);
-		expect(host.querySelector('.h-back .h-back-label')?.textContent).toBe('Activity');
+		expect(host.querySelector('.h-back .h-back-label')?.textContent).toBe('Notifications');
 		// The phone rule hides every Back label; the Activity item's header brings its label back.
 		expect(rule(phone, '.h-back-label')).toContain('display: none;');
 		expect(rule(phone, '.links .h-back-label')).toContain('display: inline;');
 	});
 
-	it('draws Back and “N of M · Next ›” in the link colour, and a last-item Next grey', () => {
+	it('draws Back in the link colour, with no Next beside it', () => {
 		openItem();
 		expect(host.querySelector('.shell-header')!.classList.contains('links')).toBe(true);
-		const next = host.querySelector<HTMLButtonElement>('.h-act')!;
-		expect(next.textContent).toBe('2 of 7 · Next ›');
-		expect(next.disabled).toBe(false);
+		expect(host.querySelector('.h-act')).toBeNull();
 		expect(rule(headerSource, '.links .h-back, .links .h-act:not(:disabled)')).toContain('color: var(--accent-text);');
-		openItem(true);
-		expect(host.querySelector<HTMLButtonElement>('.h-act')!.disabled).toBe(true);
-		expect(rule(headerSource, '.h-act:disabled')).toContain('color: var(--text-tertiary);');
 	});
 
 	it('leaves other back headers as they were', () => {

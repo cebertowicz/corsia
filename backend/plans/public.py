@@ -263,7 +263,7 @@ from plans.feedback_items import feedback_display, feedback_item_counts, load_fe
 from plans.feedback_nodes import create_feedback_node, create_review_node, settle_feedback_node
 from plans.person_comment_task import (
     PROVENANCE as PERSON_COMMENT_TASK, comment_tasks, covering_asks, document_retired as close_retired_comment_task,
-    reconcile as reconcile_person_comment_task,
+    documents_with_open_task as documents_with_open_comment_task, reconcile as reconcile_person_comment_task,
 )
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,

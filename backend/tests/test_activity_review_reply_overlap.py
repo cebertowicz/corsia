@@ -20,7 +20,7 @@ def db():
 from tests.test_user_ask_one_open import _block, _document
 from api.attention import _authorized_raised
 from plans import public, service
-from doceditor.activity_reply_rows import reply_rows
+from api.attention import activity_lists
 from plans import activity_rows as candidate
 
 
@@ -41,8 +41,12 @@ def test_suppression_follows_actual_emitted_authorized_reviews(db):
     # A review row reads as the agent's ask, not the document's file name.
     annotated = public.annotate_attention(_authorized_raised(None, 'user-1', db=db), db=db)
     assert [r['title'] for r in candidate.rows(db, 'user-1', annotated) if r['kind'] == 'review'] == ['Review it']
-    assert reply_rows(db, 'user-1', reviewed_artifact_ids=reviewed) == []
+    # A reviewed document's replies ride on its review row, not in Notifications.
+    tasks, notifications, _, _ = activity_lists(db, 'user-1', view='activity')
+    assert notifications == []
+    assert [r['detail'].get('unread_replies') for r in tasks if r['kind'] == 'review'] == [1]
     db.execute("UPDATE plans SET state='archived' WHERE id=?", (plan.id,))
     reviewed = project()
     assert reviewed == set()
-    assert len(reply_rows(db, 'user-1', reviewed_artifact_ids=reviewed)) == 1
+    tasks, notifications, _, _ = activity_lists(db, 'user-1', view='activity')
+    assert len(notifications) == 1 and not [r for r in tasks if r['kind'] == 'review']

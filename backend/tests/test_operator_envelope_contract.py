@@ -67,7 +67,7 @@ def _envelope(db) -> dict:
         plan.id, kind="phase", title="Delivery",
         acceptance_criteria="Delivered", db=db,
     )
-    running = _task(plan.id, "Running", db=db, parent_id=phase.id)
+    running = _task(plan.id, "Running", db=db, parent_id=phase.id, intent="Finish the task")
     waiting = _task(plan.id, "Waiting", db=db, parent_id=phase.id)
     _task(plan.id, "Person action", db=db, parent_id=phase.id, assignee="user")
     review = _task(plan.id, "Review", db=db)
@@ -138,6 +138,7 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
         db.close()
     nodes = envelope["plans"][0]["nodes"]
     # The fixture is only a contract if it carries the facts the pane branches on.
+    assert any(node["intent"] for node in nodes)
     assert any(node["execution"]["attempts"] for node in nodes)
     assert any(node["execution"]["causes"] for node in nodes)
     assert any(node["attention_path"] for node in nodes)

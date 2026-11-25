@@ -8,7 +8,7 @@
 	import { turnStates } from '$lib/ws/turnState';
 	import InputBarComposer from './InputBarComposer.svelte';
 	import ChatCommentSelection from './ChatCommentSelection.svelte';
-	import type { ChatComment } from '$lib/chatCommentAnchors';
+	import type { SendableChatComment } from '$lib/chatCommentAnchors';
 	import InputBarControls from './InputBarControls.svelte';
 	import InputBarFileInputs from './InputBarFileInputs.svelte';
 	import {
@@ -202,7 +202,7 @@
 		return 'sent';
 	}
 
-	export function sendReply(reply: ChatComment): Promise<void> {
+	export function sendReply(reply: SendableChatComment): Promise<void> {
 		return postChatComment(reply, boundThreadId, $updateRestarting, canSendToModel);
 	}
 	const activeThread = $derived(selection.thread);

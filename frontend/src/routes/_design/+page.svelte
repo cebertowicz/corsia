@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { Button, Field, IconButton, Message, Modal, Section, StatePill } from '$lib/components/ui';
 	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte'; import SpinnerShowcase from './SpinnerShowcase.svelte';
-	import AttentionDockShowcase from './AttentionDockShowcase.svelte'; import SetupVariantsShowcase from './SetupVariantsShowcase.svelte'; import CommentSheetFixture from './CommentSheetFixture.svelte'; import TextFieldShowcase from './TextFieldShowcase.svelte';
+	import SetupVariantsShowcase from './SetupVariantsShowcase.svelte'; import CommentSheetFixture from './CommentSheetFixture.svelte'; import TextFieldShowcase from './TextFieldShowcase.svelte';
 
 	/**
-	 * `?frame=attention-dock` renders that showcase and nothing else, so its own
-	 * mobile modes can load this route in a real iframe with its own viewport —
-	 * a container width cannot fire a viewport media query. The showcase owns
-	 * the framed content; this route owns whether anything else is on the page.
-	 * Read once from the document URL: a frame is loaded fresh and never
-	 * client-navigated, and `_design` is `ssr = false`.
+	 * `?frame=comment-sheet` renders that fixture and nothing else, so it can load this route in a real iframe with its
+	 * own viewport. Read once from the document URL: a frame is loaded fresh and never client-navigated, and `_design`
+	 * is `ssr = false`.
 	 */
 	const frameParams = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
-	const frame = frameParams.get('frame'); const framed = frame === 'attention-dock';
+	const frame = frameParams.get('frame');
 	import AttentionRollup from '$lib/components/AttentionRollup.svelte';
 	import ContextSheet from '$lib/components/ContextSheet.svelte';
 	import ThreadContextPanel from '$lib/components/ThreadContextPanel.svelte';
@@ -257,8 +254,6 @@
 </svelte:head>
 
 {#if frame === 'comment-sheet'}<CommentSheetFixture kind={frameParams.get('kind') === 'reply' ? 'reply' : 'draft'} text={frameParams.get('text') ?? ''} />
-{:else if framed}
-	<AttentionDockShowcase />
 {:else}
 <div class="page">
 	<header class="page-head">
@@ -410,14 +405,6 @@
 	<SetupVariantsShowcase /><TextFieldShowcase />
 	<MaterialShowcase />
 	<CommentsShowcase /><SpinnerShowcase />
-	<!-- ── The one attention dock (PLANS-AC34) ── -->
-	<section class="block" id="attention-dock">
-		<header class="block-head">
-			<h2>Attention dock — the one thing that needs you</h2>
-			<p>One item at a time at the work-canvas bottom, in the slot the host-access lease already proved. Plans point at it; they never render it.</p>
-		</header>
-		<AttentionDockShowcase />
-	</section>
 
 
 	<section class="block">

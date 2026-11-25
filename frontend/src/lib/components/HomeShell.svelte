@@ -255,7 +255,6 @@
 				{isDraggingOver}
 				onOpenLightbox={onOpenLightbox}
 				onAutoCreateThread={onAutoCreateThread}
-				onOpenDocuments={(documentId) => onDocuments('all', documentId)}
 				onArtifactHeaderInset={(width) => (artifactHeaderInset = width)}
 			/>
 		{:else if activeView === 'settings'}

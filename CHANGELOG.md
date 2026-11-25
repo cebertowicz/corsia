@@ -15,13 +15,16 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
+- Activity separates your tasks from document reply notifications, groups replies by document, and lets you mark them read there. Decisions and messages to review are now in Activity instead of above the chat input.
 - Activity shows instructions for tasks assigned to you.
+- An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
+- Plan task details now show the reading of the goal the task works under and what done means.
 - Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.

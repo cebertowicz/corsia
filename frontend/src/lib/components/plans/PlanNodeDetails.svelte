@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
 	import { renderMarkdown } from '$lib/markdown';
+	import PlanNodeIntent from './PlanNodeIntent.svelte';
 	import { localDayClock } from '$lib/time';
 	import { indentVar } from './planIndent';
 	import { liveStepClock } from './planStepTime';
@@ -67,6 +68,7 @@
 {/snippet}
 
 <section {id} class="node-details" style={`--indent:${indent}`} aria-label={node.title + ' details'}>
+	<PlanNodeIntent {node} />
 	<p class="status"><span class="prefix">Status:</span> {@render statusLine()}</p>
 	{#if causes.length}
 		<div class="causes">
@@ -127,6 +129,7 @@
 	}
 	ul, p { margin: 0; }
 	ul { padding-left: var(--space-3); }
+	.status { margin-top: var(--space-2); }
 	.causes > .prefix { display: block; }
 	.evidence-note { margin-left: var(--space-3); }
 	.person-instructions { color: var(--text-primary); font-size: var(--text-footnote); line-height: var(--lh-normal); }

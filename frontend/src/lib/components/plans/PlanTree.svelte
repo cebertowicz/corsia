@@ -338,7 +338,7 @@
 	/* The reserve tracks the same <=620px breakpoint as the 44px chevron and chips: desktop furniture is measured at 110px plus a two-digit count margin; touch keeps its 148px reserve. */
 	.plan-tree { --plan-indent-reserve: 122px; position: relative; display: flex; flex-direction: column; }
 	@media (max-width: 620px) { .plan-tree { --plan-indent-reserve: 148px; } }
-	.tree-row.can-drag { touch-action: none; }
+	.tree-row.can-drag { touch-action: pan-y; }
 	.tree-row.dragging { position: relative; z-index: 3; background: var(--bg-primary); box-shadow: var(--shadow-chip); }
 	/* Rows ease aside only while a drag is live. On drop the offsets clear in the same render as the DOM reorder, so the swap must be instant: a transition there slides the dropped row in from a slot past its place. */
 	.tree-row.drag-live { transition: transform 160ms ease; }

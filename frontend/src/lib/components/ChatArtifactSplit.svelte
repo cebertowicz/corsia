@@ -25,7 +25,6 @@
 		isDraggingOver,
 		onOpenLightbox,
 		onAutoCreateThread,
-		onOpenDocuments,
 		onArtifactHeaderInset = () => {},
 	}: {
 		threadId: string | null;
@@ -33,7 +32,6 @@
 		isDraggingOver: boolean;
 		onOpenLightbox: (url: string) => void;
 		onAutoCreateThread: () => Promise<void>;
-		onOpenDocuments?: (documentId?: string) => void;
 		onArtifactHeaderInset?: (width: number | null) => void;
 	} = $props();
 
@@ -171,7 +169,7 @@
 	<!-- ChatPanel stays mounted in compact so its scroll position, composer
 	     draft, and in-flight turn survive flipping to the artifact and back. -->
 	<div class="chat-col" data-drop-default-surface class:offscreen={artifactFullCanvas} onclick={onChatClick} onkeydown={onChatKeydown} oninput={onChatInput}>
-		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} {onOpenDocuments} visibleDocumentArtifactId={visibleDocumentId} artifactPaneOpen={leafMode === 'expanded'} />
+		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} visibleDocumentArtifactId={visibleDocumentId} artifactPaneOpen={leafMode === 'expanded'} />
 	</div>
 	{#if leafMode === 'expanded'}
 		<CanvasSplitDivider {artifactWidth} {canvasWidth} onResize={onDividerResize} />
