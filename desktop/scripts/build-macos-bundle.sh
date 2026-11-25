@@ -200,6 +200,7 @@ install -m 0644 "$ROOT/THIRD-PARTY-NOTICES.md" "$BUNDLE_ROOT/licenses/THIRD-PART
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 # The published coordination models the System manifest declares. backend/infra/system_package.py
 # finds them at docs/coordination-models beside backend/, so they sit there in Resources too.
+mkdir -p "$BUNDLE_ROOT/docs"
 rsync -a --delete "$ROOT/docs/coordination-models/" "$BUNDLE_ROOT/docs/coordination-models/"
 (
   cd "$ROOT/frontend"
