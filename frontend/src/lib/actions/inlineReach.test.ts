@@ -32,4 +32,20 @@ describe('inlineReach', () => {
 		action.destroy();
 		expect(callbacks).toHaveLength(0);
 	});
+
+	it('re-measures on a later render, so a reach read before the header was laid out does not stick', () => {
+		// The failure the person saw: the first read happens while the header holds nothing, so the canvas stops
+		// nowhere and its Details button lands under the settings gear. The shell keeps its identity when the
+		// controls appear, so no restart fires — the next render has to take the reading again.
+		vi.stubGlobal('ResizeObserver', FakeObserver);
+		const shell = document.createElement('header'), controls = document.createElement('div');
+		box(shell, { left: 0, right: 0 }); box(controls, { left: 0, right: 0 });
+		const report = vi.fn();
+		const action = inlineReach(controls, { shell, report });
+		expect(report).toHaveBeenLastCalledWith(0);
+		box(shell, { left: 0, right: 1000 }); box(controls, { left: 879.4, right: 990 });
+		action.update({ shell, report });
+		expect(report).toHaveBeenLastCalledWith(121);
+		action.destroy();
+	});
 });
