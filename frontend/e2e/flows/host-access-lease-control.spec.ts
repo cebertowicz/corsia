@@ -588,7 +588,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			id: `fill-e2e-${n}`, kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
 			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', username: 'accounts-payable@example.com',
 			revision: 1, application_hash: `hash-fill-e2e-${n}`, decision_capability: `decision-fill-e2e-${n}`,
-			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: `2026-07-18T16:0${n}:00.000Z`, updated_at: `2026-07-18T16:0${n}:00.000Z`,
 			...overrides,
 		};
@@ -885,4 +885,69 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(entry.locator('.pending-site')).toHaveAttribute('title', secondSite);
 		await expect(entry.locator('.pending-site')).toHaveText('billing.example.org');
 	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`starts on the agent's asked-for time, approves until turned off, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			let items: Record<string, unknown>[] = [fillRequest(threadId, 1, { requested_duration_seconds: 900 })];
+			const decisions: { action: string; body: unknown }[] = [];
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const url = new URL(route.request().url());
+				if (route.request().method() === 'POST') {
+					const match = /\/fills\/([^/]+)\/(approve|revoke)$/.exec(url.pathname);
+					expect(match, url.pathname).toBeTruthy();
+					decisions.push({ action: match![2], body: route.request().postDataJSON() });
+					const decided = { ...items[0], decision_capability: 'decision-fill-e2e-active' };
+					items = match![2] === 'approve'
+						? [{ ...decided, state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null }]
+						: [];
+					await route.fulfill({
+						status: 200, contentType: 'application/json',
+						body: JSON.stringify(match![2] === 'approve' ? items[0] : { ...decided, state: 'revoked' }),
+					});
+					return;
+				}
+				const root = url.searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? items : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			await page.locator('.pending-request-trigger').click();
+			const dialog = page.getByRole('dialog');
+			const choices = dialog.getByRole('radio');
+			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
+			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`) });
+
+			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`) });
+			await dialog.getByRole('button', { name: 'Approve' }).click();
+			await expect.poll(() => decisions.length).toBe(1);
+			expect(decisions[0]).toEqual({
+				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_turned_off: true },
+			});
+
+			const chip = page.locator('.active-chip-trigger');
+			await expect(chip).toHaveAccessibleName('Saved login');
+			await expect(chip.locator('.countdown')).toHaveText('On');
+			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`) });
+			await chip.click();
+			const active = page.getByRole('dialog');
+			await expect(active).toContainText('Until I turn it off');
+			await expect(active).not.toContainText('Time remaining');
+			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`) });
+			await active.getByRole('button', { name: 'Revoke approval' }).click();
+			await expect(page.locator('.active-chip')).toHaveCount(0);
+			expect(decisions[1]).toEqual({ action: 'revoke', body: { revision: 2, application_hash: 'hash-fill-e2e-1' } });
+			await page.screenshot({ path: testInfo.outputPath(`after-revoke-${viewport.width}.png`) });
+		});
+	}
 });

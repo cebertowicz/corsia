@@ -13,13 +13,14 @@ text, so no refusal echoes what was sent.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from infra import saved_login_offers, saved_logins
+from infra import saved_login_fills, saved_login_offers, saved_logins
 from infra.auth import require_human_user, require_user_header_only
 from infra.db_async import run_in_db
 from infra.key_store_values import KeyStoreError
@@ -111,9 +112,11 @@ async def list_saved_logins(_user: dict = Depends(require_human_user)) -> dict:
 
 @router.delete("/{login_id}")
 async def delete_saved_login(login_id: str, _user: dict = Depends(require_person_write)) -> dict:
-    """Delete one saved login and its password; 404 when there is no such login."""
+    """Delete one saved login and its password, ending every request and grant to fill it; 404 when there is none."""
     try:
         await run_in_db(saved_logins.delete_login, login_id)
     except KeyStoreError:
         raise HTTPException(404, _NO_LOGIN_TO_DELETE) from None
+    # A worker thread: ending them records product events, a blocking write.
+    await asyncio.to_thread(saved_login_fills.end_for_login, login_id, deleted=True)
     return {"deleted": login_id}

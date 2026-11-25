@@ -122,12 +122,19 @@ export interface HostAccessFill {
 	revision: number;
 	application_hash: string;
 	max_duration_seconds: number;
+	/** The time the agent's task needs, where the drawer's choice starts; never a standing grant. */
+	requested_duration_seconds: number | null;
 	duration_seconds: number | null;
+	/** The person chose "Until I turn it off": active with no deadline, so no countdown. */
+	standing: boolean;
 	expires_at: string | null;
 	created_at: string;
 	updated_at: string;
 	decision_capability?: string;
 }
+
+/** A fill approval's choice: whole seconds, or until the person turns it off. Only the person makes it. */
+export type FillChoice = number | 'until_turned_off';
 
 export type HostAccessItem = HostAccessLease | HostAccessScript | HostAccessFill;
 
@@ -192,7 +199,7 @@ export async function decideHostAccessLease(
 	lease: HostAccessItem,
 	decision: HostAccessLeaseDecision,
 	/** A fill approval's duration, which the person picks; nothing else takes one. */
-	durationSeconds?: number,
+	durationSeconds?: FillChoice,
 ): Promise<HostAccessLease> {
 	const prefix = lease.kind === 'script' || lease.kind === 'fill' ? DECISION_PATH[lease.kind] : '';
 	const response = await apiFetch(
@@ -206,7 +213,9 @@ export async function decideHostAccessLease(
 			body: JSON.stringify({
 				...(lease.kind === 'script' ? {} : { revision: lease.revision }),
 				application_hash: lease.application_hash,
-				...(lease.kind === 'fill' && decision === 'approve' ? { duration_seconds: durationSeconds } : {}),
+				...(lease.kind === 'fill' && decision === 'approve'
+					? (durationSeconds === 'until_turned_off' ? { until_turned_off: true } : { duration_seconds: durationSeconds })
+					: {}),
 			}),
 		},
 	);

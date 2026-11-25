@@ -5,7 +5,7 @@
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { text, duration, policyLabel, approvalReady, casReady, owner } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessItem } from '$lib/api/hostAccess';
+	import type { FillChoice, HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
 		stale,
@@ -28,7 +28,7 @@
 		/** The server's line when it refused this request's last decision. */
 		notice?: string | null;
 		/** A fill approval passes the duration the person picked; nothing else does. */
-		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
+		onApprove: (event: MouseEvent, durationSeconds?: FillChoice) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
 		/** Done, on the sheet's own head row. */

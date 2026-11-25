@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
-	import { duration, owner, remaining } from '$lib/hostAccess/leaseFormat';
+	import { duration, owner, remaining, UNTIL_TURNED_OFF_LABEL } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	let {
@@ -36,8 +36,12 @@
 			<dl>
 				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
 				<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>
-				<div><dt class="section-label">For how long</dt><dd>{duration(lease.duration_seconds)}</dd></div>
-				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
+				{#if lease.standing === true}
+					<div><dt class="section-label">For how long</dt><dd>{UNTIL_TURNED_OFF_LABEL}</dd></div>
+				{:else}
+					<div><dt class="section-label">For how long</dt><dd>{duration(lease.duration_seconds)}</dd></div>
+					<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
+				{/if}
 			</dl>
 		{:else}
 			<p>{lease.purpose}</p>

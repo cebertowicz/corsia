@@ -195,9 +195,27 @@ export function cadence(seconds: number | null): string {
  */
 export const FILL_DURATIONS_SECONDS = [300, 900, 1_800] as const;
 
-export function fillDurations(max: number): number[] {
-	return FILL_DURATIONS_SECONDS.filter((seconds) => seconds <= max);
+/**
+ * The timed choices for one request: today's set plus the time the agent asked for, when that is
+ * whole seconds within the cap, shortest first.
+ */
+export function fillDurations(max: number, requested: number | null = null): number[] {
+	const asked = Number.isInteger(requested) && (requested as number) >= 1 && (requested as number) <= max
+		? [requested as number] : [];
+	return [...new Set<number>([...FILL_DURATIONS_SECONDS, ...asked])]
+		.filter((seconds) => seconds <= max)
+		.sort((a, b) => a - b);
 }
+
+/** Where a fill request's duration choice starts: the time the agent asked for, else the shortest. */
+export function fillStartingChoice(choices: number[], requested: number | null): number | null {
+	return requested !== null && choices.includes(requested) ? requested : (choices[0] ?? null);
+}
+
+/** The person's standing choice for a fill: this agent, this login, until they revoke it. */
+export const UNTIL_TURNED_OFF_LABEL = 'Until I turn it off';
+/** A standing fill grant's chip, in place of a countdown. */
+export const STANDING_CHIP_LABEL = 'On';
 
 export function remaining(lease: HostAccessTimed, nowMs: number): string {
 	if (lease.expires_at === null) return 'activating';

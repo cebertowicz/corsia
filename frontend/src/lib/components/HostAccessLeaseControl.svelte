@@ -29,7 +29,7 @@
 		decideHostAccessLease,
 		fetchHostAccessLeases,
 		type HostAccessLease, type HostAccessItem, type HostAccessTimed,
-		type HostAccessLeaseDecision,
+		type HostAccessLeaseDecision, type FillChoice,
 	} from '$lib/api/hostAccess';
 	import { decisionFailure } from '$lib/hostAccess/decisionFailure';
 	import { token } from '$lib/stores/auth';
@@ -198,7 +198,7 @@
 	async function decide(
 		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
-		event: MouseEvent | null = null, durationSeconds?: number,
+		event: MouseEvent | null = null, durationSeconds?: FillChoice,
 	): Promise<void> {
 		const currentToken = get(token);
 		if (!currentToken || decisionBlocked(lease, staleBlocks(stale, decision), decidingLeaseId)) return;

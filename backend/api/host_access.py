@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, ConfigDict, StrictInt
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, model_validator
 
 from host_access.decision_capability import (
     INTERACTIVE_UI_HEADER,
@@ -56,9 +56,16 @@ class ScriptMutation(BaseModel):
 
 
 class FillApproval(LeaseMutation):
-    """The person's yes to a saved-login fill, with the duration they picked."""
+    """The person's yes to a saved-login fill: the duration they picked, or until they turn it off; exactly one."""
 
-    duration_seconds: StrictInt
+    duration_seconds: StrictInt | None = None
+    until_turned_off: StrictBool = False
+
+    @model_validator(mode="after")
+    def _one_choice(self) -> "FillApproval":
+        if (self.duration_seconds is None) != self.until_turned_off:
+            raise ValueError("Pick a duration or until turned off, not both.")
+        return self
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -151,7 +158,8 @@ async def _decide_fill(operation_name: str, approval_id: str, body: LeaseMutatio
 async def approve_fill(approval_id: str, body: FillApproval,
                        user: dict = Depends(require_human_user),
                        capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
-    return await _decide_fill("approve", approval_id, body, user, capability, duration_seconds=body.duration_seconds)
+    return await _decide_fill("approve", approval_id, body, user, capability, duration_seconds=body.duration_seconds,
+                              until_turned_off=body.until_turned_off)
 
 
 @router.post("/fills/{approval_id}/reject")
