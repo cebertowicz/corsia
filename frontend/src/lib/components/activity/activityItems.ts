@@ -72,9 +72,8 @@ export function followerOf(
 }
 
 /**
- * The list with the item the person is still reading after the server let it go (its press was refused and it left),
- * at the place it held in the order they last saw. Once they move on it is no longer kept, and the list is the
- * server's alone.
+ * The list with the item the person is still reading after a refusal or departure, at the place it held in the order
+ * they last saw. Once they move on it is no longer kept, and the list is the server's alone.
  */
 export function keepInPlace(
 	items: readonly ActivityQueueItem[],
