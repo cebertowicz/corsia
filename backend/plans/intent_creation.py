@@ -34,8 +34,8 @@ def canonical(connection, node_id: str):
     row = connection.execute(
         f"""WITH RECURSIVE intent_roots(opened_id, source_id) AS (VALUES (?, ?)),
         {CANONICAL_CHAIN_SQL}
-        SELECT n.* FROM chain JOIN plan_nodes n ON n.id = chain.source_id
-        WHERE n.intent_node_id IS NULL""", (node_id, node_id),
+        SELECT n.* FROM chain CROSS JOIN plan_nodes n ON n.id = chain.source_id
+        WHERE n.intent_node_id IS NULL""", (node_id, node_id),  # CROSS JOIN: walk the chain, never scan plan_nodes
     ).fetchone()
     if row is not None:
         return row
