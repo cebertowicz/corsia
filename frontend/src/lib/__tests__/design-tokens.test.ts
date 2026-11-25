@@ -31,6 +31,8 @@ const RUNTIME_PROVIDED = new Set([
 	// ReviewBar measures it (its bindable `capsuleClearance`) and the image viewer writes it with `style:--x`: the room
 	// its canvas leaves for the phone review capsule.
 	'--capsule-clearance',
+	// ArtifactTabStrip's `style:--tab-floor` on .strip: the narrowest a tab may shrink to.
+	'--tab-floor',
 	// Set per-instance via Svelte `style:--x` or a parent inline style.
 	'--drawer-drag-y',
 	// AdaptiveDrawer's `within` sheet: the measured document column, written with `style:--drawer-*`.

@@ -48,6 +48,12 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		};
 		private frame = 0;
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
+		/**
+		 * The selection moved. While the editor holds focus it is read at once, not a frame later: the editor's own focus sync runs
+		 * 10 ms after it takes focus and, with the selection in a widget, cycles focus and writes its caret over it, so a read a frame
+		 * late can come after the selection is gone (a long press on a table cell's word).
+		 */
+		private readonly moved = () => { if (this.view.hasFocus) this.read(); this.listen(); };
 		// What a click landed on, read before the cell editor's own click opens the cell and puts its editor in place of the
 		// drawn text the click hit: a click on a comment drawn in a cell opens that comment and the cell both.
 		private landed: { event: MouseEvent; widget: HTMLElement | null; ids: string[]; opener: HTMLElement | null } | null = null;
@@ -170,7 +176,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			view.dom.addEventListener('pointerdown', this.down, true);
 			view.dom.addEventListener('pointermove', this.move, true);
 			view.dom.addEventListener('mousedown', this.press, true);
-			document.addEventListener('selectionchange', this.listen);
+			document.addEventListener('selectionchange', this.moved);
 			view.dom.addEventListener('mouseup', this.listen);
 			view.dom.addEventListener('click', this.land, true);
 			view.dom.addEventListener('click', this.click);
@@ -189,7 +195,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 
 		destroy() {
 			cancelAnimationFrame(this.frame);
-			document.removeEventListener('selectionchange', this.listen);
+			document.removeEventListener('selectionchange', this.moved);
 			this.view.dom.removeEventListener('mouseup', this.listen);
 			this.view.dom.removeEventListener('pointerdown', this.down, true);
 			this.view.dom.removeEventListener('pointermove', this.move, true);
