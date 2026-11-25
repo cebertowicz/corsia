@@ -192,6 +192,112 @@ def test_no_key_store_reader_returns_a_login_password(state):
         key_store.entry_metadata(name)
 
 
+def _offer_refusals(password: str, key: str) -> list[BaseException]:
+    """Drive every save-offer refusal with the password in the arguments; return what each raised."""
+    from infra import saved_login_offers as offers
+
+    attempts = [
+        lambda: offers.offer_login(key, "https://localhost:1956", "me", password),
+        lambda: offers.offer_login(key, password, "me", password),
+        lambda: offers.offer_login(password, "https://example.com", "me", password),
+        lambda: offers.offer_login(key, "https://example.com", password + "\x00", password),
+        lambda: offers.offer_login(key, "https://example.com", "me", password + "\x00"),
+        lambda: offers.note_username(key, password, password + "\x00"),
+        lambda: offers.save_offer(key, saved_by="person"),
+    ]
+    raised = []
+    for attempt in attempts:
+        with pytest.raises(KeyStoreError) as refused:
+            attempt()
+        raised.append(refused.value)
+    return raised
+
+
+def _unreadable_store(*_args, **_kwargs):
+    raise KeyStoreError("The key store file could not be read.")
+
+
+@pytest.mark.asyncio
+async def test_an_offered_password_appears_nowhere_but_the_values_file(state, tmp_path, caplog, emitted, monkeypatch):
+    """Through an unconfirmed offer dropped, a confirmed one declined and one saved, by the person's routes."""
+    import httpx
+    from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_USER
+    from fastapi import FastAPI
+
+    from api import saved_logins as saved_logins_api
+    from host_access import browser_pane
+    from infra import saved_login_offers as offers
+
+    monkeypatch.setattr(offers, "_offers", {})
+    monkeypatch.setattr(offers, "_usernames", {})
+    monkeypatch.setattr(offers, "_claims", {})
+    monkeypatch.setattr(browser_pane, "session_identity", {"t-1": "s1"}.get)
+    db = get_db()
+    db.execute("INSERT INTO threads (id, user_id, model, created_at, updated_at) VALUES ('t-1', ?, 'm', 't', 't')",
+               (OWNER_USER,))
+    db.commit()
+    app = FastAPI()
+    app.include_router(saved_logins_api.router)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    headers = {"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}
+    password, marker = _sentinel()
+    forms = _forms(password, marker)
+    key, body = "t-1:s1", {"thread_id": "t-1"}
+    responses: list[str] = []
+    snapshots: list[dict[Path, bytes]] = []
+
+    async def call(method: str, path: str, **kwargs) -> None:
+        response = await client.request(method, f"/api/saved-logins{path}", headers=headers, **kwargs)
+        responses.append(response.text + repr(response.headers))
+
+    with caplog.at_level(logging.DEBUG):
+        offers.note_username(key, "https://example.com", "me@example.com")
+        assert offers.offer_login(key, "https://example.com", None, password)
+        await call("GET", "/offer", params=body)
+        await call("POST", "/offer/save", json=body)
+        offers.drop_offer(key)
+        assert offers._offers == {}
+        offers.offer_login(key, "https://example.com", "me@example.com", password)
+        offers.confirm_offer(key)
+        await call("GET", "/offer", params=body)
+        snapshots.append(_files_except_values(tmp_path))
+        await call("POST", "/offer/not-now", json=body)
+        assert offers._offers == {} and saved_logins.list_logins() == []
+        snapshots.append(_files_except_values(tmp_path))
+        offers.offer_login(key, "https://example.com", "me@example.com", password)
+        offers.confirm_offer(key)
+        with monkeypatch.context() as failing:
+            failing.setattr(saved_logins.key_store_values, "put", _unreadable_store)
+            await call("POST", "/offer/save", json=body)
+        assert key in offers._offers and saved_logins.list_logins() == []
+        snapshots.append(_files_except_values(tmp_path))
+        await call("POST", "/offer/save", json=body)
+        assert offers._offers == {}
+        await call("GET", "", params=None)
+        errors = _offer_refusals(password, key)
+        snapshots.append(_files_except_values(tmp_path))
+        values_file = (key_store.keys_dir() / key_store.VALUES_FILE).read_bytes()
+
+    assert password in json.loads(values_file).values()
+    assert all(any(path.name.endswith(".db") for path in snapshot) for snapshot in snapshots)
+    for snapshot in snapshots:
+        for path, data in snapshot.items():
+            assert not any(form in data for form in forms), path
+    logged = caplog.text + "".join(repr(record.args) + repr(record.msg) for record in caplog.records)
+    held = repr(offers._offers) + repr(offers._usernames)
+    for text in (logged, "".join(emitted), *responses, held, *(_exception_text(error) for error in errors)):
+        assert password not in text
+        assert marker not in text
+
+
+def test_an_offer_never_shows_its_password_in_a_repr():
+    from infra.saved_login_offers import _Offer
+
+    password, marker = _sentinel()
+    offer = _Offer("https://example.com", "me", password, update=False)
+    assert marker not in repr(offer) and marker not in repr(offer.view())
+
+
 def _modules_naming_a_reader() -> set[str]:
     pattern = re.compile(r"\b(" + "|".join(READERS) + r")\b")
     return {
