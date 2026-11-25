@@ -110,26 +110,20 @@ export const hitAtCentre = (locator: ReturnType<Page['locator']>) => locator.eva
 /**
  * Wait out the finite animations (the ask's entrance, the pane's slide, a sheet's slide-in) so geometry and hit tests read the
  * settled layout. An animation that starts after the call (a sheet's slide begins a frame after the click that opens it) is
- * not in a single snapshot, so this waits a frame, awaits every running finite animation, and looks again until none runs. It
- * fails after `timeout` ms with the names of what is still running.
+ * not in a single snapshot, so this waits two frames, awaits every running finite animation, and looks again until none runs.
+ * It has no bound of its own: motion that never stops shows as the test's own timeout inside this call.
  */
-export const settled = (page: Page, timeout = 30_000) => page.evaluate(async (limit) => {
+export const settled = (page: Page) => page.evaluate(async () => {
 	const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 	const running = () => document.getAnimations().filter((animation) =>
-		(animation.playState === 'running' || animation.playState === 'pending') && animation.effect?.getComputedTiming().iterations !== Infinity);
-	const name = (animation: Animation) => `${(animation as CSSAnimation).animationName ?? (animation as CSSTransition).transitionProperty ?? animation.constructor.name} on ${((animation.effect as KeyframeEffect | null)?.target as Element | null)?.getAttribute('class') ?? '?'}`;
-	const deadline = performance.now() + limit;
+		animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity);
 	for (;;) {
 		await frame(); await frame();
 		const live = running();
 		if (!live.length) return;
-		if (performance.now() >= deadline) throw new Error(`settled: still running after ${limit}ms: ${live.map(name).join(', ')}`);
-		await Promise.race([
-			Promise.all(live.map((animation) => animation.finished.catch(() => undefined))),
-			new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - performance.now()))),
-		]);
+		await Promise.all(live.map((animation) => animation.finished.catch(() => undefined)));
 	}
-}, timeout);
+});
 
 export type Case = readonly [label: string, mode: Mode, theme: 'light' | 'dark'];
 /** The starting state a journey begins from — seeded documents, comments and asks — built before its own budget. */
