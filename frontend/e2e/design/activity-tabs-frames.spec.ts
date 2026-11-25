@@ -41,7 +41,7 @@ for (const width of [1440, 393]) {
   const docRow = base.notifications.items.find((item: { key: string }) => item.key === `doc:${doc.artifactId}`);
   expect(reviewRow).toBeTruthy();
   expect(docRow).toBeTruthy();
-  const tasks = [reviewRow, ...Array.from({ length: 99 }, (_, i) => ({
+  const tasks = [{ ...reviewRow, rank: { position: 1, reason: 'First in order', ranked_by: doc.threadId, ranked_at: new Date().toISOString() } }, ...Array.from({ length: 99 }, (_, i) => ({
    ...reviewRow, key: `task:frame-${i}`, external_id: `frame-${i}`, renderer: 'task', kind: 'task',
    title: `Task ${i + 2}: Review the next item`, open: null,
    rank: { position: i + 2, reason: 'Next in order', ranked_by: doc.threadId, ranked_at: new Date().toISOString() },
@@ -67,13 +67,20 @@ for (const width of [1440, 393]) {
   if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
   await expect(page.getByRole('tab', { name: /Your tasks.*100/ })).toBeVisible();
+  await expect(page.locator('.pane-col .spinner')).toHaveCount(0);
   await shot('tasks');
   if (width === 1440) {
    await page.getByRole('tab', { name: /Your tasks/ }).focus();
+   await page.keyboard.press('ArrowRight');
+   await page.keyboard.press('ArrowLeft');
+   await expect(page.getByRole('tab', { name: /Your tasks/ })).toBeFocused();
+   expect(await page.getByRole('tab', { name: /Your tasks/ }).evaluate((el) => el.matches(':focus-visible'))).toBe(true);
    await shot('tab-focus');
   }
   await page.locator('[data-activity-row]').last().scrollIntoViewIfNeeded();
   await expect(page.locator('[data-activity-row]').last()).toContainText('100');
+  await expect(page.getByRole('tab', { name: /Your tasks/ })).toBeInViewport();
+  await expect(page.getByRole('tab', { name: /Notifications/ })).toBeInViewport();
   await shot('rank-100');
   await page.getByRole('tab', { name: /Notifications.*200/ }).click();
   await expect(page.getByRole('button', { name: 'Mark all read' })).toBeVisible();
@@ -83,6 +90,10 @@ for (const width of [1440, 393]) {
   await expect(page.getByRole('alert')).toContainText('Couldn’t mark these read. Try again.');
   await shot('mark-all-failed');
   await page.unroute('**/api/attention/notifications/read');
+  await page.reload();
+  if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
+  await page.getByRole('tab', { name: /Notifications/ }).click();
   if (width === 1440) {
    await page.locator('[data-activity-row]').first().hover();
    await shot('dismiss-hover');

@@ -220,6 +220,7 @@
 	}
 
 	function open(key: string) {
+		markAllFailed = false;
 		const kind = [...tasks, ...notifications].find((item) => item.key === key)?.kind;
 		moveTo(key);
 		if (get(isMobile)) phoneOpen = true;
@@ -243,6 +244,7 @@
 
 	/** × or a swipe: the same call as Done, without opening the document. The open one is acted on as Done is. */
 	async function dismiss(key: string) {
+		markAllFailed = false;
 		const item = notifications.find((row) => row.key === key);
 		const read = item && through(item);
 		if (!read) return;
@@ -339,7 +341,7 @@
 				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
-			<div class="nothing">{(tab === 'tasks' ? tasks : notifications).length ? 'Nothing to open.' : tab === 'tasks' ? 'Nothing needs you.' : 'No unread replies.'}</div>
+			<div class="nothing">Nothing to open.</div>
 		{/if}
 	</section>
 </div>

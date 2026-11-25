@@ -43,6 +43,8 @@ import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 import { consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { activeId, expandedId, goneReply } from '$lib/stores/attentionDock.svelte';
 import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
+import { connectionState } from '$lib/stores/connection';
+import { token, user } from '$lib/stores/auth';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -91,6 +93,7 @@ beforeEach(() => {
 	notes = [];
 	queueReads = 0;
 	mobile.store?.set(false);
+	connectionState.set('connected');
 	activityPhoneItem.set(null);
 	mutate.mockReset();
 	emit.mockReset();
@@ -254,7 +257,7 @@ describe('Activity list', () => {
 		await settle();
 		expect(host.querySelector('.empty-line')?.textContent).toBe('Nothing needs you.');
 		expect(rows()).toHaveLength(0);
-		expect(pane().textContent).toContain('Nothing needs you.');
+		expect(pane().textContent).toContain('Nothing to open.');
 		expect(tabNamed('tasks').getAttribute('aria-label')).toBe('Your tasks');
 		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications');
 		tabNamed('notifications').click();
@@ -359,6 +362,8 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 		rows()[5].click();
 		await settle();
+		expect(pane().textContent).toContain('To: the public issue on GitHub');
+		expect(pane().querySelector('blockquote')?.textContent).toBe("Thanks for asking. We haven't tried 0.5.0 on an Intel Mac yet; we'll post here once we have.");
 		buttonNamed('Send')!.click();
 		await settle();
 		expect(calls).toBe(1);
@@ -415,6 +420,8 @@ describe('what a press comes to, reported in Activity', () => {
 		buttonNamed('Send')!.click();
 		await settle();
 		expect(rows()).toHaveLength(7);
+		expect(alert()).toBe('It wasn’t sent.');
+		expect(buttonNamed('Send')!.disabled).toBe(true);
 		rows()[0].click();
 		await settle();
 		expect(rows()).toHaveLength(6);
@@ -445,6 +452,20 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(openRow()).toBe(rows()[1]);
 		expect(pane().querySelector('h1')?.textContent).toBe(activityFrameItems()[1].title);
 		expect(dockState()).toEqual(dockAtRest);
+	});
+
+	it('shows a closed decision fallback when the refusal has no sentence', async () => {
+		alsoServe('/api/plans/decisions/decision-docs/answer', () => respond(410, {}));
+		render();
+		await settle();
+		rows()[1].click();
+		await settle();
+		pane().querySelector<HTMLInputElement>('input[value="ship"]')!.click();
+		await settle();
+		buttonNamed('Answer')!.click();
+		await settle();
+		expect(alert()).toBe('That decision is closed.');
+		expect(buttonNamed('Answer')!.disabled).toBe(true);
 	});
 
 	it('answers the selected decision from its own thread, never another decision', async () => {
@@ -585,18 +606,28 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(emit).toHaveBeenCalledWith('activity', 'acted', { kind: 'task', action: 'done', outcome: 'refused', reason: 'rejected' });
 	});
 
-	it('shows a failed Send’s reference beside its line, as the dock does', async () => {
-		alsoServe('/api/held-replies/held-intel/approve', () => respond(500, { reference: 'err-7f3a' }));
+	it('shows a failed Send’s reference and retries the same message', async () => {
+		let calls = 0;
+		alsoServe('/api/held-replies/held-intel/approve', () => {
+			calls += 1;
+			if (calls === 1) return respond(502, { detail: 'Delivery failed.', reference: 'err-7f3a' });
+			dropServed('message:intel-mac');
+			return respond(200, { state: 'sent' });
+		});
 		render();
 		await settle();
 		rows()[5].click();
 		await settle();
 		buttonNamed('Send')!.click();
 		await settle();
-		expect(alert()).toBe('Couldn’t send this message. Try again.');
+		expect(alert()).toBe('Delivery failed.');
 		expect(pane().querySelector('.reference')?.textContent).toBe('Reference: err-7f3a');
 		// The band is a wrapping flex row: the reference must share its line's flex item, or it lands beside the buttons.
 		expect(pane().querySelector('.act-failure-row > .act-failure + .reference')).toBeTruthy();
+		buttonNamed('Try again')!.click();
+		await settle();
+		expect(calls).toBe(2);
+		expect(rows()).toHaveLength(6);
 	});
 
 	it('shows why an earlier Send didn’t go, with its reference, before any press', async () => {
@@ -686,8 +717,18 @@ describe('answering a decision or a held message in Activity', () => {
 		expect(pane().textContent).toContain('Raised directly — no parent review.');
 	});
 
+	it('shows decision context and tradeoff before the choices', async () => {
+		await openDecision({ context: 'The context.', tradeoff: 'The tradeoff.' });
+		const text = pane().textContent!;
+		expect(text).toContain('The context.');
+		expect(text).toContain('The tradeoff.');
+		expect(text.indexOf('The context.')).toBeLessThan(text.indexOf('The tradeoff.'));
+		expect(text.indexOf('The tradeoff.')).toBeLessThan(text.indexOf('Ship without their review'));
+	});
+
 	it('marks only the recommended option', async () => {
 		await openDecision();
+		expect(pane().textContent).not.toContain('Raised directly');
 		const marked = [...pane().querySelectorAll('label.opt')].filter((label) => label.querySelector('em')?.textContent === 'Recommended');
 		expect(marked.map((label) => label.querySelector('b')?.textContent)).toEqual(['Ship without their review']);
 	});
@@ -700,6 +741,14 @@ describe('answering a decision or a held message in Activity', () => {
 		expect(reason.textContent).toContain('This is the reason.');
 		expect(option.closest('label')!.contains(reason)).toBe(true);
 		expect(pane().querySelector('dl')?.textContent ?? '').not.toContain('Why');
+	});
+
+	it('keeps four long pick-any labels in separate choices', async () => {
+		const long = 'A deliberately long option label that wraps in its row '.repeat(2).trim();
+		await openDecision({ pick: 'any', recommendation: ['A'], options: ['A', 'B', 'C', 'D'].map((id) => ({ id, label: `${id} ${long}`, detail: long })) });
+		const choices = [...pane().querySelectorAll('label.opt')];
+		expect(choices).toHaveLength(4);
+		expect(choices.map((choice) => choice.querySelector('b')?.textContent)).toEqual(['A', 'B', 'C', 'D'].map((id) => `${id} ${long}`));
 	});
 
 	it('shows a pick-any recommendation reason once, on the first recommended option', async () => {
@@ -889,6 +938,39 @@ describe('answering a decision or a held message in Activity', () => {
 		expect(pane().querySelector<HTMLTextAreaElement>('textarea.other')!.value).toBe('Keep this note.');
 	});
 
+	it('pauses decision controls offline and restores the draft on reconnect', async () => {
+		await openDecision({ pick: 'any', other_enabled: true });
+		pane().querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+		await settle();
+		await typeOther('Keep this note.');
+		connectionState.set('disconnected');
+		await settle();
+		expect([...pane().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every((box) => box.disabled)).toBe(true);
+		expect(pane().querySelector<HTMLTextAreaElement>('textarea.other')!.disabled).toBe(true);
+		expect(buttonNamed('Answer')!.disabled).toBe(true);
+		expect(pane().textContent).toContain('Answering is paused until this reconnects.');
+		connectionState.set('connected');
+		await settle();
+		expect(pane().querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
+		expect(pane().querySelector<HTMLTextAreaElement>('textarea.other')!.value).toBe('Keep this note.');
+		expect(buttonNamed('Answer')!.disabled).toBe(false);
+	});
+
+	it('pauses held-message actions offline and restores them on reconnect', async () => {
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		connectionState.set('disconnected');
+		await settle();
+		expect(buttonNamed('Don’t send')!.disabled).toBe(true);
+		expect(buttonNamed('Send')!.disabled).toBe(true);
+		expect(pane().textContent).toContain('Sending and declining are paused until this reconnects.');
+		connectionState.set('connected');
+		await settle();
+		expect(buttonNamed('Send')!.disabled).toBe(false);
+	});
+
 	it('declines a held message through the decline call, and it leaves', async () => {
 		let declined = false;
 		alsoServe('/api/held-replies/held-intel/decline', () => {
@@ -905,6 +987,35 @@ describe('answering a decision or a held message in Activity', () => {
 		expect(declined).toBe(true);
 		expect(rows()).toHaveLength(6);
 		expect(alert()).toBeNull();
+	});
+
+	it('lets an already-decided held message leave without an error', async () => {
+		alsoServe('/api/held-replies/held-intel/approve', () => {
+			served = served.filter((item) => item.key !== 'message:intel-mac');
+			return respond(409, { detail: 'This reply was already decided' });
+		});
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		buttonNamed('Send')!.click();
+		await settle();
+		expect(rows()).toHaveLength(6);
+		expect(alert()).toBeNull();
+	});
+
+	it.each(['Send', 'Don’t send'])('clears the expired session when %s gets a 401', async (action) => {
+		token.set('test-session');
+		user.set({ id: 'test-user', name: 'Test' });
+		alsoServe('/api/held-replies/held-intel/', () => respond(401, {}));
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		buttonNamed(action)!.click();
+		await settle();
+		expect(get(token)).toBeNull();
+		expect(get(user)).toBeNull();
 	});
 
 	it('re-reads when a held message changes elsewhere', async () => {
@@ -1157,6 +1268,23 @@ describe('a document row in Notifications', () => {
 		await settle();
 		expect(host.querySelector('.panel [role="alert"]')?.textContent).toBe('Couldn’t mark these read. Try again.');
 		expect(rows()).toHaveLength(2);
+	});
+
+	it('clears a Mark all read failure when opening or dismissing a row', async () => {
+		await openNotifications();
+		alsoServe('/api/attention/notifications/read', () => respond(500, {}));
+		buttonNamed('Mark all read')!.click();
+		await settle();
+		expect(host.querySelector('.panel [role="alert"]')).not.toBeNull();
+		rows()[1].click();
+		await settle();
+		expect(host.querySelector('.panel [role="alert"]')).toBeNull();
+		buttonNamed('Mark all read')!.click();
+		await settle();
+		expect(host.querySelector('.panel [role="alert"]')).not.toBeNull();
+		host.querySelector<HTMLButtonElement>('button.dismiss')!.click();
+		await settle();
+		expect(host.querySelector('.panel > [role="alert"]')).toBeNull();
 	});
 
 	it('moves between tabs with the arrow keys', async () => {

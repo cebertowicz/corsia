@@ -68,7 +68,7 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 		await page.getByRole('button', { name: 'Close comments' }).click();
 		// Wait for the sheet's close transition before reopening (#3328).
 		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeHidden();
-		await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+		await page.locator('main').getByRole('button', { name: 'Notifications', exact: true }).click();
 	}
 	const top = (await row.boundingBox())!.y;
 	const position = await row.evaluate((el) => [...document.querySelectorAll('[data-activity-row]')].indexOf(el));
@@ -127,7 +127,7 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	}
 	await frame('opened');
 	if (width === 393) {
-		await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+		await page.locator('main').getByRole('button', { name: 'Notifications', exact: true }).click();
 		await checkRow();
 		await row.click();
 	} else await checkRow();
@@ -136,6 +136,9 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	await expect(field).toBeVisible();
 	await expect(field).toHaveValue('Thank you for explaining');
 	await checkPane();
+	await expect.poll(() => field.evaluate((el) => !el.closest('[inert]'))).toBe(true);
+	await field.focus();
+	await expect(field).toBeFocused();
 	await field.fill('Thank you for explaining');
 	const response = page.waitForResponse((r) => r.url().includes(`/api/artifacts/${doc.artifactId}/comments`) && r.request().method() === 'POST');
 	await card.getByRole('button', { name: 'Send reply' }).click();
@@ -149,11 +152,11 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeHidden();
 	} else await page.keyboard.press('Escape');
 	await frame('sent');
-	if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+	if (width === 393) await page.locator('main').getByRole('button', { name: 'Notifications', exact: true }).click();
 	await checkRow();
 	await page.getByRole('tab', { name: /Your tasks/ }).click();
 	await page.locator('[data-activity-row]').filter({ hasText: 'Another item 00' }).click();
-	if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+	if (width === 393) await page.locator('main').getByRole('button', { name: 'Your tasks', exact: true }).click();
 	await page.getByRole('tab', { name: /Notifications/ }).click();
 	await expect(row).toHaveCount(0);
 	await frame('another');
@@ -214,7 +217,7 @@ for (const width of [1440, 393]) {
 		await open.click();
 		if (width === 393) {
 			// The phone keeps the selected row in the hidden list while the pane is open.
-			await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+			await page.locator('main').getByRole('button', { name: 'Your tasks', exact: true }).click();
 		}
 		await open.scrollIntoViewIfNeeded();
 		const before = (await open.boundingBox())!.y;

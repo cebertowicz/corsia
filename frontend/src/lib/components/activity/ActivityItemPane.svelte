@@ -11,6 +11,7 @@
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
+	import { connectionState } from '$lib/stores/connection';
 	import { unreadCommentCount } from '$lib/docUnread';
 	import type { HeldVerb } from '$lib/api/heldReplies';
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
@@ -61,6 +62,7 @@
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
 
 	let sending = $state(false);
+	const offline = $derived($connectionState !== 'connected');
 	let failure = $state<{ text: string; reference?: string; retry: PressAction | null; final: boolean } | null>(null);
 	/** The decision answer's retry key: kept across Try again so a retry can't answer twice. */
 	let answerMutation: string | null = null;
@@ -74,7 +76,6 @@
 		Array.isArray(decision.recommendation) ? decision.recommendation.includes(option.id) : decision.recommendation === option.id,
 	)?.id ?? null);
 	function saveDraft() { onDraft({ selected, picked: [...picked], other }); }
-
 	let lookup = $state<DocumentLookup | { status: 'resolving' } | null>(null);
 
 	// A document item opens in Activity's workspace as its only tab; the item it replaces is closed through the
@@ -153,23 +154,12 @@
 		: press('dont_send', 'decline this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED));
 	const markTaskDone = () => press('done', 'mark this task done', async () => (task ? markTaskDonePress(task) : SUCCEEDED));
 	/** Done marks the document read up to the latest reply its row showed; one that lands after stays unread. */
-	async function markDocumentRead() {
-		if (sending || !document) return;
-		sending = true;
-		failure = null;
-		let outcome: 'succeeded' | 'failed' = 'succeeded';
-		try {
+	function markDocumentRead() {
+		if (!document) return;
+		return press('done', 'mark these replies read', async () => {
 			await markDocumentsRead([{ artifact_id: document.artifact_id, through_reply_id: document.latest_reply_id }]);
-		} catch {
-			outcome = 'failed';
-			failure = { text: 'Couldn’t mark these replies read. Try again.', retry: 'done', final: false };
-		}
-		emitProductEvent('activity', 'acted', { kind: item.kind, action: 'done', outcome });
-		try {
-			if (outcome === 'succeeded') await onActed();
-		} finally {
-			sending = false;
-		}
+			return SUCCEEDED;
+		});
 	}
 
 	/**
@@ -270,21 +260,21 @@
 					{@const rationaleId = option.id === rationaleOptionId && decision.rationale ? `decision-${decision.id}-${option.id}-rationale` : undefined}
 					<label class="opt">
 						{#if isPickAny(decision)}
-							<input type="checkbox" checked={picked.includes(option.id)} aria-describedby={rationaleId} onchange={() => togglePicked(option.id)} disabled={sending} />
+							<input type="checkbox" checked={picked.includes(option.id)} aria-describedby={rationaleId} onchange={() => togglePicked(option.id)} disabled={sending || offline} />
 						{:else}
-							<input type="radio" name="decision-{decision.id}" value={option.id} checked={selected === option.id} aria-describedby={rationaleId} onchange={() => { selected = option.id; saveDraft(); }} disabled={sending} />
+							<input type="radio" name="decision-{decision.id}" value={option.id} checked={selected === option.id} aria-describedby={rationaleId} onchange={() => { selected = option.id; saveDraft(); }} disabled={sending || offline} />
 						{/if}
 						<span><b>{option.label}</b>{#if recommended} <em>Recommended</em>{/if}{#if option.detail}<span class="opt-detail">{option.detail}</span>{/if}{#if rationaleId}<span class="option-rationale" id={rationaleId}><span>Why</span>{decision.rationale}</span>{/if}</span>
 					</label>
 				{/each}
 				{#if decision.other_enabled && !isPickAny(decision)}
 					<label class="opt">
-						<input type="radio" name="decision-{decision.id}" value={OTHER_OPTION_ID} checked={selected === OTHER_OPTION_ID} onchange={() => { selected = OTHER_OPTION_ID; saveDraft(); }} disabled={sending} />
+						<input type="radio" name="decision-{decision.id}" value={OTHER_OPTION_ID} checked={selected === OTHER_OPTION_ID} onchange={() => { selected = OTHER_OPTION_ID; saveDraft(); }} disabled={sending || offline} />
 						<span><b>Something else</b></span>
 					</label>
 				{/if}
 				{#if decision.other_enabled && (selected === OTHER_OPTION_ID || isPickAny(decision))}
-					<textarea class="other" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; saveDraft(); }} disabled={sending}
+					<textarea class="other" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; saveDraft(); }} disabled={sending || offline}
 						placeholder={isPickAny(decision) ? 'Add a note (optional)' : 'Say what you want instead'}
 						aria-label={isPickAny(decision) ? 'Note' : 'Your answer'}></textarea>
 				{/if}
@@ -294,9 +284,10 @@
 			<ReviewBarShell view="ask" {who} full="Waiting for your answer" askLabel="Decision" docked busy={sending}>
 				{#snippet actions()}
 					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} disabled={!answerReady || settled} onclick={() => void answer(decision)}>{labelFor('answer', 'Answer')}</Button>
+						<Button size="sm" variant="primary" loading={sending} disabled={!answerReady || settled || offline} onclick={() => void answer(decision)}>{labelFor('answer', 'Answer')}</Button>
 					</div>
 					{@render failureLine()}
+					{#if offline}<p class="act-failure-row offline-notice" role="status">Answering is paused until this reconnects.</p>{/if}
 				{/snippet}
 			</ReviewBarShell>
 		{/snippet}
@@ -332,10 +323,11 @@
 			<ReviewBarShell view="ask" {who} full="Waiting for your yes before it’s sent" askLabel="Message waiting for your yes" docked busy={sending}>
 				{#snippet actions()}
 					<div class="rb-actions">
-						<Button size="sm" variant="ghost" disabled={sending || settled} onclick={() => void decide('decline')}>{labelFor('dont_send', 'Don’t send')}</Button>
-						<Button size="sm" variant="primary" loading={sending} disabled={settled} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
+						<Button size="sm" variant="ghost" disabled={sending || settled || offline} onclick={() => void decide('decline')}>{labelFor('dont_send', 'Don’t send')}</Button>
+						<Button size="sm" variant="primary" loading={sending} disabled={settled || offline} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
 					</div>
 					{@render failureLine()}
+					{#if offline}<p class="act-failure-row offline-notice" role="status">Sending and declining are paused until this reconnects.</p>{/if}
 				{/snippet}
 			</ReviewBarShell>
 		{/snippet}
@@ -402,6 +394,7 @@
 	}
 	.unopenable { padding-top: var(--space-4); }
 	.act-failure-row { flex: 1 0 100%; order: 10; text-align: right; }
-	.act-failure { margin: 0; color: var(--red); font-size: var(--text-footnote); }
+	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.act-failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }
 	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

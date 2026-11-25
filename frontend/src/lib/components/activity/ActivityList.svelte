@@ -236,6 +236,7 @@
 		padding: var(--space-1) var(--space-3) var(--space-4);
 	}
 	.tabs {
+		position: sticky; top: 0; z-index: 1; background: var(--bg-primary);
 		display: flex; gap: var(--space-5); padding: var(--space-3) var(--edge) 0;
 		border-bottom: 1px solid var(--border-subtle);
 	}
@@ -258,7 +259,7 @@
 	p.by { margin: 0; }
 	.by-text { min-width: 0; }
 	.mark-all { margin-left: auto; flex: none; font-weight: var(--fw-medium); }
-	.failed { margin: 0 var(--edge) var(--space-2); color: var(--red); font-size: var(--text-footnote); }
+	.failed { margin: 0 var(--edge) var(--space-2); color: var(--red-text); font-size: var(--text-footnote); }
 	.rows { margin: 0; padding: 0; list-style: none; }
 	.row { position: relative; touch-action: pan-y; }
 	.item {
