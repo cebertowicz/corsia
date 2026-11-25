@@ -9,6 +9,7 @@ import re
 from uuid import uuid4
 
 from core.workspace_layout import resolve_project_root, resolve_thread_working_root
+from doceditor import comment_snapshots
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from registry.shared_category_index import (
     _index_lists_file,
@@ -17,7 +18,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry.durable_write_preconditions import check_expected_content, checked_copy_target, checked_file_mode, replace_if_expected, restore_if_owned
+from registry.durable_write_preconditions import _publish_stage, checked_file_mode, restore_if_owned
 from registry.durable_write_recovery import recover_intents, recovery_shared_target, remove_created_parent
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
@@ -179,7 +180,6 @@ def _register_applied(
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
         settle_promoted_source(source_identity, left, artifact, db=db)
-        # Anchor adoption happens before the file is replaced.
         record_post_write_events(
             shared,
             artifact,
@@ -366,16 +366,6 @@ def _complete_publication(
     }
 
 
-def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha256: str | None) -> None:
-    check_expected_content(target, expected_sha256)
-    if backup is not None:
-        checked_copy_target(target, backup, expected_sha256)
-    if backup is not None:
-        replace_if_expected(stage, target, expected_sha256)
-    elif not restore_claimed_file(stage, target):
-        raise FileExistsError(f"Publication destination already exists: {target}")
-
-
 def _publish_bytes(
     shared: SharedTarget,
     content: bytes | None,
@@ -389,18 +379,14 @@ def _publish_bytes(
     notify: bool = True, expected_sha256: str | None = None,
 ) -> dict:
     if (source is None) == (content is None):
-        raise ValueError(
-            "A durable publication requires bytes or one promotion source."
-        )
+        raise ValueError("A durable publication requires bytes or one promotion source.")
     artifact_type, external_id = _intent_identity(shared.path, db=db)
     intent_id = str(uuid4())
     claim = _source_claim(source, intent_id)
     content_hash = hashlib.sha256(content).hexdigest() if content is not None else ""
     stage = shared.path.parent / f".corsia-write-{intent_id}.stage"
     before = shared.path.read_bytes() if shared.path.exists() else None
-    if before is not None:
-        from doceditor.comment_snapshots import adopt_before_write
-        adopt_before_write(shared.path, before=before)
+    if before is not None: comment_snapshots.adopt_before_write(shared.path, before=before)
     backup = (
         shared.path.parent / f".corsia-write-{intent_id}.backup"
         if shared.path.exists()
