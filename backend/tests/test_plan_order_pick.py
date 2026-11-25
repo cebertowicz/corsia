@@ -90,3 +90,21 @@ def test_a_comment_task_on_an_empty_plan_is_picked(db):
     comment = _comment_task(db, plan.id)
 
     assert open_attempt(db, comment) is not None
+
+
+def test_a_passed_over_task_still_wakes_its_idle_owner(db):
+    """An owner that went idle with work queued has a stalled wake; new work re-arms it."""
+    from automation import plan_liveness
+
+    plan = owner_plan(db)
+    task(db, plan.id, "Ship the release")
+    plan_liveness.on_turn_complete(str(plan.owner_id), db=db)
+    db.execute("UPDATE plan_liveness_wakes SET status=? WHERE thread_id=?",
+               (plan_liveness.STALLED, str(plan.owner_id)))
+    db.commit()
+
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is None
+    wake = plan_liveness.wake_for(str(plan.owner_id), db)
+    assert wake is not None and wake["status"] == plan_liveness.ARMED

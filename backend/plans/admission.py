@@ -202,7 +202,7 @@ def reconcile_plan(
         )
     elif candidates is None:
         candidates = tuple(node_order.active_task_ids(db, plan_id))
-    for node_id in triage_lines.in_plan_order(db, plan, candidates):
+    for node_id in _in_plan_order(db, plan, candidates):
         attempt, _conflict = select(
             node_id, actor_id=actor_id, provenance=provenance,
             db=db, touch=False,
@@ -221,6 +221,15 @@ def reconcile_plan(
 
         delegated_selection.reconcile_delegator(plan_id, db=db)
     return reconciled
+
+
+def _in_plan_order(db, plan, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """The pick's candidates in plan order; a passed-over task re-arms its idle executor's liveness wake."""
+    ordered = triage_lines.in_plan_order(db, plan, candidates)
+    if len(ordered) < len(candidates):
+        from automation import plan_liveness
+        plan_liveness.on_turn_complete(str(plan["owner_id"]), db=db)
+    return ordered
 
 
 def reselect_and_reconcile(
