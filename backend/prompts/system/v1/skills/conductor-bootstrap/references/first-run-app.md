@@ -62,9 +62,11 @@ The server posts `references/first-run-opening.md` as your first message, with `
    - **Something else:** follow skill `mail-host-setup` from its step 1.
 
    On "not now" to the question: `Ask me any time to connect your email.` This is CORSIA's own platform sign-in; it creates no agent.
-7. **Learning from the community.** Always. Post, word for word:
+7. **Learning from the community.** Always. Post each line as its own message, word for word:
 
-   > CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose.
+   - `Instruction files stay short: they hold what's true for every task at their level, such as goals, preferences, limits and who decides what. How each kind of work gets done goes in its workflow: the steps, who does each, and the checks before it reaches you.`
+   - `Agents get each step's instructions as it starts. When you correct something, they can change the workflow, and later runs show them whether to keep the change.`
+   - `You can use workflows other people have proven, and share yours if you choose.`
 
    Then raise the one decision from `setup.setup_decisions` titled `Use and share improvements with the CORSIA community?` as **Raising a decision** in `references/first-run.md` says, with the `source_node_id` of the task it names if your plan has one, else your current plan task. Using the community's improvements needs no account.
    - **The answer** is written to the profile for you when the decision is answered: **Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No. On "not now", post `Ask me any time.`, write no line, and agents share nothing and take nothing until it is answered.

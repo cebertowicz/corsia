@@ -407,7 +407,14 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     step = _step(7)
 
     assert step.startswith("Learning from the community.** Always.")
-    assert "CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose." in step
+    lines = [
+        "Instruction files stay short: they hold what's true for every task at their level, such as goals, preferences, limits and who decides what. How each kind of work gets done goes in its workflow: the steps, who does each, and the checks before it reaches you.",
+        "Agents get each step's instructions as it starts. When you correct something, they can change the workflow, and later runs show them whether to keep the change.",
+        "You can use workflows other people have proven, and share yours if you choose.",
+    ]
+    assert "Post each line as its own message" in step
+    assert all(f"`{line}`" in step for line in lines)
+    assert [step.index(line) for line in lines] == sorted(step.index(line) for line in lines)
     assert "Measurement" not in step
     assert "chart button" not in step
     assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
