@@ -16,7 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
-- First run is shorter and shows how you steer your agents: your profile becomes yours when you approve your About you doc (or at the end of setup if you skip it), agents then suggest changes to it for you to accept, setup explains workflows, and the access step drops the Auto-approve paragraph.
+- First run is shorter and shows how you steer your agents: your profile becomes yours when you approve your About you doc (or at the end of setup if you skip it), agents then suggest changes to it for you to accept, setup explains workflows, the access step drops the Auto-approve paragraph, and the opening message is cut from 241 words to about 130: what an agent is, that CORSIA is one too, and a one-line project.
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.

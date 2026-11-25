@@ -282,7 +282,8 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "My job is to give you back your time, and I measure it" in opening
-    assert "My plan for finishing your setup is in the Plan section on the right" in opening and 'shows how many tasks are left' in opening
+    assert "I'm one too, a special one: I'll help you set yours up when it fits" in opening
+    assert "Plan section" not in opening and "skip the rest" not in opening
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
@@ -419,7 +420,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert [step.index(line) for line in lines] == sorted(step.index(line) for line in lines)
     assert "Measurement" not in step
     assert "chart button" not in step
-    assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
+    assert "You can see it in Measurement from your first day; trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "`Choose it on the card, and it's saved to your profile.` Leave the card open and write nothing." in step

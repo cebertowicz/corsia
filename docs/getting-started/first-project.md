@@ -19,14 +19,13 @@ CORSIA opens at `http://localhost:1956` on a setup screen that shows four steps 
 
 ## The first chat and the setup plan
 
-Pressing **Start using CORSIA** opens a chat with the CORSIA agent. The chat opens empty. Its first message is a fixed introduction, not a model reply, and it appears when a model is first chosen for that chat, from the model button in the message box. It says how help is organized:
+Pressing **Start using CORSIA** opens a chat with the CORSIA agent. The chat opens empty. Its first message is a fixed introduction, not a model reply, and it appears when a model is first chosen for that chat, from the model button in the message box. It says what CORSIA measures, and:
 
-- a quick question is a new chat;
-- something that keeps coming back and taking your time is given to an agent, an AI that owns that job and answers for the result (the next page, [Your first agent](first-agent.md), does this);
-- work that needs its own space, or several agents together, becomes a project;
-- everything else stays with the CORSIA agent.
+- an agent owns one kind of work for you, with goals it measures itself against (the next page, [Your first agent](first-agent.md), sets one up);
+- the CORSIA agent is one too: it helps set yours up and keeps CORSIA itself running;
+- work that needs its own space, or several agents together, becomes a project.
 
-The message also points to a **plan** for finishing setup, in the **Plan** section on the right. On a phone it is the button above the message box that shows how many tasks are left. A plan is a list of tasks, each with a stated end condition; see [Plans](../how-it-works/plans.md).
+Setup itself is a **plan**, in the **Plan** section on the right. On a phone it is the button above the message box that shows how many tasks are left. A plan is a list of tasks, each with a stated end condition; see [Plans](../how-it-works/plans.md).
 
 The setup plan's tasks come in this order. A task that does not apply to you is left out of the plan without a word: a subscription task appears only for a subscription you said you pay for, and **Web search** only until a web search works.
 
