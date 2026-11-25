@@ -10,7 +10,7 @@ from functools import partial
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
+from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_field_values, browser_identity as identity
 from host_access import browser_agent_verbs, browser_fill_marks, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
@@ -283,7 +283,7 @@ def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandRes
     snapshot = data.get("snapshot") if isinstance(data, dict) else None
     if not isinstance(snapshot, str):
         return None
-    stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
+    stdout = json.dumps({"success": True, "data": {"snapshot": browser_field_values.hide_field_values(snapshot)}})
     return replace(result, stdout=stdout, stderr="")
 
 

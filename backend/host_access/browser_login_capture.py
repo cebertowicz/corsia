@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
-from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _quiet_cdp, world as _world
+from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, world as _world
 from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
 from host_access.browser_login_capture_policy import is_submit, switches_tab, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
@@ -193,7 +193,7 @@ def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
 
 
 async def _submit(thread_id: str, endpoint: str, step):
-    async with _quiet_cdp(endpoint) as cdp:
+    async with CdpClient(endpoint) as cdp:  # silent by default: no frame reaches a log
         loader, frames = await _frame_tree(cdp)
         if _marked(thread_id, loader):
             return None

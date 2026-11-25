@@ -170,8 +170,8 @@ async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> Non
 
 
 def use_page(monkeypatch, page: FakePage) -> FakePage:
-    monkeypatch.setattr(capture, "_quiet_cdp", page.client)
-    monkeypatch.setattr(capture_writes, "quiet_cdp", page.client)
+    monkeypatch.setattr(capture, "CdpClient", page.client)
+    monkeypatch.setattr(capture_writes, "CdpClient", page.client)
     monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
     return page
 
@@ -607,7 +607,7 @@ async def test_rule7_session_end_clears_marks_and_an_unreadable_page_marks_every
     await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
     holder.calls.clear()
-    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    monkeypatch.setattr(capture_writes, "CdpClient", no_page)
     await agent_typed()
     page.loader = "doc-9"
     await settled_submit(THREAD, KEY, "ws://page")
@@ -813,9 +813,9 @@ async def test_rule7_a_watch_that_fails_to_start_or_settle_marks_every_document_
 
     agent, finish = _agent_path(monkeypatch, page, run=hang_at_settle if failure == "hangs" else None)
     if failure == "unreadable":
-        monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+        monkeypatch.setattr(capture_writes, "CdpClient", no_page)
     elif failure == "strange":
-        monkeypatch.setattr(capture_writes, "quiet_cdp", lambda _endpoint: SimpleNamespace())
+        monkeypatch.setattr(capture_writes, "CdpClient", lambda _endpoint: SimpleNamespace())
     assert await agent(("fill", "@e1", "x")) == "ok"
     assert finish and capture._ANY_DOCUMENT in finish[0]
 
@@ -1043,7 +1043,7 @@ async def test_failed_step_drops_prior_offer_when_latest_queued_call_is_skipped(
 @pytest.mark.asyncio
 async def test_any_document_mark_is_never_evicted(monkeypatch):
     page = use_page(monkeypatch, FakePage())
-    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    monkeypatch.setattr(capture_writes, "CdpClient", no_page)
     await agent_typed()
     use_page(monkeypatch, page)
     for number in range(100):

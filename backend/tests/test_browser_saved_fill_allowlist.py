@@ -112,7 +112,7 @@ ALLOWED_ON_THE_FILLED_PAGE = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("args", REFUSED_ON_THE_FILLED_PAGE)
 async def test_on_the_filled_page_scripts_value_reads_routes_and_screenshots_are_refused(args):
-    browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     with pytest.raises(BrowserSessionError) as refused:
         await _access(args)
     assert str(refused.value) == browser_control.SAVED_FILL_REFUSED
@@ -121,7 +121,7 @@ async def test_on_the_filled_page_scripts_value_reads_routes_and_screenshots_are
 @pytest.mark.asyncio
 @pytest.mark.parametrize("args", ALLOWED_ON_THE_FILLED_PAGE)
 async def test_on_the_filled_page_commands_that_cant_show_it_pass_with_snapshot_values_hidden(args):
-    browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     access = await _access(args)
     # filled_field_visit is what makes the command path hide a snapshot's field values.
     assert access.filled_field_visit is True and access.saved_fill is True
@@ -129,7 +129,7 @@ async def test_on_the_filled_page_commands_that_cant_show_it_pass_with_snapshot_
 
 @pytest.mark.asyncio
 async def test_a_new_document_in_the_tab_hands_over_from_the_page_rule_to_the_session_rule(monkeypatch):
-    browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     # The page guard lets the new document go...
     access = await _access(("eval", "1"), visit=OTHER)
     assert access.filled_field_visit is False and access.saved_fill is False
@@ -148,7 +148,7 @@ async def test_a_new_document_in_the_tab_hands_over_from_the_page_rule_to_the_se
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("marked", "seen"), [("", OTHER), (FILLED, "")])
 async def test_a_document_id_that_wasnt_read_counts_as_the_filled_page(marked, seen):
-    browser_control.mark_saved_fill(THREAD, "session-1", marked)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", marked)
     with pytest.raises(BrowserSessionError) as refused:
         await _access(("eval", "1"), visit=seen)
     assert str(refused.value) == browser_control.SAVED_FILL_REFUSED
@@ -170,7 +170,7 @@ async def test_a_field_the_person_filled_keeps_its_own_refusal(monkeypatch):
 ])
 async def test_a_snapshot_whose_values_cant_be_hidden_is_withheld_with_its_own_line(monkeypatch, saved_fill, line):
     if saved_fill:
-        browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+        browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     else:
         monkeypatch.setattr(lifecycle, "finished_visit", lambda _thread, visit: visit == FILLED)
     assert await _run(monkeypatch, ("snapshot",), output="not a snapshot") == line
@@ -200,7 +200,7 @@ def test_the_saved_fill_lines_say_what_holds_and_until_when():
 @pytest.mark.parametrize("args", [("snapshot",), ("get", "url"), ("click", "@e2"), ("wait", "500"), ("tab",),
                                   ("open", "https://example.com/next"), ("reload",)])
 async def test_in_the_session_the_saved_sign_in_shapes_still_run_on_any_page(monkeypatch, args):
-    browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     assert await _run(monkeypatch, args, visit=OTHER) == "ok"
 
 
@@ -212,7 +212,7 @@ async def test_without_a_fill_the_session_rule_does_not_apply(monkeypatch):
 @pytest.mark.asyncio
 async def test_closing_the_browser_ends_the_mark_for_a_later_session_with_the_same_id(monkeypatch):
     # The pane and the e2e tests reuse the session id "existing", so the mark must end with the session itself.
-    browser_control.mark_saved_fill(THREAD, "existing", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "existing", FILLED)
     with pytest.raises(BrowserSessionError):
         await _run(monkeypatch, ("eval", "1"), visit=OTHER, session="existing")
     browser_control.browser_closed(THREAD)
@@ -224,8 +224,8 @@ async def test_closing_the_browser_ends_the_mark_for_a_later_session_with_the_sa
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("marked", "command_session"), [("session-1", None), (None, "session-2"), (None, None)])
 async def test_a_mark_or_command_without_a_session_id_fails_closed(marked, command_session):
-    browser_control.mark_saved_fill(THREAD, marked, FILLED)
-    assert browser_control.saved_fill_session(THREAD, command_session) is True
+    browser_saved_fills.mark_saved_fill(THREAD, marked, FILLED)
+    assert browser_saved_fills.saved_fill_session(THREAD, command_session) is True
     with pytest.raises(BrowserSessionError) as refused:
         await _access(("eval", "1"), session=command_session)
     assert str(refused.value) == browser_control.SAVED_FILL_REFUSED
@@ -233,6 +233,6 @@ async def test_a_mark_or_command_without_a_session_id_fails_closed(marked, comma
 
 @pytest.mark.asyncio
 async def test_a_mark_for_one_session_does_not_reach_another(monkeypatch):
-    browser_control.mark_saved_fill(THREAD, "session-1", FILLED)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     assert (await _access(("eval", "1"), session="session-2")).filled_field_visit is False
     assert await _run(monkeypatch, ("eval", "1"), session="session-2") == "ok"
