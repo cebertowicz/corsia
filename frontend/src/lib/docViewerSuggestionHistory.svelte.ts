@@ -1,9 +1,12 @@
-import { transitionSuggestionHistory } from '$lib/api/commentSuggestions';
+import { SuggestionRefused, transitionSuggestionHistory } from '$lib/api/commentSuggestions';
 import type { SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { loadComments } from '$lib/stores/docComments';
 import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
+import { textSha256 } from '$lib/stores/documentWire';
 import { toasts } from '$lib/stores/toast';
+
+const CHANGE_FAILED = 'Couldn’t change the suggestion. Reload and try again.';
 
 /** Coordinate a history transition with the current viewer and its save queue. */
 export function createViewerSuggestionHistory(source: {
@@ -23,20 +26,28 @@ export function createViewerSuggestionHistory(source: {
 		busy = true;
 		source.setBusy(true);
 		try {
-			if (!await flushDraft(doc) || source.target()?.instanceId !== doc.instanceId) return false;
-			const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(before));
-			const sha = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-			const result = await transitionSuggestionHistory(artifact, entry.eventId, [...entry.ids], entry.direction, sha, after);
-			if (typeof result.text !== 'string' || typeof result.revision !== 'string') throw new Error('Missing suggestion history result');
-			seedDraft(doc, result.text, result.revision);
-			await loadComments(artifact);
-			return source.target()?.instanceId === doc.instanceId;
-		} catch (error) {
-			if (source.target()?.instanceId === doc.instanceId) {
-				toasts.show(error instanceof Error ? error.message : 'Couldn’t change the suggestion. Reload and try again.', 'error');
-				source.reload();
+			let result: Awaited<ReturnType<typeof transitionSuggestionHistory>>;
+			try {
+				if (!await flushDraft(doc) || source.target()?.instanceId !== doc.instanceId) return false;
+				result = await transitionSuggestionHistory(artifact, entry.eventId, [...entry.ids], entry.direction, await textSha256(before), after);
+				if (typeof result.text !== 'string' || typeof result.revision !== 'string') throw new Error('Missing suggestion history result');
+			} catch (error) {
+				// Only the server's own written refusal reaches the person; any other error is code or network text.
+				if (source.target()?.instanceId === doc.instanceId) {
+					toasts.show(error instanceof SuggestionRefused ? error.message : CHANGE_FAILED, 'error');
+					source.reload();
+				}
+				return false;
 			}
-			return false;
+			// The server has applied the change. A failure from here on is this side's follow-up, never an error to the person.
+			try {
+				seedDraft(doc, result.text, result.revision);
+				await loadComments(artifact);
+			} catch (followUpError) {
+				console.error('[suggestion history] follow-up after the server applied it failed', followUpError);
+				if (source.target()?.instanceId === doc.instanceId) source.reload();
+			}
+			return source.target()?.instanceId === doc.instanceId;
 		} finally {
 			busy = false;
 			source.setBusy(false);
