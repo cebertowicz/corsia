@@ -90,11 +90,6 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
         "work": "Work",
         "review": "Fresh review",
     }),
-    ("review-work", {
-        "brief": "Brief",
-        "check": "Check",
-        "weigh": "Fixes",
-    }),
 ])
 def test_shipped_general_workflow_step_titles_name_what_the_person_gets(skill, titles):
     """A person reads these titles in their plan, Activity and Measurement; the step ids stay fixed."""

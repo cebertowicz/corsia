@@ -24,8 +24,8 @@ workflow:
     - id: review
       title: Fresh review
       required: true
-      workflow: review-work
-      check: "review-work completed: a fresh reviewer returned PASS or a list; each failure is fixed or its rejection noted, and anything open goes into the hand-over"
+      by: reviewer
+      check: "a worker that had not seen the work, briefed as skill review-work says, checked the result as that skill says and returned PASS; each failed review came back as a revision whose findings were fixed wherever their cause reached, or rejected with the reason told to the reviewer, before the same reviewer checked again; anything still open goes into the hand-over"
       after: [work]
       difficulty: {default: standard}
       instruction: "## Review"
