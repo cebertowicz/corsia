@@ -257,12 +257,19 @@ describe('Activity list', () => {
 		await settle();
 		expect(host.querySelector('.empty-line')?.textContent).toBe('Nothing needs you.');
 		expect(rows()).toHaveLength(0);
-		expect(pane().textContent).toContain('Nothing to open.');
+		expect(pane().textContent).toContain('Nothing needs you.');
 		expect(tabNamed('tasks').getAttribute('aria-label')).toBe('Your tasks');
 		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications');
+	});
+
+	it('shows the notification empty line in both list and pane', async () => {
+		served = [];
+		render();
+		await settle();
 		tabNamed('notifications').click();
 		await settle();
 		expect(host.querySelector('.empty-line')?.textContent).toBe('No unread replies.');
+		expect(pane().textContent).toContain('No unread replies.');
 	});
 
 	it('says the read failed and offers Try again, naming the connection only when the request never arrived', async () => {
@@ -1193,7 +1200,7 @@ describe('a document row in Notifications', () => {
 		served = [];
 		render();
 		await settle();
-		expect(pane().textContent).toContain('Nothing to open.');
+		expect(pane().textContent).toContain('Nothing needs you.');
 		tabNamed('notifications').click();
 		await settle();
 		expect(openRow()).toBe(rows()[0]);

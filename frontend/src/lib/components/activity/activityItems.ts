@@ -19,6 +19,7 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
 
 /** Activity's two lists. A document with unread replies is a notification; everything else is a task. */
 export type ActivityTab = 'tasks' | 'notifications';
+export const EMPTY_LINE: Record<ActivityTab, string> = { tasks: 'Nothing needs you.', notifications: 'No unread replies.' };
 export type DecisionDraft = { selected: string | null; picked: string[]; other: string };
 export const tabOf = (item: ActivityQueueItem): ActivityTab => (item.kind === 'document' ? 'notifications' : 'tasks');
 

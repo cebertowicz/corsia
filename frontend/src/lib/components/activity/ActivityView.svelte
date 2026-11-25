@@ -12,7 +12,7 @@
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
+	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
 
 	/**
 	 * Activity: two lists beside the pane the chat uses. Your tasks holds everything waiting on the person, ranked by
@@ -339,7 +339,7 @@
 				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
-			<div class="nothing">Nothing to open.</div>
+			<div class="nothing">{EMPTY_LINE[tab]}</div>
 		{/if}
 	</section>
 </div>

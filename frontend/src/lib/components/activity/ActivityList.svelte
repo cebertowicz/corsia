@@ -3,7 +3,7 @@
 	import type { ActivityQueueItem, ActivityRanker } from '$lib/api/activityQueue';
 	import { formatTime } from '$lib/time';
 	import {
-		KIND_LABEL, ageLabel, documentDetailOf, latestLabel, rankedAt, reviewOf, unreadRepliesLabel, type ActivityTab,
+		EMPTY_LINE, KIND_LABEL, ageLabel, documentDetailOf, latestLabel, rankedAt, reviewOf, unreadRepliesLabel, type ActivityTab,
 	} from './activityItems';
 
 	/**
@@ -154,7 +154,7 @@
 				<button type="button" class="link" onclick={onRetry}>Try again</button>
 			</div>
 		{:else if !loading && items.length === 0}
-			<p class="empty-line">{tab === 'tasks' ? 'Nothing needs you.' : 'No unread replies.'}</p>
+			<p class="empty-line">{EMPTY_LINE[tab]}</p>
 		{:else}
 			{#if !loading}
 				<div class="by">
@@ -233,11 +233,11 @@
 	.activity-list {
 		--rank-col: 3ch; --title-indent: calc(var(--rank-col) + var(--space-2));
 		--edge: var(--space-2);
-		padding: var(--space-1) var(--space-3) var(--space-4);
+		padding: 0 var(--space-3) var(--space-4);
 	}
 	.tabs {
 		position: sticky; top: 0; z-index: 1; background: var(--bg-primary);
-		display: flex; gap: var(--space-5); padding: var(--space-3) var(--edge) 0;
+		display: flex; gap: var(--space-5); padding: calc(var(--space-3) + var(--space-1)) var(--edge) 0;
 		border-bottom: 1px solid var(--border-subtle);
 	}
 	.tab {
@@ -305,6 +305,8 @@
 	:global(.activity.phone) .notes .item { padding-right: var(--edge); transition: transform 0.12s ease-out; }
 	:global(.activity.phone) .dismiss { display: none; }
 	:global(.activity.phone) .link { position: relative; }
+	/* Reserve the full target in the flow so the first row cannot cover it. */
+	:global(.activity.phone) .mark-all { min-height: var(--touch-target); }
 	:global(.activity.phone) .link::after {
 		content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%);
 	}

@@ -68,6 +68,11 @@ for (const width of [1440, 393]) {
   await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
   await expect(page.getByRole('tab', { name: /Your tasks.*100/ })).toBeVisible();
   await expect(page.locator('.pane-col .spinner')).toHaveCount(0);
+  const tasksTab = page.getByRole('tab', { name: /Your tasks/ });
+  const tabY = (await tasksTab.boundingBox())!.y;
+  if (width === 393) {
+   for (const tab of await page.getByRole('tab').all()) expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
   await shot('tasks');
   if (width === 1440) {
    await page.getByRole('tab', { name: /Your tasks/ }).focus();
@@ -81,9 +86,22 @@ for (const width of [1440, 393]) {
   await expect(page.locator('[data-activity-row]').last()).toContainText('100');
   await expect(page.getByRole('tab', { name: /Your tasks/ })).toBeInViewport();
   await expect(page.getByRole('tab', { name: /Notifications/ })).toBeInViewport();
+  expect(Math.abs((await tasksTab.boundingBox())!.y - tabY)).toBeLessThanOrEqual(1);
   await shot('rank-100');
   await page.getByRole('tab', { name: /Notifications.*200/ }).click();
-  await expect(page.getByRole('button', { name: 'Mark all read' })).toBeVisible();
+  const markAll = page.getByRole('button', { name: 'Mark all read' });
+  await expect(markAll).toBeVisible();
+  if (width === 393) {
+   const hits = await markAll.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    return [-20, 0, 20].map((dy) => {
+     const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2 + dy);
+     return { dy, hit: button.contains(target), tag: target?.tagName, class: target?.getAttribute('class'), text: target?.textContent?.slice(0, 100), box: box.toJSON(), viewport: { width: innerWidth, height: innerHeight } };
+    });
+   });
+   console.log('Mark all read hit targets', JSON.stringify(hits));
+   expect(hits.every((hit) => hit.hit)).toBe(true);
+  }
   await shot('notifications');
   await page.route('**/api/attention/notifications/read', route => route.fulfill({ status: 500, json: {} }));
   await page.getByRole('button', { name: 'Mark all read' }).click();
@@ -174,7 +192,11 @@ test('five replies from three agents, dark desktop', async ({ page, request }, i
  const bar = page.getByRole('region', { name: 'Replies to your comments' });
  await expect(bar).toContainText('and 2 others');
  await expect(bar).toContainText('1 of 5 replies to your comments');
- await expect(page.getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Question 5' })).toContainText('Answer 5');
+ const card = page.getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Question 5' });
+ await expect(card).toContainText('Answer 5');
+ const popover = card.locator('xpath=ancestor::*[@data-popover]');
+ await expect(popover).toHaveCSS('opacity', '1');
+ await expect(popover).toHaveCSS('background-color', 'rgb(28, 28, 31)');
  await page.screenshot({ path: path.join(out, 'notifications-1440-dark.png') });
 });
 
