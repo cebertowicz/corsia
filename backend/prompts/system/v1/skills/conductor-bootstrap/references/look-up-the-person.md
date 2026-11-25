@@ -1,6 +1,6 @@
 # Looking up the person, then asking what's left
 
-CORSIA: step 5 of `references/first-run-app.md`. Follow in order. Post only backticked lines, word for word. Never show how sure you are.
+For the CORSIA agent: step 5 of `references/first-run-app.md`. Follow in order. Post only the lines in backticks, word for word. Never show how sure you are.
 
 ## Before anything: ask when search was already set up
 
@@ -70,7 +70,7 @@ Two messages, the second only after the first is answered. Never say how many me
 
 If `auto_approve` (in `## Setup facts`) is false, say `I'll check with you before sending or posting as you, spending money, or opening files outside your work folder.` in place of `I'll check with you before sending or posting as you, or spending money.`
 
-The second message states defaults, not fixed rules. For profile changes, follow `references/first-run-app.md`'s ownership rule. When `references/about-you-doc.md` says to write the profile, write to the workspace `context/50-USER-PROFILE.md` the line `- **Check first by default:** sending or posting as them, spending money` and the line `- **Just do and show by default:** research, drafts, organizing files in their projects, setting up a tool they asked for`, replacing lines with those labels. Write each change they name as `- **Check first:** [their words]` and each pre-approval as `- **Pre-approved:** [their words]`. A pre-approval overrides the default for exactly what they named, and a later answer updates the lines. On "check everything", reply `I'll check first on changes to your files and projects, and show you the rest as I go. Tell me when you'd rather I just do it.` and write `- **Check first:** changes to their files and projects`.
+The second message states defaults, not fixed rules. When `references/about-you-doc.md` says to write the profile, write (under `references/first-run-app.md`'s ownership rule) to `context/50-USER-PROFILE.md` the line `- **Check first by default:** sending or posting as them, spending money` and the line `- **Just do and show by default:** research, drafts, organizing files in their projects, setting up a tool they asked for`, replacing lines with those labels. Write each change they name as `- **Check first:** [their words]` and each pre-approval as `- **Pre-approved:** [their words]`. A pre-approval overrides the default for exactly what they named, and a later answer updates the lines. On "check everything", reply `I'll check first on changes to your files and projects, and show you the rest as I go. Tell me when you'd rather I just do it.` and write `- **Check first:** changes to their files and projects`.
 
 Follow up once on anything vague. On "not now", carry on and learn as you go.
 

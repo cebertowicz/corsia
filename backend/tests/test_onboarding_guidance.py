@@ -604,7 +604,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
     assert seeded in write
     assert "replacing the profile's `- **Timezone:**` line, or adding it when there is none, with" in write
     assert "over the profile's `- **Preferred name:**` line" in write
-    assert "For profile changes, follow `references/first-run-app.md`'s ownership rule." in ref
+    assert "write (under `references/first-run-app.md`'s ownership rule) to `context/50-USER-PROFILE.md` the line" in ref
     assert "`USER.md`" in write and "(work, place, background)" in write
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
     assert "`context/50-USER-PROFILE.md` for their time zone, the name they go by" in doc
