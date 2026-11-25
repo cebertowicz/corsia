@@ -1,7 +1,12 @@
 """Prove each declared additive migration cannot write existing rows in its fixture."""
 
+import ast
+import inspect
 import sqlite3
+import textwrap
 from contextlib import closing
+
+import pytest
 
 from infra.database import initialize_schema
 from infra.database_migrations import ADDITIVE_STEPS, MIGRATIONS, migrate_to_current
@@ -59,6 +64,39 @@ def _allowed(action, first, second, _database, _source):
 def test_every_additive_step_has_a_registered_migration_and_fixture():
     assert ADDITIVE_STEPS <= MIGRATIONS.keys()
     assert ADDITIVE_STEPS == _FIXTURES.keys()
+
+
+def _assert_literal_execute_only(function):
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    assert len(tree.body) == 1 and isinstance(tree.body[0], ast.FunctionDef)
+    definition = tree.body[0]
+    positional = definition.args.posonlyargs + definition.args.args
+    assert positional
+    connection = positional[0].arg
+    body = definition.body
+    if ast.get_docstring(definition) is not None:
+        body = body[1:]
+    for statement in body:
+        assert isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+        call = statement.value
+        assert isinstance(call.func, ast.Attribute) and call.func.attr == "execute"
+        assert isinstance(call.func.value, ast.Name) and call.func.value.id == connection
+        assert len(call.args) == 1 and not call.keywords
+        assert isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str)
+
+
+def test_declared_additive_steps_are_literal_execute_statements():
+    for version in sorted(ADDITIVE_STEPS):
+        _assert_literal_execute_only(MIGRATIONS[version])
+
+
+def test_literal_execute_proof_rejects_data_dependent_branch():
+    def branching_step(conn):
+        if conn.execute("SELECT 1").fetchone():
+            conn.execute("UPDATE sample SET value = 1")
+
+    with pytest.raises(AssertionError):
+        _assert_literal_execute_only(branching_step)
 
 
 def test_proof_rejects_executescript_implicit_commit():
