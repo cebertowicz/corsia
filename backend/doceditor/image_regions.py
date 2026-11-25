@@ -19,12 +19,11 @@ from typing import Any, Iterable, Mapping
 
 from PIL import Image
 
-from core.workspace_layout import resolve_workspace_root
 from doceditor import diagram_pins, live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.document_scope import ProjectNotFound, scope_bases
+from doceditor.image_label import image_label
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
-from infra import config
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
@@ -132,13 +131,6 @@ def reader_bases(db, thread_id: str | None) -> list[Path]:
         return scope_bases(row["project_id"] if row else None, db)
     except ProjectNotFound:
         return []
-
-
-def image_label(path: str | Path) -> str:
-    """How a refusal names an image: its path from the workspace root, never a path on this machine."""
-    resolved = Path(path).expanduser().resolve(strict=False)
-    root = resolve_workspace_root(config.WORKSPACE).resolve(strict=False)
-    return resolved.relative_to(root).as_posix() if resolved.is_relative_to(root) else resolved.name
 
 
 def checked_image(db, path: str, bases: list[Path]) -> Path:

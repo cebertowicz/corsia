@@ -20,8 +20,9 @@ from urllib.parse import unquote
 from doceditor import diagram_pins
 from doceditor.comment_action_errors import CommentActionError, diagram_changed
 from doceditor.doc_text import read_doc_text
+from doceditor.image_label import image_label
 from doceditor.image_regions import (
-    checked_image, comment_image, image_label, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
+    checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
 )
 from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context, reanchor
 
