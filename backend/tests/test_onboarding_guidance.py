@@ -415,7 +415,8 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
         "Agents get each step's instructions as it starts. When you correct something, they can change the workflow, and later runs show them whether to keep the change.",
         "You can use workflows other people have proven, and share yours if you choose.",
     ]
-    assert "Post each line as its own message" in step
+    assert "Post each line with its own `post_update`" in step
+    assert "a preference for short answers shortens your own words, never these lines, and never drops one" in FIRST_RUN_APP.read_text()
     assert all(f"`{line}`" in step for line in lines)
     assert [step.index(line) for line in lines] == sorted(step.index(line) for line in lines)
     assert "Measurement" not in step
