@@ -69,7 +69,7 @@
 		.ct-suggestion-actions { gap: var(--space-8); }
 		.ct-suggestion-actions :global(.ico-btn.lg) { min-width: var(--touch-target); height: var(--touch-target); }
 	}
-	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-decision-error { font-size: var(--text-footnote); color: var(--red-text); }
 	/* A sheet is read at arm's length: its decision labels take the body size, not the popover's compact one. */
-	:global([data-adaptive-drawer]) .ct-suggestion-actions :global(.ico-btn.lg) { font-size: var(--text-body); }
+	:global([data-adaptive-drawer]) .ct-suggestion-actions :global(.ico-btn.lg) { font-size: var(--text-subhead); }
 </style>

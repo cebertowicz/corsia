@@ -243,6 +243,21 @@ def test_the_decision_cost_grows_by_one_read_per_spawn_hop(ownership_scope):
     assert len(_decision_statements(scope, path, "deep")) == shallow + 4
 
 
+def test_plain_owner_write_adopts_legacy_with_one_owner_lookup(ownership_scope):
+    from doceditor import comments
+
+    scope = ownership_scope
+    path, artifact_id = _own_dir_doc(scope)
+    comments.create_with_status(artifact_id, body='note', client_id='legacy-owner',
+                                anchor_text='beta', from_off=6, to_off=10, db=scope['db'])
+    scope['db'].commit()
+    assert comments.get_comment('legacy-owner', db=scope['db'])['snapshot_id'] is None
+    statements = _statements(scope, lambda: _managed(scope, path, 'owner', 'changed\n'))
+    assert comments.get_comment('legacy-owner', db=scope['db'])['snapshot_id'] is not None
+    owner_lookups = [sql for sql in statements if 'relationship_state IN' in sql]
+    assert len(owner_lookups) == 1, owner_lookups
+
+
 def test_a_plain_owner_write_decides_once_and_reports_nothing(ownership_scope):
     scope = ownership_scope
     path, _ = _own_dir_doc(scope)
