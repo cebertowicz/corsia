@@ -1,10 +1,11 @@
 """Execution, cleanup and capability adapters for the browser tool family."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
-from host_access import browser_cli, browser_control
+from host_access import browser_cli, browser_control, browser_output_blanking
 from host_access.browser_identity import BrowserIdentityError
 from host_access.browser_sessions import (
     BrowserSessionCleanupError,
@@ -69,7 +70,11 @@ async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
 async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = None,
                      timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None,
                      navigation_url: str | None = None, notice: bool = True) -> str:
-    """Run a browser command, preserving owner failures as exceptions."""
+    """Run a browser command, preserving owner failures as exceptions.
+
+    The one place a browser command's text goes back to an agent: its result and any error's text have every
+    saved password blanked (C6, browser_output_blanking), once per command.
+    """
     err = _check_installed()
     if err:
         raise BrowserOwnerError(err)
@@ -77,17 +82,24 @@ async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = 
         options: dict[str, Any] = {"navigation_url": navigation_url} if navigation_url is not None else {}
         if not notice:
             options["notice"] = False
-        return await PROCESS_OWNER.run_browser(
+        result = await PROCESS_OWNER.run_browser(
             thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window, **options,
         )
     except (BrowserSessionCleanupError, BrowserSetupError) as exc:
-        raise BrowserOwnerError(exc.tool_message) from exc
+        raise BrowserOwnerError(await _blanked(exc.tool_message)) from exc
     except BrowserSessionError as exc:
-        raise BrowserOwnerError(f"Error: {exc}") from exc
+        raise BrowserOwnerError(await _blanked(f"Error: {exc}")) from exc
     except Exception as exc:
-        # The message names only the thread and the subcommand, never the other arguments; the traceback carries the exception's own text.
-        log.exception("browser command %s failed for thread %s", args[0] if args else "", thread_id)
+        # The subcommand, the thread and the exception's type only: its message and traceback can quote page
+        # text or a typed value, so neither reaches a log.
+        log.error("browser command %s failed for thread %s: %s", args[0] if args else "", thread_id, type(exc).__name__)
         raise BrowserOwnerError(f"Error: {COMMAND_FAILED}") from exc
+    return await _blanked(result)
+
+
+async def _blanked(text: str) -> str:
+    """The agent's copy of a command's text, with saved passwords blanked off the event loop."""
+    return await asyncio.to_thread(browser_output_blanking.blank_output, text)
 
 
 async def _declare_person_step(thread_id: str, instruction: str) -> str:
@@ -133,8 +145,8 @@ class BrowserCloseTool(Tool):
             return exc.tool_message
         except BrowserSessionError as exc:
             return f"Error: {exc}"
-        except Exception:
-            log.exception("browser close failed for thread %s", thread_id)
+        except Exception as exc:  # the type only: a chained error's text can quote what the page or CDP returned
+            log.error("browser close failed for thread %s: %s", thread_id, type(exc).__name__)
             return "Error: browser cleanup could not be verified. Stop retrying browser tools and inform the user."
 
 
