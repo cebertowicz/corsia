@@ -26,10 +26,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 from infra import write_effects
-from infra.database import write_transaction
+from infra.database import TransactionOwnershipError, write_transaction
 from infra.packed_rows import fetch_all
 from plans import (
-    later_fields, node_order, node_waits, plan_wake, service, status_time,
+    later_fields, node_order, node_states, node_waits, plan_wake, service, status_time,
 )
 from plans.close_next_bounds import CRITERIA_MIN_BYTES, bounded, json_bytes, title as _title
 from plans.errors import PlanError
@@ -88,24 +88,38 @@ def arm_node(connection, node_id: str) -> None:
 
 def schedule_if_top_empties(connection, node) -> None:
     """Recheck the committed plan once per transaction after above-cut work settles."""
-    if node["kind"] != "task" or node["later"]:
+    if not node_states.later_ready(connection) or node["kind"] != "task" or node["later"]:
         return
     plan_id = str(node["plan_id"])
     plan = connection.execute("SELECT owner_kind FROM plans WHERE id=?", (plan_id,)).fetchone()
     if plan is None or plan["owner_kind"] != "thread":
         return
-    write_effects.after_commit_merged(
-        connection, ("later_review_top_empty", plan_id), [plan_id],
-        lambda ids: _arm_empty_tops(connection, ids),
-    )
+    try:
+        write_effects.after_commit_merged(
+            connection, ("later_review_top_empty", plan_id), [plan_id],
+            lambda ids: _arm_empty_tops(connection, ids),
+        )
+    except TransactionOwnershipError:
+        # An unowned transaction cannot schedule the effect; the weekly review remains the backstop.
+        return
 
 
 def _arm_empty_tops(connection, plan_ids: list[str]) -> None:
     """Bring the review forward only if committed work still leaves the top empty."""
-    with write_transaction(connection, scope="later_review_empty") as db:
-        for plan_id in plan_ids:
-            rows = node_order.open_nodes_with_paths(db, plan_id)
-            tasks = [row for row, _ in rows if row["kind"] == "task"]
+    for plan_id in plan_ids:
+        later_exists = connection.execute(
+            "SELECT 1 FROM plan_nodes WHERE plan_id=? AND kind='task' AND later=1 AND "
+            f"{node_states.open_sql('plan_nodes')} LIMIT 1", (plan_id,),
+        ).fetchone()
+        if not later_exists:
+            continue
+        tasks = [row for row, _ in node_order.open_nodes_with_paths(connection, plan_id)
+                 if row["kind"] == "task"]
+        if not any(row["later"] for row in tasks) or any(not row["later"] for row in tasks):
+            continue
+        with write_transaction(connection, scope="later_review_empty") as db:
+            tasks = [row for row, _ in node_order.open_nodes_with_paths(db, plan_id)
+                     if row["kind"] == "task"]
             if not any(row["later"] for row in tasks) or any(not row["later"] for row in tasks):
                 continue
             now = service._now()

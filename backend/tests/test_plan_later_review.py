@@ -124,6 +124,19 @@ def test_review_is_armed_only_after_commit_and_not_after_rollback(db):
     assert _review_at(db, plan.id) <= service._now()
 
 
+def test_unscoped_settlement_keeps_weekly_review(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    before = _review_at(db, plan.id)
+    db.execute("UPDATE plans SET later_review_at=later_review_at WHERE id=?", (plan.id,))
+    _fail_task(db, top.id)
+    db.commit()
+    assert row(db, top.id)["state"] == "failed"
+    assert _review_at(db, plan.id) == before
+
+
 def test_settlement_with_no_later_does_not_arm(db):
     plan = owner_plan(db)
     top = task(db, plan.id, "Current work")
