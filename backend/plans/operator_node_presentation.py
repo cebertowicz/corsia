@@ -59,6 +59,9 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         # dependents remain private to their plan owner.
         "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
         "acceptance_criteria": node["acceptance_criteria"],
+        **{key: state[key] for key in (
+            "intent", "intent_is_person_comment", "intent_parent_title", "intent_owner_name", "intent_run_title",
+        )},
         "state": node["state"],
         "unmet_dependencies": list(node["unmet_dependencies"]),
         "held_by": node["held_by"],

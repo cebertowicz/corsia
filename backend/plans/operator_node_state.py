@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from plans import admission, node_states, node_time, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
-from plans import operator_node_facts as facts
+from plans import operator_node_facts as facts, operator_intent
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
     ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
@@ -236,6 +236,7 @@ def project(
     ``status_reason``, and ``execution`` has no attempts and zero counts.
     """
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
+    intent_by_node = {} if lean else operator_intent.read([str(node["id"]) for node, _plan in node_plans], db=db)
     executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
     labels, history, attempt_counts, evidence, changed, settled_because = (
         facts.NO_DETAIL if lean else facts.detail(
@@ -252,7 +253,6 @@ def project(
         detail_ids=detail_ids, stable=stable,
     ), named=stable and costs)
     states: dict[str, dict] = {}
-
     for item in projected:
         for node in item.nodes:
             execution = executions[node["id"]]
@@ -267,6 +267,7 @@ def project(
             asks_user = row_asks_user(node, review, execution)
             paused_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
             states[node["id"]] = {
+                **intent_by_node.get(node["id"], operator_intent.EMPTY),
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),

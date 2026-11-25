@@ -57,7 +57,9 @@ function isNode(v: unknown): boolean {
 	if (!isObject(v) || !isStr(v.id) || !isStrOrNull(v.parent_id) || !isNum(v.depth)) return false;
 	if (!isStr(v.kind) || !isStr(v.title) || !isStr(v.state) || !isNum(v.revision)) return false;
 	if (!isStrArray(v.unmet_dependencies) || !isStrOrNull(v.held_by)) return false;
-	if (!isStrArray(v.waiting_on)) return false;
+	if (!isStrArray(v.waiting_on) || !isStr(v.acceptance_criteria)) return false;
+	if (!isStrOrNull(v.intent) || typeof v.intent_is_person_comment !== 'boolean') return false;
+	if (!isStrOrNull(v.intent_parent_title) || !isStrOrNull(v.intent_owner_name) || !isStrOrNull(v.intent_run_title)) return false;
 	if (v.assignee !== undefined && !isStrOrNull(v.assignee)) return false;
 	if (v.workflow_step !== undefined && !isStrOrNull(v.workflow_step)) return false;
 	if (v.workflow_run !== undefined && typeof v.workflow_run !== 'boolean') return false;
