@@ -52,6 +52,8 @@ FIRST_PAGE = """<!doctype html><title>Sign in</title>
 <input id=user name=user type=email autocomplete=username>
 <button type=submit>Next</button>
 </form>"""
+# A page whose link loads the sign-in page: an agent batch can click it, then type on the page it loads.
+LINKS = """<!doctype html><title>Start</title><a id=go href=/login.html>Sign in</a>"""
 SECOND_PAGE = """<!doctype html><title>Sign in</title>
 <form method=post action=/login>
 <input id=pw name=pw type=password autocomplete=current-password>
@@ -62,7 +64,7 @@ SECOND_PAGE = """<!doctype html><title>Sign in</title>
 @contextmanager
 def sign_in_server():
     pages = {"/login.html": LOGIN, "/two.html": TWO_STEP, "/welcome.html": WELCOME,
-             "/first.html": FIRST_PAGE, "/second.html": SECOND_PAGE}
+             "/first.html": FIRST_PAGE, "/second.html": SECOND_PAGE, "/links.html": LINKS}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -325,3 +327,41 @@ async def test_an_agents_fill_on_the_username_means_no_offer(monkeypatch):
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("popup", [False, True])
+async def test_an_agent_batch_that_loads_the_sign_in_page_then_types_means_no_offer_there(monkeypatch, popup):
+    _skip_without_browser()
+    thread_id = f"login-capture-batch-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-login-capture", instance_key=uuid4().hex)
+    _quiet_password_steps(monkeypatch, [])
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with sign_in_server() as origin, wired(monkeypatch, owner, origin) as holder:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/links.html"), show_window=False,
+                                        session="new")).startswith("Error:")
+            if popup:
+                # The link opens a new page instead, and agent-browser runs the fill there.
+                await page_value(await owner.page_endpoint(thread_id), "document.getElementById('go').target = '_blank'")
+            # One batch: the click loads a new document, and the fill types into that one.
+            await owner.run(thread_id, ("batch", "click #go", f"fill #user {ACCOUNT}"), session="existing")
+            endpoint = await owner.page_endpoint(thread_id)
+            assert await page_value(endpoint, "location.pathname + ' ' + user.value") == f"/login.html {ACCOUNT}"
+            with pytest.raises(BrowserSessionError, match="asks for a password"):
+                await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            person = Person(owner, thread_id, endpoint)
+            await person.click("#pw")
+            await person.type(MARKER)
+            await person.enter()
+            await capture_settled()
+            assert holder.calls == []
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.shutdown()
+
+
+async def capture_settled() -> None:
+    while capture._tasks:
+        await asyncio.gather(*list(capture._tasks))

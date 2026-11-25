@@ -8,6 +8,34 @@ from host_access.browser_cdp import CdpClient, protocol_int
 from host_access.browser_session_state import BrowserSessionError
 
 
+# The isolated-world read of a password field and a username beside it, as [typed, username]; null when the node
+# isn't an input of this world's document. Username: an autocomplete~=username input in the field's form (or the
+# document), else a type=email one, else the last visible text, email or tel input before the field.
+READ_LOGIN = """function() {
+  if (!(this instanceof HTMLInputElement) || this.ownerDocument !== document) return null;
+  const field = this;
+  const inputs = Array.from((field.form || document).querySelectorAll('input')).filter(el => el !== field);
+  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+  const shows = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const before = inputs.filter(el => ['text', 'email', 'tel'].includes(el.type) && shows(el)
+    && (el.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING));
+  const account = inputs.find(el => tokens(el).includes('username'))
+    || inputs.find(el => el.type === 'email') || before[before.length - 1];
+  return [field.value, account ? account.value : ''];
+}"""
+# The isolated-world read of a username the person filled in: the focused input, else one in the focused
+# element's form, that is type=email or autocomplete~=username/email and not empty; null otherwise.
+READ_ACCOUNT = """(() => {
+  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+  const named = el => el instanceof HTMLInputElement && el.value !== ''
+    && (el.type === 'email' || tokens(el).includes('username') || tokens(el).includes('email'));
+  const active = document.activeElement;
+  if (named(active)) return active.value;
+  const found = active && active.form ? Array.from(active.form.elements).find(named) : undefined;
+  return found ? found.value : null;
+})()"""
+
+
 class _Silent(logging.Logger):
     """Disable websocket frame logs for isolated login reads."""
 

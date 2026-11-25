@@ -22,15 +22,17 @@ import asyncio
 import importlib
 import logging
 from dataclasses import dataclass, field
+from functools import partial
+from typing import Sequence
 from urllib.parse import urlsplit
-
-from websockets.exceptions import WebSocketException
 
 from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _QuietCdp, world as _world
-from host_access.browser_login_capture_policy import is_submit, writes_value
+from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
+from host_access.browser_login_capture_policy import is_submit, switches_tab, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
+from host_access.browser_login_capture_writes import ANY_DOCUMENT as _ANY_DOCUMENT, AgentWrites, NoWrites
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 from infra import saved_login_offers
@@ -39,36 +41,12 @@ log = logging.getLogger(__name__)
 # Measured on PR #3242 (figures in its body); one second bounds a delay that can interrupt a person's thought
 # (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
 CAPTURE_TIMEOUT = 1.0
+# An agent typing command's page watch (rule 7) opened in about 2 ms and settled in 1-5 ms on Chrome for Testing
+# 152 (PR #3242). Waiting holds the agent's command, then the pane; expiring marks every document, so the
+# session makes no offer and the person's sign-in still goes through. Five seconds is three orders above that.
+WATCH_TIMEOUT = 5.0
 _WORLD = "corsia-login-capture"
-# Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
-_ANY_DOCUMENT = ""
-
-# The isolated-world read of a password field and a username beside it, as [typed, username]; null when the node
-# isn't an input of this world's document. Username: an autocomplete~=username input in the field's form (or the
-# document), else a type=email one, else the last visible text, email or tel input before the field.
-_READ_LOGIN = """function() {
-  if (!(this instanceof HTMLInputElement) || this.ownerDocument !== document) return null;
-  const field = this;
-  const inputs = Array.from((field.form || document).querySelectorAll('input')).filter(el => el !== field);
-  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
-  const shows = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  const before = inputs.filter(el => ['text', 'email', 'tel'].includes(el.type) && shows(el)
-    && (el.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING));
-  const account = inputs.find(el => tokens(el).includes('username'))
-    || inputs.find(el => el.type === 'email') || before[before.length - 1];
-  return [field.value, account ? account.value : ''];
-}"""
-# The isolated-world read of a username the person filled in: the focused input, else one in the focused
-# element's form, that is type=email or autocomplete~=username/email and not empty; null otherwise.
-_READ_ACCOUNT = """(() => {
-  const tokens = el => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
-  const named = el => el instanceof HTMLInputElement && el.value !== ''
-    && (el.type === 'email' || tokens(el).includes('username') || tokens(el).includes('email'));
-  const active = document.activeElement;
-  if (named(active)) return active.value;
-  const found = active && active.form ? Array.from(active.form.elements).find(named) : undefined;
-  return found ? found.value : null;
-})()"""
+session_key = saved_login_offers.session_key
 
 
 @dataclass(frozen=True)
@@ -104,6 +82,7 @@ class _ThreadCapture:
     flights: list[_Flight] = field(default_factory=list)
     pending: _Pending | None = None
     marks: dict[str, None] = field(default_factory=dict)
+    watches: int = 0  # open rule 7 watches: their marks go to this session's `marks`, so the state stays
 
 
 _threads: dict[str, _ThreadCapture] = {}
@@ -120,21 +99,39 @@ def _reset_for_tests() -> None:
 
 def _prune(thread_id: str) -> None:
     state = _threads.get(thread_id)
-    if state is not None and not (state.group or state.flights or state.pending or state.marks):
+    if state is not None and not (state.group or state.flights or state.pending or state.marks or state.watches):
         _threads.pop(thread_id, None)
 
 
-async def agent_writing(thread_id: str, endpoint: str) -> None:
-    """Mark the page's current document before an agent command that can type into it runs (rule 7)."""
-    loader = _ANY_DOCUMENT
+def _mark(thread_id: str, loader: str) -> None:
+    _state(thread_id).marks[loader] = None
+
+
+async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> AgentWrites:
+    """Start rule 7's watch before an agent command runs; settle it before the pane gets the page back.
+
+    A command that can't type marks nothing. A batch that types and switches tabs marks every document.
+    """
+    if not writes_value(args):
+        return NoWrites()
+    if switches_tab(args):
+        _mark(thread_id, _ANY_DOCUMENT)
+        return NoWrites()
+    state = _state(thread_id)
+    marks, state.watches = state.marks, state.watches + 1  # a late settle can't mark the next session
+    writes = AgentWrites(marks.setdefault, WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
     try:
-        if endpoint:
-            async with _QuietCdp(endpoint) as cdp:
-                loader, _ = await _frame_tree(cdp)
-    except (BrowserSessionError, OSError, WebSocketException):
-        log.info("saved-login capture couldn't read the page an agent typed into; no offer is made in this session")
-    marks = _state(thread_id).marks
-    marks[loader] = None
+        await writes.start(endpoint)
+    except BaseException:
+        await writes.settle()
+        raise
+    return writes
+
+
+def _watch_done(thread_id: str) -> None:
+    if (state := _threads.get(thread_id)) is not None:
+        state.watches -= 1
+        _prune(thread_id)
 
 
 def _marked(thread_id: str, loader: str) -> bool:
@@ -246,7 +243,7 @@ async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple
     try:
         made = await asyncio.to_thread(saved_login_offers.offer_login, flight.session_key, login[0], login[1], login[2])
     except Exception:
-        log.warning("saved-login capture skipped a submit it couldn't read")
+        log.warning("saved-login capture couldn't hand a submit to the offer holder")
         made = False
     flight.group.offered = made
     _forget(thread_id, flight)
@@ -376,7 +373,7 @@ def session_ended(thread_id: str, session_key: str | None = None) -> None:
         state.group = None
     if (pending := state.pending) is not None and pending.session_key == session_key:
         _resolve(thread_id, confirm=False)
-    state.marks.clear()
+    state.marks = {}
     _prune(thread_id)
 
 

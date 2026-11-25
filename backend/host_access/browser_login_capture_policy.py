@@ -32,3 +32,13 @@ def writes_value(args: Sequence[str]) -> bool:
         return any(writes_value(command) for command in nested)
     # wait --fn runs a page script, which can set a field.
     return args[0] not in _NO_VALUE_COMMANDS or args[0] == "wait" and "--fn" in args
+
+
+def switches_tab(args: Sequence[str]) -> bool:
+    """Whether a batch has a tab command: loads in another tab aren't seen from the page the batch started on."""
+    if not args or args[0] != "batch":
+        return False
+    try:
+        return any(shlex.split(arg)[:1] == ["tab"] for arg in args[1:])
+    except ValueError:
+        return True
