@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+from collections.abc import AsyncIterator
 from functools import partial
 from typing import Any
 
@@ -130,6 +132,18 @@ async def _release(cdp: browser_cdp.CdpClient, loaded: bool) -> None:
                 break
             await _decide(cdp, message, get_goes_on=False)
     await cdp.call("Fetch.disable")
+
+
+@contextlib.asynccontextmanager
+async def after_history_move(owner: Any, runtime: Any, thread_id: str, command: Any, *,
+                             active: bool) -> AsyncIterator[None]:
+    """Around a back or forward: load the page again afterwards, also when the move timed out or failed,
+    since it may still have restored the page."""
+    try:
+        yield
+    finally:
+        if active:
+            await fresh_after_history(owner, runtime, thread_id, command)
 
 
 async def fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:

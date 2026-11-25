@@ -244,18 +244,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         args = ("select", args[1], args[2])
     history = saved_sign_in and not pane and args[0] in {"back", "forward"}
     browser_pane_state.page_command_starting(thread_id, tuple(args))
-    try:
-        result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-    except BaseException:
-        # A history move that timed out or failed may still have restored the page.
-        if history:
-            await browser_history.fresh_after_history(owner, runtime, thread_id, command)
-        raise
-    finally:
-        # A held pane shows nothing until this restart, so it runs however the command ends.
-        await browser_pane_state.page_command_finished(thread_id, tuple(args))
-    if history:
-        await browser_history.fresh_after_history(owner, runtime, thread_id, command)
+    async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
+        try:
+            result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+        finally:
+            # A held pane shows nothing until this restart, so it runs however the command ends.
+            await browser_pane_state.page_command_finished(thread_id, tuple(args))
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
@@ -267,11 +261,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         result = hidden
     rendered = owner._model_result(result, runtime.record)
     if saved_sign_in and not pane:
-        rendered = browser_agent_verbs.model_error(args, rendered)
-    if (saved_sign_in and not pane and args[0] in browser_agent_verbs.VERBS and not unfinished
-            and not rendered.startswith("Error:")):
-        # A page that was held by a person or the password guard never reaches the agent through a verb's result.
-        rendered = browser_agent_verbs.ACKNOWLEDGED
+        rendered = browser_agent_verbs.saved_result(args, rendered, unfinished)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until

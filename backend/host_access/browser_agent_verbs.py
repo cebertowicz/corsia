@@ -13,8 +13,8 @@ VERBS = frozenset({"press", "select", "scroll", "scrollintoview", "hover", "back
 KEYS = ("Enter", "Tab", "Shift+Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
         "Home", "End", "PageUp", "PageDown", "Space", "Backspace", "Delete")
 DIRECTIONS = ("up", "down", "left", "right")
-# The widest viewport the pane accepts (browser_pane.Appearance: 7680 px wide, 4320 high), so one scroll moves
-# at most one full screen in any direction at any size; further takes more scrolls.
+# The widest viewport width the pane accepts (browser_pane.Appearance: 7680 px wide, 4320 high), applied in
+# every direction: one scroll moves at most that many pixels; further takes more scrolls.
 MAX_SCROLL = 7680
 KEY_REFUSAL = ("press takes one of these keys only: Enter, Tab, Shift+Tab, Escape, ArrowUp, ArrowDown, "
                "ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Space, Backspace, Delete. "
@@ -104,3 +104,12 @@ def model_error(args: Sequence[str], text: str) -> str:
     if args[0] not in TARGETED or not text.startswith("Error:") or text == NOT_FOUND:
         return text
     return COVERED if " is covered by " in text else UNUSABLE
+
+
+def saved_result(args: Sequence[str], text: str, unfinished: object) -> str:
+    """What an agent's command on a saved sign-in returns: a verb that worked says only ACKNOWLEDGED."""
+    text = model_error(args, text)
+    if args[0] in VERBS and not unfinished and not text.startswith("Error:"):
+        # A page that was held by a person or the password guard never reaches the agent through a verb's result.
+        return ACKNOWLEDGED
+    return text
