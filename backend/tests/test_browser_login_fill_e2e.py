@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from types import SimpleNamespace
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -197,7 +197,7 @@ async def test_a_listener_an_agent_added_never_sees_the_value(browser, monkeypat
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
             assert text.startswith(fill.NOT_CLEAN.format(site=site_origin)), text
-            assert browser.declared == [f"Sign in to {site_origin} yourself"]
+            assert browser.declared == [f"Sign in to {urlsplit(site_origin).netloc} yourself."]
             assert posts == []
             await _after_fill_reads(browser)
         finally:
@@ -220,7 +220,7 @@ async def test_a_service_worker_an_agent_registered_on_another_page_of_the_site_
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
             assert text.startswith(fill.NOT_CLEAN.format(site=site_origin)), text
-            assert browser.declared == [f"Sign in to {site_origin} yourself"]
+            assert browser.declared == [f"Sign in to {urlsplit(site_origin).netloc} yourself."]
             assert posts == []
             await _after_fill_reads(browser)
         finally:
@@ -277,7 +277,7 @@ async def test_an_agent_network_route_makes_the_sign_in_the_persons(browser, mon
             text = await fill.fill_saved_login(browser.thread, login_id)
             browser.outputs.append(text)
             assert text.startswith(fill.NOT_CLEAN.format(site=site_origin)), text
-            assert browser.declared == [f"Sign in to {site_origin} yourself"]
+            assert browser.declared == [f"Sign in to {urlsplit(site_origin).netloc} yourself."]
             assert posts == []
             await _after_fill_reads(browser)
         finally:
@@ -335,7 +335,7 @@ async def test_a_rejected_sign_in_marks_the_login_out_of_date_and_gives_the_pers
             assert text.startswith(rejected), text
             assert posts == [{"user": USER, "matched": True}]
             assert saved_logins.get_login(login_id).status == saved_logins.STATUS_OUT_OF_DATE
-            assert browser.declared == [f"Sign in to {site_origin} yourself"]
+            assert browser.declared == [f"Sign in to {urlsplit(site_origin).netloc} yourself."]
             await _after_fill_reads(browser)
         finally:
             await browser.owner.shutdown()

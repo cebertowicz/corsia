@@ -190,7 +190,7 @@ async def test_an_out_of_date_login_gives_the_person_its_sign_in_with_the_approv
     text = await fill.fill_saved_login(THREAD, world.login_id)
     refusal = f"The saved login for {SITE} ({USER}) is out of date. The person has a step to sign in to {SITE} themselves."
     assert text == f"{refusal} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
-    assert world.owner.declared == [f"Sign in to {SITE} yourself"] and not world.typed
+    assert world.owner.declared == ["Sign in to example.com yourself."] and not world.typed
     _never_shown(world, caplog, text)
 
 
@@ -252,7 +252,7 @@ async def test_a_rejected_sign_in_calls_only_fill_failed_and_gives_the_person_th
                 f"The person has a step to sign in to {SITE} themselves.")
     assert text == f"{rejected} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
     assert saved_logins.get_login(world.login_id).status == saved_logins.STATUS_OUT_OF_DATE
-    assert world.owner.declared == [f"Sign in to {SITE} yourself"]
+    assert world.owner.declared == ["Sign in to example.com yourself."]
     _never_shown(world, caplog, text)
 
 
@@ -350,7 +350,7 @@ async def test_a_get_sign_in_form_is_refused_before_any_read_and_is_the_persons_
     text = await fill.fill_saved_login(THREAD, world.login_id)
     lead = fill.REFUSED["get_form"].format(site=SITE)
     assert text == f"{lead} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
-    assert world.owner.declared == [f"Sign in to {SITE} yourself"]
+    assert world.owner.declared == ["Sign in to example.com yourself."]
     assert "read" not in world.steps and "mark" not in world.steps and not world.typed
     _never_shown(world, caplog, text)
 

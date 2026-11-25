@@ -258,7 +258,7 @@ async def _result(owner: Any, thread_id: str, login: saved_logins.SavedLogin, st
 async def _person_step(owner: Any, thread_id: str, login: saved_logins.SavedLogin, lead: str) -> str:
     """Give the sign-in to the person; `lead` with the step's text, or DECLARATION_NOT_RECORDED."""
     try:
-        await owner.declare_person_step(thread_id, f"Sign in to {login.site} yourself")
+        await owner.declare_person_step(thread_id, f"Sign in to {urlsplit(login.site).netloc} yourself.")
     except BrowserSessionError as exc:
         text = str(exc)
         if text in {browser_control.PERSON_STEP_DECLINED, browser_control.PASSWORD_DECLINED}:
