@@ -6,6 +6,7 @@
 	import './DocViewer.css';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import ReviewBar from './ReviewBar.svelte';
+	import { createReviewBarState } from '$lib/reviewBarState.svelte';
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
@@ -27,6 +28,7 @@
 
 	type ImageState = 'loading' | 'ready' | 'error';
 
+	const reviewBarState = createReviewBarState();
 	let imageState = $state<ImageState>('loading');
 	let src = $state<string | null>(null);
 	let revision = $state<string | null>(null);
@@ -106,7 +108,7 @@
 
 <!-- The canvas ends above the review bar's floating capsule on a phone, so the capsule never covers its edge or focus ring. -->
 <div class="image-viewer" style:--capsule-clearance="{capsuleClearance}px">
-	<ReviewBar {artifactId} {draftOpen} suppressed={sheetUp} bind:capsuleClearance />
+	<ReviewBar {artifactId} bar={reviewBarState} {draftOpen} suppressed={sheetUp} bind:capsuleClearance />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -121,7 +123,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {target} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen bind:sheetUp {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} commentTaskBar={reviewBarState} {target} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen bind:sheetUp {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

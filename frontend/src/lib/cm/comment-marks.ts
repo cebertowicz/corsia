@@ -153,6 +153,17 @@ export function coveredByMove(view: EditorView, from: number, before: Box | null
 	return { band, covered: !!before && within(box, before) && !within(box, band) };
 }
 
+/** Track the previous visible band while a sheet opens or moves. */
+export function createSheetCoverage() {
+	let before: Box | null = null;
+	return (view: EditorView | undefined, from: number, opening: boolean): boolean => {
+		if (!view) return opening;
+		const { band, covered } = coveredByMove(view, from, opening ? null : before);
+		before = band;
+		return opening || covered;
+	};
+}
+
 /** The frame watch of the jump that last moved the reader: one at a time, so a new jump retires the previous one. */
 const placedIn = new WeakMap<EditorView, () => void>();
 

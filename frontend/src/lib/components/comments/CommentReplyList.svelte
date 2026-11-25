@@ -98,7 +98,7 @@
 	.ct-reply { display: flex; flex-direction: column; gap: var(--space-1); }
 	/* One line, as the thread's own row: the name truncates in the middle; the time and New keep their width. */
 	.ct-msg-meta { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-	.ct-msg-author { display: flex; min-width: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--text-secondary); white-space: nowrap; }
+	.ct-msg-author { display: flex; min-width: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); white-space: nowrap; }
 	.ct-at { flex: none; font-size: var(--text-caption); color: var(--text-tertiary); white-space: nowrap; }
 	.ct-msg-meta > :global(.ct-new) { flex: none; white-space: nowrap; }
 

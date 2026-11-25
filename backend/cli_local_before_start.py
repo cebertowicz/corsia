@@ -57,12 +57,14 @@ def _quiet_logs() -> Path:
     from loguru import logger
 
     from infra.config import LOGS_DIR
+    from infra.log_files import nofollow_log_opener
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     path = Path(LOGS_DIR) / LOG_NAME
+    log_file = open(path, "a", encoding="utf-8", opener=nofollow_log_opener)
     logger.remove()
-    logger.add(str(path), level="INFO", diagnose=False)  # frame values can hold keys (infra.log_locals)
-    logging.basicConfig(filename=str(path), level=logging.INFO, force=True)
+    logger.add(log_file, level="INFO", diagnose=False)  # frame values can hold keys (infra.log_locals)
+    logging.basicConfig(stream=log_file, level=logging.INFO, force=True)
     return path
 
 

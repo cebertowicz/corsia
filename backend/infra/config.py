@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
+from infra.log_files import logs_dir
 from infra.platform_paths import (
     LegacyRuntimePaths,
     WorkspaceSelection,
@@ -281,7 +282,12 @@ _OP_DIR = STATE_ROOT
 DB_PATH, ANALYTICS_DB_PATH, UPLOADS_DIR = runtime_db_paths(_OP_DIR)
 # CORSIA's own captured log records (``infra.otel_logs``); never corsia.db.
 OTEL_LOGS_DB_PATH = _OP_DIR / "otel_logs.db"
-LOGS_DIR = _OP_DIR / "logs"
+# A disposable test instance (CORSIA_TEST_MODE=1; the real launchers unset it)
+# keeps every log under its own state root: it must never write the person's
+# ~/Library/Logs, and the agent sandbox that starts such instances denies it.
+LOGS_DIR = _OP_DIR / "logs" if os.environ.get("CORSIA_TEST_MODE") == "1" else logs_dir(_OP_DIR)
+# Lifecycle result files remain inside the state floor.
+STATE_LOGS_DIR = _OP_DIR / "logs"
 RUNTIME_DIR = _OP_DIR / "runtime"
 FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 

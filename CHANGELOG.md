@@ -10,9 +10,17 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A host access approval now shows in chat as Host access with its time left, in plain text, and Revoke host access in its drawer is a text button; before, it was a shield icon and a countdown in an amber outline, and Revoke was a red button.
 - A host access request now shows its details as plain labelled sections, with Reject as a text button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
+- A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
+- A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
+- Activity opens review documents even when they no longer appear in the asking chat's files.
+- Activity shows instructions for tasks assigned to you.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
+- Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
+- If an approved host-access request cannot start, CORSIA now says why and what to do next.
+- On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
+- Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
 

@@ -15,6 +15,7 @@ import shutil
 import sys
 from typing import Iterable
 
+from infra.log_files import logs_dir
 from tools.host_path_resolution import (
     canonical,
     contains,
@@ -82,6 +83,11 @@ class ProtectedHostPathPolicy:
         return self.home / ".ssh"
 
     @property
+    def logs_root(self) -> Path:
+        """The macOS location for readable, non-writable CORSIA logs."""
+        return self.home / "Library" / "Logs" / "CORSIA"
+
+    @property
     def private_roots(self) -> tuple[Path, ...]:
         return (
             self.home / ".corsia",
@@ -120,8 +126,6 @@ class ProtectedHostPathPolicy:
             for path in (
                 *_CONTROL_FILES,
                 self.state_root / "runtime" / "corsia-restart.signal",
-                self.state_root / "logs" / "restart.log",
-                self.state_root / "logs" / "self-restart.log",
             )
         )
 
@@ -182,6 +186,8 @@ class ProtectedHostPathPolicy:
         if not for_write:
             return None
 
+        if sys.platform == "darwin" and resolution_touches(self.logs_root, path):
+            return "CORSIA log files are read-only in protected mode."
         if any(contains(root, candidate) for root in self.generated_roots):
             return "CORSIA manages the context and skills files under .corsia, so they cannot be changed in protected mode."
 
@@ -234,6 +240,8 @@ class ProtectedHostPathPolicy:
         candidate = canonical(path)
         if contains(self.state_root, candidate):
             return self._state_denial()
+        if for_write and sys.platform == "darwin" and resolution_touches(self.logs_root, path):
+            return "CORSIA log files are read-only in protected mode."
         return self.denial(candidate, for_write=for_write)
 
     def denial_guidance_for_output(self, text: str, cwd: Path | None = None) -> str | None:
@@ -270,9 +278,18 @@ class ProtectedHostPathPolicy:
         ssh = self.ssh_root
         launch_agents = self.home / "Library" / "LaunchAgents"
         denied_roots = (self.state_root, *self.private_roots)
+        instance_logs = logs_dir(self.state_root, home=self.home, platform="darwin")
+        # Safehouse's base profile denies Library/Logs. Put the narrow read
+        # grant before our floors so state and credential denials still win.
         lines = [
-            f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))'
-            for path in denied_roots
+            f'(allow file-read-metadata (literal "{sandbox_literal(self.logs_root.parent)}"))',
+            f'(allow file-read-metadata (literal "{sandbox_literal(self.logs_root)}"))',
+            f'(allow file-read* (subpath "{sandbox_literal(instance_logs)}"))',
+            f'(deny file-write* (subpath "{sandbox_literal(self.logs_root)}"))',
+            *(
+                f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))'
+                for path in denied_roots
+            ),
         ]
         lines.append(self.hard_floor_sandbox_rules())
         if self.generated_profile is not None:

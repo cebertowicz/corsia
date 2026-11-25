@@ -47,7 +47,7 @@ async def test_startup_removes_only_terminal_result_files(isolated_db, monkeypat
     invalid = tmp_path / "lifecycle-not-an-operation.result"
     for path in (terminal, active, unknown, invalid):
         path.write_text("result")
-    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
+    monkeypatch.setattr(config, "STATE_LOGS_DIR", tmp_path)
 
     async def no_work(*_args):
         return None

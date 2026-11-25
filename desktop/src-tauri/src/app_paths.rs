@@ -5,7 +5,10 @@
 // same rule as the backend's `default_state_root()`. `CORSIA_STATE_DIR` stays
 // the one exact state-root override, for tests and scripted runs.
 
+use sha2::{Digest, Sha256};
+
 use std::{
+    collections::VecDeque,
     env,
     ffi::OsString,
     fs::{self, File, OpenOptions},
@@ -23,6 +26,52 @@ pub fn app_dir_for_home(home: &Path) -> PathBuf {
     home.join("Library")
         .join("Application Support")
         .join(APP_FOLDER)
+}
+
+/// Resolve existing symlinks even when the state folder has not yet been created.
+fn canonical_state(path: &Path) -> io::Result<PathBuf> {
+    let absolute = if path.is_absolute() { path.to_path_buf() } else { env::current_dir()?.join(path) };
+    let mut pending: VecDeque<_> = absolute.components().map(|part| part.as_os_str().to_owned()).collect();
+    let mut resolved = PathBuf::new();
+    let mut links = 0;
+    while let Some(part) = pending.pop_front() {
+        if part == "/" { resolved = PathBuf::from("/"); continue; }
+        if part == "." { continue; }
+        if part == ".." { resolved.pop(); continue; }
+        resolved.push(&part);
+        match fs::symlink_metadata(&resolved) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                links += 1;
+                if links > 40 { return Err(io::Error::new(io::ErrorKind::InvalidInput, "too many state path symlinks")); }
+                let target = fs::read_link(&resolved)?;
+                resolved.pop();
+                for component in target.components().rev() {
+                    pending.push_front(component.as_os_str().to_owned());
+                }
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(resolved)
+}
+
+/// Resolve a log for the state root; the source-install backend log stays in
+/// its original place on non-macOS platforms.
+pub(crate) fn log_path(home: &Path, state: &Path, name: &str) -> Result<PathBuf, String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(if name == "backend.log" { state.join(name) } else { state.join("logs").join(name) });
+    }
+    let canonical = canonical_state(state).map_err(|error| format!("could not resolve state folder: {error}"))?;
+    let digest = Sha256::digest(canonical.as_os_str().as_encoded_bytes());
+    let key: String = digest[..6].iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(home.join("Library").join("Logs").join(APP_FOLDER).join(key).join(name))
+}
+
+pub(crate) fn home_for_app_dir(app_dir: &Path) -> Result<&Path, String> {
+    app_dir.parent().and_then(Path::parent).and_then(Path::parent)
+        .ok_or_else(|| "could not resolve home from the CORSIA app folder".into())
 }
 
 pub(crate) fn state_dir_with_override(
@@ -224,6 +273,32 @@ fn lock_update_now(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn log_path_matches_shared_vector() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../../../backend/tests/fixtures/log-folder-vector.json")).unwrap();
+        let state = Path::new(vector["state_root"].as_str().unwrap());
+        let expected = vector["folder"].as_str().unwrap();
+        let path = log_path(Path::new("/test-home"), state, "service.log").unwrap();
+        assert_eq!(path.parent().unwrap().file_name().unwrap(), expected);
+        let temp = tempfile::tempdir().unwrap();
+        let alias = temp.path().join("state-alias");
+        std::os::unix::fs::symlink(state, &alias).unwrap();
+        let via_alias = log_path(Path::new("/test-home"), &alias, "service.log").unwrap();
+        assert_eq!(via_alias.parent().unwrap().file_name().unwrap(), expected);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn canonical_state_resolves_missing_target_of_symlink() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("not-yet-created");
+        let alias = home.path().join("alias");
+        symlink(&target, &alias).unwrap();
+        assert_eq!(canonical_state(&alias).unwrap(), canonical_state(&target).unwrap());
+    }
 
     #[test]
     fn app_folder_is_corsia_with_a_state_child_never_the_legacy_identifier() {

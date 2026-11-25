@@ -103,6 +103,7 @@ def _feedback_text(before: bytes, after: bytes) -> bool:
 def prepare_owner_report(
     authority: WriteAuthority | None, artifact: dict | None, *, path: Path,
     before: bytes | None, after: bytes, db, classification: str | None = None,
+    suppress_feedback: bool = False,
 ) -> dict:
     """Prepare the classification, diff and feedback for one allowed edit, before BEGIN.
 
@@ -118,7 +119,7 @@ def prepare_owner_report(
     payload = {"classification": classification, "diff": capped_unified_diff(path, before, after),
                "feedback": None, "owner": dict(owner) if owner else None}
     recipient = str(owner["parent_thread_id"] if owner else authority.owner or "").strip()
-    if classification == "content" and recipient and artifact is not None and _feedback_text(before, after):
+    if not suppress_feedback and classification == "content" and recipient and artifact is not None and _feedback_text(before, after):
         kind, author, display = _actor_display(db, authority.actor)
         kwargs = dict(artifact_id=str(artifact["id"]), recipient_id=recipient, author_kind=kind,
                       author_id=author, actor_display=display, path=path, before=before, after=after)
@@ -183,6 +184,7 @@ def report_owner_write(
 
 def report_plain_write(
     authority: WriteAuthority | None, path: Path, before: bytes | None, *, thread_id: str, db,
+    suppress_feedback: bool = False,
 ) -> str | None:
     """Report a landed plain write (a file-tool write or save outside ``shared/``) in its own transaction."""
     if authority is None or not authority.reaches_owner or authority.artifact_id is None:
@@ -191,7 +193,8 @@ def report_plain_write(
     if artifact is None:
         return None
     after = path.read_bytes()
-    prepared = prepare_owner_report(authority, artifact, path=path, before=before, after=after, db=db)
+    prepared = prepare_owner_report(authority, artifact, path=path, before=before, after=after, db=db,
+                                    suppress_feedback=suppress_feedback)
     with write_transaction(db, scope="report_plain_write") as connection:
         return report_owner_write(authority, artifact, path=path, before=before, after=after,
                                   thread_id=thread_id, db=connection, prepared=prepared)
@@ -206,6 +209,7 @@ def record_post_write_events(
     actor_thread_id: str,
     db,
     prepared: dict | None = None,
+    suppress_feedback: bool = False,
 ) -> None:
     """Record a governed shared write's outside-tool change and owner report before it commits."""
     relative = shared.authority.path_rel if shared.authority else shared.path.as_posix()
@@ -223,6 +227,7 @@ def record_post_write_events(
         )
     if prepared is None:
         prepared = prepare_owner_report(shared.authority, artifact, path=shared.path, before=before,
-                                        after=after, db=db, classification=shared.classification)
+                                        after=after, db=db, classification=shared.classification,
+                                        suppress_feedback=suppress_feedback)
     report_owner_write(shared.authority, artifact, path=shared.path, before=before, after=after,
                        thread_id=actor_thread_id, db=db, prepared=prepared)

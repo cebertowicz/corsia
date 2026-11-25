@@ -107,7 +107,10 @@ app_mode_runtime_identity() {
     CORSIA_STATE_DIR="${CORSIA_STATE_DIR:-$_corsia_app_state_root}"
     export CORSIA_WORKSPACE CORSIA_STATE_DIR
     # The launcher sends the service's output here.
-    BACKEND_LOG="${BACKEND_LOG:-$CORSIA_STATE_DIR/logs/service.log}"
+    if [ -z "${BACKEND_LOG:-}" ]; then
+        LOGS_DIR="$(corsia_logs_dir)" || return 1
+        BACKEND_LOG="$LOGS_DIR/service.log"
+    fi
 }
 
 # CFBundleShortVersionString+CFBundleVersion of the bundle at $1.
