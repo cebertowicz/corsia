@@ -221,12 +221,11 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
             current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
-    if not pane:
-        # Only a command the guard let through puts the agent in the page, and marks it against a saved-login fill.
-        await browser_fill_marks.before_agent_command(thread_id, runtime.record.session, endpoint, args, navigation=navigation)
-        browser_pane_state.agent_acted(thread_id)
-    # Capture marks every document a typing command passes through (browser_login_capture_writes).
-    async with await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes:
+    # A command the guard let through marks against a saved-login fill; capture marks each document typing passes through.
+    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation) as finished,
+                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes):
+        if not pane:
+            browser_pane_state.agent_acted(thread_id)
         if shared_write:
             try:
                 return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
@@ -248,6 +247,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
             try:
                 result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+                finished(not unfinished and not result.timed_out)
             finally:
                 # Rule 7's marks land before the held pane restarts, and it restarts however the command ends.
                 await writes.settle(then=partial(browser_pane_state.page_command_finished, thread_id, tuple(args)))

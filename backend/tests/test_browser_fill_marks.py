@@ -156,6 +156,54 @@ async def test_a_route_marks_its_session_until_the_browser_closes(on_page):
     assert not marks.site_marked(THREAD, "s1", "example.com")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after", [("L2", "example.com"), ("L2", "other.test"), None])
+async def test_a_script_whose_page_changed_or_went_unreadable_during_it_marks_the_session(on_page, after):
+    # A navigation that commits before the script runs (an open that didn't wait, a self-redirect, `wait --fn`
+    # evaluating across loads) puts the script in a document the read before it never saw.
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        on_page["page"] = after
+        finished(True)
+    assert marks.session_marked(THREAD, "s1") and not marks.session_marked(THREAD, "s2")
+    # A later script that finishes on one document never clears the session mark.
+    on_page["page"] = ("L3", "example.com")
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        finished(True)
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_script_that_finished_in_the_document_it_marked_leaves_the_session_unmarked(on_page):
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("wait", "--fn", "window.ready")) as finished:
+        finished(True)
+    assert marks.scripted(THREAD, "L1") and not marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", [None, False])
+async def test_a_script_that_didnt_finish_marks_the_session(on_page, report):
+    # A timed-out command may still be running in the browser, in whatever document it reaches next.
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")) as finished:
+        if report is not None:
+            finished(report)
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_script_command_that_raised_marks_the_session(on_page):
+    with pytest.raises(RuntimeError):
+        async with marks.agent_command(THREAD, "s1", "ws://page", ("eval", "1")):
+            raise RuntimeError("down")
+    assert marks.session_marked(THREAD, "s1")
+
+
+@pytest.mark.asyncio
+async def test_a_command_with_no_script_is_not_read_again(on_page):
+    async with marks.agent_command(THREAD, "s1", "ws://page", ("click", "@e1")):
+        on_page["page"] = None
+    assert not marks.session_marked(THREAD, "s1") and not marks.scripted(THREAD, "L1")
+
+
 def test_an_unread_document_counts_as_scripted():
     assert marks.scripted(THREAD, "")
 
@@ -185,7 +233,7 @@ def tool_path(synthetic_browser, monkeypatch, on_page):
 
     async def recording(thread_id, session, endpoint, args, *, navigation=False):
         calls.append((session, tuple(args), navigation))
-        await real(thread_id, session, endpoint, args, navigation=navigation)
+        return await real(thread_id, session, endpoint, args, navigation=navigation)
 
     monkeypatch.setattr(marks, "before_agent_command", recording)
     return calls
@@ -221,6 +269,24 @@ async def test_an_agent_eval_of_the_same_navigation_text_still_marks(tool_path, 
         assert await browser_runtime._run(["eval", NAVIGATION], thread_id=THREAD) == "ok"
         assert tool_path[-1][1:] == (("eval", NAVIGATION), False)
         assert not _clean(tool_path) and marks.scripted(THREAD, "L1")
+    finally:
+        await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_eval_whose_page_navigated_during_it_marks_the_session(tool_path, synthetic_browser, monkeypatch):
+    from tools import browser_runtime
+
+    reads = iter([("L1", "example.com"), ("L2", "example.com")])
+
+    async def page(_endpoint):
+        return next(reads)
+
+    try:
+        await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
+        monkeypatch.setattr(marks, "_page", page)
+        assert await browser_runtime._run(["eval", "1"], thread_id=THREAD) == "ok"
+        assert marks.session_marked(THREAD, tool_path[-1][0])
     finally:
         await synthetic_browser.owner.shutdown()
 

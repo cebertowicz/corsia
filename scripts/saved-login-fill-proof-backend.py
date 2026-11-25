@@ -84,7 +84,8 @@ def main() -> None:
 
     def fill(thread_id: str, login_id: str) -> str:
         coroutine = browser_login_fill.fill_saved_login(thread_id, login_id)
-        return asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=180)
+        # No limit of its own: the fill's waits are already bounded (browser_login_fill.SETTLE_LIMIT).
+        return asyncio.run_coroutine_threadsafe(coroutine, loop).result()
 
     threading.Thread(target=_commands, args=(saved_login_fills, saved_logins, fill), daemon=True).start()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=args.port))

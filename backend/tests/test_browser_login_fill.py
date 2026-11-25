@@ -298,8 +298,13 @@ async def test_every_end_after_typing_began_without_a_known_result_writes_one_un
     else:
         monkeypatch.setattr(fill, "_settled", raises)
     called = _results(monkeypatch)
-    await fill.fill_saved_login(THREAD, world.login_id)
+    text = await fill.fill_saved_login(THREAD, world.login_id)
     assert called == ["fill_unknown"] and _audit(world.login_id) == ["unknown"]
+    # The text agrees with the row: once the value may be in the page, nothing says it wasn't filled.
+    status = {"unknown": "unknown", "settle_raises": "unknown", "unsubmitted": "unsubmitted",
+              "type_changed": "changed", "type_raises": "uncertain", "submit_raises": "uncertain"}[end]
+    line = fill.UNKNOWN if status == "unknown" else fill.REFUSED[status]
+    assert text == line.format(site=SITE, username=USER)
 
 
 @pytest.mark.asyncio
@@ -520,7 +525,16 @@ async def test_the_result_waits_for_the_page_to_settle_as_the_password_step_does
         return browser_cdp.PasswordProbe(visit, host, frozenset({1}) if shown else frozenset(), "T1",
                                          present_nodes=frozenset())
 
+    # A clock that moves only by the settle's own sleeps, so a loaded machine can't stretch a 0.01 s sleep
+    # past REPROBE_EVERY and settle on the page before it changed.
+    now = [0.0]
+
+    async def sleep(delay):
+        now[0] += delay
+        await asyncio.sleep(0)
+
     monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+    monkeypatch.setattr(fill, "asyncio", SimpleNamespace(sleep=sleep, get_running_loop=lambda: SimpleNamespace(time=lambda: now[0])))
     tracker = page.Requests()
     tracker.seen = requests_seen
     assert await fill._settled(ENDPOINT, "example.com", tracker) == expected

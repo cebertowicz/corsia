@@ -51,6 +51,8 @@ REFUSED = {
     "gone": "The saved login wasn't filled: it's no longer saved.",
     "page": ("The saved login for {site} wasn't filled: the page didn't respond as expected. Take a snapshot to see "
              "where it is."),
+    "uncertain": ("The saved login for {site} ({username}) may be in the page, and its form may have been sent: the "
+                  "page didn't respond as expected. Take a snapshot to see where the page is."),
     "unsubmitted": ("The saved login for {site} was filled, but its form couldn't be sent. Take a snapshot and "
                     "use the page's sign-in button."),
 }
@@ -151,12 +153,20 @@ async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logi
         if status == "no_grant":
             return status
         try:
-            # From here the value may be in the page, so every end records a result exactly once.
+            # From here the value may be in the page, so every end records a result exactly once, and a failure
+            # is never reported as nothing filled: 'uncertain' until the submit answers, then 'unknown' until
+            # the page settles.
             if status == "typed":
-                status = "unsubmitted"
+                status = "uncertain"
                 requests.submitted(asyncio.get_running_loop().time())
                 if await page.submit(cdp, form) in {"enter", "clicked"}:
+                    status = "unknown"
                     status = await _settled(endpoint, domain, requests)
+                else:
+                    status = "unsubmitted"
+            return status
+        except Exception as exc:  # noqa: BLE001 - reduced to its type; the result is the status reached so far
+            log.warning("saved-login fill stopped after typing began: %s", type(exc).__name__)
             return status
         finally:
             if status not in _RESULT_KNOWN:
@@ -173,7 +183,7 @@ async def _record_unknown(thread_id: str, login: saved_logins.SavedLogin) -> Non
 
 
 async def _type(cdp: browser_cdp.CdpClient, form: page.SignInForm, thread_id: str, login: saved_logins.SavedLogin) -> str:
-    """'no_grant' when nothing was read, so nothing was typed; else type_values's status, or 'page'."""
+    """'no_grant' when nothing was read, so nothing was typed; else type_values's status, or 'uncertain'."""
     text = await asyncio.to_thread(_saved_value, thread_id, login.id)
     if text is None:
         return "no_grant"
@@ -181,7 +191,7 @@ async def _type(cdp: browser_cdp.CdpClient, form: page.SignInForm, thread_id: st
         return await page.type_values(cdp, form, login.username, text)
     except Exception as exc:  # noqa: BLE001 - the error is reduced to its type; the value never leaves here
         log.warning("saved-login fill couldn't type: %s", type(exc).__name__)
-        return "page"
+        return "uncertain"
     finally:
         del text
 

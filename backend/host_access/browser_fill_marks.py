@@ -11,6 +11,10 @@ A saved login is filled only on a clean document (browser_login_fill). Before ea
   registrable domain) in this session. A reload or navigation commits a new, clean document, but a script can
   leave stored state (a service worker, storage) that reaches every page of its site, so a fill on a marked
   site is not clean even after a reload. A page whose document or address can't be read marks the session.
+  The page is read again after such a command (agent_command): a navigation that commits before the script runs
+  (an open that didn't wait for its load, a page that redirects itself, `wait --fn` evaluating across loads)
+  puts the script in a document the first read never saw, so a different or unreadable document after it, or a
+  command that didn't finish (it may still be running in the browser), marks the session.
 
 Marks are kept until the browser closes (forget), with no cap: each is one identity per agent script command,
 freed with the session, and forgetting one could make a live document look clean. Only identities are kept
@@ -20,7 +24,8 @@ from __future__ import annotations
 
 import logging
 import shlex
-from typing import Sequence
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Callable, Sequence
 
 from websockets.exceptions import WebSocketException
 
@@ -77,26 +82,63 @@ def outlives_document(args: Sequence[str]) -> bool:
     return args[0] not in _DOCUMENT_SCRIPT_COMMANDS
 
 
+@asynccontextmanager
+async def agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str], *,
+                        navigation: bool = False) -> AsyncIterator[Callable[[bool], None]]:
+    """Mark before an agent command (before_agent_command), and after it check the document its script ran in.
+
+    The body calls the yielded function with True once the command finished in the browser. A command that
+    marked one document marks the session when it wasn't reported finished (it raised, timed out, or took
+    another route), or when the page's document afterwards can't be read or isn't the one marked.
+    """
+    loader = await before_agent_command(thread_id, session, endpoint, args, navigation=navigation)
+    done = False
+
+    def finished(ok: bool) -> None:
+        nonlocal done
+        done = ok
+
+    try:
+        yield finished
+    finally:
+        if loader:
+            await _after(thread_id, session, endpoint, loader, finished=done)
+
+
 async def before_agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str], *,
-                               navigation: bool = False) -> None:
+                               navigation: bool = False) -> str:
     """Mark the session, or the page's document and site, before an agent command that can reach them.
 
-    `navigation` is browser_open's own navigation (browser_session_commands.run's trusted_navigation): a
-    server-built eval that only sets the address, so it runs no script of the agent's and marks nothing. The
-    same text sent by an agent has no navigation and marks as any eval does.
+    Returns the document (loader id) marked, or "" when none was. `navigation` is browser_open's own
+    navigation (browser_session_commands.run's trusted_navigation): a server-built eval that only sets the
+    address, so it runs no script of the agent's and marks nothing. The same text sent by an agent has no
+    navigation and marks as any eval does.
     """
     if navigation:
-        return
+        return ""
     if outlives_document(args) or (bool(args) and args[0] == "batch" and runs_script(args)):
         _session_marks.add((thread_id, session))
     elif runs_script(args):
         page = await _page(endpoint)
         if page is None:
             _session_marks.add((thread_id, session))
-            return
+            return ""
         loader, domain = page
         _scripted.setdefault(thread_id, set()).add(loader)
         _site_marks.add((thread_id, session, domain))
+        return loader
+    return ""
+
+
+async def _after(thread_id: str, session: str | None, endpoint: str, loader: str, *, finished: bool) -> None:
+    """Mark the session unless the command finished and the page still shows the document marked before it."""
+    try:
+        page = await _page(endpoint) if finished else None
+    except BaseException:
+        _session_marks.add((thread_id, session))
+        raise
+    if page is None or page[0] != loader:
+        _session_marks.add((thread_id, session))
 
 
 async def _page(endpoint: str) -> tuple[str, str] | None:
