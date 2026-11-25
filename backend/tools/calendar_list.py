@@ -30,7 +30,7 @@ RANGE_TOO_LARGE = "Ask for at most 31 days at a time."
 NO_OPEN_DRAFT = "Save the invite again with calendar_draft_invite and show the person."
 BAD_DOCUMENT = (
     "Not sent: the invite draft document isn't in the draft format. Save it again with "
-    "calendar_draft_invite, show the person, and wait for their reply."
+    "calendar_draft_invite and show the person."
 )
 STILL_SENDING = (
     "Not sent: an earlier send of this invite didn't finish, so it may already have gone out. "
@@ -184,8 +184,8 @@ class CalendarSendInviteTool(Tool):
 
     @property
     def description(self) -> str:
-        return ("Send a saved invite draft, from the account it was drafted from, after the person "
-                "says to send it; attendees get emails")
+        return ("Send a saved invite draft, from the account it was drafted from, when the person "
+                "wants it sent; attendees get emails")
 
     @property
     def parameters(self) -> dict[str, Any]:

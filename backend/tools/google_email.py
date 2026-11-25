@@ -47,8 +47,8 @@ log = logging.getLogger(__name__)
 
 NO_OPEN_DRAFT = "There is no open draft with that id in this conversation."
 BAD_DOCUMENT = (
-    "Not sent: the draft document isn't in the draft format. Save it again with email_draft, "
-    "show the person, and wait for their reply."
+    "Not sent: the draft document isn't in the draft format. Save it again with email_draft "
+    "and show the person."
 )
 STILL_SENDING = (
     "Not sent: an earlier send of this draft didn't finish, so it may already have gone out. "
@@ -69,7 +69,7 @@ OTHER_ACCOUNT = (
 )
 NO_ACCOUNT = (
     "Not sent: this draft isn't tied to an email account. Save it again with email_draft and "
-    "account_id, show the person, and wait for their reply."
+    "account_id, and show the person."
 )
 GATE = Gate("email_send", STILL_SENDING, "Not sent: couldn't check the draft. Try again.")
 
@@ -93,13 +93,13 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
 
 UNGUARDED_REPLY = (
     "Not sent: this reply draft has no record of when its conversation was last read. Save it "
-    "again with email_draft, then wait for the person's reply."
+    "again with email_draft."
 )
 
 
 GUARD_GUIDANCE = (
     "If message text is withheld, use email_read or ask the person to look in their mail app. "
-    "For new mail, save a new draft and wait for the person's reply. "
+    "For new mail, save a new draft. "
 )
 
 
@@ -302,7 +302,7 @@ class EmailSendTool(Tool):
             if guard_read_at is not None:
                 original, newer = await new_arrival(backend, str(account["id"]), str(target["reply_to"]), guard_read_at)
                 if newer:
-                    return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft and wait for the person's reply."
+                    return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft."
             quote_body = await backend.fetch_body(str(account["id"]), original.message_id) if original else None
             body = str(message.get_content())
             face, size, _ = await _font(backend, str(account["id"]))

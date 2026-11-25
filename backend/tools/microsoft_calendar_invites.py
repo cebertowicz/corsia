@@ -92,7 +92,7 @@ def _graph_utc(value: datetime) -> str:
 
 BAD_CALENDAR_DRAFT = (
     "This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with "
-    "microsoft_calendar_draft, show the person, and wait for their reply."
+    "microsoft_calendar_draft and show the person."
 )
 
 

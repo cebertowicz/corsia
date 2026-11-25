@@ -245,7 +245,7 @@ async def test_calendar_send_refuses_a_legacy_raw_event_draft(microsoft, workspa
     assert await MicrosoftCalendarCreateTool().execute(
         _thread_id=THREAD, account_id=microsoft, draft_id=legacy["draft_id"], revision=legacy["revision"],
     ) == ("Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft "
-          "with microsoft_calendar_draft, show the person, and wait for their reply.")
+          "with microsoft_calendar_draft and show the person.")
     assert calls == []
 
 
@@ -350,7 +350,7 @@ async def test_calendar_create_claims_before_graph_and_update_refuses_blank_even
     assert await MicrosoftCalendarUpdateTool().execute(
         _thread_id=THREAD, account_id=microsoft, draft_id=update["draft_id"], revision=update["revision"],
     ) == ("Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft "
-          "with microsoft_calendar_draft, show the person, and wait for their reply.")
+          "with microsoft_calendar_draft and show the person.")
     assert len(calls) == 1
 
 

@@ -76,18 +76,17 @@ def test_first_description_lines_and_email_refusal_bytes_are_pinned():
         "person to review; nothing is sent, and it is later sent from the same account"
     )
     assert CalendarSendInviteTool().description.splitlines()[0] == (
-        "Send a saved invite draft, from the account it was drafted from, after the person says to "
-        "send it; attendees get emails"
+        "Send a saved invite draft, from the account it was drafted from, when the person wants it "
+        "sent; attendees get emails"
     )
     assert action_gate.CHANGED_OUTSIDE == (
         "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
-        "again and keep their changes when you save it with email_draft, then show the person "
-        "and wait for their reply."
+        "again and keep their changes when you save it with email_draft, then show the person."
     )
     assert action_gate._changed_outside("invite") == (
         "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
         "again and keep their changes when you save it with calendar_draft_invite, then show "
-        "the person and wait for their reply."
+        "the person."
     )
 
 
@@ -181,7 +180,7 @@ async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, 
         expected = (
             "Error: Not sent: the draft was changed outside the draft tools, maybe by the person. "
             "Read it again and keep their changes when you save it with calendar_draft_invite, "
-            "then show the person and wait for their reply."
+            "then show the person."
         )
     assert await CalendarSendInviteTool().execute(
         _thread_id="sender-self", draft_id=draft["draft_id"], revision=revision,

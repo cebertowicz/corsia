@@ -83,12 +83,11 @@ NEEDS_BODY = "Error: Pass the text to send as body."
 BAD_TO = "Error: Pass the full phone number with country code (+1…), an email, or a chat_id from messages_chats."
 AMBIGUOUS = "Error: More than one chat matches that number. Use one of these chat_ids: {ids}."
 BAD_DOCUMENT = (
-    "Not sent: the draft document isn't in the draft format. Save it again with messages_draft, "
-    "show the person, and wait for their reply."
+    "Not sent: the draft document isn't in the draft format. Save it again with messages_draft "
+    "and show the person."
 )
 NO_TARGET = (
-    "Not sent: this draft isn't tied to a chat. Save it again with messages_draft, show the person, "
-    "and wait for their reply."
+    "Not sent: this draft isn't tied to a chat. Save it again with messages_draft and show the person."
 )
 STILL_SENDING = (
     "Not sent: an earlier send of this draft didn't finish, so it may already have gone out. Don't send it "

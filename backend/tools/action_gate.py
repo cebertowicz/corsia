@@ -22,15 +22,14 @@ def _changed_outside(kind: str, draft_tool: str | None = None) -> str:
     return (
         "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
         f"again and keep their changes when you save it with {tool}, then "
-        "show the person and wait for their reply."
+        "show the person."
     )
 
 
 # Keep the public email constant byte-identical for existing callers and tests.
 CHANGED_OUTSIDE = _changed_outside("email")
 STALE_REVISION = (
-    "Not sent: the draft has changed since you read it. Read it again, show the person, "
-    "and wait for their reply."
+    "Not sent: the draft has changed since you read it. Read it again and show the person."
 )
 
 @dataclass(frozen=True)
