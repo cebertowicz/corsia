@@ -238,7 +238,7 @@ def project(
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
     intent_by_node = {} if lean else operator_intent.read([str(node["id"]) for node, _plan in node_plans], db=db)
     executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
-    labels, history, attempt_counts, evidence, changed, settled_because = (
+    labels, history, attempt_counts, evidence, changed, settled_because, later_because = (
         facts.NO_DETAIL if lean else facts.detail(
             projected, node_plans, executor_by_node, limit=ATTEMPT_HISTORY_LIMIT, db=db,
             scoped=detail_ids is not None,
@@ -274,6 +274,7 @@ def project(
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
                     execution, sequenced_after, stopped, deferred_ask=paused_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
+                "later_reason": later_because.get(node["id"]),
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
                 # commitment's figure on its own row.

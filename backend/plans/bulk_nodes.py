@@ -67,7 +67,9 @@ def edit_many(
 
     Returns:
         ``{"changed": [{"node_id", "revision"}], "refused": [{"node_id", "reason"}]}``,
-        each in the caller's order, plus ``next`` when the call freed a slot.
+        each in the caller's order, plus ``next`` when the call freed a slot, and
+        ``landing`` when a pull back moved other items to Later to make room, as the
+        single edit names them.
     """
     from plans import later_fields, mutations
 
@@ -79,15 +81,22 @@ def edit_many(
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common, reconcile_move=False,
     ))
+    landing: dict[str, str] = {}
     if changed.get("later") is False:
         from plans import plan_cap
+        from prompts import plan_top as top_text
 
-        plan_cap.pulled_back(db, [entry["node_id"] for entry in applied], actor_id=common["actor_id"])
+        made_room = plan_cap.pulled_back(db, [entry["node_id"] for entry in applied], actor_id=common["actor_id"])
+        if made_room:
+            landing["landing"] = top_text.top_made_room(
+                [str(service._node_row(db, root)["title"]) for root in made_room], cap=plan_cap.CAP,
+            )
     # Each move's own reconcile is deferred to this one, after every row is placed.
     moved = "parent_id" in changed and bool(applied)
     return {
         "changed": applied,
         "refused": _refused(node_ids, reasons),
+        **landing,
         **_free_slot(plan_id, held, applied, common, acting, closed=False, reconcile=moved, owners=owners),
     }
 

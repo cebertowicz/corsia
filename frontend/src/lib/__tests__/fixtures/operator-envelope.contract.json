@@ -1,5 +1,5 @@
 {
- "as_of": "2026-11-25T05:34:56.480974+00:00",
+ "as_of": "2026-11-25T10:08:05.354813+00:00",
  "attention": {
   "awaiting_count": 0
  },
@@ -7,19 +7,19 @@
  "plans": [
   {
    "current_node_ids": [
-    "79aab01207ee4d64a587c0e165b0691f",
-    "d241e0be0e6b401582968f8b3db54ab5",
-    "d474aedb22164041a502f09047563f5e",
-    "986409cc896241a782210881359a0b4d"
+    "ef14fd28df9440d2a74a4003f103214f",
+    "350972159c9940d5a973d5a60cfe5238",
+    "533c39c29a02455ebf27c0f4ca9dab52",
+    "fe861575bf9348cf82f04fdd4c4e4e82"
    ],
    "display": {
     "label_key": "working",
     "tone_key": "active",
     "wait": {
-     "artifact_id": "88c38bf0-526",
+     "artifact_id": "4bbb37cd-440",
      "label": "the linked item",
      "more": 0,
-     "until": "2026-11-26T05:34:56.441851+00:00"
+     "until": "2026-11-26T10:08:05.309450+00:00"
     }
    },
    "folds": [],
@@ -42,10 +42,10 @@
        "failed": 0,
        "total": 2
       },
-      "commitment_id": "0425550501f54a9f8939ac860fbe4264",
+      "commitment_id": "fae4eb83a41b40db83fc59609d9d8b18",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T05:34:56.398382+00:00"
+        "2026-11-25T10:08:05.262522+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -64,7 +64,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "0425550501f54a9f8939ac860fbe4264",
+     "commitment_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "completion": null,
      "container": true,
      "depth": 0,
@@ -92,11 +92,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "0425550501f54a9f8939ac860fbe4264",
+     "id": "fae4eb83a41b40db83fc59609d9d8b18",
      "initiative": null,
      "kind": "phase",
-     "last_transition_at": "2026-11-25T05:34:56.446968+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.315431+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -149,7 +150,7 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T05:34:56.442198+00:00"
+         "2026-11-25T10:08:05.309863+00:00"
         ],
         "settled_seconds": 0
        }
@@ -165,7 +166,7 @@
      "status_reason": null,
      "title": "Delivery",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.398382+00:00",
+     "updated_at": "2026-11-25T10:08:05.262522+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -183,7 +184,7 @@
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "0425550501f54a9f8939ac860fbe4264",
+     "commitment_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -202,12 +203,12 @@
          "label": "Plan owner",
          "thread_id": "owner"
         },
-        "id": "8366a18ec4b54bcc817db484b718b3a1",
+        "id": "c3264ebb66454a82ad7c589c27e81e4b",
         "ordinal": 1,
         "release_reason": null,
         "released_at": null,
         "requirements_revision": 1,
-        "selected_at": "2026-11-25T05:34:56.447561+00:00"
+        "selected_at": "2026-11-25T10:08:05.316253+00:00"
        }
       ],
       "causes": [],
@@ -217,7 +218,7 @@
       "primary_reason": null,
       "revision_round": 0,
       "selection": {
-       "attempt_id": "8366a18ec4b54bcc817db484b718b3a1",
+       "attempt_id": "c3264ebb66454a82ad7c589c27e81e4b",
        "attempt_ordinal": 1,
        "executor_thread_id": "owner",
        "in_flight_dispatch_count": 0,
@@ -231,11 +232,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "79aab01207ee4d64a587c0e165b0691f",
+     "id": "ef14fd28df9440d2a74a4003f103214f",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.446968+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.315431+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -292,7 +294,7 @@
        }
       }
      },
-     "parent_id": "0425550501f54a9f8939ac860fbe4264",
+     "parent_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "requirements_revision": 1,
      "requires_user_action": false,
      "review": null,
@@ -302,7 +304,7 @@
      "status_reason": null,
      "title": "Running",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.446840+00:00",
+     "updated_at": "2026-11-25T10:08:05.315260+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -321,7 +323,7 @@
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "0425550501f54a9f8939ac860fbe4264",
+     "commitment_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -340,35 +342,35 @@
          "label": "Plan owner",
          "thread_id": "owner"
         },
-        "id": "03d699ff0d6d482d96e3f4ddb2d61219",
+        "id": "bb6c6f904f4b41f5ab80c0826714a243",
         "ordinal": 1,
         "release_reason": "watch_armed",
-        "released_at": "2026-11-25T05:34:56.443038+00:00",
+        "released_at": "2026-11-25T10:08:05.310912+00:00",
         "requirements_revision": 1,
-        "selected_at": "2026-11-25T05:34:56.437518+00:00"
+        "selected_at": "2026-11-25T10:08:05.306683+00:00"
        }
       ],
       "causes": [
        {
-        "artifact_id": "88c38bf0-526",
+        "artifact_id": "4bbb37cd-440",
         "artifact_title": null,
         "blocked_reason": null,
         "blocked_wait": false,
-        "created_at": "2026-11-25T05:34:56.442198+00:00",
-        "ends_at": "2026-11-26T05:34:56.441851+00:00",
+        "created_at": "2026-11-25T10:08:05.309863+00:00",
+        "ends_at": "2026-11-26T10:08:05.309450+00:00",
         "kind": "waiting",
         "owner_id": null,
         "owner_kind": "external",
-        "reason": "Waiting for ci.complete until 2026-11-26T05:34:56.441851+00:00",
+        "reason": "Waiting for ci.complete until 2026-11-26T10:08:05.309450+00:00",
         "reason_key": "deadline",
         "scheduled_reason": null,
-        "watch_id": "bff82638-ab1"
+        "watch_id": "5906313f-b75"
        }
       ],
       "condition": "waiting",
       "conflict": null,
       "friction_count": 0,
-      "primary_reason": "Waiting for ci.complete until 2026-11-26T05:34:56.441851+00:00",
+      "primary_reason": "Waiting for ci.complete until 2026-11-26T10:08:05.309450+00:00",
       "revision_round": 0,
       "selection": null
      },
@@ -378,11 +380,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "d241e0be0e6b401582968f8b3db54ab5",
+     "id": "350972159c9940d5a973d5a60cfe5238",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.443095+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.310990+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -408,7 +411,7 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T05:34:56.442198+00:00"
+         "2026-11-25T10:08:05.309863+00:00"
         ],
         "settled_seconds": 0
        }
@@ -437,23 +440,23 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T05:34:56.442198+00:00"
+         "2026-11-25T10:08:05.309863+00:00"
         ],
         "settled_seconds": 0
        }
       }
      },
-     "parent_id": "0425550501f54a9f8939ac860fbe4264",
+     "parent_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "requirements_revision": 1,
      "requires_user_action": false,
      "review": null,
      "revision": 2,
      "scheduled_until": null,
      "state": "active",
-     "status_reason": "Waiting for ci.complete until 2026-11-26T05:34:56.441851+00:00",
+     "status_reason": "Waiting for ci.complete until 2026-11-26T10:08:05.309450+00:00",
      "title": "Waiting",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.436689+00:00",
+     "updated_at": "2026-11-25T10:08:05.305608+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -461,10 +464,10 @@
       "close_node"
      ],
      "wait": {
-      "artifact_id": "88c38bf0-526",
+      "artifact_id": "4bbb37cd-440",
       "label": "the linked item",
       "more": 0,
-      "until": "2026-11-26T05:34:56.441851+00:00"
+      "until": "2026-11-26T10:08:05.309450+00:00"
      },
      "waiting_on": [],
      "workflow_run": false,
@@ -475,13 +478,13 @@
      "artifacts": [],
      "assignee": "user",
      "attention_path": [
-      "0425550501f54a9f8939ac860fbe4264",
-      "3c4d3179ddba45588d5bed8cd5f41f4c"
+      "fae4eb83a41b40db83fc59609d9d8b18",
+      "d62686ba79a2474cb064a0d44eef21a6"
      ],
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "0425550501f54a9f8939ac860fbe4264",
+     "commitment_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -509,11 +512,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "3c4d3179ddba45588d5bed8cd5f41f4c",
+     "id": "d62686ba79a2474cb064a0d44eef21a6",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.416658+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.276592+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -570,7 +574,7 @@
        }
       }
      },
-     "parent_id": "0425550501f54a9f8939ac860fbe4264",
+     "parent_id": "fae4eb83a41b40db83fc59609d9d8b18",
      "requirements_revision": 1,
      "requires_user_action": true,
      "review": null,
@@ -580,7 +584,7 @@
      "status_reason": null,
      "title": "Person action",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.416486+00:00",
+     "updated_at": "2026-11-25T10:08:05.276403+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -605,10 +609,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "d474aedb22164041a502f09047563f5e",
+      "commitment_id": "533c39c29a02455ebf27c0f4ca9dab52",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T05:34:56.419604+00:00"
+        "2026-11-25T10:08:05.279930+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -627,7 +631,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "d474aedb22164041a502f09047563f5e",
+     "commitment_id": "533c39c29a02455ebf27c0f4ca9dab52",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -659,11 +663,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "d474aedb22164041a502f09047563f5e",
+     "id": "533c39c29a02455ebf27c0f4ca9dab52",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.448545+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.317583+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -738,7 +743,7 @@
      "status_reason": null,
      "title": "Review",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.448480+00:00",
+     "updated_at": "2026-11-25T10:08:05.317493+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -757,7 +762,7 @@
      "branch_progress": null,
      "child": {
       "available": true,
-      "plan_id": "1719b513fbef4067b50d86a68fed694f",
+      "plan_id": "88af10e51841426b8d5f72ad92000d2f",
       "progress": {
        "done": 0,
        "liveness": "idle",
@@ -773,10 +778,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "986409cc896241a782210881359a0b4d",
+      "commitment_id": "fe861575bf9348cf82f04fdd4c4e4e82",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T05:34:56.423080+00:00"
+        "2026-11-25T10:08:05.283464+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -795,7 +800,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "986409cc896241a782210881359a0b4d",
+     "commitment_id": "fe861575bf9348cf82f04fdd4c4e4e82",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -813,7 +818,7 @@
        {
         "child_active": false,
         "child_thread_id": "worker",
-        "created_at": "2026-11-25T05:34:56.464319+00:00",
+        "created_at": "2026-11-25T10:08:05.332802+00:00",
         "kind": "waiting",
         "owner_id": "worker",
         "owner_kind": "thread",
@@ -834,11 +839,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "986409cc896241a782210881359a0b4d",
+     "id": "fe861575bf9348cf82f04fdd4c4e4e82",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.464319+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.332802+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -905,7 +911,7 @@
      "status_reason": "Waiting for the delegated child to take up its open steps",
      "title": "Delegated",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.462923+00:00",
+     "updated_at": "2026-11-25T10:08:05.331454+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -917,14 +923,11 @@
      "workflow_step": null
     },
     {
-     "acceptance_criteria": "Enter your password",
+     "acceptance_criteria": "Set aside is proven",
      "artifacts": [],
-     "assignee": "user",
-     "attention_path": [
-      "bf9212a07d694202b294c2fa550169dd"
-     ],
+     "assignee": null,
+     "attention_path": [],
      "branch_progress": null,
-     "browser_thread_id": "owner",
      "child": null,
      "commitment_cost": {
       "attempts": {
@@ -933,10 +936,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "bf9212a07d694202b294c2fa550169dd",
+      "commitment_id": "68281f17faf04cb2b4fbdecc3be9386a",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T05:34:56.432140+00:00"
+        "2026-11-25T10:08:05.288661+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -955,7 +958,162 @@
        "status": "partial"
       }
      },
-     "commitment_id": "bf9212a07d694202b294c2fa550169dd",
+     "commitment_id": "68281f17faf04cb2b4fbdecc3be9386a",
+     "completion": null,
+     "container": false,
+     "depth": 0,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "waiting",
+      "tone_key": "waiting"
+     },
+     "evidence": null,
+     "execution": {
+      "attempt_count": 0,
+      "attempts": [],
+      "causes": [],
+      "condition": "ready",
+      "conflict": {
+       "condition": "executor_selected",
+       "selected_node_id": "ef14fd28df9440d2a74a4003f103214f",
+       "selected_node_state": "active",
+       "selected_node_title": "Running"
+      },
+      "friction_count": 0,
+      "primary_reason": null,
+      "revision_round": 0,
+      "selection": null
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "68281f17faf04cb2b4fbdecc3be9386a",
+     "initiative": null,
+     "kind": "task",
+     "last_transition_at": "2026-11-25T10:08:05.305100+00:00",
+     "later": true,
+     "later_reason": "After launch",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "open_starts": [],
+        "settled_seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "open_starts": [],
+        "settled_seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "open_starts": [],
+        "settled_seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "open_starts": [],
+        "settled_seconds": 0
+       }
+      }
+     },
+     "parent_id": null,
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": null,
+     "revision": 2,
+     "scheduled_until": null,
+     "state": "pending",
+     "status_reason": "Not started",
+     "title": "Set aside",
+     "unmet_dependencies": [],
+     "updated_at": "2026-11-25T10:08:05.304991+00:00",
+     "user_actions": [
+      "reorder",
+      "mark_done",
+      "pause_node",
+      "close_node"
+     ],
+     "waiting_on": [],
+     "workflow_run": false,
+     "workflow_step": null
+    },
+    {
+     "acceptance_criteria": "Enter your password",
+     "artifacts": [],
+     "assignee": "user",
+     "attention_path": [
+      "a67a11934aee4c40ab9d95e1d0048e05"
+     ],
+     "branch_progress": null,
+     "browser_thread_id": "owner",
+     "child": null,
+     "commitment_cost": {
+      "attempts": {
+       "correction": 0,
+       "delegated": 0,
+       "failed": 0,
+       "total": 0
+      },
+      "commitment_id": "a67a11934aee4c40ab9d95e1d0048e05",
+      "elapsed_seconds": {
+       "open_starts": [
+        "2026-11-25T10:08:05.299175+00:00"
+       ],
+       "settled_seconds": 0,
+       "status": "in_progress"
+      },
+      "model_cost_usd": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "tokens": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "usage_recording_failures": 0,
+      "user_effort": {
+       "known_plan_actions": 0,
+       "status": "partial"
+      }
+     },
+     "commitment_id": "a67a11934aee4c40ab9d95e1d0048e05",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -983,11 +1141,12 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "bf9212a07d694202b294c2fa550169dd",
+     "id": "a67a11934aee4c40ab9d95e1d0048e05",
      "initiative": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T05:34:56.432299+00:00",
+     "last_transition_at": "2026-11-25T10:08:05.299382+00:00",
      "later": false,
+     "later_reason": null,
      "node_cost": {
       "own": {
        "execution": {
@@ -1054,7 +1213,7 @@
      "status_reason": null,
      "title": "Enter your password",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T05:34:56.432140+00:00",
+     "updated_at": "2026-11-25T10:08:05.299175+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -1073,13 +1232,13 @@
     "thread_id": "owner"
    },
    "plan": {
-    "id": "5a856c954cad4d22a1aaa08e5c2a0615",
+    "id": "558e71306c6245ad8afbffac80a46a85",
     "owner_id": "owner",
     "owner_kind": "thread",
-    "parent_plan_id": "c67b4ae1c06e457fa5a57beec4787233",
-    "revision": 14,
+    "parent_plan_id": "d68160d8cf9b4d3e8037fbd91265d162",
+    "revision": 16,
     "state": "active",
-    "updated_at": "2026-11-25T05:34:56.462923+00:00"
+    "updated_at": "2026-11-25T10:08:05.331454+00:00"
    },
    "progress": {
     "distribution": {
@@ -1088,17 +1247,17 @@
      "done": 0,
      "failed": 0,
      "paused": 0,
-     "pending_ready": 2,
+     "pending_ready": 3,
      "review_human": 0,
      "review_parent_agent": 1,
      "waiting": 2
     },
     "done": 0,
     "liveness": "needs-review",
-    "open": 6,
-    "total": 6
+    "open": 7,
+    "total": 7
    },
-   "root_count": 4
+   "root_count": 5
   }
  ],
  "revision_token": "fixture",

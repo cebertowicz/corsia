@@ -7,6 +7,7 @@ from plans.plan_cap import CAP
 from tests.plan_close_next_helpers import (
     owner_plan, plan_update, queue_active, revision, row, select, task,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
 
 
@@ -129,3 +130,41 @@ def test_the_first_spill_runs_once_over_every_agent_plan(db):
     assert counts == {"owner": 3}
     assert [_later(db, node_id) for node_id in filled] == [False] * CAP + [True] * 3
     assert plan_cap.spill_all(db) == {}
+
+
+def test_a_stranded_task_counts_for_no_item_and_stops_no_add(db):
+    """A live task the order reader appends after the tree (its parent archived out from
+    under it) belongs to no top-level item: the cap leaves it alone, and adds and the
+    first spill still run."""
+    plan = owner_plan(db)
+    phase = service.add_node(plan.id, kind="phase", title="Gone", acceptance_criteria="done", db=db)
+    stranded = service.add_node(
+        plan.id, kind="task", title="Stranded", acceptance_criteria="done", parent_id=phase.id, db=db,
+    ).id
+    # No operation archives a phase over open work, so the shape is seeded.
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at=? WHERE id=?", ("2026-11-25T00:00:00+00:00", phase.id))
+    db.commit()
+    filled = _fill(db, plan.id, CAP)
+
+    result = plan_update(db, plan.id, "add", {"title": "One more", "acceptance_criteria": "done", "size": "S"})
+
+    assert _later(db, result["node"]["id"])
+    assert not _later(db, stranded)
+    assert not any(_later(db, node_id) for node_id in filled)
+    assert plan_cap.spill_all(db) == {}
+
+
+def test_a_bulk_pull_back_names_what_made_room(db):
+    plan = owner_plan(db)
+    filled = _fill(db, plan.id, CAP)
+    added = plan_update(db, plan.id, "add", {
+        "title": "Pulled", "acceptance_criteria": "done", "size": "S",
+    })["node"]["id"]
+
+    result = plan_update(db, plan.id, "edit", {"node_ids": [added], "later": False})
+
+    assert not _later(db, added)
+    assert _later(db, filled[-1])
+    # The same line the single pull back gives.
+    assert result["landing"] == f"To keep {CAP} items waiting to start, this moved to Later: 'Task {CAP - 1}'."

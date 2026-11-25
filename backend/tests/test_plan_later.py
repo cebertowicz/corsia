@@ -561,6 +561,23 @@ def test_the_pane_reads_which_rows_sit_below_the_cut(db):
     assert nodes[now.id]["later"] is False
 
 
+def test_a_later_row_carries_the_reason_of_its_latest_crossing(db):
+    """The row shows why a task is in Later: the reason its latest move recorded, never an older one."""
+    plan = owner_plan(db)
+    now = task(db, plan.id, "Do it now")
+    brief = task(db, plan.id, "Draft the brief")
+    for later, reason in ((True, "First reason"), (False, None), (True, "Steve's cut: after launch")):
+        plan_update(db, plan.id, "edit", {
+            "node_id": brief.id, "later": later, "expected_revision": revision(db, brief.id),
+            **({"reason": reason} if reason else {}),
+        })
+
+    nodes = _pane_nodes(db)
+
+    assert nodes[brief.id]["later_reason"] == "Steve's cut: after launch"
+    assert nodes[now.id]["later_reason"] is None
+
+
 def _phase(db, plan_id: str, title: str):
     node = service.add_node(
         plan_id, kind="phase", title=title, acceptance_criteria=f"{title} is verified", db=db,

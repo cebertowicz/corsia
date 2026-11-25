@@ -229,6 +229,36 @@ def record_event(
         later_review.arm_node(connection, node_id)
 
 
+def latest_reasons(db, nodes) -> dict[str, str]:
+    """The reason each Later task's row shows: the one its latest crossing recorded, by node id.
+
+    Reads only tasks in Later, so a plan with none costs no query. A task whose
+    latest crossing gave no reason is absent.
+    """
+    import json
+
+    from plans.operator_node_facts import id_chunks
+
+    ids = sorted(str(node["id"]) for node in nodes if node["kind"] == "task" and node.get("later"))
+    reasons: dict[str, str] = {}
+    for chunk in [part for part in id_chunks(ids) if part]:
+        marks = ",".join("?" for _ in chunk)
+        rows = db.execute(
+            f"""SELECT node_id, payload_json FROM (
+                  SELECT node_id, payload_json,
+                         ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC, rowid DESC) AS latest
+                  FROM plan_node_events INDEXED BY idx_plan_node_events_node
+                  WHERE node_id IN ({marks}) AND event=?
+                ) WHERE latest=1""",
+            (*chunk, EVENT),
+        ).fetchall()
+        for row in rows:
+            reason = json.loads(row["payload_json"] or "{}").get("reason")
+            if reason:
+                reasons[str(row["node_id"])] = str(reason)
+    return reasons
+
+
 def validate_later_edit(connection, node, later: object, *, actor_id: str | None) -> None:
     """Check an edit that names the cut before anything is written.
 

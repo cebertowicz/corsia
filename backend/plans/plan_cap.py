@@ -60,13 +60,20 @@ def _waiting(db, node_ids: list[str]) -> set[str]:
 
 
 def unstarted_above(db, plan_id: str) -> list[tuple[str, list[str]]]:
-    """The plan's unstarted top-level items above the line, in plan order, each with its open tasks above the line."""
+    """The plan's unstarted top-level items above the line, in plan order, each with its open tasks above the line.
+
+    A task counts under the open top-level item its path starts from. One the order
+    reader appends after the tree (a stranded row, with no path to a root) or one
+    under a top-level item that is not open belongs to no item here, so it is left out.
+    """
     ordered = node_order.open_nodes_with_paths(db, plan_id)
     roots = [str(row["id"]) for row, _path in ordered if row["parent_id"] is None]
     tasks: dict[str, list] = {root: [] for root in roots}
     for row, path in ordered:
         if not row["is_parent"] and row["kind"] == "task":
-            tasks[path[0] if path else str(row["id"])].append(row)
+            item = tasks.get(path[0] if path else str(row["id"]))
+            if item is not None:
+                item.append(row)
     ids = [str(row["id"]) for rows in tasks.values() for row in rows]
     started = set(attempts.open_attempts(ids, db=db, compact=True)) | _open_holds(db, ids) | _waiting(db, ids)
     items = []
