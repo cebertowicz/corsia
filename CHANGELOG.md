@@ -10,7 +10,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
-- Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a credential setting whose quotes are escaped inside JSON, such as a tool call’s arguments. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
+- Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a password, token or key field in JSON carried as text inside other JSON, such as the details an agent sends with an action. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
 - Activity shows instructions for tasks assigned to you.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
