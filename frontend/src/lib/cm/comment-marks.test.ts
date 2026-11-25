@@ -22,7 +22,9 @@ afterEach(() => {
 function editorWithTarget(onScreen: (jumps: number, checks: number) => boolean) {
 	const scrollDOM = document.createElement('div');
 	scrollDOM.style.overflowY = 'auto';
-	vi.spyOn(scrollDOM, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 700 } as DOMRect);
+	// The pane's width changes when a drawer opens beside it; its height, when a keyboard or sheet takes room.
+	const pane = { width: 600, bottom: 700 };
+	vi.spyOn(scrollDOM, 'getBoundingClientRect').mockImplementation(() => ({ top: 100, bottom: pane.bottom, width: pane.width }) as DOMRect);
 	const measures: MeasureRequest[] = [];
 	const frames: (() => void)[] = [];
 	vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -53,7 +55,7 @@ function editorWithTarget(onScreen: (jumps: number, checks: number) => boolean) 
 			finally { measuring = false; }
 		}
 	};
-	return { view, dom, measures, frames, settle };
+	return { view, dom, measures, frames, settle, pane };
 }
 
 describe('document range navigation', () => {
@@ -87,6 +89,59 @@ describe('document range navigation', () => {
 		dom.remove();
 		settle();
 		expect(view.dispatch).toHaveBeenCalledTimes(1);
+	});
+});
+
+// A drawn row whose box moves with the scroller, as a table or an image does.
+function rowAt(view: EditorView, height: number, offset = 1400) {
+	let writes = 0, top = 0;
+	Object.defineProperty(view.scrollDOM, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; writes += 1; } });
+	const widget = { start: 440, box: () => ({ top: offset - top, bottom: offset + height - top }) as DOMRect, reveal: vi.fn() };
+	vi.mocked(widgetTarget).mockReturnValueOnce(widget);
+	return { widget, writes: () => writes, scrollTop: () => top };
+}
+
+describe('a target taller than the band', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('is placed once, its top at the band top, and never chased after', () => {
+		const { view, settle, pane } = editorWithTarget(() => true);
+		const row = rowAt(view, 1000);
+
+		scrollToRange(view, 450, 454);
+		settle();
+
+		// The band runs 100 to 700 and the row is 1,000 tall: top at 100, and nothing more is asked of it.
+		expect(row.scrollTop()).toBe(1300);
+		expect(row.writes()).toBe(1);
+		// The keyboard comes up and shrinks the band; the row is still taller than it, and stays where it was put.
+		pane.bottom = 400;
+		settle();
+		expect(row.writes()).toBe(1);
+	});
+
+	it('ends with the reader where they scrolled when they scroll within the settle window', () => {
+		const { view, settle } = editorWithTarget(() => true);
+		const row = rowAt(view, 1000);
+
+		scrollToRange(view, 450, 454);
+		view.scrollDOM.dispatchEvent(new Event('wheel'));
+		(view.scrollDOM as HTMLElement).scrollTop = 1600;
+		settle();
+
+		expect(row.scrollTop()).toBe(1600);
+	});
+
+	it('centres a row that fits, as before', () => {
+		const { view, settle } = editorWithTarget(() => true);
+		const row = rowAt(view, 200);
+
+		scrollToRange(view, 450, 454);
+		settle();
+
+		// Band centre 400, row 200 tall: top at 300, so 1400 - 300 = 1100.
+		expect(row.scrollTop()).toBe(1100);
+		expect(row.writes()).toBe(1);
 	});
 });
 
@@ -177,7 +232,7 @@ describe('a jump whose frame moves after it lands', () => {
 	it('takes the place again when the pane moves it out of view, and stops watching on the reader scroll', () => {
 		const observers = watching();
 		let moved = false;
-		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+		const { view, settle, pane } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
 
 		scrollToRange(view, 450, 454);
 		settle();
@@ -188,7 +243,9 @@ describe('a jump whose frame moves after it lands', () => {
 		settle();
 		expect(view.dispatch).toHaveBeenCalledTimes(1);
 
+		// A drawer takes width from the pane: every line above the landing rewraps and the landing shifts.
 		moved = true;
+		pane.width = 420;
 		watch.trigger();
 		settle();
 		expect(view.dispatch).toHaveBeenCalledTimes(3);
@@ -229,7 +286,7 @@ describe('a jump whose frame moves after it lands', () => {
 	it('never moves the reader from a check the pane queued before the reader scrolled', () => {
 		const observers = watching();
 		let moved = false;
-		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+		const { view, settle, pane } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
 
 		scrollToRange(view, 450, 454);
 		settle();
@@ -237,6 +294,7 @@ describe('a jump whose frame moves after it lands', () => {
 		watch.trigger();
 		moved = true;
 		// The pane moves and queues a check; the reader scrolls before its frame runs.
+		pane.width = 420;
 		watch.trigger();
 		view.scrollDOM.dispatchEvent(new Event('scroll'));
 		settle();
@@ -256,6 +314,40 @@ describe('a jump whose frame moves after it lands', () => {
 
 		expect(widget.reveal).not.toHaveBeenCalled();
 		expect(view.scrollDOM.scrollTop).toBe(0);
+	});
+
+	it('leaves the landing alone when the pane only changes height: the keyboard, a growing composer, a sheet', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, settle, pane } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+
+		scrollToRange(view, 450, 454);
+		settle();
+		const watch = observers.at(-1)!;
+		watch.trigger();
+		// Each step takes room from the bottom of the pane and leaves the landing out of the band it has left.
+		moved = true;
+		for (const bottom of [450, 420, 380]) {
+			pane.bottom = bottom;
+			watch.trigger();
+			settle();
+		}
+
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		expect(watch.disconnected).toBe(false);
+	});
+
+	it.each(['wheel', 'touchstart', 'keydown'])('ends the placement at once on the reader\'s %s, before it has settled', (input) => {
+		const observers = watching();
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 4);
+
+		scrollToRange(view, 450, 454);
+		// The target has not landed yet; the reader moves before the next check runs.
+		view.scrollDOM.dispatchEvent(new Event(input));
+		settle();
+
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		expect(observers.at(-1)!.disconnected).toBe(true);
 	});
 
 	it('retires the watch of the jump the reader replaced', () => {

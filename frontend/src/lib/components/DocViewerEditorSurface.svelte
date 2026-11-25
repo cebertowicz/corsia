@@ -10,7 +10,8 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
-	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
+	import { coarsePointer, keepInBand, selectionButtonPlace } from '$lib/selectionButtonPlace';
+	import { visibleRegion } from '$lib/cm/visible-region';
 	import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import DocLoadState from './DocLoadState.svelte';
@@ -169,12 +170,27 @@
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
 	const coarse = coarsePointer();
+	// The button is fixed to the window, so it is read again whenever the document scrolls: a selection that is taller than the
+	// window, or has scrolled away, keeps it at the edge of what the reader sees nearest the selection.
+	let scrolled = $state(0);
+	$effect(() => {
+		const view = pendingSel ? untrack(() => editor?.editorView()) : undefined;
+		if (!view) return;
+		const scroller = visibleRegion(view).scroller;
+		const bump = () => { scrolled += 1; };
+		scroller.addEventListener('scroll', bump, { passive: true });
+		return () => scroller.removeEventListener('scroll', bump);
+	});
+	let buttonHeight = $state(0);
 	const place = $derived.by(() => {
 		if (!pendingSel) return null;
+		void scrolled;
 		// An offer placed by its widget (above a cell, or at the point it gives) sits as given.
 		if (pendingSel.above || pendingSel.exact) return { top: pendingSel.top, above: !!pendingSel.above, below: !!pendingSel.below };
-		const { top, above } = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
-		return { top, above, below: !above };
+		const placed = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
+		const view = editor?.editorView();
+		const top = view ? keepInBand(placed, visibleRegion(view).band, buttonHeight, EDGE) : placed.top;
+		return { top, above: placed.above, below: !placed.above };
 	});
 	const refusedStale = $derived(!!tabInstanceId && !!$docSaveDrafts[tabInstanceId]?.stale);
 	const EDGE = 8;
@@ -228,7 +244,7 @@
 		<button class="sel-comment" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>{@render commentFace()}</button>
 	</DocTouchCommentBar>
 {:else if pendingSel && !listOverText}
-	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth} bind:offsetHeight={buttonHeight}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
 		{@render commentFace()}
 	</button>
