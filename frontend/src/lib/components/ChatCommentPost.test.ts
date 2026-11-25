@@ -218,13 +218,17 @@ it('posts the comment as the input its kept draft’s client id names, again on 
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post('Posted under one id');
 	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
-	const kept = keptCommentDrafts.get(chatCommentDrafts.rootKey('thread', 'm1', anchor));
-	expect(kept?.clientId).toBeTruthy();
+	// Read as the device holds it, so the leg asks only what a person's restart would find.
+	const onDevice = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!).filter(name => name.startsWith('corsia:commentDraft:v1:'))
+		.map(name => JSON.parse(localStorage.getItem(name)!) as { body: string; clientId?: string });
+	expect(onDevice).toHaveLength(1);
+	const kept = onDevice[0];
+	expect(kept.clientId).toBeTruthy();
 	relaunch(1440, reply => postChatComment(reply, 'thread', false, true));
 	await openBox();
 	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-	expect(fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id)).toEqual([kept!.clientId, kept!.clientId]);
+	expect(fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id)).toEqual([kept.clientId, kept.clientId]);
 });
 
 it('posts a reply as the input the person’s own id names, and sends no id of its own when none is given', async () => {
