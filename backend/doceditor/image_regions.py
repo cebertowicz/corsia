@@ -19,10 +19,12 @@ from typing import Any, Iterable, Mapping
 
 from PIL import Image
 
+from core.workspace_layout import resolve_workspace_root
 from doceditor import diagram_pins, live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.document_scope import ProjectNotFound, scope_bases
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
+from infra import config
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
@@ -132,12 +134,19 @@ def reader_bases(db, thread_id: str | None) -> list[Path]:
         return []
 
 
+def image_label(path: str | Path) -> str:
+    """How a refusal names an image: its path from the workspace root, never a path on this machine."""
+    resolved = Path(path).expanduser().resolve(strict=False)
+    root = resolve_workspace_root(config.WORKSPACE).resolve(strict=False)
+    return resolved.relative_to(root).as_posix() if resolved.is_relative_to(root) else resolved.name
+
+
 def checked_image(db, path: str, bases: list[Path]) -> Path:
     """The file at ``path`` as the read-scope gate passes it for ``bases``, or the region error."""
     try:
         return checked_read(path, bases, db=db)
     except ReadRefused as exc:
-        raise CommentActionError("region_target", f"the image {path} {_REFUSED[exc.reason]}.") from exc
+        raise CommentActionError("region_target", f"the image {image_label(path)} {_REFUSED[exc.reason]}.") from exc
 
 
 def comment_image(db, row: Mapping[str, Any], path: str | None, bases: list[Path]) -> Path | None:

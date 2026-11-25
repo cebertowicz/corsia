@@ -52,6 +52,13 @@ describe('opening a document image from its comments', () => {
 		expect(viewer({ artifactId: null }).images.comments()).toBeUndefined();
 	});
 
+	it('says why an image comment was refused in a document that is not live, as a live one does', () => {
+		const failure = viewer().images.comments()!.failure!;
+		expect(failure(new Error('400 {"detail":"the image shots/a.png could not be found.","kind":"region_target"}')))
+			.toBe('Couldn’t post the comment: the image shots/a.png could not be found. Your draft is kept.');
+		expect(failure(new TypeError('Failed to fetch'))).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+	});
+
 	it('uses the current document cache key for a comment thumbnail', () => {
 		const { images, imageCacheKey } = viewer({ imageCacheKey: 'open-1' });
 		const first = images.groups.srcOf(onImage('one'))!;

@@ -5,7 +5,7 @@ import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
 import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
-import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
+import { liveFailureMessage, postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { regionColor, type ImageRegion } from '$lib/imageRegions';
 import { token } from '$lib/stores/auth';
@@ -70,7 +70,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body, taggedAgentIds, mentions, press, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions, press),
-			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
+			failure: options.session() ? liveFailureMessage : postFailureMessage, feedback: options.feedback(),
 			refreshDiagram: async (from, to) => {
 				const root = options.root();
 				if (!root) return null;

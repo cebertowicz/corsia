@@ -163,6 +163,18 @@ def test_a_doc_region_needs_an_image_stored_in_the_workspace(integration_client,
 
     assert r.status_code == 400, r.text
     assert detail in r.text
+    assert str(doc.parent.resolve()) not in r.text and str(doc.parent) not in r.text
+
+
+def test_a_refused_doc_image_is_named_from_the_workspace_root(integration_client, doc, integration_workspace):
+    artifact_id = _register(integration_client, doc)
+    (doc.parent / "img" / "cart.png").unlink()
+
+    r = _post(integration_client, artifact_id, doc, CART, {"x": 0.1, "y": 0.1})
+
+    assert r.status_code == 400, r.text
+    named = (doc.parent / "img" / "cart.png").relative_to(integration_workspace).as_posix()
+    assert r.json() == {"detail": f"the image {named} could not be found.", "kind": "region_target"}
 
 
 def test_a_doc_region_without_its_image_is_refused(integration_client, doc):

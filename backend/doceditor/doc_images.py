@@ -21,7 +21,7 @@ from doceditor import diagram_pins
 from doceditor.comment_action_errors import CommentActionError, diagram_changed
 from doceditor.doc_text import read_doc_text
 from doceditor.image_regions import (
-    checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
+    checked_image, comment_image, image_label, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
 )
 from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context, reanchor
 
@@ -103,7 +103,7 @@ def image_file(db, *, doc_path: str | None, markdown: str | None, bases: list[Pa
     if path is None:
         raise CommentActionError("region_target", "a region goes only on an image stored in the workspace, never a web image.")
     if not is_image_path(path):
-        raise CommentActionError("region_target", f"{path} is not an image, so a region cannot be placed on it.")
+        raise CommentActionError("region_target", f"{image_label(path)} is not an image, so a region cannot be placed on it.")
     checked_image(db, path, bases)
     return Path(path)
 

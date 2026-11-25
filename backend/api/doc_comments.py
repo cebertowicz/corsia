@@ -154,7 +154,8 @@ async def create_comment(
         # Its kind tells the browser which of the known causes to name.
         return decision_refusal(exc)
     except CommentActionError as exc:
-        raise HTTPException(400, exc.message) from exc
+        # Its kind rides along (as it does on a selection refusal) so the browser's timing report can name the refusal.
+        return JSONResponse({"detail": exc.message, "kind": exc.kind}, status_code=400)
     except CommentSelectionChanged as exc:
         return selection_refusal(exc)
     except AppLoopUnavailable as exc:
