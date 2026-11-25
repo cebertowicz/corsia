@@ -231,15 +231,41 @@ def _person_writer(user: dict, saved: dict):
     """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
-        _suggestion_author: str | None, accepted: tuple[str, ...],
+        _suggestion_author: str | None, accepted: tuple[str, ...], *, suppress_feedback: bool = False,
     ) -> dict:
         receipt = await save_document_text(
             DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-            expected_sha256=expected_sha256, accepted=accepted,
+            expected_sha256=expected_sha256, accepted=accepted, suppress_feedback=suppress_feedback,
         )
         saved.update(text=text, revision=receipt["revision"])
         return receipt
     return write
+
+
+class SuggestionHistoryTransition(BaseModel):
+    event_id: str
+    ids: list[str]
+    direction: str
+    expected_sha256: str
+    text: str
+
+
+@router.post("/artifacts/{artifact_id}/suggestions/history")
+async def suggestion_history_transition(artifact_id: str, token: str, body: SuggestionHistoryTransition):
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    from doceditor.suggestion_history_actions import transition_suggestion_history
+
+    saved: dict = {}
+    try:
+        return await transition_suggestion_history(
+            artifact_id, body.event_id, body.ids, body.direction, body.expected_sha256, body.text,
+            user_id=user['id'], write=_person_writer(user, saved))
+    except CommentActionError as exc:
+        return decision_refusal(exc)
+    except DocumentSaveError as exc:
+        raise document_save_http_exception(exc) from exc
 
 
 @router.post("/artifacts/{artifact_id}/suggestions/accept-all")

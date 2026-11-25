@@ -378,6 +378,22 @@ describe('DocViewerStatus toolbar', () => {
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
 
+	it('carries a comment task in Details: named on the entry while closed, Dismiss all in the panel once open', () => {
+		const step = { node_id: 'task-1', node_title: 'Launch plan.md', node_revision: 1, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Docs agent', comment_attention: { artifact_id: 'doc-1', comments: 2, suggestions: 0, system_task: true } };
+		const commentTaskBar = { read: { person_step: step }, artifactId: 'doc-1', load: vi.fn() };
+		render(value(), vi.fn().mockResolvedValue(undefined), { commentTaskBar });
+		const entry = host.querySelector<HTMLButtonElement>('[data-document-details]')!;
+		expect(entry.getAttribute('aria-label')).toBe('Document details · 2 comments to review');
+		expect(host.querySelector('[data-comments-entry]')?.parentElement?.textContent).not.toContain('Dismiss all');
+		entry.click(); flushSync();
+		expect(entry.getAttribute('aria-label')).toBe('Document details');
+		const panel = host.querySelector('.doc-panel')!;
+		expect([...panel.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Dismiss all')).toHaveLength(1);
+		const task = panel.querySelector('.task-dismiss')!;
+		expect(task.querySelector('.task-who')?.textContent?.trim()).toBe('Docs agent');
+		expect(task.querySelector('.task-who')?.nextElementSibling?.textContent).toBe('2 comments to review');
+	});
+
 	it('names behind Details what waits there, in the words the panel uses, and never a count', () => {
 		const detailsName = () => host.querySelector<HTMLButtonElement>('[data-document-details]')!.getAttribute('aria-label');
 		const ask = { who: 'Structured Plans', text: 'Is this skill ready?', others: [], onCard: false };
@@ -414,12 +430,12 @@ describe('DocViewerStatus toolbar', () => {
 		// Every combination of the sources; a third source is a new required field of DetailsNeeds, so these lines stop
 		// compiling until it names both the flag and the words the panel calls it by.
 		const all: DetailsNeeds[] = [false, true].flatMap((overdue) =>
-			[false, true].map((hiddenAsk) => ({ overdue, hiddenAsk })));
-		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?' };
+			[false, true].flatMap((hiddenAsk) => [false, true].map((hiddenTask) => ({ overdue, hiddenAsk, hiddenTask }))));
+		const words: DetailsNeedsWords = { overdue: 'Overdue', hiddenAsk: 'Is this skill ready?', hiddenTask: '2 comments, 2 suggestions to review' };
 		for (const needs of all) {
 			const up = detailsNeedsUp(needs, words);
-			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk].filter(Boolean).length);
-			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null].filter((word): word is string => !!word));
+			expect(up.length, JSON.stringify(needs)).toBe([needs.overdue, needs.hiddenAsk, needs.hiddenTask].filter(Boolean).length);
+			expect(up).toEqual([needs.overdue ? words.overdue : null, needs.hiddenAsk ? words.hiddenAsk : null, needs.hiddenTask ? words.hiddenTask : null].filter((word): word is string => !!word));
 		}
 	});
 });

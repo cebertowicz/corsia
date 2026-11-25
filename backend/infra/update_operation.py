@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+from infra.log_files import nofollow_log_opener
+
 _LOG_TAIL_CHARS = 6000
 
 
@@ -20,9 +22,9 @@ def _failure_log_tail(operation: dict) -> str | None:
         from infra.config import LOGS_DIR
 
         resolved_logs = LOGS_DIR.resolve()
-        resolved_path = Path(log_path).resolve()
-        resolved_path.relative_to(resolved_logs)
-        with resolved_path.open("rb") as handle:
+        path = Path(log_path).absolute()
+        path.parent.resolve().relative_to(resolved_logs)
+        with open(path, "rb", opener=nofollow_log_opener) as handle:
             size = handle.seek(0, os.SEEK_END)
             handle.seek(max(0, size - _LOG_TAIL_CHARS))
             return handle.read().decode(errors="replace")[-_LOG_TAIL_CHARS:]

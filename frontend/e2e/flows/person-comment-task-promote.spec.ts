@@ -7,6 +7,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
+import { openDetails, closeDetails } from '../support/documentBar';
 
 const repo = path.resolve(process.cwd(), '..');
 const MOVED = 'This document is in another place, and its comments are there with it.';
@@ -75,7 +76,10 @@ for (const editedOnDisk of [false, true]) test(`comment task after promote, edit
 	expect(node.state).toBe('pending');
 	await expect(row.first()).toContainText('2 comments, 2 suggestions');
 	await row.first().getByRole('button').first().click();
-	await expect(page.locator('.review-bar.ask[aria-label="Task for you"]').first()).toContainText('2 comments, 2 suggestions to review');
+	const details = await openDetails(page);
+	await expect(details.getByText('2 comments, 2 suggestions to review')).toBeVisible();
+	await expect(details.getByRole('button', { name: 'Dismiss all', exact: true })).toBeVisible();
+	await closeDetails(page);
 	await page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first().click();
 	await expect(page.getByRole('region', { name: /^Comment by / })).toHaveCount(4);
 	await page.screenshot({ path: testInfo.outputPath('moved-document.png') });

@@ -20,12 +20,10 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, docked = false, named = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', suppressed = false, docked = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
 		/** The ask answers from a card docked to the document canvas's bottom edge: at rest the question on one line above the answers; a tap opens it to the asker and the full question. The caller docks only on a phone or a short touch screen; elsewhere the ask keeps its row. */
 		docked?: boolean;
-		/** Docked: the asker's name stays on the resting line (a comment task, whose line is about who commented). */
-		named?: boolean;
 		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
 		/** How many others also asked. */
@@ -122,9 +120,9 @@
 <!-- Docked to the document canvas's left, right and bottom edges. A review ask cuts one thing per line: at rest the question alone, then the answers; opened, the asker takes its own line above the full question. -->
 <div class="rb-dock-slot" bind:this={slotEl}>
 {#if view === 'ask' && who}
-	<section class="rb-dock" class:suppressed class:noting class:named class:asker={askerAtRest} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+	<section class="rb-dock" class:suppressed class:noting class:asker={askerAtRest} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
 		<button type="button" class="rb-dock-ask" title={full || ask} aria-expanded={cardOpen} aria-label={lineLabel || `${who.name}${plus ? ` +${plus}` : ''}: ${full || ask}`} onclick={() => (cardOpen = !cardOpen)}>
-			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen && !named}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
+			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
 		</button>
 		{#if (cardOpen || noting) && others.length}
 			<ul class="rb-others">
@@ -223,17 +221,14 @@
 	/* The name stays on one line, cut in the middle (MiddleName). */
 	.rb-dock-who { display: inline-grid; max-width: 60%; vertical-align: bottom; font-weight: var(--fw-semibold); }
 	.rb-dock-sep { margin-inline: var(--space-1); color: var(--text-tertiary); }
-	.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by { display: none; }
-	.rb-dock.open:not(.named) .rb-dock-by { display: flex; min-width: 0; white-space: normal; }
+	.rb-dock .rb-dock-sep, .rb-dock:not(.open) .rb-dock-by { display: none; }
+	.rb-dock.open .rb-dock-by { display: flex; min-width: 0; white-space: normal; }
 	/* Activity: at rest the asker leads the question on its one line. */
 	.rb-dock.asker:not(.open) .rb-dock-by, .rb-dock.asker:not(.open) .rb-dock-sep { display: inline; }
-	.rb-dock.open:not(.named) .rb-dock-who { display: block; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
-	/* A comment task holds one line: Dismiss all ends it where the card is wide enough, else wraps to its own row. */
-	.rb-dock.named .rb-dock-ask { flex: 1 1 auto; }
+	.rb-dock.open .rb-dock-who { display: block; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 	.rb-dock .rb-others { flex: 1 0 100%; padding-left: 0; }
 	.rb-dock .rb-status { flex: 1 0 100%; }
 	.rb-dock .rb-status:empty { display: none; }
-	.rb-dock.named .rb-status { order: 3; }
 	/* What Approve also does: left-aligned under the question and never cut. Beside the answers while its whole text fits there, else on its own line above them. */
 	.rb-dock :global(.rb-derived) { flex: 1 1 auto; width: max-content; max-width: 100%; min-width: 0; margin: 0; }
 	.rb-dock.open :global(.rb-derived) { flex-basis: 100%; white-space: normal; }
@@ -242,7 +237,7 @@
 	/* Touch: 44px answers, and the question's tap area (8px below its line) keeps 8px clear of the answers' row. */
 	@media (any-pointer: coarse), (max-width: 48rem) {
 		.rb-dock :global(.btn) { min-height: var(--touch-target); }
-		.rb-dock:not(.named) .rb-dock-ask { margin-bottom: var(--space-3); }
+		.rb-dock .rb-dock-ask { margin-bottom: var(--space-3); }
 	}
 	.rb-dock.receipt, .rb-dock.stale { flex-wrap: nowrap; column-gap: var(--space-2); padding-top: var(--space-2); }
 	.rb-dock .rb-receipt { flex: 1 1 0; min-width: 0; color: var(--text-secondary); }

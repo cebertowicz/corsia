@@ -5,9 +5,11 @@ import type { ImageCommentSurface, DocImageComments } from '$lib/docImageComment
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
+import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 /** What DocCommentSurface takes; `resolvedOpen` is bindable. */
 export interface DocCommentSurfaceProps {
+	commentTaskBar?: ReviewBarState;
 	state: CommentSurfaceState;
 	onThreadMissing?: (remaining: string[]) => void;
 	/** The column opened on its own at load, so opening it does not hide the sidebar or the Workspace panel. */
@@ -56,7 +58,7 @@ export interface DocCommentSurfaceProps {
 	readOnly?: boolean;
 	/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 	onSuggestionBusy?: (busy: boolean, id?: string) => void;
-	onSuggestionAccepted?: (text: string) => void;
+	onSuggestionAccepted?: (text: string, history?: { eventId: string; ids: string[] }) => void;
 	/** The server applied an accepted edit but could not record the decision: read the shown document again. */
 	onDocumentChanged?: () => void;
 	load?: CommentLoad;

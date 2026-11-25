@@ -143,3 +143,39 @@ def test_the_recount_never_touches_a_connection_another_thread_opened(world, tmp
     finally:
         done.set()
         worker.join()
+
+
+def test_a_file_another_thread_holds_busy_is_judged_once_it_is_free(world, tmp_path):
+    """A pool job still writing as the test ends leaves its file busy: the drift it committed
+    is judged after a later test, never recorded as judged and dropped."""
+    world.add(None)
+    path = tmp_path / "locked.db"
+    _file_copy(world, path).close()
+    plan_writer_authorizer.recount_changed_plans()
+    locked, release, released, done = (threading.Event() for _ in range(4))
+
+    def other_thread():
+        copy = sqlite3.connect(path)
+        copy.execute("UPDATE plan_nodes SET sub_open = sub_open + 5")
+        copy.commit()
+        copy.execute("BEGIN EXCLUSIVE")  # a rollback-journal exclusive lock: no reader gets in
+        locked.set()
+        release.wait(10)
+        copy.rollback()  # the committed drift stays; the file itself is unchanged
+        released.set()
+        done.wait(10)
+        copy.close()
+
+    worker = threading.Thread(target=other_thread)
+    worker.start()
+    try:
+        assert locked.wait(10)
+        assert plan_writer_authorizer.recount_changed_plans() == []
+        assert str(path) not in plan_writer_authorizer._JUDGED_FILES
+        release.set()
+        assert released.wait(10)
+        assert plan_writer_authorizer.recount_changed_plans() != []
+    finally:
+        release.set()
+        done.set()
+        worker.join()
