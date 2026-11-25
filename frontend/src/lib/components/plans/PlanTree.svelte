@@ -158,13 +158,11 @@
 	createFocusKeeper(() => treeElement, () => items);
 	createFoldWave({
 		nodes: () => shownNodes,
-		items: () => items,
-		element: () => treeElement,
+		items: () => items, element: () => treeElement,
 		isFinished: (node) => isVisibleFinished(node, index.openBlocked),
 		isHidden: (node) => node.later === true && !(reveal.isScheduledOpen(levelOf(node, index.byId)) ?? false),
 		keyOf: (node) => ({ id: `${scope}${node.id}`, level: `${scope}${levelOf(node, index.byId)}` }),
 	});
-
 </script>
 
 <!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
@@ -317,8 +315,7 @@
 				/>
 			</div>
 		{:else if item.kind === 'later-page'}
-			<div class="tree-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} style={depthStyle(depthOffset + item.depth + 1)}>
-				<PlanLevelToggle shown={item.shown} total={item.total} page={LATER_PAGE} noun="later tasks" onShow={() => reveal.pageLater(item.level)} onCollapse={() => reveal.collapseScheduled(item.level)} />
+			<div class="tree-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} style={depthStyle(depthOffset + item.depth + 1)}><PlanLevelToggle shown={item.shown} total={item.total} page={LATER_PAGE} noun="later tasks" onShow={() => reveal.pageLater(item.level)} onCollapse={() => reveal.collapseScheduled(item.level)} />
 			</div>
 		{:else if item.kind === 'cluster'}
 			<!-- Tasks sharing one moment: one time line, their rows listed beneath it. -->
@@ -380,8 +377,7 @@
 	}
 	@media (hover: hover) {
 		button.row-body:hover { background: var(--bg-hover); }
-		/* A lifted row is one surface, and rows easing aside take no hover. */
-		.tree-row.drag-live button.row-body:hover { background: transparent; }
+		.tree-row.drag-live button.row-body:hover { background: transparent; } /* A lifted row is one surface; rows easing aside take no hover. */
 	}
 	button.row-body:focus-visible, .drill-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The one line above tasks that share a moment, at their left edge. */
