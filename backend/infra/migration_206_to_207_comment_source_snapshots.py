@@ -8,12 +8,11 @@ nobody commented on. From here the exact source text is stored with the anchor, 
 unchanged spans are re-measured against it instead of being searched for in the new text
 (``doceditor.comment_snapshots``, ``doceditor.snapshot_reanchor``).
 
-Purely additive. The table is empty and every existing row's ``snapshot_id`` stays NULL,
-which means "written before snapshots were kept": those comments are placed exactly as
-before, and a row gains its first snapshot the next time its document is saved with the
-anchor still valid (``doceditor.comment_state_updates``) or the next time a comment is
-created on that document. Nothing is backfilled: the old text of a past version is not
-recoverable from the current file, so a backfilled snapshot would be a guess.
+Purely additive. Existing references start NULL; no past version is invented. On a
+save, valid NULL root anchors are adopted against the pre-save text before pairing with
+the published text. On comment creation, valid NULL roots are adopted against the current
+captured text in the same transaction. A demoted row can be adopted again when valid;
+an invalid row stays NULL and uses the legacy resolver until a later eligible write.
 
 Snapshots are shared by identical bytes and are collected when no anchor references one
 any more (``doceditor.comment_snapshots.collect_candidates``), so a document that is

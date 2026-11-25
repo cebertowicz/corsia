@@ -49,40 +49,60 @@ def persist_updates(db, artifact_id: str, text: str, updates: list[dict], *, leg
         return count
 
 
-def persist_client_positions(db, artifact_id: str, text: str | None, requested: list[dict]) -> int:
-    """Preserve client updates; pair only positions justified by the stored source."""
+def persist_client_positions(db, artifact_id: str, text: str | None, requested: list[dict], *, verify_text) -> int:
+    """Resolve by source before locking, then verify the document and rows before writing."""
     from infra.database import write_transaction
     from doceditor.quote_anchor import anchor_context
 
+    requested_ids = {str(update.get('id', '')) for update in requested}
+    comments = {row['id']: dict(row) for row in db.execute(
+        'SELECT * FROM doc_comments WHERE artifact_id=? AND id IN (SELECT value FROM json_each(?))',
+        (artifact_id, json.dumps(list(requested_ids))),
+    )}
+    candidates = {identifier: dict(comment) for identifier, comment in comments.items()
+                  if comment.get('snapshot_id') is not None}
+    invalid_source = set()
+    if text is not None and candidates:
+        _, _, bad = resolve_versioned(list(candidates.values()), text, db)
+        invalid_source = {row['id'] for row in bad}
+    legacy, versioned, invalid = [], [], []
+    for update in requested:
+        prepared = dict(update)
+        comment = comments.get(str(update.get('id', '')))
+        quote = update.get('anchor_text', comment.get('anchor_text') if comment else None)
+        start, end = update.get('from_off'), update.get('to_off')
+        context = anchor_context(text, start, end, quote) if text is not None and quote else None
+        if context is not None:
+            prepared['anchor_prefix'], prepared['anchor_suffix'] = context
+        if not comment or comment.get('snapshot_id') is None:
+            legacy.append(prepared)
+            continue
+        expected = {'id': comment['id'], 'expected_snapshot_id': comment['snapshot_id'],
+                    'expected_anchor': tuple(comment.get(field) for field in _ANCHOR_FIELDS)}
+        reason = comment_snapshots.invalid_reason(text, start, end, quote) if text is not None else 'text_unavailable'
+        candidate = candidates[comment['id']]
+        if reason is None and (comment['id'] in invalid_source or candidate.get('orphaned') or
+                               (candidate.get('from_off'), candidate.get('to_off'), candidate.get('anchor_text')) !=
+                               (start, end, quote)):
+            reason = 'ambiguous'
+        if reason:
+            log.info('comment snapshot mismatch id=%s reason=%s', comment['id'], reason)
+            legacy.append(prepared)
+            invalid.append(expected)
+        else:
+            versioned.append({**prepared, **expected})
     with write_transaction(db, scope='client_comment_positions') as connection:
-        legacy, versioned, invalid = [], [], []
-        for update in requested:
-            prepared = dict(update)
-            comment = comment_anchoring.store.get_comment(str(update.get('id', '')), db=connection)
-            quote = update.get('anchor_text', comment.get('anchor_text') if comment else None)
-            start, end = update.get('from_off'), update.get('to_off')
-            context = anchor_context(text, start, end, quote) if text is not None and quote else None
-            if context is not None:
-                prepared['anchor_prefix'], prepared['anchor_suffix'] = context
-            if not comment or comment['artifact_id'] != artifact_id or comment.get('snapshot_id') is None:
-                legacy.append(prepared)
-                continue
-            expected = {'id': comment['id'], 'expected_snapshot_id': comment['snapshot_id'],
-                        'expected_anchor': tuple(comment.get(field) for field in _ANCHOR_FIELDS)}
-            reason = comment_snapshots.invalid_reason(text, start, end, quote) if text is not None else 'text_unavailable'
-            if reason is None:
-                candidate = dict(comment)
-                _, _, invalid_source = resolve_versioned([candidate], cast(str, text), connection)
-                if (invalid_source or candidate.get('orphaned') or
-                        (candidate.get('from_off'), candidate.get('to_off'), candidate.get('anchor_text')) !=
-                        (start, end, quote)):
-                    reason = 'ambiguous'
-            if reason:
-                log.info('comment snapshot mismatch id=%s reason=%s', comment['id'], reason)
-                legacy.append(prepared)
-                invalid.append(expected)
-            else:
-                versioned.append({**prepared, **expected})
+        verify_text()
+        current = {row[0]: tuple(row[1:]) for row in connection.execute(
+            f"SELECT id, snapshot_id, {', '.join(_ANCHOR_FIELDS)} FROM doc_comments "
+            'WHERE artifact_id=? AND id IN (SELECT value FROM json_each(?))',
+            (artifact_id, json.dumps(list(requested_ids))),
+        )}
+        expected_rows = {identifier: (comment.get('snapshot_id'),
+                        *(comment.get(field) for field in _ANCHOR_FIELDS))
+                         for identifier, comment in comments.items()}
+        if current != expected_rows:
+            raise AnchorConflict('comment anchor changed during client position calculation')
         return persist_updates(connection, artifact_id, cast(str, text), versioned, legacy_updates=legacy, invalid=invalid)
 
 

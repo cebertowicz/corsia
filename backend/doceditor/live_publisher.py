@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 import logging
 
-from doceditor import comments, comment_anchoring, comment_snapshots
+from doceditor import comments, comment_anchoring, comment_snapshots, snapshot_reanchor
 from doceditor.feedback_edit_discard import discard_new_edit_item
 from doceditor.live_publication_record import OwedPublication, Publication
 from doceditor.live_store import LiveStore, StoreRefused
@@ -25,6 +25,31 @@ from registry.shared_document_events import (
 log = logging.getLogger(__name__)
 _STAMP = "live_publication"
 PUBLICATION_ATTEMPTS = 3
+
+
+def _unplaced_sources(db, artifact_id: str, before: str, after: str) -> tuple[dict[str, tuple], set[str]]:
+    """Capture anchor state and find sources whose text does not survive publication."""
+    rows = [dict(row) for row in db.execute(
+        'SELECT * FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL AND review=0', (artifact_id,))]
+    versions = comment_snapshots.read_many(db, (row['snapshot_id'] for row in rows if row.get('snapshot_id') is not None))
+    versions[-1] = before
+    candidates = []
+    expected = {row['id']: (row.get('snapshot_id'), *(row.get(field) for field in snapshot_reanchor._ANCHOR_FIELDS))
+                for row in rows}
+    for row in rows:
+        if row['parent_id'] or row['review'] or not row['anchor_text']:
+            continue
+        if row.get('snapshot_id') is None:
+            if comment_snapshots.invalid_reason(before, row['from_off'], row['to_off'], row['anchor_text']) is not None:
+                continue
+            candidate = {**row, 'snapshot_id': -1}
+        else:
+            if comment_snapshots.invalid_reason(versions[row['snapshot_id']], row['from_off'], row['to_off'], row['anchor_text']) is not None:
+                continue
+            candidate = dict(row)
+        candidates.append(candidate)
+    snapshot_reanchor.resolve_versioned(candidates, after, versions=versions)
+    return expected, {row['id'] for row in candidates if row.get('orphaned')}
 
 
 def publish_one(store: LiveStore, row: OwedPublication, *, db=None,
@@ -63,6 +88,7 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
     before = str(clone(publication.prior_mirror)["text"]).encode("utf-8")
     after = text.encode("utf-8")
     artifact = service.find_file_identity(prepared.identity, db=db)
+    expected, unplaced = _unplaced_sources(db, artifact['id'], before.decode('utf-8'), text) if artifact else ({}, set())
     positions = comment_anchoring.prepare_positions(artifact["id"], text, db,
                                                     ranges=publication.ranges) if artifact else []
     authority = publication.authority()
@@ -80,9 +106,16 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
                 actor_thread_id=publication.actor,
                 metadata={"last_written_sha256": result_hash, **({_STAMP: stamp} if stamp else {})},
             )
+            current_rows = {row[0]: tuple(row[1:]) for row in db.execute(
+                f"SELECT id, snapshot_id, {', '.join(snapshot_reanchor._ANCHOR_FIELDS)} FROM doc_comments "
+                'WHERE artifact_id=? AND parent_id IS NULL AND review=0', (artifact['id'],),
+            )}
+            eligible = {identifier for identifier, state in expected.items() if current_rows.get(identifier) == state}
+            preserved = unplaced & eligible
+            comment_snapshots.adopt_legacy(db, artifact["id"], before.decode("utf-8"), eligible=eligible)
             if positions:
-                comments.update_positions(artifact["id"], positions, db=db)
-            comment_snapshots.pair_published_positions(db, artifact["id"], text)
+                comments.update_positions(artifact["id"], [p for p in positions if p['id'] in eligible - preserved], db=db)
+            comment_snapshots.pair_published_positions(db, artifact["id"], text, preserve=preserved, eligible=eligible)
             if shared:
                 record_post_write_events(shared, artifact, before=before, after=after,
                                          actor_thread_id=publication.actor, db=db, prepared=payload)

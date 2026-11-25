@@ -195,7 +195,21 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
                 text = read_doc_text(artifact["path"] if artifact else None)
             except (OSError, ValueError):
                 text = None
-            return snapshot_reanchor.persist_client_positions(db, live_id, text, body.updates)
+            def verify_text():
+                current_artifact = registry_models.get_artifact(live_id, db=db)
+                current_path = current_artifact.get('path') if current_artifact else None
+                if current_path and find_live(Path(current_path)) is not None:
+                    raise HTTPException(409, 'Live comment positions are saved by the server')
+                try:
+                    current_text = read_doc_text(current_path)
+                except (OSError, ValueError):
+                    current_text = None
+                if current_path != (artifact.get('path') if artifact else None) or current_text != text:
+                    raise HTTPException(409, 'Document changed while saving comment positions')
+            try:
+                return snapshot_reanchor.persist_client_positions(db, live_id, text, body.updates, verify_text=verify_text)
+            except snapshot_reanchor.AnchorConflict as exc:
+                raise HTTPException(409, 'Comment changed while saving positions') from exc
         finally:
             db.close()
 

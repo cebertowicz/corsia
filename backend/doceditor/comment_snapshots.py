@@ -36,6 +36,8 @@ def attach_on_create(db: sqlite3.Connection, comment_id: str, text: str | None,
         raise ValueError("snapshot changes require an owning transaction")
     if text is not None:
         db.execute('UPDATE doc_comments SET snapshot_id=? WHERE id=?', (intern(db, text), comment_id))
+        artifact_id = db.execute('SELECT artifact_id FROM doc_comments WHERE id=?', (comment_id,)).fetchone()[0]
+        adopt_legacy(db, artifact_id, text)
     if invalid_reason:
         after_commit(db, lambda: log.info('comment snapshot omitted id=%s reason=%s',
                                           comment_id, invalid_reason))
@@ -80,8 +82,26 @@ def read(db: sqlite3.Connection, snapshot_id: int) -> str:
     return read_many(db, [snapshot_id])[snapshot_id]
 
 
-def pair_published_positions(db: sqlite3.Connection, artifact_id: str, text: str) -> None:
-    """Keep versioned root positions paired with publication bytes in its transaction."""
+def adopt_legacy(db: sqlite3.Connection, artifact_id: str, text: str, *, eligible=None) -> None:
+    """Adopt only root selections whose stored range exactly matches these bytes."""
+    if not db.in_transaction:
+        raise ValueError('snapshot changes require an owning transaction')
+    rows = db.execute(
+        'SELECT id,from_off,to_off,anchor_text FROM doc_comments '
+        'WHERE artifact_id=? AND parent_id IS NULL AND review=0 AND snapshot_id IS NULL',
+        (artifact_id,),
+    ).fetchall()
+    valid = [identifier for identifier, start, end, quote in rows
+             if (eligible is None or identifier in eligible) and quote
+             and invalid_reason(text, start, end, quote) is None]
+    if valid:
+        snapshot_id = intern(db, text)
+        db.executemany('UPDATE doc_comments SET snapshot_id=? WHERE id=?',
+                       [(snapshot_id, identifier) for identifier in valid])
+
+
+def pair_published_positions(db: sqlite3.Connection, artifact_id: str, text: str, *, preserve=(), eligible=None) -> None:
+    """Pair surviving roots with publication bytes; keep unplaced sources intact."""
     if not db.in_transaction:
         raise ValueError('snapshot changes require an owning transaction')
     rows = db.execute(
@@ -92,6 +112,8 @@ def pair_published_positions(db: sqlite3.Connection, artifact_id: str, text: str
     new_id = None
     previous = []
     for identifier, old_id, start, end, quote in rows:
+        if identifier in preserve or (eligible is not None and identifier not in eligible):
+            continue
         reason = invalid_reason(text, start, end, quote)
         if reason is None:
             if new_id is None:
