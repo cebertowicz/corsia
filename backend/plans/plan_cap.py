@@ -14,9 +14,9 @@ is unstarted when every open task under it is pending, holds no slot, has no
 worker, is not the person's own task, and waits on nothing but the agent's own
 check-back. Only a thread's own plan is capped.
 
-It runs when work is added or inserted, when a task is pulled back from Later
-(that task stays where it was put), and once on the first start
-(``run_startup_spill``).
+It runs when work is added or inserted, when an item is pulled back from Later
+(that item stays where it was put), and once on the first start
+(``run_startup_spill``), which first brings back any item only partly in Later.
 """
 
 from __future__ import annotations
@@ -28,8 +28,10 @@ import plans.node_order as node_order
 import plans.node_waits as node_waits
 import plans.service as service
 
-#: Top-level unstarted items kept above the line in an agent's plan.
-CAP = 7
+#: Top-level unstarted items kept above the line in an agent's plan: the item the
+#: agent starts next, plus about four the person can hold at once to compare and
+#: move up (Cowan 2001, "The magical number 4 in short-term memory").
+CAP = 5
 
 #: The reason a spilled task shows on its Later row.
 REASON = f"Moved to Later: more than {CAP} items were waiting to start"
@@ -86,7 +88,7 @@ def spill(db: sqlite3.Connection, plan_id: str, *, keep: frozenset[str] = frozen
           actor_id: str | None = None) -> list[str]:
     """Move the lowest unstarted items past the cap to Later; return those items, top-level ids.
 
-    ``keep`` holds tasks just pulled back from Later: their items are not the ones moved.
+    ``keep`` holds the top-level ids of items just pulled back from Later: they are not the ones moved.
     """
     plan = service._plan_row(db, plan_id)
     if plan["owner_kind"] != "thread":
@@ -99,7 +101,7 @@ def spill(db: sqlite3.Connection, plan_id: str, *, keep: frozenset[str] = frozen
     for root, tasks in reversed(items):  # lowest first
         if over <= 0:
             break
-        if keep.intersection(tasks):
+        if root in keep:
             continue
         from plans import later_fields
 
@@ -111,12 +113,34 @@ def spill(db: sqlite3.Connection, plan_id: str, *, keep: frozenset[str] = frozen
 
 
 def pulled_back(db, node_ids: list[str], *, actor_id: str | None) -> list[str]:
-    """Apply the cap after tasks were pulled back from Later: they stay where they were put,
+    """Apply the cap after items were pulled back from Later: they stay where they were put,
     and the lowest other unstarted items make room."""
+    from plans import later_fields
+
     if not node_ids:
         return []
     plan_id = str(service._node_row(db, node_ids[0])["plan_id"])
-    return spill(db, plan_id, keep=frozenset(node_ids), actor_id=actor_id)
+    keep = frozenset(later_fields.item_root_id(db, node_id) for node_id in node_ids)
+    return spill(db, plan_id, keep=keep, actor_id=actor_id)
+
+
+def whole_items(db, plan_id: str) -> int:
+    """Bring back every item only partly in Later, so each item is in Later whole or not at all.
+
+    Returns the number of items brought back. Only the first start runs it: every
+    write since keeps an item on one side (``later_fields``).
+    """
+    from plans import later_fields
+
+    count = 0
+    for row, _path in node_order.open_nodes_with_paths(db, plan_id):
+        if row["parent_id"] is not None:
+            continue
+        values = {bool(task["later"]) for task in later_fields.item_tasks(db, str(row["id"]))}
+        if values == {True, False}:
+            later_fields.set_item(db, str(row["id"]), later=False, reason=None, actor_id=None, provenance=PROVENANCE)
+            count += 1
+    return count
 
 
 def spill_all(db) -> dict[str, int]:
@@ -124,11 +148,11 @@ def spill_all(db) -> dict[str, int]:
     from infra.database import write_transaction
 
     counts: dict[str, int] = {}
-    plans = db.execute(
-        "SELECT id, owner_id FROM plans WHERE owner_kind='thread' ORDER BY id",
-    ).fetchall()
+    # Every plan's items are made whole; only an agent's own plan is capped (``spill``).
+    plans = db.execute("SELECT id, owner_id FROM plans ORDER BY id").fetchall()
     for plan in plans:
         with write_transaction(db, scope="plan_cap_first_spill") as connection:
+            whole_items(connection, str(plan["id"]))
             moved = spill(connection, str(plan["id"]))
         if moved:
             counts[str(plan["owner_id"])] = len(moved)

@@ -253,7 +253,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
              checkpoint_exception: bool = False,
              assignee: str | None = None, spawn_kind: str | None = None,
              watchdog_budget_seconds: int | None = None, actor_id: str | None = None,
-             provenance: str = "plan_service", db=None, later: bool = False,
+             provenance: str = "plan_service", db=None, later: bool | None = None,
              person_step: bool = True, announce: bool = True) -> PlanNode:
     """Add one DOD-bearing node at a valid tree position; ``announce=False`` keeps its moves off cards and receipts."""
     with plan_write.transaction(db) as connection:

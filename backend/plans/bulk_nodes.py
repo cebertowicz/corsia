@@ -69,11 +69,13 @@ def edit_many(
         ``{"changed": [{"node_id", "revision"}], "refused": [{"node_id", "reason"}]}``,
         each in the caller's order, plus ``next`` when the call freed a slot.
     """
-    from plans import mutations
+    from plans import later_fields, mutations
 
     # As the single edit does (``later_fields.edit_across_cut``): only an edit that
-    # puts tasks in Later takes the slot off them; a regroup or a promotion keeps it.
-    held = _held_slots(db, node_ids) if changed.get("later") is True else {}
+    # puts work in Later takes the slot off it, from whichever task of each named
+    # item holds one; a regroup or a promotion keeps it.
+    owners = later_fields.item_task_ids(db, node_ids) if changed.get("later") is True else {}
+    held = _held_slots(db, list(owners))
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common, reconcile_move=False,
     ))
@@ -86,7 +88,7 @@ def edit_many(
     return {
         "changed": applied,
         "refused": _refused(node_ids, reasons),
-        **_free_slot(plan_id, held, applied, common, acting, closed=False, reconcile=moved),
+        **_free_slot(plan_id, held, applied, common, acting, closed=False, reconcile=moved, owners=owners),
     }
 
 
@@ -204,6 +206,7 @@ def _held_slots(db, node_ids) -> dict:
 def _free_slot(
     plan_id: str, held: dict, applied: list[dict], common: dict,
     acting: str | None, *, closed: bool, archived: bool = False, reconcile: bool = False,
+    owners: dict[str, str] | None = None,
 ) -> dict:
     """Release every slot this call took off a task, reconcile once, and report next.
 
@@ -216,10 +219,11 @@ def _free_slot(
 
     db = common["db"]
     done = {entry["node_id"] for entry in applied}
+    owners = owners or {}
     reason = "archived" if archived else service.CLOSED if closed else "later"
     freed = [
         node_id for node_id in held
-        if node_id in done and admission.release(node_id, reason, db=db)
+        if owners.get(node_id, node_id) in done and admission.release(node_id, reason, db=db)
     ]
     if not freed and not reconcile:
         return {}

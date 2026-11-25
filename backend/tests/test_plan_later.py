@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from plans import later_fields, node_order, projections, service, status_context
-from plans.later_fields import LATER_ON_BRANCH, REASON_WITHOUT_LATER
+from plans.later_fields import LATER_WITHOUT_TASKS, REASON_WITHOUT_LATER
 from plans.upkeep_notice import notice_for
 from tests.plan_close_next_helpers import (
     OWNER, next_block, owner_plan, pause, plan_update, queue_active, revision, row,
@@ -80,7 +80,7 @@ def test_insert_below_the_cut_keeps_its_position_and_its_flag(db):
     assert _later(db, node["id"]) == 1
 
 
-def test_add_cannot_put_a_branch_below_the_cut(db):
+def test_add_cannot_put_a_new_branch_below_the_cut(db):
     plan = owner_plan(db)
 
     with pytest.raises(service.PlanInputError) as refused:
@@ -89,10 +89,10 @@ def test_add_cannot_put_a_branch_below_the_cut(db):
             "later": True,
         })
 
-    assert str(refused.value) == LATER_ON_BRANCH
+    assert str(refused.value) == LATER_WITHOUT_TASKS
 
 
-def test_edit_cannot_put_a_branch_below_the_cut(db):
+def test_edit_cannot_put_an_empty_branch_below_the_cut(db):
     plan = owner_plan(db)
     phase = plan_update(db, plan.id, "add", {
         "kind": "phase", "title": "Branch", "acceptance_criteria": "Verified",
@@ -104,7 +104,7 @@ def test_edit_cannot_put_a_branch_below_the_cut(db):
             "expected_revision": phase["revision"],
         })
 
-    assert str(refused.value) == LATER_ON_BRANCH
+    assert str(refused.value) == LATER_WITHOUT_TASKS
 
 
 def test_a_reason_without_the_cut_is_refused(db):
@@ -583,23 +583,161 @@ def test_a_phase_whose_open_tasks_are_all_later_reads_later(db):
     """A branch carries no stored flag; the pane rolls it up so the sheet folds it into Later."""
     plan = owner_plan(db)
     phase = _phase(db, plan.id, "Launch follow-ups")
-    task(db, plan.id, "Write the recap", parent_id=phase.id, later=True)
-    task(db, plan.id, "Archive the drafts", parent_id=phase.id, later=True)
+    task(db, plan.id, "Write the recap", parent_id=phase.id)
+    task(db, plan.id, "Archive the drafts", parent_id=phase.id)
     finished = task(db, plan.id, "Send the notes", parent_id=phase.id)
     plan_update(db, plan.id, "mark_done", {
         "node_id": finished.id, "expected_revision": revision(db, finished.id), "evidence": "Sent",
     })
+    _item_to_later(db, plan.id, phase)
 
     assert _pane_nodes(db)[phase.id]["later"] is True
 
 
-def test_a_phase_with_one_open_task_above_the_cut_does_not(db):
-    plan = owner_plan(db)
-    phase = _phase(db, plan.id, "Launch")
-    task(db, plan.id, "Someday", parent_id=phase.id, later=True)
-    task(db, plan.id, "Ship it", parent_id=phase.id)
+# --- a top-level item is in Later whole or not at all (the person, Nov 24) ---
 
+
+def _item(db, plan_id: str, title: str = "Launch") -> tuple:
+    phase = _phase(db, plan_id, title)
+    steps = [task(db, plan_id, name, parent_id=phase.id) for name in ("Draft", "Review", "Ship")]
+    return phase, steps
+
+
+def _item_to_later(db, plan_id: str, phase) -> None:
+    plan_update(db, plan_id, "edit", {
+        "node_id": phase.id, "expected_revision": revision(db, phase.id), "later": True,
+    })
+
+
+def test_editing_one_step_moves_its_whole_item_and_writes_no_branch_flag(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+
+    plan_update(db, plan.id, "edit", {
+        "node_id": steps[1].id, "expected_revision": revision(db, steps[1].id),
+        "later": True, "reason": "After launch",
+    })
+
+    assert [_later(db, step.id) for step in steps] == [1, 1, 1]
+    assert _later(db, phase.id) == 0
+    assert _pane_nodes(db)[phase.id]["later"] is True
+    # Every step that crossed says why, with the reason given once.
+    assert [_events(db, step.id) for step in steps] == [[{"later": True, "reason": "After launch"}]] * 3
+
+
+def test_editing_the_branch_moves_its_whole_item(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+
+    _item_to_later(db, plan.id, phase)
+
+    assert [_later(db, step.id) for step in steps] == [1, 1, 1]
+
+
+def test_pulling_back_one_step_brings_back_the_whole_item(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+    _item_to_later(db, plan.id, phase)
+
+    plan_update(db, plan.id, "edit", {
+        "node_id": steps[2].id, "expected_revision": revision(db, steps[2].id), "later": False,
+    })
+
+    assert [_later(db, step.id) for step in steps] == [0, 0, 0]
     assert _pane_nodes(db)[phase.id]["later"] is False
+
+
+def test_a_step_added_to_an_item_in_later_is_born_there(db):
+    plan = owner_plan(db)
+    phase, _steps = _item(db, plan.id)
+    _item_to_later(db, plan.id, phase)
+
+    added = _add(db, plan.id, "Follow up", parent_id=phase.id)
+
+    assert added["later"] is True
+    assert _pane_nodes(db)[phase.id]["later"] is True
+
+
+def test_a_step_naming_the_other_side_from_its_item_is_refused(db):
+    plan = owner_plan(db)
+    phase, _steps = _item(db, plan.id)
+
+    with pytest.raises(service.PlanInputError) as refused:
+        _add(db, plan.id, "Someday", parent_id=phase.id, later=True)
+
+    assert str(refused.value) == later_fields.LATER_NOT_ITEM.format(title="Launch", side="not in Later")
+
+
+def test_starting_a_step_of_an_item_in_later_brings_the_whole_item_back(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+    _item_to_later(db, plan.id, phase)
+
+    plan_update(db, plan.id, "start", {
+        "node_id": steps[0].id, "expected_revision": revision(db, steps[0].id),
+    })
+
+    assert [_later(db, step.id) for step in steps] == [0, 0, 0]
+
+
+def test_a_task_moved_into_an_item_takes_its_side(db):
+    plan = owner_plan(db)
+    phase, _steps = _item(db, plan.id)
+    _item_to_later(db, plan.id, phase)
+    loose = task(db, plan.id, "Loose end")
+
+    plan_update(db, plan.id, "edit", {
+        "node_id": loose.id, "expected_revision": revision(db, loose.id), "parent_id": phase.id,
+    })
+
+    assert _later(db, loose.id) == 1
+    assert _pane_nodes(db)[phase.id]["later"] is True
+
+
+def _open_attempts(db, node_id: str) -> int:
+    return db.execute(
+        "SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (node_id,),
+    ).fetchone()[0]
+
+
+def test_moving_an_item_frees_the_slot_another_of_its_steps_holds(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+    other = task(db, plan.id, "Next thing")
+    select(db, plan.id, steps[0].id)
+    queue_active(db, other.id)
+
+    result = plan_update(db, plan.id, "edit", {
+        "node_id": steps[2].id, "later": True, "expected_revision": revision(db, steps[2].id),
+    })
+
+    assert _open_attempts(db, steps[0].id) == 0
+    assert next_block(result)["selected"]["id"] == other.id
+
+
+def test_a_bulk_later_frees_the_slot_another_step_of_the_item_holds(db):
+    plan = owner_plan(db)
+    phase, steps = _item(db, plan.id)
+    select(db, plan.id, steps[0].id)
+
+    result = plan_update(db, plan.id, "edit", {"node_ids": [phase.id], "later": True})
+
+    assert [entry["node_id"] for entry in result["changed"]] == [phase.id]
+    assert [_later(db, step.id) for step in steps] == [1, 1, 1]
+    assert _open_attempts(db, steps[0].id) == 0
+
+
+def test_the_first_start_brings_back_an_item_only_partly_in_later(db):
+    from plans import plan_cap
+
+    plan = owner_plan(db)
+    _phase_row, steps = _item(db, plan.id)
+    # Written before the whole-item rule: one step in Later, two not.
+    db.execute("UPDATE plan_nodes SET later=1 WHERE id=?", (steps[0].id,))
+
+    assert plan_cap.whole_items(db, plan.id) == 1
+    assert [_later(db, step.id) for step in steps] == [0, 0, 0]
+    assert plan_cap.whole_items(db, plan.id) == 0
 
 
 def test_a_phase_with_nothing_open_is_not_later(db):
