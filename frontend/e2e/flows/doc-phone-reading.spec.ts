@@ -54,9 +54,9 @@ for (const width of [320, 393, 768, 1440]) {
 					const offer = page.locator('.touch-comment-bar.offered');
 					await expect(offer).toBeVisible();
 					await expect(page.locator('.sel-comment')).toHaveCount(1);
-					const target = await offer.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
-					expect(target!.height).toBeGreaterThanOrEqual(44);
-					expect(target!.width).toBeGreaterThanOrEqual(44);
+					// The button pops in from 90% size, as it does beside a selection on a desktop: it is a 44 px target once that has settled.
+					const comment = offer.getByRole('button', { name: 'Comment', exact: true });
+					await expect.poll(async () => { const box = (await comment.boundingBox())!; return box.height >= 44 && box.width >= 44; }, { message: 'the button is a 44 px target' }).toBe(true);
 					await expectCommentPill(page);
 					const geometry = await offer.evaluate(el => {
 						const bar = el.getBoundingClientRect(), viewport = window.visualViewport!;
