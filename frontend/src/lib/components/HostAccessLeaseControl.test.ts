@@ -1475,7 +1475,7 @@ describe('HostAccessLeaseControl — fixed sentences, never raw errors', () => {
 		status = 409;
 		await reject();
 		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(2));
-		// The 409 re-reads (a third GET), which clears the stale row; the server's 409 words never show.
+		// The 409 re-reads (a second GET), which clears the stale row; the server's 409 words never show.
 		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => (call[1]?.method ?? 'GET') === 'GET')).toHaveLength(2));
 		await vi.waitFor(() => expect(host.querySelector('.status-row.stale')).toBeNull());
 		expect(document.body.textContent).not.toContain('Reviewer transport failed.');
