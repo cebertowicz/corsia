@@ -6,7 +6,8 @@ import { createSession, replacePreviousFixtureThread, loadPastFirstRunLanding, o
 import { injectMessage } from './support/mock';
 import { setDebugVersionOverlay } from './support/heldComments';
 
-const out = '/Users/jarvis/Corsia/projects/corsia/shared/structured-plans/renders/2026-11-25-cap-later-cases';
+const out = process.env.CORSIA_CAPTURE_DIR ?? path.resolve('test-results/plan-cap-cases');
+fs.mkdirSync(out, { recursive: true });
 const probe = (v: unknown) => { const line = JSON.stringify(v); console.log(line); fs.appendFileSync(path.join(out, 'probe.jsonl'), line + '\n'); };
 const seed = String.raw`
 import sys, uuid, asyncio, json, traceback
