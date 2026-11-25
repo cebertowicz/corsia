@@ -282,7 +282,7 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "My job is to give you back your time, and I measure it" in opening
-    assert "I'm one too, a special one: I'll help you set yours up when it fits" in opening
+    assert "Take me, for example: I'll help you set yours up when it fits" in opening
     assert "Plan section" not in opening and "skip the rest" not in opening
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
