@@ -36,4 +36,4 @@ def row(renderer, key, raised_at):
 def test_renderer_levels_and_unknown_default():
     from infra.activity_urgency import sort_key
     assert [sort_key({'renderer': kind, 'key': kind})[0] for kind in
-            ('decision', 'task', 'review', 'held-reply', 'reply', 'unknown')] == [1, 1, 2, 2, 3, 2]
+            ('decision', 'task', 'review', 'held-reply', 'reply', 'unknown')] == [1, 1, 2, 1, 3, 2]

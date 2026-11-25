@@ -74,7 +74,7 @@ def test_queue_count_and_activity_awaiting_count_agree(db, monkeypatch):
     assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 1
 
 
-def test_held_replies_sort_first_then_by_raised_at(db, monkeypatch):
+def test_held_replies_share_the_blocking_level_and_sort_oldest_first(db, monkeypatch):
     raise_decision(db, "child", "child", title="A decision")
     later = _hold(db, "child", "later")
     earlier = _hold(db, "other-root", "earlier")
