@@ -72,6 +72,25 @@ for (const width of [1440, 393]) {
   const tabY = (await tasksTab.boundingBox())!.y;
   if (width === 393) {
    for (const tab of await page.getByRole('tab').all()) expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+   const probe = async (button: ReturnType<typeof page.locator>, name: string) => {
+    const result = await button.evaluate((el) => {
+     const box = el.getBoundingClientRect();
+     return [-20, 0, 20].map((dy) => {
+      const y = box.y + box.height / 2 + dy;
+      return { y, hit: el.contains(document.elementFromPoint(box.x + box.width / 2, y)) };
+     });
+    });
+    console.log(`${name} hit targets`, JSON.stringify(result));
+    expect(result.map(({ hit }) => hit)).toEqual([true, true, true]);
+   };
+   await probe(page.locator('.activity .by .link'), 'Ranker');
+   const taskRowY = (await page.locator('[data-activity-row]').first().boundingBox())!.y;
+   await page.getByRole('tab', { name: /Notifications.*200/ }).click();
+   await probe(page.getByRole('button', { name: 'Mark all read' }), 'Mark all read');
+   const notificationRowY = (await page.locator('[data-activity-row]').first().boundingBox())!.y;
+   console.log('First row y', JSON.stringify({ taskRowY, notificationRowY }));
+   expect(notificationRowY).toBe(taskRowY);
+   await tasksTab.click();
   }
   await shot('tasks');
   if (width === 1440) {
@@ -91,17 +110,6 @@ for (const width of [1440, 393]) {
   await page.getByRole('tab', { name: /Notifications.*200/ }).click();
   const markAll = page.getByRole('button', { name: 'Mark all read' });
   await expect(markAll).toBeVisible();
-  if (width === 393) {
-   const hits = await markAll.evaluate((button) => {
-    const box = button.getBoundingClientRect();
-    return [-20, 0, 20].map((dy) => {
-     const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2 + dy);
-     return { dy, hit: button.contains(target), tag: target?.tagName, class: target?.getAttribute('class'), text: target?.textContent?.slice(0, 100), box: box.toJSON(), viewport: { width: innerWidth, height: innerHeight } };
-    });
-   });
-   console.log('Mark all read hit targets', JSON.stringify(hits));
-   expect(hits.every((hit) => hit.hit)).toBe(true);
-  }
   await shot('notifications');
   await page.route('**/api/attention/notifications/read', route => route.fulfill({ status: 500, json: {} }));
   await page.getByRole('button', { name: 'Mark all read' }).click();

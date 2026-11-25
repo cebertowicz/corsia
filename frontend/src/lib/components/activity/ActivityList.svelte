@@ -306,7 +306,7 @@
 	:global(.activity.phone) .dismiss { display: none; }
 	:global(.activity.phone) .link { position: relative; }
 	/* Reserve the full target in the flow so the first row cannot cover it. */
-	:global(.activity.phone) .mark-all { min-height: var(--touch-target); }
+	:global(.activity.phone) .by { min-height: var(--touch-target); padding-block: 0; align-items: center; }
 	:global(.activity.phone) .link::after {
 		content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%);
 	}

@@ -1391,10 +1391,13 @@ describe('Activity on a phone', () => {
 		const phoneRules = listSource.split('\n').filter((line) => line.includes(':global(.activity.phone)'));
 		// Titles keep the sidebar rows' token; the phone type scale alone raises it.
 		expect(phoneRules.some((line) => line.includes('strong'))).toBe(false);
-		// Links get their touch area from a pseudo-element, so the ranker link and Mark all read don't push the header
-		// lines apart. The tabs are the one exception: the spec has them at least 44 px high on a phone.
+		// The header line is 44 px on both tabs, so switching tabs doesn't move the rows.
+		// Links get their touch area from a pseudo-element; tabs also need a 44 px target.
 		const grown = listSource.split('\n').filter((line) => /min-height: var\(--touch-target\)/.test(line));
-		expect(grown).toEqual(['\t:global(.activity.phone) .tab { min-height: var(--touch-target); align-items: center; }']);
+		expect(grown).toEqual([
+			'\t:global(.activity.phone) .tab { min-height: var(--touch-target); align-items: center; }',
+			'\t:global(.activity.phone) .by { min-height: var(--touch-target); padding-block: 0; align-items: center; }',
+		]);
 		expect(listSource).toMatch(/\.link::after \{\n[^}]*height: var\(--touch-target\)/);
 	});
 
