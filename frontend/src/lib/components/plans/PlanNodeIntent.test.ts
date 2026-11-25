@@ -51,8 +51,10 @@ it('shows only the done test for a settled task with no reading', () => {
 	expect(text).not.toContain('No reading recorded.');
 	expect(text).toContain('Done when: Finished result');
 });
-it('shows the empty reading for an open task and the run caption for a step', () => {
+it('shows the empty reading for an open task and no edit caption for a step', () => {
 	expect(render({ intent: null })).toContain('No reading recorded.');
 	component.$destroy(); host.remove();
-	expect(render({ intent: 'Run goal', intent_run_title: 'The run' })).toContain('Changes the reading for the whole run: The run');
+	const step = render({ intent: 'Run goal', intent_run_title: 'The run' });
+	expect(step).toContain('Run goal');
+	expect(step).not.toContain('Changes the reading');
 });

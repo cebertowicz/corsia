@@ -13,7 +13,6 @@
 		</div>
 		{#if node.intent}
 			<p class="reading">{node.intent}</p>
-			{#if !node.intent_parent_title && node.intent_run_title}<p class="note">Changes the reading for the whole run: {node.intent_run_title}</p>{/if}
 		{:else}
 			<p class="reading muted">No reading recorded.</p>
 		{/if}
