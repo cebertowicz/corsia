@@ -873,6 +873,10 @@ for (const theme of ['light', 'dark'] as const) {
 		const split = page.locator('.split');
 		await expect.poll(async () => { const box = (await header.boundingBox())!; return box.x + box.width; }, 'the header ends at the overlaid pane').toBeLessThanOrEqual(paneLeft + 0.5);
 
+		// The date behind "as of Sep 11" is read out, not drawn, as shipped at f51bbda8e.
+		const readOutDates = page.locator('.document-metadata time .sr-only');
+		expect(await readOutDates.count(), 'the freshness date is in the row for a screen reader').toBeGreaterThan(0);
+		expect(await readOutDates.evaluateAll((els) => els.every((el) => el.getBoundingClientRect().width <= 1)), 'the freshness date is not drawn').toBe(true);
 		// The row's count and Request review are in the document's tools, as shipped at f51bbda8e.
 		const tools = page.locator('.document-tools');
 		const pill = tools.getByRole('button', { name: /^0 comments\b/ });
@@ -904,7 +908,8 @@ for (const theme of ['light', 'dark'] as const) {
 		expect(geometry.chevron.top, 'chevron stays beside the asker name').toBeLessThanOrEqual(geometry.who.bottom);
 		expect(geometry.tools.right, 'tools clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(geometry.ask.right, 'question clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
-		expect(await nameWhole(who), 'asker name not clipped').toBe(true);
+		// At this width the name is shortened in the middle, as shipped at f51bbda8e (pre-#3083): the whole string is in the element, and nothing is clipped past its box.
+		expect(await who.evaluate((el) => el.scrollWidth <= el.clientWidth), 'asker name not clipped').toBe(true);
 		// The ask's line box, not `.rb-lead`: the lead is a layout-less wrapper when the line stays on one row.
 		expect(geometry.who.right, 'asker name inside its row').toBeLessThanOrEqual(geometry.lineBox.right + 0.5);
 		expect(geometry.lineBox.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);

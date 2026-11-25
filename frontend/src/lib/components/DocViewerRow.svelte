@@ -123,6 +123,8 @@
 	.document-metadata.held :global(button:disabled) { opacity: 1; cursor: default; }
 	.document-metadata.held :global(button.item:disabled:hover) { background: transparent; color: var(--text-secondary); }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
+	/* The date behind "verified N days ago" is read out, not drawn. */
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
 	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
 	/* The cluster breaks only where content does not fit, in this order: between [Send · count] and the rest; inside the rest, between [Deliver immediately · switch] and [reviewers · Request review · History]; and, only when [Send · count] alone is wider than the header, between Send and the count. The label never leaves its switch, and the reviewers, Request review and History stay on one row. */
