@@ -3,6 +3,7 @@ import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
+import { claimDecision, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
 import { token } from '$lib/stores/auth';
 import { emit } from '$lib/ws/events';
 import type { HostAccessFill, HostAccessLease } from '$lib/api/hostAccess';
@@ -140,6 +141,68 @@ afterEach(() => {
 });
 
 describe('HostAccessLeaseControl', () => {
+	it('keeps one decision in flight per lease', () => {
+		const attempt = claimDecision('helper-test')!;
+		expect(claimDecision('helper-test')).toBeNull();
+		expect(isCurrentDecision('helper-test', attempt)).toBe(true);
+		releaseDecision('helper-test', attempt);
+		expect(isCurrentDecision('helper-test', attempt)).toBe(false);
+	});
+	it.each([
+		['activation_reviewer_unavailable', 'Host access couldn’t start because its reviewer model can’t run. Choose another reviewer model in Settings › System, then ask the agent to request access again.'],
+		['activation_failed', 'Host access couldn’t start. Ask the agent to request access again.'],
+		['raw secret detail', 'Host access couldn’t start. Ask the agent to request access again.'],
+	])('shows a safe message when approval returns blocked: %s', async (reason, message) => {
+		let decided = false;
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') {
+				decided = true;
+				return response({ ...waitingLease, state: 'blocked', terminal_reason: reason });
+			}
+			return response({ leases: decided ? [] : [waitingLease] });
+		}));
+		component = mountControl();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
+		const dialog = await openPendingDrawer();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain(message));
+		expect(host.textContent).not.toContain('raw secret detail');
+		emit('host_access_changed', {});
+		await tick();
+		expect(host.textContent).toContain(message);
+	});
+
+	it.each(['active', 'awaiting_user', 'reviewing', 'activating'] as const)(
+		'clears the failure when a new %s lease appears, but not for the failed lease', async (state) => {
+			const message = 'Host access couldn’t start. Ask the agent to request access again.';
+			let listed: HostAccessLease[] = [waitingLease];
+			const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === 'POST') {
+					listed = [];
+					return response({ ...waitingLease, state: 'blocked', terminal_reason: 'activation_failed' });
+				}
+				return response({ leases: listed });
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			component = mountControl();
+			await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
+			const dialog = await openPendingDrawer();
+			Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+				.find((button) => button.textContent?.trim() === 'Approve')!.click();
+			await vi.waitFor(() => expect(host.textContent).toContain(message));
+			await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
+			listed = [{ ...waitingLease, state }];
+			emit('host_access_changed', {});
+			await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4));
+			await tick();
+			expect(host.textContent).toContain(message);
+			listed = [{ ...waitingLease, id: 'lease-2', state }];
+			emit('host_access_changed', {});
+			await vi.waitFor(() => expect(host.textContent).not.toContain(message));
+		},
+	);
+
 	it('shows the full reviewed questionnaire and performs one explicit approval', async () => {
 		let state: HostAccessLease = waitingLease;
 		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

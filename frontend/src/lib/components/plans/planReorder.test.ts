@@ -30,4 +30,14 @@ describe('the renderer groups eligible for reorder', () => {
 		const now = Date.parse('2026-01-01T00:00:00Z');
 		expect([ready, untimed, timed, scheduled, finished].map((node) => planOrderGroup(node, now, new Set()))).toEqual(['work', 'untimed', null, null, null]);
 	});
+	it('puts every unfolded step of a run in one sequence, since the run shows in plan order', () => {
+		const ready = operatorNode();
+		const cause = { kind: 'waiting' as const, reason_key: 'watch', reason: 'Waiting', owner_kind: 'thread' as const, owner_id: 'agent', ends_at: '2030-01-01T00:00:00Z' };
+		const timed = operatorNode({ display: { label_key: 'waiting', tone_key: 'waiting' }, execution: { ...ready.execution, condition: 'waiting', causes: [cause] } });
+		const scheduled = operatorNode({ ...timed, execution: { ...timed.execution, causes: [{ ...cause, scheduled_reason: 'Later' }] } });
+		const finished = operatorNode({ state: 'accepted' });
+		const folded = operatorNode({ state: 'accepted', folded: true });
+		const now = Date.parse('2026-01-01T00:00:00Z');
+		expect([ready, timed, scheduled, finished, folded].map((node) => planOrderGroup(node, now, new Set(), true))).toEqual(['run', 'run', 'run', 'run', null]);
+	});
 });

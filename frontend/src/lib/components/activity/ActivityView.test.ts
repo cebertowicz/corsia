@@ -492,7 +492,7 @@ describe('Activity’s bottom band at rest', () => {
 		expect(start).toBeGreaterThan(-1);
 		expect(shellSource.slice(start, shellSource.indexOf('}', start))).toContain('display: inline;');
 		// It must come after the rule that hides them, or that rule wins.
-		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by {'));
+		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock .rb-dock-sep, .rb-dock:not(.open) .rb-dock-by {'));
 	});
 });
 
@@ -546,8 +546,8 @@ describe('a reply row in a document with two replied threads', () => {
 		served = [replyRow('reply:first', 'c-first', 'r-first', 1), replyRow('reply:second', 'c-second', 'r-second', 2)];
 		const fetchStub = vi.mocked(fetch);
 		const queue = fetchStub.getMockImplementation()!;
-		fetchStub.mockImplementation(async (input) => String(input).includes('/api/threads/thread-plans/artifacts')
-			? respond(200, { nodes: [{ kind: 'artifact', id: 'art-later', name: 'later.md', title: 'Later row', path: '/docs/later.md' }], needs_attention: [] })
+		fetchStub.mockImplementation(async (input) => /\/api\/artifacts\/art-later(?:\?|$)/.test(String(input))
+			? respond(200, { artifact: { id: 'art-later', title: 'Later row', path: '/docs/later.md' } })
 			: queue(input));
 		render();
 		await settle();

@@ -1,7 +1,5 @@
 <script module lang="ts">
-	import { get as getStoreValue, writable } from 'svelte/store';
-
-	const inFlightDecisionAttempts = writable(new Map<string, symbol>());
+	import { claimDecision, failureLeaseIds, hasNewLease, inFlightDecisionAttempts, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
 
 	/*
 	 * "A lease is asking the user right now" is deliberately NOT a module
@@ -11,31 +9,6 @@
 	 * bound out per instance instead, and cleared on teardown.
 	 */
 
-	function claimDecision(leaseId: string): symbol | null {
-		const attempt = Symbol(leaseId);
-		let claimed = false;
-		inFlightDecisionAttempts.update((current) => {
-			if (current.has(leaseId)) return current;
-			const next = new Map(current);
-			next.set(leaseId, attempt);
-			claimed = true;
-			return next;
-		});
-		return claimed ? attempt : null;
-	}
-
-	function isCurrentDecision(leaseId: string, attempt: symbol): boolean {
-		return getStoreValue(inFlightDecisionAttempts).get(leaseId) === attempt;
-	}
-
-	function releaseDecision(leaseId: string, attempt: symbol): void {
-		inFlightDecisionAttempts.update((current) => {
-			if (current.get(leaseId) !== attempt) return current;
-			const next = new Map(current);
-			next.delete(leaseId);
-			return next;
-		});
-	}
 </script>
 
 <script lang="ts">
@@ -65,6 +38,8 @@
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
 	const STALE = 'Couldn’t check host access.';
 	const DECISION_UNCONFIRMED = 'Couldn’t confirm whether your choice went through. Retry to check.';
+	const REVIEWER_UNAVAILABLE_MESSAGE = 'Host access couldn’t start because its reviewer model can’t run. Choose another reviewer model in Settings › System, then ask the agent to request access again.';
+	const ACTIVATION_FAILED_MESSAGE = 'Host access couldn’t start. Ask the agent to request access again.';
 
 	let {
 		threadId,
@@ -84,6 +59,8 @@
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
+	let activationFailure = $state('');
+	let failureIds = new Set<string>();
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
 	let nowMs = $state(Date.now());
 	let generation = 0;
@@ -131,7 +108,7 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || STALE : null,
+		stale ? error || STALE : activationFailure || null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);
@@ -156,10 +133,6 @@
 		openActiveTrigger = null;
 	}
 
-	function openPendingDrawer(): void {
-		pendingOpen = true;
-	}
-
 	function closePendingDrawer(): void {
 		pendingOpen = false;
 		pendingTriggerEl?.focus();
@@ -174,6 +147,7 @@
 			&& intent.threadId === requestedThreadId
 			&& !nextLeases.some((lease) => lease.id === intent.leaseId);
 		leases = nextLeases;
+		if (activationFailure && hasNewLease(nextLeases, failureIds)) activationFailure = '';
 		if (!leaseWasRemoved || !intent) return;
 		focusRestoreIntent = null;
 		await restoreComposerFocusAfterLeaseRemoval(
@@ -252,9 +226,16 @@
 			decision, lease.id, decisionThreadId, decisionControl,
 		);
 		error = '';
+		activationFailure = '';
 		let refreshTruth = true;
 		try {
-			await decideHostAccessLease(lease, decision, durationSeconds);
+			const result = await decideHostAccessLease(lease, decision, durationSeconds);
+			if (decision === 'approve' && result.state === 'blocked'
+				&& isCurrentDecision(lease.id, decisionAttempt) && threadId === decisionThreadId) {
+				failureIds = failureLeaseIds(leases, lease.id);
+				activationFailure = result.terminal_reason === 'activation_reviewer_unavailable'
+					? REVIEWER_UNAVAILABLE_MESSAGE : ACTIVATION_FAILED_MESSAGE;
+			}
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			if (!(caught instanceof HostAccessApiError)) console.warn('Could not send host-access decision', caught);
@@ -283,6 +264,7 @@
 
 	$effect(() => {
 		const selectedThreadId = threadId;
+		activationFailure = '';
 		leases = [];
 		stale = false;
 		error = '';
@@ -364,7 +346,7 @@
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
 						<span>{staleNotice}</span>
-						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
+						{#if stale}<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>{/if}
 					</div>
 				{:else if transitionalStatus}
 					<div class="status-row" role="status">
@@ -400,7 +382,7 @@
 				{stale} deciding={decidingLeaseId === currentPending.id}
 				open={pendingOpen}
 				bind:element={pendingTriggerEl}
-				onclick={openPendingDrawer}
+				onclick={() => { pendingOpen = true; }}
 			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
