@@ -25,11 +25,12 @@ _SENSITIVE_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _TEXT_ASSIGNMENT_KEY = _CREDENTIAL_KEY
+# A quote may be escaped (\") when the text is itself JSON-encoded, such as a tool call's arguments.
 _ASSIGNMENT_RE = re.compile(
     rf"(?P<prefix>(?<![A-Za-z0-9_-])"
-    rf"(?:(?P<key_quote>[\"']){_TEXT_ASSIGNMENT_KEY}(?P=key_quote)"
+    rf"(?:(?P<key_quote>\\?[\"']){_TEXT_ASSIGNMENT_KEY}(?P=key_quote)"
     rf"|{_TEXT_ASSIGNMENT_KEY})\s*[:=]\s*)"
-    r"(?:(?P<quote>[\"'])(?P<quoted>.*?)(?P=quote)"
+    r"(?:(?P<quote>\\?[\"'])(?P<quoted>.*?)(?P=quote)"
     r"|(?P<bare>[^\s,;&}\]]+))",
     re.IGNORECASE,
 )
@@ -42,10 +43,11 @@ _COOKIE_ASSIGNMENT_RE = re.compile(
 # GitHub's ``token`` scheme is also an everyday word ("authorization token expired"), so in
 # free text it counts only before a credential-shaped value.
 _TOKEN_SCHEME = r"token\s+(?=[A-Za-z0-9_.-]{20,})"
+# The header name and value may each be quoted, as in a headers dict or JSON ('Authorization': 'Bearer …').
 _AUTH_SCHEME_RE = re.compile(
-    r"(?P<prefix>\b(?:(?:proxy-)?authorization|auth)\s*[:=]\s*"
+    r"(?P<prefix>\b(?:(?:proxy-)?authorization|auth)(?:\\?[\"'])?\s*[:=]\s*(?:\\?[\"'])?"
     rf"(?:(?:bearer|basic)\s+|{_TOKEN_SCHEME}))"
-    r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]]+)",
+    r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]\\]+)",
     re.IGNORECASE,
 )
 _AUTH_SPACE_SCHEME_RE = re.compile(
@@ -183,6 +185,8 @@ def _redact_token_prefix(_match: re.Match[str]) -> str:
 _TOKEN_PREFIX_RE = re.compile(
     r"\b(?:sk-(?:ant-)?|gh[pousr]_|github_pat_|glpat-|xox[a-z]-|xoxe\.xox[a-z]-|xapp-|AIza|ya29\.|dop_v1_)"
     r"[A-Za-z0-9_-]{16,}|\b(?:AKIA|ASIA)[0-9A-Z]{12,}\b"
+    # A signed JSON Web Token: base64url JSON header and payload (both open with eyJ) and a signature.
+    r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}"
 )
 
 # Applied in this order; sanitize_credential_text and credential_spans share it.

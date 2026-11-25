@@ -10,6 +10,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
+- Access tokens are now hidden from agents in more of the forms they take in commands and messages (a signed web token on its own, after --token or a custom header, or inside quoted or encoded headers), including when an agent reads back an earlier chat.
 - Activity shows instructions for tasks assigned to you.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
