@@ -15,7 +15,7 @@ workflow:
       difficulty: {default: standard}
       instruction: "## Pre-mortem"
     - id: work
-      title: Draft
+      title: Work
       required: true
       check: "the result exists where the person will use it; anything to go outside is a draft; nothing has been sent, published, paid, filed or deleted"
       after: [ground, premortem]

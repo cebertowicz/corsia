@@ -316,10 +316,10 @@
       "sha256": "12161fe0588584412eb6d82ee1c6f7e9b2c07367197d0ba1ed8f8280825f0a3d"
     },
     {
-      "bytes": 2265,
+      "bytes": 2264,
       "kind": "skill",
       "path": "skills/general-work/corsia.yaml",
-      "sha256": "ffbdbf3d9d021eebc9af1a3c6581c24fa3982452e7473244df590f115e571001"
+      "sha256": "283b08720ffd835e8a5882de54fae1abe64f2b9230d658d9a8032866772b3e72"
     },
     {
       "bytes": 3823,

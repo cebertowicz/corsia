@@ -87,7 +87,7 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
     ("general-work", {
         "ground": "Groundwork",
         "premortem": "Risks",
-        "work": "Draft",
+        "work": "Work",
         "review": "Fresh review",
         "handover": "Delivery",
     }),
