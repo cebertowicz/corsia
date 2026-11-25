@@ -22,6 +22,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
+- Plan task details now show the reading of the goal the task works under and what done means.
 - Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.

@@ -180,6 +180,11 @@ export interface OperatorNode {
 	/** Open steps in this plan that this user-assigned step releases. */
 	waiting_on: string[];
 	acceptance_criteria: string;
+	intent: string | null;
+	intent_is_person_comment: boolean;
+	intent_parent_title: string | null;
+	intent_owner_name: string | null;
+	intent_run_title: string | null;
 	state: string;
 	/** Prerequisites not yet accepted; empty unless the node is open. */
 	unmet_dependencies: string[];
