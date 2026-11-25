@@ -23,6 +23,7 @@ REVIEW_FAILURE_STAGE = "application_reviewer_failure"
 ACTIVATION_FAILED_STAGE = "activation_failed"
 BROWSER_ISOLATION_FAILED_STAGE = "browser_isolation_failed"
 REVIEWER_UNAVAILABLE_REASON = "reviewer_unavailable"
+ACTIVATION_REVIEWER_UNAVAILABLE_REASON = "activation_reviewer_unavailable"
 
 ReviewTerminal = Literal[
     "allow", "block", "revoke", "invalid_output", "identity_failure",
@@ -67,6 +68,7 @@ HOLDER_SAFE_REASONS = frozenset(
         BROWSER_ISOLATION_FAILED_STAGE,
         REVIEW_FAILURE_STAGE,
         REVIEWER_UNAVAILABLE_REASON,
+        ACTIVATION_REVIEWER_UNAVAILABLE_REASON,
     }
 )
 
@@ -154,6 +156,8 @@ def lease_failure_reason(exc: BaseException, *, review_recorded: bool) -> str:
     """
     if isinstance(exc, HostAccessBrowserIsolationError):
         return BROWSER_ISOLATION_FAILED_STAGE
+    if review_recorded and isinstance(exc, ReviewerUnavailableError):
+        return ACTIVATION_REVIEWER_UNAVAILABLE_REASON
     if review_recorded:
         return ACTIVATION_FAILED_STAGE
     if isinstance(exc, ReviewerUnavailableError):

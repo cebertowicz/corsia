@@ -297,6 +297,17 @@ test('Activity first version: built frames', async ({ page, request }) => {
 	await shot(page, 'e-item-393.png');
 });
 
+test('Activity opens an asked document after its registration settles', async ({ page, request }) => {
+	const w = await seedWorld(request);
+	isolatedDb([
+		'changed = connection.execute("UPDATE artifact_registrations SET surfacing=\'settled\' WHERE artifact_id=?", (sys.argv[2],)).rowcount',
+		'assert changed == 1, changed',
+	], w.docs.credentials);
+	await serveActivity(page, w, frameItems(w));
+	await arrive(page, 1440, 900);
+	await expect(page.locator('.pane-col').getByText('Agents sign in with your saved passwords')).toBeVisible({ timeout: 15_000 });
+});
+
 /** Today's Activity at both widths, for the before row; run on the base commit. */
 test('Activity first version: before frames', async ({ page, request }) => {
 	test.skip(process.env.ACTIVITY_BEFORE !== '1', 'run only on the base commit');

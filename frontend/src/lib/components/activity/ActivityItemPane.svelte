@@ -15,7 +15,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { openArtifactTab, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 	import {
-		chatReplyOf, decisionOf, docReplyOf, documentOf, findDocument, heldOf, taskOf, taskSteps,
+		decisionOf, docReplyOf, documentOf, findDocument, heldOf, taskOf, taskSteps,
 		type DocumentLookup,
 	} from './activityItems';
 	import {
@@ -46,7 +46,6 @@
 	const held = $derived(heldOf(item));
 	const task = $derived(taskOf(item));
 	const docReply = $derived(docReplyOf(item));
-	const chatReply = $derived(chatReplyOf(item));
 	const doc = $derived(documentOf(item));
 	const sourceThread = $derived(item.source.thread_id);
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
@@ -101,14 +100,14 @@
 		}
 		lookup = { status: 'resolving' };
 		let current = true;
-		void findDocument(thread, artifactId).then((found) => {
+		void findDocument(artifactId).then((found) => {
 			if (!current || key !== itemKey) return;
 			lookup = found;
 			if (found.status !== 'found') return;
 			openArtifactTab(workspaceKey, {
 				artifactId,
 				path: found.path,
-				title: found.title,
+				title: found.title ?? found.path.split('/').pop() ?? found.path,
 				...(landOnReplies ? { landOn: 'new-replies' as const, landOnCommentId: commentId } : {}),
 			});
 			const open = get(threadWorkspaces)[workspaceKey]?.activeTabId ?? null;
@@ -198,7 +197,7 @@
 	function reply() {
 		if (lookup?.status !== 'found' || !doc) return;
 		openArtifactTab(workspaceKey, {
-			artifactId: doc.artifactId, path: lookup.path, title: lookup.title, landOn: 'new-replies', landOnCommentId: replyThread,
+			artifactId: doc.artifactId, path: lookup.path, title: lookup.title ?? lookup.path.split('/').pop() ?? lookup.path, landOn: 'new-replies', landOnCommentId: replyThread,
 		});
 	}
 
@@ -330,22 +329,6 @@
 						<Button size="sm" variant="primary" loading={sending} disabled={settled} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
 					</div>
 					{@render failureLine()}
-				{/snippet}
-			</ReviewBarShell>
-		{/snippet}
-	</ActivityKindPanel>
-{:else if chatReply}
-	<ActivityKindPanel label="Reply" icon="chat">
-		{#snippet body()}
-			<h1 class="dh">{item.title}</h1>
-			{#if chatReply.text}<blockquote class="pre">{chatReply.text}</blockquote>{/if}
-		{/snippet}
-		{#snippet band()}
-			<ReviewBarShell view="ask" {who} full="Replied to your comment" askLabel="Reply to your comment" docked>
-				{#snippet actions()}
-					<div class="rb-actions">
-						<Button size="sm" variant="primary" onclick={() => onOpenChat(chatReply.thread_id)}>Open in chat</Button>
-					</div>
 				{/snippet}
 			</ReviewBarShell>
 		{/snippet}
