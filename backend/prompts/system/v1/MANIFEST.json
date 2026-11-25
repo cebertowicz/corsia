@@ -232,10 +232,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 3313,
+      "bytes": 3679,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/priorities-files.md",
-      "sha256": "270f2f26e68dc2a800600be484dd8a363ae8df2fd6650902e7a5c7070ebb6334"
+      "sha256": "b3501f6c1b76e158750d2fcb4612657ce71ddcefefee84834af25bded9364dda"
     },
     {
       "bytes": 7206,
@@ -280,10 +280,10 @@
       "sha256": "d549a33e89f04a5a7b5c888874d71910e01316bbd518973778b719b02f1f5c3d"
     },
     {
-      "bytes": 10515,
+      "bytes": 10574,
       "kind": "skill",
       "path": "skills/coordination-api/SKILL.md",
-      "sha256": "defc03a30ba4b60180919216c98f756fc5b403fdbe6ef2dbe89cc167d221203b"
+      "sha256": "0bc8b3de914a26f75bab7f00950e7006b0db287f9596f7eab70563e6d7075eb2"
     },
     {
       "bytes": 4151,
