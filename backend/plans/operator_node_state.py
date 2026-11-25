@@ -275,9 +275,8 @@ def project(
                     execution, sequenced_after, stopped, deferred_ask=paused_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 "later_reason": later_because.get(node["id"]),
-                # The commitment total is true only at its one root; every
-                # other node in the tree would otherwise repeat the whole
-                # commitment's figure on its own row.
+                # The commitment total is true only at its one root; every other node in the tree
+                # would otherwise repeat the whole commitment's figure on its own row.
                 "commitment_cost": commitment_costs.get(commitment_id) if is_commitment_root else None,
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),

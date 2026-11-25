@@ -19,6 +19,15 @@ def _artifact_fields(link: dict) -> dict:
     }
 
 
+def _later_fields(node: dict, state: dict) -> dict:
+    """The sheet's Later row gathers the tasks set below the cut; ``later`` is its one source.
+
+    ``later_reason`` is why a task is in Later: the reason its latest crossing recorded
+    (``later_fields.latest_reasons``).
+    """
+    return {"later": bool(node.get("later")), "later_reason": state.get("later_reason")}
+
+
 def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_state: str) -> dict:
     """Adapt a node and its canonical state into the operator row."""
     links = node["artifact_links"]
@@ -82,10 +91,7 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "initiative": state["initiative"],
         "branch_progress": None,
         "scheduled_until": None,
-        # The sheet's Later row gathers the tasks set below the cut; this flag is its one source.
-        "later": bool(node.get("later")),
-        # Why a task is in Later: the reason its latest crossing recorded (``later_fields.latest_reasons``).
-        "later_reason": state.get("later_reason"),
+        **_later_fields(node, state),
         "attention_path": attention_path,
         "completion": completion,
         "child": plan_header.child_summary(node["child_plan"], node["spawned_thread_id"]),
