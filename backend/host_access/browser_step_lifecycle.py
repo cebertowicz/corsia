@@ -136,6 +136,10 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
         if answer.declined:
             return Decision(("R8",), refusal="password_declined")
         if not result.visible_nodes <= answer.nodes:
+            # Listing tabs reads only each tab's title and address, so it is refused like any command here
+            # but asks the person for nothing: an agent leaving a page it shouldn't be on gets no task for it.
+            if event.name == "list_tabs":
+                return Decision(("R9",), refusal="password_no_step")
             return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
         # R14: the person finished these fields, so the page is the agent's again. A declare asks for
         # a different step (e-signature, MFA), so it goes on to R10/R11.
