@@ -1242,7 +1242,9 @@ def _backup_foreign_key_violations(
     backup_path: Path, tables: set[str],
 ) -> Counter[ForeignKeyViolation]:
     """Read old violations only for tables with violations after migration."""
-    uri = backup_path.resolve().as_uri() + "?mode=ro"
+    # Both backup writers close a self-contained snapshot before returning it.
+    # Immutable avoids creating WAL/SHM files beside that snapshot on read.
+    uri = backup_path.resolve().as_uri() + "?mode=ro&immutable=1"
     backup = sqlite3.connect(uri, uri=True)
     try:
         old_tables = {

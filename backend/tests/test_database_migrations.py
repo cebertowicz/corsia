@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from infra import sqlite_clone
+from infra import database_migrations as migrations, sqlite_clone
 from infra.database_migrations import (
     MIGRATIONS,
     MigrationError,
@@ -586,6 +586,40 @@ def test_a_newer_database_is_refused_rather_than_downgraded(tmp_path, ladder):
 
     assert _digest(path) == before
     assert _backups(tmp_path) == []
+
+
+@pytest.mark.parametrize("copy_method", ["clone", "page-copy"])
+def test_backup_fk_read_leaves_no_wal_sidecars(tmp_path, monkeypatch, copy_method):
+    path = _database(tmp_path, 1)
+    db = sqlite3.connect(path)
+    try:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        db.execute("INSERT INTO child (id, parent_id) VALUES (11, 999)")
+        db.commit()
+        assert Path(f"{path}-wal").stat().st_size > 32
+        real_clone = migrations.clone_database
+
+        def clone_or_skip(*args, **kwargs):
+            if copy_method == "page-copy":
+                raise sqlite_clone.CloneUnsupported("exercise page copy")
+            try:
+                return real_clone(*args, **kwargs)
+            except sqlite_clone.CloneUnsupported:
+                pytest.skip("filesystem does not support cloning")
+
+        monkeypatch.setattr(migrations, "clone_database", clone_or_skip)
+        db.execute("BEGIN IMMEDIATE")
+        backup = migrations._write_backup(db, 1)
+        assert backup is not None
+        wal = Path(f"{backup}-wal")
+        assert not wal.exists() or wal.stat().st_size <= 32
+        assert migrations._backup_foreign_key_violations(backup, {"child"}) == {
+            ("child", 11, "parent", 0): 1,
+        }
+        assert list(tmp_path.glob(f"{backup.name}*")) == [backup]
+    finally:
+        db.rollback()
+        db.close()
 
 
 def test_a_backup_is_written_beside_the_database_that_is_migrating(tmp_path, ladder):
