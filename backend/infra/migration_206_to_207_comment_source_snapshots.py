@@ -14,8 +14,9 @@ the published text. On comment creation, valid NULL roots are adopted against th
 captured text in the same transaction. Closed-document writes and position updates
 also attempt adoption against the pre-write text. A demoted row can be adopted again
 when valid; an invalid row stays NULL and uses the legacy resolver until a later
-eligible write. A change made outside CORSIA and discovered only on reload has no
-captured pre-write text, so NULL anchors continue to use the legacy resolver.
+eligible write. Best-effort adoption is skipped on the event-loop thread, including
+knowledge-tool updates. A change made outside CORSIA and discovered only on reload has
+no captured pre-write text. In these cases NULL anchors continue to use the legacy resolver.
 
 Snapshots are shared by identical bytes and are collected when no anchor references one
 any more (``doceditor.comment_snapshots.collect_candidates``), so a document that is

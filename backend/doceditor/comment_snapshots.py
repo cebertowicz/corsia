@@ -1,6 +1,7 @@
 """Transaction-owned, byte-verified storage for document anchor versions."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import sqlite3
@@ -85,6 +86,13 @@ def read(db: sqlite3.Connection, snapshot_id: int) -> str:
 def adopt_before_write(path, *, before: bytes | str | None = None, artifact_id: str | None = None,
                        verify_text=None) -> None:
     """Best-effort adoption before a file or position write; never refuse the write."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        log.debug('Skipping legacy comment adoption on the event-loop thread')
+        return
     db = None
     try:
         from infra.database import get_db, write_transaction

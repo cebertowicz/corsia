@@ -117,8 +117,8 @@ async def test_client_adoption_does_not_commit_stale_document(ownership_scope, t
         await manager.close()
         def changed():
             raise RuntimeError('document changed')
-        comment_snapshots.adopt_before_write(None, before=entry.live.text, artifact_id=entry.artifact_id,
-                                             verify_text=changed)
+        await asyncio.to_thread(comment_snapshots.adopt_before_write, None, before=entry.live.text,
+                                artifact_id=entry.artifact_id, verify_text=changed)
         assert comments.get_comment('stale-legacy', db=db)['snapshot_id'] is None
     finally:
         await manager.close()
@@ -280,7 +280,46 @@ async def test_adoption_failure_warns_and_does_not_block_write(ownership_scope, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('writer', ['file_tool', 'document_save', 'knowledge', 'guidance'])
+async def test_knowledge_tool_skips_adoption_on_event_loop(ownership_scope, tmp_path, monkeypatch):
+    from doceditor.document_save import DocumentSave, _write_document
+    from infra import database
+    from memory import knowledge_base
+    from registry import service
+    from tools.knowledge import WriteKnowledgeTool
+
+    scope = ownership_scope
+    manager, _, _ = await opened(scope, tmp_path, monkeypatch)
+    app_loop.capture(asyncio.get_running_loop())
+    db = scope['db']
+    try:
+        monkeypatch.setattr(knowledge_base, 'KB_ROOT', scope['root'] / '.threads' / scope['owner'] / 'kb')
+        path = knowledge_base.KB_ROOT / 'facts' / 'ordinary.md'
+        _write_document(DocumentSave(str(path), 'a b\nsecond\n', project_id='project-alpha',
+                                     thread_id=scope['owner'], create=True), path, direct_user=False)
+        artifact = service.find_file_identity(str(path), db=db)
+        entry = await manager.open(artifact['id'], path)
+        await invoke('native', scope, entry, 'knowledge-loop')
+        db.execute("UPDATE doc_comments SET snapshot_id=NULL WHERE id='knowledge-loop'")
+        db.commit()
+        await manager.close()
+        monkeypatch.setenv('CORSIA_DB_LOOP_WRITE_STRICT', '1')
+        db_calls = []
+        def unexpected_db(*args, **kwargs):
+            db_calls.append(1)
+            raise AssertionError('adoption must not open a database on the event loop')
+        monkeypatch.setattr(database, 'get_db', unexpected_db)
+        result = await WriteKnowledgeTool().execute(title='ordinary', body='second', category='facts')
+        assert 'updated' in result
+        assert 'second' in path.read_text()
+        assert not db_calls
+        assert comments.get_comment('knowledge-loop', db=db)['snapshot_id'] is None
+    finally:
+        await manager.close()
+        app_loop.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('writer', ['file_tool', 'document_save', 'guidance'])
 async def test_closed_ordinary_write_adopts_before_deletion(ownership_scope, tmp_path, monkeypatch, writer):
     from doceditor import snapshot_reanchor
     from doceditor.document_save import DocumentSave, _write_document
@@ -291,12 +330,7 @@ async def test_closed_ordinary_write_adopts_before_deletion(ownership_scope, tmp
     app_loop.capture(asyncio.get_running_loop())
     db = scope['db']
     try:
-        if writer == 'knowledge':
-            from memory import knowledge_base
-            monkeypatch.setattr(knowledge_base, 'KB_ROOT', scope['root'] / '.threads' / scope['owner'] / 'kb')
-            path = knowledge_base.KB_ROOT / 'facts' / 'ordinary.md'
-        else:
-            path = scope['root'] / '.threads' / scope['owner'] / 'ordinary.md'
+        path = scope['root'] / '.threads' / scope['owner'] / 'ordinary.md'
         _write_document(DocumentSave(str(path), 'a b\nsecond\n', project_id='project-alpha',
                                      thread_id=scope['owner'], create=True), path, direct_user=False)
         artifact = service.find_file_identity(str(path), db=db)
@@ -311,13 +345,11 @@ async def test_closed_ordinary_write_adopts_before_deletion(ownership_scope, tmp
                 path=str(path), content='second\n', **context)
             assert not result.startswith('Error'), result
         elif writer == 'document_save':
-            _write_document(DocumentSave(str(path), 'second\n', project_id='project-alpha',
-                                         thread_id=scope['owner']), path, direct_user=False)
-        elif writer == 'knowledge':
-            knowledge_base.write_entry('ordinary', 'second', 'facts')
+            await asyncio.to_thread(_write_document, DocumentSave(str(path), 'second\n', project_id='project-alpha',
+                                    thread_id=scope['owner']), path, direct_user=False)
         else:
             from infra.guidance_history_paths import write_bytes
-            write_bytes(path, b'second\n')
+            await asyncio.to_thread(write_bytes, path, b'second\n')
         row = comments.get_comment('ordinary-legacy', db=db)
         assert row['snapshot_id'] is not None
         snapshot_reanchor.resolve_versioned([row], path.read_text(), db)
