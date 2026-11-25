@@ -97,3 +97,15 @@ def test_shipped_general_workflow_step_titles_name_what_the_person_gets(skill, t
 
     assert result.ok, result.errors
     assert {step["id"]: step["title"] for step in result.corsia["workflow"]["steps"]} == titles
+
+
+def test_general_work_review_instruction_is_for_the_reviewer_only():
+    """The reviewer's brief carries the Review section, so the author's hand-off and hand-over stay out of it."""
+    from core.skill_validation import instruction_section, parse_frontmatter
+
+    text = (system_package_dir() / "skills/general-work/SKILL.md").read_text(encoding="utf-8")
+    review = instruction_section(parse_frontmatter(text)[1], "## Review")
+
+    assert review is not None and "review-work" in review
+    for author_only in ("Hand over", "delegate_task", "yes for that exact action"):
+        assert author_only not in review

@@ -31,4 +31,4 @@ workflow:
       instruction: "## Review"
       quality:
         - {name: pass-then-corrected, good: "no correction from the person against this run within 7 days of a PASS", observed: signal, when: "lagging:7"}
-        - {name: accepted-first-try, good: "the person used or approved the result without sending it back; no reply is not acceptance", observed: signal, when: completion}
+        - {name: accepted-first-try, good: "the person used or approved the result without sending it back; no reply is not acceptance", observed: signal, when: "lagging:7"}

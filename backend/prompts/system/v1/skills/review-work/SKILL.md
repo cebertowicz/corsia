@@ -5,7 +5,7 @@ description: Use when finished work (a letter, a plan, a filing, a schedule, a d
 
 # Review work
 
-A fresh review is one step: the agent that did the work hands it to a new worker that has not seen the work, and that worker's verdict settles the step. In a workflow it is the step marked for a reviewer, such as General work's Fresh review. A review workflow made for this kind of work comes first.
+A fresh review is one hand-off: the agent that did the work hands it to a new worker that has not seen the work, and that worker's verdict settles the review. In a workflow it is the step marked for a reviewer, such as General work's Fresh review, handed with `delegate_task` on that step. Outside a workflow, hand it with `delegate_task`; the verdict comes back to you as the worker's result. A review workflow made for this kind of work comes first.
 
 ## Brief
 
@@ -26,4 +26,4 @@ For the reviewer. Try to show the result is wrong. First list your own ways it c
 
 ## Findings
 
-For the author. A PASS settles the step. A failed review comes back to you as a revision beside the review step: settle every finding with skill `apply-feedback` inside it, starting no run of your own, then hand it back to the same reviewer saying what changed and which findings you rejected, and why. Whatever stays open goes into the hand-over.
+For the author. A PASS settles the review. In a workflow, a failed review comes back to you as a revision beside the review step: settle every finding with skill `apply-feedback` inside it, starting no run of your own. Outside a workflow it comes back as the worker's result: settle the findings with skill `apply-feedback` as that skill says, and reach the same reviewer with `delegate_send`. Either way, then hand it back to the same reviewer saying what changed and which findings you rejected, and why. Whatever stays open goes into the hand-over.

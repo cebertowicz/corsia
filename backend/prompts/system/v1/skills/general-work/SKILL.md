@@ -55,16 +55,15 @@ Optional. Do it when the result will be sent outside, is hard to undo, is large,
 - When what you find contradicts the plan, change the steps and say what changed. If the work turns into a different kind, `fail` the step you are on with that reason (this ends the run) and start the fitting workflow, naming this run.
 - Hand bounded parts to a worker with a brief that stands alone; check what it returns against the work itself, never its own account.
 - Do not send, publish, pay, file or delete anything here: draft it. It goes out after Review, as Hand over says.
+- When the result is ready, before the person sees it (any draft to be sent, published, paid, filed or deleted included), hand the Review step with `delegate_task` on that step to a new worker that has not seen the work. The hand-off is the brief, written as skill `review-work`'s Brief says; a failed review comes back to you as its Findings says.
 
 ## Review
 
-Only a fresh reviewer's verdict settles this step. Hand it to a new worker that has not seen the work (`delegate_task` on this step); that hand-off is the brief, written as skill `review-work` says, and the reviewer checks as it says. Do this before the person sees the result, including any draft to be sent, published, paid, filed or deleted.
+For the fresh reviewer. Load skill `review-work` and check the result as its Check says. Your verdict settles this step: PASS, or each failure, worst first. Change nothing, send nothing, and start no run of your own.
 
-A PASS closes the step; a failed review comes back to you as that skill's Findings says.
+## Hand over
 
-### Hand over
-
-When the review passes, the run ends; there is no step for this. Do it before you call the work done.
+For the agent that did the work. When the review passes, the run ends; there is no step for this. Do it before you call the work done.
 
 Check the result yourself against Done when, the way the person will use it and where: the thing itself, as they will meet it. A check of something standing in for it (a draft instead of what goes out, a few items instead of the whole, another copy or device) does not count; if you cannot make the real check, say so in what you hand over.
 
