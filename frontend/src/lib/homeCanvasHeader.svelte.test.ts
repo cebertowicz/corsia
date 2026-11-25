@@ -25,14 +25,14 @@ it('re-runs the effect that syncs the header when the phone Activity item change
 	flushSync();
 	expect(get(canvasHeader)?.title).toBe('Activity');
 
-	activityPhoneItem.set({ position: 3, count: 7, nextDisabled: false, nextTitle: 'Next one', onBack: () => {}, onNext: () => {} });
+	activityPhoneItem.set({ backLabel: 'Your tasks', onBack: () => {} });
 	flushSync();
-	expect(get(canvasHeader)?.actions?.[0]?.label).toBe('3 of 7 · Next ›');
+	expect(get(canvasHeader)?.backLabel).toBe('Your tasks');
 
 	activityPhoneItem.set(null);
 	flushSync();
 	expect(get(canvasHeader)?.title).toBe('Activity');
-	expect(get(canvasHeader)?.actions).toBeUndefined();
+	expect(get(canvasHeader)?.backLabel).toBeUndefined();
 	expect(runs).toHaveBeenCalledTimes(3);
 	stop();
 });

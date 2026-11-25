@@ -8,6 +8,8 @@ export interface ArtifactLeafProps {
 	targetThreadId?: string | null;
 	/** A host's status line below the tab strip. */
 	notice?: Snippet;
+	/** Keep a reply landing visible below the host's notice when the comments list opens. */
+	protectReplyLanding?: boolean;
 	/** False where the leaf is the whole pane, with no chat to collapse back to. */
 	collapsible?: boolean;
 	mode: 'rail' | 'expanded' | 'compact';

@@ -4,7 +4,7 @@
 	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-	import { clipChatSelection, chatTextPoint, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+	import { clipChatSelection, chatTextPoint, sendCommentReply, type SendableChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentHighlight, commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
@@ -21,7 +21,7 @@
 	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
 	import './commentAnchors.css';
 
-	let { threadId, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; onSendReply: (reply: ChatComment) => Promise<void>; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
+	let { threadId, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; onSendReply: (reply: SendableChatComment) => Promise<void>; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
@@ -321,15 +321,15 @@
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
 		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('pointerdown', press, true); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
-	function replyInThread(note: string): Promise<void> {
+	function replyInThread(note: string, inputId: string): Promise<void> {
 		// The row this thread opened on may have been replaced or removed while the reply was being typed.
-		return sendCommentReply($messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId), viewedComment, note, onSendReply);
+		return sendCommentReply($messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId), viewedComment, note, onSendReply, inputId);
 	}
 	async function submit(note: string) {
 		const currentDraft = draft;
 		if (!currentDraft || !threadId) return;
 		// The box stays, read-only, until the server stores the comment, then closes; a refusal keeps it open with its cause.
-		const stored = await chatCommentDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, () => onSendReply({ id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }));
+		const stored = await chatCommentDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, (inputId) => onSendReply({ id: crypto.randomUUID(), input_id: inputId, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }));
 		if (stored && draft === currentDraft && !closing) {
 			afterClose = () => { close(); focusPosted(currentDraft, note); };
 			closing = true;
@@ -363,7 +363,7 @@
 	<ChatThreadSheet bind:panel={sheetPanel} bind:dialog={sheetDialog} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
 {/if}
 {#snippet composerBody()}
-	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} error={rootDraft?.error ?? ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
+	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} error={rootDraft?.error ?? ''} shownKey={threadId && draft ? chatCommentDrafts.rootKey(threadId, draft.messageId, draft.anchor) : ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
 {/snippet}
 {#snippet marginBody()}
 	{#key target}<div role="dialog" aria-label={heading}>{@render composerBody()}</div>{/key}

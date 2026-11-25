@@ -1,122 +1,65 @@
-import { test } from "./support/test";
-import { expect, type Page, type TestInfo } from "@playwright/test";
-import path from "node:path";
+import { test, expect } from './support/test';
+import type { Page } from '@playwright/test';
+import { openAppPastLanding } from './support/corsia';
 
-async function waitForDrawerToSettle(page: Page) {
-  const drawer = page.locator("[data-adaptive-drawer]");
-  await expect(drawer).toBeVisible();
-  await drawer.evaluate(async (element) => {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await Promise.all(
-      element
-        .getAnimations({ subtree: true })
-        .map((animation) => animation.finished.catch(() => undefined)),
-    );
-  });
-  await expect
-    .poll(() => drawer.evaluate((element) => element.getAnimations({ subtree: true }).length))
-    .toBe(0);
+const source = { thread_id: 'child', thread_label: 'Reviewer', project_id: null, project_label: null, parent_reviewed: true };
+const detail = {
+ id: 'footer-decision', plan_id: 'plan-1', node_id: 'node-decision', source_node_id: 'node-source', thread_id: 'child',
+ title: 'Choose the next step', context: 'Choose what happens next.', tradeoff: '', pick: 'one', recommendation: 'A',
+ rationale: 'Ready to proceed.', other_enabled: true,
+ options: [{ id: 'A', label: 'Proceed', detail: '' }, { id: 'B', label: 'Wait', detail: '' }],
+ order_key: 0, revision: 3, raised_at: '2026-11-24T10:00:00Z', source,
+};
+const item = { key: 'decision:footer', external_id: detail.id, renderer: 'decision', kind: 'decision', title: detail.title, raised_at: detail.raised_at, source, open: null, rank: null, detail };
+async function openDecision(page: Page, width: number) {
+ await page.route('**/api/attention/queue**', async route => {
+  if (!route.request().url().includes('view=activity')) return route.fallback();
+  await route.fulfill({ json: { count: 1, items: [item], ranker: null, notifications: { count: 0, items: [] } } });
+ });
+ await openAppPastLanding(page);
+ if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+ await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
+ if (width === 393) await page.locator('[data-activity-row]').filter({ hasText: detail.title }).click();
+ await expect(page.getByRole('heading', { name: detail.title })).toBeVisible();
 }
-
-async function openDecision(page: Page) {
-  await page.goto("/_design?frame=attention-dock&scenario=one");
-  const bar = page.locator(".dock-bar");
-  await expect(bar).toBeVisible();
-  await bar.click();
-  await expect(page.locator(".decision-chip")).toBeVisible();
-  await waitForDrawerToSettle(page);
-}
-
-async function capture(page: Page, testInfo: TestInfo, name: string) {
-  const directory = process.env.PE_FRAME_DIR ?? testInfo.outputDir;
-  await page.screenshot({
-    path: path.join(directory, `${name}.png`),
-    fullPage: true,
-    animations: "disabled",
-  });
-}
-
 for (const [name, width, height, colorScheme] of [
-  ["393-light", 393, 852, "light"],
-  ["393-dark", 393, 852, "dark"],
-  ["1440-light", 1440, 900, "light"],
+ ['393-light', 393, 852, 'light'], ['393-dark', 393, 852, 'dark'], ['1440-light', 1440, 900, 'light'],
 ] as const) {
-  test(`@surface:attention decision footer remains inside its scroll region (${name})`, async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium-desktop", "Frames set their exact viewport directly.");
-    await page.setViewportSize({ width, height });
-    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
-    await openDecision(page);
-
-    const geometry = await page.locator(".drawer-body").evaluate((scrollRegion) => {
-      const footer = document.querySelector<HTMLElement>(".decision-actions");
-      const sheet = document.querySelector<HTMLElement>(".drawer-panel");
-      const decisionBody = document.querySelector<HTMLElement>(".decision-body");
-      const options = Array.from(document.querySelectorAll<HTMLElement>(".option-button"));
-      if (!footer || !sheet || !decisionBody) throw new Error("Decision drawer geometry is incomplete");
-
-      scrollRegion.scrollTop = scrollRegion.scrollHeight;
-      const scrollRect = scrollRegion.getBoundingClientRect();
-      const footerRect = footer.getBoundingClientRect();
-      const scrollStyle = getComputedStyle(scrollRegion);
-      const decisionBodyStyle = getComputedStyle(decisionBody);
-      const footerStyle = getComputedStyle(footer);
-      const coveredOptions = options
-        .map((option) => ({ label: option.textContent?.trim(), rect: option.getBoundingClientRect() }))
-        .filter(({ rect }) => rect.bottom > footerRect.top && rect.top < footerRect.bottom)
-        .map(({ label }) => label);
-
-      return {
-        sheetBottom: sheet.getBoundingClientRect().bottom,
-        scrollBottom: scrollRect.bottom,
-        footerBottom: footerRect.bottom,
-        coveredOptions,
-        styles: {
-          scrollPaddingBottom: scrollStyle.paddingBottom,
-          decisionBodyPaddingBottom: decisionBodyStyle.paddingBottom,
-          footerBottom: footerStyle.bottom,
-          footerMarginTop: footerStyle.marginTop,
-          footerPosition: footerStyle.position,
-        },
-      };
-    });
-
-    await capture(page, testInfo, `decision-footer-${name}`);
-    expect(geometry.footerBottom, JSON.stringify(geometry)).toBeCloseTo(geometry.scrollBottom, 0);
-    expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.sheetBottom);
-    expect(geometry.coveredOptions).toEqual([]);
-  });
+ test(`@surface:attention decision options stay reachable above actions (${name})`, async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  await page.setViewportSize({ width, height });
+  await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+  await openDecision(page, width);
+  const options = page.getByRole('radio');
+  for (let i = 0; i < await options.count(); i++) {
+   await options.nth(i).scrollIntoViewIfNeeded();
+   const option = (await options.nth(i).boundingBox())!;
+   const action = (await page.getByRole('button', { name: 'Answer', exact: true }).boundingBox())!;
+   expect(option.y + option.height).toBeLessThanOrEqual(action.y);
+   await expect(options.nth(i)).toBeVisible();
+  }
+  await page.screenshot({ path: info.outputPath(`decision-footer-${name}.png`), animations: 'disabled' });
+ });
 }
-
-// 336px is a phone keyboard; 60px is the accessory-bar inset the app sets on focus.
-for (const [name, keyboard] of [
-  ["keyboard-closed", 0],
-  ["keyboard-open", 336],
-] as const) {
-  test(`@surface:attention typing in Other keeps the whole box above the actions row (${name})`, async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium-desktop", "Frames set their exact viewport directly.");
-    await page.setViewportSize({ width: 393, height: 852 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await openDecision(page);
-    if (keyboard) {
-      await page.setViewportSize({ width: 393, height: 852 - keyboard });
-      await page.evaluate(() => document.documentElement.style.setProperty("--kb-toolbar-inset", "60px"));
-    }
-
-    const other = page.locator(".other-option textarea");
-    // Focus and type like a phone does: Playwright's click would scroll the box clear of the row on its own.
-    await other.focus();
-    await page.keyboard.type(
-      "Move it to the bottom, A, but also note this problem should go to the owner and be fixed properly so it does not come back next week.",
-    );
-    const geometry = await page.evaluate(() => {
-      const box = document.querySelector<HTMLElement>(".other-option textarea")?.getBoundingClientRect();
-      const footer = document.querySelector<HTMLElement>(".decision-actions")?.getBoundingClientRect();
-      if (!box || !footer) throw new Error("Decision drawer geometry is incomplete");
-      return { boxTop: box.top, boxBottom: box.bottom, footerTop: footer.top };
-    });
-
-    await capture(page, testInfo, `decision-other-${name}`);
-    expect(geometry.boxBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry.footerTop);
-    expect(geometry.boxTop, JSON.stringify(geometry)).toBeGreaterThanOrEqual(0);
-  });
+for (const [name, keyboard] of [['keyboard-closed', 0], ['keyboard-open', 336]] as const) {
+ test(`@surface:attention typing in Other keeps the whole box above the actions row (${name})`, async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openDecision(page, 393);
+  await page.getByRole('radio', { name: 'Something else' }).check();
+  const other = page.getByRole('textbox', { name: 'Your answer' });
+  await other.focus();
+  if (keyboard) {
+   await page.setViewportSize({ width: 393, height: 852 - keyboard });
+   await page.evaluate(() => document.documentElement.style.setProperty('--kb-toolbar-inset', '60px'));
+  }
+  await page.keyboard.type('Move it to the bottom, and make sure the owner can read this answer.');
+  await expect.poll(async () => {
+   const box = (await other.boundingBox())!;
+   const footer = (await page.getByRole('button', { name: 'Answer', exact: true }).boundingBox())!;
+   return box.y >= 0 && box.y + box.height <= footer.y;
+  }).toBe(true);
+  await page.screenshot({ path: info.outputPath(`decision-other-${name}.png`), animations: 'disabled' });
+ });
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { watchActivityOpenRequests } from '$lib/stores/activityOpen';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
 	import { threads, coordinationThreads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
@@ -62,6 +63,7 @@
 		lastEmittedView = next;
 	});
 
+	$effect(() => watchActivityOpenRequests(openActivity));
 	$effect(() => { recordSettingsHomeThread(activeView, get(activeThreadId)); }); // every route out of Settings clears the thread it opened over
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
@@ -120,9 +122,7 @@
 		resetSurface('activity');
 	}
 
-	function openActivity() {
-		resetSurface('activity');
-	}
+	function openActivity() { resetSurface('activity'); }
 
 	async function goConductor(isActive: () => boolean = () => true, scope: UiScope | null = $uiScope): Promise<boolean> {
 		sidebarOpen = false;

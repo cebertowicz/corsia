@@ -13,19 +13,22 @@ def test_queue_orders_ranks_then_urgency_and_age(db, monkeypatch):
         row('task', 'task-new', '2026-01-03'),
         row('review', 'review-old', '2026-01-01'),
         row('task', 'task-old', '2026-01-01'),
-        row('reply', 'ranked', '2026-01-04'),
+        row('task', 'ranked', '2026-01-04'),
     ])
     monkeypatch.setattr(attention.public, 'dedupe_activity_comment_tasks', lambda _db, _user, projected, _replies: projected)
     from doceditor import activity_reply_rows
-    monkeypatch.setattr(activity_reply_rows, 'reply_rows', lambda *a, **k: [row('reply', 'reply-old', '2026-01-01')])
+    document = row('document', 'document-old', '2026-01-01')
+    document['detail']['unread'] = 1
+    monkeypatch.setattr(activity_reply_rows, 'document_rows', lambda *a, **k: [document])
     from infra import activity_rank_scope
     monkeypatch.setattr(activity_rank_scope, 'ranker_for', lambda *a: ('scope', None))
     db.execute('INSERT INTO activity_ranks VALUES (?,?,?,?,?,?,?)',
                ('user-1', 'scope', 'ranked', 1, 'First', 'root', '2026-01-01'))
-    rows, _, _ = attention.activity_queue(db, 'user-1', view='activity')
+    rows, notifications, _, _ = attention.activity_lists(db, 'user-1', view='activity')
     assert [r['key'] for r in rows] == [
-        'ranked', 'task-old', 'task-new', 'review-old', 'review-new', 'reply-old',
+        'ranked', 'task-old', 'task-new', 'review-old', 'review-new',
     ]
+    assert [r['key'] for r in notifications] == ['document-old']
 
 
 def row(renderer, key, raised_at):

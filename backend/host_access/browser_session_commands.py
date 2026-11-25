@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_agent_verbs, browser_history, browser_login_capture, browser_pane_state, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -155,13 +155,13 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     if not pane and runtime.chrome is not None and runtime.chrome.exited:
         runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
-    if runtime.record.profile or runtime.record.copy_of:
+    if (saved_sign_in := bool(runtime.record.profile or runtime.record.copy_of)) or browser_saved_fills.saved_fill_session(thread_id, runtime.record.session):
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
         if _script_config(config) or not (trusted_navigation and not pane or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
-            raise BrowserSessionError(browser_agent_verbs.refusal(args) or _SCRIPT_REFUSAL)
+            raise BrowserSessionError(browser_agent_verbs.refusal(args) or (_SCRIPT_REFUSAL if saved_sign_in else browser_saved_fills.SAVED_FILL_SESSION_REFUSED))
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
     owner._queued_actions += 1
@@ -216,13 +216,13 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         raise BrowserSessionError(browser_agent_verbs.PANE_INPUT_REFUSAL)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
-    note, filled_field_visit = None, False
+    note, filled_field_visit, saved_fill = None, False, False
     if guarded:
         access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
             current_session=partial(owner.session_identity, thread_id))
-        note, filled_field_visit = access.note, access.filled_field_visit
+        note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
@@ -259,7 +259,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if filled_field_visit and args[0] == "snapshot":
         hidden = hidden_snapshot(result)
         if hidden is None:
-            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+            return _noted(browser_control.SAVED_FILL_SNAPSHOT_WITHHELD if saved_fill else browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
         result = hidden
     rendered = owner._model_result(result, runtime.record)
     if saved_sign_in and not pane:
