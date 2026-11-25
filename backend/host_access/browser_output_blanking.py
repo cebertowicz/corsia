@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Iterable
+from typing import Callable, Iterable
 from urllib.parse import quote, quote_plus
 
 from infra import saved_logins
@@ -27,16 +27,38 @@ log = logging.getLogger(__name__)
 BLANK = "[hidden]"
 UNCHECKED = "Error: this browser result was withheld because it couldn't be checked for saved passwords."
 # The characters each URL encoder leaves as they are: Python's quote with nothing safe, JavaScript's
-# encodeURIComponent, the form encoder (URLSearchParams) and a path encoder that keeps "/".
-_URL_SAFE = ("", "-_.!~*'()", "-_.*", "/")
+# encodeURIComponent and encodeURI, the form encoder (URLSearchParams) and a path encoder that keeps "/".
+# Python's quote never encodes letters, digits or "-_.~", so the browser's encoders are written out below.
+_URL_SAFE = ("", "-_.!~*'()", "-_.!~*'();,/?:@&=+$#", "-_.*", "/")
+# What the browser's own serialisers (the WHATWG URL standard) encode besides controls, DEL and non-ASCII:
+# the query, and the path with and without "^", which the standard added later. Everything else stays as it is.
+_BROWSER_ENCODED = (' "#<>\'', ' "#<>?`{}^', ' "#<>?`{}')
+# The form encoder (URLSearchParams and a submitted form) keeps only letters, digits and "*-._", so it writes
+# "~" as %7E, and a space as "+".
+_FORM_KEPT = frozenset("*-._")
 _PERCENT = re.compile(r"%[0-9A-F]{2}")
 # Page text's collapsible whitespace: a run of these shows as one space.
 _COLLAPSIBLE = re.compile(r"[ \t\n\r\f]+")
 _ASCII_SPACE = " \t\n\r\f"
 
 
+def _percent_encode(value: str, encoded: Callable[[str], bool]) -> str:
+    return "".join("".join(f"%{byte:02X}" for byte in char.encode()) if encoded(char) else char for char in value)
+
+
+def _browser_url_forms(value: str) -> set[str]:
+    def serialiser(chars: str) -> Callable[[str], bool]:
+        return lambda char: not " " < char < "\x7f" or char in chars
+
+    forms = {_percent_encode(value, serialiser(chars)) for chars in _BROWSER_ENCODED}
+    form = _percent_encode(value, lambda char: char != " " and not (
+        char.isascii() and (char.isalnum() or char in _FORM_KEPT)))
+    return forms | {form.replace(" ", "+")}
+
+
 def _url_forms(value: str) -> set[str]:
     forms = {quote(value, safe=safe) for safe in _URL_SAFE} | {quote_plus(value, safe=safe) for safe in _URL_SAFE}
+    forms |= _browser_url_forms(value)
     # A percent escape may be written in lowercase hex (%2f), as some encoders do.
     return forms | {_PERCENT.sub(lambda match: match.group(0).lower(), form) for form in forms}
 

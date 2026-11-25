@@ -10,6 +10,7 @@ import asyncio
 import html
 import json
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -153,9 +154,12 @@ async def test_a_short_saved_value_and_unrelated_text_are_left_alone(state, monk
 
 
 @contextmanager
-def _page_showing(text: str, *, in_attributes: bool = False):
+def _page_showing(text: str, *, in_attributes: bool = False, in_form: bool = False):
     fields = (f'<input id="field" value="{html.escape(text)}" data-copy="{html.escape(text)}">'
               if in_attributes else "")
+    if in_form:  # a GET form that submits the value to /done (served the same page)
+        fields = (f'<form action="/done" method="get"><input type="hidden" name="user" value="me">'
+                  f'<input id="field" name="p" value="{html.escape(text)}"><button id="send">Send</button></form>')
     body = (f"<!doctype html><title>Account</title><main><h1>Account</h1><p>{html.escape(text)}</p>{fields}</main>"
             .encode())
 
@@ -331,6 +335,109 @@ async def test_a_saved_value_with_whitespace_on_a_real_page_comes_back_blanked(s
     for command, text in outputs.items():
         assert marker not in text, (command, text)
         assert blanking.BLANK in text, (command, text)
+
+
+# A saved value with one character each URL encoder treats differently, and what the browser's form encoder
+# (URLSearchParams, a submitted form) writes for it: written out by hand from the WHATWG URL standard and checked
+# against Node's URLSearchParams, never built with the encoder under test.
+FORM_ENCODED = {
+    "tilde": ("Ab1~cdZq7x", "Ab1%7EcdZq7x"),
+    "ampersand": ("Ab1&cdZq7x", "Ab1%26cdZq7x"),
+    "plus": ("Ab1+cdZq7x", "Ab1%2BcdZq7x"),
+    "space": ("Ab1 cdZq7x", "Ab1+cdZq7x"),
+    "non_ascii": ("Ab1ücdZq7x", "Ab1%C3%BCcdZq7x"),
+}
+# Where a form-encoded value reaches an agent: a network log's URL and its postData, and get url after a GET form
+# is submitted.
+FORM_ENCODED_KINDS = {
+    "network_url": lambda text: (0, {"success": True, "data": {"requests": [
+        {"url": f"https://example.com/login?user=me&p={text}"}]}}),
+    "post_data": lambda text: (0, {"success": True, "data": {"requests": [
+        {"url": "https://example.com/login", "postData": f"user=me&p={text}"}]}}),
+    "get_url": lambda text: (0, {"success": True, "data": {"url": f"https://example.com/done?user=me&p={text}"}}),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lowercase_hex", [False, True])
+@pytest.mark.parametrize("kind", sorted(FORM_ENCODED_KINDS))
+@pytest.mark.parametrize("case", sorted(FORM_ENCODED))
+async def test_a_form_encoded_saved_value_is_blanked_wherever_it_comes_back(state, monkeypatch, case, kind,
+                                                                            lowercase_hex):
+    value, written = FORM_ENCODED[case]
+    if lowercase_hex:  # as a page script may write it
+        written = re.sub(r"%[0-9A-F]{2}", lambda match: match.group(0).lower(), written)
+    saved_logins.save_login(site="https://example.com", username="me@example.com", password=value, saved_by="person")
+    _fake_owner(monkeypatch, FORM_ENCODED_KINDS[kind](written))
+    text = await browser_runtime._run(["get", "url"], thread_id="thread-1")
+    assert written not in text and "Zq7x" not in text, text
+    assert f"p={blanking.BLANK}" in text
+
+
+# One value through each encoder the browser and page scripts use, as Node's WHATWG URL and JavaScript
+# encoders write it: the form encoder, encodeURIComponent, encodeURI, the URL query serialiser (which leaves
+# & = + / ? ` { } ^ and % as they are) and the path serialiser (the same value without ? and #, which end a path).
+BROWSER_URL_VALUE = "Ab1 ~&+ü=/?#'\"<>`{}^%x"
+BROWSER_URL_FORMS = {
+    "form": (BROWSER_URL_VALUE, "Ab1+%7E%26%2B%C3%BC%3D%2F%3F%23%27%22%3C%3E%60%7B%7D%5E%25x"),
+    "encode_uri_component": (BROWSER_URL_VALUE, "Ab1%20~%26%2B%C3%BC%3D%2F%3F%23'%22%3C%3E%60%7B%7D%5E%25x"),
+    "encode_uri": (BROWSER_URL_VALUE, "Ab1%20~&+%C3%BC=/?#'%22%3C%3E%60%7B%7D%5E%25x"),
+    "query": (BROWSER_URL_VALUE, "Ab1%20~&+%C3%BC=/?%23%27%22%3C%3E`{}^%x"),
+    "path": ("Ab1 ~&+ü=/'\"<>`{}^%x", "Ab1%20~&+%C3%BC=/'%22%3C%3E%60%7B%7D%5E%x"),
+}
+
+
+@pytest.mark.parametrize("encoder", sorted(BROWSER_URL_FORMS))
+def test_each_browser_url_encoding_of_a_value_is_blanked(encoder):
+    value, written = BROWSER_URL_FORMS[encoder]
+    assert blanking.blank(f"https://example.com/a?p={written}&next=1", [value]) == (
+        f"https://example.com/a?p={blanking.BLANK}&next=1")
+
+
+def test_a_near_match_of_a_saved_value_is_left_alone():
+    """Text one character off a saved value, or cut short, in any encoding, isn't blanked."""
+    near = ("Ab1%7EcdZq7y", "Ab1~cdZq7y", "Ab1%7EcdZq7", "Ab1+cdZq7x", "Ab1%7ecdZq7y")
+    for text in near:
+        assert blanking.blank(f"p={text}", ["Ab1~cdZq7x"]) == f"p={text}", text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_value_submitted_in_a_real_get_form_comes_back_blanked(state, monkeypatch):
+    """Real Chrome: a GET form submits the saved value (with ~, &, +, a space and a non-ASCII letter); get url comes
+    back blanked, and so does each URL encoding the page's own script makes of it."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    marker = uuid.uuid4().hex
+    form_value = f"Ab1 ~&+ü{marker}"
+    await asyncio.to_thread(saved_logins.save_login, site="https://example.com", username="me@example.com",
+                            password=form_value, saved_by="person")
+    thread_id = f"blanking-{uuid.uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-blanking", instance_key=uuid.uuid4().hex)
+
+    async def run_browser(thread, args, **kwargs):
+        kwargs.pop("lease_id", None)
+        return await owner.run(thread, args, **kwargs)
+
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    encodings_js = ("(() => { const v = document.getElementById('field').value; return [new URLSearchParams({p: v})"
+                    ".toString(), encodeURIComponent(v), encodeURI(v), new URL('https://example.com/a?p=' + v).search, "
+                    "new URL('https://example.com/' + v).pathname].join(' | '); })()")
+    try:
+        with _page_showing(form_value, in_form=True) as url:
+            assert not (await browser_runtime._run(["open", url], thread_id=thread_id)).startswith("Error:")
+            encoded = await browser_runtime._run(["eval", encodings_js], thread_id=thread_id)
+            submitted = await browser_runtime._run(["click", "#send"], thread_id=thread_id)
+            assert not submitted.startswith("Error:"), submitted
+            await browser_runtime._run(["wait", "--load", "networkidle"], thread_id=thread_id)
+            current = await browser_runtime._run(["get", "url"], thread_id=thread_id)
+    finally:
+        await owner.close_thread(thread_id)
+    assert "/done?" in current, current
+    for text in (encoded, current):
+        assert marker not in text, text
+        assert blanking.BLANK in text, text
+    assert encoded.count(blanking.BLANK) == 5, encoded
 
 
 def test_every_written_form_of_a_value_is_blanked_longest_first():
