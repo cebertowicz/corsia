@@ -503,3 +503,21 @@ async def test_row_read_failure_preserves_the_live_step_and_retry_recovers(plan,
     with pytest.raises(BrowserSessionError, match="person's to complete"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert lifecycle._steps[THREAD] is step
+
+
+@pytest.mark.asyncio
+async def test_input_in_the_same_pass_as_a_stop_still_stops_the_reprobe_loop():
+    """_stop_reprobe cancels the loop; input landing in that same loop pass must not keep it probing (#3364)."""
+    import asyncio
+    step = SimpleNamespace(input_seen=asyncio.Event(), last_input=None)
+    task = asyncio.create_task(lifecycle._reprobe_loop(THREAD, step))
+    await asyncio.sleep(0.01)  # Inside the wait for input.
+    step.input_seen.set()
+    task.cancel()
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.gather(task, return_exceptions=True)
+    finally:
+        stopped = task.done()
+        task.cancel()
+    assert stopped and task.cancelled()
