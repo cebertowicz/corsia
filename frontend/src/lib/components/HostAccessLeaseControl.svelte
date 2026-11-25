@@ -57,7 +57,6 @@
 
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
-	let error = $state('');
 	/** The one line for a failed decision, kept on that request's drawer after the re-read while it is listed. */
 	let decisionNotice = $state<{ leaseId: string; message: string } | null>(null);
 	let activationFailure = $state('');
@@ -109,7 +108,7 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || STALE : activationFailure || null,
+		stale ? STALE : activationFailure || null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);
@@ -162,7 +161,6 @@
 			focusRestoreIntent = null;
 			leases = [];
 			stale = false;
-			error = '';
 			return;
 		}
 		const requestGeneration = ++generation;
@@ -181,17 +179,15 @@
 			const nextLeases = Array.isArray(response.leases) ? response.leases : [];
 			await reconcileAuthoritativeLeases(nextLeases, requestedThreadId);
 			stale = false;
-			error = '';
 		} catch (caught) {
 			if (requestGeneration !== generation || threadId !== requestedThreadId) return;
 			if (caught instanceof DOMException && caught.name === 'AbortError') return;
 			if (leases.length === 0) {
 				stale = false;
-				error = '';
 				return;
 			}
 			console.warn('Could not refresh host access', caught); // the raw error goes to the log, never the screen
-			stale = true; error = STALE;
+			stale = true;
 		} finally {
 			if (requestGeneration === generation && threadId === requestedThreadId) {
 				if (activeRequest === controller) activeRequest = null;
@@ -211,7 +207,6 @@
 		if (!decisionAttempt) return;
 		const { pressed, panel, control } = decisionTargets(event, decision);
 		focusRestoreIntent = focusRestoreIntentForDecision(decision, lease.id, decisionThreadId, control);
-		error = '';
 		decisionNotice = null;
 		activationFailure = '';
 		let refreshTruth = true, failed = false;
@@ -249,7 +244,6 @@
 		activationFailure = '';
 		leases = [];
 		stale = false;
-		error = '';
 		decisionNotice = null;
 		focusRestoreIntent = null;
 		openActiveLeaseId = null;
