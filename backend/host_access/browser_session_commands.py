@@ -221,29 +221,28 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
-        await browser_login_capture.agent_writing(thread_id, endpoint, args)
-    if shared_write:
+    # Capture marks every document a typing command passes through (browser_login_capture_writes).
+    async with await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes:
+        if shared_write:
+            try:
+                return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
+            except browser_dom_write.DomWriteRefused as exc:
+                await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
+                                        properties={"command": args[0], "reason": exc.reason})
+                raise
+        if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
+            # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
+            # chooses the option by value or label (browser_dom_write), so this route does the same.
+            if runtime.record.profile or runtime.record.copy_of:
+                # A saved sign-in admits only the shapes in _saved_command, and select is not one of them.
+                raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
+            args = ("select", args[1], args[2])
+        browser_pane_state.page_command_starting(thread_id, tuple(args))
         try:
-            return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
-        except browser_dom_write.DomWriteRefused as exc:
-            await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
-                                    properties={"command": args[0], "reason": exc.reason})
-            raise
-    if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
-        # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
-        # chooses the option by value or label (browser_dom_write), so this route does the same.
-        if runtime.record.profile or runtime.record.copy_of:
-            # A saved sign-in admits only the shapes in _saved_command, and select is not one of them.
-            raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
-        args = ("select", args[1], args[2])
-    browser_pane_state.page_command_starting(thread_id, tuple(args))
-    try:
-        result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-    finally:
-        # A held pane shows nothing until this restart, so it runs however the command ends.
-        await browser_pane_state.page_command_finished(thread_id, tuple(args))
-        if not pane:
-            await browser_login_capture.agent_batch_done(thread_id, args, command)
+            result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+        finally:
+            # Rule 7's marks land before the held pane restarts, and it restarts however the command ends.
+            await writes.settle(then=partial(browser_pane_state.page_command_finished, thread_id, tuple(args)))
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():

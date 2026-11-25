@@ -8,10 +8,6 @@ _NO_VALUE_COMMANDS = frozenset({
     "click", "dblclick", "hover", "focus", "scroll", "scrollintoview", "get", "is", "snapshot", "screenshot",
     "wait", "tab", "open", "goto", "navigate", "back", "forward", "reload",
 })
-_STAYS_ON_DOCUMENT = frozenset({
-    "fill", "type", "select", "check", "uncheck", "hover", "focus", "scroll", "scrollintoview", "get", "is",
-    "snapshot", "screenshot", "wait",
-})
 
 
 def is_submit(kind: object, event: Mapping[str, object]) -> bool:
@@ -38,24 +34,11 @@ def writes_value(args: Sequence[str]) -> bool:
     return args[0] not in _NO_VALUE_COMMANDS or args[0] == "wait" and "--fn" in args
 
 
-def _may_load(command: Sequence[str]) -> bool:
-    # A click on a link, a key that submits or a script can load a new document; these commands never do.
-    return not command or command[0] not in _STAYS_ON_DOCUMENT or command[0] == "wait" and "--fn" in command
-
-
-def types_between_documents(args: Sequence[str]) -> bool:
-    """Whether a batch can type into a document it reached by a load and then left by another.
-
-    Marking the documents a batch starts and ends on covers every other batch; this one could leave the
-    agent's value in a document in between (one a back navigation can restore), so capture marks every
-    document of the session.
-    """
+def switches_tab(args: Sequence[str]) -> bool:
+    """Whether a batch has a tab command: loads in another tab aren't seen from the page the batch started on."""
     if not args or args[0] != "batch":
         return False
     try:
-        nested = [shlex.split(arg) for arg in args[1:] if arg != "--bail"]
+        return any(shlex.split(arg)[:1] == ["tab"] for arg in args[1:])
     except ValueError:
         return True
-    return any(writes_value(command) and any(map(_may_load, nested[:index]))
-               and (_may_load(command) or any(map(_may_load, nested[index + 1:])))
-               for index, command in enumerate(nested))

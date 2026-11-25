@@ -79,7 +79,7 @@ jobs:
           PATH="$RUNNER_TEMP/browser-bin:$PATH" CORSIA_BROWSER_E2E=1 env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
             backend/tests/test_browser_login_capture_e2e.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/login-capture.log"
-          grep -q " 4 passed" "$RUNNER_TEMP/login-capture.log"
+          grep -q " 5 passed" "$RUNNER_TEMP/login-capture.log"
       - name: Verify setup steps run in the native browser
         env:
           CORSIA_BROWSER_E2E: '1'

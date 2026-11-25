@@ -22,17 +22,17 @@ import asyncio
 import importlib
 import logging
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from websockets.exceptions import WebSocketException
-
-from host_access import browser_cdp, browser_cdp_frames, browser_login_capture_queue as _queue_state
+from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _QuietCdp, world as _world
 from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
-from host_access.browser_login_capture_policy import is_submit, types_between_documents, writes_value
+from host_access.browser_login_capture_policy import is_submit, switches_tab, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
+from host_access.browser_login_capture_writes import ANY_DOCUMENT as _ANY_DOCUMENT, AgentWrites, NoWrites
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 from infra import saved_login_offers
@@ -42,8 +42,6 @@ log = logging.getLogger(__name__)
 # (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
 CAPTURE_TIMEOUT = 1.0
 _WORLD = "corsia-login-capture"
-# Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
-_ANY_DOCUMENT = ""
 session_key = saved_login_offers.session_key
 
 
@@ -100,34 +98,23 @@ def _prune(thread_id: str) -> None:
         _threads.pop(thread_id, None)
 
 
-async def agent_writing(thread_id: str, endpoint: str, args: Sequence[str] | None = None) -> None:
-    """Mark the page's current document before an agent command that can type into it runs (rule 7).
+def _mark(thread_id: str, loader: str) -> None:
+    _state(thread_id).marks[loader] = None
 
-    With the command's args, a command that can't type marks nothing, and a batch that can type into a
-    document between two loads marks every document of the session.
+
+async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> AgentWrites:
+    """Start rule 7's watch before an agent command runs; settle it before the pane gets the page back.
+
+    A command that can't type marks nothing. A batch that types and switches tabs marks every document.
     """
-    if args is not None and not writes_value(args):
-        return
-    loader = _ANY_DOCUMENT
-    try:
-        if endpoint and not (args is not None and types_between_documents(args)):
-            async with _QuietCdp(endpoint) as cdp:
-                loader, _ = await _frame_tree(cdp)
-    except (BrowserSessionError, OSError, WebSocketException):
-        log.info("saved-login capture couldn't read the page an agent typed into; no offer is made in this session")
-    marks = _state(thread_id).marks
-    marks[loader] = None
-
-
-async def agent_batch_done(thread_id: str, args: Sequence[str], run: browser_cdp.RunCommand) -> None:
-    """After a batch that can type, mark the document it ended on too: it may have loaded that one first."""
-    if args and args[0] == "batch" and writes_value(args):
-        try:
-            endpoint = await browser_cdp.page_endpoint(run)
-        except Exception:
-            log.info("saved-login capture couldn't find the page a batch ended on; no offer is made in this session")
-            endpoint = ""
-        await agent_writing(thread_id, endpoint)
+    if not writes_value(args):
+        return NoWrites()
+    if switches_tab(args):
+        _mark(thread_id, _ANY_DOCUMENT)
+        return NoWrites()
+    writes = AgentWrites(partial(_mark, thread_id), CAPTURE_TIMEOUT)
+    await writes.start(endpoint)
+    return writes
 
 
 def _marked(thread_id: str, loader: str) -> bool:
