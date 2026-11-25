@@ -63,6 +63,7 @@
 	import { on } from '$lib/ws/events';
 
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
+	const STALE = 'Couldn’t check host access.';
 
 	let {
 		threadId,
@@ -131,7 +132,7 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || 'Couldn’t check host access. Try again.' : null,
+		stale ? error || STALE : null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);
@@ -215,10 +216,8 @@
 				error = '';
 				return;
 			}
-			stale = true;
-			error = caught instanceof Error
-				? caught.message
-				: 'Host-access state could not be refreshed.';
+			console.warn('Could not refresh host access', caught); // the raw error goes to the log, never the screen
+			stale = true; error = STALE;
 		} finally {
 			if (requestGeneration === generation && threadId === requestedThreadId) {
 				if (activeRequest === controller) activeRequest = null;
@@ -347,7 +346,6 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="Couldn’t check" size="sm" />
 						<span>{staleNotice}</span>
 						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
 					</div>
@@ -458,7 +456,7 @@
 		color: var(--text-secondary);
 		pointer-events: auto;
 	}
-	.status-row > span:nth-child(2) { flex: 1; min-width: 0; }
+	.status-row > span:last-of-type { flex: 1; min-width: 0; }
 	.lease-track {
 		display: flex;
 		align-items: flex-end;

@@ -974,9 +974,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check host access.'));
 
 		expect(host.querySelector('.thread-host-access')!.classList).toContain('wide');
+		// With only a countdown on screen the row is the sentence and Retry: no pill, no server words.
+		const row = host.querySelector('.status-row.stale')!;
+		expect(row.querySelector('.dotmark')).toBeNull();
+		expect(row.textContent?.replace(/\s+/g, ' ').trim()).toBe('Couldn’t check host access. Retry');
+		expect(host.textContent).not.toContain('offline');
 	});
 
 	it('does not fetch or render without a selected thread', async () => {
@@ -1747,4 +1752,31 @@ describe('HostAccessLeaseControl — AdaptiveDrawer routing (#1123)', () => {
 		await vi.waitFor(() => expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0));
 		expect(document.activeElement).toBe(trigger);
 	});
+});
+
+describe('HostAccessLeaseControl — fixed sentences, never raw errors', () => {
+	const STALE = 'Couldn’t check host access.';
+	const labelCount = (label: string) => Array.from(document.body.querySelectorAll('*'))
+		.filter((element) => element.children.length === 0 && element.textContent?.trim() === label).length;
+
+	it('shows the fixed sentence when the re-read fails, logs the raw error, and labels the request once', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
+		emit('host_access_changed', { lease_id: 'lease-1' });
+		await vi.waitFor(() => expect(document.body.textContent).toContain(STALE));
+
+		expect(document.body.textContent).not.toContain('Failed to fetch');
+		expect(labelCount('Couldn’t check')).toBe(1);
+		expect(host.querySelector('.status-row.stale .dotmark')).toBeNull();
+		expect(warn).toHaveBeenCalledWith('Could not refresh host access', expect.any(TypeError));
+	});
+	// A decision that fails (no connection, a refusal, a 409) shows its one drawer line from decisionFailure;
+	// those cases are pinned by the decision-failure tests above.
 });
