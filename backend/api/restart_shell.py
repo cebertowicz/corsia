@@ -173,7 +173,10 @@ def spawn_restart_lifecycle(
     launch_env = _lifecycle_launch_env(
         restart_env, operation_id, caller_credential
     )
-    result_path = Path(log_fh.name).parent / f"lifecycle-{operation_id}.result"
+    from infra.config import STATE_LOGS_DIR
+
+    STATE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    result_path = STATE_LOGS_DIR / f"lifecycle-{operation_id}.result"
     launch_env["CORSIA_RESTART_RESULT_FILE"] = str(result_path)
     command = [
         "/bin/bash",

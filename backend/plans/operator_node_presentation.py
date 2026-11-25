@@ -50,6 +50,9 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "depth": node["depth"],
         "kind": node["kind"],
         "workflow_step": node["workflow_step"],  # ``node_states.parent_ids`` reads it
+        # A run (``workflow_fields.build_run``, nested runs included) is a phase naming a
+        # workflow; the pane shows its children, the run's steps, in the run's order.
+        "workflow_run": node["kind"] == "phase" and node["workflow_ref"] is not None,
         "title": node["title"],
         "description": node["description"],
         # A person step names only this plan's open dependents; cross-plan
