@@ -168,6 +168,9 @@ export function createPlanTreeReorder(options: Options) {
 				const movable = options.enabled() && eligible(node) && !moving;
 				if (event.button !== 0 || !movable) return;
 				const row = event.currentTarget as HTMLElement;
+				// A new press replaces the old one, so end the old one's hold and scroll block first.
+				if (press?.timer) clearTimeout(press.timer);
+				releaseTouchDrag();
 				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
 				if (event.pointerType === 'touch') press.timer = setTimeout(() => {
 					if (press?.pointerId !== event.pointerId || press.scrolling) return;

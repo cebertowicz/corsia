@@ -115,6 +115,22 @@ for (const width of [1440, 393]) {
       expect(calls).toHaveLength(0);
       await expect(source).not.toHaveClass(/dragging/);
     });
+    if (width === 393) test('a second finger holding another row leaves no page-wide scroll block behind', async ({ page, request }) => {
+      const { tree } = await openPlan(page, request, width);
+      const touch = (id: string, type: string, pointerId: number) => tree.locator(`[data-node-id="${id}"]`).evaluate((row, [type, pointerId]) => {
+        const box = row.getBoundingClientRect();
+        row.dispatchEvent(new PointerEvent(type as string, { pointerId: pointerId as number, pointerType: 'touch', isPrimary: pointerId === 11, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 }));
+      }, [type, pointerId] as const);
+      // Two fingers each held past the long press, then lifted in the other order.
+      await touch('task-0', 'pointerdown', 11);
+      await page.waitForTimeout(700);
+      await touch('task-2', 'pointerdown', 12);
+      await page.waitForTimeout(700);
+      await touch('task-2', 'pointerup', 12);
+      await touch('task-0', 'pointerup', 11);
+      const blocked = await page.evaluate(() => !document.dispatchEvent(new Event('touchmove', { cancelable: true })));
+      expect(blocked).toBe(false);
+    });
     test('refusal restores the dragged order without overlapping rows', async ({ page, request, context }, info) => {
       const { tree } = await openPlan(page, request, width, true);
       const source = tree.locator('[data-node-id="task-1"]');
