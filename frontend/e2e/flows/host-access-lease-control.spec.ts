@@ -916,24 +916,35 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 			await page.locator('.pending-request-trigger').click();
 			const dialog = page.getByRole('dialog');
-			const choices = dialog.getByRole('radio');
-			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
-			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
-			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
-			// Every choice fits in at most two lines, all four in view, and the picker never scrolls sideways.
-			const lineCounts = await choices.evaluateAll((buttons) => buttons.map((button) => {
-				const range = document.createRange();
-				range.selectNodeContents(button);
-				return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-			}));
-			expect(lineCounts.every((lines) => lines >= 1 && lines <= 2), lineCounts.join(',')).toBe(true);
-			const group = dialog.getByRole('radiogroup');
-			expect(await group.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-			for (const choice of await choices.all()) await expect(choice).toBeInViewport({ ratio: 1 });
+			// One select named Duration, in time order, starting on the agent's asked-for time.
+			const select = dialog.getByRole('combobox', { name: 'Duration' });
+			await expect(select.locator('option')).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+			await expect(select).toHaveValue('900');
+			// One line, the full width of the sheet's content column, Field's own chevron, and a finger-sized target on touch.
+			const box = await select.evaluate((el) => {
+				const style = getComputedStyle(el);
+				const column = el.closest('.decision-body')!;
+				const columnStyle = getComputedStyle(column);
+				const inner = column.getBoundingClientRect().width - parseFloat(columnStyle.paddingLeft) - parseFloat(columnStyle.paddingRight);
+				return {
+					width: el.getBoundingClientRect().width, inner, height: el.getBoundingClientRect().height,
+					chevron: style.backgroundImage, radius: style.borderTopLeftRadius,
+					coarse: matchMedia('(pointer: coarse)').matches,
+					touchTarget: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--touch-target')) || 44,
+				};
+			});
+			expect(Math.abs(box.width - box.inner), JSON.stringify(box)).toBeLessThanOrEqual(1);
+			expect(box.chevron, JSON.stringify(box)).toContain('url(');
+			if (box.coarse) expect(box.height, JSON.stringify(box)).toBeGreaterThanOrEqual(box.touchTarget);
+			await expect(select).toBeInViewport({ ratio: 1 });
+			await expect(dialog.getByText('CORSIA types the password into this site for the agent. The agent never sees it.', { exact: true })).toBeVisible();
+			await expect(dialog).not.toContainText('revoke');
 			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
 
-			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
-			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await select.selectOption('until_revoked');
+			await expect(select).toHaveValue('until_revoked');
+			// No screen ends a standing grant yet, so the sheet never says it can be revoked.
+			await expect(dialog).not.toContainText('revoke');
 			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
 			await dialog.getByRole('button', { name: 'Approve' }).click();
 			await expect.poll(() => decisions.length).toBe(1);

@@ -299,7 +299,9 @@ describe('HostAccessLeaseControl', () => {
 		const dialog = host.querySelector('[role="dialog"]')!;
 		expect(dialog.textContent).toContain('Bookkeeper');
 		expect(dialog.textContent).toContain('me@example.com');
-		dialog.querySelector<HTMLButtonElement>('[data-seconds="1800"]')!.click();
+		const duration = dialog.querySelector<HTMLSelectElement>('select[id^="fill-duration-"]')!;
+		duration.value = '1800';
+		duration.dispatchEvent(new Event('change', { bubbles: true }));
 		flushSync();
 		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve')!.click();

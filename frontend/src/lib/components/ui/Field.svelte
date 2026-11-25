@@ -154,6 +154,8 @@
 		clip-path: inset(50%); white-space: nowrap;
 	}
 	.field.chip .c :global(select) { width: auto; flex: none; padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
+	/* A nested select keeps the full width; its text clears Field's chevron, placed as on the chip. */
+	.field.nested .c :global(select) { padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
 	.field.chip .c :global(input::placeholder) { color: var(--text-tertiary); }
 	.field.chip .c :global(input:focus),
 	.field.chip .c :global(select:focus) {
