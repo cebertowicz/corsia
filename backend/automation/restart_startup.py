@@ -82,9 +82,9 @@ def _remove_terminal_lifecycle_results(logger) -> None:
     """Remove prior lifecycle results only after their operations are terminal."""
     import re
     from automation.self_restart import TERMINAL_STATUSES, operation_by_id
-    from infra.config import LOGS_DIR
+    from infra.config import STATE_LOGS_DIR
 
-    for path in LOGS_DIR.glob("lifecycle-*.result"):
+    for path in STATE_LOGS_DIR.glob("lifecycle-*.result"):
         match = re.fullmatch(r"lifecycle-([0-9a-f]{32})\.result", path.name)
         if not match:
             continue

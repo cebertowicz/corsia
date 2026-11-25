@@ -52,9 +52,8 @@ KEY_STORE_SCHEMA_SQL = """
         created_at TEXT NOT NULL,
         login_id TEXT NOT NULL,
         site TEXT NOT NULL,
-        username TEXT NOT NULL,
         thread_id TEXT NOT NULL,
-        result TEXT NOT NULL CHECK (result IN ('filled', 'rejected'))
+        result TEXT NOT NULL CHECK (result IN ('filled', 'rejected', 'unknown'))
     );
     CREATE INDEX IF NOT EXISTS idx_saved_login_fill_audit_login_created
         ON saved_login_fill_audit(login_id, created_at);

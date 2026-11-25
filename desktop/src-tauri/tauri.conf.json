@@ -59,6 +59,7 @@
       "../bundle/licenses": "licenses",
       "../bundle/python": "python",
       "../bundle/backend": "backend",
+      "../bundle/docs": "docs",
       "../bundle/frontend": "frontend",
       "../bundle/scripts": "scripts",
       "../bundle/updater-endpoint.json": "updater-endpoint.json"

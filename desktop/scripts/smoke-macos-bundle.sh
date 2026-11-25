@@ -152,12 +152,13 @@ env -i \
   "$RESOURCES/bin/corsia-service" --host 127.0.0.1 --port "$port" \
   >"$TEMP_ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
+service_log="$(PYTHONPATH="$RESOURCES/backend" "$PYTHON" -c 'from pathlib import Path; from infra.log_files import logs_dir; import sys; print(logs_dir(Path(sys.argv[1]), home=Path(sys.argv[2])) / "service.log")' "$TEMP_ROOT/state" "$TEMP_ROOT/home")"
 startup_receipt="CORSIA bundled backend startup: state_dir=$TEMP_ROOT/state db_path=$TEMP_ROOT/state/corsia.db port=$port workspace=$TEMP_ROOT/workspace"
 for _ in $(seq 1 30); do
-  if grep -F "$startup_receipt" "$TEMP_ROOT/state/logs/service.log" >/dev/null 2>&1; then break; fi
+  if grep -F "$startup_receipt" "$service_log" >/dev/null 2>&1; then break; fi
   sleep 1
 done
-grep -F "$startup_receipt" "$TEMP_ROOT/state/logs/service.log"
+grep -F "$startup_receipt" "$service_log"
 for _ in $(seq 1 30); do
   if curl --fail --silent "http://127.0.0.1:$port/api/health" >"$TEMP_ROOT/health.json"; then break; fi
   sleep 1
@@ -166,7 +167,7 @@ grep -q '"status":"ok"' "$TEMP_ROOT/health.json"
 curl --fail --silent "http://127.0.0.1:$port/api/version" >"$TEMP_ROOT/version.json"
 # Both the service's PATH and every Git its backend ran (version reads it) lead
 # to the bundle, not the shims ahead of the system paths.
-service_git="$(sed -n 's/^CORSIA bundled backend: git=//p' "$TEMP_ROOT/state/logs/service.log")"
+service_git="$(sed -n 's/^CORSIA bundled backend: git=//p' "$service_log")"
 printf 'service-git=%s\n' "$service_git"
 [ "$service_git" -ef "$GIT_CORE/git" ] || { echo "error: the service resolves git to ${service_git:-nothing}, not the bundle" >&2; exit 1; }
 touch "$TEMP_ROOT/service-git-trace.log"

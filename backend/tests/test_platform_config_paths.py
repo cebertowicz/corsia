@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+from pathlib import Path
+import sys
 
 import pytest
 
@@ -34,7 +37,11 @@ def test_config_keeps_workspace_and_operational_state_distinct(
             == state_root.resolve() / "analytics.duckdb"
         )
         assert config.UPLOADS_DIR == state_root.resolve() / "uploads"
-        assert config.LOGS_DIR == state_root.resolve() / "logs"
+        if sys.platform == "darwin":
+            folder = hashlib.sha256(bytes(state_root.resolve())).hexdigest()[:12]
+            assert config.LOGS_DIR == Path.home() / "Library" / "Logs" / "CORSIA" / folder
+        else:
+            assert config.LOGS_DIR == state_root.resolve() / "logs"
         assert config.RUNTIME_DIR == state_root.resolve() / "runtime"
 
     importlib.reload(config)

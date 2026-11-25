@@ -1,5 +1,7 @@
 """Record the result of a saved-login fill without reading its password."""
 
+from typing import Literal
+
 from infra import saved_logins
 from infra.database import write_transaction
 from infra.key_store_values import KeyStoreError
@@ -9,28 +11,35 @@ FILLED = "Signed in to {site} as {username} with the saved login."
 REJECTED = "The saved login for {site} ({username}) didn't work, so it's now marked out of date. The person has a step to sign in to {site} themselves."
 
 
-def _record(thread_id: str, login_id: str, *, succeeded: bool) -> str:
+def _record(thread_id: str, login_id: str, result: Literal["filled", "rejected", "unknown"]) -> saved_logins.SavedLogin:
     if not isinstance(thread_id, str) or not thread_id:
         raise KeyStoreError("A login's use needs the thread that used it.")
     with write_transaction(None, scope="saved_login_fill_result") as conn:
         login = saved_logins.get_login(login_id, db=conn)
-        if succeeded:
+        if result == "filled":
             saved_logins.record_use(login_id, thread_id, db=conn)
-        else:
+        elif result == "rejected":
             saved_logins.mark_out_of_date(login_id, db=conn)
         conn.execute(
-            "INSERT INTO saved_login_fill_audit (created_at, login_id, site, username, thread_id, result) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (utc_now_iso(), login.id, login.site, login.username, thread_id, "filled" if succeeded else "rejected"),
+            "INSERT INTO saved_login_fill_audit (created_at, login_id, site, thread_id, result) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (utc_now_iso(), login.id, login.site, thread_id, result),
         )
-    return (FILLED if succeeded else REJECTED).format(site=login.site, username=login.username)
+    return login
 
 
 def fill_succeeded(thread_id: str, login_id: str) -> str:
     """Record a successful fill and return the agent-facing result."""
-    return _record(thread_id, login_id, succeeded=True)
+    login = _record(thread_id, login_id, "filled")
+    return FILLED.format(site=login.site, username=login.username)
 
 
 def fill_failed(thread_id: str, login_id: str) -> str:
     """Record a rejected fill and mark the login out of date."""
-    return _record(thread_id, login_id, succeeded=False)
+    login = _record(thread_id, login_id, "rejected")
+    return REJECTED.format(site=login.site, username=login.username)
+
+
+def fill_unknown(thread_id: str, login_id: str) -> None:
+    """Record a fill whose outcome is unknown, leaving login state unchanged."""
+    _record(thread_id, login_id, "unknown")

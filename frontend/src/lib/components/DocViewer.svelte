@@ -40,6 +40,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { DocState, DocViewerProps } from '$lib/docViewerProps';
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
+	import { createViewerSuggestionHistory } from '$lib/docViewerSuggestionHistory.svelte';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
@@ -116,8 +117,10 @@
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
-	let docRoot = $state<HTMLElement>();
-	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	let docRoot = $state<HTMLElement>(), editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	const suggestionHistory = createViewerSuggestionHistory({ target: () => target, artifact: () => loadedArtifactId, unavailable: () => !!liveSession || suggestionBusyId !== null, isLive: () => !!liveSession,
+		accept: (text, eventId, ids) => editorSurface?.acceptSuggestion(text, eventId, ids) ?? false,
+		setText: (text) => editText = text, setBusy: (busy) => suggestionBusyId = busy ? '' : null, reload: () => reload() });
 	/** The comments drawer's selected view: resolved threads shown or hidden. The count is the surface's own. */
 	let resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
@@ -268,6 +271,7 @@
 	{/if}
 	<DocViewerStatus
 		touchReading={reading.touch} editing={reading.editing} canEdit={typingAvailable()} onEnterEdit={reading.enter} onDone={reading.finish}
+		commentTaskBar={reviewBarState}
 		ask={documentAsk}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
@@ -304,6 +308,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
+		onSuggestionHistory={suggestionHistory.change} onSuggestionHistoryRecovery={reload}
 		artifactId={loadedArtifactId}
 		{docState}
 		documentName={target?.name ?? 'this document'}
@@ -370,9 +375,9 @@
 		{target}
 		artifactId={loadedArtifactId}
 		draftScope={draftController.keepKey}
-		readOnly={readonly || confirming}
+		readOnly={readonly || confirming || suggestionHistory.busy}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
-		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
+		onSuggestionAccepted={suggestionHistory.showAccepted}
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetUp = open}
 		onRevealDraft={revealDraft} onRevealCard={revealCard}
@@ -385,6 +390,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->
