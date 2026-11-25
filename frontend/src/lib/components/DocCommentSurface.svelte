@@ -43,7 +43,7 @@
 	import { refusalMessage, suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocCommentSurfaceProps } from '$lib/docCommentSurfaceProps';
-	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedOpen = $bindable(false), commentsEntry = null }: DocCommentSurfaceProps = $props();
+	let { commentTaskBar, state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, ringId = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, draftScope = '', feedback = undefined, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, offScreen = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, quiet = false, draftOverColumn = false, opened = 0, resolvedOpen = $bindable(false), commentsEntry = null }: DocCommentSurfaceProps = $props();
 	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
@@ -288,7 +288,7 @@
 {/snippet}
 {#snippet listBody()}
 	<!-- On the canvas the open threads are cards beside their text, with no heading or close around them: the column closes with the comments control. -->
-	{#if !margin}<DocCommentDrawerHeading count={headerCount} meta={switchInHeading ? statusSwitch : undefined} filtered={!!image} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
+	{#if !margin}<DocCommentDrawerHeading count={headerCount} meta={switchInHeading ? statusSwitch : undefined} filtered={!!image} {commentTaskBar} bind:filter bind:filterOpen onClose={closeDrawer} />{/if}
 	{#if !isImage && !openedComment && !switchInHeading}{@render statusSwitch()}{/if}
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}

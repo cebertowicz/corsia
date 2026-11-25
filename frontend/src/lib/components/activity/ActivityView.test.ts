@@ -492,7 +492,7 @@ describe('Activity’s bottom band at rest', () => {
 		expect(start).toBeGreaterThan(-1);
 		expect(shellSource.slice(start, shellSource.indexOf('}', start))).toContain('display: inline;');
 		// It must come after the rule that hides them, or that rule wins.
-		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by {'));
+		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock .rb-dock-sep, .rb-dock:not(.open) .rb-dock-by {'));
 	});
 });
 

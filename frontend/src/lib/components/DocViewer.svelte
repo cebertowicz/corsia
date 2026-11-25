@@ -271,6 +271,7 @@
 	{/if}
 	<DocViewerStatus
 		touchReading={reading.touch} editing={reading.editing} canEdit={typingAvailable()} onEnterEdit={reading.enter} onDone={reading.finish}
+		commentTaskBar={reviewBarState}
 		ask={documentAsk}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
