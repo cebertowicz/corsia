@@ -28,7 +28,7 @@ from infra.queries import get_thread_for_user
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
-_NO_THREAD = "Couldn’t find this chat, so no login can be saved for it."
+_NO_THREAD = "Couldn’t find this chat. Sign in again from an open chat to save the login."
 _BAD_BODY = "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."
 #: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
 _NO_LOGIN_TO_DELETE = "There’s no saved login to delete."
