@@ -215,6 +215,7 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
     from infra.activity_queue_base import shape
     from infra.activity_rank_scope import ranker_for
     from infra.activity_ranking import apply_ranks
+    from infra.activity_urgency import sort_key
 
     if project_id:
         public.check_operator_project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
@@ -229,7 +230,7 @@ def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str
         rows.extend(replies)
     if project_id:
         rows = [r for r in rows if r['source'].get('project_id') == project_id]
-    rows.sort(key=lambda r: (r.get('priority', 0), r.get('raised_at') or '', r['key']))
+    rows.sort(key=sort_key)
     scope, ranker = ranker_for(db, user_id, project_id)
     rows = apply_ranks(db, user_id, scope, rows)
     for row in rows:
