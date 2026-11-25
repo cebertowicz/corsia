@@ -131,7 +131,7 @@ async def test_lifecycle_open_records_log_after_preparation_write_fails(isolated
     expected_log = settings_restart._update_log_path(operation_id)
     env = {"CORSIA_RESTART_OPERATION_ID": operation_id}
     with monkeypatch.context() as preparation:
-        preparation.setattr(settings_restart, "nofollow_log_opener", lambda *_args: (_ for _ in ()).throw(OSError("disk write failed")))
+        preparation.setattr("infra.update_prepare_output.nofollow_log_opener", lambda *_args: (_ for _ in ()).throw(OSError("disk write failed")))
         await settings_restart._prepare_owned_release(operation_id, [operation_id], Path("corsia"), env)
     assert not expected_log.exists()
     assert not json.loads(self_restart.operation_by_id(operation_id)["failure_detail"] or "{}").get("log_path")
