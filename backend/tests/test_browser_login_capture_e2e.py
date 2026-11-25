@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_login_capture as capture, browser_pane
+from host_access import browser_cdp, browser_control, browser_login_capture as capture, browser_pane, browser_steps
 from host_access import browser_step_lifecycle as lifecycle
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
@@ -196,7 +196,7 @@ async def _open_sign_in(owner: BrowserSessionOwner, thread_id: str, url: str) ->
     assert not (await owner.run(thread_id, ("open", url), show_window=False, session="new")).startswith("Error:")
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await owner.run(thread_id, ("snapshot", "-i"), session="existing")
-    assert lifecycle.password_step(thread_id) is not None
+    assert browser_steps.password_step(thread_id) is not None
     return await owner.page_endpoint(thread_id)
 
 
@@ -212,7 +212,7 @@ async def test_the_persons_sign_in_is_offered_then_confirmed_and_the_value_goes_
     try:
         with sign_in_server() as origin, wired(monkeypatch, owner, origin) as holder:
             endpoint = await _open_sign_in(owner, thread_id, f"{origin}/login.html")
-            step = lifecycle.password_step(thread_id)
+            step = browser_steps.password_step(thread_id)
             key = f"{thread_id}:{owner.session_identity(thread_id)}"
             person = Person(owner, thread_id, endpoint)
             await person.click("#user")
@@ -246,7 +246,7 @@ async def test_a_two_page_sign_in_notes_the_username_then_offers_the_password(mo
         with sign_in_server() as origin, wired(monkeypatch, owner, origin) as holder:
             assert not (await owner.run(thread_id, ("open", f"{origin}/first.html"), show_window=False,
                                         session="new")).startswith("Error:")
-            assert lifecycle.password_step(thread_id) is None
+            assert browser_steps.password_step(thread_id) is None
             endpoint = await owner.page_endpoint(thread_id)
             key = f"{thread_id}:{owner.session_identity(thread_id)}"
             person = Person(owner, thread_id, endpoint)

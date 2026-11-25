@@ -9,7 +9,7 @@ from typing import Literal, Mapping
 
 from host_access import browser_login_capture, browser_pane_state
 from host_access.browser_cdp import PasswordProbe
-from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep
+from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep, open_steps
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -149,7 +149,7 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
     return Decision()
 
 
-_steps: dict[str, BrowserStep] = {}
+_steps = open_steps
 _answers: dict[str, dict[tuple[Kind, str], Answer]] = {}
 _sessions: dict[str, str | None] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
@@ -384,10 +384,6 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
-
-
-def password_step(thread_id: str) -> PasswordStep | None:
-    return step if isinstance(step := _steps.get(thread_id), PasswordStep) else None
 
 
 def held_pages(thread_id: str) -> bool:

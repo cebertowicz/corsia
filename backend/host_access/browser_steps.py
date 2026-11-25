@@ -114,6 +114,14 @@ class PersonStep(BrowserStep):
         )
 
 
+# Each thread's open step. browser_step_lifecycle alone writes it; others read it here, so none imports the lifecycle.
+open_steps: dict[str, BrowserStep] = {}
+
+
+def password_step(thread_id: str) -> PasswordStep | None:
+    return step if isinstance(step := open_steps.get(thread_id), PasswordStep) else None
+
+
 def publish_password_page(thread_id: str, visible: bool) -> None:
     """Show or clear the password notice on the thread's pages and panes."""
     message = {"type": "browser_password_page", "thread_id": thread_id, "visible": visible}
