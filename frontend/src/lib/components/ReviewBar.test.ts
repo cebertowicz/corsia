@@ -3,8 +3,9 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
+import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
 import ReviewBarHarness from '$lib/__tests__/fixtures/ReviewBarHarness.svelte';
-import { DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
+import { createReviewBarState, DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
 import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
 import { token } from '$lib/stores/auth';
@@ -140,14 +141,42 @@ describe('ReviewBar', () => {
 		docsApi.dismissCommentAttention.mockReset().mockResolvedValue(undefined);
 		api.fetchReviewBar.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: step })
 			.mockResolvedValue({ ...read(0), ask_raised: false });
-		await render();
-		expect(host.querySelector('.rb-ask-full')?.textContent).toBe('2 comments, 1 suggestion to review');
+		const bar = createReviewBarState();
+		bar.setTarget('doc-1');
+		await bar.load();
+		component = mount(CommentTaskDismiss, { target: host, props: { bar } });
+		flushSync();
+		expect(host.textContent).toContain('2 comments, 1 suggestion to review');
+		expect(button('Dismiss all')).toBeTruthy();
 		expect(button('Done')).toBeUndefined();
 		expect(button('Won’t do')).toBeUndefined();
 		button('Dismiss all')!.click();
 		await vi.waitFor(() => expect(docsApi.dismissCommentAttention).toHaveBeenCalledWith('doc-1'));
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
 		expect(planApi.mutateUserTask).not.toHaveBeenCalled();
+	});
+
+	it('keeps the dismissal busy, reports failure and allows retry', async () => {
+		const step = { node_id: 'task-1', node_title: 'Launch plan.md', node_revision: 1, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Docs agent', comment_attention: { artifact_id: 'doc-1', comments: 2, suggestions: 0, system_task: true } };
+		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false, person_step: step });
+		let reject!: (error: Error) => void;
+		docsApi.dismissCommentAttention.mockReset().mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; })).mockResolvedValueOnce(undefined);
+		const bar = createReviewBarState();
+		bar.setTarget('doc-1');
+		await bar.load();
+		component = mount(CommentTaskDismiss, { target: host, props: { bar } });
+		flushSync();
+		expect(host.textContent).toContain('2 comments to review');
+		const action = button('Dismiss all')!;
+		action.click();
+		flushSync();
+		expect(action.disabled).toBe(true);
+		reject(new Error('offline'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t dismiss comments. Try again.'));
+		expect(action.disabled).toBe(false);
+		action.click();
+		await vi.waitFor(() => expect(docsApi.dismissCommentAttention).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(host.textContent).not.toContain('Couldn’t dismiss comments. Try again.'));
 	});
 
 	it('re-reads the bar when a comment on this document changes, and not for another document', async () => {
