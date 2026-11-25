@@ -1,5 +1,5 @@
 import { test } from '../support/test';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -712,6 +712,110 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`) });
 		});
 	}
+
+	/**
+	 * What the saved-login card must hold at any width, stale or not: "Review →" and the stale badge wholly inside
+	 * the card and the screen, the site ending in its whole registrable domain, nothing scrolled or clipped, and
+	 * the agent's name never an empty column.
+	 */
+	async function expectEntryHolds(page: Page, tail: string) {
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+		const label = (await shown.textContent()) ?? '';
+		expect(label.endsWith(tail), label).toBe(true);
+		expect(label === tail || label.endsWith(`.${tail}`) || label === `…${tail}`, label).toBe(true);
+		const card = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (element: Element | null) => {
+				if (!element) return null;
+				const { left, right, top, bottom, width } = element.getBoundingClientRect();
+				return { left, right, top, bottom, width };
+			};
+			const site = button.querySelector('.pending-site') as HTMLElement;
+			return {
+				entry: box(button), action: box(button.querySelector('.pending-action')), pill: box(button.querySelector('.pill')),
+				owner: box(button.querySelector('.pending-owner')), screen: window.innerWidth,
+				row: { scroll: button.scrollWidth, client: button.clientWidth },
+				site: { scroll: site.scrollWidth, client: site.clientWidth },
+				layout: { stacked: button.hasAttribute('data-stacked'), row: button.getAttribute('style'), site: site.getAttribute('style') },
+			};
+		});
+		const detail = JSON.stringify(card);
+		for (const part of [card.action, card.pill]) {
+			if (!part) continue;
+			expect(part.left, detail).toBeGreaterThanOrEqual(card.entry!.left - 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.entry!.right + 0.5);
+			expect(part.top, detail).toBeGreaterThanOrEqual(card.entry!.top - 0.5);
+			expect(part.bottom, detail).toBeLessThanOrEqual(card.entry!.bottom + 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.screen);
+		}
+		expect(card.action, detail).not.toBeNull();
+		expect(card.row.scroll, detail).toBeLessThanOrEqual(card.row.client);
+		expect(card.site.scroll, detail).toBeLessThanOrEqual(card.site.client);
+		expect(card.owner!.width, detail).toBeGreaterThan(0);
+		return card;
+	}
+
+	/** One fill in the entry, served from the list read; `stale` then fails the next read, as a dropped connection does. */
+	async function showFill(page: Page, request: APIRequestContext, title: string, overrides: Record<string, unknown>, stale = false) {
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1, overrides);
+		let reads = 0;
+		await page.route('**/api/host-access/leases**', async (route) => {
+			if (route.request().method() === 'POST') {
+				await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'lease revision is stale' }) });
+				return;
+			}
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			if (root === threadId && stale && reads++ > 0) {
+				await route.abort('failed');
+				return;
+			}
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+		await expect(page.locator('.pending-request-trigger .pending-site')).toBeVisible();
+		if (!stale) return;
+		// A Reject the server refuses as changed makes the control read the list again; that read fails, so the request is out of date.
+		await page.locator('.pending-request-trigger').click();
+		await page.getByRole('dialog').getByRole('button', { name: 'Reject' }).click();
+		await expect(page.getByRole('dialog').getByRole('button', { name: 'Reject' })).toBeEnabled();
+		await page.keyboard.press('Escape');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('.pending-request-trigger .pill')).toBeVisible();
+	}
+
+	const LONG_AGENT = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+
+	test('keeps Review and the out-of-date badge inside the card on a phone, with a long agent name', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await showFill(page, request, `Saved login stale phone ${testInfo.project.name}-${Date.now()}`, { agent: LONG_AGENT }, true);
+		await expectEntryHolds(page, 'example.com');
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-stale-393.png') });
+	});
+
+	test('puts a long registrable domain on its own line on a phone, whole, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A registrable domain is one label under a public suffix, so a long one is a long label before ".com".
+		const domain = 'northwind-regional-supply-cooperative-accounts.com';
+		await showFill(page, request, `Saved login long domain ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${SCHEME}login.${domain}`, domain,
+		});
+		await expectEntryHolds(page, domain);
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-long-domain-393.png') });
+	});
+
+	test('keeps a site with a port whole to its port on a phone, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A saved login's site is an https origin: it can carry a port other than 443, never a path.
+		await showFill(page, request, `Saved login port ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${LONG_SITE}:8443`,
+		});
+		await expectEntryHolds(page, 'example.com:8443');
+	});
 
 	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
