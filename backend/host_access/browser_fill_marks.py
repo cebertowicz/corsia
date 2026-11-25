@@ -11,10 +11,13 @@ A saved login is filled only on a clean document (browser_login_fill). Before ea
   registrable domain) in this session. A reload or navigation commits a new, clean document, but a script can
   leave stored state (a service worker, storage) that reaches every page of its site, so a fill on a marked
   site is not clean even after a reload. A page whose document or address can't be read marks the session.
-  The page is read again after such a command (agent_command): a navigation that commits before the script runs
-  (an open that didn't wait for its load, a page that redirects itself, `wait --fn` evaluating across loads)
-  puts the script in a document the first read never saw, so a different or unreadable document after it, or a
-  command that didn't finish (it may still be running in the browser), marks the session.
+  A page watch (browser_login_capture_writes.AgentWrites) follows the page while such a command runs
+  (agent_command): a navigation that commits before the script runs (an open that didn't wait for its load, a
+  page that redirects itself, `wait --fn` evaluating across loads) puts the script in a document the first read
+  never saw. So any other document the watch sees, at its start, during the command or at its end, marks the
+  session, as do a page opening, a watch that fails, and a command that didn't finish (it may still be running
+  in the browser). The watch sees each main-frame navigation, back/forward cache restores included, so a
+  history restore of the first document can't hide a document committed in between.
 
 Marks are kept until the browser closes (forget), with no cap: each is one identity per agent script command,
 freed with the session, and forgetting one could make a live document look clean. Only identities are kept
@@ -30,6 +33,7 @@ from typing import AsyncIterator, Callable, Sequence
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_cdp
+from host_access.browser_login_capture_writes import AgentWrites
 from host_access.browser_saved_fills import same_session
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
@@ -47,7 +51,13 @@ _PLAIN_OPTIONS = frozenset({"-i", "--full", "--load", "--url", "--text", "--stat
 # The commands whose script lives and dies with the document it ran in.
 _DOCUMENT_SCRIPT_COMMANDS = _NO_SCRIPT_COMMANDS | {"eval"}
 
-# By thread: the documents (loader ids) an agent's script ran in. Loader ids never recur.
+# How long the page watch may take to start, and to settle after the command.
+WATCH_TIMEOUT = 5.0
+# The page watch's class; tests stand in for it.
+_watch = AgentWrites
+
+# By thread: the documents (loader ids) an agent's script ran in. A loader id names one document: a back/forward
+# cache restore makes that same document current again under the same id, so a mark on it still holds.
 _scripted: dict[str, set[str]] = {}
 # (thread, session) pairs, and (thread, session, registrable domain) triples, an agent marked.
 _session_marks: set[tuple[str, str | None]] = set()
@@ -89,7 +99,7 @@ async def agent_command(thread_id: str, session: str | None, endpoint: str, args
 
     The body calls the yielded function with True once the command finished in the browser. A command that
     marked one document marks the session when it wasn't reported finished (it raised, timed out, or took
-    another route), or when the page's document afterwards can't be read or isn't the one marked.
+    another route), or when its page watch saw any other document, saw a page open, or failed.
     """
     loader = await before_agent_command(thread_id, session, endpoint, args, navigation=navigation)
     done = False
@@ -98,11 +108,24 @@ async def agent_command(thread_id: str, session: str | None, endpoint: str, args
         nonlocal done
         done = ok
 
+    if not loader:
+        yield finished
+        return
+    seen: set[str] = set()
+    watch = _watch(seen.add, WATCH_TIMEOUT)
+    try:
+        await watch.start(endpoint)
+    except BaseException:
+        _session_marks.add((thread_id, session))
+        raise
     try:
         yield finished
     finally:
-        if loader:
-            await _after(thread_id, session, endpoint, loader, finished=done)
+        try:
+            await watch.settle()
+        finally:
+            if not done or seen != {loader}:
+                _session_marks.add((thread_id, session))
 
 
 async def before_agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str], *,
@@ -128,17 +151,6 @@ async def before_agent_command(thread_id: str, session: str | None, endpoint: st
         _site_marks.add((thread_id, session, domain))
         return loader
     return ""
-
-
-async def _after(thread_id: str, session: str | None, endpoint: str, loader: str, *, finished: bool) -> None:
-    """Mark the session unless the command finished and the page still shows the document marked before it."""
-    try:
-        page = await _page(endpoint) if finished else None
-    except BaseException:
-        _session_marks.add((thread_id, session))
-        raise
-    if page is None or page[0] != loader:
-        _session_marks.add((thread_id, session))
 
 
 async def _page(endpoint: str) -> tuple[str, str] | None:

@@ -1,9 +1,13 @@
 """Which agent commands mark a document, a site or a whole session against a saved-login fill (browser_fill_marks)."""
 from __future__ import annotations
 
+import asyncio
+import json
+
 import pytest
 
-from host_access import browser_cdp, browser_fill_marks as marks
+from host_access import browser_cdp, browser_fill_marks as marks, browser_login_capture_writes as watch_module
+from host_access import browser_login_fill
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 
 THREAD = "thread-marks"
@@ -22,13 +26,33 @@ def _fresh():
 
 @pytest.fixture
 def on_page(monkeypatch):
-    """The page's document and site as before_agent_command reads them; None stands for an unreadable page."""
-    current = {"page": ("L1", "example.com")}
+    """The page's document and site as before_agent_command reads them; None stands for an unreadable page.
+
+    A stand-in page watch sees the page's document when it starts and when it settles, and any loaders listed
+    under "during" in between.
+    """
+    current: dict = {"page": ("L1", "example.com"), "during": ()}
 
     async def page(_endpoint):
         return current["page"]
 
+    class Watch:
+        def __init__(self, mark, _timeout):
+            self._mark = mark
+
+        def _now(self) -> None:
+            self._mark(current["page"][0] if current["page"] else watch_module.ANY_DOCUMENT)
+
+        async def start(self, _endpoint):
+            self._now()
+
+        async def settle(self):
+            for loader in current["during"]:
+                self._mark(loader)
+            self._now()
+
     monkeypatch.setattr(marks, "_page", page)
+    monkeypatch.setattr(marks, "_watch", Watch)
     return current
 
 
@@ -274,17 +298,12 @@ async def test_an_agent_eval_of_the_same_navigation_text_still_marks(tool_path, 
 
 
 @pytest.mark.asyncio
-async def test_an_agent_eval_whose_page_navigated_during_it_marks_the_session(tool_path, synthetic_browser, monkeypatch):
+async def test_an_agent_eval_whose_page_navigated_during_it_marks_the_session(tool_path, synthetic_browser, on_page):
     from tools import browser_runtime
-
-    reads = iter([("L1", "example.com"), ("L2", "example.com")])
-
-    async def page(_endpoint):
-        return next(reads)
 
     try:
         await browser_runtime._run(["open", "about:blank"], thread_id=THREAD)
-        monkeypatch.setattr(marks, "_page", page)
+        on_page["during"] = ("L2",)
         assert await browser_runtime._run(["eval", "1"], thread_id=THREAD) == "ok"
         assert marks.session_marked(THREAD, tool_path[-1][0])
     finally:

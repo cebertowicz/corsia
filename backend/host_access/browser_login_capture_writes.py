@@ -1,4 +1,5 @@
-"""Mark every document an agent command that can type passes through (capture rule 7).
+"""Mark every document an agent command passes through: one that can type (capture rule 7), or a script command
+(browser_fill_marks, for the saved-login fill).
 
 A second CDP connection to the agent's page sees each main-frame Page.frameNavigated while the command runs,
 back/forward cache restores included, and a restored document keeps its loader id (checked on Chrome for
@@ -95,7 +96,7 @@ class AgentWrites:
             self._mark(_loader(((answer.get("result") or {}).get("frameTree") or {}).get("frame")))
             if pages - self._pages:
                 self._mark(ANY_DOCUMENT)
-                log.info("a page opened while an agent typed; saved-login capture makes no offer in this session")
+                log.info("a page opened while an agent command ran; its page watch marks every document of the session")
         except BaseException as exc:
             self._fail(exc)
             if not isinstance(exc, Exception):
@@ -111,8 +112,8 @@ class AgentWrites:
 
     def _fail(self, exc: BaseException) -> None:
         self._mark(ANY_DOCUMENT)
-        log.info("saved-login capture couldn't follow the page an agent typed into (%s); no offer is made in this "
-                 "session", type(exc).__name__)
+        log.info("a page watch couldn't follow an agent command's page (%s); it marks every document of the session",
+                 type(exc).__name__)
 
     async def _close(self) -> None:
         listener, cdp, self._listener, self._cdp = self._listener, self._cdp, None, None
@@ -122,7 +123,7 @@ class AgentWrites:
             try:
                 await cdp.__aexit__(None, None, None)
             except Exception as exc:  # noqa: BLE001 - the marks are already set; no close error changes them
-                log.info("saved-login capture's page watch didn't close cleanly (%s)", type(exc).__name__)
+                log.info("an agent command's page watch didn't close cleanly (%s)", type(exc).__name__)
 
     async def __aenter__(self) -> AgentWrites:
         return self
