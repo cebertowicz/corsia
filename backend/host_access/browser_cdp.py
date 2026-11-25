@@ -6,12 +6,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Mapping, Sequence, cast
-from urllib.parse import urlparse, urlunparse
-from urllib.request import urlopen
+from urllib.parse import urlparse
 
 import websockets
 
 from host_access import browser_cli, browser_cdp_frames
+from host_access.browser_cdp_targets import page_targets
 from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 
@@ -346,15 +346,7 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
 
 def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
-    listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
-    try:
-        with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
-            targets = json.load(response)
-    except (OSError, ValueError) as exc:
-        raise BrowserSessionError("This page couldn't be checked") from exc
-    if not isinstance(targets, list):
-        raise BrowserSessionError("This page couldn't be checked")
-    pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
+    pages = page_targets(browser_endpoint)
     if expected_url:
         pages.sort(key=lambda page: (page.get("url") != expected_url, expected_title not in (None, page.get("title"))))
     for target in pages:

@@ -13,11 +13,9 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from urllib.parse import urlsplit, urlunsplit
-from urllib.request import urlopen
 
 from host_access.browser_cdp import CdpClient
-from host_access.browser_login_capture_cdp import quiet_cdp
+from host_access.browser_cdp_targets import page_targets
 
 log = logging.getLogger(__name__)
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
@@ -30,14 +28,8 @@ def _loader(frame: object) -> str:
 
 
 def _page_ids(endpoint: str, timeout: float) -> frozenset[str]:
-    """Every page target's id in the agent's browser, read from the CDP port the watched page is on."""
-    listing = urlunsplit(("http", urlsplit(endpoint).netloc, "/json/list", "", ""))
-    with urlopen(listing, timeout=timeout) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
-        targets = json.load(response)
-    if not isinstance(targets, list):
-        raise ValueError("the page list isn't a list")
-    return frozenset(str(target.get("id")) for target in targets
-                     if isinstance(target, dict) and target.get("type") == "page")
+    """Every page target's id in the agent's browser; an unreadable list raises, and the watch marks every document."""
+    return frozenset(str(target.get("id")) for target in page_targets(endpoint, timeout))
 
 
 class AgentWrites:
@@ -54,7 +46,7 @@ class AgentWrites:
     async def start(self, endpoint: str) -> None:
         """Mark the current document and watch for the next ones; on any failure mark every document."""
         try:
-            self._endpoint, self._cdp = endpoint, quiet_cdp(endpoint)
+            self._endpoint, self._cdp = endpoint, CdpClient(endpoint)  # silent by default: no frame reaches a log
             await asyncio.wait_for(self._open(self._cdp), self._timeout)
         except BaseException as exc:
             self._fail(exc)

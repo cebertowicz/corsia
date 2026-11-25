@@ -6,6 +6,7 @@ import pytest
 
 from host_access import browser_cdp, browser_control, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
+from host_access.browser_field_values import hide_field_values
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
 from host_access.browser_steps import PasswordStep, PersonStep
@@ -314,7 +315,7 @@ async def test_a_step_settled_by_its_field_hiding_leaves_the_visit_restricted(pl
     ("- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\"", "- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\""),
 ])
 def test_hide_field_values_hides_every_value_and_the_text_beneath_it(snapshot, expected):
-    assert browser_control.hide_field_values(snapshot) == expected
+    assert hide_field_values(snapshot) == expected
 
 
 _SNAPSHOT_JSON = '{"success": true, "data": {"snapshot": "- textbox [ref=e2]: Typed1\\n- button \\"Go\\" [ref=e3]"}}'
