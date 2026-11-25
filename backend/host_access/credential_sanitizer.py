@@ -116,11 +116,18 @@ _PLACEHOLDER_REFERENCE_RE = re.compile(
 )
 
 
+# A placeholder holding a letter-and-digit run this long could hide a real token body, so it is
+# masked rather than kept. 16 is the shortest body _TOKEN_PREFIX_RE below already treats as a
+# live key after a known prefix (and a JWT signature's minimum), so both rules agree on length.
+_PLACEHOLDER_MAX_ALNUM_RUN = 16
+_PLACEHOLDER_LONG_RUN_RE = re.compile(r"[A-Za-z0-9]{%d}" % _PLACEHOLDER_MAX_ALNUM_RUN)
+
+
 def _is_placeholder(value: str) -> bool:
     value = value.strip()
     return value.casefold() in _PLACEHOLDERS or bool(
         _PLACEHOLDER_REFERENCE_RE.fullmatch(value)
-        and not re.search(r"[A-Za-z0-9]{16}", value)
+        and not _PLACEHOLDER_LONG_RUN_RE.search(value)
         and not _TOKEN_SHAPE_ANYWHERE_RE.search(value)
         and not _PEM_PRIVATE_KEY_RE.search(value)
     )
