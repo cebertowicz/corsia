@@ -4,6 +4,7 @@ from pathlib import Path
 
 from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside, MISSING_DOCUMENT_MESSAGE
 from registry.identity_metadata import sha256_file
+from tools.filesystem_effects import restore_claimed_file
 
 
 def check_expected_content(path: Path, expected_sha256: str | None) -> None:
@@ -61,3 +62,13 @@ def checked_copy_target(path: Path, backup: Path, expected_sha256: str | None) -
     except FileNotFoundError:
         check_expected_content(path, expected_sha256)
         raise
+
+
+def _publish_stage(target: Path, stage: Path, backup: Path | None, expected_sha256: str | None) -> None:
+    check_expected_content(target, expected_sha256)
+    if backup is not None:
+        checked_copy_target(target, backup, expected_sha256)
+    if backup is not None:
+        replace_if_expected(stage, target, expected_sha256)
+    elif not restore_claimed_file(stage, target):
+        raise FileExistsError(f"Publication destination already exists: {target}")

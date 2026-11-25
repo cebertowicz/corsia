@@ -45,7 +45,7 @@
 
 <style>
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: calc(var(--space-3) / 2); align-items: center; }
-	.suggestion-status button { min-height: var(--space-6); background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
+	.suggestion-status button { min-height: var(--space-6); background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--accent-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
 	.suggestion-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -53,8 +53,8 @@
 	.suggestion-choices { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); width: 100%; }
 	.suggestion-choices label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--touch-target); }
 	@media (pointer: coarse), (max-width: 48em) { .suggestion-status button { min-height: var(--touch-target); } }
-	:global([data-adaptive-drawer]) .suggestion-status button { font-size: var(--text-body); }
-	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }
+	:global([data-adaptive-drawer]) .suggestion-status button { font-size: var(--text-subhead); }
+	.suggestion-error { font-size: var(--text-footnote); color: var(--red-text); }
 	.suggestion-status details { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.suggestion-status p { margin: var(--space-1) 0; }
 </style>
