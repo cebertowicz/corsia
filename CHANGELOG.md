@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A host access approval now shows in chat as Host access with its time left, in plain text, and Revoke host access in its drawer is a text button; before, it was a shield icon and a countdown in an amber outline, and Revoke was a red button.
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
+- Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a password, token or key field in JSON carried as text inside other JSON, such as the details an agent sends with an action. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity shows instructions for tasks assigned to you.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
@@ -19,6 +20,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
+- Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser

@@ -1,16 +1,13 @@
-"""Activity reply rows; integrate in the backend with the existing queue projection.
+"""Activity document reply rows for the existing queue projection.
 
 Requires a sqlite3 connection configured with sqlite3.Row, as in the backend.
-No writes are made. The document and chat reads reuse their canonical unread SQL.
+No writes are made; the read reuses the canonical unread SQL.
 """
 from __future__ import annotations
-
-import json
 
 from doceditor.feedback_state import unread_comment_rows
 from infra.activity_queue_base import TITLE_MAX_CHARS, clip_title, flat as _flat
 from infra.auth import may_access_artifact
-from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
 from plans.public import UNKNOWN_THREAD_SOURCE, thread_sources
 
 
@@ -37,21 +34,11 @@ def _reply_title(agent: str, row) -> str:
     return quoted or clip_title(f"{agent} replied in your comment thread on {_flat(row['artifact_title']) or 'a document'}")
 
 
-def _chat_note(metadata: str | None, cid: str) -> str | None:
-    """The person's own words for one chat comment, from the input that carried it."""
-    try:
-        comments = (json.loads(metadata or '{}').get('reply_context') or {}).get('comments') or []
-    except (ValueError, AttributeError):
-        return None
-    return next((c.get('note') for c in comments if isinstance(c, dict) and c.get('cid') == cid), None)
-
-
 def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dict]:
     """Return actionable unread agent replies visible to this user.
 
-    Document rows are grouped by comment root; chat rows are grouped by the
-    comment whose viewed endpoint advances the watermark. The newest unread
-    answer is the one that can advance that watermark over its predecessors.
+    Document rows are grouped by comment root. The newest unread answer can
+    advance the watermark over its predecessors.
     Pass artifact IDs from review rows actually emitted and authorized for this
     user, before applying any response cap.
     """
@@ -85,19 +72,7 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
     # Access is the artifact routes' own predicate, so a change to it governs these rows too.
     documents = [row for row in db.execute(document_sql, (*unread_params, user_id)).fetchall()
                  if may_access_artifact(row['owner_thread'], user_id, db=db)]
-    chats = db.execute(f"""
-      WITH unread AS (
-        SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id,
-               a.answered_at, c.target_message_id, u.metadata AS user_metadata,
-               COALESCE(c.root_user_message_id,a.user_message_id) AS root_user_message_id,
-               COALESCE(c.root_cid,a.cid) AS root_cid,
-               ROW_NUMBER() OVER (PARTITION BY a.thread_id,a.user_message_id,a.cid
-                                  ORDER BY a.answered_at DESC,a.assistant_message_id DESC) AS pos
-        {UNREAD_FROM}
-        WHERE {UNREAD_WHERE}
-      ) SELECT * FROM unread WHERE pos=1
-    """, (user_id, user_id)).fetchall()
-    sources = thread_sources(db, {str(r['author_thread_id']) for r in documents} | {str(r['thread_id']) for r in chats})
+    sources = thread_sources(db, {str(r['author_thread_id']) for r in documents})
     result = []
     for row in documents:
         artifact, root, reply = row['artifact_id'], row['root_id'], row['reply_id']
@@ -109,20 +84,5 @@ def reply_rows(db, user_id: str, *, reviewed_artifact_ids: set[str]) -> list[dic
             'title': _reply_title(_agent(sources[row['author_thread_id']]), row), 'raised_at': row['created_at'],
             'source': sources[row['author_thread_id']], 'open': {'artifact_id': artifact, 'comment_id': root},
             'detail': {'artifact_id': artifact, 'root_id': root, 'reply_id': reply}, 'priority': 0,
-        })
-    for row in chats:
-        thread, message, cid = row['thread_id'], row['user_message_id'], row['cid']
-        key = f'chat-reply:{thread}:{message}:{cid}'
-        source = sources[thread]
-        agent = _agent(source)
-        title = _quoted(f'{agent} replied to your comment ', _chat_note(row['user_metadata'], cid))
-        result.append({
-            'renderer': 'reply', 'kind': 'reply', 'key': key, 'external_id': key,
-            'title': title or f'{agent} replied to your comment in chat', 'raised_at': row['answered_at'],
-            'source': source, 'open': {'thread_id': thread, 'message_id': row['target_message_id']},
-            'detail': {'thread_id': thread, 'message_id': message, 'cid': cid,
-                       'assistant_message_id': row['assistant_message_id'],
-                       'root_user_message_id': row['root_user_message_id'], 'root_cid': row['root_cid']},
-            'priority': 0,
         })
     return result
