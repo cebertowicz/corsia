@@ -97,9 +97,82 @@ def test_last_above_line_settlement_brings_review_due_once(db):
     assert later_review.due(db, now) == []
     _sweep(db, now)
     assert len(_wakes(db)) == 1
-    next_top = task(db, plan.id, "Next work")
-    _fail_task(db, next_top.id)
-    assert [r["id"] for r in later_review.due(db, service._now())] == [plan.id]
+
+
+def _reviewed_once(db, plan_id: str) -> str:
+    """Empty the top over a pile, send its early review, and return the review time."""
+    top = task(db, plan_id, "Current work")
+    db.commit()
+    _fail_task(db, top.id)
+    now = service._now()
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+    assert db.execute(
+        "SELECT later_reviewed_at FROM plans WHERE id=?", (plan_id,)
+    ).fetchone()["later_reviewed_at"] == now
+    return now
+
+
+def _top_empties_again(db, plan_id: str) -> list:
+    top = task(db, plan_id, "Next work")
+    db.commit()
+    _fail_task(db, top.id)
+    return [r["id"] for r in later_review.due(db, service._now())]
+
+
+def test_no_repeat_review_on_an_unchanged_pile(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    assert _top_empties_again(db, plan.id) == []
+
+
+def test_repeat_review_when_a_task_is_added_below_the_cut(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    _below_cut(db, plan.id, "New someday")
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_repeat_review_when_a_task_is_moved_below_the_cut(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    moved = _below_cut(db, plan.id, "Created before the review")
+    _reviewed_once(db, plan.id)
+    for later, reason in ((False, None), (True, "Not now")):
+        plan_update(db, plan.id, "edit", {
+            "node_id": moved["id"], "expected_revision": revision(db, moved["id"]),
+            "later": later, **({"reason": reason} if reason else {}),
+        })
+    db.commit()
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_repeat_review_when_priorities_change_and_not_before(db, tmp_path, monkeypatch):
+    import os
+    from infra import config
+
+    monkeypatch.setattr(config, "WORKSPACE", str(tmp_path))
+    priorities = tmp_path / ".threads" / "owner" / "context" / "PRIORITIES.md"
+    priorities.parent.mkdir(parents=True)
+    priorities.write_text("1. Ship the release\n")
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    reviewed = datetime.fromisoformat(_reviewed_once(db, plan.id)).timestamp()
+    os.utime(priorities, (reviewed - 3600, reviewed - 3600))
+    assert _top_empties_again(db, plan.id) == []
+    os.utime(priorities, (reviewed + 60, reviewed + 60))
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_weekly_review_is_sent_on_an_unchanged_pile(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    _arm(db, plan.id, DUE)
+    _sweep(db)
+    assert len(_wakes(db)) == 2
 
 
 def test_review_is_armed_only_after_commit_and_not_after_rollback(db):

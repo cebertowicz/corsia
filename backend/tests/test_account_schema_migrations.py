@@ -889,6 +889,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 208 -> 209 adds saved-login fill history.
         from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
         migrate_208_to_209(db)
+        # 209 -> 210 adds when a plan's Later pile was last reviewed.
+        from infra.migration_209_to_210_later_reviewed_at import migrate_209_to_210
+        migrate_209_to_210(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -1022,7 +1025,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 209
+    assert SCHEMA_VERSION == 210
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
