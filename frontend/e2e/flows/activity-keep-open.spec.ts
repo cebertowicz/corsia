@@ -37,6 +37,47 @@ async function activity(page: Page, width: number) {
 	await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
 }
 
+for (const width of [1440, 393]) test(`approving a review keeps its unread document open at ${width}`, async ({ page, request }, info) => {
+	 test.setTimeout(150_000);
+	 const doc = await seed(request, 'Review with unread replies');
+	 const rootId = await comment(request, doc, 'Why this step?', 1);
+	 const reply = await request.post(`/api/artifacts/${doc.artifactId}/comments`, {
+		 params: { token: TEST_TOKEN }, data: { body: 'Here is the explanation', parent_id: rootId, delivery_policy: 'immediate' },
+	 });
+	 expect(reply.ok()).toBeTruthy();
+	 const replyId = (await reply.json()).comment.id as string;
+	 isolatedDb([
+		 'changed = connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=? WHERE id=?", ("Agent", sys.argv[2], sys.argv[3])).rowcount',
+		 'assert changed == 1, changed',
+	 ], doc.threadId, replyId);
+	 raiseAsk(doc.threadId, doc.artifactId, 'Review this document');
+	 await activity(page, width);
+	 const review = page.locator('[data-activity-row]').filter({ hasText: 'Review this document' });
+	 await expect(review).toBeVisible();
+	 if (width === 393) await review.click();
+	 const editor = page.locator('.pane-col .cm-content');
+	 await expect(editor).toContainText('Step 1:');
+	 await editor.evaluate((el) => { (window as any).__reviewEditor = el; });
+	 let refreshedBeforeCallback = false;
+	 await page.route(`**/api/attention/${doc.artifactId}/clear`, async (route) => {
+		 const response = await route.fetch();
+		 await expect(page.locator('[data-tab="notifications"][aria-label="Notifications, 1"]')).toHaveCount(1);
+		 refreshedBeforeCallback = true;
+		 await route.fulfill({ response });
+	 });
+	 await page.locator('.pane-col').getByRole('button', { name: 'Approve', exact: true }).click();
+	 await expect.poll(() => refreshedBeforeCallback).toBe(true);
+	 await expect.poll(async () => {
+		 const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } });
+		 const queue = await response.json();
+		 return queue.notifications.items.some((row: { key: string }) => row.key === `doc:${doc.artifactId}`);
+	 }).toBe(true);
+	 await expect(editor).toContainText('Step 1:');
+	 expect(await editor.evaluate((el) => el === (window as any).__reviewEditor)).toBe(true);
+	 await expect(page.getByRole('region', { name: 'Replies to your comments' })).toBeVisible();
+	 await page.screenshot({ path: info.outputPath('after-approve.png'), animations: 'disabled' });
+});
+
 for (const width of [1440, 393]) test(`replying keeps its now-read Activity row and pane at ${width}`, async ({ page, request }) => {
 	test.setTimeout(150_000);
 	page.setDefaultTimeout(12_000);

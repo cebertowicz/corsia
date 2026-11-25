@@ -135,14 +135,7 @@
 				arrived = true;
 				openKey = lists.tasks[0]?.key ?? null;
 			} else if (openKey && !keys.includes(openKey) && advancing === openKey && lastOpen) {
-				// An approved review whose document still has unread replies stays open as that document, now a notification.
-				const artifact = lastOpen.kind === 'review' ? documentOf(lastOpen)?.artifactId : undefined;
-				const follower = artifact ? lists.notifications.find((item) => documentDetailOf(item)?.artifact_id === artifact) : undefined;
-				if (follower) {
-					advancing = null;
-					kept = null;
-					openKey = follower.key;
-				} else advance(lists[tabOf(lastOpen)], openKey);
+				advance(lists[tabOf(lastOpen)], openKey);
 			} else if (openKey && !keys.includes(openKey) && lastOpen) {
 				const doc = documentOf(lastOpen);
 				const matches = doc ? current.filter((item) => {
@@ -191,10 +184,13 @@
 		openKey = key;
 	}
 
-	/** Opens what followed `key` in its own list; acting never moves the person to the other tab. */
+	/** Keep an approved review's unread document open; otherwise advance within its list. */
 	function advance(current: readonly ActivityQueueItem[], key: string) {
 		advancing = null;
 		kept = null;
+		const artifact = lastOpen?.kind === 'review' ? documentOf(lastOpen)?.artifactId : undefined;
+		const document = artifact ? store.queue?.notifications.items.find((item) => documentDetailOf(item)?.artifact_id === artifact) : undefined;
+		if (document) { openKey = document.key; return; }
 		const list = lastOpen ? tabOf(lastOpen) : tab;
 		const following = followerOf(seen[list], key, current);
 		if (following) moveTo(following);
@@ -227,11 +223,13 @@
 		emitProductEvent('activity', 'row_opened', { kind });
 	}
 
-	/** Only the list changes; the open item stays, and each tab comes back at its own scroll. */
+	/** Keep an open item; otherwise select the destination's first row without leaving the phone list. */
 	async function switchTab(to: ActivityTab) {
 		if (to === tab) return;
 		scrolls[tab] = listScroll?.scrollTop ?? 0;
 		tab = to;
+		const first = (to === 'tasks' ? tasks : notifications)[0];
+		if (!openKey && first) moveTo(first.key);
 		emitProductEvent('activity', 'tab_opened', { tab: to });
 		await tick();
 		if (listScroll) listScroll.scrollTop = scrolls[to];

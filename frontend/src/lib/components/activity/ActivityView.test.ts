@@ -1189,6 +1189,40 @@ describe('a document row in Notifications', () => {
 		await settle();
 	}
 
+	it('opens the top row when switching to a populated tab with nothing open on desktop', async () => {
+		served = [];
+		render();
+		await settle();
+		expect(pane().textContent).toContain('Nothing to open.');
+		tabNamed('notifications').click();
+		await settle();
+		expect(openRow()).toBe(rows()[0]);
+		expect(activityTab()?.artifactId).toBe('art-plan-pane');
+	});
+
+	it('selects the top row but stays on the list on a phone when nothing is open', async () => {
+		served = [];
+		mobile.store!.set(true);
+		render();
+		await settle();
+		tabNamed('notifications').click();
+		await settle();
+		expect(openRow()).toBe(rows()[0]);
+		expect(host.querySelector('.activity')?.classList.contains('phone-item')).toBe(false);
+		expect(get(activityPhoneItem)).toBeNull();
+	});
+
+	it('keeps the open item when switching to a populated tab', async () => {
+		render();
+		await settle();
+		const original = pane().getAttribute('aria-label');
+		expect(original).not.toBe('Nothing open');
+		tabNamed('notifications').click();
+		await settle();
+		expect(pane().getAttribute('aria-label')).toBe(original);
+		expect(openRow()).toBeNull();
+	});
+
 	it('lists one row per document, newest reply first, counted by document', async () => {
 		await openNotifications();
 		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications, 2');

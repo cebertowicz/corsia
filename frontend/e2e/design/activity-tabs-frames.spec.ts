@@ -168,15 +168,14 @@ test('five replies from three agents, dark desktop', async ({ page, request }, i
  await openAppPastLanding(page);
  await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
  await page.getByRole('tab', { name: /Notifications/ }).click();
- await expect(page.locator('[data-activity-row]').filter({ hasText: doc.name })).toContainText('5 unread replies');
- await page.screenshot({ path: path.join(out, 'notifications-1440-dark.png'), animations: 'disabled' });
- await page.locator('[data-activity-row]').filter({ hasText: doc.name }).click();
+ const firstNotification = page.locator('[data-activity-row]').filter({ hasText: doc.name });
+ await expect(firstNotification).toContainText('5 unread replies');
+ await expect(firstNotification).toHaveAttribute('aria-current', 'true');
  const bar = page.getByRole('region', { name: 'Replies to your comments' });
  await expect(bar).toContainText('and 2 others');
  await expect(bar).toContainText('1 of 5 replies to your comments');
- await expect(page.getByRole('button', { name: /5 new/ })).toBeVisible();
  await expect(page.getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Question 5' })).toContainText('Answer 5');
- await page.screenshot({ path: path.join(out, 'five-replies-1440-dark.png'), animations: 'disabled' });
+ await page.screenshot({ path: path.join(out, 'notifications-1440-dark.png') });
 });
 
 for (const width of [1440, 393] as const) {

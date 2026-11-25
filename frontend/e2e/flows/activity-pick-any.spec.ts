@@ -74,6 +74,23 @@ for (const width of [1440, 393]) {
 	});
 }
 
+test('focus follows a sent held message to the next task', async ({ page }) => {
+	let pending = true;
+	await page.route('**/api/attention/queue**', (route) => route.request().url().includes('view=activity')
+		? route.fulfill({ json: { count: pending ? 2 : 1, items: pending ? [heldItem, item] : [item], ranker: null, notifications: { count: 0, items: [] } } })
+		: route.fallback());
+	await page.route('**/api/held-replies/held-1/approve', (route) => {
+		pending = false;
+		return route.fulfill({ json: { state: 'sent' } });
+	});
+	await openAppPastLanding(page);
+	await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
+	const send = page.getByRole('button', { name: 'Send', exact: true });
+	await send.focus();
+	await page.keyboard.press('Enter');
+	await expect(page.locator('[data-activity-row]').filter({ hasText: detail.title })).toBeFocused();
+});
+
 for (const width of [1440, 393]) {
 	test(`held message pauses and recovers on connection loss at ${width}`, async ({ page }, testInfo) => {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
@@ -97,9 +114,9 @@ for (const width of [1440, 393]) {
 		await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled({ timeout: 15_000 });
 		await expect(page.getByRole('button', { name: 'Don’t send' })).toBeDisabled();
 		await expect(page.getByText('Sending and declining are paused until this reconnects.')).toBeVisible();
-		await page.screenshot({ path: testInfo.outputPath('held-offline.png'), animations: 'disabled' });
 		await expect(page.getByRole('button', { name: 'Send', exact: true })).toHaveCSS('opacity', '0.5');
 		await expect(page.getByRole('button', { name: 'Don’t send' })).toHaveCSS('opacity', '0.5');
+		await page.screenshot({ path: testInfo.outputPath('held-offline.png'), animations: 'disabled' });
 		disconnected = false;
 		await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled({ timeout: 30_000 });
 		await expect(page.getByText(heldDetail.text)).toBeVisible();
