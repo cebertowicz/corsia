@@ -36,8 +36,8 @@
 	import { on } from '$lib/ws/events';
 
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
-	const REVIEWER_UNAVAILABLE_MESSAGE = 'Host access could not start because the reviewer is unavailable; ask the agent to request access again once the reviewer can run.';
-	const ACTIVATION_FAILED_MESSAGE = 'Host access could not start; ask the agent to request access again.';
+	const REVIEWER_UNAVAILABLE_MESSAGE = 'Host access couldn’t start because its reviewer model can’t run. Choose another reviewer model in Settings › System, then ask the agent to request access again.';
+	const ACTIVATION_FAILED_MESSAGE = 'Host access couldn’t start. Ask the agent to request access again.';
 
 	let {
 		threadId,

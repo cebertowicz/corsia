@@ -143,9 +143,9 @@ describe('HostAccessLeaseControl', () => {
 		expect(isCurrentDecision('helper-test', attempt)).toBe(false);
 	});
 	it.each([
-		['reviewer_unavailable', 'Host access could not start because the reviewer is unavailable; ask the agent to request access again once the reviewer can run.'],
-		['activation_failed', 'Host access could not start; ask the agent to request access again.'],
-		['raw secret detail', 'Host access could not start; ask the agent to request access again.'],
+		['reviewer_unavailable', 'Host access couldn’t start because its reviewer model can’t run. Choose another reviewer model in Settings › System, then ask the agent to request access again.'],
+		['activation_failed', 'Host access couldn’t start. Ask the agent to request access again.'],
+		['raw secret detail', 'Host access couldn’t start. Ask the agent to request access again.'],
 	])('shows a safe message when approval returns blocked: %s', async (reason, message) => {
 		let decided = false;
 		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
