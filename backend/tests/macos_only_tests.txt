@@ -11,6 +11,7 @@ backend/tests/test_desktop_service_launcher.py
 backend/tests/test_foreground_invocation_handoff.py
 backend/tests/test_install_script.py
 backend/tests/test_launchd_services.py
+backend/tests/test_log_sandbox_access.py
 backend/tests/test_matrix_environment.py
 backend/tests/test_mcp_safehouse.py
 backend/tests/test_omlx_restart_exit_event.py
