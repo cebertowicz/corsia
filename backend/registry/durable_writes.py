@@ -176,6 +176,7 @@ def _register_applied(
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
         settle_promoted_source(source_identity, left, artifact, db=db)
+        # Anchor adoption happens before the file is replaced.
         record_post_write_events(
             shared,
             artifact,
@@ -381,9 +382,12 @@ def _publish_bytes(
     claim = source_claim(source, intent_id)
     content_hash = hashlib.sha256(content).hexdigest() if content is not None else ""
     stage = shared.path.parent / f".corsia-write-{intent_id}.stage"
-    before = shared.path.read_bytes() if shared.path.exists() else None
-    if before is not None: comment_snapshots.adopt_before_write(shared.path, before=before)
-    backup = shared.path.parent / f".corsia-write-{intent_id}.backup" if shared.path.exists() else None
+    before = comment_snapshots.adopt_existing(shared.path)
+    backup = (
+        shared.path.parent / f".corsia-write-{intent_id}.backup"
+        if shared.path.exists()
+        else None
+    )
     intents.create(
         db,
         dict(

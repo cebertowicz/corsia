@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from pathlib import Path
 import sqlite3
 from typing import cast
 
@@ -81,6 +82,14 @@ def read_many(db: sqlite3.Connection, snapshot_ids) -> dict[int, str]:
 def read(db: sqlite3.Connection, snapshot_id: int) -> str:
     """Read an exact version; a broken reference is an error, not a legacy row."""
     return read_many(db, [snapshot_id])[snapshot_id]
+
+
+def adopt_existing(path: Path) -> bytes | None:
+    """Read and adopt existing bytes before replacing the file."""
+    before = path.read_bytes() if path.exists() else None
+    if before is not None:
+        adopt_before_write(path, before=before)
+    return before
 
 
 def adopt_before_write(path, *, before: bytes | str | None = None, artifact_id: str | None = None,
