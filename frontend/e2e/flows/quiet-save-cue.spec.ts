@@ -80,7 +80,7 @@ for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const)
 				return owed;
 			}, source);
 		}).toBe(true);
-		await expect(page.locator('.bar-save')).toHaveCount(0);
+		await expect(page.locator('.bar-save, .save-ghost')).toHaveCount(0);
 		link.restore();
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible({ timeout: 20_000 });
 		await expect.poll(() => serverText(request, fixture)).toContain('An offline thought.');

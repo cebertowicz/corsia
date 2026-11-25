@@ -4,9 +4,36 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * The open document's one row of controls: Comments and Details at the end of the bar that holds the canvas (the app bar, or the
  * tab strip while the canvas is expanded). Everything else the document header used to show (status, owner, Send, Resolved,
  * History, Request review) sits in the Details panel, so a spec opens it as a person does before it presses or reads one.
+ *
+ * That is the phone's header. Above the phone width (`phoneHeader` false) the document column keeps its own row, as shipped at
+ * f51bbda8e: the count, Sent, Deliver immediately, Request review, History, owner, freshness and Mark verified are in it, and
+ * Details holds only Edit, an ask that is off its card and the comment task's Dismiss all, so it is there only while one waits.
  */
 export const detailsEntry = (page: Page): Locator => page.locator('[data-document-details]');
 export const detailsPanel = (page: Page): Locator => page.locator('.document-header .doc-panel');
+
+/** The pair of tests the app itself reads for the one-row header: a phone width, or a touch screen too short for a margin column. */
+export const phoneHeader = (page: Page): Promise<boolean> =>
+	page.evaluate(() => matchMedia('(max-width: 768px)').matches || matchMedia('(any-pointer: coarse) and (max-height: 30em)').matches);
+
+/**
+ * Where the controls that moved into Details on a phone are (status, owner and supervisor, freshness, Mark verified, History,
+ * Request review): Details, opened, on a phone; the document's own row above it. Search the result for the control.
+ */
+export async function documentControls(page: Page): Promise<Locator> {
+	return (await phoneHeader(page)) ? openDetails(page) : page.locator('.document-header');
+}
+
+/** Closes what `documentControls` opened: Details on a phone, nothing above it (the row is always drawn). */
+export async function leaveDocumentControls(page: Page): Promise<void> {
+	if (await phoneHeader(page)) await closeDetails(page);
+}
+
+/** The Comments count button wherever the header draws it: the row above the phone width, the bar on a phone. One of them exists. */
+export const commentsEntry = (page: Page): Locator => page.locator('[data-comments-entry]');
+
+/** The row's Resolved · N button (above the phone width only; on a phone the drawer's own switch is the way in). */
+export const resolvedTool = (page: Page): Locator => page.locator('[data-resolved-tool]');
 
 /**
  * On a phone the open-files sheet opens from the document's name in the app bar (it took the old "Files (N)" button's place).

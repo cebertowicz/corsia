@@ -9,7 +9,7 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, replacePreviousFixtureThread, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
-import { headerSend, headerSentStatus, holdDocumentComments, seedHeldComments, shownHeaderSend } from '../support/heldComments';
+import { headerSend, headerSentStatus, holdDocumentComments, openSenderSurface, seedHeldComments, shownHeaderSend } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 import { enterDocumentEdit } from '../support/documentReading';
 
@@ -416,7 +416,6 @@ for (const theme of ['light', 'dark'] as const) {
 				expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
 				expect(controlBounds.width, 'the jump target is at least 44px wide').toBeGreaterThanOrEqual(44);
 				expect(controlBounds.x < sendBox.x + sendBox.width && sendBox.x < controlBounds.x + controlBounds.width && controlBounds.y < sendBox.y + sendBox.height && sendBox.y < controlBounds.y + controlBounds.height, 'held-comment Send stays clear of the jump control').toBe(false);
-				await closeComments(page);
 			}
 			const controlBounds = await controlFace(page);
 			expect(controlBounds.height, 'the jump target is at least its touch target high').toBeGreaterThanOrEqual(minControlHeight(width));
@@ -885,14 +884,20 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
 			await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 			await holdTimers(page, true);
+			// On a phone the receipt is the Comments button's own check mark; above the phone width it is the row's Sent, read above.
 			const entry = page.locator('[data-comments-entry]');
-			await expect(entry.locator('[data-comments-sent] .bar-sent .sent-check')).toBeVisible();
-			await expect(entry.locator('.bar-sent > span')).toHaveCount(width === 393 ? 0 : 1);
-			const sentWidth = (await entry.boundingBox())!.width;
+			let sentWidth = 0;
+			if (width <= 768) {
+				await expect(entry.locator('[data-comments-sent] .bar-sent .sent-check')).toBeVisible();
+				await expect(entry.locator('.bar-sent > span')).toHaveCount(width === 393 ? 0 : 1);
+				sentWidth = (await entry.boundingBox())!.width;
+			}
 			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
 			await holdTimers(page, false);
-			await expect(entry.locator('[data-comments-sent]')).toHaveCount(0);
-			expect((await entry.boundingBox())!.width, 'the receipt does not change the control width').toBe(sentWidth);
+			if (width <= 768) {
+				await expect(entry.locator('[data-comments-sent]')).toHaveCount(0);
+				expect((await entry.boundingBox())!.width, 'the receipt does not change the control width').toBe(sentWidth);
+			}
 
 			await holdTimers(page, true);
 			if (width === 1440) await page.evaluate(() => {
@@ -1222,7 +1227,7 @@ test.describe('the jump control and held Send controls', () => {
 			const cdp = await page.context().newCDPSession(page);
 			await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
 			const { root } = await cdp.send('DOM.getDocument');
-			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '[data-doc-comments-drawer] .sending-now button' });
+			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button, [data-doc-comments-drawer] .sending-now button' });
 			expect(nodeId).toBeGreaterThan(0);
 			const beforeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
 
@@ -1313,7 +1318,7 @@ test.describe('the jump control and the document toolbar', () => {
 		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		await page.waitForTimeout(600);
-		await openComments(page);
+		await openSenderSurface(page);
 		const geometry = await headerSend(page).evaluate(node => {
 			const rect = node.getBoundingClientRect();
 			const canvas = document.querySelector('.document-canvas')!.getBoundingClientRect();

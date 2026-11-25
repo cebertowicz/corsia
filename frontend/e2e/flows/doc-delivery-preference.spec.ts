@@ -2,11 +2,12 @@ import { test } from '../support/test';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 import { resetBackendToSeed } from '../support/backendSeed';
 import {
-	batchRows, deliveredBatches, DELIVER_IMMEDIATELY_KEY, heldIn, readDeliveryPreference, setDeliveryPreference, turnOffDocumentComments,
+	batchRows, deliveredBatches, DELIVER_IMMEDIATELY_KEY, heldIn, readDeliveryPreference, setDeliveryPreference, turnOffDocumentComments, closeSenderSurface,
 } from '../support/heldComments';
 import { seedLiveDocument, openLiveDocument, typeAtDocumentEnd } from '../support/liveDocument';
 import { beginComment, outsideClose, submitButton } from '../support/liveCommentProof';
-import { closeComments, openComments } from '../support/commentDrawer';
+import { openComments } from '../support/commentDrawer';
+import { phoneHeader } from '../support/documentBar';
 
 // The "Deliver immediately" choice belongs to the person: the server keeps it, every open client follows it, and
 // the document save path reads it where no client frame can carry the lane.
@@ -16,10 +17,11 @@ const mockOnly = (testInfo: TestInfo) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 };
 
-/** Opens the comments drawer, then returns its delivery toggle. */
+/** The delivery toggle: in the document's row above the phone width ("Deliver comments immediately"); on a phone in the comments drawer, opened first ("Deliver immediately"). */
 const toggle = async (page: Page) => {
-	await openComments(page);
-	return page.getByRole('button', { name: 'Deliver immediately', exact: true });
+	const phone = await phoneHeader(page);
+	if (phone) await openComments(page);
+	return page.getByRole('button', { name: phone ? 'Deliver immediately' : 'Deliver comments immediately', exact: true });
 };
 
 test('@surface:doc-delivery-preference a toggle on one client sets the lane of a comment posted from another', async ({ browser, request }, testInfo) => {
@@ -38,7 +40,7 @@ test('@surface:doc-delivery-preference a toggle on one client sets the lane of a
 		// Off on A reaches B with no reload (B's drawer stays open while A presses); B's comment waits for a Send.
 		await turnOffDocumentComments(clientA);
 		await expect(await toggle(clientB)).toHaveAttribute('aria-pressed', 'false');
-		await closeComments(clientB);
+		await closeSenderSurface(clientB);
 		await beginComment(clientB, quote, 'Posted from B while A has delivery off.');
 		await submitButton(clientB).click();
 		await expect.poll(() => heldIn(document.artifactId, 'document-held')).toBe(1);
@@ -51,8 +53,8 @@ test('@surface:doc-delivery-preference a toggle on one client sets the lane of a
 		await expect(await toggle(clientB)).toHaveAttribute('aria-pressed', 'true');
 		await expect.poll(() => heldIn(document.artifactId, 'document-held')).toBe(0);
 		expect(deliveredBatches(document.artifactId, 'document-held')).toBe(1);
-		await closeComments(clientA);
-		await closeComments(clientB);
+		await closeSenderSurface(clientA);
+		await closeSenderSurface(clientB);
 		await outsideClose(clientB);
 		await expect(clientB.locator('[data-popover]')).toHaveCount(0);
 		await beginComment(clientB, `second line ${stamp}`, 'Posted from B while A has delivery on.');
@@ -72,7 +74,7 @@ test('@surface:doc-delivery-preference a person\'s save is held while delivery i
 	const held = await seedLiveDocument(request, `edit-held-${stamp}`, `# Edit held ${stamp}\n\nbody line ${stamp}\n`);
 	await openLiveDocument(page, held);
 	await expect(await toggle(page)).toHaveAttribute('aria-pressed', 'false');
-	await closeComments(page);
+	await closeSenderSurface(page);
 	await typeAtDocumentEnd(page, ' edited with delivery off');
 	await expect.poll(() => heldIn(held.artifactId, 'document-held')).toBe(1);
 	expect(deliveredBatches(held.artifactId, 'document-held')).toBe(0);
@@ -82,7 +84,7 @@ test('@surface:doc-delivery-preference a person\'s save is held while delivery i
 	const immediate = await seedLiveDocument(request, `edit-immediate-${stamp}`, `# Edit immediate ${stamp}\n\nbody line ${stamp}\n`);
 	await openLiveDocument(page, immediate);
 	await expect(await toggle(page)).toHaveAttribute('aria-pressed', 'true');
-	await closeComments(page);
+	await closeSenderSurface(page);
 	await typeAtDocumentEnd(page, ' edited with delivery on');
 	await expect.poll(() => batchRows(immediate.artifactId).filter((row) => row.policy === 'immediate').length).toBeGreaterThan(0);
 	expect(heldIn(immediate.artifactId, 'document-held')).toBe(0);

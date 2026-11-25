@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, TEST_TOKEN } from './corsia';
 import { closeComments, openComments } from './commentDrawer';
+import { phoneHeader } from './documentBar';
 
 // Held-comment delivery: a held comment waits for a person's Send. Its one sender is the surface that owns its lane:
-// the open document's comments drawer (document-held), the image viewer bar (image-held), and the
-// chat for the thread's document-held comments whose own document is not on screen.
+// the open document's own row above the phone width and its comments drawer on a phone (document-held), the image viewer bar
+// (image-held), and the chat for the thread's document-held comments whose own document is not on screen.
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HOLD_LATER = "strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+1 hour')";
@@ -84,15 +85,16 @@ export async function holdDocumentComments(request: APIRequestContext): Promise<
 	await setDeliveryPreference(request, false);
 }
 
-/** Set the preference through the comments drawer, then close it again. */
+/** Set the preference through the real toggle, as a person does: the document's row above the phone width, the comments drawer's footer on a phone (closed again afterwards). */
 export async function turnOffDocumentComments(page: Page): Promise<void> {
-	await openComments(page);
-	const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
+	const phone = await phoneHeader(page);
+	if (phone) await openComments(page);
+	const toggle = page.getByRole('button', { name: phone ? 'Deliver immediately' : 'Deliver comments immediately', exact: true });
 	await expect(toggle).toBeVisible();
 	if (await toggle.getAttribute('aria-pressed') === 'true') await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 	await expect.poll(async () => (await readDeliveryPreference(page.request)).immediate).toBe(false);
-	await closeComments(page);
+	if (phone) await closeComments(page);
 }
 
 /** Makes `count` document-held comments on a document, as a person's would be with delivery-immediately off. */
@@ -172,10 +174,10 @@ export function makeHeldBatchDue(artifactId: string, policy: 'document-held' | '
 const SEND_NAME = /^Send( all)? \d+ comments?( to .+)?$/;
 
 /**
- * The open document's Send in the comments drawer. Open the drawer before asserting either presence or absence;
- * otherwise a count of zero only says that the drawer is closed.
+ * The open document's Send: in its own row above the phone width (`.document-header`), in the comments drawer's footer on a phone.
+ * On a phone open the drawer first (`shownHeaderSend`); otherwise a count of zero only says that the drawer is closed.
  */
-export const headerSend = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot').getByRole('button', { name: SEND_NAME, includeHidden: true });
+export const headerSend = (page: Page): Locator => page.locator('.document-header, [data-doc-comments-drawer] .drawer-foot').getByRole('button', { name: SEND_NAME, includeHidden: true });
 /**
  * How many lines a control's label is drawn on: the distinct tops of its text's own line boxes. Element boxes are left out, since a
  * span's box starts above its text by the half-leading whenever the line height is taller than the font's (a 1.5 line height puts
@@ -191,9 +193,17 @@ export const labelLines = (control: Locator): Promise<number> => control.evaluat
 	}
 	return tops.size;
 });
-/** Opens the comments drawer, as a person does to reach its Send, and returns that Send. */
+/** Opens the surface that holds the document's Send: the comments drawer on a phone, nothing above it (the row is always drawn). */
+export async function openSenderSurface(page: Page): Promise<void> {
+	if (await phoneHeader(page)) await openComments(page);
+}
+/** Closes what `openSenderSurface` opened. */
+export async function closeSenderSurface(page: Page): Promise<void> {
+	if (await phoneHeader(page)) await closeComments(page);
+}
+/** Returns the open document's Send, opening the comments drawer first as a person does on a phone, where its footer holds it. */
 export async function shownHeaderSend(page: Page): Promise<Locator> {
-	await openComments(page);
+	if (await phoneHeader(page)) await openComments(page);
 	return headerSend(page);
 }
 /** The image viewer bar's Send (its image-held lane), for an image over a document or an image file. */
@@ -234,7 +244,7 @@ export function visibleSenders(page: Page): Promise<Sender[]> {
 			// Nor is one covered by another surface (an image viewer laid over the document's header).
 			const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
 			if (!top || !(button.contains(top) || top.contains(button))) continue;
-			const where = button.closest('[data-doc-comments-drawer] .drawer-foot') ? 'header'
+			const where = button.closest('.document-header, [data-doc-comments-drawer] .drawer-foot') ? 'header'
 				: button.closest('.image-comments') ? 'image-bar'
 				: button.closest('[aria-label="Document comments waiting to be sent"]') ? 'chat'
 				: null;
@@ -255,7 +265,7 @@ export async function watchSenders(page: Page): Promise<{ stop: () => Promise<st
 			for (const button of document.querySelectorAll<HTMLElement>('button')) {
 				const text = (button.querySelector('.send-full') ?? button).textContent?.replace(/\s+/g, ' ').trim() ?? '';
 				if (!/^Send( all)? \d+ comments?$/.test(text)) continue;
-				const where = button.closest('[data-doc-comments-drawer] .drawer-foot') ? 'header'
+				const where = button.closest('.document-header, [data-doc-comments-drawer] .drawer-foot') ? 'header'
 					: button.closest('.image-comments') ? 'image-bar'
 					: button.closest('[aria-label="Document comments waiting to be sent"]') ? 'chat'
 					: 'other';
@@ -307,10 +317,10 @@ export async function sendByKeyboard(page: Page, send: Locator, whileSent?: () =
 /** The toast a send raised, by its exact wording: an image viewer's band; a document says it in its header instead. */
 export const sentToast = (page: Page, text: string): Locator => page.locator('.toast').filter({ hasText: text });
 /**
- * The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered: in Details,
- * found closed or open like `headerSend`; check it is visible only after opening Details.
+ * The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered: in the row above
+ * the phone width, in the comments drawer's footer on a phone (found closed or open like `headerSend`; visible only with the drawer open).
  */
-export const headerSent = (page: Page): Locator => page.locator('[data-doc-comments-drawer] .drawer-foot .sending-now .sent');
+export const headerSent = (page: Page): Locator => page.locator('.document-header .sending-now .sent, [data-doc-comments-drawer] .drawer-foot .sending-now .sent');
 /** The document's spoken delivery status remains mounted whether the drawer is open or closed. */
 export const headerSentStatus = (page: Page): Locator => page.locator('[data-feedback-status]');
 

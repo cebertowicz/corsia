@@ -1,7 +1,7 @@
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
-import { closeDetails, expectOneRow, openDetails, openFilesButton } from '../support/documentBar';
+import { closeDetails, expectOneRow, openDetails, openFilesButton, phoneHeader } from '../support/documentBar';
 import { closeComments, openComments } from '../support/commentDrawer';
 import {
 	deliveredBatches, headerSend, heldIn, installWorkspace, labelLines, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
@@ -45,13 +45,14 @@ test('@surface:doc-send-on-close sends an unsent user batch exactly once before 
 	await installWorkspace(page, threadId, [document], 0);
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
-	// The open document's drawer is the one sender; a held comment waits there.
-	await openComments(page);
+	// The open document's header is the one sender (its row above the phone width, the comments drawer's footer on a phone); a held comment waits for it.
+	const phone = await phoneHeader(page);
+	if (phone) await openComments(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expectSenders(page, ['header: Send 1 comment']);
 	expect(heldIn(document.artifactId, 'document-held')).toBe(1);
-	expect(sends.document, 'looking at the drawer sends nothing').toHaveLength(0);
-	await closeComments(page);
+	expect(sends.document, 'looking at the header sends nothing').toHaveLength(0);
+	if (phone) await closeComments(page);
 
 	// Closing the tab sends what is still held, once, without the header Send.
 	await (await tabControl(page, document.fileName, 'close')).click();
@@ -71,29 +72,50 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^1 comment, 1 waiting for Send$/ })).toBeVisible();
-	// The bar stays one row whatever the owner's name; Request review and Send are whole in their respective surfaces.
-	// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
-	await expectOneRow(page);
-	const panel = await openDetails(page);
-	await expect(panel.locator('.review-request')).toBeVisible();
-	const reviewInside = await panel.evaluate((root) => { const review = root.querySelector<HTMLElement>('.review-request')!.getBoundingClientRect(), bounds = root.getBoundingClientRect(); return review.width > 0 && review.left >= bounds.left - 0.5 && review.right <= bounds.right + 0.5; });
-	await closeDetails(page);
-	await openComments(page);
-	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
-	await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toBeVisible();
-	const layout = await headerSend(page).evaluate((send) => {
-		const panel = send.closest<HTMLElement>('[data-doc-comments-drawer]')!;
-		const inside = (element: Element | null) => { if (!element) return false; const box = element.getBoundingClientRect(), bounds = panel.getBoundingClientRect(); return box.width > 0 && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5; };
-		return {
-			send: inside(send),
-			sideways: panel.scrollWidth - panel.clientWidth,
-		};
-	});
-	expect(reviewInside, 'Request review sits whole inside Details').toBe(true);
-	expect(layout.send, 'Send sits whole inside the drawer').toBe(true);
-	expect(layout.sideways, 'the drawer does not scroll sideways').toBeLessThanOrEqual(1);
-	expect(await labelLines(headerSend(page)), 'the header Send reads on one line').toBe(1);
-	await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+	if (await phoneHeader(page)) {
+		// The bar stays one row whatever the owner's name; Request review and Send are whole in their respective surfaces.
+		// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
+		await expectOneRow(page);
+		const panel = await openDetails(page);
+		await expect(panel.locator('.review-request')).toBeVisible();
+		const reviewInside = await panel.evaluate((root) => { const review = root.querySelector<HTMLElement>('.review-request')!.getBoundingClientRect(), bounds = root.getBoundingClientRect(); return review.width > 0 && review.left >= bounds.left - 0.5 && review.right <= bounds.right + 0.5; });
+		await closeDetails(page);
+		await openComments(page);
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+		await expect(page.locator('[data-doc-comments-drawer] .drawer-foot')).toBeVisible();
+		const layout = await headerSend(page).evaluate((send) => {
+			const panel = send.closest<HTMLElement>('[data-doc-comments-drawer]')!;
+			const inside = (element: Element | null) => { if (!element) return false; const box = element.getBoundingClientRect(), bounds = panel.getBoundingClientRect(); return box.width > 0 && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5; };
+			return {
+				send: inside(send),
+				sideways: panel.scrollWidth - panel.clientWidth,
+			};
+		});
+		expect(reviewInside, 'Request review sits whole inside Details').toBe(true);
+		expect(layout.send, 'Send sits whole inside the drawer').toBe(true);
+		expect(layout.sideways, 'the drawer does not scroll sideways').toBeLessThanOrEqual(1);
+		expect(await labelLines(headerSend(page)), 'the header Send reads on one line').toBe(1);
+		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+
+	} else {
+		// Above the phone width Request review shares a row with the comment count and the header Send, whatever the owner's name (as shipped at f51bbda8e).
+		// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
+		// Deliver immediately and Send are in the row, so the comments popover repeats neither.
+		await openComments(page);
+		await expect(page.locator('[data-doc-comments-drawer] .drawer-foot'), 'the popover has no footer above the phone width').toHaveCount(0);
+		await closeComments(page);
+		const layout = await headerSend(page).evaluate((send) => {
+			const row = (selector: string) => send.ownerDocument.querySelector<HTMLElement>(`.document-header ${selector}`)!.getBoundingClientRect();
+			return {
+				count: row('.comment-status').top,
+				review: row('.review-request').top,
+				sendTop: send.getBoundingClientRect().top,
+			};
+		});
+		expect(Math.abs(layout.review - layout.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
+		expect(await labelLines(headerSend(page)), 'the header Send reads on one line').toBe(1);
+	}
 
 	// The header Send is the batch's own Send: one send, then it goes.
 	await headerSend(page).click();

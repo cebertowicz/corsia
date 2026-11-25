@@ -469,7 +469,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.locator('.cm-comment-anchor').first().click();
 			await expect(page.getByText('Reviewed.', { exact: true })).toBeVisible();
 			await expect(page.locator('.reply-mark')).toHaveCount(0);
-			await expect(pillUnread).not.toHaveAttribute('aria-label', /\bnew\b/);
+			await expect(pillUnread).not.toHaveAttribute('aria-label', width === 393 ? /\bnew\b/ : /unread/);
 		});
 	}
 }
@@ -539,19 +539,32 @@ for (const theme of ['light', 'dark'] as const) {
 			await reloadComments(page, scenario.artifactId);
 			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
 			await expect(commentsPill).toBeVisible();
-			// The phone shows the icon and count; desktop also shows "new". The accessible name carries both counts.
-			await expect(commentsPill).toHaveText(width <= 768 ? /^\s*3$/ : /^\s*3 unread$/, { useInnerText: true });
-			await expect(commentsPill.locator('svg')).toBeVisible();
-			const unread = commentsPill.locator('.bar-new');
-			await expect(unread).toBeVisible();
-			expect(await unread.evaluate((el) => {
-				const reference = document.createElement('span');
-				reference.style.color = 'var(--accent-text)';
-				el.appendChild(reference);
-				const matches = getComputedStyle(el).color === getComputedStyle(reference).color;
-				reference.remove();
-				return matches;
-			}), 'unread count uses the accent text color').toBe(true);
+			if (width <= 768) {
+				// The phone's bar shows the icon and count; its accessible name carries both counts.
+				await expect(commentsPill).toHaveText(/^\s*3$/, { useInnerText: true });
+				await expect(commentsPill.locator('svg')).toBeVisible();
+				const unread = commentsPill.locator('.bar-new');
+				await expect(unread).toBeVisible();
+				expect(await unread.evaluate((el) => {
+					const reference = document.createElement('span');
+					reference.style.color = 'var(--accent-text)';
+					el.appendChild(reference);
+					const matches = getComputedStyle(el).color === getComputedStyle(reference).color;
+					reference.remove();
+					return matches;
+				}), 'unread count uses the accent text color').toBe(true);
+			} else {
+				// Above the phone width the pill is in the document's row, as shipped at f51bbda8e: up to 600 px of canvas it is the icon and "3 unread"
+				// alone (the row stays one line); wider, the whole count shows. The container query reads the canvas's content width, so it is measured the same way.
+				const canvasWidth = await commentsPill.evaluate((pill) => {
+					let canvas: HTMLElement | null = pill.parentElement;
+					while (canvas && !getComputedStyle(canvas).containerName.split(' ').includes('doc-canvas')) canvas = canvas.parentElement;
+					if (!canvas) return Infinity;
+					const style = getComputedStyle(canvas);
+					return canvas.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+				});
+				await expect(commentsPill).toHaveText(canvasWidth > 600 ? /^\s*3 comments · 3 unread$/ : /^\s*3 unread$/, { useInnerText: true });
+			}
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
 			// Opening the comments shows the three threads the pill counted. Hold the

@@ -116,34 +116,37 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 				await page.getByRole('button', { name: /^Expand Files/ }).click();
 				await turnOffDocumentComments(page);
 			}
-			// Retry is in the comments drawer, where its Send stood: open it as a person does.
-			await openComments(page);
-			const header = page.locator('[data-doc-comments-drawer]');
+			// Retry is where its Send stood: in the document's row above the phone width (as shipped at f51bbda8e), in the comments drawer on a phone, opened as a person does.
+			const onRow = width === 1440;
+			if (!onRow) await openComments(page);
+			const header = onRow ? page.locator('.document-header') : page.locator('[data-doc-comments-drawer]');
 			const retry = header.locator('.undelivered').getByRole('button', { name: /^Retry/ });
 			await expect(retry).toBeVisible();
-			// The delivery toast outlasts the panel's entrance; read and capture the settled drawer after it leaves.
-			await expect(page.locator('.toast')).toHaveCount(0, { timeout: 12000 });
-			await page.evaluate(async () => { await Promise.allSettled(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished)); });
-			const footGeometry = await header.locator('.drawer-foot').evaluate((foot) => {
-				const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
-				return { foot: rect(foot), send: rect(foot.querySelector('.send')!), retry: rect(foot.querySelector('.undelivered button')!), scrollWidth: foot.scrollWidth, clientWidth: foot.clientWidth };
-			});
-			console.log('RETRY_FOOT_GEOMETRY', JSON.stringify({ width, theme, ...footGeometry }));
-			expect(footGeometry.scrollWidth).toBeLessThanOrEqual(footGeometry.clientWidth);
-			for (const box of [footGeometry.send, footGeometry.retry]) {
-				expect(box.left).toBeGreaterThanOrEqual(footGeometry.foot.left - 0.5);
-				expect(box.right).toBeLessThanOrEqual(footGeometry.foot.right + 0.5);
-				expect(box.top).toBeGreaterThanOrEqual(footGeometry.foot.top - 0.5);
-				expect(box.bottom).toBeLessThanOrEqual(footGeometry.foot.bottom + 0.5);
+			if (!onRow) {
+				// The delivery toast outlasts the panel's entrance; read and capture the settled drawer after it leaves.
+				await expect(page.locator('.toast')).toHaveCount(0, { timeout: 12000 });
+				await page.evaluate(async () => { await Promise.allSettled(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished)); });
+				const footGeometry = await header.locator('.drawer-foot').evaluate((foot) => {
+					const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+					return { foot: rect(foot), send: rect(foot.querySelector('.send')!), retry: rect(foot.querySelector('.undelivered button')!), scrollWidth: foot.scrollWidth, clientWidth: foot.clientWidth };
+				});
+				console.log('RETRY_FOOT_GEOMETRY', JSON.stringify({ width, theme, ...footGeometry }));
+				expect(footGeometry.scrollWidth).toBeLessThanOrEqual(footGeometry.clientWidth);
+				for (const box of [footGeometry.send, footGeometry.retry]) {
+					expect(box.left).toBeGreaterThanOrEqual(footGeometry.foot.left - 0.5);
+					expect(box.right).toBeLessThanOrEqual(footGeometry.foot.right + 0.5);
+					expect(box.top).toBeGreaterThanOrEqual(footGeometry.foot.top - 0.5);
+					expect(box.bottom).toBeLessThanOrEqual(footGeometry.foot.bottom + 0.5);
+				}
 			}
 			// The panel slides in on a phone: read the boxes once it has stopped. Each must sit inside the document's own
-			// Details panel, not just the window: a reason pushed past the panel's left edge is cut off while still on screen.
+			// header (the row, or the drawer on a phone), not just the window: a reason pushed past its left edge is cut off while still on screen.
 			const inside = (locator: typeof retry) => async () => {
 				const box = await locator.boundingBox();
 				const bounds = await header.boundingBox();
 				return box !== null && bounds !== null && box.x >= bounds.x - 0.5 && box.x + box.width <= bounds.x + bounds.width + 0.5;
 			};
-			await expect.poll(inside(retry), { message: 'Retry sits inside the comments drawer' }).toBe(true);
+			await expect.poll(inside(retry), { message: 'Retry sits inside the document header' }).toBe(true);
 			// The whole reason stays reachable: laid out whole inside Details, or, in a narrow bar, carried by Retry itself.
 			const reason = header.locator('.undelivered > span').filter({ hasText: 'not delivered' });
 			await expect(reason).toContainText("its owner can't be reached");
@@ -154,8 +157,9 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 				await expect.poll(inside(reason), { message: 'the whole reason sits inside the document Details' }).toBe(true);
 			}
 			if (framesOut) {
-				// Where the toast sends the person: the document's own Details holds the Retry, with the toast long gone.
+				// Where the toast sends the person: the document's own header holds the Retry, with the toast long gone.
 				mkdirSync(framesOut, { recursive: true });
+				await expect(page.locator('.toast')).toHaveCount(0, { timeout: 12000 });
 				await page.screenshot({ path: join(framesOut, `retry-on-document-${width}-${theme}.png`), animations: 'disabled', scale: 'css' });
 			}
 			expect(batchRows(doc.artifactId)).toEqual([{ policy: 'document-held', state: 'undelivered', items: 2 }]);

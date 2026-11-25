@@ -76,9 +76,9 @@ for (const width of WIDTHS) {
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
 			// The canvas's own top padding: the document's (.doc) and the leaf body's that holds it.
 			const padTop = (selector: string) => Number.parseFloat(getComputedStyle(document.querySelector(selector)!).paddingTop);
-			const tool = document.querySelector<HTMLElement>('[data-document-details]')!;
-			const tools = tool.getBoundingClientRect();
-			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
+			// Details is always in a phone's bar; above the phone width it is drawn only while something waits behind it.
+			const tools = document.querySelector<HTMLElement>('[data-document-details]')?.getBoundingClientRect();
+			const hit = tools ? document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2) : null;
 			resolve({
 				left: rect.left - scroller.left, right: scroller.right - rect.right,
 				padLeft: Number.parseFloat(content.paddingLeft), padRight: Number.parseFloat(content.paddingRight),

@@ -7,7 +7,7 @@ import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
 import { openResolved, resolvedList } from '../support/commentDrawer';
-import { openDetails } from '../support/documentBar';
+import { documentControls } from '../support/documentBar';
 import { editorText } from '../support/liveDocument';
 
 /**
@@ -24,7 +24,8 @@ async function expectFirstCardAtColumnOrLine(page: Page, ids: string[]) {
 	const [first] = await geometry(page, ids);
 	const { top, aboveBottom } = await page.locator('.drawer-comments.in-margin').evaluate((column) => ({
 		top: column.getBoundingClientRect().top,
-		aboveBottom: column.previousElementSibling!.getBoundingClientRect().bottom,
+		// Above the phone width the footer (Deliver immediately, Send) is in the document's row, so the column may have nothing above it.
+		aboveBottom: column.previousElementSibling?.getBoundingClientRect().bottom ?? -Infinity,
 	}));
 	expect(Math.abs(first.card!.top - Math.max(first.line!, top)), 'first card is at its line or column top').toBeLessThanOrEqual(1);
 	expect(first.card!.top, 'first card does not overlap the preceding control').toBeGreaterThanOrEqual(aboveBottom);
@@ -352,8 +353,8 @@ test('@flow:doc-margin-cards the column comes back when version history closes, 
 	await expect(page.locator('.cm-scroller')).toBeVisible();
 	await widen(page, doc);
 	await expect(card(page, doc, FIRST)).toBeVisible();
-	// History sits in the Details panel and toggles the history drawer: open Details, as a person does, then press it.
-	const history = { click: async () => (await openDetails(page)).getByRole('button', { name: 'History', exact: true }).click() };
+	// History toggles the history drawer. It is in the document's row above the phone width and in Details on a phone (opened first, as a person does).
+	const history = { click: async () => (await documentControls(page)).getByRole('button', { name: 'History', exact: true }).click() };
 	for (const close of ['the History button', 'the history drawer Close button'] as const) {
 		await history.click();
 		await expect(page.locator('[data-doc-history-drawer]')).toBeVisible();

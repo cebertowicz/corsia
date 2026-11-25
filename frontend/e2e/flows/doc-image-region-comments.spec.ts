@@ -6,7 +6,8 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, settled, shoot } from '../support/imageRegionComments';
 import { openComments } from '../support/commentDrawer';
-import { headerSend, shownHeaderSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
+import { phoneHeader } from '../support/documentBar';
+import { headerSend, openSenderSurface, shownHeaderSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
 import { beginComment, submitButton } from '../support/liveCommentProof';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { clickDocImage, expectBarFits } from '../support/docImageComments';
@@ -86,15 +87,15 @@ const docComments = (page: Page) => page.locator('[data-comments-entry]');
 /** The document's pending batch, as its header pill names it; its Send is the document header's. */
 const unsentName = (count: number) => new RegExp(`, ${count} waiting for Send$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
-/** The document's own delivery row, in Details' Comments section: what was sent, or not delivered with Retry. */
-const docDelivery = (page: Page) => page.locator('[data-doc-comments-drawer] .drawer-foot');
+/** The document's own delivery row: what was sent, or not delivered with Retry. It is the drawer's footer on a phone and the document's own row above it. */
+const docDelivery = (page: Page) => page.locator('.document-header .feedback-controls, [data-doc-comments-drawer] .drawer-foot');
 /** Back from the viewer to the document, then its comments drawer opened from the header pill. */
 async function backToDocumentDrawer(page: Page) {
 	await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 	await expect(overlay(page)).toHaveCount(0);
 	await openComments(page);
 	await expect(drawer(page)).toBeVisible();
-	await expect(drawer(page).locator('.drawer-foot'), 'the drawer has its delivery footer').toHaveCount(1);
+	await expect(drawer(page).locator('.drawer-foot'), 'the drawer has its delivery footer on a phone only').toHaveCount((await phoneHeader(page)) ? 1 : 0);
 }
 /** The document's comments drawer closed with its own Close button. */
 async function closeDocumentDrawer(page: Page) {
@@ -232,7 +233,7 @@ async function startSampling(page: Page) {
 		(window as unknown as { __sender: typeof state }).__sender = state;
 		const start = performance.now();
 		const measure = (): Sample => {
-			const slot = document.querySelector<HTMLElement>('[data-doc-comments-drawer] .sending-now');
+			const slot = document.querySelector<HTMLElement>('.document-header .sending-now, [data-doc-comments-drawer] .sending-now');
 			const button = slot?.querySelector('.btn');
 			const status = !slot ? 'gone' : !button ? 'sent' : button.classList.contains('loading') ? 'sending' : 'pending';
 			return [Math.round(performance.now() - start), status, Math.round((document.querySelector('.cm-content')?.getBoundingClientRect().top ?? 0) * 10) / 10];
@@ -343,9 +344,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect.poll(() => sends.document).toHaveLength(1);
 		expect(JSON.parse(sends.document[0]).delivery_policy).toBe('image-held');
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
-		await openComments(page);
+		await openSenderSurface(page);
 		await expect(headerSend(page)).toHaveCount(0);
-		await closeDocumentDrawer(page);
+		if (await phoneHeader(page)) await closeDocumentDrawer(page);
 		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 		await expectImagesSettled(page, testInfo, 'doc-1440-04-document');
 
@@ -362,7 +363,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		const card = page.locator('.canvas-comment-drawer .ct').filter({ hasText: 'The header crowds the logo' });
 		await expect(card).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
-		await expect(drawer(page).locator('.drawer-foot')).toHaveCount(1);
+		await expect(drawer(page).locator('.drawer-foot'), 'above the phone width the drawer has no delivery footer').toHaveCount(0);
 		await expect(headerSend(page)).toHaveCount(0);
 		await shoot(page, testInfo, 'doc-1440-06-drawer-image-group', true);
 		await cardOpensViewerAndReturns(page, testInfo, 'The header crowds the logo', 'back', 'doc-1440-06b-drawer-card');
@@ -526,7 +527,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(retry).toBeInViewport({ ratio: 1 });
 		if (width <= 768) expect((await retry.boundingBox())!.height, 'Retry keeps a 44 px target').toBeGreaterThanOrEqual(44);
 		await shoot(page, testInfo, `doc-${width}-10-document-undelivered-retry`, true);
-		await closeDocumentDrawer(page);
+		if (await phoneHeader(page)) await closeDocumentDrawer(page);
 		await openImage(page);
 		await expect(bar(page).getByRole('button', { name: /Retry/ })).toHaveCount(0);
 	});
@@ -573,7 +574,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				await expect(await shownHeaderSend(page)).toBeVisible();
 				await page.route('**/api/doc-feedback/send', async (route) => { await new Promise((resolve) => setTimeout(resolve, 800)); await route.fallback(); });
 				// Finish the setup's Send entrance before slowing and filming this send's lifecycle.
-				await page.locator('[data-doc-comments-drawer]').evaluate(async (element) => {
+				await page.locator(width > 768 ? '.document-header' : '[data-doc-comments-drawer]').evaluate(async (element) => {
 					await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
 				});
 				await slow();

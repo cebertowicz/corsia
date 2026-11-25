@@ -56,12 +56,15 @@ export async function routeDocumentSaves(context: BrowserContext, delayMs = 0) {
 	};
 }
 
+/** The save cue: the app bar's text on a phone, the document row's pill above the phone width (as shipped at f51bbda8e). Only one is drawn. */
+const SAVE_CUE = '.bar-save, .save-ghost';
+
 /** Record every animation frame, not merely the final DOM assertion. */
 export async function observeSaveCue(page: Page) {
-	await page.evaluate(() => {
+	await page.evaluate((selector) => {
 		(window as any).__saveCueSamples = [];
 		const sample = () => {
-			const cue = document.querySelector<HTMLElement>('.bar-save');
+			const cue = document.querySelector<HTMLElement>(selector);
 			const style = cue ? getComputedStyle(cue) : null;
 			(window as any).__saveCueSamples.push({ at: performance.now(), cue: cue?.textContent ?? '',
 				visible: Boolean(cue && style?.display !== 'none' && style?.visibility !== 'hidden'),
@@ -70,23 +73,25 @@ export async function observeSaveCue(page: Page) {
 			requestAnimationFrame(sample);
 		};
 		sample();
-	});
+	}, SAVE_CUE);
 }
 /** Prove the selector with a slow save before recording the quiet episode. */
 export async function proveSaveCue(page: Page, link: Awaited<ReturnType<typeof routeDocumentSaves>>, edit: () => Promise<void>) {
 	link.hold();
 	await edit();
-	await expect(page.locator('.bar-save')).toHaveText('Saving…');
-	await expect(page.locator('.bar-save')).toBeVisible();
+	await expect(page.locator(SAVE_CUE)).toHaveText('Saving…');
+	await expect(page.locator(SAVE_CUE)).toBeVisible();
 	link.release();
-	await expect(page.locator('.bar-save')).toHaveCount(0, { timeout: 20_000 });
+	await expect(page.locator(SAVE_CUE)).toHaveCount(0, { timeout: 20_000 });
 }
 
 export async function expectTextOnlyCue(page: Page, text: string) {
-	const cue = page.locator('.bar-save');
+	const cue = page.locator(SAVE_CUE);
 	await expect(cue).toHaveCount(1);
 	await expect(cue).toHaveText(text);
 	await expect(cue).toBeVisible();
+	// Above the phone width the row's own pill is the shipped look; the text-only look is the phone bar's.
+	if (await cue.evaluate(element => element.classList.contains('save-ghost'))) return;
 	const style = await cue.evaluate(element => {
 		const computed = getComputedStyle(element);
 		return { background: computed.backgroundColor, shadow: computed.boxShadow,
@@ -106,5 +111,5 @@ export async function cueSamples(page: Page): Promise<Array<{ at: number; cue: s
 export async function expectQuietSave(page: Page) {
 	const frames = await cueSamples(page);
 	expect(frames.filter(frame => frame.visible && frame.cue !== ''), 'no cue appeared on any animation frame').toEqual([]);
-	await expect(page.locator('.bar-save')).toHaveCount(0);
+	await expect(page.locator(SAVE_CUE)).toHaveCount(0);
 }

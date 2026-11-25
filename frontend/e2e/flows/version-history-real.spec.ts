@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../support/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
-import { openDetails } from '../support/documentBar';
+import { documentControls } from '../support/documentBar';
 import { enterDocumentEdit } from '../support/documentReading';
 
 const authQuery = `?${['to', 'ken'].join('')}=${encodeURIComponent(TEST_TOKEN)}`;
@@ -62,7 +62,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await openDocument(page);
 	if (!phone) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	// History is fetched only once it is opened, never on document ready (nor when Details, which holds it, opens).
-	const details = await openDetails(page);
+	const details = await documentControls(page);
 	await expect(details.getByRole('button', { name: 'History', exact: true })).toBeVisible();
 	expect(historyReads).toHaveLength(0);
 	const out = process.env.VH_OUT;

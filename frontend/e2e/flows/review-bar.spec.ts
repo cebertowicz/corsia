@@ -6,8 +6,8 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
-import { expectSenders, headerSend, labelLines, leaveUnsent, shownHeaderSend } from '../support/heldComments';
-import { closeDetails, expectTouchTargets, openDetails } from '../support/documentBar';
+import { closeSenderSurface, expectSenders, headerSend, labelLines, leaveUnsent, openSenderSurface, shownHeaderSend } from '../support/heldComments';
+import { documentControls, expectTouchTargets, leaveDocumentControls, phoneHeader } from '../support/documentBar';
 import { type AskForm, askFormOf, expectAskPlacement } from '../support/askPlacement';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled, type JourneySetup } from '../support/reviewFixtures';
 
@@ -107,21 +107,24 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		// Opened, the person step's card gives who asks its own line above the question; the document's controls are Comments and
 		// Details in the bar.
 		await setAskOpen(page, true, form, { personStep: true });
-		const geometry = await askOf(page, form).evaluate((element) => {
+		// A phone's tools are Comments and Details in the bar; above the phone width they are the document's own tools row (f51bbda8e).
+		const toolSelector = width === 393 ? '[data-comments-entry], [data-document-details]' : '.document-tools button';
+		const geometry = await askOf(page, form).evaluate((element, selector) => {
 			const who = element.querySelector('.rb-dock-who, .rb-who strong')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = element.getBoundingClientRect(), style = getComputedStyle(element);
-			const tools = [...document.querySelectorAll('[data-comments-entry], [data-document-details]')].map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0);
+			const tools = [...document.querySelectorAll(selector)].map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0);
 			return { text: text.toJSON(), contentRight: box.right - parseFloat(style.paddingRight), toolsLeft: Math.min(...tools.map((rect) => rect.left)),
 				toolsRight: Math.max(...tools.map((rect) => rect.right)), tools: tools.length, name: who.textContent,
 				paneOverlay: !!document.querySelector('.pane.overlay') };
-		});
+		}, toolSelector);
 		console.info('Delivery header geometry:', JSON.stringify({ width, theme, ...geometry }));
 		expect(geometry.name).toBe(doc.title);
 		expect(geometry.text.right, 'full name stays inside the ask').toBeLessThanOrEqual(geometry.contentRight + 0.5);
-		expect(geometry.tools, 'Comments and Details are in the bar').toBe(2);
+		if (width === 393) expect(geometry.tools, 'Comments and Details are in the bar').toBe(2);
+		else expect(geometry.tools, 'the document tools are in its row').toBeGreaterThan(0);
 		expect(geometry.toolsLeft, 'every bar tool starts inside the screen').toBeGreaterThanOrEqual(0);
 		expect(geometry.toolsRight, 'every bar tool ends inside the screen').toBeLessThanOrEqual(width + 0.5);
-		for (const button of await page.locator('[data-comments-entry], [data-document-details], [data-ask-card] button:visible, .review-bar.ask button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
+		for (const button of await page.locator(`${toolSelector}, [data-ask-card] button:visible, .review-bar.ask button:visible`).all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
 		expect(await hitAtCentre(bar(page).getByRole('button', { name: 'Done', exact: true }))).toBe(true);
 		if (width === 1280) expect(geometry.paneOverlay).toBe(true);
 		const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
@@ -363,11 +366,11 @@ journey('send back after two comments', ALL, async ({ page, request, info, mode,
 	await expectLayout(page, mode);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	// One primary on screen: the card's Approve. The drawer's Send is secondary, and Comments names the unsent pair.
-	await openComments(page);
+	await openSenderSurface(page);
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
-	await closeComments(page);
+	await closeSenderSurface(page);
 	await expect(page.locator('[data-comments-entry]')).toHaveAttribute('aria-label', /, 2 waiting for Send$/);
 	await expect(sendBack).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
@@ -666,12 +669,14 @@ journey('held comments have one drawer Send, whole at every size', [
 	const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
-	// The drawer lists the threads and has exactly one Send in its footer.
+	// The drawer lists the threads. On a phone it has exactly one Send in its footer; above the phone width the one Send is in the document's row and the drawer has no footer.
 	await openComments(page, /^6 comments, 6 waiting for Send$/);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expectCommentsShown(drawer);
-	await expect(drawer.locator('.drawer-foot')).toHaveCount(1);
-	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(1);
+	const phoneDrawer = await phoneHeader(page);
+	await expect(drawer.locator('.drawer-foot')).toHaveCount(phoneDrawer ? 1 : 0);
+	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(phoneDrawer ? 1 : 0);
+	await expect(headerSend(page)).toHaveCount(1);
 	await settled(page);
 	if (mode === 'closed') {
 		// This canvas has room for the margin column, so the list is that column inside the document canvas, not a sheet over it.
@@ -683,7 +688,7 @@ journey('held comments have one drawer Send, whole at every size', [
 	await shot(page, 'drawer-with-footer', info);
 	await closeComments(drawer);
 	await expect(drawer).toBeHidden();
-	await openComments(page);
+	await openSenderSurface(page);
 	await settled(page);
 
 	if (mode === 'phone') {
@@ -785,8 +790,8 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		expect(await nameWhole(requester), 'the long ask leaves its requester untruncated').toBe(true);
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
 		await setAskOpen(page, false, 'docked');
-		// The owner and the status live in Details: the owner and supervisor stay one touch row, and the status keeps its as-of date.
-		const panel = await openDetails(page);
+		// The owner and the status live in Details on a phone (in the document's row above it): the owner and supervisor stay one touch row, and the status keeps its as-of date.
+		const panel = await documentControls(page);
 		const ownership = page.locator('[data-ownership-row]');
 		expect((await ownership.boundingBox())!.height, 'the owner and supervisor row is one touch row').toBeLessThanOrEqual(56);
 		const owner = page.locator('[data-ownership-row] [data-role="owner"]');
@@ -794,7 +799,7 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		expect(await owner.getAttribute('aria-label'), 'the owner item names the owner in full').toContain(`: ${doc.title}`);
 		await expect(panel).toContainText(/Status: as of \w+ \d+/);
 		await shot(page, `orphan-heavy-details-${mode}-${theme}`, info);
-		await closeDetails(page);
+		await leaveDocumentControls(page);
 	}
 	// Recovery remains exercised through the comments drawer below.
 	await openComments(page);
@@ -819,7 +824,7 @@ async function expectNameClearOfControls(page: Page, title: string, form: AskFor
 		const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, label: (node.getAttribute('aria-label') ?? node.textContent ?? '').slice(0, 40) }; };
 		const who = element.querySelector<HTMLElement>('.rb-dock-who, .rb-who strong')!;
 		// A touch control's 44px hit area is held to what is drawn, as the review answers' rows are.
-		const controls = [...element.querySelectorAll('.rb-actions .btn'), ...document.querySelectorAll('[data-comments-entry], [data-document-details]')]
+		const controls = [...element.querySelectorAll('.rb-actions .btn'), ...document.querySelectorAll('[data-comments-entry], [data-document-details], .document-tools button')]
 			.map(rect).filter((r) => r.right > r.left);
 		return { who: rect(who), scrollWidth: who.scrollWidth, clientWidth: who.clientWidth, controls };
 	});
@@ -856,10 +861,8 @@ for (const theme of ['light', 'dark'] as const) {
 		await loginByUrl(page, { waitForComposer: false });
 		await selectThread(page, doc, 'default');
 		await expect(bar(page)).toContainText('Is the rollout plan right?');
-		// Identity is the owner row in Details, whatever the visible width.
-		const identityPanel = await openDetails(page);
-		await expect(identityPanel.locator('[data-ownership-row]'), 'the canvas beside the pane keeps document identity in Details').toContainText(doc.title);
-		await closeDetails(page);
+		// Above the phone width identity shows as the narrow canvas's age line or the wider canvas's owner row (its label depends on ownership), whichever the visible width picks.
+		await expect(page.locator('.identity-owner:visible, .metadata-owner:visible'), 'the canvas beside the pane keeps document identity visible').toContainText(doc.title);
 		const pane = page.locator('.pane');
 		await expect(pane).toHaveClass(/\boverlay\b/);
 		await expect(pane).not.toHaveClass(/\bcollapsed\b/);
@@ -870,25 +873,18 @@ for (const theme of ['light', 'dark'] as const) {
 		const split = page.locator('.split');
 		await expect.poll(async () => { const box = (await header.boundingBox())!; return box.x + box.width; }, 'the header ends at the overlaid pane').toBeLessThanOrEqual(paneLeft + 0.5);
 
-		const pill = page.locator('[data-comments-entry]');
-		await expect(pill).toHaveAttribute('aria-label', /^0 comments\b/);
-		const details = page.locator('[data-document-details]');
+		// The row's count and Request review are in the document's tools, as shipped at f51bbda8e.
+		const tools = page.locator('.document-tools');
+		const pill = tools.getByRole('button', { name: /^0 comments\b/ });
+		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
 		const requestChanges = bar(page).getByRole('button', { name: 'Send back', exact: true });
-		for (const control of [pill, details, approve, requestChanges]) {
+		for (const control of [pill, requestReview, approve, requestChanges]) {
 			await expect(control).toBeVisible();
 			const box = (await control.boundingBox())!;
 			expect(box.x + box.width, 'clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 			expect(await hitAtCentre(control), `${await control.getAttribute('aria-label') ?? await control.textContent()} not covered`).toBe(true);
 		}
-		// Request review is in Details, which opens beside the pane too.
-		await openDetails(page);
-		const requestReview = page.locator('.document-header').getByRole('button', { name: 'Request review', exact: true });
-		await expect(requestReview).toBeVisible();
-		expect((await requestReview.boundingBox())!.x + (await requestReview.boundingBox())!.width, 'Request review clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
-		expect(await hitAtCentre(requestReview), 'Request review not covered').toBe(true);
-		await closeDetails(page);
-
 		// The ask is the row in the header: the full name keeps its chevron and the question keeps a visible, uncovered row, all left of the pane.
 		await expectAskPlacement(page, 'header');
 		const who = askerOf(page, 'header');
@@ -896,7 +892,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect(who).toHaveText(doc.title);
 		const geometry = await page.evaluate(() => {
 			const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON();
-			const tools = [...document.querySelectorAll('[data-comments-entry], [data-document-details]')].map((el) => el.getBoundingClientRect()).filter((rect) => rect.width > 0);
+			const tools = [...document.querySelectorAll('.document-header .presence-row, .document-tools')].map((el) => el.getBoundingClientRect()).filter((rect) => rect.width > 0);
 			return {
 				line: getComputedStyle(document.querySelector('.review-bar.ask .rb-line')!).display,
 				who: box('.review-bar.ask .rb-who'),
@@ -918,13 +914,11 @@ for (const theme of ['light', 'dark'] as const) {
 		expect(await hitAtCentre(question), 'question not covered').toBe(true);
 		await shot(page, `overlay-1280-${theme}-pane-open`, info);
 
-		await openDetails(page);
 		await requestReview.click();
 		await expect(page.getByRole('combobox', { name: 'Add reviewers' })).toBeVisible();
 		await shot(page, `overlay-1280-${theme}-pane-open-request-review`, info);
 		await page.keyboard.press('Escape');
 		await expect(page.getByRole('combobox', { name: 'Add reviewers' })).toHaveCount(0);
-		await closeDetails(page);
 
 		// A real click on each answer: Send back opens the note, and Cancel returns to the ask.
 		await requestChanges.click();

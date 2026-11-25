@@ -7,7 +7,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { expectContrast, TEXT } from '../support/contrast';
 import { headerSend } from '../support/heldComments';
-import { detailsPanel, openDetails } from '../support/documentBar';
+import { documentControls, phoneHeader } from '../support/documentBar';
 import { closeComments, openComments } from '../support/commentDrawer';
 import { settled } from '../support/reviewFixtures';
 import { demoteAgent } from '../support/sharedLiveDocument';
@@ -62,11 +62,11 @@ async function openDocument(page: Page, doc: DocumentFixture, splitWidth = 500) 
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	// Request review, the reviewers, Send and the delivery toggle are in the document's Details panel.
-	await openDetails(page);
+	// Request review, the reviewers, Send and the delivery toggle are in the document's row above the phone width and in its Details panel on a phone.
+	await documentControls(page);
 	await expect(reviewTrigger(page)).toBeVisible();
 }
-const reviewTrigger = (page: Page) => detailsPanel(page).getByRole('button', { name: 'Request review', exact: true });
+const reviewTrigger = (page: Page) => page.locator('.document-header .doc-panel, .document-tools').getByRole('button', { name: 'Request review', exact: true });
 async function requestReview(request: APIRequestContext, doc: DocumentFixture, reviewer: string) {
 	const response = await request.post('/api/doc-reviews', { headers: auth(), data: {
 		artifact_id: doc.artifactId, thread_id: doc.threadId, reviewer, client_id: crypto.randomUUID(),
@@ -155,10 +155,13 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 		const header = root.querySelector('.document-header')!.getBoundingClientRect();
 		const editor = root.querySelector('.doc-main')!.getBoundingClientRect();
 		const canvas = root.getBoundingClientRect();
-		// The Details panel holds what the status and tools rows held; Comments and Details are in the bar outside the canvas.
-		const row = root.querySelector('.doc-panel')!;
-		const barTools = [...document.querySelectorAll<HTMLButtonElement>('[data-comments-entry], [data-document-details]')];
-		const retry = row.querySelector<HTMLButtonElement>('.undelivered > .btn');
+		// On a phone the Details panel holds what the status and tools rows held, and Comments and Details are in the bar outside the canvas;
+		// above the phone width the document's own status and tools rows hold them (as shipped at f51bbda8e).
+		const phone = window.innerWidth <= 768;
+		const row = root.querySelector(phone ? '.doc-panel' : '.document-status-row')!;
+		const tools = root.querySelector('.document-tools');
+		const barTools = phone ? [...document.querySelectorAll<HTMLButtonElement>('[data-comments-entry], [data-document-details]')] : [];
+		const retry = (phone ? row : tools ?? row).querySelector<HTMLButtonElement>('.undelivered > .btn');
 		const retryInset = retry ? getComputedStyle(retry, '::after').inset : null;
 		const geometry = (element: Element) => {
 			const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
@@ -178,12 +181,12 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			root: geometry(root), header: geometry(root.querySelector('.document-header')!),
 			row: geometry(row), retryInset, descendants: [...row.querySelectorAll('*')].map(geometry),
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
-			controls: [...new Set([...barTools, ...row.querySelectorAll('button')])].map((button) => {
+			controls: [...new Set([...barTools, ...(phone ? [] : tools?.querySelectorAll('button') ?? []), ...row.querySelectorAll('button')])].map((button) => {
 				// A Toggle's target is the hit area inside its button.
 				const rect = (button.querySelector('.hit') ?? button).getBoundingClientRect();
-				// Phone actions are 44px; with a pointer the bar's Comments and Details are 36px (IconButton lg), and Toggle and small
+				// Phone actions and the row's tool buttons are 44px; with a pointer the bar's Comments and Details are 36px (IconButton lg), and Toggle and small
 				// Button keep their own sizes.
-				const minimum = window.innerWidth <= 768 ? 44 : button.matches('.bar-comments, .bar-details') ? 36 : button.matches('.tg') ? 17 : 28;
+				const minimum = window.innerWidth <= 768 ? 44 : button.matches('.doc-tool') ? 44 : button.matches('.bar-comments, .bar-details') ? 36 : button.matches('.tg') ? 17 : 28;
 				return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height, minimum };
 			}),
 		};
@@ -238,7 +241,7 @@ test('review surface switches at the document width boundary', async ({ page, re
 
 const composedFixtures = [
 	{ viewport: 'desktop-1280', width: 1280, height: 900, splitWidth: 820, expectedNarrow: false },
-	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: false },
+	{ viewport: 'desktop-1440', width: 1440, height: 1000, splitWidth: 820, expectedNarrow: true },
 	{ viewport: 'phone-393', width: 393, height: 852, splitWidth: 500, expectedNarrow: true },
 	{ viewport: 'wide-desktop-1920', width: 1920, height: 1000, splitWidth: 820, expectedNarrow: false },
 ] as const;
@@ -256,35 +259,55 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		// The drawer's delivery Toggle is one labelled row control at every width: the label and the track share the button,
-		// so the row is the touch target and the painted track keeps its size.
-		await openComments(page);
-		const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
-		await expect(toggle, 'the row is named by its visible label').toHaveAccessibleName('Deliver immediately');
-		const row = (await toggle.boundingBox())!;
-		const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
-		await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox: row, track }), contentType: 'application/json' });
-		console.info('Delivery button bounds:', JSON.stringify({ targetBox: row, track }));
-		expect(track).toEqual({ width: 30, height: 17 });
-		expect(Math.min(row.width, row.height), 'the whole row is a touch target').toBeGreaterThanOrEqual(44);
-		// A press on the label half of the row, far from the painted track, activates the same single control.
-		const pressLabel = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 8, y: row.height / 2 } }) : toggle.click({ position: { x: 8, y: row.height / 2 } });
-		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-		await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-		await closeComments(page);
-		// Keep the overlaid Workspace case at 1280; close it at 1440 to exercise the wide document popover.
-		if (viewport === 'desktop-1440' && !(await page.locator('.pane').evaluate(element => element.classList.contains('collapsed')))) {
-			await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
-			await settled(page);
+		if (await phoneHeader(page)) {
+			// The drawer's delivery Toggle is one labelled row control at every width: the label and the track share the button,
+			// so the row is the touch target and the painted track keeps its size.
+			await openComments(page);
+			const toggle = page.getByRole('button', { name: 'Deliver immediately', exact: true });
+			await expect(toggle, 'the row is named by its visible label').toHaveAccessibleName('Deliver immediately');
+			const row = (await toggle.boundingBox())!;
+			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
+			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox: row, track }), contentType: 'application/json' });
+			console.info('Delivery button bounds:', JSON.stringify({ targetBox: row, track }));
+			expect(track).toEqual({ width: 30, height: 17 });
+			expect(Math.min(row.width, row.height), 'the whole row is a touch target').toBeGreaterThanOrEqual(44);
+			// A press on the label half of the row, far from the painted track, activates the same single control.
+			const pressLabel = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 8, y: row.height / 2 } }) : toggle.click({ position: { x: 8, y: row.height / 2 } });
+			await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+			await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+			await pressLabel(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+			await closeComments(page);
+		} else {
+			// Above the phone width the delivery Toggle is in the document's row (as shipped at f51bbda8e). A narrow canvas (here the 1440 window
+			// with the Workspace panel open) gives it its 44px target; a wide one keeps the desktop Toggle.
+			if (expectedNarrow) {
+				const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+				// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
+				const hit = toggle.locator('.hit');
+				const targetBox = (await hit.boundingBox())!;
+				const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
+				await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
+				console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
+				expect(track).toEqual({ width: 30, height: 17 });
+				expect(targetBox.height, 'actual delivery hit area').toBe(44);
+				expect(targetBox.width).toBe(44);
+				// The hit area outside the painted track activates the same single control.
+				const pressPadding = () => info.project.name === 'chromium-mobile' ? hit.tap({ position: { x: 4, y: 22 } }) : hit.click({ position: { x: 4, y: 22 } });
+				await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+				await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+				await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+			} else {
+				const box = (await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).boundingBox())!;
+				expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
+			}
 		}
-		await openDetails(page);
+		await documentControls(page);
 		const trigger = reviewTrigger(page);
 		await trigger.click();
 		const surface = await reviewSurface(page);
 		expect(surface.narrow, `${viewport} document content width ${surface.contentWidth}`).toBe(expectedNarrow);
 		await expect(surface.panel).toBeVisible();
-		if (viewport === 'desktop-1280' || viewport === 'desktop-1440') {
+		if (!surface.narrow && (viewport === 'desktop-1280' || viewport === 'desktop-1440')) {
 			await settled(page);
 			const geometry = await surface.panel.evaluate(panel => ({
 				panel: panel.getBoundingClientRect().toJSON(),
@@ -321,7 +344,7 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		if (surface.narrow) expect((await surface.close.button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-selected`, { fullPage: false });
 		await surface.panel.getByRole('button', { name: 'Send', exact: true }).click();
-		// Sending closes the surface, confirms with a toast and leaves the new reviewer in Details.
+		// Sending closes the surface, confirms with a toast and leaves the new reviewer in the header (in Details on a phone).
 		await expect(page.getByText(/^Review requested from /)).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toBeVisible();
 		await expect(trigger).toBeFocused();
@@ -567,7 +590,7 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 			retry: { target: page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true }), min: TEXT },
 		});
 		await closeComments(page);
-		await openDetails(page);
+		await documentControls(page);
 		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (count) {
 			await page.locator('.reviewer-group').click();

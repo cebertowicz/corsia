@@ -74,8 +74,9 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		}
 		await expect(page.locator('.pane:not(.collapsed)')).toBeVisible();
 	}
-	// The document's controls stay put while its text scrolls: they sit in the bar that holds the canvas, above the scroller.
-	const comments = page.locator('[data-comments-entry]'), scroller = page.locator('.doc-main .cm-scroller');
+	// The document's controls stay put while its text scrolls: on a phone they sit in the bar that holds the canvas, above the scroller;
+	// above the phone width they are in the document's own header, as shipped at f51bbda8e.
+	const comments = mobile ? page.locator('[data-comments-entry]') : page.locator('.document-header'), scroller = page.locator('.doc-main .cm-scroller');
 	const pinnedTop = (await comments.boundingBox())!.y;
 	await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
 	await expect.poll(async () => (await comments.boundingBox())!.y).toBeCloseTo(pinnedTop, 0);
@@ -110,8 +111,8 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	// below shows its arrival pill. Chat replies sit in Focus-mode groups whose
 	// labels vary by viewport, so they are not asserted here.
 	await reader.close();
-	// The document bar shows three readers, evenly spaced.
-	const presence = page.locator('[data-document-bar-row] .bar-tools').getByRole('group', { name: '3 participants', exact: true });
+	// The phone's bar shows the readers as one avatar and "+2"; the document's own row above the phone width shows three, evenly spaced.
+	const presence = mobile ? page.locator('[data-document-bar-row] .bar-tools').getByRole('group', { name: '3 participants', exact: true }) : page.getByRole('group', { name: '3 participants', exact: true });
 	await expect(presence).toBeVisible();
 	const avatars = await presence.locator('.avatar').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
 	await testInfo.attach('presence-avatar-lefts', { body: JSON.stringify(avatars), contentType: 'application/json' });

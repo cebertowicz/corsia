@@ -5,6 +5,7 @@ import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { setDebugVersionOverlay } from '../support/heldComments';
 import { expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../support/discussionVisible';
 import { openComments } from '../support/commentDrawer';
+import { phoneHeader } from '../support/documentBar';
 
 const quote = 'target line for a reply';
 const text = Array.from({ length: 45 }, (_, i) => i === 25 ? quote : `document line ${i}`).join('\n\n');
@@ -36,8 +37,8 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 	await expect(card.getByText('first reply 0')).toBeVisible();
 	if (state === 'resolved') {
 		await card.getByRole('button', { name: 'Resolve', exact: true }).click();
-		// "Resolved · N" sits at the top of the comments drawer.
-		await openComments(page);
+		// "Resolved · N" is in the document's row above the phone width and at the top of the comments drawer on a phone.
+		if (await phoneHeader(page)) await openComments(page);
 		await page.getByRole('button', { name: /^Resolved ·/ }).click();
 		// Catch the opening while it is still animating: the field must never be clipped mid-transition.
 		await page.evaluate(() => {

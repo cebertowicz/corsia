@@ -6,7 +6,7 @@ import type { APIRequestContext, Browser, Page, TestInfo } from '@playwright/tes
 import { test, expect } from '../support/test';
 import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
-import { closeDetails, openDetails } from '../support/documentBar';
+import { documentControls, leaveDocumentControls } from '../support/documentBar';
 
 const authQuery = `?${['to', 'ken'].join('')}=${encodeURIComponent(TEST_TOKEN)}`;
 const FIRST = 'Plan for the week.\nKeep this line.\nDelete this line.\n';
@@ -65,7 +65,7 @@ async function openDocument(page: Page, info: TestInfo, title: string, artifactI
 async function openHistory(page: Page, info: TestInfo, title: string, artifactId: string, file: string, threadId: string) {
 	await openDocument(page, info, title, artifactId, file, threadId);
 	// History sits in the Details panel: open it first, as a person does.
-	await (await openDetails(page)).getByRole('button', { name: 'History', exact: true }).click();
+	await (await documentControls(page)).getByRole('button', { name: 'History', exact: true }).click();
 	return page.locator('[data-doc-history-drawer]');
 }
 
@@ -270,7 +270,7 @@ test('@flow:version-history-every-file a registered chat file has History from t
 	await shot(page, 'history-tray');
 	await trayRow.click();
 	await expect(page.locator('.cm-content')).toContainText('Agent line.');
-	const history = (await openDetails(page)).getByRole('button', { name: 'History', exact: true });
+	const history = (await documentControls(page)).getByRole('button', { name: 'History', exact: true });
 	await expect(history).toBeVisible();
 	await shot(page, 'history-tray-file-open');
 	await history.click();
@@ -295,8 +295,8 @@ test('@flow:version-history-every-file a registered chat file has History from t
 		// History shows once the open settles, so give it the time it takes before reading it absent.
 		await page.waitForTimeout(1500);
 		// Read inside the open Details panel, where History would be, so a hidden panel cannot pass this.
-		await expect((await openDetails(page)).getByRole('button', { name: 'History', exact: true })).toHaveCount(0);
-		await closeDetails(page);
+		await expect((await documentControls(page)).getByRole('button', { name: 'History', exact: true })).toHaveCount(0);
+		await leaveDocumentControls(page);
 		await expect(page.locator('[data-doc-history-drawer]')).toHaveCount(0);
 		await shot(page, name);
 	}

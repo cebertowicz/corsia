@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { closeComments, showAllThreads, openComments, openResolved } from '../support/commentDrawer';
+import { phoneHeader, resolvedTool } from '../support/documentBar';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { deliveredBatches, headerSend, headerSent, headerSentStatus, heldIn, leaveUnsent, setDeliveryPreference, shownHeaderSend } from '../support/heldComments';
 
@@ -21,7 +22,7 @@ async function expectHeaderSendFits(send: import('@playwright/test').Locator): P
 		const box = button.getBoundingClientRect();
 		const style = getComputedStyle(button);
 		const slot = button.closest<HTMLElement>('.sending-now');
-		const identity = button.closest<HTMLElement>('.drawer-foot');
+		const identity = button.closest<HTMLElement>('.document-identity, .drawer-foot');
 		return {
 			fits: button.scrollWidth <= button.clientWidth && box.left >= 0 && box.right <= button.ownerDocument.defaultView!.innerWidth,
 			button: { clientWidth: button.clientWidth, scrollWidth: button.scrollWidth, width: box.width, minWidth: style.minWidth, maxWidth: style.maxWidth, flex: style.flex },
@@ -192,16 +193,21 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
-	// A resolved thread leaves the open list for the drawer's Resolved view.
-	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
+	// A resolved thread leaves the open list for the document row's Resolved button above the phone width (the comments popover is closed first), and for the drawer's Resolved view on a phone.
+	if (await phoneHeader(page)) await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
+	else {
+		await closeComments(page);
+		await resolvedTool(page).click();
+	}
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
 	await resolved.getByRole('button', { name: 'Resolved · 1 message' }).click();
 	// The document has an owner, so the card says a re-open reaches it.
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
-	// The re-opened comment is held for the owner in the drawer's Send lane.
-	await openComments(page);
+	// The re-opened comment is held for the owner: its Send is the header's, in the row above the phone width, in the drawer's footer on a phone.
+	if (await phoneHeader(page)) await openComments(page);
+	else await closeComments(page);
 	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
 	else {
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
