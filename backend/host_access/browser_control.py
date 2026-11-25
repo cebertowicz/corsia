@@ -128,8 +128,7 @@ def mark_saved_fill(thread_id: str, session: str | None, document: str | None) -
 
 
 def _same_session(marked: str | None, session: str | None) -> bool:
-    # A mark or a command with no session id can't be told apart from the filled session, so it counts as it.
-    return marked is None or session is None or marked == session
+    return marked is None or session is None or marked == session  # a missing id can't be told from the filled session
 
 
 def saved_fill_session(thread_id: str, session: str | None) -> bool:
