@@ -293,7 +293,9 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert "skill `connect-tools`" in steps
     work_step = steps.split("3. **Where your work lives,**", 1)[1].split("4. **", 1)[0]
     assert not re.search(r"\bsteps? \d", work_step)
-    assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
+    handoff = app.split("## Hand over to your agents", 1)[1].strip()
+    assert handoff.startswith("If they skipped About you or did not approve it")
+    assert "After the last step that applies, post one line" in handoff
     assert "post exactly `" + HANDOFF + "`" in app
     assert "then `google_connect`" in steps
     assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in steps
