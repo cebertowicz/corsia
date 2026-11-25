@@ -4,6 +4,7 @@ import type {
 	HostAccessTimed,
 	HostAccessPolicyException,
 	HostAccessRepoPolicy,
+	HostAccessLeaseDecision,
 } from '$lib/api/hostAccess';
 
 export function text(value: unknown): value is string {
@@ -105,11 +106,22 @@ export function decisionBlocked(
 	return stale || blockingLeaseId !== null || !casReady(lease);
 }
 
+/**
+ * Whether a failed read blocks this decision: Approve and Revoke, never Reject. Every reject route checks
+ * the request's revision and hash on the server, so a Reject sent from the last view either ends that same
+ * request or is refused as changed, and the person can always say no.
+ */
+export function staleBlocks(stale: boolean, decision: HostAccessLeaseDecision): boolean {
+	return stale && decision !== 'reject';
+}
+
 export function approvalReady(lease: HostAccessItem | null): boolean {
 	if (lease?.kind === 'fill') {
 		return lease.state === 'awaiting_user' && casReady(lease)
 			&& text(lease.agent) && text(lease.site) && text(lease.username)
-			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= 1
+			// The server always offers the shortest choice; a request that doesn't is not approvable, and the
+			// drawer says so rather than dropping Approve with no word.
+			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= FILL_DURATIONS_SECONDS[0]
 			&& validTime(lease.created_at);
 	}
 	if (lease?.kind === 'script') {
@@ -194,4 +206,12 @@ export function remaining(lease: HostAccessTimed, nowMs: number): string {
 	const minutes = Math.floor(total / 60);
 	const seconds = total % 60;
 	return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+/** The chip's time: whole minutes left, rounded up ("15 min left"), so it never reads as a clock time. */
+export function minutesLeft(lease: HostAccessTimed, nowMs: number): string {
+	if (lease.expires_at === null) return 'activating';
+	if (!validTime(lease.expires_at)) return 'unknown';
+	const seconds = Math.max(0, Math.ceil((Date.parse(lease.expires_at) - nowMs) / 1000));
+	return `${Math.ceil(seconds / 60)} min left`;
 }

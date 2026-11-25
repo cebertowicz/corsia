@@ -21,6 +21,7 @@ import {
 } from './artifactAuxiliaryTabs';
 import { relocatedTitle } from './artifactTabTitle';
 import { isTabChanged } from './artifactTabStatus';
+import { landingOf, withLanding } from './artifactTabLanding';
 export { isTabChanged } from './artifactTabStatus';
 import { restoreWorkspace as restorePersistedWorkspace } from './artifactWorkspaceRestore';
 import type {
@@ -91,7 +92,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		if (input.artifactId && !tabs[existing].artifactId) {
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
-		if (input.landOn) tabs[existing] = { ...tabs[existing], landOn: input.landOn };
+		if (input.landOn) tabs[existing] = withLanding(tabs[existing], input);
 		return {
 			...ws,
 			tabs,
@@ -110,7 +111,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		loadedRevision: null,
 		latestRevision: null,
 		status: 'loading',
-		...(input.landOn ? { landOn: input.landOn } : {}),
+		...landingOf(input),
 	};
 	return {
 		...ws,

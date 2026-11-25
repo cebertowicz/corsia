@@ -6,7 +6,10 @@ export interface TaskDetail {
 	crumbs: string[];
 	/** An ancestor is missing from the read (archived or removed), so the path starts mid-tree. */
 	gap: boolean;
-	/** The description, else `Done when: <acceptance criteria>`; null when neither is written. */
+	/**
+	 * The description, else `Done when: <acceptance criteria>`; null when neither is written,
+	 * and always null for a workflow step, whose description and criteria are its agent instructions.
+	 */
 	text: string | null;
 }
 
@@ -28,6 +31,7 @@ export function taskDetail(byId: Map<string, OperatorNode>, nodeId: string): Tas
 		crumbs.unshift(parent.title);
 		parentId = parent.parent_id;
 	}
+	if (node.workflow_step) return { crumbs, gap, text: null };
 	const description = node.description?.trim();
 	const criteria = node.acceptance_criteria?.trim();
 	return { crumbs, gap, text: description || (criteria ? `Done when: ${criteria}` : null) };

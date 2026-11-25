@@ -409,28 +409,22 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
 
 		await dialog.getByRole('button', { name: 'Approve' }).click();
-		await expect(page.locator('.active-chip .countdown')).toContainText(':');
+		await expect(page.locator('.active-chip .countdown')).toContainText('min left');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
-		const hostAccessDisclosure = page.getByRole('button', { name: 'Host access', exact: true });
+		// The chip's words are its name, the time left included.
+		const hostAccessDisclosure = page.getByRole('button', { name: /^Host access · \d+ min left$/ });
 		const revokeHostAccess = page.getByRole('button', { name: 'Revoke host access' });
 		await expect(hostAccessDisclosure).toBeVisible();
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			// The solid material is the trigger's; the wrapper only lays it out.
+			// A composer chip: no fill and no border at rest; it sits clear of the messages instead.
 			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
-				const solidProbe = document.createElement('div');
-				solidProbe.style.background = 'var(--bg-secondary)';
-				document.body.appendChild(solidProbe);
-				const solidBackground = getComputedStyle(solidProbe).backgroundColor;
-				solidProbe.remove();
-				return {
-					actualBackground: getComputedStyle(element).backgroundColor,
-					solidBackground,
-				};
+				const style = getComputedStyle(element);
+				return { background: style.backgroundColor, border: style.borderTopWidth };
 			});
-			expect(chipMaterial.actualBackground).toBe(chipMaterial.solidBackground);
+			expect(chipMaterial).toEqual({ background: 'rgba(0, 0, 0, 0)', border: '0px' });
 
 			const messages = page.locator('.messages');
 			await messages.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -528,5 +522,199 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			body: { revision: 5, application_hash: 'hash-e2e-1' },
 		});
 		expect(consoleErrors).toEqual([]);
+	});
+
+	const SCHEME = 'https:' + '//';
+	const LONG_SITE = `${SCHEME}accounts.northwind-regional-supply-cooperative.example.com`;
+	const LONG_SITE_SHOWN = 'accounts.northwind-regional-supply-cooperative.example.com';
+
+	function fillRequest(threadId: string, n: number, overrides: Record<string, unknown> = {}) {
+		return {
+			id: `fill-e2e-${n}`, kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
+			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', username: 'accounts-payable@example.com',
+			revision: 1, application_hash: `hash-fill-e2e-${n}`, decision_capability: `decision-fill-e2e-${n}`,
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: `2026-07-18T16:0${n}:00.000Z`, updated_at: `2026-07-18T16:0${n}:00.000Z`,
+			...overrides,
+		};
+	}
+
+	/** The entry's site line: one line, nothing clipped. */
+	async function siteLine(shown: Locator) {
+		return shown.evaluate((element) => ({
+			fits: element.scrollWidth <= element.clientWidth,
+			width: element.clientWidth,
+			lines: element.getClientRects().length,
+			height: element.getBoundingClientRect().height,
+			lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+		}));
+	}
+
+	/** The entry's row: the site ends before the status, and the status and Review stay inside the entry and the screen. */
+	async function expectRowFits(page: Page) {
+		const row = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
+			const entry = button.getBoundingClientRect();
+			return { siteRight: box('.pending-site').right, statusLeft: box('.pending-status').left,
+				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth,
+				ownerWidth: box('.pending-owner').width, whatWidth: box('.pending-what').width,
+				entryWidth: entry.width, parentWidth: button.parentElement!.getBoundingClientRect().width };
+		});
+		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.statusLeft);
+		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
+		expect(row.entryRight, JSON.stringify(row)).toBeLessThanOrEqual(row.screen);
+	}
+
+	test('fits a long saved-login site on one line on a phone, cut from the front between whole labels with the domain whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login entry ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1);
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect(shown).toBeVisible();
+		await expect(shown).toHaveAttribute('title', LONG_SITE);
+		await expect.poll(() => shown.textContent()).not.toBe(LONG_SITE_SHOWN);
+		const label = (await shown.textContent()) ?? '';
+		// No scheme; one cut, at the front; what follows it is whole labels ending in the whole domain.
+		expect(label, label).not.toContain(SCHEME);
+		expect(label.startsWith('…'), label).toBe(true);
+		expect(label.match(/…/g), label).toHaveLength(1);
+		const tail = label.slice(1);
+		expect(tail === 'example.com' || LONG_SITE_SHOWN.endsWith(`.${tail}`), label).toBe(true);
+		const box = await siteLine(shown);
+		expect(box.fits, JSON.stringify(box)).toBe(true);
+		expect(box.lines).toBe(1);
+		if (box.lineHeight) expect(box.height).toBeLessThanOrEqual(box.lineHeight + 1);
+		await expectRowFits(page);
+	});
+
+	test('stacks a long agent name over the site on a wide screen, so the site stays whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const title = `Saved login long name ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+		const fill = fillRequest(threadId, 1, { agent });
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const name = page.locator('.pending-request-trigger .pending-owner');
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect(shown).toBeVisible();
+		await expect(name).toHaveText(agent);
+		// The site is never shortened for the name: it is whole, on a line of its own under the name.
+		await expect.poll(() => shown.textContent()).toBe(LONG_SITE_SHOWN);
+		const box = await siteLine(shown);
+		expect(box.fits, JSON.stringify(box)).toBe(true);
+		expect(box.lines).toBe(1);
+		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
+		expect(siteBox!.y, 'the site sits under the name').toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
+		expect(siteBox!.width).toBeGreaterThan(0);
+		await expectRowFits(page);
+	});
+
+	test('keeps Review on screen on a phone when the agent name is long', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login long name phone ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+		const fill = fillRequest(threadId, 1, { agent });
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
+		await expectRowFits(page);
+	});
+
+	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const title = `Saved login one row ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1);
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const name = page.locator('.pending-request-trigger .pending-owner');
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect.poll(() => shown.textContent()).toBe(LONG_SITE_SHOWN);
+		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
+		expect(Math.abs(siteBox!.y - nameBox!.y), 'one row').toBeLessThan(nameBox!.height);
+		expect(siteBox!.x).toBeGreaterThan(nameBox!.x + nameBox!.width - 1);
+		await expectRowFits(page);
+	});
+
+	test('shows the next waiting request in the entry as soon as the first is decided', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const title = `Saved login next request ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const first = fillRequest(threadId, 1);
+		const secondSite = `${SCHEME}billing.example.org`;
+		const second = fillRequest(threadId, 2, { agent: 'Payroll helper', site: secondSite, domain: 'example.org' });
+		let waiting = [first, second];
+		const rejected: string[] = [];
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const url = new URL(route.request().url());
+			if (route.request().method() === 'POST') {
+				const match = /\/fills\/([^/]+)\/reject$/.exec(url.pathname);
+				expect(match, url.pathname).toBeTruthy();
+				rejected.push(match![1]);
+				const decided = waiting.find((item) => item.id === match![1])!;
+				waiting = waiting.filter((item) => item.id !== match![1]);
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ ...decided, state: 'denied', revision: 2 }),
+				});
+				return;
+			}
+			const root = url.searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? waiting : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const entry = page.locator('.pending-request-trigger');
+		await expect(entry).toHaveCount(1);
+		await expect(entry.locator('.pending-owner')).toHaveText('Bookkeeper');
+		await entry.click();
+		const dialog = page.getByRole('dialog');
+		await dialog.getByRole('button', { name: 'Reject' }).click();
+		await expect.poll(() => rejected).toEqual(['fill-e2e-1']);
+		// The next request takes the entry's place without a reload.
+		await expect(entry.locator('.pending-owner')).toHaveText('Payroll helper');
+		await expect(entry.locator('.pending-site')).toHaveAttribute('title', secondSite);
+		await expect(entry.locator('.pending-site')).toHaveText('billing.example.org');
 	});
 });

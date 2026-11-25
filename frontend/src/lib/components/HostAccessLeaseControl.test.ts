@@ -97,8 +97,14 @@ async function openPendingDrawer(): Promise<HTMLElement> {
 	return host.querySelector('[role="dialog"]')!;
 }
 
+/** The active chip whose words (its accessible name) start with the kind: "Host access 14:52". */
+function chipTrigger(kind: 'Host access' | 'Saved login'): HTMLButtonElement | null {
+	return Array.from(host.querySelectorAll<HTMLButtonElement>('.active-chip-trigger'))
+		.find((button) => button.textContent?.replace(/\s+/g, ' ').trim().startsWith(`${kind} `)) ?? null;
+}
+
 async function openActiveDrawer(): Promise<HTMLElement> {
-	const trigger = host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Host access"]')!;
+	const trigger = chipTrigger('Host access')!;
 	trigger.click();
 	flushSync();
 	await tick();
@@ -198,7 +204,7 @@ describe('HostAccessLeaseControl', () => {
 	it('approves a saved-login fill for the picked duration, then revokes it from its chip', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -237,14 +243,14 @@ describe('HostAccessLeaseControl', () => {
 			.find((button) => button.textContent?.trim() === 'Approve')!.click();
 		await tick();
 
-		await vi.waitFor(() => expect(host.querySelector('.active-chip [aria-label="Saved login approval"]')).toBeTruthy());
+		await vi.waitFor(() => expect(chipTrigger('Saved login')).toBeTruthy());
 		const approve = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
 		expect(approve?.[0]).toBe('/api/host-access/leases/fills/fill-1/approve');
 		expect(JSON.parse(String(approve?.[1]?.body))).toEqual({
 			revision: 1, application_hash: 'fill-hash', duration_seconds: 1800,
 		});
 
-		host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Saved login approval"]')!.click();
+		chipTrigger('Saved login')!.click();
 		flushSync();
 		await tick();
 		const activeDialog = host.querySelector('[role="dialog"]')!;
@@ -277,11 +283,12 @@ describe('HostAccessLeaseControl', () => {
 		const chip = host.querySelector('.active-chip');
 		expect(chip).toBeTruthy();
 		expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
-		const trigger = chip!.querySelector<HTMLButtonElement>('[aria-label="Host access"]');
-		expect(trigger?.getAttribute('aria-label')).toBe('Host access');
-		expect(trigger?.querySelector('.host-access-icon')).toBeTruthy();
-		expect(trigger?.textContent).toContain('5:00');
-		expect(trigger?.querySelector('.countdown')?.getAttribute('aria-hidden')).toBe('true');
+		const trigger = chip!.querySelector<HTMLButtonElement>('.active-chip-trigger');
+		// The chip's words are its accessible name, time included: no static label, nothing hidden, no icon.
+		expect(trigger?.hasAttribute('aria-label')).toBe(false);
+		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 5 min left');
+		expect(trigger?.querySelector('[aria-hidden="true"]')).toBeNull();
+		expect(trigger?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
 
 		trigger?.click();
@@ -534,7 +541,7 @@ describe('HostAccessLeaseControl', () => {
 		});
 		try {
 			await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-			host.querySelector<HTMLElement>('.active-chip [aria-label="Host access"]')!.click();
+			chipTrigger('Host access')!.click();
 			flushSync();
 			await tick();
 			expect(host.textContent).toContain('Thread one purpose.');
@@ -547,7 +554,7 @@ describe('HostAccessLeaseControl', () => {
 
 			resolveThreadTwo(response({ leases: [threadTwo] }));
 			await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-			host.querySelector<HTMLElement>('.active-chip [aria-label="Host access"]')!.click();
+			chipTrigger('Host access')!.click();
 			flushSync();
 			await tick();
 			expect(host.textContent).toContain('Thread two purpose.');
@@ -833,11 +840,19 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(approve?.disabled).toBe(true);
+		// The drawer's status is coloured text, not a pill, and its Retry is a text action.
+		const status = dialog.querySelector('.decision-head .status');
+		expect(status?.textContent?.trim()).toBe('Couldn’t check');
+		expect(status?.classList.contains('stale')).toBe(true);
+		expect(dialog.querySelector('.pill')).toBeNull();
+		const retry = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Retry');
+		expect(retry?.className).toContain('ghost');
 	});
 
 	it('takes the full mobile band for the stale notice, not the narrow chip slot', async () => {
@@ -856,7 +871,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 
 		expect(host.querySelector('.thread-host-access')!.classList).toContain('wide');
 	});
@@ -919,20 +934,20 @@ describe('HostAccessLeaseControl', () => {
 		flushSync();
 		await vi.advanceTimersByTimeAsync(0);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:02');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:01');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
+		expect(chipTrigger('Host access')).toBeTruthy();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 
 		await vi.advanceTimersByTimeAsync(1_999);
@@ -942,7 +957,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(1);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 
 		await vi.advanceTimersByTimeAsync(3_999);
 		await tick();
@@ -975,7 +990,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(120_000);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(7);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 	});
 
 	it('does not leak another thread terminal failure into the selected thread', async () => {
@@ -1001,8 +1016,8 @@ describe('HostAccessLeaseControl', () => {
 		component = mountControl();
 		flushSync();
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
-		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
-		expect(host.querySelector('[aria-label="Host access"]')?.querySelector('.host-access-icon')).toBeTruthy();
+		expect(chipTrigger('Host access')).toBeTruthy();
+		expect(chipTrigger('Host access')?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
 		expect(host.textContent).not.toContain('Other thread');
 		expect(host.textContent).not.toContain('application_reviewer_failure');
@@ -1086,7 +1101,7 @@ describe('HostAccessLeaseControl', () => {
 
 		component = mountControl();
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('.active-chip [aria-label="Host access"]')).toBeTruthy());
+		await vi.waitFor(() => expect(chipTrigger('Host access')).toBeTruthy());
 		const revokeButton = await openRevokeButton();
 		revokeButton.click();
 		await tick();
@@ -1109,10 +1124,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(button('Reject')?.disabled).toBe(false));
 	});
 
-	it('disables Reject, not only Approve, when the selected thread truth becomes stale', async () => {
+	it('keeps Reject enabled when the selected thread truth becomes stale, and sends the last view', async () => {
+		// The server checks the revision and hash it is sent, so a Reject from the last view either ends
+		// that same request or comes back refused as changed; Approve stays disabled.
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
-			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503));
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingLease, state: 'rejected' }))
+			.mockResolvedValue(response({ leases: [] }));
 		vi.stubGlobal('fetch', fetchMock);
 
 		component = mountControl();
@@ -1120,14 +1139,57 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
-		const reject = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Reject');
-		expect(reject?.disabled).toBe(true);
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject');
+		expect(reject?.disabled).toBe(false);
 		reject!.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/lease-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 4, application_hash: 'hash-1' });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeNull());
+	});
+
+	it('keeps a stale saved-login fill rejectable through its own route', async () => {
+		const waitingFill: HostAccessFill = {
+			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+		};
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingFill] }))
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingFill, state: 'denied' }))
+			.mockResolvedValue(response({ leases: [] }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		const trigger = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLButtonElement>('[aria-label="Review a request to sign in with a saved login"]');
+			expect(found).toBeTruthy();
+			return found!;
+		});
+		emit('host_access_changed', { lease_id: 'fill-1' });
+		await vi.waitFor(() => expect(host.querySelector('.pending-status.stale')).toBeTruthy());
+		trigger.click();
+		flushSync();
 		await tick();
-		expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+		const dialog = host.querySelector('[role="dialog"]')!;
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject')!;
+		expect(reject.disabled).toBe(false);
+		reject.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/fills/fill-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 1, application_hash: 'fill-hash' });
 	});
 
 	it('disables Reject and no-ops its click when CAS identity is malformed', async () => {
@@ -1277,7 +1339,7 @@ describe('HostAccessLeaseControl — AdaptiveDrawer routing (#1123)', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 		expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 
-		const trigger = host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Host access"]')!;
+		const trigger = chipTrigger('Host access')!;
 		trigger.click();
 		flushSync();
 		await tick();

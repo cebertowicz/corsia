@@ -558,7 +558,9 @@ for (const theme of ['light', 'dark'] as const) {
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
 			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
-			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
+			// The phone sheet's heading carries the count on its Open button beside the title; the popover keeps it in the title.
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText(width <= 768 ? 'Comments' : 'Comments 3');
+			if (width <= 768) await expect(page.locator('[data-doc-comments-drawer] .drawer-heading').getByRole('button', { name: 'Open · 3' })).toHaveAttribute('aria-pressed', 'true');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			await shot(page, `03-three-replies-${theme}-${width}`);
 			await shotRailClosed(page, `03-three-replies-${theme}-${width}-rail-closed`, width);

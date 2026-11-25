@@ -148,7 +148,8 @@ def test_deny_and_revoke_end_it(world):
                              application_hash=row["application_hash"])
     assert denied["state"] == "denied"
     assert fills.may_fill(AGENT_THREAD, login) is False
-    with pytest.raises(fills.FillApprovalNotFound):
+    with pytest.raises(fills.FillApprovalNotFound, match="^This sign-in request is closed. Ask the agent to try "
+                       "again if it still needs to sign in.$"):
         _approve(row)  # a denied request can't be approved afterwards
     granted = _approve(fills.request_fill(AGENT_THREAD, login))
     assert fills.may_fill(AGENT_THREAD, login) is True
@@ -156,15 +157,21 @@ def test_deny_and_revoke_end_it(world):
                                 application_hash=granted["application_hash"])
     assert revoked["state"] == "revoked"
     assert fills.may_fill(AGENT_THREAD, login) is False
+    with pytest.raises(fills.FillApprovalNotFound, match="^This approval has ended.$"):
+        fills.revoke_fill(granted["id"], user_id=PERSON, revision=granted["revision"],
+                          application_hash=granted["application_hash"])
 
 
 def test_decisions_need_the_current_request_of_the_same_person(world):
     row = fills.request_fill(AGENT_THREAD, world["login"])
     with pytest.raises(fills.FillApprovalNotFound):
         _approve(row, user_id=OTHER_PERSON)
-    with pytest.raises(fills.FillApprovalError):
+    with pytest.raises(fills.FillApprovalError, match="^This request has new details. Review them, then approve or reject it.$"):
         fills.approve_fill(row["id"], user_id=PERSON, revision=row["revision"] + 1,
                            application_hash=row["application_hash"], duration_seconds=60)
+    with pytest.raises(fills.FillApprovalError):
+        fills.deny_fill(row["id"], user_id=PERSON, revision=row["revision"] + 1,
+                        application_hash=row["application_hash"])  # a reject on an old view is refused too
     with pytest.raises(fills.FillApprovalNotFound):
         fills.revoke_fill(row["id"], user_id=PERSON, revision=row["revision"],
                           application_hash=row["application_hash"])  # not granted yet
@@ -183,6 +190,20 @@ def test_a_duration_outside_one_to_1800_seconds_is_refused_not_clamped(world, se
 def test_the_longest_duration_is_the_host_access_cap(world):
     granted = _approve(fills.request_fill(AGENT_THREAD, world["login"]), seconds=1800)
     assert granted["duration_seconds"] == fills.MAX_GRANT_SECONDS == 1800
+
+
+#: The drawer's shortest duration choice (FILL_DURATIONS_SECONDS in frontend leaseFormat.ts).
+SHORTEST_DRAWER_CHOICE = 300
+
+
+def test_every_request_offers_at_least_the_drawers_shortest_choice(world):
+    """The drawer shows Approve only with a duration to pick, so the server never offers less than its shortest one."""
+    assert fills.MAX_GRANT_SECONDS >= SHORTEST_DRAWER_CHOICE
+    rows = [fills.request_fill(AGENT_THREAD, world["login"]), fills.request_fill(OTHER_THREAD, world["other_login"])]
+    assert all(row["max_duration_seconds"] >= SHORTEST_DRAWER_CHOICE for row in rows)
+    assert all(row["max_duration_seconds"] >= SHORTEST_DRAWER_CHOICE for row in fills.listed(PERSON))
+    _approve(rows[0], seconds=SHORTEST_DRAWER_CHOICE)
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is True
 
 
 def test_a_call_naming_another_thread_from_inside_an_agents_turn_is_refused(world):
@@ -337,3 +358,56 @@ def test_another_persons_session_cannot_see_or_decide(world):
         assert _post(client, theirs, pending, "approve", pending["decision_capability"],
                      duration_seconds=60).status_code == 404
     assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+
+
+# --- Product events --------------------------------------------------------------------------------
+
+
+def test_each_fill_transition_counts_once_with_only_the_thread_and_minutes(world, monkeypatch):
+    """One `saved_login` event per transition; never the site, username, domain or any id but the thread."""
+    from infra import product_events
+    from infra.accounts import issue_token
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    session, _ = issue_token(PERSON, kind="session")
+
+    first = fills.request_fill(AGENT_THREAD, world["login"])
+    fills.request_fill(AGENT_THREAD, world["login"])  # the same request again: no second event
+    with _client() as client:
+        pending = _listed(client, session)
+        assert _post(client, session, pending, "approve", pending["decision_capability"],
+                     duration_seconds=900).status_code == 200
+        active = _listed(client, session)
+        assert _post(client, session, active, "revoke", active["decision_capability"]).status_code == 200
+        second = fills.request_fill(AGENT_THREAD, world["login"])
+        again = _listed(client, session)
+        assert _post(client, session, again, "reject", again["decision_capability"]).status_code == 200
+        assert _post(client, session, again, "reject", again["decision_capability"]).status_code == 404
+        third = fills.request_fill(AGENT_THREAD, world["login"])
+        fresh = _listed(client, session)
+        assert _post(client, session, fresh, "approve", fresh["decision_capability"],
+                     duration_seconds=60).status_code == 200
+        clock = fills.time.monotonic
+        monkeypatch.setattr(fills.time, "monotonic", lambda: clock() + 61)
+        client.get("/api/host-access/leases", headers={"Authorization": f"Bearer {session}"})  # the read that drops it
+        fills.listed(PERSON)  # already dropped: counted once
+
+    assert [(args, sorted(kwargs)) for args, kwargs in events] == [
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_approved"), ["properties", "thread_id"]),
+        (("saved_login", "fill_revoked"), ["properties", "thread_id"]),
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_denied"), ["properties", "thread_id"]),
+        (("saved_login", "fill_requested"), ["properties", "thread_id"]),
+        (("saved_login", "fill_approved"), ["properties", "thread_id"]),
+        (("saved_login", "fill_expired"), ["properties", "thread_id"]),
+    ]
+    assert all(kwargs["thread_id"] == AGENT_THREAD for _, kwargs in events)
+    approvals = [kwargs["properties"] for args, kwargs in events if args[1] == "fill_approved"]
+    assert approvals == [{"duration_minutes": 15}, {"duration_minutes": 1}]
+    assert all(kwargs["properties"] is None for args, kwargs in events if args[1] != "fill_approved")
+    payloads = repr(events)
+    for private in ("example.com", "example.org", "example", "me@example.com", world["login"], world["other_login"],
+                    first["id"], second["id"], third["id"]):
+        assert private not in payloads

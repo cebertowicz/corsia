@@ -72,7 +72,13 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	const drawer = drawerOf(page);
 	await listShown(drawer);
 	await settled(page);
-	if (mode === 'phone') await expect(drawer.locator('.drawer-heading h2')).toHaveText('Comments 2');
+	if (mode === 'phone') {
+		// The sheet's heading carries the count on its Open button, beside the title, with no switch row under it.
+		await expect(drawer.locator('.drawer-heading h2')).toHaveText('Comments');
+		await expect(drawer.locator('.drawer-heading').getByRole('button', { name: 'Open · 2' })).toHaveAttribute('aria-pressed', 'true');
+		await expect(drawer.locator('.drawer-switch')).toHaveCount(1);
+		await expect(drawer.locator('.drawer-heading .drawer-switch')).toHaveCount(1);
+	}
 	await expect(drawer.locator('.ct-reply-count')).toContainText('2 replies');
 	await showReplies(drawer);
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();

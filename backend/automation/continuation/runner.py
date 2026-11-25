@@ -8,6 +8,7 @@ from typing import Protocol
 from loguru import logger
 
 from automation.continuation import execution, state, triggers
+from automation.continuation.sources.activity_ranking import ActivityRankingSource
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from automation.continuation.sources.harvest import HarvestSource
 from automation.continuation.sources.later_review import LaterReviewSource
@@ -62,6 +63,7 @@ def default_sources() -> list[TriggerSource]:
         WatchdogSource(),
         WatchExpirySource(),
         FeedbackBatchSource(),
+        ActivityRankingSource(),
         ScheduleSource(),
         HarvestSource(),
         SilentChildSource(),

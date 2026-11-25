@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plans import operator_plan_display as plan_header, user_steering
+from plans import operator_node_state, operator_plan_display as plan_header, user_steering
 
 
 def _artifact_fields(link: dict) -> dict:
@@ -34,11 +34,15 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
             "witnessed": False,
         }
     execution = state["execution"]
-    # Precedence decides disclosure: only a primarily blocked node opens its
-    # ancestor path. A paused, review, or terminal node keeps its blocker as a
-    # detail cause without widening what the tree opens by default.
+    # Quiet waits keep their causes without opening a path. Shown blocks,
+    # action owed to the person, and selected work whose executor stopped
+    # (it reads waiting but is not a quiet wait) need this disclosure.
     attention_path = (
-        [*node["path"], node["id"]] if execution["condition"] == "blocked" else []
+        [*node["path"], node["id"]]
+        if operator_node_state.shown_condition(state) == "blocked"
+        or state["requires_user_action"]
+        or state["executor_stopped"]
+        else []
     )
     return {
         "id": node["id"],

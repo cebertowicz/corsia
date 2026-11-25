@@ -9,6 +9,7 @@ import {
 	TEST_TOKEN,
 } from '../support/corsia';
 import { syntheticGif, syntheticPng } from '../support/syntheticImages';
+import { enterDocumentEdit } from '../support/documentReading';
 
 const WIDTHS = [1440, 393];
 const REMOTE_HOST = 'images.example.invalid';
@@ -132,6 +133,9 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 				await expect(page.locator('.image-overlay img')).toBeVisible();
 				await page.locator('.image-overlay button.back').click();
 				await expect(page.locator('.image-overlay')).toHaveCount(0);
+				// The steps below move a caret and Backspace removes an image; this describe uses a touch pointer, which opens
+				// documents in Reading, so choose Edit first (a no-op when the opening was already editable).
+				await enterDocumentEdit(page);
 				await page.getByText('Text between the images').click({ position: { x: 2, y: 2 } });
 				await page.keyboard.press('Home');
 				await page.keyboard.press('Shift+ArrowUp');

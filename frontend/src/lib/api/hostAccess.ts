@@ -113,6 +113,11 @@ export interface HostAccessFill {
 	root_thread_id: string;
 	agent: string;
 	site: string;
+	/**
+	 * The site's registrable domain (Public Suffix List). A host with none, such as an IP address, is its own
+	 * domain; null only when the site has no host.
+	 */
+	domain: string | null;
 	username: string;
 	revision: number;
 	application_hash: string;
