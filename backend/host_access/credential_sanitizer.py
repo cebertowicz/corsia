@@ -109,8 +109,33 @@ class CredentialSafeText(str):
     """Text already redacted by a source-aware boundary."""
 
 
+_PLACEHOLDER_REFERENCE_RE = re.compile(
+    r"(?:\$[A-Z_][A-Z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
+    r"\{[A-Za-z_]+(?:\.[A-Za-z_]+)*\}|<[A-Za-z][A-Za-z_ -]*>|"
+    r"[Yy][Oo][Uu][Rr][_-][A-Za-z_-]+)"
+)
+
+
 def _is_placeholder(value: str) -> bool:
-    return value.strip().casefold() in _PLACEHOLDERS
+    value = value.strip()
+    return value.casefold() in _PLACEHOLDERS or bool(
+        _PLACEHOLDER_REFERENCE_RE.fullmatch(value)
+        and not re.search(r"[A-Za-z0-9]{16}", value)
+        and not _TOKEN_SHAPE_ANYWHERE_RE.search(value)
+        and not _PEM_PRIVATE_KEY_RE.search(value)
+    )
+
+
+def _matched_placeholder(match: re.Match[str], value: str, group: str) -> bool:
+    if _is_placeholder(value):
+        return True
+    end = match.end(group)
+    following = match.string[end + 1:end + 2]
+    return bool(
+        match.string[end:end + 1] == "}"
+        and (not following or following.isspace() or following in "\"'`\\,;)]}")
+        and _is_placeholder(value + "}")
+    )
 
 
 def _is_credential_key(name: object) -> bool:
@@ -127,7 +152,7 @@ def _redact_assignment(match: re.Match[str]) -> str:
     value = match.group("quoted")
     if value is None:
         value = match.group("bare") or ""
-    if _is_placeholder(value):
+    if _matched_placeholder(match, value, "quoted" if match.group("quoted") is not None else "bare"):
         return match.group(0)
     quote = match.group("quote") or ""
     return f"{match.group('prefix')}{quote}{REDACTION_MARKER}{quote}"
@@ -175,6 +200,8 @@ def _redact_space_value(match: re.Match[str]) -> str:
 
 
 def _redact_auth_scheme(match: re.Match[str]) -> str:
+    if _matched_placeholder(match, match.group("value"), "value"):
+        return match.group(0)
     return match.group("prefix") + REDACTION_MARKER
 
 
@@ -188,6 +215,9 @@ _TOKEN_PREFIX_RE = re.compile(
     # A signed JWT, made of a base64url JSON header and payload (both open with eyJ) and a signature.
     r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}"
 )
+
+# Detect embedded shapes even where a preceding word character hides their boundary.
+_TOKEN_SHAPE_ANYWHERE_RE = re.compile(_TOKEN_PREFIX_RE.pattern.replace(r"\b", ""))
 
 # Applied in this order; sanitize_credential_text and credential_spans share it.
 _RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
@@ -305,7 +335,7 @@ def sanitize_credential_data(value: Any) -> Any:
                             f"{authorization.group('scheme')} "
                             f"{REDACTION_MARKER}"
                         )
-                    if sanitized == child and not _is_placeholder(child):
+                    if sanitized == child and not _is_placeholder(authorization.group("value") if authorization else child):
                         sanitized = REDACTION_MARKER
                 else:
                     sanitized = REDACTION_MARKER
