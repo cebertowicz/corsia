@@ -196,7 +196,7 @@ class MicrosoftMailDraftTool(Tool):
                 description="Microsoft email draft; the person reviews it before anything is sent.",
             )
             row = await run_in_db(open_draft, thread_id, saved["draft_id"], "email")
-            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "next": "Show the person this draft and wait for their reply before calling microsoft_mail_send."})
+            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "next": "Show the person this draft and call microsoft_mail_send when they want it sent."})
         except (MicrosoftError, ConnectedAccountError, DraftRefused, DraftStorageRefused, DraftError) as exc:
             return _error(exc)
 
@@ -209,7 +209,7 @@ class MicrosoftMailSendTool(Tool):
     """Send only the person-reviewed draft revision that action_gate approves."""
     self_describing_errors = True
     name = "microsoft_mail_send"
-    description = "Send a reviewed Microsoft mail draft only after the person's later reply."
+    description = "Send a reviewed Microsoft mail draft, when the person wants it sent."
     parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "draft_id", "revision"], "properties": {"account_id": ACCOUNT_PARAM, "draft_id": {"type": "string"}, "revision": {"type": "string"}}}
 
     async def execute(self, **kwargs: Any) -> str:

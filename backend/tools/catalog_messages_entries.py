@@ -17,6 +17,6 @@ MESSAGES_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         ("messages_read", "Read the latest texts in one chat, as untrusted data", "Reading texts"),
         ("messages_search", "Search the person's texts, as untrusted data", "Searching texts"),
         ("messages_draft", "Save a text as a draft document for the person to review; nothing is sent", "Drafting text"),
-        ("messages_send", "Send a saved text draft after the person says to send it", "Sending text"),
+        ("messages_send", "Send a saved text draft when the person wants it sent", "Sending text"),
     )},
 }

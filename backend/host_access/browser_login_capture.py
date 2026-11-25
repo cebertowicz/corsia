@@ -19,7 +19,6 @@ Confirmed and dropped offers leave capture's pending state; the holder owns conf
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 from dataclasses import dataclass, field
 from functools import partial
@@ -28,12 +27,13 @@ from urllib.parse import urlsplit
 
 from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
-from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _QuietCdp, world as _world
+from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, quiet_cdp as _quiet_cdp, world as _world
 from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
 from host_access.browser_login_capture_policy import is_submit, switches_tab, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
 from host_access.browser_login_capture_writes import ANY_DOCUMENT as _ANY_DOCUMENT, AgentWrites, NoWrites
 from host_access.browser_domain import registrable_domain
+from host_access.browser_steps import password_step
 from host_access.browser_session_state import BrowserSessionError
 from infra import saved_login_offers
 
@@ -142,8 +142,7 @@ def _marked(thread_id: str, loader: str) -> bool:
 
 async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None:
     """Read before delivering input, then queue holder work without holding the input."""
-    lifecycle = importlib.import_module("host_access.browser_step_lifecycle")
-    step = lifecycle.password_step(thread_id)
+    step = password_step(thread_id)
     item, previous, finished = _queue_state.begin(thread_id, session_key)
     flight = _start_submit(thread_id, session_key, step) if step is not None else None
     read = None
@@ -155,7 +154,7 @@ async def person_submit(thread_id: str, session_key: str, endpoint: str) -> None
     except Exception:
         log.warning("saved-login capture skipped a submit it couldn't read")
     if flight is not None:
-        if read is None or lifecycle.password_step(thread_id) is not step:
+        if read is None or password_step(thread_id) is not step:
             work = _discard(thread_id, flight)
         else:
             flight.domain = _site_domain(read[0])
@@ -194,7 +193,7 @@ def _start_submit(thread_id: str, session_key: str, step: object) -> _Flight:
 
 
 async def _submit(thread_id: str, endpoint: str, step):
-    async with _QuietCdp(endpoint) as cdp:
+    async with _quiet_cdp(endpoint) as cdp:
         loader, frames = await _frame_tree(cdp)
         if _marked(thread_id, loader):
             return None
@@ -259,11 +258,10 @@ async def _offer(thread_id: str, item: _QueueItem, flight: _Flight, login: tuple
         return
     if flight.number != flight.group.number:
         return
-    lifecycle = importlib.import_module("host_access.browser_step_lifecycle")
     if flight.verdict is not None:
         _settle(flight.session_key, confirm=flight.verdict)
         flight.group.offered = False
-    elif lifecycle.password_step(thread_id) is not flight.group.step:
+    elif password_step(thread_id) is not flight.group.step:
         _settle(flight.session_key, confirm=False)
         flight.group.offered = False
     else:

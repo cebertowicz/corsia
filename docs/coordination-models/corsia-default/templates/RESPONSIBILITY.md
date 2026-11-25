@@ -44,9 +44,8 @@ the upstream maintainers.
 - scope changes;
 - disagreements with a reviewer finding (sdlc-process stop rules).
 
-**Standing grant:** work eligible upstream issues in the `corsia-contrib`
-project, up to <N> tokens per week, during <hours/days>, until the owner
-revokes it.
+<!-- Standing grants and what comes first now live in this agent's
+PRIORITIES.md (templates/PRIORITIES.md), which the person owns. -->
 
 ## Principles and invariants
 
@@ -80,10 +79,6 @@ revokes it.
 `shared/contrib/`, indexed by `INDEX.md`. It holds the list of claimed and
 merged issues with links, the decision log, the failure catalog (reviewer
 findings and their root causes), and the budget ledger.
-
-## Current priorities and initiatives
-
-1. <date> — Complete the smoke test and first eligible PR. Serves OKR 1.
 
 ## Quality signals
 

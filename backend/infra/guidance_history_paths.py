@@ -25,6 +25,8 @@ def digest(content: str | bytes | None) -> str | None:
 def write_bytes(path: Path, data: bytes) -> None:
     """Write guidance bytes, creating their parent directory when needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    from doceditor.comment_snapshots import adopt_before_write
+    adopt_before_write(path)
     path.write_bytes(data)
 
 

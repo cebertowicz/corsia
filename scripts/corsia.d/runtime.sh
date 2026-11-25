@@ -1,5 +1,13 @@
 # Runtime helpers for local services.
 
+lifecycle_log_prefix() {
+    if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-false}" = true ]; then
+        printf '%s ' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+}
+
+lifecycle_say() { printf '%s%s\n' "$(lifecycle_log_prefix)" "$1"; }
+
 # Compare literal paths first, then their physical directories when they exist.
 same_directory() {
     local left="$1" right="$2" left_real right_real
@@ -161,7 +169,7 @@ wait_for_backend_health() {
                 if [ "$shown_phase" != upgrading ]; then
                     [ "$line_open" -eq 0 ] || echo
                     line_open=0
-                    echo "  CORSIA is upgrading its data; this can take several minutes on a large database…"
+                    lifecycle_say "  CORSIA is upgrading its data; this can take several minutes on a large database…"
                     shown_phase=upgrading
                 fi
                 ;;
@@ -174,7 +182,7 @@ wait_for_backend_health() {
             fi
             line_open=1
         elif [ "$elapsed" -eq 0 ] || [ "$elapsed" -eq 30 ]; then
-            echo "  Starting CORSIA…"
+            lifecycle_say "  Starting CORSIA…"
         fi
         if [ "$elapsed" -ge "$ceiling" ]; then
             why=ceiling
@@ -197,7 +205,7 @@ wait_for_backend_health() {
             fi
             ;;
     esac
-    echo "     Run 'corsia logs' to see why (log: ${BACKEND_LOG:-the backend log})."
+    lifecycle_say "     Run 'corsia logs' to see why (log: ${BACKEND_LOG:-the backend log})."
     return 1
 }
 
@@ -493,7 +501,7 @@ drain_and_wait() {
     fi
 
     export CORSIA_RESTART_OPERATION_ID="$operation_id"
-    echo "  Drain started..."
+    lifecycle_say "  Drain started..."
     local started_at waited
     started_at="$(runtime_epoch_seconds)"
     while :; do
@@ -634,9 +642,9 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
         fi
         # The /ready endpoint, not a projected phase, owns quiescence.
         if [ -n "$blocker" ]; then
-            printf '  Waiting... %s (%ss)\n' "$blocker" "$waited"
+            lifecycle_say "  Waiting... $blocker (${waited}s)"
         else
-            echo "  Waiting... $active blocking work item$([ "$active" = "1" ] || printf 's') (${waited}s)"
+            lifecycle_say "  Waiting... $active blocking work item$([ "$active" = "1" ] || printf 's') (${waited}s)"
         fi
         sleep 2
     done
@@ -755,7 +763,7 @@ start_backend() {
         sleep 1
         port_wait=$((port_wait + 1))
     done
-    echo "  Starting CORSIA backend on :$BACKEND_PORT..."
+    lifecycle_say "  Starting CORSIA backend on :$BACKEND_PORT..."
     mkdir -p "$(dirname "$BACKEND_LOG")" || return 1
     cd "$BACKEND_DIR"
     [ ! -L "$BACKEND_LOG" ] || rm -f "$BACKEND_LOG" || return 1
@@ -835,11 +843,11 @@ print("\t".join((backend_sha, state(backend.get("dirty")),
         topology="legacy process PID ${pid:-unknown}"
     fi
     ok "Health: ok"
-    echo "  Serving on :$BACKEND_PORT"
-    echo "  Checkout: $checkout"
-    echo "  Revision: ${revision:0:12} (backend + frontend)"
-    echo "  Dirty state: backend $backend_dirty, frontend $frontend_dirty, checkout $checkout_dirty"
-    echo "  Process: $topology"
+    lifecycle_say "  Serving on :$BACKEND_PORT"
+    lifecycle_say "  Checkout: $checkout"
+    lifecycle_say "  Revision: ${revision:0:12} (backend + frontend)"
+    lifecycle_say "  Dirty state: backend $backend_dirty, frontend $frontend_dirty, checkout $checkout_dirty"
+    lifecycle_say "  Process: $topology"
 }
 
 start_server() {
@@ -1461,7 +1469,7 @@ handoff_redeploy_restart() {
         fail "Redeploy prepared successfully, but the updated lifecycle script is not executable: $script"
         return 1
     fi
-    echo "  Handing off to the updated lifecycle..."
+    lifecycle_say "  Handing off to the updated lifecycle..."
     if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-}" = true ]; then
         if [ "$FORCE" = "true" ]; then
             source "$script" restart-prepared --force

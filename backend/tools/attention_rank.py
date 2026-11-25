@@ -53,7 +53,7 @@ def _set(db, thread_id: str, user_id: str, project_id: str | None, scope: str,
         return f'Error: {exc}'
     # The queue is composed outside the lock; the write re-checks only the ranker. A key that
     # leaves the queue meanwhile is ignored on read and dropped on the next set, which also
-    # forgets it was seen, so its return wakes the ranker.
+    # forgets it was seen, so its return appears in a passive note.
     with write_transaction(db, scope='attention_rank') as tx:
         locked_scope, ranker = ranker_for(tx, user_id, project_id)
         if locked_scope != scope or not ranker or ranker['thread_id'] != thread_id:
@@ -102,8 +102,8 @@ class AttentionRankTool(Tool):
                 'blocks agents or a date the person set first. Write each reason for the '
                 f'person in one line, at most {REASON_MAX_CHARS} characters. State only what the item or '
                 'priorities show; if unsure, say what it waits for. Unlisted items stay '
-                'below ranked items; set replaces the previous order. Call on a ranking '
-                'wake and when your scope priorities change.')
+                'below ranked items; set replaces the previous order. Call when a passive '
+                'note lists unranked items, and when your scope priorities change.')
 
     @property
     def parameters(self) -> dict[str, Any]:

@@ -883,6 +883,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 206 -> 207 adds the suggestion-history receipt table.
         from infra.migration_206_to_207_suggestion_history import migrate_206_to_207
         migrate_206_to_207(db)
+        # 207 -> 208 adds the snapshot store an anchor is measured against.
+        from infra.migration_207_to_208_comment_source_snapshots import migrate_207_to_208
+        migrate_207_to_208(db)
         # 208 -> 209 adds saved-login fill history.
         from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
         migrate_208_to_209(db)

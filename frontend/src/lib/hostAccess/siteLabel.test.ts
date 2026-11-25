@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { siteLabels } from './siteLabel';
+import { rowLayout, siteLabels } from './siteLabel';
 
 const SCHEME = 'https:' + '//';
 
@@ -38,5 +38,28 @@ describe('siteLabels', () => {
 	it('keeps the whole host without a registrable domain or when the domain is the host itself', () => {
 		expect(siteLabels(`${SCHEME}192.168.1.20`, null)).toEqual(['192.168.1.20']);
 		expect(siteLabels(`${SCHEME}192.168.1.20`, '192.168.1.20')).toEqual(['192.168.1.20']);
+	});
+});
+
+describe('rowLayout', () => {
+	// A 393 px phone: 343 px of row, 12 px gaps, a 13 px name, "Review →" 59 px, the badge 122 px, "…example.com" 91 px.
+	const phone = { room: 343, gap: 12, em: 13, siteMin: 91 };
+
+	it('keeps the name at 8em on one row when the site fits beside it at its domain', () => {
+		expect(rowLayout({ ...phone, fixed: 59, items: 3 })).toEqual({ stacked: false, ownerFloor: 104 });
+		expect(rowLayout({ room: 1100, gap: 12, em: 13, siteMin: 91, fixed: 160, items: 4 })).toEqual({ stacked: false, ownerFloor: 104 });
+	});
+
+	it('lowers the name\'s floor below 8em, not under 4em, before the site leaves the row', () => {
+		expect(rowLayout({ ...phone, fixed: 59, items: 3, siteMin: 200 })).toEqual({ stacked: false, ownerFloor: 60 });
+		expect(rowLayout({ ...phone, fixed: 59, items: 3, siteMin: 208 })).toEqual({ stacked: false, ownerFloor: 52 });
+	});
+
+	it('puts the site on its own line when the name would get less than 4em, and the name keeps the row', () => {
+		// Out of date: the badge joins "Review →" on the row.
+		expect(rowLayout({ ...phone, fixed: 59 + 122, items: 4 })).toEqual({ stacked: true, ownerFloor: 104 });
+		// A long registrable domain that only fits on a line of its own.
+		expect(rowLayout({ ...phone, fixed: 59, items: 3, siteMin: 340 })).toEqual({ stacked: true, ownerFloor: 104 });
+		expect(rowLayout({ room: 200, gap: 12, em: 13, siteMin: 91, fixed: 59 + 122, items: 4 })).toEqual({ stacked: true, ownerFloor: 0 });
 	});
 });

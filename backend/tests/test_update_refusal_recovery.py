@@ -1,6 +1,7 @@
 """Refusals settle only the update that owns the lifecycle process."""
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -152,7 +153,13 @@ async def test_lifecycle_appends_to_preparation_log(isolated_db, tmp_path, monke
     settings_restart._prepare_current_release(Path("/tmp/corsia"), env)
     await settings_restart._launch_settings_restart(operation_id, True, Path("/tmp/corsia"), env, ["restart-prepared"], lambda name: tmp_path / name)
     log = tmp_path / f"update-{operation_id}.log"
-    assert log.read_text() == "preparation output\nlifecycle output\n"
+    lines = log.read_text().splitlines()
+    stamp = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+    assert len(lines) == 4
+    assert re.fullmatch(stamp + r" Prepare started", lines[0])
+    assert lines[1] == "preparation output"
+    assert re.fullmatch(stamp + r" Prepare ended in \d+s \(exit 0\)", lines[2])
+    assert lines[3] == "lifecycle output"
     assert not (tmp_path / "restart.log").exists()
 
 

@@ -92,6 +92,31 @@ async def test_request_host_access_tool_reports_automatic_activation(
 
 
 @pytest.mark.asyncio
+async def test_auto_approved_request_reports_reviewer_outage_during_activation(isolated_db, monkeypatch):
+    from host_access import supervisor
+    from host_access.errors import ReviewerOutage, ReviewerUnavailableError
+    from test_host_access_supervisor import _configure_review_fakes, _seed_session
+    from tools.host_access import RequestHostAccessTool
+
+    _seed_session(isolated_db, "root")
+    _configure_review_fakes(monkeypatch, supervisor)
+    monkeypatch.setattr(supervisor, "get_host_access_auto_approve", lambda: True)
+
+    async def unavailable(*_args, **_kwargs):
+        raise ReviewerUnavailableError("unavailable", outage=ReviewerOutage("reviewer", "rate_limit"))
+
+    monkeypatch.setattr(supervisor.reviewer_target, "resolve_bound_reviewer_target", unavailable)
+    result = json.loads(await RequestHostAccessTool().execute(
+        purpose="Inspect the local runtime", plan=["Read logs"], duration_seconds=60,
+        _thread_id="root", _host_access_turn_identity=TurnIdentity("request-turn", 1),
+    ))
+    assert result == {
+        "state": "blocked", "access_granted": False,
+        "next": "lease_activation_failed", "reason": "activation_reviewer_unavailable",
+    }
+
+
+@pytest.mark.asyncio
 async def test_request_host_access_tool_without_context_fails_closed(isolated_db):
     from tools.host_access import RequestHostAccessTool
 

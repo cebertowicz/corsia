@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp_frames, browser_pane_state, browser_step_lifecycle
+from host_access import browser_cdp_frames, browser_pane_state, browser_saved_fills, browser_step_lifecycle
+from host_access.browser_saved_fills import (mark_saved_fill as mark_saved_fill, saved_fill_document as _saved_fill_document,
+                                         saved_fill_session as saved_fill_session)
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
@@ -118,27 +120,6 @@ class PasswordReadGuard:
 # per document it has guarded: leaving a tab never lifts it, and a loader id never recurs, so a new
 # document is never over-refused. Cleared when the thread's browser closes.
 _guarded_visits: dict[str, dict[str, PasswordReadGuard]] = {}
-# Saved-login fills by thread: (session, filled tab's main-frame loader id). Cleared when its browser closes.
-_saved_fills: dict[str, set[tuple[str | None, str | None]]] = {}
-
-
-def mark_saved_fill(thread_id: str, session: str | None, document: str | None) -> None:
-    """Before a saved login is typed: allowlist its document until a new one commits; limit its session to the end."""
-    _saved_fills.setdefault(thread_id, set()).add((session, document or None))
-
-
-def same_session(marked: str | None, session: str | None) -> bool:
-    return marked is None or session is None or marked == session  # a missing id can't be told from any session
-
-def saved_fill_session(thread_id: str, session: str | None) -> bool:
-    """Whether a saved login was filled in this session, which then runs only _saved_command shapes until it ends."""
-    return any(same_session(marked, session) for marked, _ in _saved_fills.get(thread_id, ()))
-
-
-def _saved_fill_document(thread_id: str, session: str | None, visit: str) -> bool:
-    # A document id that wasn't read, on either side, counts as the filled document.
-    return any(same_session(marked, session) and (document is None or not visit or document == visit)
-               for marked, document in _saved_fills.get(thread_id, ()))
 
 
 def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None,
@@ -256,6 +237,22 @@ def hide_field_values(snapshot: str) -> str:
     return "\n".join(lines)
 
 
+async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reopen: Callable[[], Awaitable[None]]) -> None:
+    """After back or forward, load the page again as a new navigation once the session has held a page.
+
+    A page that was in a person step or under the password read guard can come back from the back-forward
+    cache, or from its history entry, with its document and filled values. History doesn't say which entry
+    that was, so once a session has held any page, every back and forward loads fresh. A failed check
+    fails closed: the agent gets no page.
+    """
+    try:
+        result = await probe(_known_nodes(thread_id))
+    except Exception as exc:
+        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+    if result.visible_nodes or _guarded_visits.get(thread_id) or browser_step_lifecycle.held_pages(thread_id):
+        await reopen()
+
+
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
                               session: str | None = None,
                               current_session: Callable[[], str | None] | None = None) -> None:
@@ -365,7 +362,7 @@ def browser_closed(thread_id: str) -> None:
     """Clear read guards, saved-fill scope, agent presence and any save-login offer; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
-    _saved_fills.pop(thread_id, None)
+    browser_saved_fills.drop_thread(thread_id)
     saved_login_offers.drop_thread(thread_id)
 
 

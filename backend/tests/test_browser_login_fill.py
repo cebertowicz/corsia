@@ -15,7 +15,7 @@ import pytest
 
 from host_access import (
     browser_cdp, browser_control, browser_fill_marks, browser_login_fill as fill, browser_login_page as page,
-    browser_session_commands, browser_step_lifecycle,
+    browser_saved_fills, browser_session_commands, browser_step_lifecycle,
 )
 from host_access.browser_session_state import BrowserSessionError
 from infra import key_store_values, saved_login_fills, saved_login_results, saved_logins
@@ -151,7 +151,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
 
 def _clear_marks() -> None:
     for held in (browser_fill_marks._scripted, browser_fill_marks._session_marks, browser_fill_marks._site_marks,
-                 browser_control._saved_fills):
+                 browser_saved_fills._saved_fills):
         held.clear()
 
 
@@ -360,7 +360,7 @@ async def test_every_status_has_its_own_line_and_none_falls_through(world):
     login = saved_logins.get_login(world.login_id)
     lines = {}
     for status in STATUSES:
-        browser_control._saved_fills.clear()
+        browser_saved_fills._saved_fills.clear()
         lines[status] = await fill._result(world.owner, THREAD, login, status)
     assert len(set(lines.values())) == len(STATUSES), lines
     assert all("{" not in line for line in lines.values()), lines

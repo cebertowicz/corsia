@@ -16,7 +16,7 @@ import sys, threading
 from pathlib import Path
 from infra import config, database
 from infra.platform_paths import WorkspaceSelection
-from registry import durable_writes, service
+from registry import durable_write_preconditions, durable_writes, service
 workspace, db_path, owner, target, cut = sys.argv[1:]
 workspace = Path(workspace)
 config.WORKSPACE = workspace
@@ -29,7 +29,7 @@ def pause(*args, **kwargs):
 if cut == 'applied':
     durable_writes._register_applied = pause
 else:
-    durable_writes.replace_if_expected = pause
+    durable_write_preconditions.replace_if_expected = pause
 durable_writes.write_text(Path(target), 'new bytes', thread_id=owner, project_id='project-alpha', workspace=workspace, update_trigger='test fixture')
 '''
 SERVER = r'''

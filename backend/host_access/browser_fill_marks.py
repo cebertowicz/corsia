@@ -25,7 +25,7 @@ from typing import Sequence
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_cdp
-from host_access.browser_control import same_session
+from host_access.browser_saved_fills import same_session
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
 

@@ -334,7 +334,8 @@ def test_turn_start_never_selects_user_assigned_work(db):
 def test_turn_start_skips_held_work_and_selects_the_first_eligible_task(db):
     """Canonical order is preserved after batched eligibility excludes a held task."""
     plan = service.ensure_plan("thread", "child", db=db)
-    prerequisite = add_task(db, plan.id, "Prerequisite", order_key=0)
+    # The prerequisite waits on the person, so it is not ready work the pick would pass.
+    prerequisite = add_task(db, plan.id, "Prerequisite", order_key=0, assignee="user")
     held = add_task(db, plan.id, "Held first", order_key=1)
     first_ready = add_task(db, plan.id, "First eligible", order_key=2)
     second_ready = add_task(db, plan.id, "Second eligible", order_key=3)
@@ -446,6 +447,8 @@ def test_turn_start_read_count_is_flat_for_eligible_work(db):
     one = _work_turn_start_reads(db, "one-ready-task", 1)
     hundred = _work_turn_start_reads(db, "hundred-ready-tasks", 100)
 
-    # 130: the plan-status digest a start journals now reads the open work through the
+    # 122: the plan-status digest a start journals now reads the open work through the
     # batched open-tree facts (ten more constant reads) instead of the whole plan (#149 S2w).
-    assert hundred == one <= 130
+    # +9 (measured 122 -> 131): the app's pick reads the open top-level order and
+    # readiness once, so it never passes ready work ranked above (#3160).
+    assert hundred == one <= 131

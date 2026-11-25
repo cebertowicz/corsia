@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from registry import file_identity_reads, models, registration_events, registration_writer
+from registry import file_identity_reads, models, priorities_ownership, registration_events, registration_writer
 from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
@@ -284,8 +284,8 @@ def register_write_strict(
                 "UPDATE artifact_identities SET external_id=?, path=? WHERE id=?",
                 (identity.external_id, identity.canonical, existing["id"]),
             )
-        artifact_metadata = prepared.metadata({**(metadata or {}), "zone": identity.zone},
-                                               parse_metadata(existing["metadata"]) if existing else {})
+        artifact_metadata = prepared.metadata({**(metadata or {}), "zone": identity.zone}, parse_metadata(existing["metadata"]) if existing else {})
+        priorities_ownership.register_new_person_owner(identity, existing, artifact_metadata, title, description, retention, db=_db)
         artifact = models.register_artifact(
             integration="workspace",
             type=identity.artifact_type,
@@ -300,7 +300,7 @@ def register_write_strict(
             metadata=artifact_metadata, origin=origin,
             db=_db,
         )
-        artifact_id = (artifact or existing)["id"]
+        artifact_id = cast(dict[str, Any], artifact or existing)["id"]
         merge_identity_metadata(_db, artifact_id, artifact_metadata)
         artifact = written_row(_db, artifact_id, thread_id)
         if existing is not None:

@@ -6,9 +6,13 @@ import json
 import re
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 from infra.database import get_db
-from tests.test_action_gate import _admit, _bind
+from fastapi import HTTPException
+from api.email_drafts import send_now
+from tests.test_email_drafts_api import _artifact, _owner, _shown
+from tools.email_send_approved import UNGUARDED_REPLY
 
 import httpx
 import pytest
@@ -17,7 +21,7 @@ from tests.test_google_email import (  # fixtures and existing provider fake
     EMAIL, GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
 )
 from tools import google_email, mail_guard_runtime
-from tools.google_email import EmailDraftTool, EmailSendTool
+from tools.google_email import EmailDraftTool
 from tools.reviewed_drafts import working_root
 
 
@@ -56,8 +60,10 @@ def clean_screen(monkeypatch):
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
 
 
-async def send(mail, draft, **kwargs):
-    return await EmailSendTool().execute(_thread_id=mail.thread, draft_id=draft['draft_id'], revision=draft['revision'], **kwargs)
+async def send(mail, draft):
+    text = (mail.workspace / draft['path']).read_text()
+    with patch('events.delivery.deliver_to_thread', new_callable=AsyncMock):
+        return await send_now(_artifact(draft), _shown(draft, text), _owner(mail.thread))
 
 
 async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):
@@ -79,23 +85,22 @@ async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):
     assert 'quoted below the reply' in notes
     assert json.loads(_row(retargeted['draft_id'])['target_json'])['reply_to'] == 'm-101'
     result = await send(mail, retargeted)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert _mime(mail.sends[-1])['In-Reply-To'] == '<new@mail.example>'
 
 
 async def test_new_mail_after_draft_stops_send_until_new_draft(mail, approve, clean_screen):
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
     now = datetime.now(timezone.utc)
-    db = get_db()
     _backdate(saved, now - timedelta(seconds=10))
     provider_state(mail, [THREADED, _arrival(newer(), now - timedelta(seconds=5))])
-    stopped = await send(mail, saved)
-    assert 'Not sent' in stopped and 'New details from Pat' in stopped
+    with pytest.raises(HTTPException) as stopped:
+        await send(mail, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not mail.sends
-    assert 'seen_newer' not in EmailSendTool().parameters['properties']
     replacement = await _draft(mail, to=[], reply_to_message_id='m-101')
     result = await send(mail, replacement)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(mail.sends) == 1
     message = _mime(mail.sends[0])
     assert message['To'] == 'pat@mail.example'
@@ -115,7 +120,7 @@ async def test_font_and_attachment_in_sent_mime_and_missing_file_refused(mail, a
     assert [(a['name'], a['size']) for a in target['attachments']] == [('report.txt', 19)]
     assert 'Attachment:' not in document and not any(n.startswith('Attachment:') for n in target['notes'])
     result = await send(mail, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     message = _mime(mail.sends[0])
     html = message.get_body(preferencelist=('html',)).get_content()
     assert 'Garamond' in html and 'small' in html
@@ -140,35 +145,19 @@ def _backdate(saved, when):
     db.commit()
 
 
-def _person_reply(thread, turn):
-    db = get_db()
-    _admit(db, turn, thread_id=thread)
-    _bind(db, turn, thread_id=thread, call_id=f'call-{turn}')
-
-
-async def test_arrival_after_approval_requires_new_draft_and_new_person_reply(mail, clean_screen):
+async def test_arrival_after_save_requires_review_before_sending(mail, clean_screen):
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    # Make the recorded save earlier than the arrival, without sleeping.
-    db = get_db()
-    prior = datetime.now(timezone.utc) - timedelta(seconds=10)
-    _backdate(saved, prior)
-    _person_reply(mail.thread, 'reply-before-arrival')
+    _backdate(saved, datetime.now(timezone.utc) - timedelta(seconds=10))
     arrived = _arrival(newer(), datetime.now(timezone.utc) - timedelta(seconds=2))
     provider_state(mail, [THREADED, arrived])
-    stopped = await send(mail, saved)
-    assert 'Not sent' in stopped and 'New details from Pat' in stopped
+    with pytest.raises(HTTPException) as stopped:
+        await send(mail, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not mail.sends
     replacement = await _draft(mail, to=[], reply_to_message_id='m-101')
-    refused = await send(mail, replacement)
-    assert 'hasn\'t replied' in refused and not mail.sends
-    db.execute("UPDATE active_turns SET status='completed' WHERE id=?", ('reply-before-arrival',))
-    db.commit()
-    _person_reply(mail.thread, 'reply-after-new-draft')
-    result = await send(mail, replacement)
-    assert not result.startswith('Error'), result
+    assert await send(mail, replacement) == {'state': 'sent'}
     assert len(mail.sends) == 1
     assert _mime(mail.sends[0])['In-Reply-To'] == '<new@mail.example>'
-    assert 'seen_newer' not in EmailSendTool().parameters['properties']
 
 
 async def test_reading_other_thread_after_draft_does_not_stop_send(mail, approve, clean_screen):
@@ -185,7 +174,7 @@ async def test_reading_other_thread_after_draft_does_not_stop_send(mail, approve
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
     other['labelIds'] = []
     result = await send(mail, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(mail.sends) == 1
 
 
@@ -195,7 +184,7 @@ async def test_malformed_date_header_does_not_prevent_draft_or_send(mail, approv
     provider_state(mail, [target])
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
     result = await send(mail, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(mail.sends) == 1
 
 
@@ -232,7 +221,7 @@ async def test_font_read_failure_still_saves_and_sends_with_default(mail, approv
     assert note in json.loads(_row(saved['draft_id'])['target_json'])['notes']
     assert saved['font_note'] == note
     result = await send(mail, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(mail.sends) == 1
     assert _mime(mail.sends[0]).get_body(preferencelist=('html',)) is not None
 
@@ -271,8 +260,9 @@ async def test_arrival_during_draft_save_stops_send(mail, approve, clean_screen,
 
     monkeypatch.setattr(google_email, 'save_draft', save_after_arrival)
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    result = await send(mail, saved)
-    assert 'Not sent' in result and 'New details from Pat' in result
+    with pytest.raises(HTTPException) as stopped:
+        await send(mail, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not mail.sends
 
 
@@ -284,7 +274,7 @@ async def test_reply_saved_without_guard_read_is_refused(mail, approve, clean_sc
     db.execute('UPDATE action_drafts SET target_json=? WHERE id=?', (json.dumps(target), saved['draft_id']))
     db.commit()
     result = await send(mail, saved)
-    assert result == f'Error: {google_email.UNGUARDED_REPLY}'
+    assert result == {'state': 'failed', 'reason': UNGUARDED_REPLY}
     assert not mail.sends
 
 
@@ -306,8 +296,9 @@ async def test_same_second_arrival_stops_but_target_itself_does_not(mail, approv
         if header['name'] == 'From':
             header['value'] = 'Another person <other@mail.example>'
     provider_state(mail, [THREADED, same_second])
-    result = await send(mail, saved)
-    assert 'Not sent' in result and 'New details from Pat' in result
+    with pytest.raises(HTTPException) as stopped:
+        await send(mail, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not mail.sends
 
 
@@ -338,7 +329,7 @@ async def test_same_second_target_is_not_a_new_arrival(mail, approve):
     target = _arrival(THREADED, _guard_read_second(saved['draft_id']))
     provider_state(mail, [target])
     result = await send(mail, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(mail.sends) == 1
 
 
@@ -394,7 +385,7 @@ async def test_own_target_send_is_not_refused_by_unrelated_own_mail(mail, approv
     mail.fake.handler = lambda r: (httpx.Response(200, json={'messages': [{'id': unrelated['id']}]})
                                    if str(r.url).split('?')[0] == f'{GMAIL}/messages' and r.url.params.get('q', '').startswith('from:')
                                    else inner(r))
-    assert 'Not sent' not in await send(mail, saved) and len(mail.sends) == 1
+    assert await send(mail, saved) == {'state': 'sent'} and len(mail.sends) == 1
 
 
 async def test_forged_from_without_sent_label_is_guarded_as_today(mail, screen_calls):

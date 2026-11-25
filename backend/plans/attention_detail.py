@@ -14,7 +14,8 @@ that renderer's payload, so a generic list never hides an item nothing draws.
 
 Canonical order (PRD-PLANS E8): `(priority, raised_at, external_id)`. `priority`
 is the agent-settable `order_key`, so an agent can still reorder its own queued
-decisions before the user reaches them.
+decisions before the user reaches them. The composed queue puts an urgency level
+in front of this order (infra/activity_urgency.py).
 """
 
 from __future__ import annotations
@@ -184,8 +185,9 @@ def annotate(items: list[dict], *, db) -> list[dict]:
     return annotated
 
 
-# A held reply holds another agent's message back right now, so it sorts above every decision;
-# -1 is below every `order_key >= 0`. Held replies sort among themselves by `raised_at`.
+# A held reply holds another agent's message back right now, so it sorts above every decision
+# in its urgency level; -1 is below every `order_key >= 0`. Held replies sort among themselves
+# by `raised_at`.
 HELD_REPLY_PRIORITY = -1
 
 

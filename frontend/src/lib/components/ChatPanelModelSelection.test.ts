@@ -620,7 +620,7 @@ describe('ChatPanel host-access scope', () => {
 		activeThreadId.set('thread-2');
 		flushSync();
 		await vi.waitFor(() => {
-			expect(host.querySelector('.active-chip-trigger')?.textContent).toContain('Host access');
+			expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
 		});
 		expect(host.textContent).not.toContain('Thread two');
 
@@ -631,11 +631,11 @@ describe('ChatPanel host-access scope', () => {
 		await tick();
 		await tick();
 
-		expect(host.querySelector('.active-chip-trigger')?.textContent).toContain('Host access');
+		expect(host.querySelector('[aria-label="Host access"]')).toBeTruthy();
 		expect(host.textContent).not.toContain('Thread two');
 		expect(host.textContent).not.toContain('Thread one');
 
-		const trigger = host.querySelector<HTMLButtonElement>('.active-chip-trigger')!;
+		const trigger = host.querySelector<HTMLButtonElement>('.active-chip [aria-label="Host access"]')!;
 		trigger.click();
 		flushSync();
 		await tick();
