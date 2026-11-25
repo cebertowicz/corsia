@@ -7,8 +7,7 @@ import type {
 	ActivityTaskDetail,
 } from '$lib/api/activityQueue';
 import type { DecisionDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
-import { fetchArtifactPane } from '$lib/api/docs';
-import type { ArtifactNode, PaneNode } from '$lib/api/artifactPane';
+export { findDocument } from '$lib/findDocument';
 import { parseWsTimestamp } from '$lib/time';
 
 export const KIND_LABEL: Record<ActivityKind, string> = {
@@ -134,26 +133,4 @@ export function taskSteps(text: string): TaskSteps {
 export const chatReplyOf = (item: ActivityQueueItem) =>
 	item.kind === 'reply' && chatOf(item) ? (item.detail as ActivityChatReplyDetail) : null;
 
-export type DocumentLookup =
-	| { status: 'found'; path: string; title: string }
-	| { status: 'missing' }
-	| { status: 'failed' };
-
-/**
- * The app opens a document by its path, so an item's artifact id is looked up in the files of the chat it came
- * from, the same lookup an outside wait's document uses.
- */
-export async function findDocument(threadId: string, artifactId: string): Promise<DocumentLookup> {
-	let nodes: PaneNode[];
-	try {
-		nodes = (await fetchArtifactPane(threadId)).nodes;
-	} catch {
-		return { status: 'failed' };
-	}
-	const found = nodes
-		.flatMap((node): ArtifactNode[] => (node.kind === 'artifact' ? [node] : node.children))
-		.find((node) => node.id === artifactId);
-	const path = found?.path ?? found?.external_id;
-	if (!found || !path) return { status: 'missing' };
-	return { status: 'found', path, title: found.title ?? found.name };
-}
+export type { DocumentLookup } from '$lib/findDocument';
