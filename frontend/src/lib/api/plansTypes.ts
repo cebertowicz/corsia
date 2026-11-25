@@ -170,6 +170,8 @@ export interface OperatorNode {
 	kind: string;
 	/** Set on a step a workflow built (`+name` for one an agent added); its description and criteria are agent instructions. */
 	workflow_step?: string | null;
+	/** A workflow run (a nested run included): its children are the run's steps, shown in the run's order. */
+	workflow_run?: boolean;
 	title: string;
 	description: string | null;
 	comment_attention?: CommentAttention;
