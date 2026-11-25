@@ -134,7 +134,7 @@ describe('PlanDrillView', () => {
 				plans: [{
 					plan: { id: 'child-plan', owner_kind: 'thread', owner_id: 'child', state: 'active', revision: 1, updated_at: 'now' },
 					owner: { label: 'Child', project_id: null, thread_id: 'child' },
-					progress: { done: 1, total: 2, open: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
+					progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
 					display: planDisplay('working', 'active'),
 					current_node_ids: [], next_node_ids: [],
 					nodes: [node({ id: 'child-step', title: 'Child step' })], folds: [], root_count: 1,
@@ -153,6 +153,8 @@ describe('PlanDrillView', () => {
 		flushSync();
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip.getAttribute('aria-expanded')).toBe('false');
+		expect(chip.textContent).toContain('1 left');
+		expect(chip.getAttribute('aria-label')).toContain('1 subtask left');
 		chip.click();
 		await settle();
 		expect(chip.getAttribute('aria-expanded')).toBe('true');

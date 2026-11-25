@@ -82,6 +82,8 @@ export interface OperatorProgress {
 	total: number;
 	/** Unsettled leaves in play, shown as "N left": done/total would read 0 of N in a flat plan. */
 	open: number;
+	/** Open leaves above the line (not in Later); the plan header's N left. */
+	open_above: number;
 	liveness: OperatorLiveness;
 	distribution?: OperatorDistribution;
 }
@@ -101,7 +103,7 @@ export interface OperatorChildSummary {
 	available: true;
 	plan_id: string;
 	thread_id: string;
-	progress: OperatorProgress;
+	progress: Omit<OperatorProgress, 'open_above'>;
 	/** What a waiting child plan waits for (EW4). Its state stays `progress.liveness`. */
 	wait?: OperatorWait | null;
 }

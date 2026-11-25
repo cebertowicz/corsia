@@ -1,5 +1,5 @@
 {
- "as_of": "2026-11-25T17:10:09.106590+00:00",
+ "as_of": "2026-11-25T20:23:41.612253+00:00",
  "attention": {
   "awaiting_count": 0
  },
@@ -7,19 +7,19 @@
  "plans": [
   {
    "current_node_ids": [
-    "adef2fccfdef491f965b51cd74181617",
-    "f07e2628646441b293371c8e356f120b",
-    "899a4303482f4314a38bd0976fa8cbb3",
-    "886b22433e294f17a322eba4d9cdc7a3"
+    "0c65d1e236ae4ca7abefebf0501ca683",
+    "8b4ee41fc5a5462fb42d3387c52b307a",
+    "a7d1f4314ab14fbc93811677de075ef8",
+    "72e99ad61f2349c6bf5f3ba0b2cde887"
    ],
    "display": {
     "label_key": "working",
     "tone_key": "active",
     "wait": {
-     "artifact_id": "33734270-5a0",
+     "artifact_id": "ac9537d3-8d8",
      "label": "the linked item",
      "more": 0,
-     "until": "2026-11-26T17:10:09.068861+00:00"
+     "until": "2026-11-26T20:23:41.580016+00:00"
     }
    },
    "folds": [],
@@ -42,10 +42,10 @@
        "failed": 0,
        "total": 2
       },
-      "commitment_id": "ce7de8130f2f4767880d10c663127a6f",
+      "commitment_id": "53a6abcbea4540e49972edc8eac49c87",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T17:10:09.014901+00:00"
+        "2026-11-25T20:23:41.539118+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -64,7 +64,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "ce7de8130f2f4767880d10c663127a6f",
+     "commitment_id": "53a6abcbea4540e49972edc8eac49c87",
      "completion": null,
      "container": true,
      "depth": 0,
@@ -92,7 +92,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "ce7de8130f2f4767880d10c663127a6f",
+     "id": "53a6abcbea4540e49972edc8eac49c87",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -100,7 +100,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "phase",
-     "last_transition_at": "2026-11-25T17:10:09.073700+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.583914+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -155,7 +155,7 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T17:10:09.069121+00:00"
+         "2026-11-25T20:23:41.580249+00:00"
         ],
         "settled_seconds": 0
        }
@@ -171,7 +171,7 @@
      "status_reason": null,
      "title": "Delivery",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.014901+00:00",
+     "updated_at": "2026-11-25T20:23:41.539118+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -189,7 +189,7 @@
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "ce7de8130f2f4767880d10c663127a6f",
+     "commitment_id": "53a6abcbea4540e49972edc8eac49c87",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -208,12 +208,12 @@
          "label": "Plan owner",
          "thread_id": "owner"
         },
-        "id": "ac2004dddfd34599b91b640c065014a3",
+        "id": "42b0cc290cbb4f74819ae53b1b12409f",
         "ordinal": 1,
         "release_reason": null,
         "released_at": null,
         "requirements_revision": 1,
-        "selected_at": "2026-11-25T17:10:09.074389+00:00"
+        "selected_at": "2026-11-25T20:23:41.584534+00:00"
        }
       ],
       "causes": [],
@@ -223,7 +223,7 @@
       "primary_reason": null,
       "revision_round": 0,
       "selection": {
-       "attempt_id": "ac2004dddfd34599b91b640c065014a3",
+       "attempt_id": "42b0cc290cbb4f74819ae53b1b12409f",
        "attempt_ordinal": 1,
        "executor_thread_id": "owner",
        "in_flight_dispatch_count": 0,
@@ -237,7 +237,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "adef2fccfdef491f965b51cd74181617",
+     "id": "0c65d1e236ae4ca7abefebf0501ca683",
      "initiative": null,
      "intent": "Finish the task",
      "intent_is_person_comment": false,
@@ -245,7 +245,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.073700+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.583914+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -304,7 +304,7 @@
        }
       }
      },
-     "parent_id": "ce7de8130f2f4767880d10c663127a6f",
+     "parent_id": "53a6abcbea4540e49972edc8eac49c87",
      "requirements_revision": 1,
      "requires_user_action": false,
      "review": null,
@@ -314,7 +314,7 @@
      "status_reason": null,
      "title": "Running",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.073560+00:00",
+     "updated_at": "2026-11-25T20:23:41.583811+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -333,7 +333,7 @@
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "ce7de8130f2f4767880d10c663127a6f",
+     "commitment_id": "53a6abcbea4540e49972edc8eac49c87",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -352,35 +352,35 @@
          "label": "Plan owner",
          "thread_id": "owner"
         },
-        "id": "f1397b366d6148e8a0367a392ee7ab49",
+        "id": "ed97a2639dd643deb9ee491c428e68a9",
         "ordinal": 1,
         "release_reason": "watch_armed",
-        "released_at": "2026-11-25T17:10:09.069935+00:00",
+        "released_at": "2026-11-25T20:23:41.580943+00:00",
         "requirements_revision": 1,
-        "selected_at": "2026-11-25T17:10:09.066395+00:00"
+        "selected_at": "2026-11-25T20:23:41.578025+00:00"
        }
       ],
       "causes": [
        {
-        "artifact_id": "33734270-5a0",
+        "artifact_id": "ac9537d3-8d8",
         "artifact_title": null,
         "blocked_reason": null,
         "blocked_wait": false,
-        "created_at": "2026-11-25T17:10:09.069121+00:00",
-        "ends_at": "2026-11-26T17:10:09.068861+00:00",
+        "created_at": "2026-11-25T20:23:41.580249+00:00",
+        "ends_at": "2026-11-26T20:23:41.580016+00:00",
         "kind": "waiting",
         "owner_id": null,
         "owner_kind": "external",
-        "reason": "Waiting for ci.complete until 2026-11-26T17:10:09.068861+00:00",
+        "reason": "Waiting for ci.complete until 2026-11-26T20:23:41.580016+00:00",
         "reason_key": "deadline",
         "scheduled_reason": null,
-        "watch_id": "7fe40c36-160"
+        "watch_id": "862b7df5-be9"
        }
       ],
       "condition": "waiting",
       "conflict": null,
       "friction_count": 0,
-      "primary_reason": "Waiting for ci.complete until 2026-11-26T17:10:09.068861+00:00",
+      "primary_reason": "Waiting for ci.complete until 2026-11-26T20:23:41.580016+00:00",
       "revision_round": 0,
       "selection": null
      },
@@ -390,7 +390,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "f07e2628646441b293371c8e356f120b",
+     "id": "8b4ee41fc5a5462fb42d3387c52b307a",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -398,7 +398,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.069999+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.580997+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -426,7 +426,7 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T17:10:09.069121+00:00"
+         "2026-11-25T20:23:41.580249+00:00"
         ],
         "settled_seconds": 0
        }
@@ -455,23 +455,23 @@
        "usage_recording_failures": 0,
        "waiting": {
         "open_starts": [
-         "2026-11-25T17:10:09.069121+00:00"
+         "2026-11-25T20:23:41.580249+00:00"
         ],
         "settled_seconds": 0
        }
       }
      },
-     "parent_id": "ce7de8130f2f4767880d10c663127a6f",
+     "parent_id": "53a6abcbea4540e49972edc8eac49c87",
      "requirements_revision": 1,
      "requires_user_action": false,
      "review": null,
      "revision": 2,
      "scheduled_until": null,
      "state": "active",
-     "status_reason": "Waiting for ci.complete until 2026-11-26T17:10:09.068861+00:00",
+     "status_reason": "Waiting for ci.complete until 2026-11-26T20:23:41.580016+00:00",
      "title": "Waiting",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.065483+00:00",
+     "updated_at": "2026-11-25T20:23:41.576707+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -479,10 +479,10 @@
       "close_node"
      ],
      "wait": {
-      "artifact_id": "33734270-5a0",
+      "artifact_id": "ac9537d3-8d8",
       "label": "the linked item",
       "more": 0,
-      "until": "2026-11-26T17:10:09.068861+00:00"
+      "until": "2026-11-26T20:23:41.580016+00:00"
      },
      "waiting_on": [],
      "workflow_run": false,
@@ -493,13 +493,13 @@
      "artifacts": [],
      "assignee": "user",
      "attention_path": [
-      "ce7de8130f2f4767880d10c663127a6f",
-      "d52f5df6e7a04ff08175c89274c9f211"
+      "53a6abcbea4540e49972edc8eac49c87",
+      "6c4c50cb6ea248bfb5cfbbe8c5436fa2"
      ],
      "branch_progress": null,
      "child": null,
      "commitment_cost": null,
-     "commitment_id": "ce7de8130f2f4767880d10c663127a6f",
+     "commitment_id": "53a6abcbea4540e49972edc8eac49c87",
      "completion": null,
      "container": false,
      "depth": 1,
@@ -527,7 +527,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "d52f5df6e7a04ff08175c89274c9f211",
+     "id": "6c4c50cb6ea248bfb5cfbbe8c5436fa2",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -535,7 +535,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.036299+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.554885+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -594,7 +594,7 @@
        }
       }
      },
-     "parent_id": "ce7de8130f2f4767880d10c663127a6f",
+     "parent_id": "53a6abcbea4540e49972edc8eac49c87",
      "requirements_revision": 1,
      "requires_user_action": true,
      "review": null,
@@ -604,7 +604,7 @@
      "status_reason": null,
      "title": "Person action",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.036037+00:00",
+     "updated_at": "2026-11-25T20:23:41.554699+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -629,10 +629,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "899a4303482f4314a38bd0976fa8cbb3",
+      "commitment_id": "a7d1f4314ab14fbc93811677de075ef8",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T17:10:09.040826+00:00"
+        "2026-11-25T20:23:41.558210+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -651,7 +651,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "899a4303482f4314a38bd0976fa8cbb3",
+     "commitment_id": "a7d1f4314ab14fbc93811677de075ef8",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -683,7 +683,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "899a4303482f4314a38bd0976fa8cbb3",
+     "id": "a7d1f4314ab14fbc93811677de075ef8",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -691,7 +691,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.075542+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.585457+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -768,7 +768,7 @@
      "status_reason": null,
      "title": "Review",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.075471+00:00",
+     "updated_at": "2026-11-25T20:23:41.585398+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -787,7 +787,7 @@
      "branch_progress": null,
      "child": {
       "available": true,
-      "plan_id": "0b0659fa307146679efe3832bcb90df1",
+      "plan_id": "31256e57188d4a0ba4a0dd44cf601564",
       "progress": {
        "done": 0,
        "liveness": "idle",
@@ -803,10 +803,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "886b22433e294f17a322eba4d9cdc7a3",
+      "commitment_id": "72e99ad61f2349c6bf5f3ba0b2cde887",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T17:10:09.045765+00:00"
+        "2026-11-25T20:23:41.561412+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -825,7 +825,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "886b22433e294f17a322eba4d9cdc7a3",
+     "commitment_id": "72e99ad61f2349c6bf5f3ba0b2cde887",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -843,7 +843,7 @@
        {
         "child_active": false,
         "child_thread_id": "worker",
-        "created_at": "2026-11-25T17:10:09.089115+00:00",
+        "created_at": "2026-11-25T20:23:41.596226+00:00",
         "kind": "waiting",
         "owner_id": "worker",
         "owner_kind": "thread",
@@ -864,7 +864,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "886b22433e294f17a322eba4d9cdc7a3",
+     "id": "72e99ad61f2349c6bf5f3ba0b2cde887",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -872,7 +872,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.089115+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.596226+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -941,7 +941,7 @@
      "status_reason": "Waiting for the delegated child to take up its open steps",
      "title": "Delegated",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.088068+00:00",
+     "updated_at": "2026-11-25T20:23:41.595399+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -966,10 +966,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "6782dd18633e4120bbdb4618b07e0170",
+      "commitment_id": "7429d90d2e23434ab43eee62489b3d0f",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T17:10:09.050351+00:00"
+        "2026-11-25T20:23:41.564697+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -988,7 +988,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "6782dd18633e4120bbdb4618b07e0170",
+     "commitment_id": "7429d90d2e23434ab43eee62489b3d0f",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -1006,7 +1006,7 @@
       "condition": "ready",
       "conflict": {
        "condition": "executor_selected",
-       "selected_node_id": "adef2fccfdef491f965b51cd74181617",
+       "selected_node_id": "0c65d1e236ae4ca7abefebf0501ca683",
        "selected_node_state": "active",
        "selected_node_title": "Running"
       },
@@ -1021,7 +1021,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "6782dd18633e4120bbdb4618b07e0170",
+     "id": "7429d90d2e23434ab43eee62489b3d0f",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -1029,7 +1029,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.065073+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.576220+00:00",
      "later": true,
      "later_reason": "After launch",
      "node_cost": {
@@ -1098,7 +1098,7 @@
      "status_reason": "Not started",
      "title": "Set aside",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.065002+00:00",
+     "updated_at": "2026-11-25T20:23:41.576156+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -1114,7 +1114,7 @@
      "artifacts": [],
      "assignee": "user",
      "attention_path": [
-      "87ef909cdd8e418e8c89d31f680d9db8"
+      "05a792efd74d4e65b40308895ba34685"
      ],
      "branch_progress": null,
      "browser_thread_id": "owner",
@@ -1126,10 +1126,10 @@
        "failed": 0,
        "total": 0
       },
-      "commitment_id": "87ef909cdd8e418e8c89d31f680d9db8",
+      "commitment_id": "05a792efd74d4e65b40308895ba34685",
       "elapsed_seconds": {
        "open_starts": [
-        "2026-11-25T17:10:09.060240+00:00"
+        "2026-11-25T20:23:41.572293+00:00"
        ],
        "settled_seconds": 0,
        "status": "in_progress"
@@ -1148,7 +1148,7 @@
        "status": "partial"
       }
      },
-     "commitment_id": "87ef909cdd8e418e8c89d31f680d9db8",
+     "commitment_id": "05a792efd74d4e65b40308895ba34685",
      "completion": null,
      "container": false,
      "depth": 0,
@@ -1176,7 +1176,7 @@
      },
      "folded": false,
      "held_by": null,
-     "id": "87ef909cdd8e418e8c89d31f680d9db8",
+     "id": "05a792efd74d4e65b40308895ba34685",
      "initiative": null,
      "intent": null,
      "intent_is_person_comment": false,
@@ -1184,7 +1184,7 @@
      "intent_parent_title": null,
      "intent_run_title": null,
      "kind": "task",
-     "last_transition_at": "2026-11-25T17:10:09.060442+00:00",
+     "last_transition_at": "2026-11-25T20:23:41.572427+00:00",
      "later": false,
      "later_reason": null,
      "node_cost": {
@@ -1253,7 +1253,7 @@
      "status_reason": null,
      "title": "Enter your password",
      "unmet_dependencies": [],
-     "updated_at": "2026-11-25T17:10:09.060240+00:00",
+     "updated_at": "2026-11-25T20:23:41.572293+00:00",
      "user_actions": [
       "reorder",
       "mark_done",
@@ -1272,13 +1272,13 @@
     "thread_id": "owner"
    },
    "plan": {
-    "id": "13a5dd509ed9453898691564a8bc7a26",
+    "id": "bd28ae6414fc4f8d8856edd50aed65d8",
     "owner_id": "owner",
     "owner_kind": "thread",
-    "parent_plan_id": "e8fe2593608e4d4abbc985b8c8f8c58e",
+    "parent_plan_id": "3f65ce7a7b2a476fb9a2f33872a8d9fd",
     "revision": 16,
     "state": "active",
-    "updated_at": "2026-11-25T17:10:09.088068+00:00"
+    "updated_at": "2026-11-25T20:23:41.595399+00:00"
    },
    "progress": {
     "distribution": {
@@ -1295,6 +1295,7 @@
     "done": 0,
     "liveness": "needs-review",
     "open": 7,
+    "open_above": 6,
     "total": 7
    },
    "root_count": 5

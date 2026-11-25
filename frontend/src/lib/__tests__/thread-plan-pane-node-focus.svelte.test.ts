@@ -68,7 +68,7 @@ function envelope(threadId: string, nodes = planNodes(threadId)): OperatorEnvelo
 		plans: [{
 			plan: { id: `plan-${threadId}`, owner_kind: 'thread', owner_id: threadId, state: 'active', revision: 1, updated_at: 'now' },
 			owner: { label: 'Thread', project_id: null, thread_id: threadId },
-			progress: { done: 0, total: 13, open: 12, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
+			progress: { done: 0, total: 13, open: 12, open_above: 12, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
 			display: planDisplay('working', 'active'),
 			oversize: null,
 			current_node_ids: ['now'],

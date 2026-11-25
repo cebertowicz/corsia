@@ -29,7 +29,7 @@ function envelope(nodes: unknown[] = [operatorNode({ id: 'a', title: 'Step' })])
 		plans: [{
 			plan: { id: 'plan-t1', owner_kind: 'thread', owner_id: 't1', state: 'active', revision: 1, updated_at: '2026-08-13T00:00:00Z' },
 			owner: { label: 'Conversation', project_id: null, thread_id: 't1' },
-			progress: { done: 0, total: 1, open: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION } },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION } },
 			display: planDisplay('working', 'active'),
 			current_node_ids: ['a'],
 			next_node_ids: [],
@@ -42,6 +42,12 @@ describe('decodeOperatorEnvelope', () => {
 	it('admits the envelope the pane renders, with and without plans', () => {
 		expect(decodeOperatorEnvelope(envelope())).not.toBeNull();
 		expect(decodeOperatorEnvelope({ ...envelope(), plans: [] })).not.toBeNull();
+	});
+
+	it('requires a numeric above-line count in plan progress', () => {
+		const body = envelope();
+		delete (body.plans[0].progress as Partial<typeof body.plans[0]['progress']>).open_above;
+		expect(decodeOperatorEnvelope(body)).toBeNull();
 	});
 
 	it('admits the envelope the backend projection actually builds', () => {

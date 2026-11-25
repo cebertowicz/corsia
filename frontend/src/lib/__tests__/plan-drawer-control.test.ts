@@ -43,7 +43,7 @@ function envelope(nodes = [operatorNode({ id: 'node-1', title: 'Choose a model',
 		plans: [{
 			plan: { id: 'p1', owner_kind: 'thread', owner_id: 't1', state: 'active', revision: 1, updated_at: 'now' },
 			owner: { label: 'Thread', project_id: null, thread_id: 't1' },
-			progress: { done: 0, total: 1, open: 1, liveness: 'advancing', distribution: EMPTY_DISTRIBUTION },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing', distribution: EMPTY_DISTRIBUTION },
 			display: planDisplay('working', 'active'), oversize: null,
 			current_node_ids: ['node-1'], next_node_ids: [],
 			nodes, ...planFoldFields(nodes),
@@ -107,6 +107,26 @@ afterEach(() => {
 	host.remove();
 	resetObserversForTests();
 	vi.unstubAllGlobals();
+});
+
+describe('plan header progress above the line', () => {
+	it.each([
+		{ open: 8, above: 5, text: '5 left', label: 'Open plan — 5 left · Needs you', drawer: 'Plan — 5 left' },
+		{ open: 3, above: 0, text: '0 left', label: 'Open plan — 0 left · Needs you', drawer: 'Plan — 0 left' },
+		{ open: 0, above: 0, text: '✓', label: 'Open plan — all work complete · Needs you', drawer: 'Plan — all work complete' },
+	])('shows $text for open=$open and above=$above', async ({ open, above, text, label, drawer }) => {
+		const body = envelope();
+		body.plans[0].progress.open = open;
+		body.plans[0].progress.open_above = above;
+		serve(body);
+		await renderPhone();
+		const chip = host.querySelector<HTMLButtonElement>('.plan-progress-chip')!;
+		expect(chip.querySelector('b')?.textContent).toBe(text);
+		expect(chip.getAttribute('aria-label')).toBe(label);
+		chip.click();
+		await settle();
+		expect(document.querySelector('[data-adaptive-drawer] [role="dialog"]')?.getAttribute('aria-label')).toBe(drawer);
+	});
 });
 
 describe('PlanDrawerControl attention-item click', () => {

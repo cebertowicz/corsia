@@ -85,7 +85,7 @@ const isFoldLevel = (v: unknown): boolean =>
 
 function isPlanEntry(v: unknown): boolean {
 	if (!isObject(v) || !isObject(v.plan) || !isStr(v.plan.id) || !isStr(v.plan.state) || !isNum(v.plan.revision)) return false;
-	if (!isObject(v.owner) || !isObject(v.progress) || !isPlanProgress(v.progress)) return false;
+	if (!isObject(v.owner) || !isObject(v.progress) || !isPlanProgress(v.progress) || !isNum(v.progress.open_above)) return false;
 	if (!isObject(v.progress.distribution) || !isDisplay(v.display) || !isOversize(v.oversize)) return false;
 	if (!isStrArray(v.current_node_ids) || !isStrArray(v.next_node_ids)) return false;
 	if (!Array.isArray(v.folds) || !v.folds.every(isFoldLevel) || !isNum(v.root_count)) return false;
