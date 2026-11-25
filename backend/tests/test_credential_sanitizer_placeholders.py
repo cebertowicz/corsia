@@ -116,3 +116,25 @@ def test_embedded_real_values_are_redacted(value, template):
 
 def test_bare_assignment_reference_with_suffix_is_redacted():
     assert contains_credential("api_key = ${API_KEY}a8Fk29dLqZ7xP0")
+
+
+# Colon-less header and oauth_token forms stop their value at '}', so the brace must be re-attached.
+@pytest.mark.parametrize("text", [
+    "Authorization Bearer {api_key}",
+    "Authorization Bearer ${API_KEY}",
+    "authorization basic {credentials}",
+    "oauth_token {api_key}",
+    "oauth-token ${OAUTH_TOKEN}",
+])
+def test_space_scheme_brace_placeholder_is_unchanged(text):
+    assert sanitize_credential_text(text) == text
+    assert not contains_credential(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Authorization Bearer q8Zt3mWv1Kp9Lx2Rb7Nc}",  # gitleaks:allow
+    "oauth_token q8Zt3mWv1Kp9Lx2Rb7Nc}",  # gitleaks:allow
+])
+def test_space_scheme_real_value_before_brace_is_redacted(text):
+    assert "q8Zt3mWv1Kp9Lx2Rb7Nc" not in sanitize_credential_text(text)
+    assert contains_credential(text)

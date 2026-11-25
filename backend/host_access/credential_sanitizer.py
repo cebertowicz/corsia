@@ -201,7 +201,7 @@ def _redact_private_key(match: re.Match[str]) -> str:
 
 
 def _redact_space_value(match: re.Match[str]) -> str:
-    if _is_placeholder(match.group("value")):
+    if _matched_placeholder(match, match.group("value"), "value"):
         return match.group(0)
     return match.group("prefix") + REDACTION_MARKER
 
