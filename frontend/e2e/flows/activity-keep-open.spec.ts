@@ -66,12 +66,22 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	}
 	const top = (await row.boundingBox())!.y;
 	const position = await row.evaluate((el) => [...document.querySelectorAll('[data-activity-row]')].indexOf(el));
-	if (width === 393) await row.click();
+	if (width === 393) {
+		await row.click();
+		// A restored landing does not mark a reply read; choosing its highlight does.
+		await page.locator('.pane-col .cm-comment-anchor').first().click();
+		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeVisible();
+	}
 	await expect(editor).toContainText('Step 1:');
 	await editor.evaluate((el) => { (window as any).__replyEditor = el; });
-	const card = page.locator(`[data-comment-id="${rootId}"]`).last();
+	const card = width === 393
+		? page.getByRole('dialog', { name: 'Document comments' }).getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Please explain this step' })
+		: page.locator(`[data-comment-id="${rootId}"]`).last();
 	const field = card.locator('textarea').first();
-	if (!await field.isVisible()) await page.locator('.pane-col').getByRole('button', { name: 'Reply', exact: true }).click();
+	if (width === 393) {
+		await expect(card).toContainText('Please explain this step');
+		await expect(field).toBeVisible();
+	} else if (!await field.isVisible()) await page.locator('.pane-col').getByRole('button', { name: 'Reply', exact: true }).click();
 	await field.fill('Thank you for explaining');
 	await expect.poll(async () => {
 		const queue = await (await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } })).json();
@@ -92,7 +102,7 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	const frame = async (step: string) => { if (out) { fs.mkdirSync(out, { recursive: true }); await page.screenshot({ path: path.join(out, `reply-${step}-${width}.png`), animations: 'disabled' }); } };
 	await checkPane();
 	if (width === 393) {
-		await page.getByRole('button', { name: 'Close comments' }).click();
+		await page.getByRole('dialog', { name: 'Document comments' }).getByRole('button', { name: 'Close', exact: true }).click();
 		await expect(field).toBeHidden();
 	} else await page.keyboard.press('Escape');
 	await frame('opened');
