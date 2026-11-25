@@ -79,7 +79,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 		},
 		display: item.display, status_reason: item.status_reason, evidence: null, commitment_cost: null,
 		node_cost: { own: EMPTY_AMOUNT, rolled: EMPTY_AMOUNT }, initiative: null,
-		branch_progress: null, scheduled_until: null, attention_path: [], completion: null,
+		branch_progress: null, scheduled_until: null, later: false, later_reason: null, attention_path: [], completion: null,
 		child: null, review: null, user_actions: [], discussion_artifact_id: null, artifacts: [],
 	};
 }

@@ -9,7 +9,7 @@
  */
 import type { OperatorNode } from '$lib/api/plans';
 import {
-	captureFold, newlyFolded, newlyMatching, playFold, prefersReducedMotion, type FoldSnapshot,
+	captureFold, newlyFolded, newlyLater, newlyMatching, playFold, prefersReducedMotion, type FoldSnapshot,
 } from './foldWave';
 
 /** One pane view of a plan: the folded rows the pane has already shown fold (the rest are new to the user). */
@@ -44,32 +44,54 @@ export interface FoldWaveInput {
 	items: () => unknown;
 	element: () => HTMLElement | null;
 	isFinished: (node: OperatorNode) => boolean;
+	/** True when a node has no row rendered for it: a Later member of a collapsed group. */
+	isHidden: (node: OperatorNode) => boolean;
 	/** A folding row's flip key and fold level, as the tree renders them. */
 	keyOf: (node: OperatorNode) => { id: string; level: string };
 }
 
 /**
  * The fold wave: before the DOM takes a new snapshot, note which on-screen
- * rows are about to fold or sink to their finished group; after it, play
- * them -- a fold gets a ghost into its level's count, a sink only glides to its
- * new place, both the same wave. The first render only records what already
- * folded or was already finished. Neither a refresh nor a later wave (a row
+ * rows are about to fold, sink to their finished group, or cross into or out of
+ * the Later group; after it, play them -- a fold gets a ghost into its level's
+ * count, a crossing into a collapsed group gets one into the group's own row,
+ * a sink or a crossing you can see the end of only glides to its new place,
+ * all the same wave. The first render only records what already
+ * folded, was already finished or was already Later. Neither a refresh nor a later wave (a row
  * finishing mid-wave) cuts a wave short; waves stop only when the tree unmounts,
  * and a wave that has ended lets go of its stop.
  */
 export function createFoldWave(input: FoldWaveInput): void {
 	let seenFolded: Map<string, boolean> | null = null;
 	let seenFinished: Map<string, boolean> | null = null;
+	let seenLater: Map<string, boolean> | null = null;
 	let pendingFold: FoldSnapshot | null = null;
 	$effect.pre(() => {
 		const nodes = input.nodes();
 		const folding = newlyFolded(seenFolded, nodes);
 		const sinking = newlyMatching(seenFinished, nodes, input.isFinished);
+		// A Later crossing you can see the end of is not a removal: the row stays on
+		// screen at its new place, so it arms the wave like a sinking row and nothing
+		// ghosts it. Into a collapsed group there is no row to glide to, so the leaving
+		// row takes the wave's ghost into the group row, as a folding row takes one
+		// into its level's count -- the count changes in place while it collapses there.
+		const crossing = newlyLater(seenLater, nodes);
+		const hidden = crossing.filter((node) => node.later === true && input.isHidden(node));
 		seenFolded = new Map(nodes.map((node) => [node.id, node.folded]));
 		seenFinished = new Map(nodes.map((node) => [node.id, input.isFinished(node)]));
+		seenLater = new Map(nodes.map((node) => [node.id, node.later === true]));
 		const element = input.element();
-		if ((folding.length === 0 && sinking.length === 0) || !element || prefersReducedMotion()) return;
-		pendingFold = captureFold(element, folding.map(input.keyOf));
+		const still = folding.length === 0 && sinking.length === 0 && crossing.length === 0;
+		if (still || !element || prefersReducedMotion()) return;
+		pendingFold = captureFold(element, [
+			...folding.map(input.keyOf),
+			// The group row is a different bucket of the same level, so its ghost asks
+			// for the level's Later target rather than the finished-count one.
+			...hidden.map((node) => {
+				const key = input.keyOf(node);
+				return { id: key.id, level: `${key.level}:later` };
+			}),
+		]);
 	});
 	const stops = new Set<() => void>();
 	$effect(() => {

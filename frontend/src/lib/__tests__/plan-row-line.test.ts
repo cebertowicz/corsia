@@ -45,6 +45,19 @@ function subline(title: string): string | null {
 	return row(title).querySelector('.row-subline')?.textContent?.trim() ?? null;
 }
 
+describe('Later rows with comments', () => {
+	it('keeps rank and reason before counts for comment tasks and asks', () => {
+		render([
+			node({ id: 'file', title: 'File comments', later: true, later_reason: 'After launch', comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 0, system_task: true } }),
+			node({ id: 'ask', title: 'Ask', later: true, later_reason: 'After review', requires_user_action: true, comment_attention: { artifact_id: 'doc', comments: 3, suggestions: 0, system_task: false } }),
+		]);
+		(host.querySelector('.scheduled-row button') as HTMLButtonElement).click();
+		flushSync();
+		expect(subline('File comments')).toBe('1st · After launch · 2 comments');
+		expect(subline('Ask')).toBe('2nd · After review · 3 comments');
+	});
+});
+
 describe('PlanRowFace — one line unless something specific needs saying', () => {
 	it('names no status or owner under a plain row', () => {
 		render([

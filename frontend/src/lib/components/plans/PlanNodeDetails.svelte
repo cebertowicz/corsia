@@ -2,10 +2,11 @@
 	import type { OperatorNode } from '$lib/api/plans';
 	import { renderMarkdown } from '$lib/markdown';
 	import PlanNodeIntent from './PlanNodeIntent.svelte';
-	import { localDayClock } from '$lib/time';
+	import { localDayClock, minuteClock } from '$lib/time';
 	import { indentVar } from './planIndent';
 	import { liveStepClock } from './planStepTime';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
+	import { isLaterMember } from './planScheduled';
 	import {
 		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, personStepInstructionsDocument, tokenLine,
 		tryEnding, waitingTime, withFollowUps, workingTime,
@@ -61,6 +62,10 @@
 	// One total on a lineage of two or more tasks: the older line gives way to it.
 	const followUps = $derived(initiative ? null : withFollowUps(node));
 	const instructionsDocument = $derived(personStepInstructionsDocument(node));
+	// A Later member's own reason is the agent's words for the set-aside. The row's
+	// one-line subline cuts it (and never carries it at all under a date line), so
+	// details are where it reads whole -- dated and undated alike.
+	const laterReason = $derived(isLaterMember(node, $minuteClock.getTime()) ? node.later_reason : null);
 </script>
 
 {#snippet statusLine()}
@@ -76,6 +81,9 @@
 			<!-- The named cause is sufficient; internal dependency ids stay hidden. -->
 			<ul>{#each causes as cause}<li>{localizeInstants(cause.reason, $localDayClock)}</li>{/each}</ul>
 		</div>
+	{/if}
+	{#if laterReason}
+		<p class="later-reason"><span class="prefix">Later:</span> {localizeInstants(laterReason, $localDayClock)}</p>
 	{/if}
 	{#if showTries}
 		<div class="tries">
@@ -132,6 +140,9 @@
 	.status { margin-top: var(--space-2); }
 	.causes > .prefix { display: block; }
 	.evidence-note { margin-left: var(--space-3); }
+	/* A Later reason is prose the person came to read: it wraps, and a long URL or
+	   hash breaks inside the line instead of running past the pane. */
+	.later-reason { overflow-wrap: anywhere; }
 	.person-instructions { color: var(--text-primary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.person-instructions :global(p) { margin-bottom: var(--space-1); }
 	.person-instructions :global(.code-block) { margin: var(--space-1) 0; }

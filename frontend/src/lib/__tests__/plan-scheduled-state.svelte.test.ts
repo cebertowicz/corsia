@@ -6,14 +6,13 @@ import { node } from './fixtures/planTreeNode';
 import { withFolds, withLiveFolds } from './fixtures/planFolds';
 
 /**
- * The Scheduled row's open state and focus while a tree stays mounted: a level's
+ * The Later row's open state and focus while a tree stays mounted: a level's
  * flag is kept while its group is absent, a reveal request opens the group that
  * hides its row, and focus never falls to the page when the row holding it goes.
  */
 
 const NOW = new Date(2026, 8, 25, 10, 0);
 const HOUR = 3_600_000;
-const MIN = 60_000;
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -36,8 +35,9 @@ async function settle() {
 	flushSync();
 }
 
-function waiting(id: string, hours: number): OperatorNode {
-	const base = node({ id, title: id });
+/** A task the server set below the plan's cut, dated `hours` out; `later: false` is the same task moved back up. */
+function waiting(id: string, hours: number, later = true): OperatorNode {
+	const base = node({ id, title: id, later });
 	base.display = { label_key: 'waiting', tone_key: 'waiting' };
 	base.scheduled_until = new Date(NOW.getTime() + hours * HOUR).toISOString();
 	base.execution = {
@@ -62,15 +62,15 @@ describe('a level\'s open flag', () => {
 		await settle();
 		groupToggle().click();
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}', 'A', 'B']);
+		expect(titles()).toEqual(['{Later}', 'A', 'B']);
 
 		props.nodes = [waiting('A', 48)];
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}', 'A']);
+		expect(titles()).toEqual(['{Later}', 'A']);
 
 		props.nodes = [waiting('A', 48), waiting('B', 72), waiting('C', 90)];
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}', 'A', 'B', 'C']);
+		expect(titles()).toEqual(['{Later}', 'A', 'B', 'C']);
 	});
 
 	it('re-forms closed when the user never opened it', async () => {
@@ -81,7 +81,7 @@ describe('a level\'s open flag', () => {
 		await settle();
 		props.nodes = [waiting('A', 48), waiting('B', 72)];
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 	});
 
 	it('starts closed on a fresh mount', async () => {
@@ -93,7 +93,7 @@ describe('a level\'s open flag', () => {
 		unmount(component);
 		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 	});
 });
 
@@ -103,10 +103,10 @@ describe('revealing a row the group hides', () => {
 		tree = mount(PlanTree, { target: host, props: withFolds({ nodes: [waiting('A', 48), waiting('B', 72)] }) }) as typeof tree;
 		component = tree as unknown as Record<string, unknown>;
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}']);
+		expect(titles()).toEqual(['{Later}']);
 		expect(tree.revealNode('B')).toBe(true);
 		await settle();
-		expect(titles()).toEqual(['{Scheduled}', 'A', 'B']);
+		expect(titles()).toEqual(['{Later}', 'A', 'B']);
 		expect(tree.focusRow('B')).toBe(true);
 		expect(document.activeElement?.closest('.tree-row')?.querySelector('.row-title')?.textContent).toBe('B');
 	});
@@ -114,16 +114,15 @@ describe('revealing a row the group hides', () => {
 
 describe('focus when the row holding it goes', () => {
 	it('keeps focus on the toggle when a member leaves and one remains', async () => {
-		const soon = waiting('Soon', 24);
-		soon.scheduled_until = new Date(NOW.getTime() + 24 * HOUR + MIN).toISOString();
-		soon.execution.causes[0].ends_at = soon.scheduled_until;
-		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [soon, waiting('Other', 72)] }) });
+		const props = $state({ nodes: [waiting('Soon', 30), waiting('Other', 72)] });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await settle();
 		groupToggle().focus();
 		expect(document.activeElement).toBe(groupToggle());
-		vi.advanceTimersByTime(3 * MIN);
+		// The owner moves 'Soon' back above the cut.
+		props.nodes = [waiting('Soon', 30, false), waiting('Other', 72)];
 		await settle();
-		expect(titles()).toEqual(['Soon', '{Scheduled}']);
+		expect(titles()).toEqual(['Soon', '{Later}']);
 		expect(document.activeElement).toBe(groupToggle());
 	});
 

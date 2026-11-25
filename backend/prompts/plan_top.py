@@ -4,6 +4,8 @@ by someone else."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from prompts.plan_tools import in_later
 
 #: What each listed number means.
@@ -23,6 +25,13 @@ _TOP_PLACE = (
     " Leave it there, or move it: reorder node_id={node} expected_revision={revision} "
     "order_key=<the number of the item it goes above>."
 )
+#: The add went past the cap on unstarted items (``plans.plan_cap``) and is in Later.
+_TOP_LANDED_LATER = (
+    " It went to Later: more than {cap} items were waiting to start. To work it sooner, "
+    "pull it back: edit node_id={node} expected_revision={revision} later=false, then reorder it."
+)
+#: The add went past the cap and lower items made room.
+_TOP_MOVED_LATER = " To keep {cap} items waiting to start, this moved to Later: {titles}."
 #: Digest change kinds for an add or move by someone other than the owner.
 TOP_ADDED_KIND = "plan.added_by_other"
 TOP_MOVED_KIND = "plan.moved_by_other"
@@ -50,10 +59,23 @@ def top_more(more: int, later: int) -> str:
     return tail + in_tail
 
 
-def top_landing(place: int, node: str, revision: int, *, last: bool) -> str:
+def top_landing(
+    place: int, node: str, revision: int, *, last: bool,
+    in_later: bool = False, moved: Sequence[str] = (), cap: int = 0,
+) -> str:
     """The landing line an owner's own top-level add or insert gets."""
     landed = (_TOP_LANDED_LAST if last else _TOP_LANDED_AT).format(place=place)
-    return landed + _TOP_PLACE.format(node=node, revision=revision)
+    if in_later:
+        return landed + _TOP_LANDED_LATER.format(cap=cap, node=node, revision=revision)
+    line = landed + _TOP_PLACE.format(node=node, revision=revision)
+    if moved:
+        line += _TOP_MOVED_LATER.format(cap=cap, titles="; ".join(f"'{title}'" for title in moved))
+    return line
+
+
+def top_made_room(titles: Sequence[str], *, cap: int) -> str:
+    """The line a pull back from Later gets when lower items moved to Later to make room."""
+    return _TOP_MOVED_LATER.format(cap=cap, titles="; ".join(f"'{title}'" for title in titles)).lstrip()
 
 
 def top_added_by(

@@ -25,7 +25,7 @@
 
 	// A branch row in the tree carries its count on its expand control instead.
 	// threads, moves: this row's rolled work (`rolledLive`); carriedBelow: what rows rendered under it already show.
-	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, owners, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; owners?: ReadonlyMap<string, OperatorNode>; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
+	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, owners, carriedBelow = [], scheduledView, rank }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; owners?: ReadonlyMap<string, OperatorNode>; carriedBelow?: readonly string[]; scheduledView?: ScheduledView; rank?: { n: number } } = $props();
 
 	const state = $derived(nodeDisplayState(node));
 	const tone = $derived(nodeStateTone(node));
@@ -35,7 +35,7 @@
 	const outsideWait = $derived(state === 'waiting' && !scheduled && isOutsideWait(node));
 	const label = $derived(nodeDisplayLabel(node, isNext));
 	// A narrow row cuts the reason first; a settled row's time stays whole.
-	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView));
+	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView, rank));
 	// AS14: running work reads its current step on the row itself.
 	const liveNow = $derived(planLiveStep(threads, $turnStates, $activeToolsByThread));
 	const liveLine = createLiveLine(
@@ -54,7 +54,8 @@
 	);
 	const attention = $derived(node.comment_attention);
 	// An open ask keeps its own subtext and gains the count after it; a file task's subtext is the count.
-	const countFollows = $derived(!!attention && !attention.system_task && node.requires_user_action);
+	const laterCount = $derived(!!attention && (rank !== undefined || scheduledView !== undefined));
+	const countFollows = $derived(!!attention && (laterCount || (!attention.system_task && node.requires_user_action)));
 	const symbol = $derived.by(() => {
 		if (state === 'needs-you') return '!';
 		if (state === 'waiting') return isNext ? '→' : '•';
@@ -80,7 +81,7 @@
 	{#if !attention?.system_task && liveStep}
 		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={liveRun} /></span>
 		{:else}<span class="row-subline {state} {tone}">{@render liveRun()}</span>{/if}
-	{:else if !attention?.system_task && (subline.lead || subline.moment)}
+	{:else if (!attention?.system_task || laterCount) && (subline.lead || subline.moment)}
 		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={plainRun} /></span>
 		{:else}<span class="row-subline {state} {tone}">{@render plainRun()}</span>{/if}
 	{:else if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot /></span>{/if}

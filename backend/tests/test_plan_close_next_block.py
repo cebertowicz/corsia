@@ -303,7 +303,8 @@ def test_an_accepted_follow_up_is_listed_and_counted(db):
     result = close(db, plan.id, "accept_with_follow_up", task_a.id)
 
     block = next_block(result)
-    assert row_ids(block) == [task_b.id, result["follow_up"]["id"]]
+    # The follow-up takes its accepted source's place, above Task B.
+    assert row_ids(block) == [result["follow_up"]["id"], task_b.id]
     assert block["open_tasks_listed"] == listed(2, 2)
 
 

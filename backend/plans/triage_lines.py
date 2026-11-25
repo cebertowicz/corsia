@@ -2,8 +2,8 @@
 
 A named start (``activate``, ``start``, or a closing operation's
 ``next_node_id``) by the plan's owner is refused while a top-level item ranked
-above it is ready: neither started nor waiting. The refusal names that item and
-the two ways on: start it, or reorder this item above it so the plan says so.
+above it is ready or held only by its own deadline check-back. The refusal
+names the item, reordering, and naming a real wait as ways on.
 A user's write, a conductor's write to another agent's plan and a delegating
 parent's write are never refused here; the person can always override, by
 starting a task by name or moving it up. An add gets the top of the plan and a
@@ -19,8 +19,8 @@ Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
 each open leaf task, less a started task (one holding its slot, or delegated to
 a worker) and a Later task (below the cut, so never passed over), so this
-module holds no second readiness check: a top-level task is ready when it is,
-and a top-level phase when a task under it is. Nothing here writes.
+module counts a ready leaf or one held only by an unbound, non-blocking deadline
+watch. A top-level phase counts when a task under it does. Nothing here writes.
 """
 
 from __future__ import annotations
@@ -29,9 +29,11 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import plans.admission_attempts as attempts
+import plans.admission_projection as projection
 import plans.aggregates as aggregates
 import plans.close_next_bounds as bounds
 import plans.node_order as node_order
+import plans.node_waits as node_waits
 import plans.selection_validity as validity
 import plans.service as service
 from prompts import plan_start_order as order_text
@@ -99,7 +101,33 @@ def standing(db, plan) -> Standing:
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])
-    eligible = [str(row["id"]) for row in leaves if blockers[str(row["id"])] is None]
+    held = [row for row in leaves if blockers[str(row["id"])] == validity.HELD]
+    causes = projection.causes_many([(row, plan) for row in held], db=db)
+    watches = node_waits.armed_watches(db, [str(row["id"]) for row in held], compact=True)
+    checkbacks = {
+        str(row["id"]): {
+            str(watch["id"]) for watch in watches.get(str(row["id"]), [])
+            if (cause := node_waits.watch_cause(watch))["reason_key"] == "deadline"
+            and node_waits.is_check_back(cause)
+        }
+        for row in held
+    }
+    only_checkback = {
+        str(row["id"]) for row in held
+        if causes[str(row["id"])]
+        and all(cause.get("artifact_id") is None
+                and str(cause.get("watch_id")) in checkbacks[str(row["id"])]
+                for cause in causes[str(row["id"])])
+    }
+    other_held_roots = {
+        root_of[str(row["id"])] for row in leaves
+        if blockers[str(row["id"])] is not None and str(row["id"]) not in only_checkback
+    }
+    eligible = [
+        str(row["id"]) for row in leaves
+        if blockers[str(row["id"])] is None
+        or (str(row["id"]) in only_checkback and root_of[str(row["id"])] not in other_held_roots)
+    ]
     # A task already holding its slot is running, and a delegated one is
     # started: neither is waiting to be picked.
     running = attempts.open_attempts(eligible, db=db, compact=True)

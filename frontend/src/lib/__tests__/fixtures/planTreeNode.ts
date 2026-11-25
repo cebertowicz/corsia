@@ -57,6 +57,8 @@ export function node(over: Partial<OperatorNode>): OperatorNode {
 		status_reason: null,
 		branch_progress: null,
 		scheduled_until: null,
+		later: false,
+		later_reason: null,
 		attention_path: [], completion: null, child: null, review,
 		discussion_artifact_id: null, artifacts: [], user_actions: [], ...over,
 	};
