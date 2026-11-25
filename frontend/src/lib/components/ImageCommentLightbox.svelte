@@ -10,6 +10,7 @@
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
@@ -27,7 +28,8 @@
 
 	const COMMENT_IMAGE_MARGIN = 40;
 
-	let { src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, target = null, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { commentTaskBar, src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, target = null, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
+		commentTaskBar?: ReviewBarState;
 		src: string;
 		alt: string;
 		/** A diagram's labels are body size at this scale; it opens there rather than at Fit. */
@@ -285,6 +287,7 @@
 		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->
 		<DocCommentSurface
 			bind:this={surface}
+			{commentTaskBar}
 			state={image.ui.state}
 			anchor={image.ui.anchor}
 			bounds={root}

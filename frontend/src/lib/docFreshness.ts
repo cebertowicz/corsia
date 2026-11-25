@@ -65,3 +65,10 @@ export function shouldOfferVerification(value: DocumentFreshness): boolean {
 	const msUntilDue = new Date(value.due_at).getTime() - Date.now();
 	return msUntilDue >= 0 && msUntilDue <= 7 * 24 * 60 * 60 * 1000;
 }
+
+/** The Details panel's status line; Overdue names the last verification's date, which fits beside Mark verified at phone width, where an age cuts mid-word. */
+export function freshnessStatusText(presentation: FreshnessPresentation | null): string {
+	if (!presentation) return '';
+	if (!presentation.overdue) return presentation.phrase;
+	return `Overdue · ${presentation.dateText ? `verified ${presentation.dateText}` : presentation.phrase}`;
+}
