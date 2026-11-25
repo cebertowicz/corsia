@@ -6,11 +6,12 @@
 	 * the same frame as the document pane, its one tab as the first row and its control docked at the bottom edge,
 	 * where the document's review bar sits.
 	 */
-	let { label, body, band }: {
+	let { label, body, band, notice }: {
 		label: string;
 		body: Snippet;
 		/** The docked control (a ReviewBarShell in docked mode), placed against the canvas's bottom edge. */
 		band?: Snippet;
+		notice?: Snippet;
 	} = $props();
 </script>
 
@@ -23,6 +24,7 @@
 			</span>
 		</div>
 	</div>
+	{#if notice}{@render notice()}{/if}
 	<div class="canvas">
 		<div class="box">
 			<div class="scroll">

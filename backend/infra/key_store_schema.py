@@ -47,6 +47,17 @@ KEY_STORE_SCHEMA_SQL = """
         UNIQUE (site, username)
     );
 
+    CREATE TABLE IF NOT EXISTS saved_login_fill_audit (
+        id INTEGER PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        login_id TEXT NOT NULL,
+        site TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (result IN ('filled', 'rejected', 'unknown'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_saved_login_fill_audit_login_created
+        ON saved_login_fill_audit(login_id, created_at);
+
     CREATE TABLE IF NOT EXISTS key_write_attempts (
         token_hash TEXT PRIMARY KEY
             REFERENCES auth_tokens(token_hash) ON DELETE CASCADE,

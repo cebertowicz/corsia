@@ -4,6 +4,7 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 import { inContentEditorView, inEditorView } from './liveDocument';
 import { enterDocumentEdit } from './documentReading';
+import { settled } from './reviewFixtures';
 
 /**
  * The document, layouts and helpers the table-cell editing specs share (`flows/doc-table-cell-*.spec.ts`). Frames for the
@@ -68,10 +69,8 @@ async function seed(page: Page, text: string, readOnly: boolean) {
 	return { title, fileName, docPath, params, threadId, artifactId: (await seeded.json()).artifact.id as string };
 }
 
-/** Resolves once every animation and transition that ends (the sidebar's slide, a button's pop) has ended. */
-export const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
-	.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-	.map((a) => a.finished.catch(() => null))).then(() => undefined));
+/** The one settle helper, shared with the review specs: waits out every animation and transition that ends (the sidebar's slide, a button's pop, a sheet's late slide-in). */
+export { settled };
 
 /**
  * Resolves once the phone sheet around `target`, if it is in one, has finished sliding in. `settled` cannot tell: the sheet's

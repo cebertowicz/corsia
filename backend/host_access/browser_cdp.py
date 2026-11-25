@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Mapping, Sequence, cast
+from typing import Any, Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -45,9 +45,9 @@ class PasswordProbe:
 class CdpClient:
     """Small request/response CDP client; the session owner supplies its endpoint."""
 
-    def __init__(self, endpoint: str, *, max_size: int | None = 2**20) -> None:
+    def __init__(self, endpoint: str, *, max_size: int | None = 2**20, logger: logging.Logger | None = None) -> None:
         self.endpoint = endpoint
-        self._max_size = max_size
+        self._max_size, self._logger = max_size, logger
         self._next_id = 0
         self.session_id: str | None = None
         self.parents: dict[int, int] = {}
@@ -108,7 +108,7 @@ class CdpClient:
                         parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1)
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, **cast(dict[str, Any], {"logger": self._logger} if self._logger is not None else {}))
         return self
 
     async def __aexit__(self, *_: object) -> None:

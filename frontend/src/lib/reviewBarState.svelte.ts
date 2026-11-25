@@ -6,6 +6,8 @@ import type { DocumentAsk } from '$lib/stores/documentBar';
 import { isCommentTask, personStepAsk } from '$lib/components/comments/commentTask';
 import { createReviewBarRetry } from '$lib/reviewBarRetry';
 
+export const REVIEW_ANSWERED = Symbol('review-answered');
+
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
 export interface ReviewReceipt { verdict: ReviewVerdict; sent: FeedbackCounts; at: Date }

@@ -100,7 +100,7 @@ def _record_skill_read(db: sqlite3.Connection, monkeypatch, path: Path) -> None:
     )
 
 
-def test_email_effect_proposes_serious_and_lower_tier_needs_reason(tmp_path: Path) -> None:
+def test_send_effect_proposes_serious_and_lower_tier_needs_reason(tmp_path: Path) -> None:
     from infra.queries import insert_message
 
     db = _db()
@@ -108,7 +108,7 @@ def test_email_effect_proposes_serious_and_lower_tier_needs_reason(tmp_path: Pat
     path.write_text("# Rule\n", encoding="utf-8")
     _record_manifest(db, _file_source(path))
     insert_message(
-        THREAD, "tool", "sent", {"turn_id": TURN, "name": "email_send"},
+        THREAD, "tool", "sent", {"turn_id": TURN, "name": "calendar_send_invite"},
         msg_id="tool-email", db=db,
     )
 
@@ -184,7 +184,7 @@ def test_serious_effect_scope_is_the_corrected_work_not_the_triage_turn() -> Non
         created_at="2026-10-19T20:00:00+00:00",
     )
     insert_message(
-        THREAD, "tool", "old send", {"turn_id": "older-turn", "name": "email_send"},
+        THREAD, "tool", "old send", {"turn_id": "older-turn", "name": "calendar_send_invite"},
         msg_id="tool-before-task", db=db, created_at="2026-10-19T21:00:00+00:00",
     )
     insert_message(
@@ -196,7 +196,7 @@ def test_serious_effect_scope_is_the_corrected_work_not_the_triage_turn() -> Non
     assert serious_proposed(db, THREAD, SUBJECT) is False
 
     insert_message(
-        THREAD, "tool", "task send", {"turn_id": "task-turn", "name": "email_send"},
+        THREAD, "tool", "task send", {"turn_id": "task-turn", "name": "calendar_send_invite"},
         msg_id="tool-in-task", db=db, created_at="2026-10-19T23:00:00+00:00",
     )
 
@@ -209,7 +209,7 @@ def test_serious_effect_with_no_earlier_person_message_scans_from_the_thread_sta
 
     db = _db()
     insert_message(
-        THREAD, "tool", "send", {"turn_id": "first-turn", "name": "email_send"},
+        THREAD, "tool", "send", {"turn_id": "first-turn", "name": "calendar_send_invite"},
         msg_id="tool-first", db=db, created_at="2026-10-19T21:00:00+00:00",
     )
 
@@ -225,7 +225,7 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
     insert_message(
         THREAD, "assistant", "", {"turn_id": TURN, "llm_tool_calls": [{
             "id": "call-email", "type": "function",
-            "function": {"name": "mcp__corsia__email_send", "arguments": "{}"},
+            "function": {"name": "mcp__corsia__calendar_send_invite", "arguments": "{}"},
         }]}, msg_id="step-email", db=db,
     )
 
@@ -241,12 +241,12 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
     )
     row = await handle_native_tool_complete(
         handler,
-        {"id": "call-email", "name": "mcp__corsia__email_send", "result": "sent"},
+        {"id": "call-email", "name": "mcp__corsia__calendar_send_invite", "result": "sent"},
         (run_in_db, lambda *_args, **_kwargs: nullcontext(db)),
     )
 
     metadata = json.loads(db.execute("SELECT metadata FROM messages WHERE id=?", (row.message_id,)).fetchone()[0])
-    assert metadata["name"] == "mcp__corsia__email_send"
+    assert metadata["name"] == "mcp__corsia__calendar_send_invite"
     assert serious_proposed(db, THREAD, SUBJECT) is True
 
 
@@ -255,7 +255,7 @@ def test_not_a_correction_records_only_its_tier_even_after_a_serious_effect() ->
 
     db = _db()
     insert_message(
-        THREAD, "tool", "send", {"turn_id": TURN, "name": "email_send"}, msg_id="tool-send", db=db,
+        THREAD, "tool", "send", {"turn_id": TURN, "name": "calendar_send_invite"}, msg_id="tool-send", db=db,
         created_at="2026-10-20T00:00:01+00:00",
     )
     with pytest.raises(ValueError, match="records only its tier"):
@@ -288,10 +288,10 @@ def test_serious_effect_with_unreadable_turn_provenance_is_refused_not_skipped()
 
     db = _db()
     insert_message(
-        THREAD, "tool", "send", {"turn_id": TURN, "name": "email_send"}, msg_id="tool-no-turn", db=db,
+        THREAD, "tool", "send", {"turn_id": TURN, "name": "calendar_send_invite"}, msg_id="tool-no-turn", db=db,
         created_at="2026-10-20T00:00:01+00:00",
     )
-    db.execute("UPDATE messages SET active_turn_id=NULL, metadata=? WHERE id='tool-no-turn'", ('{"name": "email_send"}',))
+    db.execute("UPDATE messages SET active_turn_id=NULL, metadata=? WHERE id='tool-no-turn'", ('{"name": "calendar_send_invite"}',))
 
     with pytest.raises(ValueError, match="whether Serious applies cannot be determined"):
         serious_proposed(db, THREAD, SUBJECT)
