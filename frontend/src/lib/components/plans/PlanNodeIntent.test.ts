@@ -34,16 +34,18 @@ it('labels legacy person comments without rewriting them', () => {
 	expect(text).toContain('Reading (your comment, as given):');
 	expect(text).toContain('User document feedback: original');
 });
-it('shows provenance and the person-comment label for a worker reading', () => {
+it('heads a worker reading with its provenance in place of the reading label', () => {
 	const text = render({ intent: 'User document feedback: exact words', intent_is_person_comment: true, intent_parent_title: 'Feedback', intent_owner_name: 'Plan owner', acceptance_criteria: 'Child done' });
-	const parts = ['From Plan owner · Feedback', 'Reading (your comment, as given):', 'User document feedback: exact words', 'To change it, tell Plan owner.', 'Done when: Child done'];
+	expect(text).not.toContain('Reading');
+	const parts = ['From Plan owner · Feedback', 'User document feedback: exact words', 'To change it, tell Plan owner.', 'Done when: Child done'];
 	let previous = -1;
 	for (const part of parts) { const index = text.indexOf(part); expect(index).toBeGreaterThan(previous); previous = index; }
 });
-it('names who to tell when an open worker task has no reading', () => {
-	const text = render({ intent: null, intent_parent_title: 'Parent task', intent_owner_name: 'New Chat' });
-	expect(text).toContain('No reading recorded.');
-	expect(text).toContain('To change it, tell New Chat.');
+it('shows no reading block for an open worker task with no reading', () => {
+	const text = render({ intent: null, intent_parent_title: 'Parent task', intent_owner_name: 'New Chat', acceptance_criteria: 'Child done' });
+	expect(text).not.toContain('No reading recorded.');
+	expect(text).not.toContain('From New Chat');
+	expect(text).toContain('Done when: Child done');
 });
 it('shows only the done test for a settled task with no reading', () => {
 	const text = render({ state: 'closed', intent: null, acceptance_criteria: 'Finished result' });

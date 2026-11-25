@@ -129,6 +129,7 @@
 	}
 	ul, p { margin: 0; }
 	ul { padding-left: var(--space-3); }
+	.status { margin-top: var(--space-2); }
 	.causes > .prefix { display: block; }
 	.evidence-note { margin-left: var(--space-3); }
 	.person-instructions { color: var(--text-primary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
