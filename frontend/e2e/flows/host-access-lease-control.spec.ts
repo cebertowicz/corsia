@@ -709,7 +709,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			if (name.lineHeight) expect(name.height, JSON.stringify(name)).toBeLessThanOrEqual(name.lineHeight + 1);
 			await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
 			await expectRowFits(page);
-			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`), animations: 'disabled' });
 		});
 	}
 
@@ -924,11 +924,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
 			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
 			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
-			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
 
 			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
 			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
-			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
 			await dialog.getByRole('button', { name: 'Approve' }).click();
 			await expect.poll(() => decisions.length).toBe(1);
 			expect(decisions[0]).toEqual({
@@ -938,16 +938,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			const chip = page.locator('.active-chip-trigger');
 			await expect(chip).toHaveAccessibleName('Saved login');
 			await expect(chip.locator('.countdown')).toHaveText('On');
-			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`), animations: 'disabled' });
 			await chip.click();
 			const active = page.getByRole('dialog');
 			await expect(active).toContainText('Until I turn it off');
 			await expect(active).not.toContainText('Time remaining');
-			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`), animations: 'disabled' });
 			await active.getByRole('button', { name: 'Revoke approval' }).click();
 			await expect(page.locator('.active-chip')).toHaveCount(0);
 			expect(decisions[1]).toEqual({ action: 'revoke', body: { revision: 2, application_hash: 'hash-fill-e2e-1' } });
-			await page.screenshot({ path: testInfo.outputPath(`after-revoke-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`after-revoke-${viewport.width}.png`), animations: 'disabled' });
 		});
 	}
 });
