@@ -192,3 +192,83 @@ test('393 sheet: unfolding the earlier replies lifts the document, as it does to
 	await page.waitForTimeout(1500); await settled(page);
 	expect((await doc.evaluate((node) => node.scrollTop)) - before).toBeGreaterThan(50);
 });
+
+// "Go to text" on the card already open still takes the document to the text, however far the thread was read and the page left.
+// Only the docked list has the button to press: the margin card shows it only while its text shows, and the sheet's thread view has none.
+const viewportOf = (page: Page) => page.viewportSize()!;
+/** Waits until the comment's anchor is on screen, and above the phone sheet when there is one. */
+async function expectAnchorShown(page: Page, surface: Surface) {
+	await expect(async () => {
+		const box = await page.locator('.cm-comment-anchor').first().boundingBox();
+		expect(box, 'the commented text is not on screen').not.toBeNull();
+		expect(box!.y).toBeGreaterThanOrEqual(0);
+		const limit = surface.touch ? (await page.locator('[data-adaptive-drawer] .drawer-body').first().boundingBox())!.y : viewportOf(page).height;
+		expect(box!.y + box!.height, 'the commented text is not above the sheet or inside the screen').toBeLessThanOrEqual(limit + 1);
+	}).toPass({ timeout: 8_000 });
+}
+async function press(page: Page, surface: Surface, el: Locator) {
+	await expect(el).toBeVisible();
+	const box = (await el.boundingBox())!;
+	if (surface.touch) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2); else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+	await page.waitForTimeout(1500); await settled(page);
+}
+
+test(`${DOCKED.name}: Go to text on the open card, after reading its later replies, takes the document to the text`, async ({ page, request }, info) => {
+	only(DOCKED, info); test.setTimeout(180_000);
+	const count = 8;
+	const seeded = await seedThread(request, `${DOCKED.mode} goto ${DOCKED.width}`, 'middle', count);
+	const { card } = await openThread(page, request, DOCKED, seeded);
+	const doc = page.locator('.cm-scroller').first();
+	await targetOf(card, 'body', count).evaluate((node) => node.scrollIntoView({ block: 'center', behavior: 'instant' }));
+	await page.waitForTimeout(400); await settled(page);
+	const jump = card.locator('[data-comment-jump]').first();
+	await jump.evaluate((node) => node.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
+	await doc.evaluate((node) => { node.scrollTop = 0; });
+	await page.waitForTimeout(400); await settled(page);
+	const before = await doc.evaluate((node) => node.scrollTop);
+	await press(page, DOCKED, jump);
+	expect(Math.abs((await doc.evaluate((node) => node.scrollTop)) - before), 'the document did not go to the text').toBeGreaterThan(200);
+	await expectAnchorShown(page, DOCKED);
+});
+
+// The phone list: a press inside the open card keeps the sheet's height and the document where they are; Go to text on it goes to the text.
+async function openPhoneList(page: Page, request: APIRequestContext, name: string) {
+	const seeded = await seedThread(request, name, 'middle', 2);
+	await setMockCorsiaAgentModel(request);
+	await setDebugVersionOverlay(request, false);
+	await open(page, seeded.doc, 'phone', 'light');
+	await openComments(page);
+	await settled(page);
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	const card = drawer.locator(`[data-thread-id="${seeded.root}"]`).first();
+	const jump = card.locator('[data-comment-jump]').first();
+	await press(page, PHONE, jump);
+	await expect(card).toHaveClass(/focused/);
+	const doc = page.locator('.cm-scroller').first();
+	await doc.evaluate((node) => { node.scrollTop = 0; });
+	await page.waitForTimeout(400); await settled(page);
+	return { card, jump, doc, drawer };
+}
+
+/** The open sheet is at half height, so the card's row can sit below its edge: scroll it into the sheet's view before pressing (the press is by position). */
+const bring = (el: Locator) => el.evaluate((node) => node.scrollIntoView({ block: 'center', behavior: 'instant' }));
+
+test('393 phone list: pressing inside the open card keeps the sheet height and the document where they are', async ({ page, request }, info) => {
+	only(PHONE, info); test.setTimeout(180_000);
+	const { card, doc, drawer } = await openPhoneList(page, request, 'list press');
+	await bring(card.getByText('Is the owner of this ring confirmed?')); await page.waitForTimeout(400); await settled(page);
+	const before = { doc: await doc.evaluate((node) => node.scrollTop), sheet: (await drawer.boundingBox())!.height };
+	await press(page, PHONE, card.getByText('Is the owner of this ring confirmed?'));
+	expect(Math.abs((await doc.evaluate((node) => node.scrollTop)) - before.doc), 'the document scrolled').toBeLessThanOrEqual(STEADY);
+	expect(Math.abs((await drawer.boundingBox())!.height - before.sheet), 'the sheet changed height').toBeLessThanOrEqual(STEADY);
+});
+
+test('393 phone list: Go to text on the open card still takes the document to the text', async ({ page, request }, info) => {
+	only(PHONE, info); test.setTimeout(180_000);
+	const { jump, doc } = await openPhoneList(page, request, 'list goto');
+	await bring(jump); await page.waitForTimeout(400); await settled(page);
+	const before = await doc.evaluate((node) => node.scrollTop);
+	await press(page, PHONE, jump);
+	expect(Math.abs((await doc.evaluate((node) => node.scrollTop)) - before), 'the document did not go to the text').toBeGreaterThan(200);
+	await expectAnchorShown(page, PHONE);
+});

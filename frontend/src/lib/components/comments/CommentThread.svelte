@@ -32,7 +32,7 @@
 	import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 	import { failedLine } from '$lib/stores/draftKept';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, pressKeepsPlace = false, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -79,6 +79,8 @@
 		/** A multi-selection may mark several cards without moving keyboard focus into each one. */
 		autoFocusSelection?: boolean;
 		onFocus?: () => void;
+		/** A press inside the card already focused only reads it: the page, sheet and column stay where they are. Off by default, so a surface that selects from a press (an image's list) keeps calling `onFocus`. */
+		pressKeepsPlace?: boolean;
 		readOnly?: boolean;
 		/** How the replies show (CommentReplyList's `view`): `recent` by default (a card, popover or sheet opened at its highlight), `summary` for a row in the drawer's list, `all` for the whole thread its replies row opens. A summary row's replies row calls `onOpenThread`. */
 		replyView?: 'recent' | 'all' | 'summary';
@@ -209,7 +211,7 @@
 	function pressCard(event: MouseEvent) {
 		if (notEngaging(event)) return;
 		engage();
-		onFocus?.();
+		if (!(pressKeepsPlace && focused)) onFocus?.();
 	}
 	function pressResolved(event: MouseEvent) {
 		if (!notEngaging(event)) engage();
