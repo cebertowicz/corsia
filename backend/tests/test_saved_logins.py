@@ -83,7 +83,7 @@ def test_a_site_is_kept_as_its_https_origin(given, kept):
 def test_anything_but_an_https_origin_is_refused(given):
     with pytest.raises(KeyStoreError) as refused:
         saved_logins.normalized_site(given)
-    assert str(refused.value) == "A saved login's site is an https address, such as https://example.com."
+    assert str(refused.value) == "CORSIA saves logins only for sites whose address starts with https://."
 
 
 def test_the_longest_host_name_is_kept():
