@@ -354,8 +354,8 @@
 	.ct-count-mark { display: none; width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 	/* CommentMeta draws the avatar (Avatar owns the shared initials presentation); the Agree and Resolve boxes are in comment-link.css. */
 
-	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
-	.ct-decision-error, .ct-reply-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-orphan { font-size: var(--text-footnote); color: var(--amber); }
+	.ct-decision-error, .ct-reply-error { font-size: var(--text-footnote); color: var(--red-text); }
 	/* The card's gap spaces it, as it spaces the field above it: no paragraph margin of its own. */
 	.ct-reply-error { margin: 0; }
 	.ct-decided { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
