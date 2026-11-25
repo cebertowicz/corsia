@@ -213,7 +213,7 @@ export function fillStartingChoice(choices: number[], requested: number | null):
 }
 
 /** The person's standing choice for a fill: this agent, this login, until they revoke it. */
-export const UNTIL_TURNED_OFF_LABEL = 'Until I turn it off';
+export const UNTIL_REVOKED_LABEL = 'Until I revoke it';
 /** A standing fill grant's chip, in place of a countdown. */
 export const STANDING_CHIP_LABEL = 'On';
 

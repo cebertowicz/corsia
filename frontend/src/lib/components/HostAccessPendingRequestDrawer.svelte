@@ -313,7 +313,8 @@
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
 		/* A segmented choice in a request sheet (the fill's duration) is finger-sized on a phone. */
-		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); }
+		/* A narrower side padding keeps each of the fill's four choices to two lines in one row. */
+		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); padding-inline: var(--space-2); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
 		:global(.pending-drawer .decision-buttons) { gap: var(--touch-target); }

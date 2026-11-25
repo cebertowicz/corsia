@@ -3,7 +3,7 @@
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import {
-		approvalReady, casReady, duration, fillDurations, fillStartingChoice, owner, UNTIL_TURNED_OFF_LABEL,
+		approvalReady, casReady, duration, fillDurations, fillStartingChoice, owner, UNTIL_REVOKED_LABEL,
 	} from '$lib/hostAccess/leaseFormat';
 	import type { FillChoice, HostAccessFill } from '$lib/api/hostAccess';
 
@@ -12,7 +12,7 @@
 	 * HostAccessPendingRequestDrawer renders it and owns the shared sheet layout (.pending-drawer,
 	 * .decision-*); like the script sheet it draws the §0.1 roles: sentence-case section labels, status
 	 * as coloured text, no boxes. The duration is the person's pick, never the agent's: the agent's asked-for
-	 * time is only where the choice starts. "Until I turn it off" is the last choice, offered here only (never on
+	 * time is only where the choice starts. "Until I revoke it" is the last choice, offered here only (never on
 	 * the host-access lease sheet), never where the choice starts, and never reached by wrapping the arrow keys.
 	 */
 	let {
@@ -49,7 +49,7 @@
 	);
 
 	/**
-	 * The arrow keys wrap around the timed choices only: "Until I turn it off" is reached by a deliberate
+	 * The arrow keys wrap around the timed choices only: "Until I revoke it" is reached by a deliberate
 	 * step forward from the longest one (or a click), never by wrapping back from the first.
 	 */
 	function choiceKey(event: KeyboardEvent): void {
@@ -88,7 +88,7 @@
 						tabindex={seconds === choice ? 0 : -1}
 						onkeydown={choiceKey}
 						onclick={() => { picked = choice; }}
-					>{choice === STANDING ? UNTIL_TURNED_OFF_LABEL : duration(choice)}</button>
+					>{choice === STANDING ? UNTIL_REVOKED_LABEL : duration(choice)}</button>
 				{/each}
 			</div>
 		</section>

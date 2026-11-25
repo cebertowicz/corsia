@@ -56,7 +56,7 @@ class ScriptMutation(BaseModel):
 
 
 class FillApproval(LeaseMutation):
-    """The person's yes to a saved-login fill: the duration they picked, or until they turn it off; exactly one."""
+    """The person's yes to a saved-login fill: the duration they picked, or until they revoke it; exactly one."""
 
     duration_seconds: StrictInt | None = None
     until_turned_off: StrictBool = False
@@ -64,7 +64,7 @@ class FillApproval(LeaseMutation):
     @model_validator(mode="after")
     def _one_choice(self) -> "FillApproval":
         if (self.duration_seconds is None) != self.until_turned_off:
-            raise ValueError("Pick a duration or until turned off, not both.")
+            raise ValueError("Pick a duration or until revoked, not both.")
         return self
 
 

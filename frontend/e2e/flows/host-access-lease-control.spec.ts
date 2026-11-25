@@ -921,13 +921,23 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.locator('.pending-request-trigger').click();
 			const dialog = page.getByRole('dialog');
 			const choices = dialog.getByRole('radio');
-			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I revoke it']);
 			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
-			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
+			await expect(dialog.getByRole('radio', { name: 'Until I revoke it' })).toHaveAttribute('aria-checked', 'false');
+			// Every choice fits in at most two lines, all four in view, and the picker never scrolls sideways.
+			const lineCounts = await choices.evaluateAll((buttons) => buttons.map((button) => {
+				const range = document.createRange();
+				range.selectNodeContents(button);
+				return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+			}));
+			expect(lineCounts.every((lines) => lines >= 1 && lines <= 2), lineCounts.join(',')).toBe(true);
+			const group = dialog.getByRole('radiogroup');
+			expect(await group.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+			for (const choice of await choices.all()) await expect(choice).toBeInViewport({ ratio: 1 });
 			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
 
-			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
-			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await dialog.getByRole('radio', { name: 'Until I revoke it' }).click();
+			await expect(dialog.getByRole('radio', { name: 'Until I revoke it' })).toHaveAttribute('aria-checked', 'true');
 			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
 			await dialog.getByRole('button', { name: 'Approve' }).click();
 			await expect.poll(() => decisions.length).toBe(1);
@@ -941,7 +951,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`), animations: 'disabled' });
 			await chip.click();
 			const active = page.getByRole('dialog');
-			await expect(active).toContainText('Until I turn it off');
+			await expect(active).toContainText('Until I revoke it');
 			await expect(active).not.toContainText('Time remaining');
 			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`), animations: 'disabled' });
 			await active.getByRole('button', { name: 'Revoke approval' }).click();

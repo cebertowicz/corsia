@@ -35,7 +35,7 @@
 	} = $props();
 
 	const fill = $derived(lease.kind === 'fill');
-	/** A fill the person approved until they turn it off: no countdown, revoked as any other. */
+	/** A fill the person approved until they revoke it: no countdown, revoked as any other. */
 	const standing = $derived(lease.kind === 'fill' && lease.standing === true);
 </script>
 

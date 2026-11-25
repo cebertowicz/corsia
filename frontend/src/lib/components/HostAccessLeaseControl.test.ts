@@ -1847,7 +1847,7 @@ describe('HostAccessLeaseControl — fixed sentences, never raw errors', () => {
 	// those cases are pinned by the decision-failure tests above.
 });
 
-it('offers Until I turn it off on a saved-login request only, never on a host-access lease request', async () => {
+it('offers Until I revoke it on a saved-login request only, never on a host-access lease request', async () => {
 	const { default: HostAccessPendingRequestDrawer } = await import('./HostAccessPendingRequestDrawer.svelte');
 	const fill: HostAccessFill = {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
@@ -1870,6 +1870,6 @@ it('offers Until I turn it off on a saved-login request only, never on a host-ac
 		target.remove();
 	}
 	expect(seen.lease).toContain('5 minutes');
-	expect(seen.lease).not.toContain('Until I turn it off');
-	expect(seen.fill).toContain('Until I turn it off');
+	expect(seen.lease).not.toContain('Until I revoke it');
+	expect(seen.fill).toContain('Until I revoke it');
 });
