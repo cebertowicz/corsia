@@ -1,5 +1,7 @@
 <script lang="ts">
-	let { column, offered, onComment }: { column: HTMLElement | undefined; offered: boolean; onComment: () => void } = $props();
+	import type { Snippet } from 'svelte';
+	// The Comment button is the document's own (the one the editor floats beside a selection); this only holds it at the bottom of the visible screen.
+	let { column, offered, children }: { column: HTMLElement | undefined; offered: boolean; children: Snippet } = $props();
 	let bar = $state<HTMLDivElement>();
 	let bottom = $state(0);
 	let left = $state(0);
@@ -16,8 +18,8 @@
 			width = bounds.width;
 			const lift = Math.max(0, window.innerHeight - ((viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)));
 			bottom = lift;
-			// The room is what the bar covers of the document's column, never more: a bar on a column that ends above the page's foot covers less than its own height.
-			// The bar's top is worked out from the lift just set, not read back: the lift reaches the page at the next flush, so a measured top is the one before the move.
+			// The room is what the button covers of the document's column, never more: a button on a column that ends above the page's foot covers less than its own height.
+			// The holder's top is worked out from the lift just set, not read back: the lift reaches the page at the next flush, so a measured top is the one before the move.
 			const height = element.getBoundingClientRect().height;
 			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(height, bounds.bottom - (window.innerHeight - lift - height)))}px`);
 		};
@@ -46,11 +48,11 @@
 </script>
 
 <div class="touch-comment-bar" class:offered bind:this={bar} style:bottom="{bottom}px" style:left="{left}px" style:width="{width}px" aria-hidden={!offered}>
-	{#if offered}<button type="button" class="sel-comment" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={onComment}>Comment</button>{/if}
+	{#if offered}{@render children()}{/if}
 </div>
 
 <style>
-	.touch-comment-bar { position: fixed; z-index: 5; display: flex; justify-content: flex-end; box-sizing: border-box; min-height: calc(var(--touch-target) + var(--space-2) + max(var(--space-2), env(safe-area-inset-bottom))); padding: var(--space-2); padding-bottom: max(var(--space-2), env(safe-area-inset-bottom)); background: var(--bg-elevated); border-top: 1px solid var(--border-subtle); visibility: hidden; pointer-events: none; }
-	.touch-comment-bar.offered { visibility: visible; pointer-events: auto; }
-	button.sel-comment { position: static; translate: none; animation: none; box-shadow: none; min-width: var(--touch-target); min-height: var(--touch-target); padding-inline: var(--space-4); color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); border: 0; border-radius: var(--radius); background: var(--bg-hover); cursor: pointer; }
+	/* A holder only: no fill, border or band. It keeps the button centred at the bottom of the visible screen, above the keyboard and the safe-area inset, and its height is the room the button covers. */
+	.touch-comment-bar { position: fixed; z-index: 5; display: flex; justify-content: center; box-sizing: border-box; min-height: calc(var(--touch-target) + max(var(--space-2), env(safe-area-inset-bottom))); padding-bottom: max(var(--space-2), env(safe-area-inset-bottom)); pointer-events: none; }
+	.touch-comment-bar :global(.sel-comment) { position: static; translate: none; align-self: flex-end; pointer-events: auto; }
 </style>
