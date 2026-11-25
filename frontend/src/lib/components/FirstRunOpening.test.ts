@@ -101,7 +101,7 @@ describe('first-run transcript composition', () => {
 		if (kind === 'reduced motion') { awaitFirstRunOpening(thread); vi.stubGlobal('matchMedia', () => ({ matches: true })); }
 		if (kind !== 'history') receive();
 		await settle();
-		expect(host.textContent).toContain('My plan for finishing your setup is in the Plan section on the right');
+		expect(host.textContent).toContain('Work that needs its own space, or several agents working together, becomes a project.');
 		expect(host.querySelector('.typewriter-text')).toBeNull();
 		expect(host.querySelector('[aria-atomic="true"]')).toBeNull();
 	});
@@ -122,7 +122,7 @@ describe('first-run transcript composition', () => {
 
 	// A comment made on the opening must point at the same text whether it was picked during the reveal's session or after a reload.
 	it('anchors a comment on the revealed opening at the offsets a reloaded opening gives', async () => {
-		const phrase = 'My plan for finishing your setup';
+		const phrase = 'Work that needs its own space';
 		const anchorOf = () => {
 			const body = messageBody(host.querySelector('.message.assistant[data-message-id]'))!;
 			const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);

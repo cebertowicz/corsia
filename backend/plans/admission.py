@@ -10,6 +10,7 @@ import plans.errors as errors
 import plans.node_states as node_states
 import plans.selection_validity as validity
 import plans.service as service
+import plans.triage_lines as triage_lines
 
 # Projection is split out to keep admission's mutation owner within its file budget.
 
@@ -91,11 +92,11 @@ def select(
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
     if _below_cut(node):
-        # A running row never sits inside Later: taking the task up ends the
-        # set-aside, whatever route started it (Later design §2).
+        # A running row never sits inside Later: taking the task up brings its
+        # whole item back, whatever route started it (Later design §2).
         from plans import later_fields
 
-        later_fields.flip(
+        later_fields.set_item(
             db, node_id, later=False, reason="started",
             actor_id=actor_id, provenance=provenance,
         )
@@ -201,7 +202,7 @@ def reconcile_plan(
         )
     elif candidates is None:
         candidates = tuple(node_order.active_task_ids(db, plan_id))
-    for node_id in candidates:
+    for node_id in _in_plan_order(db, plan, candidates):
         attempt, _conflict = select(
             node_id, actor_id=actor_id, provenance=provenance,
             db=db, touch=False,
@@ -220,6 +221,15 @@ def reconcile_plan(
 
         delegated_selection.reconcile_delegator(plan_id, db=db)
     return reconciled
+
+
+def _in_plan_order(db, plan, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """The pick's candidates in plan order; a passed-over task re-arms its idle executor's liveness wake."""
+    ordered = triage_lines.in_plan_order(db, plan, candidates)
+    if len(ordered) < len(candidates):
+        from automation import plan_liveness
+        plan_liveness.on_turn_complete(str(plan["owner_id"]), db=db)
+    return ordered
 
 
 def reselect_and_reconcile(

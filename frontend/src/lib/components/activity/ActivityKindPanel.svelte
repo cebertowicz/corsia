@@ -2,16 +2,16 @@
 	import type { Snippet } from 'svelte';
 
 	/**
-	 * The pane for an item that is not a document (a decision, a task with no document, a held message, a chat reply):
+	 * The pane for an item that is not a document (a decision, a task with no document, or a held message):
 	 * the same frame as the document pane, its one tab as the first row and its control docked at the bottom edge,
 	 * where the document's review bar sits.
 	 */
-	let { label, icon = 'item', body, band }: {
+	let { label, body, band, notice }: {
 		label: string;
-		icon?: 'item' | 'chat';
 		body: Snippet;
 		/** The docked control (a ReviewBarShell in docked mode), placed against the canvas's bottom edge. */
 		band?: Snippet;
+		notice?: Snippet;
 	} = $props();
 </script>
 
@@ -19,15 +19,12 @@
 	<div class="panel-strip">
 		<div class="strip" role="tablist" aria-label={label}>
 			<span class="tab-wrap active" role="tab" aria-selected="true" tabindex="0">
-				{#if icon === 'chat'}
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /></svg>
-				{:else}
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-				{/if}
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 				<span class="tab-title">{label}</span>
 			</span>
 		</div>
 	</div>
+	{#if notice}{@render notice()}{/if}
 	<div class="canvas">
 		<div class="box">
 			<div class="scroll">
@@ -66,9 +63,9 @@
 		padding: 0 var(--canvas-pad-inline) var(--canvas-pad-bottom);
 	}
 	/* The box the docked control is placed against, inside the canvas's padding, as the document's box is. */
-	.box { position: relative; height: 100%; }
-	.scroll { height: 100%; overflow-y: auto; }
+	.box { position: relative; height: 100%; --control-clearance: 10rem; }
+	.scroll { height: 100%; overflow-y: auto; scroll-padding-bottom: var(--control-clearance); }
 	/* The docked control covers the canvas bottom; the content keeps its last lines clear of it. */
-	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) 10rem; }
+	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) var(--control-clearance); }
 	:global(.activity.phone) .canvas { --canvas-pad-inline: var(--space-3); }
 </style>

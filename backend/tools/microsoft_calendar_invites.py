@@ -81,7 +81,7 @@ class MicrosoftCalendarDraftTool(Tool):
         return json.dumps({
             "draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"],
             "account_id": account, "operation": operation,
-            "next": f"Show the person this calendar invite and wait for their reply. After approval, call microsoft_calendar_{operation} with this account_id, draft_id, and revision.",
+            "next": f"Show the person this calendar invite. When they want it sent, call microsoft_calendar_{operation} with this account_id, draft_id, and revision.",
         })
 
 
@@ -92,7 +92,7 @@ def _graph_utc(value: datetime) -> str:
 
 BAD_CALENDAR_DRAFT = (
     "This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with "
-    "microsoft_calendar_draft, show the person, and wait for their reply."
+    "microsoft_calendar_draft and show the person."
 )
 
 

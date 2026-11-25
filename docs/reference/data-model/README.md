@@ -12,7 +12,7 @@ SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`.
 | Analytics store | [Analytics store](analytics-store.md) | `backend/infra/analytics_db.py` |
 | Context and memory | [Context and memory](context-and-memory.md) | `backend/infra/checkpoint_schema.py`, `backend/infra/context_change_schema.py`, `backend/infra/continuity_schema.py`, `backend/infra/continuity_staging.py`, `backend/infra/fact_extraction_schema.py`, `backend/infra/lesson_placement_check_schema.py`, `backend/infra/schema.py` |
 | Document store | [Document store](document-store.md) | `backend/doceditor/live_store.py` |
-| Documents and artifacts | [Documents and artifacts](documents-and-artifacts.md) | `backend/infra/artifact_identity_schema.py`, `backend/infra/artifact_relocation_schema.py`, `backend/infra/doc_comments_schema.py`, `backend/infra/doc_feedback_schema.py`, `backend/infra/doc_review_schema.py`, `backend/infra/schema.py` |
+| Documents and artifacts | [Documents and artifacts](documents-and-artifacts.md) | `backend/infra/artifact_identity_schema.py`, `backend/infra/artifact_relocation_schema.py`, `backend/infra/doc_comments_schema.py`, `backend/infra/doc_feedback_schema.py`, `backend/infra/doc_review_schema.py`, `backend/infra/schema.py`, `backend/infra/suggestion_history_schema.py` |
 | Events and webhooks | [Events and webhooks](events-and-webhooks.md) | `backend/infra/bulletin_schema.py`, `backend/infra/event_intake_schema.py`, `backend/infra/event_rule_schema.py`, `backend/infra/event_watch_schema.py`, `backend/infra/schema.py`, `backend/infra/webhook_delivery_schema.py` |
 | Host access | [Host access](host-access.md) | `backend/infra/host_access_schema.py` |
 | Log store | [Log store](log-store.md) | `backend/infra/otel_logs/store.py` |

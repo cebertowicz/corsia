@@ -7,6 +7,7 @@
 // update restart finds it; the person's own Sign out clears it, an expired session does not. From the first press of Comment
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
+// The same holds for a comment typed on a passage of a chat (`chatDraftKey`) and a reply typed in a chat's comment thread.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { clippedWindow } from '$lib/cm/visible-region';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -187,6 +188,12 @@ export function documentDraftKey(target: Pick<DocViewerTarget, 'path' | 'project
 export function imageDraftKey(artifactId: string | null, image = ''): string {
 	return artifactId ? `image:${JSON.stringify([artifactId, image])}` : '';
 }
+/** A new comment on one passage of a chat: the chat, the message and the passage's offsets, so two passages never share a draft. */
+export function chatDraftKey(threadId: string, messageId: string, anchor: { from_off: number; to_off: number }): string {
+	return `chat:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
+}
+/** The scope of a reply to a chat's comment thread (`replyDraftKey`): the thread's id is a comment's own UUID, so it keys the reply wherever the card is shown. */
+export const CHAT_REPLY_SCOPE = 'chat';
 /** A reply to one thread, under the document or image it is written on (`documentDraftKey`, `imageDraftKey`); a thread's id alone keys it where there is neither. */
 export function replyDraftKey(scope: string, commentId: string): string {
 	return `reply:${JSON.stringify([scope, commentId])}`;

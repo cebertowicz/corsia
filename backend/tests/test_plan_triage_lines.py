@@ -9,8 +9,6 @@ add returns is `test_plan_top.py`'s.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 import plans.selection_validity as validity
@@ -41,9 +39,13 @@ def _refusal(title: str, node_id: str, top_id: str, key: int, *, nested: bool = 
     )
     mover = "its phase " if nested else ""
     return (
-        f"Not started: '{title}' ({node_id}) is above this in plan order and ready. Start it "
-        f"first, or if this outranks it, reorder {mover}node_id={top_id} order_key={key}, "
-        f"then start this with {revision_text}."
+        f"Not started: '{title}' ({node_id}) is above this in plan order and is ready or held only "
+        f"by your own deadline check-back. Start it first, or reorder {mover}node_id={top_id} "
+        f"order_key={key}, then start this with {revision_text}. If it really waits on someone or "
+        "something, set a wait that names it: block_node with an owner, a dependency, or a watch "
+        "on the PR or event. Scheduling never puts off work you could move now. Reorder only if "
+        "your priorities and the project's, read now, rank this higher. Otherwise start the "
+        "item above."
     )
 
 
@@ -70,27 +72,12 @@ def _phase(db, plan_id: str, title: str):
     return node
 
 
-def _watch(db, plan_id: str, node_id: str) -> None:
-    """Park one task on a deadline wait three days out."""
-    queue_active(db, node_id)
-    deadline = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
-    plan_update(db, plan_id, "arm_watch", {
-        "node_id": node_id, "expected_revision": revision(db, node_id),
-        "condition": {"type": "deadline", "value": deadline},
-        "expected_event": f"proof.{node_id[:8]}",
-    })
-
-
 def _activations(db, node_id: str) -> int:
     return int(db.execute(
         "SELECT COUNT(*) FROM plan_node_events "
         "WHERE node_id=? AND event='state_transition' AND new_state='active'",
         (node_id,),
     ).fetchone()[0])
-
-
-def _waiting(db, plan_id: str) -> None:
-    _watch(db, plan_id, task(db, plan_id, "Waiting work").id)
 
 
 def _held(db, plan_id: str) -> None:
@@ -134,7 +121,6 @@ def _delegated(db, plan_id: str) -> None:
 
 
 NOT_READY_SCENES = {
-    "waiting": _waiting,
     "later": _later,
     "held": _held,
     "behind_a_prerequisite": _behind_a_prerequisite,
@@ -331,7 +317,7 @@ def test_a_next_node_id_start_ahead_of_a_ready_task_is_refused(db):
     block = next_block(close(db, plan.id, "fail", current.id, next_node_id=chosen.id))
 
     assert block["named"] == {
-        "reason": "start Waiting P0 fix first (ready, above this task) or reorder this task above it",
+        "reason": "start Waiting P0 fix first, reorder this task above it, or name its wait",
         "refusal": "out_of_order",
         "started": False,
     }
@@ -350,7 +336,7 @@ def test_a_nested_next_node_id_refusal_names_the_phase_to_reorder(db):
     block = next_block(close(db, plan.id, "fail", current.id, next_node_id=child.id))
 
     assert block["named"]["reason"] == (
-        "start Waiting P0 fix first (ready, above this task) or reorder its phase above it"
+        "start Waiting P0 fix first, reorder its phase above it, or name its wait"
     )
     assert block["named"]["started"] is False
 

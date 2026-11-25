@@ -52,17 +52,6 @@ WAKE_REASON_BYTES = 60
 #: plus the count and the moves.
 WAKE_ROWS = 8
 
-#: The latest move below the cut, including a move with no reason, per row.
-_REASON_SQL = """SELECT e.node_id AS node_id,
-        json_extract(e.payload_json,'$.reason') AS reason
-    FROM plan_node_events AS e
-    WHERE e.event=? AND e.node_id IN (SELECT value FROM json_each(?))
-      AND e.rowid=(SELECT MAX(l.rowid) FROM plan_node_events AS l
-                   WHERE l.node_id=e.node_id AND l.event=?
-                     AND json_extract(l.payload_json,'$.later')=1)
-    """
-
-
 def _week_out(instant: str) -> str:
     """One week after ``instant``, in the same canonical form.
 
@@ -139,10 +128,9 @@ def row_facts(db, node_ids) -> dict[str, dict]:
     ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
     if not ids:
         return {}
-    facts: dict[str, dict] = {}
-    for row in fetch_all(db, _REASON_SQL, (later_fields.EVENT, encoded_ids(ids), later_fields.EVENT)):
-        if row["reason"] is not None:
-            facts.setdefault(str(row["node_id"]), {})["reason"] = row["reason"]
+    facts: dict[str, dict] = {
+        node_id: {"reason": reason} for node_id, reason in later_fields.latest_reasons(db, ids).items()
+    }
     for node_id, watches in node_waits.armed_watches(db, ids, compact=True).items():
         dated = sorted(
             str(row["condition_value"]) for row in watches if row["condition_type"] == "deadline"

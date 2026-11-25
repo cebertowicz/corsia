@@ -226,5 +226,21 @@ describe('suggestion pointer behavior', () => {
 		insert.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
 		expect(pointer.hover).toHaveBeenLastCalledWith(null);
 	});
-});
 
+	it('does not report the pointer over a suggestion after a touch, where the browser sends it as a long press starts a selection', () => {
+		const view = mount([range()]);
+		const [strike] = strikes(view);
+		const arrive = (type: string, pointerType: string) => {
+			const event = new Event(type, { bubbles: true });
+			Object.defineProperty(event, 'pointerType', { value: pointerType });
+			strike.dispatchEvent(event);
+		};
+		arrive('pointerdown', 'touch');
+		strike.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+		expect(pointer.hover).not.toHaveBeenCalled();
+		// A mouse that only moves over the text after it (no press) is a pointer again: hovering reports as before.
+		arrive('pointerover', 'mouse');
+		strike.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+		expect(pointer.hover).toHaveBeenCalledWith('s1');
+	});
+});

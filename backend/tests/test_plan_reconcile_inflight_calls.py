@@ -55,7 +55,11 @@ def _ineligibility_params(connection, plan_id: str, operation: str, node_id: str
             connection, plan_id, "Unaccepted prerequisite",
         ).id
     if operation == "arm_watch":
-        params["condition"] = {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"}
+        # A watch on an artifact's event; a deadline alone still ranks the task (plans.triage_lines).
+        from tests.test_plan_reconcile_release import watched_artifact
+
+        params["condition"] = {"type": "event", "value": "proof.ready"}
+        params["artifact_id"] = watched_artifact(connection, node_id)
         params["expected_event"] = "proof.ready"
     params["expected_revision"] = revision(connection, node_id)
     return params

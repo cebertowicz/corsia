@@ -20,6 +20,7 @@ from api.system_admin_helpers import own_backend_port as _own_backend_port
 from api.system_admin_helpers import restart_log_path as _restart_log_path
 from api.system_admin_helpers import update_status_details
 from infra.auth import authenticate, require_human_user, require_user
+from infra.log_files import nofollow_log_opener
 
 
 router = APIRouter(tags=["system"])
@@ -216,7 +217,7 @@ def _spawn_self_restart(
         "CORSIA_RESTART_BACKEND_PORT": str(own_port),
         "CORSIA_RESTART_OPERATION_ID": operation_id,
     }
-    with _restart_log_path("self-restart.log").open("w") as log_fh:
+    with open(_restart_log_path("self-restart.log"), "w", opener=nofollow_log_opener) as log_fh:
         return spawn_restart_lifecycle(
             corsia_script,
             verb,

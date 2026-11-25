@@ -1,23 +1,46 @@
 import type {
-	ActivityChatReplyDetail,
-	ActivityDocReplyDetail,
+	ActivityDocumentDetail,
 	ActivityKind,
 	ActivityQueueItem,
 	ActivityReviewDetail,
 	ActivityTaskDetail,
 } from '$lib/api/activityQueue';
 import type { DecisionDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
-import { fetchArtifactPane } from '$lib/api/docs';
-import type { ArtifactNode, PaneNode } from '$lib/api/artifactPane';
+export { findDocument } from '$lib/findDocument';
 import { parseWsTimestamp } from '$lib/time';
 
 export const KIND_LABEL: Record<ActivityKind, string> = {
 	review: 'Review',
 	decision: 'Decision',
 	task: 'Task',
-	reply: 'Reply',
+	document: 'Document',
 	message: 'Message',
 };
+
+/** Activity's two lists. A document with unread replies is a notification; everything else is a task. */
+export type ActivityTab = 'tasks' | 'notifications';
+export const EMPTY_LINE: Record<ActivityTab, string> = { tasks: 'Nothing needs you.', notifications: 'No unread replies.' };
+export type DecisionDraft = { selected: string | null; picked: string[]; other: string };
+export const tabOf = (item: ActivityQueueItem): ActivityTab => (item.kind === 'document' ? 'notifications' : 'tasks');
+
+/** "1 unread reply", "5 unread replies". */
+export const unreadRepliesLabel = (count: number) => `${count} unread repl${count === 1 ? 'y' : 'ies'}`;
+
+/** Who replied, for the opened document's bar: "Governance & Scopes", "A and B", "A and 2 others". */
+export function agentsLabel(agents: readonly string[]): string {
+	if (agents.length <= 1) return agents[0] ?? 'An agent';
+	if (agents.length === 2) return `${agents[0]} and ${agents[1]}`;
+	return `${agents[0]} and ${agents.length - 1} others`;
+}
+
+/**
+ * Where the person is in a document's replies. `total` is fixed when the document opens and rises only when a reply
+ * arrives; `unread` is what the jump button still counts. So the position plus the jump button's count is the total.
+ */
+export function replyPosition(total: number, unread: number): { at: number; of: number } {
+	const of = Math.max(total, unread, 1);
+	return { at: Math.min(of, Math.max(1, of - unread)), of };
+}
 
 /** How long an item has waited, in the list's words: "1 hour", "yesterday", "5 days". */
 export function ageLabel(iso: string | null, now = Date.now()): string {
@@ -31,6 +54,13 @@ export function ageLabel(iso: string | null, now = Date.now()): string {
 	const days = Math.floor(hours / 24);
 	if (days < 2) return 'yesterday';
 	return `${days} days`;
+}
+
+/** When a document's latest reply came, in its row's words: "latest 1 hour ago", "latest yesterday". */
+export function latestLabel(iso: string | null, now = Date.now()): string {
+	const age = ageLabel(iso, now);
+	if (!age) return '';
+	return `latest ${age === 'yesterday' || age === 'just now' ? age : `${age} ago`}`;
 }
 
 /** When the ranker last set the order: the newest rank among the items, or null when none is ranked. */
@@ -47,16 +77,10 @@ export function rankedAt(items: readonly ActivityQueueItem[]): string | null {
 	return newest;
 }
 
-/** The item after `key` in the list, without acting on it; null on the last item. */
-export function nextKey(items: readonly ActivityQueueItem[], key: string | null): string | null {
-	const at = items.findIndex((item) => item.key === key);
-	if (at < 0) return items[0]?.key ?? null;
-	return items[at + 1]?.key ?? null;
-}
-
 /**
  * Which item opens once the open one has left the list: the first item that followed it in the order the person
- * last saw that is still listed, else whatever now sits at its place, else the last item, else nothing.
+ * last saw that is still listed, else whatever now sits at its place, else the last item (the row above the last
+ * one acted on), else nothing.
  */
 export function followerOf(
 	previous: readonly string[],
@@ -74,9 +98,8 @@ export function followerOf(
 }
 
 /**
- * The list with the item the person is still reading after the server let it go (its press was refused and it left),
- * at the place it held in the order they last saw. Once they move on it is no longer kept, and the list is the
- * server's alone.
+ * The list with the item the person is still reading after a refusal or departure, at the place it held in the order
+ * they last saw. Once they move on it is no longer kept, and the list is the server's alone.
  */
 export function keepInPlace(
 	items: readonly ActivityQueueItem[],
@@ -96,10 +119,6 @@ export function documentOf(item: ActivityQueueItem): { artifactId: string; comme
 	return null;
 }
 
-export function chatOf(item: ActivityQueueItem): { threadId: string; messageId: string } | null {
-	if (item.open && 'message_id' in item.open) return { threadId: item.open.thread_id, messageId: item.open.message_id };
-	return null;
-}
 
 export const decisionOf = (item: ActivityQueueItem) =>
 	item.kind === 'decision' ? (item.detail as DecisionDetail) : null;
@@ -109,10 +128,10 @@ export const taskOf = (item: ActivityQueueItem) =>
 	item.kind === 'task' ? (item.detail as ActivityTaskDetail) : null;
 export const reviewOf = (item: ActivityQueueItem) =>
 	item.kind === 'review' ? (item.detail as ActivityReviewDetail) : null;
-export function docReplyOf(item: ActivityQueueItem): ActivityDocReplyDetail | null {
-	if (item.kind !== 'reply') return null;
-	const detail = item.detail as Partial<ActivityDocReplyDetail>;
-	return detail.artifact_id && detail.root_id && detail.reply_id ? (detail as ActivityDocReplyDetail) : null;
+export function documentDetailOf(item: ActivityQueueItem): ActivityDocumentDetail | null {
+	if (item.kind !== 'document') return null;
+	const detail = item.detail as Partial<ActivityDocumentDetail>;
+	return detail.artifact_id && detail.latest_reply_id ? (detail as ActivityDocumentDetail) : null;
 }
 export type TaskSteps =
 	| { kind: 'numbered'; start: number; items: string[] }
@@ -131,29 +150,5 @@ export function taskSteps(text: string): TaskSteps {
 	return { kind: 'text', text };
 }
 
-export const chatReplyOf = (item: ActivityQueueItem) =>
-	item.kind === 'reply' && chatOf(item) ? (item.detail as ActivityChatReplyDetail) : null;
 
-export type DocumentLookup =
-	| { status: 'found'; path: string; title: string }
-	| { status: 'missing' }
-	| { status: 'failed' };
-
-/**
- * The app opens a document by its path, so an item's artifact id is looked up in the files of the chat it came
- * from, the same lookup an outside wait's document uses.
- */
-export async function findDocument(threadId: string, artifactId: string): Promise<DocumentLookup> {
-	let nodes: PaneNode[];
-	try {
-		nodes = (await fetchArtifactPane(threadId)).nodes;
-	} catch {
-		return { status: 'failed' };
-	}
-	const found = nodes
-		.flatMap((node): ArtifactNode[] => (node.kind === 'artifact' ? [node] : node.children))
-		.find((node) => node.id === artifactId);
-	const path = found?.path ?? found?.external_id;
-	if (!found || !path) return { status: 'missing' };
-	return { status: 'found', path, title: found.title ?? found.name };
-}
+export type { DocumentLookup } from '$lib/findDocument';

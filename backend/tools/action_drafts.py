@@ -97,6 +97,11 @@ def release_claim(draft_id: str, *, db: sqlite3.Connection | None = None) -> Non
     _transition(draft_id, "sending", "open", db)
 
 
+def discard_draft(draft_id: str, *, db: sqlite3.Connection | None = None) -> None:
+    """Close an open draft as not to send, once: the person's Don't send."""
+    _transition(draft_id, "open", "discarded", db)
+
+
 def mark_sent(
     draft_id: str, external_id: str | None, *, db: sqlite3.Connection | None = None,
 ) -> None:

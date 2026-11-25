@@ -26,7 +26,7 @@ import plans.dependencies as dependencies
 from plans import service, writer_context
 from plans.aggregates_recount import stored_mismatches
 from plans.boundary import PlanActor
-from plans.later_fields import LATER_ON_BRANCH
+from plans.later_fields import LATER_WITHOUT_TASKS
 from tests.plan_close_next_helpers import OWNER, owner_plan, plan_update, revision, row
 from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixtures
@@ -454,8 +454,8 @@ def test_edit_names_parent_id_with_the_cut_in_one_call(db):
     assert _events(db, task.id) == [{"from": None, "to": branch.id}]
 
 
-def test_a_branch_still_refuses_the_cut_and_now_names_node_ids(db):
-    """Slice 1's wording pointed at per-task edits; slice 2 ships the bulk call."""
+def test_a_branch_with_no_open_task_refuses_the_cut(db):
+    """A whole item moves to Later through its tasks; an empty branch has none to carry it."""
     plan = owner_plan(db)
     branch = _phase(db, plan.id, "Branch")
 
@@ -464,6 +464,4 @@ def test_a_branch_still_refuses_the_cut_and_now_names_node_ids(db):
             "node_id": branch.id, "expected_revision": revision(db, branch.id), "later": True,
         })
 
-    assert str(refused.value) == LATER_ON_BRANCH
-    assert "node_ids" in LATER_ON_BRANCH
-    assert "edit each of its open tasks" not in LATER_ON_BRANCH
+    assert str(refused.value) == LATER_WITHOUT_TASKS

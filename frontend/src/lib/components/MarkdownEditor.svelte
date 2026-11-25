@@ -16,7 +16,7 @@
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { CaretRule, releasesPress } from '$lib/cm/caret-rule';
-	import { caretAtPress, commentMarks, coveredByMove, highlightAtPress, highlightsAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
+	import { caretAtPress, commentMarks, createSheetCoverage, highlightAtPress, highlightsAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -28,6 +28,9 @@
 	import { selectionOffer, type SelectionOffer } from '$lib/cm/selection-offer';
 	import { cardQuoteLabel } from '$lib/cm/widget-cells';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
+	import { suggestionHistory, suggestionHistoryEffect, type SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
+	import { acceptSuggestion as recordAcceptance, replaceExternalDocument } from '$lib/cm/suggestionAcceptance';
+	import { suggestionHistoryKeys } from '$lib/cm/suggestionHistoryKeys';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { jumpToComment, type JumpTarget } from '$lib/cm/comment-jump';
@@ -61,7 +64,8 @@
 		pendingComment = null,
 		scrollTo = null,
 		tabInstanceId = null,
-		onDocumentPlace
+		onDocumentPlace,
+		onSuggestionHistory, onSuggestionHistoryRecovery,
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -97,6 +101,7 @@
 		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
+		onSuggestionHistory?: (entry: SuggestionHistoryEntry, before: string, after: string) => Promise<boolean>; onSuggestionHistoryRecovery?: () => void;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -104,11 +109,10 @@
 	const typedReveal = createTypedReveal({ canType: () => typingOk });
 	let host = $state<HTMLDivElement>();
 	let view = $state<EditorView>();
-	const roComp = new Compartment();
-	const documentComp = new Compartment();
+	const roComp = new Compartment(), documentComp = new Compartment(), historyComp = new Compartment();
 	let activeText: Y.Text | null = null;
 	let binding: ReturnType<typeof liveDocumentBinding> | undefined;
-	const localHistory = [history(), keymap.of(historyKeymap)];
+	const localHistory = [historyComp.of(history()), suggestionHistory, suggestionHistoryKeys((entry, before, after) => onSuggestionHistory?.(entry, before, after) ?? Promise.resolve(false), () => onSuggestionHistoryRecovery?.()), keymap.of(historyKeymap)];
 	let syncing = false;
 	let curHighlights: CommentRange[] = [];
 
@@ -150,19 +154,19 @@
 	 * Whether the text at `from` (a draft's, or an opened thread's) needs revealing now the sheet that overlays this editor came up
 	 * (always) or moved (only when it covered text the reader had in view); a reader's own scroll away from it is never undone.
 	 */
-	let bandBefore: { top: number; bottom: number } | null = null;
-	export function coveredBySheet(from: number, opening: boolean): boolean {
-		if (!view) return opening;
-		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore);
-		bandBefore = band;
-		return opening || covered;
-	}
+	const sheetCoverage = createSheetCoverage();
+	export function coveredBySheet(from: number, opening: boolean): boolean { return sheetCoverage(view, from, opening); }
 
 	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
 	export function widgetLabelStamp(): unknown { return view?.state.doc; }
 
 	/** This editor's view while it is up, for a caller that adds its own extension slot (an email draft's header). */
 	export function editorView(): EditorView | undefined { return view; }
+
+	/** Record a server acceptance as one isolated local history step. */
+	export function acceptSuggestion(text: string, eventId: string, ids: string[]): boolean {
+		return !!view && !activeText && recordAcceptance(view, text, eventId, ids);
+	}
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent, fromText = false) {
@@ -248,7 +252,7 @@
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) {
 						value = u.state.doc.toString();
-						if (!syncing) onEdit?.(u.changes, openCommentIds(u.startState));
+						if (!syncing && !u.transactions.some(t => t.effects.some(effect => effect.is(suggestionHistoryEffect)))) onEdit?.(u.changes, openCommentIds(u.startState));
 						if (u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'))) onTyping?.();
 					}
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
@@ -312,12 +316,8 @@
 		if (view && current !== undefined && next !== current) {
 			// Only the span that differs is replaced, so a comment mark on text this change leaves alone keeps its place (a whole-document
 			// replace maps every mark to the end of the document and its comment reads as 'Text changed').
-			let from = 0;
-			while (from < current.length && from < next.length && current[from] === next[from]) from += 1;
-			let tail = 0;
-			while (tail < current.length - from && tail < next.length - from && current[current.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1;
 			syncing = true;
-			try { view.dispatch({ changes: { from, to: current.length - tail, insert: next.slice(from, next.length - tail) } }); }
+			try { replaceExternalDocument(view, next, historyComp); }
 			finally { syncing = false; }
 		}
 	});

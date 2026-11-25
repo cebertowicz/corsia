@@ -1,7 +1,7 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { tick } from 'svelte';
 import { ancestorChain } from './planTreeFilter';
-import { FOLD_PAGE, revealFoldedPath, type PlanTreeItem } from './planTreeFold';
+import { FOLD_PAGE, LATER_PAGE, revealFoldedPath, type PlanTreeItem } from './planTreeFold';
 import type { FoldLevelView } from './planFoldLevels';
 
 interface FoldHistoryController {
@@ -25,6 +25,7 @@ interface PlanTreeRevealOptions {
 export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranches, history }: PlanTreeRevealOptions) {
 	let revealed = $state<Record<string, number>>({});
 	let scheduledOpen = $state<Record<string, boolean>>({});
+	let laterPages = $state<Record<string, number>>({});
 	let userDisclosure = $state(false);
 	let pendingFoldLevel = $state<string | null>(null);
 
@@ -45,8 +46,11 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 		const ancestors = ancestorChain(currentById, nodeId).slice(1);
 		openBranches(ancestors);
 		revealed = revealFoldedPath(levels(), currentById, [nodeId, ...ancestors], revealed);
-		const hiding = items().find((item) => item.kind === 'scheduled' && !item.open && item.members.some((member) => member.id === nodeId));
-		if (hiding?.kind === 'scheduled') scheduledOpen = { ...scheduledOpen, [hiding.level]: true };
+		const hiding = items().find((item) => item.kind === 'scheduled' && item.members.some((member) => member.id === nodeId));
+		if (hiding?.kind === 'scheduled') {
+			scheduledOpen = { ...scheduledOpen, [hiding.level]: true };
+			laterPages = { ...laterPages, [hiding.level]: hiding.members.length };
+		}
 		return true;
 	}
 
@@ -80,7 +84,14 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 	}
 
 	function openScheduled(level: string): void {
-		byRequest(() => (scheduledOpen = { ...scheduledOpen, [level]: true }));
+		byRequest(() => {
+			scheduledOpen = { ...scheduledOpen, [level]: true };
+			laterPages = { ...laterPages, [level]: LATER_PAGE };
+		});
+	}
+
+	function pageLater(level: string): void {
+		byRequest(() => (laterPages = { ...laterPages, [level]: (laterPages[level] ?? LATER_PAGE) + LATER_PAGE }));
 	}
 
 	function collapseScheduled(level: string): void {
@@ -94,6 +105,8 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 		pageSize: FOLD_PAGE,
 		byRequest,
 		isScheduledOpen,
+		laterShown: (level: string) => laterPages[level] ?? LATER_PAGE,
+		pageLater,
 		revealNode,
 		revealFolded,
 		pageFold,

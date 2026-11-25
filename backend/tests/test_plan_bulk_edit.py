@@ -25,7 +25,7 @@ from plans import service
 from plans.aggregates_recount import stored_mismatches
 from plans.boundary import PlanActor
 from plans.bulk_fields import MAX_BULK_NODES
-from plans.later_fields import LATER_ON_BRANCH
+from plans.later_fields import LATER_WITHOUT_TASKS
 from tests.plan_close_next_helpers import OWNER, owner_plan, plan_update, revision, row
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixtures
 
@@ -193,7 +193,7 @@ def test_one_refusal_costs_only_its_own_row(db):
     assert stored_mismatches(db, plan.id) == []
 
 
-def test_a_branch_in_a_bulk_later_list_is_refused_and_its_siblings_move(db):
+def test_an_empty_branch_in_a_bulk_later_list_is_refused_and_its_siblings_move(db):
     """The per-node guard is not relaxed for a list, and the rest still cross."""
     plan = owner_plan(db)
     branch = _phase(db, plan.id, "Branch")
@@ -203,7 +203,7 @@ def test_a_branch_in_a_bulk_later_list_is_refused_and_its_siblings_move(db):
 
     assert [entry["node_id"] for entry in result["changed"]] == [task.id]
     assert result["refused"][0]["node_id"] == branch.id
-    assert LATER_ON_BRANCH.split(".")[0] in result["refused"][0]["reason"]
+    assert LATER_WITHOUT_TASKS.split(".")[0] in result["refused"][0]["reason"]
     assert row(db, branch.id)["later"] == 0
 
 

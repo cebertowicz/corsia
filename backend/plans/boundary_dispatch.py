@@ -18,6 +18,7 @@ import plans.user_settle as user_settle
 import plans.user_step_settle as user_step_settle
 import plans.mutations as mutations
 import plans.pause_authority as pause_authority
+import plans.plan_cap as plan_cap
 import plans.rejection as rejection
 import plans.service as service
 import plans.triage_lines as triage_lines
@@ -143,6 +144,7 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
 
         placing = plan_top.placing_reply(
             db, service._plan_row(db, plan_id), node.id, actor=actor, inserted=operation == "insert",
+            moved=plan_cap.spill(db, plan_id, actor_id=common["actor_id"]),
         )
         plan_top.tell_owner_added(db, node.id, actor_id=common["actor_id"])
         return workflow_fields.added(db, node, placing, workflow_steps, causing_executor=acting)

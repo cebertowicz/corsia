@@ -609,8 +609,8 @@ def test_runtime_image_dependency_is_declared() -> None:
     runtime_requirements = RUNTIME_REQUIREMENTS.read_text().casefold().splitlines()
     locked_requirements = LOCKED_REQUIREMENTS.read_text().casefold().splitlines()
 
-    assert "pillow==12.2.0" in runtime_requirements
-    assert "pillow==12.2.0" in locked_requirements
+    assert "pillow==13.0.0" in runtime_requirements
+    assert "pillow==13.0.0" in locked_requirements
 
 
 def _requirement_names(path: Path) -> set[str]:

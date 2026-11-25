@@ -72,7 +72,7 @@ def rows(db, user_id, annotated):
     plans = {r["id"]: dict(r) for r in db.execute("SELECT * FROM plans WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(sorted(allowed)),))}
     task_nodes = _due_person_tasks(db, plans)
     node_ids = [n["id"] for n in task_nodes]
-    details = {r["id"]: dict(r) for r in db.execute("SELECT id,title,revision,created_at FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),))}
+    details = {r["id"]: dict(r) for r in db.execute("SELECT id,title,description,revision,created_at FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),))}
     links = person_comment_task.comment_tasks(db, node_ids)
     # Match the artifact route's owner selection; access is that route's own predicate, one
     # thread read per comment-linked task, so a change to the rule governs these rows too.
@@ -105,16 +105,16 @@ def rows(db, user_id, annotated):
         artifact_id = links.get(node["id"])
         if artifact_id and artifact_id not in authorized_artifacts:
             continue
-        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
+        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], "description":detail["description"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
     return out
 
 
-def dedupe_comment_tasks(db, user_id, projected, reply_rows):
-    """Use the *actual* authorized reply rows; do not suppress unrelated directed work."""
+def dedupe_comment_tasks(db, user_id, projected, document_rows):
+    """Use the *actual* authorized document rows; do not suppress unrelated directed work."""
     reviewed = {r["detail"]["artifact_id"] for r in projected if r["kind"] == "review"}
-    reply_ids = {r['detail']['reply_id']: (r['detail']['artifact_id'], r['detail']['root_id'])
-                 for r in reply_rows if r.get('kind') == 'reply' and r.get('detail', {}).get('artifact_id')
-                 and r['detail'].get('root_id') and r['detail'].get('reply_id')}
+    reply_ids = {thread['reply_id']: (r['detail']['artifact_id'], thread['root_id'])
+                 for r in document_rows if r.get('kind') == 'document' and r.get('detail', {}).get('artifact_id')
+                 for thread in r['detail'].get('threads', ()) if thread.get('root_id') and thread.get('reply_id')}
     reply_roots = {}
     if reply_ids:
         for r in db.execute('SELECT id, artifact_id, parent_id, created_at FROM doc_comments WHERE id IN (SELECT value FROM json_each(?))', (json.dumps(list(reply_ids)),)):

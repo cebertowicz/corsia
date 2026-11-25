@@ -11,11 +11,12 @@ one place that closes that gap, inside the prerequisite's write:
 - the dependent's owner gets one wake per dependent, prerequisite and outcome,
   through ``plan_wake.append``, the one writer of plan wakes.
 
-It is called from exactly two places: ``service._transition`` when a
+It is called from exactly three places: ``service._transition`` when a
 prerequisite is accepted or fails for good (a rejection hands its dependents
 to the revision instead, ``dependencies.move_dependents``, and they keep
-waiting), and ``dependencies.drop_edges_for_node`` when a prerequisite is
-closed or archived. A close drops the node's edges in the same write
+waiting), ``material_events.settle_phases_waited_on`` when a workflow run's
+recorded end settles its phase (#3145), and ``dependencies.drop_edges_for_node``
+when a prerequisite is closed or archived. A close drops the node's edges in the same write
 (``archival.release_closed``), so its news is the edge going, told once there.
 
 A dependent in the prerequisite's *own* plan hears only a failure or a close,
@@ -147,8 +148,11 @@ def prerequisite_removed(
 
 
 def _prerequisite(connection, node_id: str):
+    """The prerequisite as its dependents read it: a workflow run that ended reads as that end (#3145)."""
+    from plans.node_waits import prerequisite_state_sql
+
     return connection.execute(
-        """SELECT n.id,n.title,n.state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
+        f"""SELECT n.id,n.title,{prerequisite_state_sql(connection, 'n')} AS state,n.revision,n.requirements_revision,n.plan_id,pl.owner_kind,pl.owner_id
            FROM plan_nodes n JOIN plans pl ON pl.id=n.plan_id WHERE n.id=?""",
         (node_id,),
     ).fetchone()

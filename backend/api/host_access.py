@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, ConfigDict, StrictInt
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, model_validator
 
 from host_access.decision_capability import (
     INTERACTIVE_UI_HEADER,
@@ -53,6 +55,19 @@ class ScriptMutation(BaseModel):
     application_hash: str
 
 
+class FillApproval(LeaseMutation):
+    """The person's yes to a saved-login fill: the duration they picked, or until they revoke it; exactly one."""
+
+    duration_seconds: StrictInt | None = None
+    until_revoked: StrictBool = False
+
+    @model_validator(mode="after")
+    def _one_choice(self) -> "FillApproval":
+        if (self.duration_seconds is None) != self.until_revoked:
+            raise ValueError("Pick one: a duration or until revoked.")
+        return self
+
+
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LeaseNotFoundError):
         return HTTPException(404, "Host-access lease not found")
@@ -65,7 +80,7 @@ def _serialize_lease(row: dict) -> dict:
     """Convert domain-naive UTC timestamps only at the public API boundary."""
     result = dict(row)
     for field in _PUBLIC_TIMESTAMP_FIELDS:
-        if field in result or result.get("kind") != "script":
+        if field in result or result.get("kind") not in ("script", "fill"):
             result[field] = utc_storage_iso_to_api(result.get(field))
     return result
 
@@ -109,6 +124,58 @@ async def reject_script(schedule_id: str, body: ScriptMutation,
     return await _decide_script(schedule_id, body, user, capability, False)
 
 
+async def _decide_fill(operation_name: str, approval_id: str, body: LeaseMutation, user: dict,
+                       capability: str | None, **extra) -> dict:
+    """A person's decision on a saved-login fill. A fill approval is not a lease; it shares only this surface."""
+    from infra import saved_login_fills as fills
+
+    operation = {"approve": fills.approve_fill, "reject": fills.deny_fill, "revoke": fills.revoke_fill}[operation_name]
+
+    def decide() -> dict:
+        fills.get(approval_id, user_id=user["id"])
+        if not verify_user_decision_capability(
+            capability, {"id": approval_id, "revision": body.revision, "application_hash": body.application_hash},
+            user_id=user["id"], operation=operation_name,
+        ):
+            raise HTTPException(403, "A current interactive user decision is required")
+        return operation(
+            approval_id, user_id=user["id"], revision=body.revision, application_hash=body.application_hash, **extra,
+        )
+
+    try:
+        # A worker thread: the decision records a product event, a blocking write.
+        row = await asyncio.to_thread(decide)
+    except fills.FillApprovalNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except fills.FillDurationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except fills.FillApprovalError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _serialize_lease(row)
+
+
+@router.post("/fills/{approval_id}/approve")
+async def approve_fill(approval_id: str, body: FillApproval,
+                       user: dict = Depends(require_human_user),
+                       capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
+    return await _decide_fill("approve", approval_id, body, user, capability, duration_seconds=body.duration_seconds,
+                              until_revoked=body.until_revoked)
+
+
+@router.post("/fills/{approval_id}/reject")
+async def deny_fill(approval_id: str, body: LeaseMutation,
+                    user: dict = Depends(require_human_user),
+                    capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
+    return await _decide_fill("reject", approval_id, body, user, capability)
+
+
+@router.post("/fills/{approval_id}/revoke")
+async def revoke_fill(approval_id: str, body: LeaseMutation,
+                      user: dict = Depends(require_human_user),
+                      capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
+    return await _decide_fill("revoke", approval_id, body, user, capability)
+
+
 @router.get("")
 async def leases(
     root_thread_id: str | None = None,
@@ -127,6 +194,8 @@ async def leases(
     from automation.script_decisions import pending
     from infra.db_async import run_in_db
     rows.extend(await run_in_db(pending, user["id"], root_thread_id))
+    from infra.saved_login_fills import listed
+    rows.extend(await asyncio.to_thread(listed, user["id"], root_thread_id))
     if interactive_ui == "1":
         require_human_user(user)
         rows = [

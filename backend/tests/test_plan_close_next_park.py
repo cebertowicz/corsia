@@ -4,7 +4,9 @@ Scheduling a task (`arm_watch` with a reason), `block_node` and `arm_watch`
 take the executor off a task without closing it; an agent no longer pauses. Each returns the same `next` block a closing operation returns and
 accepts the same optional `next_node_id`: without it the result names what now
 holds the slot and lists the executor's other open tasks; with it the named task
-starts in the same call, ahead of already-active queued work. The parked task
+starts in the same call, ahead of already-active queued work, unless plan order
+refuses it: a task the agent only set a timed check-back on still counts above a
+lower start, so that start waits until the agent moves the task down. The parked task
 keeps its state and its cause, is left out of "other open tasks", and retakes
 the slot on its own once it is picked up again and the slot is free.
 """
@@ -81,7 +83,29 @@ def test_each_park_operation_returns_the_next_block_without_the_parked_task(db, 
     assert open_attempt(db, task_a.id) is None
 
 
-@pytest.mark.parametrize("operation", PARK_OPERATIONS)
+#: Parks that leave only the agent's own timed check-back on the task. Plan
+#: order still counts the task, so a named start below it is refused until the
+#: agent moves it down (``plans.triage_lines``).
+CHECK_BACK_PARKS = ("schedule", "arm_watch")
+
+
+@pytest.mark.parametrize("operation", CHECK_BACK_PARKS)
+def test_a_named_start_below_a_check_back_park_is_refused_naming_it(db, operation):
+    plan = owner_plan(db)
+    task_a = task(db, plan.id, "Task A")
+    task_b = task(db, plan.id, "Task B")
+    select(db, plan.id, task_a.id)
+
+    block = next_block(_park(db, plan.id, operation, task_a.id, next_node_id=task_b.id))
+
+    assert_block_shape(block, named=True)
+    assert block["named"]["started"] is False
+    assert "Task A" in block["named"]["reason"]
+    assert open_attempt(db, task_b.id) is None
+    assert row(db, task_a.id)["state"] == "active"
+
+
+@pytest.mark.parametrize("operation", ["block_node"])
 def test_a_named_task_starts_in_the_park_call_ahead_of_queued_work(db, operation):
     plan = owner_plan(db)
     task_a = task(db, plan.id, "Task A")
@@ -103,11 +127,18 @@ def test_a_named_task_starts_in_the_park_call_ahead_of_queued_work(db, operation
 
 
 def test_park_a_for_b_then_pick_a_up_and_it_retakes_the_slot_when_b_closes(db):
-    """Schedule, hop, come back early: nothing is closed and nothing is started unasked."""
+    """Move down, schedule, hop, come back early: nothing is closed and nothing is started unasked.
+
+    The agent moves A below B first: a scheduled task still counts above a lower
+    start, so the hop is the conscious reorder plan order asks for.
+    """
     plan = owner_plan(db)
     task_a = task(db, plan.id, "Task A")
     task_b = task(db, plan.id, "Task B")
     select(db, plan.id, task_a.id)
+    plan_update(db, plan.id, "reorder", {
+        "node_id": task_a.id, "expected_revision": revision(db, task_a.id), "order_key": 1,
+    })
 
     parked = _park(db, plan.id, "schedule", task_a.id, next_node_id=task_b.id)
     watch_id = parked["admission"]["causes"][0]["watch_id"]

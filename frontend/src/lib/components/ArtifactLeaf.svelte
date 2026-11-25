@@ -35,7 +35,7 @@
 	import type { ArtifactLeafProps } from '$lib/artifactLeafProps';
 
 	let {
-		threadId, targetThreadId = null, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
+		threadId, targetThreadId = null, notice, protectReplyLanding = false, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
 	}: ArtifactLeafProps = $props();
 
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
@@ -258,6 +258,7 @@
 				/>
 			</div>
 		{/if}
+		{#if notice}{@render notice()}{/if}
 		<div class="leaf-body" class:document-canvas={!!target || !!linkTab} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'browser' && activeTab.threadId}
 				<BrowserLeaf threadId={activeTab.threadId} />
@@ -290,6 +291,7 @@
 					<DocViewer
 						bind:this={viewer}
 						{target}
+						{protectReplyLanding}
 						{escapeCloses}
 						onClose={() => onEscapeClose?.()}
 						{onSignal}

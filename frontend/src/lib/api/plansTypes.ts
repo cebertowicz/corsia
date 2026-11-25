@@ -168,6 +168,10 @@ export interface OperatorNode {
 	parent_id: string | null;
 	depth: number;
 	kind: string;
+	/** Set on a step a workflow built (`+name` for one an agent added); its description and criteria are agent instructions. */
+	workflow_step?: string | null;
+	/** A workflow run (a nested run included): its children are the run's steps, shown in the run's order. */
+	workflow_run?: boolean;
 	title: string;
 	description: string | null;
 	comment_attention?: CommentAttention;
@@ -176,6 +180,11 @@ export interface OperatorNode {
 	/** Open steps in this plan that this user-assigned step releases. */
 	waiting_on: string[];
 	acceptance_criteria: string;
+	intent: string | null;
+	intent_is_person_comment: boolean;
+	intent_parent_title: string | null;
+	intent_owner_name: string | null;
+	intent_run_title: string | null;
 	state: string;
 	/** Prerequisites not yet accepted; empty unless the node is open. */
 	unmet_dependencies: string[];
@@ -210,6 +219,10 @@ export interface OperatorNode {
 	branch_progress: { done: number; total: number } | null;
 	/** When the work under this node, all of it quietly set aside by its agent, next comes due (ISO); null if any open work is not. */
 	scheduled_until: string | null;
+	/** Set aside below the plan's cut: the server's one Later flag (`plans.later_fields`). */
+	later: boolean;
+	/** Why the agent set it aside, as written; null when it gave none. */
+	later_reason: string | null;
 	attention_path: string[];
 	completion: OperatorCompletion | null;
 	child: OperatorChildSummary | null;

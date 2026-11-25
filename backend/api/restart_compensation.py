@@ -4,6 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+from pathlib import Path
+
+
+def discard_prepared_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
+    """Ask the management script to remove one validated, unactivated build."""
+    result = subprocess.run(
+        [str(corsia_script), "discard-prepared"],
+        capture_output=True, text=True, env=restart_env, timeout=30, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("prepared frontend cleanup failed")
 
 
 def failure_detail(failure: BaseException) -> str | None:

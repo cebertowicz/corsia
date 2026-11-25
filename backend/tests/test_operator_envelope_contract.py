@@ -20,7 +20,7 @@ from api.operator_annotations import annotate
 from host_access.browser_steps import PasswordStep
 from infra.schema import SCHEMA_SQL
 from plans import admission, mutations, operator_projection, public, review_evidence, service
-from plans import watch_operations
+from plans import later_fields, watch_operations
 from plans.boundary import PlanActor
 from tests.plan_scene import _artifact
 
@@ -67,11 +67,12 @@ def _envelope(db) -> dict:
         plan.id, kind="phase", title="Delivery",
         acceptance_criteria="Delivered", db=db,
     )
-    running = _task(plan.id, "Running", db=db, parent_id=phase.id)
+    running = _task(plan.id, "Running", db=db, parent_id=phase.id, intent="Finish the task")
     waiting = _task(plan.id, "Waiting", db=db, parent_id=phase.id)
     _task(plan.id, "Person action", db=db, parent_id=phase.id, assignee="user")
     review = _task(plan.id, "Review", db=db)
     delegated = _task(plan.id, "Delegated", db=db, spawn_kind="claude-code")
+    set_aside = _task(plan.id, "Set aside", db=db)
     _task(service.ensure_plan("thread", "worker", db=db).id, "Child step", db=db)
     pull_request = _artifact(db, external_id="owner/repo#1", owner="owner")
     # Opened before any task is selected, so it adds no dependency to the rows above.
@@ -80,6 +81,9 @@ def _envelope(db) -> dict:
         description="On the shared browser.", provenance=PasswordStep.provenance,
     )
     with service._write(db):
+        later_fields.flip(
+            db, set_aside.id, later=True, reason="After launch", actor_id="owner", provenance=_PROVENANCE,
+        )
         for node in (waiting, running):
             admission.activate(
                 node.id, expected_revision=node.revision, actor_id="owner",
@@ -138,6 +142,7 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
         db.close()
     nodes = envelope["plans"][0]["nodes"]
     # The fixture is only a contract if it carries the facts the pane branches on.
+    assert any(node["intent"] for node in nodes)
     assert any(node["execution"]["attempts"] for node in nodes)
     assert any(node["execution"]["causes"] for node in nodes)
     assert any(node["attention_path"] for node in nodes)
@@ -146,6 +151,7 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
     assert any(node["child"] for node in nodes)
     assert any(node["branch_progress"] for node in nodes)
     assert any(node.get("browser_thread_id") for node in nodes)
+    assert any(node["later_reason"] for node in nodes)
     if os.environ.get("CORSIA_WRITE_CONTRACT_FIXTURES") == "1":
         # The token is a hash of this run's values and the contract is its shape, so the
         # fixture keeps a fixed one: a fresh hash named "token" in every regeneration

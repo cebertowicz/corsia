@@ -1,5 +1,5 @@
 import { test } from '../support/test';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -370,6 +370,23 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByText('home-assistant: Protected base checkout', { exact: true })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
+		// Approve is the one solid action; Reject is today's secondary button beside it.
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toHaveClass(/\bsecondary\b/);
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toHaveClass(/\bprimary\b/);
+		// Every section is a label over plain text, with no card border or fill.
+		const sections = dialog.locator('.risk-grid section, .repo-policy-context, .policy-exceptions, .review');
+		expect(await sections.count()).toBeGreaterThanOrEqual(3);
+		for (const section of await sections.all()) {
+			await expect(section).toHaveCSS('border-top-width', '0px');
+			await expect(section).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+		}
+		// With no box, the exceptions label keeps the warning colour the pending status uses.
+		const warningColor = await dialog.locator('.decision-head .status').evaluate((element) => getComputedStyle(element).color);
+		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
+		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
+		// The header carries the state; the asked duration is body text, not a second amber.
+		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('Duration');
+		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
 		// The sheet slides up from below on open; its bounds are read where it comes to rest.
@@ -404,6 +421,33 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox).toBeTruthy();
 			expect(controlBox!.y).toBeGreaterThanOrEqual(0);
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
+		}
+		// Reject sits beside Approve, not across the footer from it: the app's button gap, a finger's width on a phone.
+		const besideGap = approveBoxAtRest!.x - (rejectBoxAtRest!.x + rejectBoxAtRest!.width);
+		const expectedGap = viewport!.width <= 720 ? 44 : 12;
+		expect(besideGap).toBeGreaterThanOrEqual(expectedGap);
+		expect(besideGap).toBeLessThanOrEqual(expectedGap + 1);
+		// The pinned head keeps 12px under its title at every width; both pinned strips end at a hairline
+		// over the scrolling content, as the decision drawer's do.
+		await expect(dialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(dialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(dialog.locator('.decision-actions')).toHaveCSS('border-top-width', '1px');
+		// The keyboard reaches Reject, then Approve, and each shows a focus ring.
+		await dialog.getByRole('button', { name: 'Reject' }).focus();
+		await page.keyboard.press('Shift+Tab');
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Reject' })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeFocused();
+		for (const name of ['Approve', 'Reject']) {
+			if (name === 'Reject') await page.keyboard.press('Shift+Tab');
+			const ring = await dialog.getByRole('button', { name }).evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { visible: element.matches(':focus-visible'), style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+			});
+			expect(ring, `${name} shows a focus ring`).toMatchObject({ visible: true });
+			expect(ring.style, `${name} outline`).not.toBe('none');
+			expect(ring.width, `${name} outline width`).toBeGreaterThan(0);
 		}
 
 		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
@@ -508,6 +552,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(revokeBoxAtRest).toBeTruthy();
 		expect(revokeBoxAtRest!.y).toBeGreaterThanOrEqual(0);
 		expect(revokeBoxAtRest!.y + revokeBoxAtRest!.height).toBeLessThanOrEqual(viewport!.height);
+		// Revoke ends where a request sheet's Approve ends: the content's right edge.
+		expect(Math.abs(revokeBoxAtRest!.x + revokeBoxAtRest!.width - (activeBodyBox!.x + activeBodyBox!.width))).toBeLessThanOrEqual(1);
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('padding-bottom', '12px');
+		await expect(activeDialog.locator('.decision-head')).toHaveCSS('border-bottom-width', '1px');
+		await expect(activeDialog.locator('.active-drawer-actions')).toHaveCSS('border-top-width', '1px');
 		await footerSitsOnScrollerEdge(activeDialog, '.active-drawer-actions');
 
 		// Escape closes the drawer without revoking, and returns focus to the
@@ -529,4 +578,373 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		});
 		expect(consoleErrors).toEqual([]);
 	});
+
+	const SCHEME = 'https:' + '//';
+	const LONG_SITE = `${SCHEME}accounts.northwind-regional-supply-cooperative.example.com`;
+	const LONG_SITE_SHOWN = 'accounts.northwind-regional-supply-cooperative.example.com';
+
+	function fillRequest(threadId: string, n: number, overrides: Record<string, unknown> = {}) {
+		return {
+			id: `fill-e2e-${n}`, kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
+			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', username: 'accounts-payable@example.com',
+			revision: 1, application_hash: `hash-fill-e2e-${n}`, decision_capability: `decision-fill-e2e-${n}`,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
+			created_at: `2026-07-18T16:0${n}:00.000Z`, updated_at: `2026-07-18T16:0${n}:00.000Z`,
+			...overrides,
+		};
+	}
+
+	/** The entry's site line: one line, nothing clipped. */
+	async function siteLine(shown: Locator) {
+		return shown.evaluate((element) => ({
+			fits: element.scrollWidth <= element.clientWidth,
+			width: element.clientWidth,
+			lines: element.getClientRects().length,
+			height: element.getBoundingClientRect().height,
+			lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+		}));
+	}
+
+	/** The card's row: the site ends before Review, and Review stays inside the card and the screen. */
+	async function expectRowFits(page: Page) {
+		const row = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (selector: string) => button.querySelector(selector)!.getBoundingClientRect();
+			const entry = button.getBoundingClientRect();
+			return { siteRight: box('.pending-site').right, actionLeft: box('.pending-action').left,
+				actionRight: box('.pending-action').right, entryRight: entry.right, screen: window.innerWidth,
+				ownerWidth: box('.pending-owner').width, entryWidth: entry.width };
+		});
+		expect(row.siteRight, JSON.stringify(row)).toBeLessThanOrEqual(row.actionLeft);
+		expect(row.actionRight, JSON.stringify(row)).toBeLessThanOrEqual(row.entryRight + 0.5);
+		expect(row.entryRight, JSON.stringify(row)).toBeLessThanOrEqual(row.screen);
+	}
+
+	test('fits a long saved-login site on one line on a phone, cut from the front between whole labels with the domain whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login entry ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1);
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect(shown).toBeVisible();
+		await expect(shown).toHaveAttribute('title', LONG_SITE);
+		await expect.poll(() => shown.textContent()).not.toBe(LONG_SITE_SHOWN);
+		const label = (await shown.textContent()) ?? '';
+		// No scheme; one cut, at the front; what follows it is whole labels ending in the whole domain.
+		expect(label, label).not.toContain(SCHEME);
+		expect(label.startsWith('…'), label).toBe(true);
+		expect(label.match(/…/g), label).toHaveLength(1);
+		const tail = label.slice(1);
+		expect(tail === 'example.com' || LONG_SITE_SHOWN.endsWith(`.${tail}`), label).toBe(true);
+		const box = await siteLine(shown);
+		expect(box.fits, JSON.stringify(box)).toBe(true);
+		expect(box.lines).toBe(1);
+		if (box.lineHeight) expect(box.height).toBeLessThanOrEqual(box.lineHeight + 1);
+		await expectRowFits(page);
+	});
+
+	test('keeps Review on screen on a phone when the agent name is long', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const title = `Saved login long name phone ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+		const fill = fillRequest(threadId, 1, { agent });
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
+		await expectRowFits(page);
+	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`cuts a long agent name before the site at ${viewport.width} px, so the registrable domain stays whole`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login long name ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+			const fill = fillRequest(threadId, 1, { agent });
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			const shown = page.locator('.pending-request-trigger .pending-site');
+			await expect(shown).toBeVisible();
+			await expect(page.locator('.pending-request-trigger .pending-owner')).toHaveText(agent);
+			// fitLabel sets the label after a frame; wait until the site's minimum is measured.
+			await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+			const label = (await shown.textContent()) ?? '';
+			// Whole, or cut once at the front between whole labels, and always ending in the whole domain.
+			expect(label === LONG_SITE_SHOWN || (label.startsWith('…') && LONG_SITE_SHOWN.endsWith(`.${label.slice(1)}`)), label).toBe(true);
+			expect(label.endsWith('example.com'), label).toBe(true);
+			const box = await siteLine(shown);
+			expect(box.fits, JSON.stringify(box)).toBe(true);
+			// The name gives way first but stays readable: on screen, one line, cut at its end.
+			const name = await page.locator('.pending-request-trigger .pending-owner').evaluate((element) => ({
+				width: element.clientWidth, height: element.getBoundingClientRect().height,
+				lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+			}));
+			expect(name.width, JSON.stringify(name)).toBeGreaterThan(40);
+			if (name.lineHeight) expect(name.height, JSON.stringify(name)).toBeLessThanOrEqual(name.lineHeight + 1);
+			await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
+			await expectRowFits(page);
+			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`), animations: 'disabled' });
+		});
+	}
+
+	/**
+	 * What the saved-login card must hold at any width, stale or not: "Review →" and the stale badge wholly inside
+	 * the card and the screen, the site ending in its whole registrable domain, nothing scrolled or clipped, and
+	 * the agent's name never an empty column.
+	 */
+	async function expectEntryHolds(page: Page, tail: string) {
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+		const label = (await shown.textContent()) ?? '';
+		expect(label.endsWith(tail), label).toBe(true);
+		expect(label === tail || label.endsWith(`.${tail}`) || label === `…${tail}`, label).toBe(true);
+		const card = await page.locator('.pending-request-trigger').first().evaluate((button) => {
+			const box = (element: Element | null) => {
+				if (!element) return null;
+				const { left, right, top, bottom, width } = element.getBoundingClientRect();
+				return { left, right, top, bottom, width };
+			};
+			const site = button.querySelector('.pending-site') as HTMLElement;
+			return {
+				entry: box(button), action: box(button.querySelector('.pending-action')), pill: box(button.querySelector('.pill')),
+				owner: box(button.querySelector('.pending-owner')), screen: window.innerWidth,
+				row: { scroll: button.scrollWidth, client: button.clientWidth },
+				site: { scroll: site.scrollWidth, client: site.clientWidth },
+				layout: { stacked: button.hasAttribute('data-stacked'), row: button.getAttribute('style'), site: site.getAttribute('style') },
+			};
+		});
+		const detail = JSON.stringify(card);
+		for (const part of [card.action, card.pill]) {
+			if (!part) continue;
+			expect(part.left, detail).toBeGreaterThanOrEqual(card.entry!.left - 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.entry!.right + 0.5);
+			expect(part.top, detail).toBeGreaterThanOrEqual(card.entry!.top - 0.5);
+			expect(part.bottom, detail).toBeLessThanOrEqual(card.entry!.bottom + 0.5);
+			expect(part.right, detail).toBeLessThanOrEqual(card.screen);
+		}
+		expect(card.action, detail).not.toBeNull();
+		expect(card.row.scroll, detail).toBeLessThanOrEqual(card.row.client);
+		expect(card.site.scroll, detail).toBeLessThanOrEqual(card.site.client);
+		expect(card.owner!.width, detail).toBeGreaterThan(0);
+		return card;
+	}
+
+	/** One fill in the entry, served from the list read; `stale` then fails the next read, as a dropped connection does. */
+	async function showFill(page: Page, request: APIRequestContext, title: string, overrides: Record<string, unknown>, stale = false) {
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1, overrides);
+		let reads = 0;
+		await page.route('**/api/host-access/leases**', async (route) => {
+			if (route.request().method() === 'POST') {
+				await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'lease revision is stale' }) });
+				return;
+			}
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			if (root === threadId && stale && reads++ > 0) {
+				await route.abort('failed');
+				return;
+			}
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+		await expect(page.locator('.pending-request-trigger .pending-site')).toBeVisible();
+		if (!stale) return;
+		// A Reject the server refuses as changed makes the control read the list again; that read fails, so the request is out of date.
+		await page.locator('.pending-request-trigger').click();
+		await page.getByRole('dialog').getByRole('button', { name: 'Reject' }).click();
+		await expect(page.getByRole('dialog').getByRole('button', { name: 'Reject' })).toBeEnabled();
+		await page.keyboard.press('Escape');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('.pending-request-trigger .pill')).toBeVisible();
+	}
+
+	const LONG_AGENT = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+
+	test('keeps Review and the out-of-date badge inside the card on a phone, with a long agent name', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await showFill(page, request, `Saved login stale phone ${testInfo.project.name}-${Date.now()}`, { agent: LONG_AGENT }, true);
+		await expectEntryHolds(page, 'example.com');
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-stale-393.png') });
+	});
+
+	test('puts a long registrable domain on its own line on a phone, whole, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A registrable domain is one label under a public suffix, so a long one is a long label before ".com".
+		const domain = 'northwind-regional-supply-cooperative-accounts.com';
+		await showFill(page, request, `Saved login long domain ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${SCHEME}login.${domain}`, domain,
+		});
+		await expectEntryHolds(page, domain);
+		await page.screenshot({ path: testInfo.outputPath('fill-entry-long-domain-393.png') });
+	});
+
+	test('keeps a site with a port whole to its port on a phone, with Review inside the card', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		// A saved login's site is an https origin: it can carry a port other than 443, never a path.
+		await showFill(page, request, `Saved login port ${testInfo.project.name}-${Date.now()}`, {
+			agent: LONG_AGENT, site: `${LONG_SITE}:8443`,
+		});
+		await expectEntryHolds(page, 'example.com:8443');
+	});
+
+	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const title = `Saved login one row ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const fill = fillRequest(threadId, 1);
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const name = page.locator('.pending-request-trigger .pending-owner');
+		const shown = page.locator('.pending-request-trigger .pending-site');
+		await expect.poll(() => shown.textContent()).toBe(LONG_SITE_SHOWN);
+		const [nameBox, siteBox] = await Promise.all([name.boundingBox(), shown.boundingBox()]);
+		expect(Math.abs(siteBox!.y - nameBox!.y), 'one row').toBeLessThan(nameBox!.height);
+		expect(siteBox!.x).toBeGreaterThan(nameBox!.x + nameBox!.width - 1);
+		await expectRowFits(page);
+	});
+
+	test('shows the next waiting request in the entry as soon as the first is decided', async ({ page, request }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const title = `Saved login next request ${testInfo.project.name}-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const first = fillRequest(threadId, 1);
+		const secondSite = `${SCHEME}billing.example.org`;
+		const second = fillRequest(threadId, 2, { agent: 'Payroll helper', site: secondSite, domain: 'example.org' });
+		let waiting = [first, second];
+		const rejected: string[] = [];
+		await page.route('**/api/host-access/leases**', async (route) => {
+			const url = new URL(route.request().url());
+			if (route.request().method() === 'POST') {
+				const match = /\/fills\/([^/]+)\/reject$/.exec(url.pathname);
+				expect(match, url.pathname).toBeTruthy();
+				rejected.push(match![1]);
+				const decided = waiting.find((item) => item.id === match![1])!;
+				waiting = waiting.filter((item) => item.id !== match![1]);
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ ...decided, state: 'denied', revision: 2 }),
+				});
+				return;
+			}
+			const root = url.searchParams.get('root_thread_id');
+			await route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ leases: root === threadId ? waiting : [] }),
+			});
+		});
+		await loginByUrl(page, { waitForComposer: false });
+		await selectThread(page, title);
+
+		const entry = page.locator('.pending-request-trigger');
+		await expect(entry).toHaveCount(1);
+		await expect(entry.locator('.pending-owner')).toHaveText('Bookkeeper');
+		await entry.click();
+		const dialog = page.getByRole('dialog');
+		await dialog.getByRole('button', { name: 'Reject' }).click();
+		await expect.poll(() => rejected).toEqual(['fill-e2e-1']);
+		// The next request takes the entry's place without a reload.
+		await expect(entry.locator('.pending-owner')).toHaveText('Payroll helper');
+		await expect(entry.locator('.pending-site')).toHaveAttribute('title', secondSite);
+		await expect(entry.locator('.pending-site')).toHaveText('billing.example.org');
+	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`starts on the agent's asked-for time, approves until turned off, and shows no chip for it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			let items: Record<string, unknown>[] = [fillRequest(threadId, 1, { requested_duration_seconds: 900 })];
+			const decisions: { action: string; body: unknown }[] = [];
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const url = new URL(route.request().url());
+				if (route.request().method() === 'POST') {
+					const match = /\/fills\/([^/]+)\/approve$/.exec(url.pathname);
+					expect(match, url.pathname).toBeTruthy();
+					decisions.push({ action: 'approve', body: route.request().postDataJSON() });
+					const approved = { ...items[0], state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null };
+					// As the server does: the chat's lease list never carries a standing grant.
+					items = [];
+					await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(approved) });
+					return;
+				}
+				const root = url.searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? items : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			await page.locator('.pending-request-trigger').click();
+			const dialog = page.getByRole('dialog');
+			const choices = dialog.getByRole('radio');
+			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
+			// Every choice fits in at most two lines, all four in view, and the picker never scrolls sideways.
+			const lineCounts = await choices.evaluateAll((buttons) => buttons.map((button) => {
+				const range = document.createRange();
+				range.selectNodeContents(button);
+				return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+			}));
+			expect(lineCounts.every((lines) => lines >= 1 && lines <= 2), lineCounts.join(',')).toBe(true);
+			const group = dialog.getByRole('radiogroup');
+			expect(await group.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+			for (const choice of await choices.all()) await expect(choice).toBeInViewport({ ratio: 1 });
+			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
+
+			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
+			await dialog.getByRole('button', { name: 'Approve' }).click();
+			await expect.poll(() => decisions.length).toBe(1);
+			expect(decisions[0]).toEqual({
+				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_revoked: true },
+			});
+
+			// A standing grant has no chip: no lock, no countdown and no drawer in the chat.
+			await expect(page.locator('.pending-request-trigger')).toHaveCount(0);
+			await expect(page.locator('.active-chip')).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath(`after-standing-${viewport.width}.png`), animations: 'disabled' });
+		});
+	}
 });

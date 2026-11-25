@@ -103,7 +103,7 @@
 	.input-wrap :global(.c) { flex: 1 1 auto; flex-direction: column; min-height: 0; align-items: stretch; }
 	.input-wrap textarea { flex: 1 1 auto; min-height: 0; overflow-y: auto !important; }
 	.actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; }
-	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
+	button { font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
 	.submit:disabled { opacity: .4; cursor: default; }

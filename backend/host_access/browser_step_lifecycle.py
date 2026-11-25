@@ -7,9 +7,9 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Literal, Mapping
 
-from host_access import browser_pane_state
+from host_access import browser_login_capture, browser_pane_state
 from host_access.browser_cdp import PasswordProbe
-from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep
+from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep, open_steps
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -136,6 +136,10 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
         if answer.declined:
             return Decision(("R8",), refusal="password_declined")
         if not result.visible_nodes <= answer.nodes:
+            # Listing tabs reads only each tab's title and address, so it is refused like any command here
+            # but asks the person for nothing: an agent leaving a page it shouldn't be on gets no task for it.
+            if event.name == "list_tabs":
+                return Decision(("R9",), refusal="password_no_step")
             return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
         # R14: the person finished these fields, so the page is the agent's again. A declare asks for
         # a different step (e-signature, MFA), so it goes on to R10/R11.
@@ -149,7 +153,7 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
     return Decision()
 
 
-_steps: dict[str, BrowserStep] = {}
+_steps = open_steps
 _answers: dict[str, dict[tuple[Kind, str], Answer]] = {}
 _sessions: dict[str, str | None] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
@@ -190,6 +194,7 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
+        browser_login_capture.step_decided(thread_id, result, decision.end, decision.open_kind)
         if decision.forget_done is not None:
             answers = _answers.get(thread_id, {})
             if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
@@ -269,8 +274,9 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
         while True:
             step.input_seen.clear()
             due = next_probe if step.last_input is None else min(next_probe, step.last_input + REPROBE_AFTER_INPUT)
-            try:
-                await asyncio.wait_for(step.input_seen.wait(), max(0.0, due - clock()))
+            try:  # Not wait_for: on Python 3.11 it swallows a stop that lands with input (#3364).
+                async with asyncio.timeout(max(0.0, due - clock())):
+                    await step.input_seen.wait()
             except TimeoutError:
                 break
         step.last_input = None
@@ -342,10 +348,8 @@ def _step_row_state(node_id: str | None) -> str | None:
 async def _settle_step(thread_id: str, step: BrowserStep) -> None:
     if step.node_id is None:
         return
-    await asyncio.to_thread(
-        _plan_write, "settle_user_step", step.node_id,
-        evidence=step.settlement_evidence, provenance=step.provenance,
-    )
+    await asyncio.to_thread(_plan_write, "settle_user_step", step.node_id,
+                            evidence=step.settlement_evidence, provenance=step.provenance)
     await _emit(f"{step.event_prefix}_settled", thread_id)
 
 
@@ -357,10 +361,8 @@ async def _close_unfinished(step: BrowserStep) -> None:
     if step.node_id is None:
         return
     try:
-        await asyncio.to_thread(
-            _plan_write, "close_user_step", step.node_id,
-            reason=SESSION_ENDED_REASON, provenance=step.provenance,
-        )
+        await asyncio.to_thread(_plan_write, "close_user_step", step.node_id,
+                                reason=SESSION_ENDED_REASON, provenance=step.provenance)
     except Exception:
         log.warning("browser step %s stays open after its session ended", step.node_id, exc_info=True)
 
@@ -385,6 +387,11 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
+
+
+def held_pages(thread_id: str) -> bool:
+    """Whether this session has given the person a page (a step is open, or one was settled or declined)."""
+    return thread_id in _steps or bool(_answers.get(thread_id))
 
 
 def finished_visit(thread_id: str, visit: str) -> bool:

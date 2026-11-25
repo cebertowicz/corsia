@@ -19,6 +19,15 @@ def _artifact_fields(link: dict) -> dict:
     }
 
 
+def _later_fields(node: dict, state: dict) -> dict:
+    """The sheet's Later row gathers the tasks set below the cut; ``later`` is its one source.
+
+    ``later_reason`` is why a task is in Later: the reason its latest crossing recorded
+    (``later_fields.latest_reasons``).
+    """
+    return {"later": bool(node.get("later")), "later_reason": state.get("later_reason")}
+
+
 def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_state: str) -> dict:
     """Adapt a node and its canonical state into the operator row."""
     links = node["artifact_links"]
@@ -50,12 +59,18 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "depth": node["depth"],
         "kind": node["kind"],
         "workflow_step": node["workflow_step"],  # ``node_states.parent_ids`` reads it
+        # A run (``workflow_fields.build_run``, nested runs included) is a phase naming a
+        # workflow; the pane shows its children, the run's steps, in the run's order.
+        "workflow_run": node["kind"] == "phase" and node["workflow_ref"] is not None,
         "title": node["title"],
         "description": node["description"],
         # A person step names only this plan's open dependents; cross-plan
         # dependents remain private to their plan owner.
         "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
         "acceptance_criteria": node["acceptance_criteria"],
+        **{key: state[key] for key in (
+            "intent", "intent_is_person_comment", "intent_parent_title", "intent_owner_name", "intent_run_title",
+        )},
         "state": node["state"],
         "unmet_dependencies": list(node["unmet_dependencies"]),
         "held_by": node["held_by"],
@@ -76,6 +91,7 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "initiative": state["initiative"],
         "branch_progress": None,
         "scheduled_until": None,
+        **_later_fields(node, state),
         "attention_path": attention_path,
         "completion": completion,
         "child": plan_header.child_summary(node["child_plan"], node["spawned_thread_id"]),

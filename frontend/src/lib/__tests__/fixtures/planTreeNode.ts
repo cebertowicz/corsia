@@ -41,6 +41,7 @@ export function node(over: Partial<OperatorNode>): OperatorNode {
 	return {
 		id, parent_id: null, depth: 0, kind: 'task', title: 'Task',
 		description: null, waiting_on: [], acceptance_criteria: 'DOD', state, unmet_dependencies: [], held_by: null, assignee: null,
+		intent: null, intent_is_person_comment: false, intent_parent_title: null, intent_owner_name: null, intent_run_title: null,
 		revision: 1, requirements_revision: 1, commitment_id: id,
 		updated_at: 'now', last_transition_at: 'now', folded: false, container: false, requires_user_action: false,
 		executor: { thread_id: 'agent', label: 'Agent' },
@@ -56,6 +57,8 @@ export function node(over: Partial<OperatorNode>): OperatorNode {
 		status_reason: null,
 		branch_progress: null,
 		scheduled_until: null,
+		later: false,
+		later_reason: null,
 		attention_path: [], completion: null, child: null, review,
 		discussion_artifact_id: null, artifacts: [], user_actions: [], ...over,
 	};

@@ -10,7 +10,7 @@ export type PressAction = 'answer' | 'send' | 'dont_send' | 'done';
 /**
  * What a press came to, in Activity's terms. `refused`: the server answered and pressing again can't change it, so it
  * shows without Try again (`final` when the item has also left the server's list). `failed`: it didn't go through,
- * and Try again may; `reference` is the server's id for a system failure, shown beside the line as the dock shows it.
+ * and Try again may; `reference` is the server's id for a system failure, shown beside the line.
  */
 export type Pressed =
 	| { outcome: 'succeeded' }
@@ -19,7 +19,7 @@ export type Pressed =
 
 export const SUCCEEDED: Pressed = { outcome: 'succeeded' };
 
-/** Send or Don't send, through the call the dock uses; an expired session signs out, as it does there. */
+/** Send or Don't send, through the held-reply call; an expired session signs out. */
 export async function decideHeldPress(id: string, verb: HeldVerb): Promise<Pressed> {
 	const outcome = await decideHeldReply(id, verb);
 	if (outcome.status === 'unauthorized') clearExpiredSession();
@@ -41,7 +41,7 @@ export function answerPressed(outcome: AnswerOutcome): Pressed {
 		// The re-read shows the decision's latest revision, to answer again.
 		case 'stale': return { outcome: 'refused', reason: 'changed', text: 'This decision changed. Showing the latest.' };
 		case 'rejected': return { outcome: 'refused', reason: 'rejected', text: outcome.message };
-		case 'unauthorized': return { outcome: 'refused', reason: 'unavailable', text: 'This decision isn’t available.' };
+		case 'unauthorized': return { outcome: 'refused', reason: 'unavailable', text: 'This decision isn’t available.', final: true };
 		default: return { outcome: 'failed', text: 'Couldn’t save your answer. Try again.' };
 	}
 }

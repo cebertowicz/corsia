@@ -1,7 +1,10 @@
-import type { ConversationFailure, EmailDraftContext } from '$lib/emailDraft';
+import type { ConversationFailure, EmailDraftContext, EmailDraftState } from '$lib/emailDraft';
 import { apiFetch } from './request';
 /** The server's answer for one draft (backend/api/email_drafts.py), before the view's own names. */
 interface ContextResponse {
+	state: EmailDraftState;
+	read_at: string | null;
+	target_version: string;
 	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
 	/** With `unreadable`: the reference the server logged the failure under. */
@@ -36,8 +39,42 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 		return failed('unreadable');
 	}
 	return {
-		status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
+		state: body.state, readAt: body.read_at ?? null, targetVersion: body.target_version ?? null, status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
 		answered: body.answered ?? undefined, conversation: body.conversation ?? [],
 		attachments: body.attachments ?? [], notes: body.notes ?? [],
 	};
+}
+
+export type DraftActionResult =
+	| { state: 'sent'; not_delivered_to?: string[] }
+	| { state: 'discarded' | 'sending' | 'unconfirmed' | 'failed'; reason?: string }
+	| { state: 'changed' | 'newer'; message: string }
+	| { state: 'signin' | 'missing' }
+	/** The server didn't answer the action (an error status): whether it happened is read from the draft's state. */
+	| { state: 'unknown' };
+
+async function draftAction(artifactId: string, action: 'send' | 'discard', body?: { text: string; target_version: string | null; read_at: string | null }): Promise<DraftActionResult> {
+	const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/${action}`, {
+		method: 'POST', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+	});
+	if (res.status === 401) return { state: 'signin' };
+	if (res.status === 404) return { state: 'missing' };
+	if (res.status === 409) return (await res.json()).detail;
+	// Only the server's own 'failed' answer means the email provably didn't leave; an error status says nothing either way.
+	if (!res.ok) return { state: 'unknown' };
+	return await res.json() as DraftActionResult;
+}
+
+/** Send now carries what the view showed: the text, the stored target its last read returned, and that read's time. */
+export function sendEmailDraft(artifactId: string, text: string, targetVersion: string | null, readAt: string | null): Promise<DraftActionResult> {
+	return draftAction(artifactId, 'send', { text, target_version: targetVersion, read_at: readAt });
+}
+
+/** The draft's state as the server holds it, or null when the read didn't reach the server. */
+export async function readEmailDraftState(artifactId: string): Promise<EmailDraftState | null> {
+	return (await fetchEmailDraftContext(artifactId)).state ?? null;
+}
+
+export function discardEmailDraft(artifactId: string): Promise<DraftActionResult> {
+	return draftAction(artifactId, 'discard');
 }

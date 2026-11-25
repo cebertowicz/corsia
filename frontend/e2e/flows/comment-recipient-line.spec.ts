@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
+import { settled } from '../support/reviewFixtures';
 import { installWorkspace, isolatedDb, openThread, setDebugVersionOverlay, setMockCorsiaAgentModel } from '../support/heldComments';
 
 // The comment box names who gets a comment, under a new comment and under a reply, on a wide screen and on a phone.
@@ -10,14 +11,12 @@ const TEXT = '# Rollout plan\n\nThe team ships the commentable rollout plan in t
 const WORD = 'commentable';
 const auth = { token: TEST_TOKEN };
 
-const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))).then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))));
-
 /** The line, the field and Send as the person sees them: each box inside the viewport and inside the nearest scroller that holds the reply; also where that scroller stands. */
 const visibleTogether = (page: Page) => page.evaluate(() => {
 	const pick = (selector: string) => document.querySelector(selector) as HTMLElement | null;
 	const line = pick('.ct-compose .rl');
 	const field = pick('.ct-compose textarea.ct-input');
-	const send = pick('.ct-compose [data-send-reply]');
+	const send = pick('.ct-compose button[aria-label="Send reply"]');
 	let scroller: HTMLElement | null = null;
 	for (let parent = line?.parentElement ?? null; parent && !scroller; parent = parent.parentElement) if (/auto|scroll/.test(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight + 1) scroller = parent;
 	const view = scroller?.getBoundingClientRect();

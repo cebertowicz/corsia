@@ -2,10 +2,10 @@
 	import { keepTyped } from '$lib/actions/keepTyped';
 	import { keepInView } from '$lib/actions/keepInView';
 	import { autosize } from '$lib/actions/autosize';
+	import Button from '$lib/components/ui/Button.svelte';
 	import Field from '$lib/components/ui/Field.svelte';
 	import MentionPicker from './MentionPicker.svelte';
 	import { createMentionSelection } from './mentionSelection';
-	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import RecipientLine from './RecipientLine.svelte';
 	import { recipientNames, type Recipient } from './recipients';
 	import { showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
@@ -85,9 +85,11 @@
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
 		<textarea use:keepTyped id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard, clearAfter: lineHeight ? lineHeight + gap() : undefined }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
-			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
-				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
-			</button>
+			<span class="ct-send-slot">
+				<Button variant="primary" size="sm" ariaLabel="Send reply" title="Reply" loading={posting} onclick={sendClicked}>
+					{#if !posting}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
+				</Button>
+			</span>
 		{/if}
 	</Field>
 	{#if goesTo}<div class="ct-goes" bind:offsetHeight={lineHeight}><RecipientLine names={recipientNames(goesTo, tagged)} none="No agent gets this reply." /></div>{/if}
@@ -100,8 +102,8 @@
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; scroll-margin-block-end: var(--space-1); }
 	/* Holds the line's own top gap inside the box that is measured. */
 	.ct-goes { display: flow-root; }
-	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
-	.ct-send:hover { filter: brightness(1.08); }
-	/* In progress, not unavailable: the ring takes the send button's own ink, and the button keeps its fill. */
-	.ct-send[aria-busy="true"] { --accent: var(--accent-on-fill); cursor: progress; filter: none; }
+	/* Only where Send sits: at the field's foot, not squeezed. The button is the shared primitive, with no style of its own here.
+	   The slot is as wide as Send with its arrow (14px icon, its side padding and 1px border each side), so the field beside it
+	   keeps its width when the arrow gives way to the narrower spinner while a reply posts. */
+	.ct-send-slot { flex-shrink: 0; align-self: flex-end; display: flex; justify-content: center; min-width: calc(14px + 2 * var(--button-pad-x-sm) + 2px); }
 </style>

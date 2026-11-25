@@ -8,9 +8,10 @@ beforeEach(() => emailDraftHeaders.set({}));
 
 describe('the email-draft readings', () => {
 	it('takes a load that found the draft record, and a later live frame’s reading of the same document', () => {
-		noteDocumentLoad('a1', draft('To: dana@example.com'));
+		noteDocumentLoad('a1', { ...draft('To: dana@example.com'), state: 'sent' });
 		noteLiveHeader('a1', draft('To: dana@example.com, sam@example.com'));
 		expect(get(emailDraftHeaders).a1.header.text).toBe('To: dana@example.com, sam@example.com');
+		expect(get(emailDraftHeaders).a1.state).toBe('sent');
 	});
 
 	it('forgets a document whose load found no draft record, and leaves the others', () => {

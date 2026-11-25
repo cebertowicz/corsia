@@ -19,7 +19,7 @@ def test_rows_and_comment_overlap(isolated_db):
         projected = projection.rows(db, 'owner-token', [])
         assert any(r['detail']['node_id'] == task for r in projected if r['kind'] == 'task')
         assert len(projection.dedupe_comment_tasks(db, 'owner-token', projected, [])) == 1
-        shown_reply = {'kind': 'reply', 'detail': {'artifact_id': doc, 'root_id': root['id'], 'reply_id': reply['id']}}
+        shown_reply = {'kind': 'document', 'detail': {'artifact_id': doc, 'threads': [{'root_id': root['id'], 'reply_id': reply['id']}]}}
         assert not projection.dedupe_comment_tasks(db, 'owner-token', projected, [shown_reply])
         with write_transaction(db, scope='test_ask') as conn:
             node = _ask_node(conn, 'owner')
@@ -45,6 +45,26 @@ def test_scope_owned_tasks_have_no_user_settlement_route(isolated_db):
                 service.add_node(plan.id, kind='task', title='Person task', acceptance_criteria='Done',
                                  assignee='user', actor_id=None, provenance='test', db=conn)
         assert projection.rows(db, 'owner-token', []) == []
+    finally:
+        db.close()
+
+
+def test_person_task_descriptions_are_in_activity_rows(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        with write_transaction(db, scope='task_descriptions') as conn:
+            plan = service.ensure_plan('thread', 'owner', db=conn)
+            browser = service.add_node(plan.id, kind='task', title='Browser step', acceptance_criteria='Done',
+                                       description='Enter your password.', assignee='user', actor_id=None,
+                                       provenance='browser.password_guard', db=conn)
+            ordinary = service.add_node(plan.id, kind='task', title='Ordinary task', acceptance_criteria='Done',
+                                        description='Follow these instructions.', assignee='user', actor_id=None,
+                                        provenance='test', db=conn)
+        details = {row['detail']['node_id']: row['detail'] for row in projection.rows(db, 'owner-token', [])
+                   if row['kind'] == 'task'}
+        assert details[browser.id]['description'] == 'Enter your password.'
+        assert details[ordinary.id]['description'] == 'Follow these instructions.'
     finally:
         db.close()
 

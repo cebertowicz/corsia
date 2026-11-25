@@ -45,7 +45,10 @@ export interface ServerHeader {
 }
 
 /** What a document load or live frame says about an email draft: its record's id and its header as the server read it. */
+export type EmailDraftState = 'open' | 'sending' | 'sent' | 'discarded';
+
 export interface EmailDraftInfo {
+	state?: EmailDraftState;
 	id: string;
 	header: ServerHeader;
 }
@@ -55,6 +58,10 @@ export interface EmailDraftInfo {
  * are read here from the conversation; an added recipient and a bad address from the server's reading of the header.
  */
 export interface EmailDraftContext {
+	state?: EmailDraftState;
+	readAt?: string | null;
+	/** Which stored target (attachments, account, reply) this read showed; Send now carries it back. */
+	targetVersion?: string | null;
 	/** Context the person may want, shown folded into one line under the header. */
 	notes: string[];
 	/** The id of the email the draft answers. Emails above it in `conversation` came after it. Absent: a new email. */

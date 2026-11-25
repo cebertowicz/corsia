@@ -1,10 +1,13 @@
 """Provider-neutral storage for person-reviewed outbound draft documents."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import sqlite3
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +32,19 @@ CHANGED_WHILE_SAVING = "The draft changed while it was being saved, so it is not
 
 class DraftStorageRefused(ValueError):
     """A safe refusal from reviewed-draft storage."""
+
+
+# Weak, so a draft's lock goes once no save or send holds or waits on it. In-process: the server runs one event loop.
+_draft_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def draft_lock(draft_id: str) -> asyncio.Lock:
+    """One draft's lock: an agent's save and the person's Send now of that draft never interleave.
+
+    Send now holds it from comparing the file to the screen until the send settles, and a save holds it from its open
+    check until it records, so the bytes that go out are the bytes the draft's record names.
+    """
+    return _draft_locks.setdefault(draft_id, asyncio.Lock())
 
 
 def _workspace_root() -> Path:
@@ -91,17 +107,21 @@ def open_draft(thread_id: str, draft_id: str, kind: str, *, db: sqlite3.Connecti
             conn.close()
 
 
-def draft_at(path: Path, kind: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
-    """The open draft record of this kind for a workspace file: the one source for whether a file is such a draft.
-
-    A sent or discarded draft opens as the file it was saved as; only open drafts were converted to the current format.
-    """
+def draft_record_at(path: Path, kind: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
+    """The newest draft record of this kind for a workspace file, in any state."""
     relative = os.path.relpath(path.resolve(), _workspace_root().resolve())
     row = db.execute(
-        "SELECT id,thread_id,path,state,target_json FROM action_drafts WHERE kind=? AND path=? ORDER BY created_at DESC LIMIT 1",
+        "SELECT id,thread_id,path,state,target_json,recorded_revision FROM action_drafts"
+        " WHERE kind=? AND path=? ORDER BY created_at DESC LIMIT 1",
         (kind, relative),
     ).fetchone()
-    return dict(row) if row and row["state"] == "open" else None
+    return dict(row) if row else None
+
+
+def draft_at(path: Path, kind: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
+    """The open draft record of this kind for a workspace file: the one source for whether a file is an open draft."""
+    row = draft_record_at(path, kind, db=db)
+    return row if row and row["state"] == "open" else None
 
 
 def checked_open_draft(thread_id: str, draft_id: object, kind: str, account_id: str) -> dict[str, Any] | None:
@@ -121,17 +141,19 @@ async def save_draft(
     target: dict[str, Any], text: str, draft_id: object, context: dict[str, Any], description: str,
 ) -> dict[str, Any]:
     """Write and record a reviewed draft under the canonical thread working root."""
-    existing = await run_in_db(checked_open_draft, thread_id, draft_id, kind, account_id)
-    path, relative = await run_in_db(_draft_path, thread_id, existing, prefix, kind, extension)
-    written = await WriteFileTool(workspace=config.WORKSPACE, allowed_dir=_workspace_root()).execute(
-        path=str(path), content=text, description=description,
-        **{key: value for key, value in context.items() if key.startswith("_")},
-    )
-    if isinstance(written, str) and written.startswith("Error"):
-        raise DraftStorageRefused(written.removeprefix("Error: "))
-    data = await run_in_db(_read_bytes, relative)
-    if data != text.encode("utf-8"):
-        raise DraftStorageRefused(CHANGED_WHILE_SAVING)
-    if existing:
-        return await run_in_db(record_draft, str(existing["id"]), data, target)
-    return await run_in_db(create_draft, thread_id, kind, relative, data, target)
+    # A new draft has no id yet, so nothing can be sending it.
+    async with draft_lock(str(draft_id)) if draft_id is not None else contextlib.nullcontext():
+        existing = await run_in_db(checked_open_draft, thread_id, draft_id, kind, account_id)
+        path, relative = await run_in_db(_draft_path, thread_id, existing, prefix, kind, extension)
+        written = await WriteFileTool(workspace=config.WORKSPACE, allowed_dir=_workspace_root()).execute(
+            path=str(path), content=text, description=description,
+            **{key: value for key, value in context.items() if key.startswith("_")},
+        )
+        if isinstance(written, str) and written.startswith("Error"):
+            raise DraftStorageRefused(written.removeprefix("Error: "))
+        data = await run_in_db(_read_bytes, relative)
+        if data != text.encode("utf-8"):
+            raise DraftStorageRefused(CHANGED_WHILE_SAVING)
+        if existing:
+            return await run_in_db(record_draft, str(existing["id"]), data, target)
+        return await run_in_db(create_draft, thread_id, kind, relative, data, target)

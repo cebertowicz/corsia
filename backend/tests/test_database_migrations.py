@@ -12,13 +12,14 @@ import hashlib
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from infra import sqlite_clone
+from infra import database_migrations as migrations, sqlite_clone
 from infra.database_migrations import (
     MIGRATIONS,
     MigrationError,
@@ -115,6 +116,304 @@ def test_a_migration_that_breaks_referential_integrity_is_rolled_back(tmp_path, 
         conn.close()
 
     assert _digest(path) == before
+
+
+class CountingConnection(sqlite3.Connection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.whole_fk_checks = 0
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().lower() == "pragma foreign_key_check":
+            self.whole_fk_checks += 1
+        return super().execute(sql, *args, **kwargs)
+
+
+@pytest.mark.parametrize("statements,whole_scans", [
+    (["CREATE TABLE added (id INTEGER)", "CREATE INDEX added_id ON added(id)"], 1),
+    (["CREATE INDEX parent_label ON parent(label)"], 1),
+    (["CREATE TABLE added (id INTEGER)", "INSERT INTO added VALUES (1)"], 1),
+    (["ALTER TABLE parent ADD COLUMN added TEXT"], 1),
+    (["CREATE TRIGGER extra AFTER INSERT ON parent BEGIN DELETE FROM child; END",
+      "INSERT INTO parent VALUES (2, 'triggered')"], 1),
+])
+def test_unmarked_step_uses_whole_database_check(tmp_path, ladder, statements, whole_scans):
+    def step(conn):
+        for statement in statements:
+            conn.execute(statement)
+
+    ladder[1] = step
+    path = _database(tmp_path, 1)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        assert migrate_to_current(conn, 2).migrated
+        assert conn.whole_fk_checks == whole_scans
+
+
+def test_marked_step_checks_no_whole_database(tmp_path, ladder, caplog):
+    from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
+
+    ladder[208] = migrate_208_to_209
+    path = _database(tmp_path, 208)
+    _add_untouched_orphan(path)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        with caplog.at_level("WARNING", logger="infra.database_migrations"):
+            assert migrate_to_current(conn, 209).migrated
+        assert conn.whole_fk_checks == 0
+    assert not [record for record in caplog.records if "predate it" in record.getMessage()]
+
+
+def test_unmarked_step_in_ladder_forces_whole_check(tmp_path, ladder):
+    from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
+
+    ladder[207] = lambda conn: conn.execute("CREATE INDEX parent_label ON parent(label)")
+    ladder[208] = migrate_208_to_209
+    path = _database(tmp_path, 207)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        assert migrate_to_current(conn, 209).migrated
+        assert conn.whole_fk_checks == 1
+
+
+def test_drop_and_recreate_same_table_still_rejects_orphans(tmp_path, ladder):
+    """DROP may reuse the same root page and isn't counted by total_changes."""
+    def step(conn):
+        ddl = conn.execute("SELECT sql FROM sqlite_schema WHERE name='parent'").fetchone()[0]
+        conn.execute("DROP TABLE parent")
+        conn.execute(ddl)
+
+    ladder[1] = step
+    path = _database(tmp_path, 1)
+    before = _digest(path)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+        assert conn.whole_fk_checks == 1
+    assert _digest(path) == before
+
+
+def test_new_table_with_a_broken_reference_rolls_back(tmp_path, ladder):
+    """A violation in a table absent from the backup is new, not a read error."""
+    def add_broken_child(conn):
+        conn.execute("CREATE TABLE new_child (id INTEGER REFERENCES parent(id))")
+        conn.execute("INSERT INTO new_child VALUES (99)")
+
+    ladder[1] = add_broken_child
+    path = _database(tmp_path, 1)
+    with closing(sqlite3.connect(path)) as conn:
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("SELECT name FROM sqlite_schema WHERE name='new_child'").fetchone() is None
+
+
+def test_in_memory_database_keeps_old_orphan_but_rejects_new_one(ladder):
+    """With no backup the existing pre/post comparison still protects memory DBs."""
+    conn = sqlite3.connect(":memory:", factory=CountingConnection)
+    try:
+        conn.executescript("""
+            CREATE TABLE parent (id INTEGER PRIMARY KEY);
+            CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
+            INSERT INTO child VALUES (1, 99);
+            PRAGMA user_version=1;
+        """)
+        ladder[1] = lambda db: db.execute("INSERT INTO child VALUES (2, 98)")
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+        assert conn.execute("SELECT id FROM child").fetchall() == [(1,)]
+        assert conn.whole_fk_checks == 2
+        ladder[1] = lambda db: db.execute("CREATE TABLE added (id INTEGER)")
+        assert migrate_to_current(conn, 2).migrated
+        assert conn.whole_fk_checks == 4  # no backup: both comparisons remain
+    finally:
+        conn.close()
+
+
+def test_marked_in_memory_step_keeps_pre_and_post_checks(ladder):
+    from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
+
+    ladder[208] = migrate_208_to_209
+    with closing(sqlite3.connect(":memory:", factory=CountingConnection)) as conn:
+        conn.executescript("""
+            CREATE TABLE parent (id INTEGER PRIMARY KEY);
+            CREATE TABLE child (id INTEGER REFERENCES parent(id));
+            INSERT INTO child VALUES (99);
+            PRAGMA user_version=208;
+        """)
+        assert migrate_to_current(conn, 209).migrated
+        assert conn.whole_fk_checks == 2
+
+
+def _add_untouched_orphan(path: Path) -> None:
+    """An orphan the migration never touches: it was already in the database."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE other_parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE other_child (
+            id INTEGER PRIMARY KEY,
+            other_parent_id INTEGER REFERENCES other_parent(id)
+        );
+        INSERT INTO other_child (id, other_parent_id) VALUES (5, 99);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_an_orphan_the_migration_did_not_create_does_not_block_it(
+    tmp_path, ladder, caplog
+):
+    """A pre-existing orphan in an untouched table no longer rolls back updates."""
+    from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
+    ladder[208] = migrate_208_to_209
+    path = _database(tmp_path, 208)
+    _add_untouched_orphan(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        with caplog.at_level("WARNING", logger="infra.database_migrations"):
+            assert migrate_to_current(conn, 209).migrated
+        assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 209
+        # The old orphan is kept as it was; the migration does not repair data.
+        assert [tuple(row) for row in conn.execute("PRAGMA foreign_key_check")] == [
+            ("other_child", 5, "other_parent", 0)
+        ]
+        assert not [r for r in caplog.records if "predate it" in r.getMessage()]
+    finally:
+        conn.close()
+
+
+def test_old_orphan_is_logged_during_data_migration(tmp_path, ladder, caplog):
+    path = _database(tmp_path, 1)
+    _add_untouched_orphan(path)
+    ladder[1] = lambda conn: conn.execute("INSERT INTO parent VALUES (2, 'new')")
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        conn.row_factory = sqlite3.Row
+        with caplog.at_level("WARNING", logger="infra.database_migrations"):
+            assert migrate_to_current(conn, 2).migrated
+        assert conn.whole_fk_checks == 1
+    kept = [r.getMessage() for r in caplog.records if "predate it" in r.getMessage()]
+    assert len(kept) == 1
+    assert "('other_child', 5, 'other_parent', 0)" in kept[0]
+    assert "sqlite3.Row" not in kept[0]
+
+
+def test_an_orphan_the_migration_creates_still_fails_beside_an_old_one(tmp_path, ladder):
+    """A pre-existing orphan elsewhere does not hide one the migration makes."""
+    def orphans_a_child(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM parent WHERE id=1")
+
+    ladder[1] = orphans_a_child
+    path = _database(tmp_path, 1)
+    _add_untouched_orphan(path)
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        with pytest.raises(MigrationError) as raised:
+            migrate_to_current(conn, 2)
+        message = str(raised.value.__cause__)
+        assert "foreign_key_check failed" in message
+        assert "('child', 10, 'parent', 0)" in message
+        assert "sqlite3.Row" not in message
+        assert "other_child" not in message
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def test_a_new_orphan_in_a_without_rowid_table_is_not_hidden_by_an_old_one(
+    tmp_path, ladder
+):
+    """WITHOUT ROWID orphans all report rowid NULL; the count still tells."""
+    path = _database(tmp_path, 1)
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE tag (
+            name TEXT PRIMARY KEY,
+            parent_id INTEGER REFERENCES parent(id)
+        ) WITHOUT ROWID;
+        INSERT INTO tag (name, parent_id) VALUES ('old', 99);
+        """
+    )
+    conn.commit()
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == [("tag", None, "parent", 0)]
+    conn.close()
+
+    ladder[1] = lambda conn: conn.execute(
+        "INSERT INTO tag (name, parent_id) VALUES ('new', 98)"
+    )
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def _rebuild_parent(keep: str):
+    """The ladder's rebuild shape: create X_new, copy, drop X, rename X_new to X."""
+    def step(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE parent_new (id INTEGER PRIMARY KEY, label TEXT)")
+        conn.execute(f"INSERT INTO parent_new SELECT * FROM parent WHERE {keep}")
+        conn.execute("DROP TABLE parent")
+        conn.execute("ALTER TABLE parent_new RENAME TO parent")
+
+    return step
+
+
+def _add_old_child_orphan(path: Path) -> None:
+    """An orphan already in the referencing table before the parent is rebuilt."""
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO child (id, parent_id) VALUES (11, 7)")
+    conn.commit()
+    conn.close()
+
+
+def test_a_rebuilt_table_that_drops_parent_rows_still_fails(tmp_path, ladder):
+    """A rebuild that loses a referenced parent row raises, beside an old orphan."""
+    ladder[1] = _rebuild_parent(keep="id <> 1")
+    path = _database(tmp_path, 1)
+    _add_old_child_orphan(path)
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError) as raised:
+            migrate_to_current(conn, 2)
+        message = str(raised.value.__cause__)
+        assert "foreign_key_check failed" in message
+        assert "'child', 10, 'parent'" in message
+        assert "'child', 11," not in message
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def test_a_rebuilt_table_that_keeps_every_row_passes_beside_an_old_orphan(
+    tmp_path, ladder
+):
+    """The same rebuild copying every row migrates; the old orphan stays as it was."""
+    ladder[1] = _rebuild_parent(keep="1")
+    path = _database(tmp_path, 1)
+    _add_old_child_orphan(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        assert migrate_to_current(conn, 2).migrated
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == [
+            ("child", 11, "parent", 0)
+        ]
+    finally:
+        conn.close()
 
 
 def test_a_migration_with_a_mismatched_rebuilt_table_index_is_rolled_back(
@@ -287,6 +586,40 @@ def test_a_newer_database_is_refused_rather_than_downgraded(tmp_path, ladder):
 
     assert _digest(path) == before
     assert _backups(tmp_path) == []
+
+
+@pytest.mark.parametrize("copy_method", ["clone", "page-copy"])
+def test_backup_fk_read_leaves_no_wal_sidecars(tmp_path, monkeypatch, copy_method):
+    path = _database(tmp_path, 1)
+    db = sqlite3.connect(path)
+    try:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        db.execute("INSERT INTO child (id, parent_id) VALUES (11, 999)")
+        db.commit()
+        assert Path(f"{path}-wal").stat().st_size > 32
+        real_clone = migrations.clone_database
+
+        def clone_or_skip(*args, **kwargs):
+            if copy_method == "page-copy":
+                raise sqlite_clone.CloneUnsupported("exercise page copy")
+            try:
+                return real_clone(*args, **kwargs)
+            except sqlite_clone.CloneUnsupported:
+                pytest.skip("filesystem does not support cloning")
+
+        monkeypatch.setattr(migrations, "clone_database", clone_or_skip)
+        db.execute("BEGIN IMMEDIATE")
+        backup = migrations._write_backup(db, 1)
+        assert backup is not None
+        wal = Path(f"{backup}-wal")
+        assert not wal.exists() or wal.stat().st_size <= 32
+        assert migrations._backup_foreign_key_violations(backup, {"child"}) == {
+            ("child", 11, "parent", 0): 1,
+        }
+        assert list(tmp_path.glob(f"{backup.name}*")) == [backup]
+    finally:
+        db.rollback()
+        db.close()
 
 
 def test_a_backup_is_written_beside_the_database_that_is_migrating(tmp_path, ladder):

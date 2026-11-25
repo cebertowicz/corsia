@@ -3,8 +3,12 @@ import {
 	type FeedbackCounts, type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
 import type { DocumentAsk } from '$lib/stores/documentBar';
-import { personStepAsk } from '$lib/components/comments/commentTask';
+import { isCommentTask, personStepAsk } from '$lib/components/comments/commentTask';
 import { createReviewBarRetry } from '$lib/reviewBarRetry';
+
+export const REVIEW_ANSWERED = Symbol('review-answered');
+/** Context key: Activity's place in a review's unread replies ("1 of 3 replies"), shown after the ask; empty when none. */
+export const REVIEW_REPLIES = Symbol('review-replies');
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
@@ -125,7 +129,7 @@ export type ReviewBarState = ReturnType<typeof createReviewBarState>;
 export function documentAskOf(bar: Pick<ReviewBarState, 'read' | 'phase'>, hidden: boolean): DocumentAsk | null {
 	const read = bar.read;
 	if (!read || bar.phase === 'answered' || bar.phase === 'stale') return null;
-	if (read.person_step) return { who: read.person_step.owner_name, text: personStepAsk(read.person_step), others: [], onCard: !hidden };
+	if (read.person_step && !isCommentTask(read.person_step)) return { who: read.person_step.owner_name, text: personStepAsk(read.person_step), others: [], onCard: !hidden };
 	if (!read.ask_raised) return null;
 	return { who: read.asker?.name ?? 'An agent', text: read.ask_reason ?? '', others: read.other_asks ?? [], onCard: !hidden };
 }

@@ -234,9 +234,9 @@ describe('Dated group disclosure motion', () => {
 	it('grows and shrinks both single and clustered members on request', async () => {
 		const date = new Date(Date.now() + 48 * 3_600_000).toISOString();
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [
-			node({ id: 'one', title: 'One', scheduled_until: new Date(Date.now() + 72 * 3_600_000).toISOString() }),
-			node({ id: 'two', title: 'Two', scheduled_until: date }),
-			node({ id: 'three', title: 'Three', scheduled_until: date }),
+			node({ id: 'one', title: 'One', later: true, scheduled_until: new Date(Date.now() + 72 * 3_600_000).toISOString() }),
+			node({ id: 'two', title: 'Two', later: true, scheduled_until: date }),
+			node({ id: 'three', title: 'Three', later: true, scheduled_until: date }),
 		] }) });
 		flushSync();
 		animate.mockClear();
@@ -251,8 +251,8 @@ describe('Dated group disclosure motion', () => {
 		reduced.store?.set(isReduced);
 		const date = new Date(Date.now() + 48 * 3_600_000).toISOString();
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [
-			node({ id: 'two', title: 'Two', scheduled_until: date }),
-			node({ id: 'three', title: 'Three', scheduled_until: date }),
+			node({ id: 'two', title: 'Two', later: true, scheduled_until: date }),
+			node({ id: 'three', title: 'Three', later: true, scheduled_until: date }),
 		] }) });
 		flushSync();
 		animate.mockClear();

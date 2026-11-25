@@ -1,7 +1,6 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { nodeStateTone } from './planDisplay';
-import { isScheduledMember, SCHEDULE_HORIZON_MS } from './planScheduled';
-import { waitEndsAtMs } from './planWaits';
+import { isLaterMember, isScheduledMember } from './planScheduled';
 import type { OperatorFoldLevel } from '$lib/api/plans';
 import type { FoldedWork, FoldLevelView } from './planFoldLevels';
 import {
@@ -19,7 +18,7 @@ import {
 export interface PlanTreeIndex {
 	/** Every node by id, for ancestor walks. */
 	byId: Map<string, OperatorNode>;
-	/** Ancestors of Working, imminent scheduled, and attention-path nodes, expanded by default. */
+	/** Ancestors of Working and attention-path nodes, expanded by default. */
 	defaultExpandedBranches: Set<string>;
 	/** Parents whose children sit past `maxDepth`, offering a drill affordance. */
 	boundaryParents: Set<string>;
@@ -38,6 +37,7 @@ export interface PlanTreeViewInput {
 	/** The clock the Scheduled rows are read against, and which levels have theirs open (`planScheduled`). */
 	now?: number;
 	isScheduledOpen?: (level: string) => boolean;
+	laterShown?: (level: string) => number;
 }
 
 export interface PlanTreeView {
@@ -139,10 +139,9 @@ export function indexPlanNodes(
 	};
 	for (const id of currentNodeIds) {
 		const node = byId.get(id);
-		if (!node) continue;
-		const end = waitEndsAtMs(node);
-		const imminent = now !== undefined && end !== null && end - now <= SCHEDULE_HORIZON_MS;
-		if ((node.display.label_key === 'working' && (now === undefined || !isScheduledMember(node, now))) || imminent) revealAncestors(id);
+		if (!node || (now !== undefined && isLaterMember(node, now))) continue;
+		// Only running work opens its branch; a check-back is named on the branch's own row.
+		if (node.display.label_key === 'working' && (now === undefined || !isScheduledMember(node, now))) revealAncestors(id);
 	}
 	for (const node of nodes) for (const id of node.attention_path) revealAncestors(id);
 
@@ -209,7 +208,7 @@ export function buildPlanTreeView(input: PlanTreeViewInput): PlanTreeView {
 	const shown = new Set(visibleNodes.map((node) => node.id));
 	const items = arrangeItems({
 		visible: visibleNodes, byId: index.byId, levels, openBlocked: index.openBlocked,
-		now: input.now, isScheduledOpen: input.isScheduledOpen,
+		now: input.now, isScheduledOpen: input.isScheduledOpen, laterShown: input.laterShown,
 		isLevelOpen: (level) => level === ROOT_LEVEL
 			|| (shown.has(level) && branchParents.has(level) && input.isBranchExpanded(level)),
 	});
