@@ -27,7 +27,7 @@ it('keeps a refused reply across a thread switch, then clears it once a retry is
 	activeThreadId.set('thread'); show();
 	const field = host.querySelector<HTMLTextAreaElement>('textarea')!;
 	field.value = 'keep my reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
 	expect(chatCommentDrafts.reply('root')?.posting).toBe(true);
 	unmount(component! as never); component = null; host.remove(); activeThreadId.set('other');
 	refuse(new CommentSendRefused('Please try again.')); await settle();
@@ -35,7 +35,7 @@ it('keeps a refused reply across a thread switch, then clears it once a retry is
 	activeThreadId.set('thread'); show();
 	expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('keep my reply');
 	expect(host.querySelector('[role="alert"]')?.textContent).toContain('Please try again');
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(chatCommentDrafts.get('root')).toBe('');
 });
@@ -108,9 +108,9 @@ it('hands the reply’s kept client id to the send, the same on a press again', 
 	activeThreadId.set('thread'); show();
 	const field = host.querySelector<HTMLTextAreaElement>('textarea')!;
 	field.value = 'Under one id'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
-	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[data-send-reply]')?.getAttribute('aria-busy')).toBe('false'); });
-	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await settle();
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector('button[aria-label="Send reply"]')?.hasAttribute('aria-busy')).toBe(false); });
+	host.querySelector<HTMLButtonElement>('button[aria-label="Send reply"]')!.click(); await settle();
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(send.mock.calls[0][1]).toBeTruthy();
 	expect(send.mock.calls[1][1]).toBe(send.mock.calls[0][1]);

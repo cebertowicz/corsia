@@ -310,7 +310,7 @@ for (const { label, view } of CASES) {
 						if (typed.cardScrollers.length) fail(`typing: the comment card scrolls inside itself (${typed.cardScrollers.join(', ')})`);
 						// The caret (at the end of the text) and Send stay in view while the reply grows.
 						const caretAndSend = await thread.evaluate((root) => {
-							const field = root.querySelector<HTMLTextAreaElement>('.ct-input'), send = root.querySelector<HTMLElement>('[data-send-reply]');
+							const field = root.querySelector<HTMLTextAreaElement>('.ct-input'), send = root.querySelector<HTMLElement>('button[aria-label="Send reply"]');
 							const vv = window.visualViewport, top = vv?.offsetTop ?? 0, bottom = top + (vv?.height ?? window.innerHeight);
 							const line = field ? Number.parseFloat(getComputedStyle(field).lineHeight) || 20 : 0;
 							const f = field?.getBoundingClientRect(), s = send?.getBoundingClientRect();

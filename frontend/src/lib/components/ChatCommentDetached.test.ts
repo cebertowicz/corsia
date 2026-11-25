@@ -65,7 +65,7 @@ async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTrans
 	field!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
 	if (!send) return;
-	dialog!.querySelector<HTMLElement>('[data-send-reply]')!.click();
+	dialog!.querySelector<HTMLElement>('button[aria-label="Send reply"]')!.click();
 	flushSync();
 }
 
