@@ -1,5 +1,4 @@
 import type {
-	ActivityChatReplyDetail,
 	ActivityDocReplyDetail,
 	ActivityKind,
 	ActivityQueueItem,
@@ -95,10 +94,6 @@ export function documentOf(item: ActivityQueueItem): { artifactId: string; comme
 	return null;
 }
 
-export function chatOf(item: ActivityQueueItem): { threadId: string; messageId: string } | null {
-	if (item.open && 'message_id' in item.open) return { threadId: item.open.thread_id, messageId: item.open.message_id };
-	return null;
-}
 
 export const decisionOf = (item: ActivityQueueItem) =>
 	item.kind === 'decision' ? (item.detail as DecisionDetail) : null;
@@ -130,7 +125,5 @@ export function taskSteps(text: string): TaskSteps {
 	return { kind: 'text', text };
 }
 
-export const chatReplyOf = (item: ActivityQueueItem) =>
-	item.kind === 'reply' && chatOf(item) ? (item.detail as ActivityChatReplyDetail) : null;
 
 export type { DocumentLookup } from '$lib/findDocument';

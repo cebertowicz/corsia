@@ -18,6 +18,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
+- Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
