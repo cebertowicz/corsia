@@ -93,7 +93,28 @@ async def test_animated_page_reports_fields_within_max_settle():
     finally:
         animation.cancel()
         task.cancel()
-        await asyncio.gather(animation, task, return_exceptions=True)
+        async with asyncio.timeout(2):
+            await asyncio.gather(animation, task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_frame_in_the_same_pass_as_a_cancel_still_stops_the_watcher():
+    """A closing pane cancels the watcher; a frame landing in that same loop pass must not keep it alive (#3209)."""
+    async def read(_width, _height):
+        return [], None
+    watcher = TouchFields('thread-1', read, lambda _message: None)
+    watcher.appearance({'touch': True, 'width': 200, 'height': 100})
+    task = asyncio.create_task(watcher.run())
+    await asyncio.sleep(0.05)  # Inside the settle wait.
+    watcher.frame('frame data is not parsed')
+    task.cancel()
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.gather(task, return_exceptions=True)
+    finally:
+        stopped = task.done()
+        task.cancel()
+    assert stopped and task.cancelled()
 
 
 @pytest.mark.asyncio
