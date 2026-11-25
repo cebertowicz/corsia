@@ -41,11 +41,11 @@ it('heads a worker reading with its provenance in place of the reading label', (
 	let previous = -1;
 	for (const part of parts) { const index = text.indexOf(part); expect(index).toBeGreaterThan(previous); previous = index; }
 });
-it('shows no reading block for an open worker task with no reading', () => {
+it('names who to tell when an open worker task has no reading', () => {
 	const text = render({ intent: null, intent_parent_title: 'Parent task', intent_owner_name: 'New Chat', acceptance_criteria: 'Child done' });
-	expect(text).not.toContain('No reading recorded.');
-	expect(text).not.toContain('From New Chat');
-	expect(text).toContain('Done when: Child done');
+	const parts = ['From New Chat · Parent task', 'No reading recorded.', 'To change it, tell New Chat.', 'Done when: Child done'];
+	let previous = -1;
+	for (const part of parts) { const index = text.indexOf(part); expect(index).toBeGreaterThan(previous); previous = index; }
 });
 it('shows only the done test for a settled task with no reading', () => {
 	const text = render({ state: 'closed', intent: null, acceptance_criteria: 'Finished result' });

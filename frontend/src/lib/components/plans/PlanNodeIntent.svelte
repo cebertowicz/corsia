@@ -6,7 +6,7 @@
 </script>
 
 <div class="intent">
-	{#if node.intent || (!isFinished(node) && !node.intent_parent_title)}
+	{#if node.intent || !isFinished(node)}
 		<div class="head">
 			<span class="prefix">{node.intent_parent_title ? `From ${node.intent_owner_name} · ${node.intent_parent_title}` : node.intent_is_person_comment ? 'Reading (your comment, as given):' : 'Reading:'}</span>
 		</div>
