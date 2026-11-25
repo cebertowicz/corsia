@@ -68,6 +68,7 @@ async function inTranscript(page: Page, selector: string) {
 
 test.describe('first send follows the live first-run opening', () => {
 	test.use({ seedPerTest: true });
+	test.afterEach(async ({ request }) => { await setFocusMode(request, true); });
 	test('sent message and reply come into view', async ({ page, request }, info) => {
 		test.setTimeout(120_000);
 		const size = info.project.name === 'chromium-mobile' ? { width: 393, height: 852 } : { width: 1440, height: 900 };
