@@ -116,6 +116,8 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
         record=(owner.socket_dir, runtime.record.session))
     runtime.chrome.release_stream()
     if runtime.record.profile:
+        from host_access.browser_own_address import clear_serving_storage
+        await clear_serving_storage(runtime.chrome.endpoint)
         await apply_kept_signins(runtime)
     runtime.attempt_started_at = time.time()
     runtime.attempt = browser_cli.CommandResult(-1, "", "", completion="unknown")

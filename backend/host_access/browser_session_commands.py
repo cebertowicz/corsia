@@ -140,9 +140,10 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     """Guard agent commands; a connected pane's own commands pass, so the person can leave a password page."""
     _validate(thread_id, args, timeout, show_window, pane)
     from host_access import browser_navigation
-    args = browser_navigation.normalize_command(args)
+    # Address checks can scan every process on the machine (browser_own_address), so they run off the loop.
+    args = await asyncio.to_thread(browser_navigation.normalize_command, args)
     if navigation_url is not None:
-        normalized_url = browser_navigation.normalize_url(navigation_url)
+        normalized_url = await asyncio.to_thread(browser_navigation.normalize_url, navigation_url)
         if tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'"):
             args = ("eval", f"location.href = {json.dumps(normalized_url)}; 'navigating'")
         navigation_url = normalized_url

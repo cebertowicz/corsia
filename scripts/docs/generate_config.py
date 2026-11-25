@@ -118,6 +118,8 @@ INTERNAL = {
 NOT_SETTINGS = {
     "CORSIA_ADMISSION_NESTED", "CORSIA_ADMISSION_TIMEOUT",
     "CORSIA_REDACTED_VALUE", "CORSIA_TOOL_RESULT_PREVIEW",
+    # Read from another process (a dev frontend) to find its backend port.
+    "CORSIA_BACKEND_URL",
 }
 
 STANDARD = {"PATH", "HOME", "SHELL", "TZ", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",

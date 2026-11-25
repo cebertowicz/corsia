@@ -18,8 +18,8 @@ test('headless browser is revealed by a person step', async ({ page, request }, 
 			{ content: 'Headless ready.', finish_reason: 'stop', match_thread: thread },
 		]);
 		await sendChatMessage(page, 'Open the fixture.');
-		await expect(page.getByRole('button', { name: /Expand Worked/ })).toBeVisible({ timeout: 30_000 });
-		await page.getByRole('button', { name: /Expand Worked/ }).click();
+		await expect(page.getByRole('button', { name: /^Expand Worked ·/ })).toBeVisible({ timeout: 30_000 });
+		await page.getByRole('button', { name: /^Expand Worked ·/ }).click();
 		await expect(page.getByText('Headless ready.')).toBeVisible();
 		await expect(page.locator('canvas[aria-label="Shared browser"]')).toHaveCount(0);
 		await saveEvidenceScreenshot(page, info, 'headless-no-pane');
@@ -58,7 +58,7 @@ test('browser_open shares a running headless browser', async ({ page, request },
 			{ content: 'Headless ready.', finish_reason: 'stop', match_thread: thread },
 		]);
 		await sendChatMessage(page, 'Open the fixture.');
-		await expect(page.getByRole('button', { name: /Expand Worked/ })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole('button', { name: /^Expand Worked ·/ })).toBeVisible({ timeout: 30_000 });
 		await expect(page.locator('canvas[aria-label="Shared browser"]')).toHaveCount(0);
 		await seedMockResponses(request, [
 			{ tool_calls: [{ id: 'shared-open', name: 'browser_open', arguments: JSON.stringify({ url, show_window: true }) }], finish_reason: 'tool_calls', match_thread: thread },
