@@ -57,7 +57,10 @@ def test_done_clears_newer_tagged_top_level_comment(isolated_db, monkeypatch):
         db.commit()
         client = _client(monkeypatch)
         [row] = client.get('/api/attention/queue?view=activity').json()['notifications']['items']
-        assert row['detail']['unread'] == 2
+        # The count is the reply to the person's comment alone; the tagged top-level comment is unread
+        # in the document but not a reply. The read mark still runs through it (#3358): the newest
+        # unread item is never older than the newest counted reply, so Done clears every counted reply.
+        assert row['detail']['unread'] == 1
         assert row['detail']['latest_reply_id'] == 'tagged'
         response = client.post('/api/attention/notifications/read', json={'documents': [
             {'artifact_id': doc, 'through_reply_id': row['detail']['latest_reply_id']},
@@ -66,6 +69,23 @@ def test_done_clears_newer_tagged_top_level_comment(isolated_db, monkeypatch):
         assert client.get('/api/attention/queue?view=activity').json()['notifications']['count'] == 0
         from doceditor.feedback_state import unread_item_ids
         assert doc not in unread_item_ids(db, 'owner-token', [doc])
+    finally:
+        db.close()
+
+
+def test_row_counts_only_replies_to_the_persons_own_comments(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        # Unread items that are not answers to the person's comments: a top-level agent comment, and
+        # an agent reply in a thread the person never entered (tagged, so it still reaches them).
+        agent_root, _ = add_comment(db, doc, author_id='owner')
+        db.execute("INSERT INTO doc_comments(id,artifact_id,parent_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('there',?,?,'agent','agent','owner','also','owner-token','9998','9998')", (doc, agent_root['id']))
+        db.commit()
+        items = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']['items']
+        [row] = items
+        assert row['detail']['unread'] == 1  # the one qualifying reply; neither unrelated item rides the number
     finally:
         db.close()
 

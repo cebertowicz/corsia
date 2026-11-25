@@ -90,16 +90,17 @@ def test_one_row_per_document_with_the_newest_reply():
     assert row['detail']['threads'] == [{'root_id': 'second', 'reply_id': 'd1-5'}, {'root_id': 'rootd1', 'reply_id': 'd14'}]
 
 
-def test_count_is_the_panes_unread_set_and_a_document_without_a_reply_has_no_row():
+def test_count_is_the_replies_to_the_person_and_a_document_without_a_reply_has_no_row():
     db = _doc_db()
     _doc(db, 'd1', 'one')
-    # An agent's top-level comment directed at the person is unread too, and counted on the row.
+    # An agent's top-level comment directed at the person is unread in the document, but it is not a
+    # reply to the person's comment: the row counts the one reply only (the approved count).
     db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('top','d1','agent','agent','one','look','u1','3','3')")
     _doc(db, 'd2', 'one', replies=())
     db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('top2','d2','agent','agent','one','look','u1','3','3')")
     from doceditor.feedback_state import unread_item_ids
-    assert unread_item_ids(db, 'u1', ['d1', 'd2']) == {'d1', 'd2'}
-    assert [(r['detail']['artifact_id'], r['detail']['unread']) for r in document_rows(db, 'u1')] == [('d1', 2)]
+    assert unread_item_ids(db, 'u1', ['d1', 'd2']) == {'d1', 'd2'}  # the document surface still counts every unread item
+    assert [(r['detail']['artifact_id'], r['detail']['unread']) for r in document_rows(db, 'u1')] == [('d1', 1)]
 
 
 def test_released_owner_has_no_reply_row():
@@ -127,3 +128,41 @@ def test_long_document_title_is_clipped_and_untitled_agent_reads_an_agent():
     [row] = document_rows(db, 'u1')
     assert row['title'].startswith('word') and len(row['title']) <= 160
     assert row['detail']['agents'] == ['An agent']
+
+
+def _file_doc(db, tmp_path, *, title: str, file_name: str, body: str) -> None:
+    """One registered document, its registry title and path as a plain file registration stores them."""
+    document = tmp_path / file_name
+    document.write_text(body)
+    db.execute("INSERT INTO artifact_identities(id,integration,type,external_id,title,path,created_at,updated_at) VALUES ('d1','local','document',?,?,?,'0','0')", (file_name, title, str(document)))
+    db.execute("INSERT INTO artifact_registrations(id,artifact_id,parent_thread_id,created_at,updated_at) VALUES ('rd1','d1','one','0','0')")
+    db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,body,created_at,updated_at) VALUES ('rootd1','d1','person','user','question','1','1')")
+    db.execute("INSERT INTO doc_comments(id,artifact_id,parent_id,author,author_kind,author_thread_id,body,created_at,updated_at) VALUES ('d12','d1','rootd1','agent','agent','one','answer','2','2')")
+
+
+def test_file_named_row_uses_the_documents_first_heading(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='# Onboarding: who owns which file\n\nWho owns what.\n')
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Onboarding: who owns which file'
+
+
+def test_a_registry_title_that_is_not_the_file_name_beats_the_heading(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding guide', file_name='onboarding-notes.md',
+              body='# Written title\n\nText.\n')
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Onboarding guide'
+
+
+def test_the_file_name_is_kept_when_the_document_has_no_title(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='Just text, no heading.\n')
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Onboarding notes.md'
+    # A file that went away keeps its registry name too; nothing is invented.
+    db.execute("UPDATE artifact_identities SET title='Gone.md', path=? WHERE id='d1'", (str(tmp_path / 'Gone.md'),))
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Gone.md'
