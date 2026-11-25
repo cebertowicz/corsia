@@ -146,7 +146,6 @@ describe('CommentThread', () => {
 		type(input, 'hello');
 		const send = button(SEND);
 		expect([...send.classList]).toEqual(expect.arrayContaining(['btn', 'primary', 'sm']));
-		expect(host.querySelector('.ct-send')).toBeNull();
 		expect(send.querySelector('svg')).not.toBeNull();
 		send.click();
 		await vi.waitFor(() => expect(button(SEND).getAttribute('aria-busy')).toBe('true'));

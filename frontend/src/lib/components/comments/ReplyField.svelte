@@ -102,6 +102,8 @@
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; scroll-margin-block-end: var(--space-1); }
 	/* Holds the line's own top gap inside the box that is measured. */
 	.ct-goes { display: flow-root; }
-	/* Only where Send sits: at the field's foot, not squeezed. The button is the shared primitive, with no style of its own here. */
-	.ct-send-slot { flex-shrink: 0; align-self: flex-end; display: flex; }
+	/* Only where Send sits: at the field's foot, not squeezed. The button is the shared primitive, with no style of its own here.
+	   The slot is as wide as Send with its arrow (14px icon, its side padding and 1px border each side), so the field beside it
+	   keeps its width when the arrow gives way to the narrower spinner while a reply posts. */
+	.ct-send-slot { flex-shrink: 0; align-self: flex-end; display: flex; justify-content: center; min-width: calc(14px + 2 * var(--button-pad-x-sm) + 2px); }
 </style>
