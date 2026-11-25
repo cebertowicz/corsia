@@ -19,4 +19,5 @@ backend/tests/test_repo_branch_pinning.py
 backend/tests/test_script_sandbox_real.py
 backend/tests/test_service_scripts.py
 backend/tests/test_shell_execution_envelopes.py
+backend/tests/test_test_instance_logs_sandbox_macos.py
 backend/tests/test_tool_work_off_event_loop.py
