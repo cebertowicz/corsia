@@ -83,7 +83,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<span class="status" class:stale>{stale ? 'Not current' : duration(lease.requested_duration_seconds)}</span>
+		<span class="status" class:stale>{stale ? 'Couldn’t check' : duration(lease.requested_duration_seconds)}</span>
 	</header>
 
 	<div class="decision-body">
@@ -376,6 +376,8 @@
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
 		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
+		/* A segmented choice in a request sheet (the fill's duration) is finger-sized on a phone. */
+		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
 		.policy-exceptions { padding: var(--space-2); }

@@ -46,7 +46,7 @@
 	import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
 	import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
 	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
-	import { decisionBlocked, owner, pendingLabel, text } from '$lib/hostAccess/leaseFormat';
+	import { decisionBlocked, owner, pendingLabel, staleBlocks, text } from '$lib/hostAccess/leaseFormat';
 	import {
 		focusRestoreIntentForDecision,
 		restoreComposerFocusAfterLeaseRemoval,
@@ -244,7 +244,7 @@
 		decisionControl: Element | null = null, durationSeconds?: number,
 	): Promise<void> {
 		const currentToken = get(token);
-		if (!currentToken || decisionBlocked(lease, stale, decidingLeaseId)) return;
+		if (!currentToken || decisionBlocked(lease, staleBlocks(stale, decision), decidingLeaseId)) return;
 		const decisionThreadId = lease.root_thread_id;
 		const decisionAttempt = claimDecision(lease.id);
 		if (!decisionAttempt) return;
@@ -362,7 +362,7 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="Not current" size="sm" />
+						<StatePill state="error" label="Couldn’t check" size="sm" />
 						<span>{staleNotice}</span>
 						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
 					</div>
@@ -412,7 +412,7 @@
 						lease={currentPending}
 						{stale}
 						deciding={decidingLeaseId === currentPending.id}
-						rejectDisabled={decisionBlocked(currentPending, stale, decidingLeaseId)}
+						rejectDisabled={decisionBlocked(currentPending, staleBlocks(stale, 'reject'), decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
 						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
 						onReject={(event) => { void decide(
@@ -502,7 +502,6 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
-			--host-access-owner-wrap: normal;
 			--host-access-eyebrow-display: none;
 		}
 	}

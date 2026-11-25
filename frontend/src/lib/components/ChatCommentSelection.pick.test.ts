@@ -240,7 +240,9 @@ it('returns focus to the pressed highlight when a thread opened from the list cl
 	await tick();
 	flushSync();
 	expect(reply.isConnected).toBe(false);
-	document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click();
+	const close = document.querySelector<HTMLButtonElement>('[role="dialog"] .drawer-done')!;
+	expect(close.textContent).toBe('Close');
+	close.click();
 	await vi.waitFor(() => expect(document.activeElement).toBe(highlight));
 });
 

@@ -11,7 +11,7 @@ from host_access import browser_cdp_frames, browser_pane_state, browser_step_lif
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
-from infra import state
+from infra import saved_login_offers, state
 
 log = logging.getLogger(__name__)
 
@@ -128,9 +128,7 @@ def mark_saved_fill(thread_id: str, session: str | None, document: str | None) -
 
 
 def same_session(marked: str | None, session: str | None) -> bool:
-    # A mark or a command with no session id can't be told apart from any session, so it counts as the same one.
-    return marked is None or session is None or marked == session
-
+    return marked is None or session is None or marked == session  # a missing id can't be told from any session
 
 def saved_fill_session(thread_id: str, session: str | None) -> bool:
     """Whether a saved login was filled in this session, which then runs only _saved_command shapes until it ends."""
@@ -364,10 +362,11 @@ def person_input(thread_id: str) -> None:
 
 
 def browser_closed(thread_id: str) -> None:
-    """Clear read guards and agent presence; the session hook owns step cleanup."""
+    """Clear read guards, saved-fill scope, agent presence and any save-login offer; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
     _saved_fills.pop(thread_id, None)
+    saved_login_offers.drop_thread(thread_id)
 
 
 async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...], resolve: Resolve | None) -> None:

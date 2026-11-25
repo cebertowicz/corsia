@@ -5,7 +5,7 @@ export type Section = {
 	title: string;
 	meta?: string;
 	empty?: string;
-	kind?: 'projects' | 'plan' | 'artifacts';
+	kind?: 'projects' | 'plan' | 'artifacts' | 'documents';
 	initialOpen?: boolean;
 };
 export type PaneConfig = { label: string; sections: Section[] };
@@ -17,7 +17,7 @@ const WORKSPACE_SECTIONS: Section[] = [
 
 const SCOPE_SECTIONS: Section[] = [
 	{ title: 'Roadmap', empty: 'No roadmap yet' },
-	{ title: 'Documents', empty: 'No documents yet' },
+	{ title: 'Documents', kind: 'documents' },
 ];
 
 const CHAT_SECTIONS: Section[] = [

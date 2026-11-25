@@ -204,7 +204,7 @@ describe('HostAccessLeaseControl', () => {
 	it('approves a saved-login fill for the picked duration, then revokes it from its chip', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -286,7 +286,7 @@ describe('HostAccessLeaseControl', () => {
 		const trigger = chip!.querySelector<HTMLButtonElement>('.active-chip-trigger');
 		// The chip's words are its accessible name, time included: no static label, nothing hidden, no icon.
 		expect(trigger?.hasAttribute('aria-label')).toBe(false);
-		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 5:00');
+		expect(trigger?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 5 min left');
 		expect(trigger?.querySelector('[aria-hidden="true"]')).toBeNull();
 		expect(trigger?.querySelector('svg')).toBeNull();
 		expect(host.textContent).not.toContain('Home Assistant');
@@ -840,14 +840,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
 		expect(approve?.disabled).toBe(true);
 		// The drawer's status is coloured text, not a pill, and its Retry is a text action.
 		const status = dialog.querySelector('.decision-head .status');
-		expect(status?.textContent?.trim()).toBe('Not current');
+		expect(status?.textContent?.trim()).toBe('Couldn’t check');
 		expect(status?.classList.contains('stale')).toBe(true);
 		expect(dialog.querySelector('.pill')).toBeNull();
 		const retry = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
@@ -871,7 +871,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 
 		expect(host.querySelector('.thread-host-access')!.classList).toContain('wide');
 	});
@@ -934,19 +934,19 @@ describe('HostAccessLeaseControl', () => {
 		flushSync();
 		await vi.advanceTimersByTimeAsync(0);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:02');
-		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:02');
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:01');
-		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access 0:01');
+		expect(host.querySelector('.countdown')?.textContent).toBe('1 min left');
+		expect(chipTrigger('Host access')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Host access · 1 min left');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(1000);
 		await tick();
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 		expect(chipTrigger('Host access')).toBeTruthy();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 
@@ -957,7 +957,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(1);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 
 		await vi.advanceTimersByTimeAsync(3_999);
 		await tick();
@@ -990,7 +990,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.advanceTimersByTimeAsync(120_000);
 		await tick();
 		expect(fetchMock).toHaveBeenCalledTimes(7);
-		expect(host.querySelector('.countdown')?.textContent).toBe('0:00');
+		expect(host.querySelector('.countdown')?.textContent).toBe('0 min left');
 	});
 
 	it('does not leak another thread terminal failure into the selected thread', async () => {
@@ -1124,10 +1124,14 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(button('Reject')?.disabled).toBe(false));
 	});
 
-	it('disables Reject, not only Approve, when the selected thread truth becomes stale', async () => {
+	it('keeps Reject enabled when the selected thread truth becomes stale, and sends the last view', async () => {
+		// The server checks the revision and hash it is sent, so a Reject from the last view either ends
+		// that same request or comes back refused as changed; Approve stays disabled.
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(response({ leases: [waitingLease] }))
-			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503));
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingLease, state: 'rejected' }))
+			.mockResolvedValue(response({ leases: [] }));
 		vi.stubGlobal('fetch', fetchMock);
 
 		component = mountControl();
@@ -1135,14 +1139,57 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t check'));
 		const dialog = await openPendingDrawer();
-		const reject = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Reject');
-		expect(reject?.disabled).toBe(true);
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject');
+		expect(reject?.disabled).toBe(false);
 		reject!.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/lease-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 4, application_hash: 'hash-1' });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeNull());
+	});
+
+	it('keeps a stale saved-login fill rejectable through its own route', async () => {
+		const waitingFill: HostAccessFill = {
+			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
+			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
+		};
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(response({ leases: [waitingFill] }))
+			.mockResolvedValueOnce(response({ detail: 'offline' }, false, 503))
+			.mockResolvedValueOnce(response({ ...waitingFill, state: 'denied' }))
+			.mockResolvedValue(response({ leases: [] }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mountControl();
+		flushSync();
+		const trigger = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLButtonElement>('[aria-label="Review a request to sign in with a saved login"]');
+			expect(found).toBeTruthy();
+			return found!;
+		});
+		emit('host_access_changed', { lease_id: 'fill-1' });
+		await vi.waitFor(() => expect(host.querySelector('.pending-status.stale')).toBeTruthy());
+		trigger.click();
+		flushSync();
 		await tick();
-		expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+		const dialog = host.querySelector('[role="dialog"]')!;
+		const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+		expect(buttons.find((button) => button.textContent?.trim() === 'Approve')?.disabled).toBe(true);
+		const reject = buttons.find((button) => button.textContent?.trim() === 'Reject')!;
+		expect(reject.disabled).toBe(false);
+		reject.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1));
+		const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')!;
+		expect(post[0]).toBe('/api/host-access/leases/fills/fill-1/reject');
+		expect(JSON.parse(String(post[1]?.body))).toEqual({ revision: 1, application_hash: 'fill-hash' });
 	});
 
 	it('disables Reject and no-ops its click when CAS identity is malformed', async () => {

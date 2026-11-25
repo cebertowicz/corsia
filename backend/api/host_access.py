@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, StrictInt
 
@@ -121,16 +123,21 @@ async def _decide_fill(operation_name: str, approval_id: str, body: LeaseMutatio
     from infra import saved_login_fills as fills
 
     operation = {"approve": fills.approve_fill, "reject": fills.deny_fill, "revoke": fills.revoke_fill}[operation_name]
-    try:
+
+    def decide() -> dict:
         fills.get(approval_id, user_id=user["id"])
         if not verify_user_decision_capability(
             capability, {"id": approval_id, "revision": body.revision, "application_hash": body.application_hash},
             user_id=user["id"], operation=operation_name,
         ):
             raise HTTPException(403, "A current interactive user decision is required")
-        row = operation(
+        return operation(
             approval_id, user_id=user["id"], revision=body.revision, application_hash=body.application_hash, **extra,
         )
+
+    try:
+        # A worker thread: the decision records a product event, a blocking write.
+        row = await asyncio.to_thread(decide)
     except fills.FillApprovalNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except fills.FillDurationError as exc:
@@ -180,7 +187,7 @@ async def leases(
     from infra.db_async import run_in_db
     rows.extend(await run_in_db(pending, user["id"], root_thread_id))
     from infra.saved_login_fills import listed
-    rows.extend(listed(user["id"], root_thread_id))
+    rows.extend(await asyncio.to_thread(listed, user["id"], root_thread_id))
     if interactive_ui == "1":
         require_human_user(user)
         rows = [

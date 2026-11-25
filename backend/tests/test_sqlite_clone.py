@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
 import stat
 from pathlib import Path
@@ -10,7 +12,7 @@ import pytest
 
 import infra.sqlite_clone as sqlite_clone
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.sqlite_clone import CloneUnsupported, clone_database
+from infra.sqlite_clone import CloneInconsistent, CloneUnsupported, clone_database
 
 
 @pytest.fixture
@@ -115,7 +117,7 @@ def test_a_clone_reading_the_wrong_version_leaves_nothing_behind(tmp_path):
     _wal_database(source, 7).close()
     target = tmp_path / "live.db.bak"
 
-    with pytest.raises(RuntimeError, match="user_version 7"):
+    with pytest.raises(CloneInconsistent, match="user_version 7"):
         clone_database(source, target, expected_user_version=8)
 
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("live.db.bak")) == []
@@ -144,6 +146,114 @@ def test_without_a_clone_the_migration_still_backs_up_by_copying_pages(tmp_path,
         assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name='migrated'").fetchone()[0] == 0
     finally:
         backup.close()
+
+
+@pytest.mark.parametrize("error_type", [sqlite3.OperationalError, OSError])
+def test_clone_failure_falls_back_to_readable_backup(tmp_path, ladder, monkeypatch, caplog, error_type):
+    import infra.database_migrations as migrations
+
+    def fail_clone(*_args, **_kwargs):
+        raise error_type("clone failed")
+
+    monkeypatch.setattr(migrations, "clone_database", fail_clone)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    _wal_database(source, 3).close()
+    with caplog.at_level(logging.WARNING, logger=migrations.__name__):
+        conn = sqlite3.connect(source)
+        try:
+            result = migrate_to_current(conn, 4)
+        finally:
+            conn.close()
+    assert result.backup_path is not None and result.backup_path.exists()
+    with sqlite3.connect(result.backup_path) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert backup.execute("SELECT count(*) FROM t").fetchone()[0] == 500
+    assert any(record.levelno == logging.WARNING and record.exc_info
+               and isinstance(record.exc_info[1], error_type) for record in caplog.records)
+
+
+def test_clone_keyboard_interrupt_propagates(tmp_path, ladder, monkeypatch):
+    import infra.database_migrations as migrations
+
+    def interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(migrations, "clone_database", interrupt)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    _wal_database(source, 3).close()
+    conn = sqlite3.connect(source)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with pytest.raises(KeyboardInterrupt):
+            migrations._write_backup(conn, 3)
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def test_an_inconsistent_clone_stops_the_migration(tmp_path, ladder, monkeypatch):
+    """A clone that misses the locked state breaks the snapshot reasoning; it must not pass as a warning."""
+    import infra.database_migrations as migrations
+
+    real_clone = sqlite_clone.clone_database
+
+    def wrong_version(source, target, *, expected_user_version):
+        return real_clone(source, target, expected_user_version=expected_user_version + 1)
+
+    monkeypatch.setattr(sqlite_clone, "_clone_file", shutil.copyfile)
+    monkeypatch.setattr(migrations, "clone_database", wrong_version)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 3)
+    conn = sqlite3.connect(source)
+    try:
+        with pytest.raises(migrations.MigrationError, match="rolled back") as stopped:
+            migrate_to_current(conn, 4)
+        assert isinstance(stopped.value.__cause__, CloneInconsistent)
+    finally:
+        conn.close()
+        writer.close()
+    assert [p.name for p in tmp_path.iterdir() if ".pre-migration-" in p.name] == []
+    with sqlite3.connect(source) as live:
+        assert live.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_fold_failure_cleans_clone_before_page_copy(tmp_path, ladder, monkeypatch, caplog):
+    import infra.database_migrations as migrations
+
+    readers: list[sqlite3.Connection] = []
+
+    def copy_then_hold_a_reader(source, target):
+        # A reader open on the clone when it is folded makes wal_checkpoint(TRUNCATE) report busy.
+        shutil.copyfile(source, target)
+        if str(target).endswith("-wal"):
+            reader = sqlite3.connect(str(target)[: -len("-wal")], isolation_level=None)
+            reader.execute("BEGIN")
+            reader.execute("SELECT count(*) FROM t").fetchone()
+            readers.append(reader)
+
+    monkeypatch.setattr(sqlite_clone, "_clone_file", copy_then_hold_a_reader)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 3)
+    conn = sqlite3.connect(source)
+    try:
+        with caplog.at_level(logging.WARNING, logger=migrations.__name__):
+            result = migrate_to_current(conn, 4)
+    finally:
+        for open_conn in (*readers, conn, writer):
+            open_conn.close()
+    assert readers, "the fold must have run against a cloned WAL"
+    assert any(record.exc_info and "could not fold" in str(record.exc_info[1])
+               for record in caplog.records)
+    assert result.backup_path is not None and result.backup_path.exists()
+    assert not Path(f"{result.backup_path}-wal").exists()
+    assert not Path(f"{result.backup_path}-shm").exists()
+    with sqlite3.connect(result.backup_path) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert backup.execute("SELECT count(*) FROM t").fetchone()[0] == 500
 
 
 def test_a_clone_backup_skips_the_copy_room_check_and_its_pruning(tmp_path, ladder, monkeypatch):

@@ -17,9 +17,10 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
+	import DocViewerDone from './DocViewerDone.svelte';
 
 	let {
-		presence,
+		presence, touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
 		reviewBar,
 		ask = null,
 		commentsOpen = false,
@@ -111,8 +112,8 @@
 	let panelEl = $state<HTMLElement | null>(null);
 	let panelOpen = $state(false);
 	let panelMax = $state<number | null>(null);
-	/** The open panel would reach down over the ask's card, so the card steps aside until it closes; Details then carries the ask. */
-	let cardCovered = $state(false);
+	/** The open panel would reach down over the ask (its card on a phone, its row in the header), so the ask steps aside until it closes; Details then carries it. */
+	let askCovered = $state(false);
 
 	$effect(() => {
 		artifactId;
@@ -125,7 +126,7 @@
 	// The panel takes the height left below its top, so it reaches its last row without scrolling wherever that fits.
 	$effect(() => {
 		const panel = panelEl;
-		if (!panelOpen || !panel) { cardCovered = false; return; }
+		if (!panelOpen || !panel) { askCovered = false; return; }
 		const fit = () => {
 			// The document can sit beside the bar entry; keep its panel within the window in either position.
 			panel.style.removeProperty('--panel-shift');
@@ -134,8 +135,8 @@
 			panel.style.setProperty('--panel-shift', `${shift}px`);
 			const top = rect.top;
 			panelMax = Math.floor(window.innerHeight - top - 8);
-			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card]')?.getBoundingClientRect();
-			cardCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
+			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card], .review-bar.ask')?.getBoundingClientRect();
+			askCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
 		};
 		fit();
 		window.addEventListener('resize', fit);
@@ -222,7 +223,8 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
-	{#if presence}{@render presence()}{/if}
+	{#if touchReading && editing}<DocViewerDone {onDone} />{/if}
+	<span class="bar-presence" hidden={touchReading && editing} style:display={touchReading && editing ? 'none' : 'contents'}>{#if presence}{@render presence()}{/if}</span>
 	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
 		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
 		<!-- The strip's own room decides whether the words show; the ↻ mark is the phone header's compact form. -->
@@ -245,7 +247,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>
@@ -259,12 +261,13 @@
 {/snippet}
 
 {#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
-<header class="document-header" class:card-covered={cardCovered} bind:this={headerEl}>
+<header class="document-header" class:ask-covered={askCovered} bind:this={headerEl}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
-			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
+			{#if touchReading}<button type="button" class="p-row p-edit" style:min-height="var(--touch-target)" disabled={!canEdit || editing} onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { panelOpen = false; onEnterEdit?.(); }}>Edit</button>{/if}
+			{#if ask && (!ask.onCard || askCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
 				{#each ask.others as other (other.name)}<span class="p-full"><strong>{other.name}</strong>: {other.reason}</span>{/each}

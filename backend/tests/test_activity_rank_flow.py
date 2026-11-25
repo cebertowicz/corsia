@@ -178,6 +178,22 @@ def test_nudge_enqueues_real_system_input(db):
     assert row and 'attention_rank' in row['content']
 
 
+def test_the_runners_own_sweep_with_no_connection_wakes_the_ranker(db, monkeypatch):
+    """The continuation loop sweeps with db=None; reads then take the pooled connection."""
+    import infra.database
+    from automation.continuation import runner
+    from automation.continuation.sources import activity_ranking
+    seed(db)
+    pooled = lambda: _DbProxy(db)  # noqa: E731
+    for module in (infra.database, runner, activity_ranking):
+        monkeypatch.setattr(module, 'get_db', pooled)
+    errors = []
+    monkeypatch.setattr(runner.logger, 'exception', lambda *a, **k: errors.append(a))
+    woken = runner._prepare('2026-01-01T00:00:00+00:00', [activity_ranking.ActivityRankingSource()], None)
+    assert errors == [] and woken == ['root']
+    assert _unread_wakes(db) == 1
+
+
 def test_nudge_failed_enqueue_does_not_throttle(db, monkeypatch):
     from automation.continuation.sources import activity_ranking
     seed(db)
@@ -193,7 +209,7 @@ def test_one_failed_scope_does_not_skip_the_next(db, monkeypatch):
     monkeypatch.setattr(activity_ranking, '_scopes', lambda db: [
         ('user-1', 'bad', 'first'), ('user-1', 'good', 'second'),
     ])
-    def enqueue(db, user_id, project_id, thread_id, now):
+    def enqueue(read_db, db, user_id, project_id, thread_id, now):
         if project_id == 'bad':
             raise RuntimeError('scope failed')
         return True
@@ -259,3 +275,22 @@ def test_an_old_task_that_falls_due_after_the_last_wake_wakes_the_ranker(db):
     assert source.prepare('2026-01-01T00:02:00+00:00', db=db) == ['root']
     seen = json.loads(db.execute('SELECT seen_keys FROM activity_rank_nudges').fetchone()[0])
     assert f'task:{waiting.id}' in seen
+
+
+def test_an_item_that_leaves_and_comes_back_unranked_after_a_set_wakes_the_ranker(db, monkeypatch):
+    from automation.continuation.sources import activity_ranking
+    from tools import attention_rank
+    key = seed(db)
+    monkeypatch.setattr(attention_rank, 'get_db', lambda: _DbProxy(db))
+    node_id = key.split(':', 1)[1]
+    source = activity_ranking.ActivityRankingSource()
+    assert source.prepare('2026-01-01T00:00:00+00:00', db=db) == ['root']
+    _read_wakes(db)
+    # The item goes into Later; the ranker's set reads the queue without it, dropping its rank.
+    db.execute('UPDATE plan_nodes SET later=1 WHERE id=?', (node_id,))
+    db.commit()
+    assert 'Ranked 0' in attention_rank._run('root', {'user_id':'user-1', 'project_id':'project-1'}, 'set', [])
+    db.execute('UPDATE plan_nodes SET later=0 WHERE id=?', (node_id,))
+    db.commit()
+    # Back in the queue unranked, it is new again.
+    assert source.prepare('2026-01-01T00:01:00+00:00', db=db) == ['root']

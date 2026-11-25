@@ -47,16 +47,18 @@ def _set(db, thread_id: str, user_id: str, project_id: str | None, scope: str,
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         return 'Error: set requires items, a list of {key, reason}.'
     try:
-        validate_order(items, {row['key'] for row in rows})
+        current_keys = {row['key'] for row in rows}
+        validate_order(items, current_keys)
     except ValueError as exc:
         return f'Error: {exc}'
     # The queue is composed outside the lock; the write re-checks only the ranker. A key that
-    # leaves the queue meanwhile is ignored on read and dropped on the next set.
+    # leaves the queue meanwhile is ignored on read and dropped on the next set, which also
+    # forgets it was seen, so its return wakes the ranker.
     with write_transaction(db, scope='attention_rank') as tx:
         locked_scope, ranker = ranker_for(tx, user_id, project_id)
         if locked_scope != scope or not ranker or ranker['thread_id'] != thread_id:
             return _refusal(ranker)
-        replace_ranks(tx, user_id, scope, thread_id, items, datetime.now(timezone.utc).isoformat())
+        replace_ranks(tx, user_id, scope, thread_id, items, datetime.now(timezone.utc).isoformat(), current_keys)
     remaining = len(rows) - len(items)
     logger.info('activity rank set scope={} count={} ranker={}', scope, len(items), thread_id)
     emit_product_event('activity_rank', 'set', thread_id=thread_id, user_id=user_id,
