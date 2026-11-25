@@ -399,9 +399,18 @@ fn journal_path(plan: &Plan) -> PathBuf {
 
 /// Preserve rollback detail alongside the restored install that can act on it.
 fn write_failure_trail(plan: &Plan, failure: &Failure) {
-    let path = plan.source.state.join("backend.log");
     let result = (|| -> Result<(), std::io::Error> {
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        let home = crate::app_paths::home_for_app_dir(&plan.app_dir).map_err(std::io::Error::other)?;
+        let path = crate::app_paths::log_path(home, &plan.source.state, "backend.log").map_err(std::io::Error::other)?;
+        fs::create_dir_all(path.parent().ok_or_else(|| std::io::Error::other("log path has no parent"))?)?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut file = options.open(path)?;
         writeln!(file, "adoption rollback: {}: {}", failure.step, failure.message)?;
         file.sync_all()
     })();
@@ -1859,9 +1868,26 @@ mod tests {
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
         assert_eq!(read_journal(&plan).unwrap().unwrap().step, Step::Reverted);
-        let log = fs::read_to_string(plan.source.state.join("backend.log")).unwrap();
+        let log_path = crate::app_paths::log_path(crate::app_paths::home_for_app_dir(&plan.app_dir).unwrap(), &plan.source.state, "backend.log").unwrap();
+        let log = fs::read_to_string(log_path).unwrap();
         assert!(log.contains("start_new"));
         assert!(log.contains("start_old"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn rollback_does_not_write_through_a_log_symlink() {
+        use std::os::unix::fs::symlink;
+        let (home, plan) = plan(false);
+        let log = crate::app_paths::log_path(home.path(), &plan.source.state, "backend.log").unwrap();
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        let target = home.path().join("target");
+        fs::write(&target, "unchanged").unwrap();
+        symlink(&target, &log).unwrap();
+        let mut fake = fake_for(&plan, Some("start_new"));
+        fake.also_fail = Some("start_old");
+        let _ = adopt_quietly(&plan, &mut fake);
+        assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
     }
 
     #[test]

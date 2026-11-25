@@ -4,6 +4,7 @@ import { apiFetch } from './request';
 export interface SuggestionDecision {
 	comment?: ServerComment;
 	accepted?: string[];
+	decision_event_id?: string;
 	skipped?: { id: string; reason: string }[];
 	text?: string;
 	revision?: string;
@@ -38,6 +39,18 @@ export async function decideSuggestion(
 export async function acceptAllSuggestions(artifactId: string): Promise<SuggestionDecision> {
 	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all`, { sessionInAddress: true, method: 'POST' });
 	return decided(response, 'Couldn’t accept the suggestions. Try again.');
+}
+
+export async function transitionSuggestionHistory(
+	artifactId: string, eventId: string, ids: string[], direction: 'undo' | 'redo', expectedSha256: string, text: string
+): Promise<SuggestionDecision> {
+	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/history`, {
+		sessionInAddress: true,
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ event_id: eventId, ids, direction, expected_sha256: expectedSha256, text }),
+	});
+	return decided(response, 'Couldn’t change the suggestion. Reload and try again.');
 }
 
 async function decided(response: Response, fallback: string): Promise<SuggestionDecision> {

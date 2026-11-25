@@ -255,7 +255,7 @@
 	}
 	const decisions = createSuggestionDecisions({
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
-		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text) => onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
+		onSuggestionBusy: (...args) => onSuggestionBusy?.(...args), onSuggestionAccepted: (text, history) => history ? onSuggestionAccepted?.(text, history) : onSuggestionAccepted?.(text), onDocumentChanged: () => onDocumentChanged?.(),
 	});
 	/** On the phone sheet the Accept suggestions row sits inside the scroller (pinned to its top at rest); every other list form keeps it above the scroller. It is in one place for the life of the sheet, so the keyboard never rebuilds it. */
 	const acceptInScroller = $derived(!margin && sheet.state?.kind === 'list' && sheetDrawer);

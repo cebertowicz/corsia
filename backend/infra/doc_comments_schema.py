@@ -2,6 +2,7 @@
 
 from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.doc_review_schema import DOC_REVIEW_SCHEMA_SQL
+from infra.suggestion_history_schema import SUGGESTION_HISTORY_SCHEMA_SQL
 from infra.migration_111_to_112_image_regions import REGION_NUMBER_INDEX_SQL
 
 #: User comments by time: the corrections scan reads its window's pending comments
@@ -147,4 +148,5 @@ COMMENT_IDENTITY_MOVES_SQL = """
     );
 """
 DOCUMENT_SCHEMA_SQL = (DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL
-                       + COMMENT_RECIPIENT_SCHEMA_SQL + WRITER_LINE_SCHEMA_SQL + COMMENT_IDENTITY_MOVES_SQL)
+                       + COMMENT_RECIPIENT_SCHEMA_SQL + WRITER_LINE_SCHEMA_SQL + COMMENT_IDENTITY_MOVES_SQL
+                       + SUGGESTION_HISTORY_SCHEMA_SQL)

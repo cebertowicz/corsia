@@ -58,7 +58,7 @@ export interface DocCommentSurfaceProps {
 	readOnly?: boolean;
 	/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 	onSuggestionBusy?: (busy: boolean, id?: string) => void;
-	onSuggestionAccepted?: (text: string) => void;
+	onSuggestionAccepted?: (text: string, history?: { eventId: string; ids: string[] }) => void;
 	/** The server applied an accepted edit but could not record the decision: read the shown document again. */
 	onDocumentChanged?: () => void;
 	load?: CommentLoad;

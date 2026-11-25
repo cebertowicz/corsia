@@ -11,7 +11,7 @@ def initialize_startup(logger) -> None:
     from app_startup_workspace import initialize_workspace
     from connections.account_projection import repair_moved_projections
     from core.project_path_conversion import convert_legacy_project_paths
-    from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
+    from infra.config import LOGS_DIR, RUNTIME_DIR, STATE_LOGS_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
     from infra import setup_progress
     from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
     from infra.held_replies import recover_interrupted as recover_interrupted_held_replies
@@ -23,7 +23,7 @@ def initialize_startup(logger) -> None:
 
     note_ignored_environment()
     prepare_startup_prerequisites()
-    for directory in (UPLOADS_DIR, LOGS_DIR, RUNTIME_DIR):
+    for directory in (UPLOADS_DIR, LOGS_DIR, STATE_LOGS_DIR, RUNTIME_DIR):
         directory.mkdir(parents=True, exist_ok=True)
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
