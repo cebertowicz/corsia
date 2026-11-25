@@ -147,9 +147,12 @@ def _arm_empty_tops(connection, plan_ids: list[str]) -> None:
 
 
 #: An open task of the plan that went below the cut after ``?``: born there
-#: (no crossing event) or moved there by its latest crossing.
+#: (no crossing event) or moved there by its latest crossing. An open task is never
+#: folded, so the listed-open filter drops none and reads only the plan's open rows
+#: (``idx_plan_nodes_open``), whatever its settled history.
 _NEW_BELOW_CUT_SQL = f"""SELECT 1 FROM plan_nodes AS n
-    WHERE n.plan_id=? AND n.kind='task' AND n.later=1 AND {node_states.open_sql('n')}
+    WHERE n.plan_id=? AND {node_states.listed_open_sql('n')}
+      AND n.kind='task' AND n.later=1 AND {node_states.open_sql('n')}
       AND (n.created_at>? OR EXISTS (
           SELECT 1 FROM plan_node_events AS e
           WHERE e.node_id=n.id AND e.event=? AND e.created_at>?
