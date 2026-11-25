@@ -16,7 +16,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from host_access import browser_login_capture as capture, browser_pane, browser_session_commands, browser_steps
-from host_access import browser_login_capture_writes as capture_writes, browser_step_lifecycle as lifecycle
+from host_access import browser_page_watch as page_watch, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_cli import CommandResult
 from host_access.browser_control import PageAccess
@@ -170,9 +170,9 @@ async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> Non
 
 
 def use_page(monkeypatch, page: FakePage) -> FakePage:
-    monkeypatch.setattr(capture, "_quiet_cdp", page.client)
-    monkeypatch.setattr(capture_writes, "quiet_cdp", page.client)
-    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
+    monkeypatch.setattr(capture, "CdpClient", page.client)
+    monkeypatch.setattr(page_watch, "CdpClient", page.client)
+    monkeypatch.setattr(page_watch, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
     return page
 
 
@@ -607,7 +607,7 @@ async def test_rule7_session_end_clears_marks_and_an_unreadable_page_marks_every
     await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
     holder.calls.clear()
-    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    monkeypatch.setattr(page_watch, "CdpClient", no_page)
     await agent_typed()
     page.loader = "doc-9"
     await settled_submit(THREAD, KEY, "ws://page")
@@ -729,7 +729,7 @@ async def test_rule7_a_batch_that_opens_a_popup_then_types_marks_every_document(
 async def test_rule7_an_unreadable_page_list_marks_every_document(monkeypatch, holder):
     page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
     agent, finish = _agent_path(monkeypatch, page)
-    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: no_page(_endpoint))
+    monkeypatch.setattr(page_watch, "_page_ids", lambda _endpoint, _timeout: no_page(_endpoint))
     assert await agent(("fill", "@e1", "x")) == "ok"
     assert capture._ANY_DOCUMENT in finish[0]
 
@@ -806,16 +806,16 @@ async def test_rule7_a_watch_that_breaks_mid_command_marks_every_document(monkey
 @pytest.mark.parametrize("failure", ["unreadable", "hangs", "strange"])
 async def test_rule7_a_watch_that_fails_to_start_or_settle_marks_every_document_and_never_raises(monkeypatch, failure):
     page = use_page(monkeypatch, FakePage())
-    monkeypatch.setattr(capture, "WATCH_TIMEOUT", 0.02)
+    monkeypatch.setattr(page_watch, "WATCH_TIMEOUT", 0.02)
 
     async def hang_at_settle():
         page.hang = True
 
     agent, finish = _agent_path(monkeypatch, page, run=hang_at_settle if failure == "hangs" else None)
     if failure == "unreadable":
-        monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+        monkeypatch.setattr(page_watch, "CdpClient", no_page)
     elif failure == "strange":
-        monkeypatch.setattr(capture_writes, "quiet_cdp", lambda _endpoint: SimpleNamespace())
+        monkeypatch.setattr(page_watch, "CdpClient", lambda _endpoint: SimpleNamespace())
     assert await agent(("fill", "@e1", "x")) == "ok"
     assert finish and capture._ANY_DOCUMENT in finish[0]
 
@@ -1043,7 +1043,7 @@ async def test_failed_step_drops_prior_offer_when_latest_queued_call_is_skipped(
 @pytest.mark.asyncio
 async def test_any_document_mark_is_never_evicted(monkeypatch):
     page = use_page(monkeypatch, FakePage())
-    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    monkeypatch.setattr(page_watch, "CdpClient", no_page)
     await agent_typed()
     use_page(monkeypatch, page)
     for number in range(100):

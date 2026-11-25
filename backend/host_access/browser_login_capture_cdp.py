@@ -1,8 +1,6 @@
 """CDP helpers for the saved-login capture's isolated page reads."""
 from __future__ import annotations
 
-import logging
-
 from host_access import browser_cdp_frames
 from host_access.browser_cdp import CdpClient, protocol_int
 from host_access.browser_session_state import BrowserSessionError
@@ -34,18 +32,6 @@ READ_ACCOUNT = """(() => {
   const found = active && active.form ? Array.from(active.form.elements).find(named) : undefined;
   return found ? found.value : null;
 })()"""
-
-
-class _Silent(logging.Logger):
-    """Disable websocket frame logs for isolated login reads."""
-
-    def isEnabledFor(self, level: int) -> bool:  # noqa: N802 - logging.Logger's own name
-        return False
-
-
-def quiet_cdp(endpoint: str) -> CdpClient:
-    """Use the shared client without logging sensitive frames."""
-    return CdpClient(endpoint, logger=_Silent("corsia-login-capture"))
 
 
 async def frame_tree(cdp: CdpClient) -> tuple[str, list[tuple[str, str]]]:

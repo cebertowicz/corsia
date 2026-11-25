@@ -73,6 +73,41 @@ def test_each_option_writes_exactly_its_two_lines(db, monkeypatch, workspace, op
     assert user_profile.uses_community_improvements(workspace) is (option_id != "C")
 
 
+@pytest.mark.parametrize("option_id", ["A", "B", "C"])
+def test_card_writes_exact_lines_after_agent_hands_profile_to_person(db, monkeypatch, workspace, option_id):
+    from infra.database import write_transaction
+    from infra.workspace_paths import WorkspaceSelection
+    from registry import models, service
+    from registry.document_supervisor import stored_pick
+    from registry.shared_principals import artifact_owner
+    from tools.artifact_person_handover import handover_to_person
+
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection("test", workspace.resolve(), "Tests"))
+    artifact = service.register_write_strict("child", str(workspace / PROFILE), db=db)
+    db.commit()
+    with write_transaction(db, scope="test_profile_handover") as connection:
+        routing = models.routing_registrations(artifact["integration"], artifact["type"], artifact["external_id"], db=connection)
+        status, _ = handover_to_person(connection, routing, "child", reason="Profile approved", causal_event_id=None, metadata=None)
+    assert status == "ok"
+    assert artifact_owner(artifact["id"], db=db) == "ui"
+    assert stored_pick(models.get_artifact(artifact["id"], db=db)) == "child"
+    from registry.document_ownership import document_write_authority
+    from registry.shared_write_errors import DocumentOwnershipRefused
+    with pytest.raises(DocumentOwnershipRefused, match="Only the person edits it directly"):
+        document_write_authority(workspace / PROFILE, workspace=workspace, thread_id="child", direct_user=False, db=db)
+
+    decision = _raise(db)
+    assert _answer(db, monkeypatch, decision, option_id).status_code == 200
+    assert (workspace / PROFILE).read_bytes() == (NAME_LINES + EXPECTED[option_id]).encode("utf-8")
+
+    from doc_feedback_helpers import add_comment
+    from plans.activity_rows import rows
+
+    add_comment(db, artifact["id"], author_id="root", replacement="A suggested change")
+    activity = rows(db, "user-1", [])
+    assert any(row.get("open") == {"artifact_id": artifact["id"]} for row in activity)
+
+
 def test_an_existing_line_is_replaced_not_duplicated(db, monkeypatch, workspace):
     (workspace / PROFILE).write_text(
         NAME_LINES + "- **Use community improvements:** No\n- **Share improvements with the community:** Yes\n"

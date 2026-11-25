@@ -125,7 +125,7 @@ def test_an_out_of_date_login_cannot_be_requested(world):
     assert fills.listed(PERSON) == []
     # Saving it again makes it usable again.
     saved_logins.save_login(
-        site="https://example.com", username="me@example.com", password="[REDACTED]", saved_by=PERSON,
+        site="https://example.com", username="me@example.com", password="fake-password-for-tests", saved_by=PERSON,  # gitleaks:allow
     )
     assert fills.request_fill(AGENT_THREAD, world["login"])["state"] == "awaiting_user"
 
@@ -249,7 +249,7 @@ def test_a_restart_drops_every_grant(world):
 
 
 def test_no_agent_tool_names_the_fill_approval_module():
-    """Only the person's routes and the fill executor reach these functions; no tool does."""
+    """Only the person's routes, the fill executor and its result recorder reach these functions; no tool does."""
     from pathlib import Path
 
     backend = Path(__file__).resolve().parents[1]
@@ -259,7 +259,12 @@ def test_no_agent_tool_names_the_fill_approval_module():
         if ".venv" not in path.parts and "tests" not in path.parts
         and "saved_login_fills" in path.read_text(encoding="utf-8", errors="replace")
     }
-    assert callers == {"api/host_access.py", "host_access/browser_login_fill.py"}
+    # The person's approval routes, the person's login delete route, the fill executor and the rejected-fill
+    # recorder.
+    assert callers == {
+        "api/host_access.py", "api/saved_logins.py",
+        "host_access/browser_login_fill.py", "infra/saved_login_results.py",
+    }
 
 
 # --- The person's routes -------------------------------------------------------------------------
@@ -410,4 +415,280 @@ def test_each_fill_transition_counts_once_with_only_the_thread_and_minutes(world
     payloads = repr(events)
     for private in ("example.com", "example.org", "example", "me@example.com", world["login"], world["other_login"],
                     first["id"], second["id"], third["id"]):
+        assert private not in payloads
+
+
+# --- The duration an agent asks for, and the person's "Until I turn it off" ----------------------
+
+#: A plain fake value for saving a login again; never a real password.
+RESAVED = "resaved-fake-value"
+
+
+def _approve_standing(row, user_id=PERSON):
+    return fills.approve_fill(
+        row["id"], user_id=user_id, revision=row["revision"], application_hash=row["application_hash"],
+        until_revoked=True,
+    )
+
+
+def test_an_agent_may_ask_for_the_time_its_task_needs_and_it_is_kept_on_the_request(world):
+    row = fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=900)
+    assert row["requested_duration_seconds"] == 900 and row["standing"] is False
+    assert fills.listed(PERSON)[0]["requested_duration_seconds"] == 900
+    # A request already waiting is returned as it is, whatever is asked the second time.
+    again = fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=60)
+    assert again["id"] == row["id"] and again["requested_duration_seconds"] == 900
+    assert fills.request_fill(OTHER_THREAD, world["login"])["requested_duration_seconds"] is None
+    longest = fills.request_fill(AGENT_THREAD, world["other_login"], requested_seconds=fills.MAX_GRANT_SECONDS)
+    assert longest["requested_duration_seconds"] == 1800
+    # The person picks; the request's duration is only where the drawer starts.
+    assert _approve(row, seconds=300)["duration_seconds"] == 300
+    # The duration is keyword-only, so no positional slip can set it.
+    with pytest.raises(TypeError):
+        fills.request_fill(OTHER_THREAD, world["other_login"], 900)  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("requested", [
+    1801, 3600, 0, -1, 60.0, 900.5, "900", True, False, "indefinite", "until_revoked", "standing",
+    float("inf"), {"until_revoked": True}, [900],
+])
+def test_an_agent_cannot_ask_for_a_standing_or_out_of_range_duration(world, requested):
+    with pytest.raises(fills.FillDurationError):
+        fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=requested)
+    assert fills.listed(PERSON) == []
+    assert fills._approvals == {}
+    assert world["nudges"] == []
+
+
+def test_until_revoked_stays_live_past_the_cap_until_revoked(world, monkeypatch):
+    login = world["login"]
+    row = fills.request_fill(AGENT_THREAD, login, requested_seconds=900)
+    granted = _approve_standing(row)
+    assert granted["state"] == "active" and granted["standing"] is True
+    assert granted["duration_seconds"] is None and granted["expires_at"] is None
+    assert fills.may_fill(AGENT_THREAD, login) is True
+    clock = fills.time.monotonic
+    monkeypatch.setattr(fills.time, "monotonic", lambda: clock() + fills.MAX_GRANT_SECONDS * 100)
+    assert fills.may_fill(AGENT_THREAD, login) is True
+    held = fills.get(granted["id"], user_id=PERSON)
+    assert held["state"] == "active" and held["standing"] is True
+    assert fills.may_fill(OTHER_THREAD, login) is False  # another thread
+    assert fills.may_fill(AGENT_THREAD, world["other_login"]) is False  # another login
+    assert fills.may_fill("worker-thread", login) is False  # not even its own subagent
+    revoked = fills.revoke_fill(granted["id"], user_id=PERSON, revision=granted["revision"],
+                                application_hash=granted["application_hash"])
+    assert revoked["state"] == "revoked"
+    assert fills.may_fill(AGENT_THREAD, login) is False
+    assert fills._approvals == {}
+
+
+def test_until_revoked_ends_at_a_restart(world):
+    _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is True
+    restarted = importlib.reload(fills)
+    assert restarted.may_fill(AGENT_THREAD, world["login"]) is False
+    assert restarted._approvals == {}
+
+
+def test_until_revoked_ends_when_its_login_goes_out_of_date_and_a_resave_does_not_revive_it(world):
+    login = world["login"]
+    _approve_standing(fills.request_fill(AGENT_THREAD, login))
+    other = _approve_standing(fills.request_fill(AGENT_THREAD, world["other_login"]))
+    saved_logins.mark_out_of_date(login)  # by no path that ends its grants
+    # The check at use fails closed and ends it; no read sweeps for it.
+    assert fills.may_fill(AGENT_THREAD, login) is False
+    assert list(fills._approvals) == [other["id"]]
+    saved_logins.save_login(site="https://example.com", username="me@example.com", password=RESAVED, saved_by=PERSON)
+    assert fills.may_fill(AGENT_THREAD, login) is False
+    assert fills.may_fill(AGENT_THREAD, world["other_login"]) is True
+
+
+def test_reading_the_list_or_one_request_does_not_look_up_any_login(world, monkeypatch):
+    standing = _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    timed = _approve(fills.request_fill(AGENT_THREAD, world["other_login"]))
+    looked_up: list[object] = []
+    monkeypatch.setattr(saved_logins, "get_login", lambda *args, **kwargs: looked_up.append(args))
+    rows = fills.listed(PERSON)
+    fills.get(standing["id"], user_id=PERSON)
+    fills.get(timed["id"], user_id=PERSON)
+    assert [row["id"] for row in rows] == [timed["id"]] and looked_up == []
+
+
+def test_a_login_going_out_of_date_ends_its_waiting_requests_too(world, monkeypatch):
+    from infra import product_events, saved_login_results
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    login = world["login"]
+    _approve_standing(fills.request_fill(AGENT_THREAD, login))
+    waiting = fills.request_fill(OTHER_THREAD, login, requested_seconds=900)
+    kept = fills.request_fill(OTHER_THREAD, world["other_login"])
+    events.clear()
+    world["nudges"].clear()
+    saved_login_results.fill_failed(AGENT_THREAD, login)
+    assert list(fills._approvals) == [kept["id"]]
+    assert [args for args, _ in events] == [("saved_login", "fill_expired")] * 2
+    assert {kwargs["thread_id"] for _, kwargs in events} == {AGENT_THREAD, OTHER_THREAD}
+    assert len(world["nudges"]) == 2
+    # The person's approve gets the closed-request answer an ended request already gives, for either choice.
+    for choice in ({"duration_seconds": 900}, {"until_revoked": True}):
+        with pytest.raises(fills.FillApprovalNotFound, match="^This sign-in request is closed. Ask the agent to try "
+                           "again if it still needs to sign in.$"):
+            fills.approve_fill(waiting["id"], user_id=PERSON, revision=waiting["revision"],
+                               application_hash=waiting["application_hash"], **choice)
+    assert fills.may_fill(OTHER_THREAD, login) is False
+    # The waiting agent's next ask gets the out-of-date answer it already gets, with the person's step.
+    with pytest.raises(fills.FillApprovalError) as refused:
+        fills.request_fill(OTHER_THREAD, login)
+    assert str(refused.value) == (
+        "The saved login for https://example.com (me@example.com) is out of date. "
+        "The person has a step to sign in to https://example.com themselves."
+    )
+
+
+def test_a_rejected_fill_ends_the_grant_before_the_login_can_be_saved_again(world):
+    from infra import saved_login_results
+
+    login = world["login"]
+    _approve_standing(fills.request_fill(AGENT_THREAD, login))
+    saved_login_results.fill_failed(AGENT_THREAD, login)
+    assert fills._approvals == {}  # ended at once, with no read in between
+    saved_logins.save_login(site="https://example.com", username="me@example.com", password=RESAVED, saved_by=PERSON)
+    assert fills.may_fill(AGENT_THREAD, login) is False
+
+
+@pytest.mark.parametrize("extra", [
+    {"duration_seconds": 600, "until_revoked": True},
+    {"duration_seconds": None, "until_revoked": False},
+    {"until_revoked": 1},
+    {"until_revoked": "yes"},
+])
+def test_approve_needs_exactly_one_of_a_duration_or_until_revoked(world, extra):
+    row = fills.request_fill(AGENT_THREAD, world["login"])
+    with pytest.raises(fills.FillDurationError):
+        fills.approve_fill(row["id"], user_id=PERSON, revision=row["revision"],
+                           application_hash=row["application_hash"], **extra)
+    assert fills.listed(PERSON)[0]["state"] == "awaiting_user"
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+
+
+def _routes_client():
+    from api.host_access import router
+    from api.saved_logins import router as saved_logins_router
+
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(saved_logins_router)
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("kind", ["api", "service"])
+def test_an_agent_token_cannot_approve_until_revoked(world, kind):
+    from infra.accounts import issue_token
+
+    session, _ = issue_token(PERSON, kind="session")
+    machine, _ = issue_token(PERSON, kind=kind)
+    fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=900)
+    with _client() as client:
+        pending = _listed(client, session)
+        response = _post(client, machine, pending, "approve", pending["decision_capability"], until_revoked=True)
+        assert response.status_code == 403
+        assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+        assert _listed(client, session)["state"] == "awaiting_user"
+
+
+def test_the_route_refuses_both_or_neither_and_approves_until_revoked(world):
+    from infra.accounts import issue_token
+
+    session, _ = issue_token(PERSON, kind="session")
+    fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=900)
+    with _client() as client:
+        pending = _listed(client, session)
+        assert pending["requested_duration_seconds"] == 900 and pending["standing"] is False
+        capability = pending["decision_capability"]
+        for body in ({"duration_seconds": 600, "until_revoked": True}, {}, {"until_revoked": False},
+                     {"until_revoked": "true"}, {"until_revoked": 1}, {"duration_seconds": None}):
+            response = _post(client, session, pending, "approve", capability, **body)
+            assert 400 <= response.status_code < 500, body
+        for body in ({"duration_seconds": 600, "until_revoked": True}, {}):  # both, and neither
+            response = _post(client, session, pending, "approve", capability, **body)
+            assert response.status_code == 422, body
+            assert "Pick one: a duration or until revoked." in response.text, body
+        assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+        granted = _post(client, session, pending, "approve", capability, until_revoked=True)
+        assert granted.status_code == 200
+        assert granted.json()["standing"] is True and granted.json()["expires_at"] is None
+        assert fills.may_fill(AGENT_THREAD, world["login"]) is True
+
+
+def _chat_list(client, credential, query):
+    response = client.get(f"/api/host-access/leases{query}", headers={
+        "Authorization": f"Bearer {credential}", INTERACTIVE_UI_HEADER: "1",
+    })
+    assert response.status_code == 200
+    return response
+
+
+def test_the_chats_lease_list_leaves_out_a_standing_grant_and_keeps_a_timed_one(world):
+    """The chat's lock chip is for timed grants only: a standing grant is in no lease list."""
+    from infra.accounts import issue_token
+
+    session, _ = issue_token(PERSON, kind="session")
+    standing = _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    timed = _approve(fills.request_fill(AGENT_THREAD, world["other_login"]), seconds=900)
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is True  # still live, only not listed
+    assert [row["id"] for row in fills.listed(PERSON)] == [timed["id"]]
+    assert [row["id"] for row in fills.listed(PERSON, AGENT_THREAD)] == [timed["id"]]
+    with _client() as client:
+        for query in (f"?root_thread_id={AGENT_THREAD}", "", "?nonterminal_only=true"):
+            response = _chat_list(client, session, query)
+            rows = [row for row in response.json()["leases"] if row["kind"] == "fill"]
+            assert [row["id"] for row in rows] == [timed["id"]], query
+            assert rows[0]["state"] == "active" and rows[0]["standing"] is False
+            assert standing["id"] not in response.text
+
+
+def test_deleting_a_login_ends_every_request_and_grant_for_it(world, monkeypatch):
+    from infra import product_events
+    from infra.accounts import issue_token
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    session, _ = issue_token(PERSON, kind="session")
+    login, other = world["login"], world["other_login"]
+    _approve_standing(fills.request_fill(AGENT_THREAD, login))
+    pending = fills.request_fill(OTHER_THREAD, login)
+    kept = _approve(fills.request_fill(AGENT_THREAD, other))
+    events.clear()
+    with _routes_client() as client:
+        response = client.delete(f"/api/saved-logins/{login}", headers={"Authorization": f"Bearer {session}"})
+        assert response.status_code == 200
+    assert fills.may_fill(AGENT_THREAD, login) is False
+    assert list(fills._approvals) == [kept["id"]]
+    assert pending["id"] not in fills._approvals
+    assert [args for args, _ in events] == [("saved_login", "fill_revoked")] * 2
+    assert {kwargs["thread_id"] for _, kwargs in events} == {AGENT_THREAD, OTHER_THREAD}
+    assert all(kwargs["properties"] is None for _, kwargs in events)
+    assert fills.may_fill(AGENT_THREAD, other) is True
+
+
+def test_duration_events_carry_only_the_thread_and_minutes_or_standing(world, monkeypatch):
+    from infra import product_events
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    timed = fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=900)
+    standing = fills.request_fill(OTHER_THREAD, world["other_login"])
+    _approve(timed, seconds=1800)
+    _approve_standing(standing)
+    assert [(args[1], kwargs["properties"]) for args, kwargs in events] == [
+        ("fill_requested", {"requested_minutes": 15}),
+        ("fill_requested", None),
+        ("fill_approved", {"duration_minutes": 30}),
+        ("fill_approved", {"standing": True}),
+    ]
+    assert all(sorted(kwargs) == ["properties", "thread_id"] for _, kwargs in events)
+    payloads = repr(events)
+    for private in ("example.com", "example.org", "example", "me@example.com", world["login"], world["other_login"],
+                    timed["id"], standing["id"], timed["application_hash"]):
         assert private not in payloads

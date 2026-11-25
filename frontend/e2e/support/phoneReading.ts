@@ -56,3 +56,35 @@ export async function selectReadingPassage(page: Page, needle: string) {
 	}, needle);
 	await expect(page.locator('.sel-comment')).toBeVisible();
 }
+
+/**
+ * The phone's Comment offer is the document's own floating button, held at the bottom of the visible screen: the same fill, round
+ * ends, shadow and text colour the button has beside a selection on a desktop, centred in the document column, with no strip behind it.
+ */
+export async function expectCommentPill(page: Page) {
+	const look = await page.evaluate(() => {
+		const holder = document.querySelector<HTMLElement>('.touch-comment-bar.offered')!;
+		const button = holder.querySelector<HTMLElement>('button.sel-comment')!;
+		// What the button looks like where it floats: a probe carrying the tokens that button is drawn from.
+		const probe = document.body.appendChild(document.createElement('div'));
+		probe.style.cssText = 'position:fixed;visibility:hidden;background:var(--accent-fill);color:var(--accent-on-fill);border-radius:var(--radius-pill);box-shadow:var(--shadow-chip), var(--glass-rim)';
+		const want = getComputedStyle(probe), got = getComputedStyle(button), strip = getComputedStyle(holder);
+		const holderBox = holder.getBoundingClientRect(), buttonBox = button.getBoundingClientRect();
+		const result = {
+			fill: [got.backgroundColor, want.backgroundColor], text: [got.color, want.color], radius: [got.borderTopLeftRadius, want.borderTopLeftRadius], shadow: [got.boxShadow, want.boxShadow],
+			stripFill: strip.backgroundColor, stripBorder: strip.borderTopWidth, stripShadow: strip.boxShadow,
+			offCentre: Math.abs((buttonBox.left + buttonBox.width / 2) - (holderBox.left + holderBox.width / 2)), icon: !!button.querySelector('svg'),
+		};
+		probe.remove();
+		return result;
+	});
+	expect(look.fill[0], 'the button is filled with the accent').toBe(look.fill[1]);
+	expect(look.text[0], 'the button text is the on-accent colour').toBe(look.text[1]);
+	expect(look.radius[0], 'the button has round ends').toBe(look.radius[1]);
+	expect(look.shadow[0], 'the button has its shadow').toBe(look.shadow[1]);
+	expect(look.icon, 'the button has its comment icon').toBe(true);
+	expect(look.stripFill, 'no strip behind the button').toBe('rgba(0, 0, 0, 0)');
+	expect(look.stripBorder, 'no line above the button').toBe('0px');
+	expect(look.stripShadow, 'no shadow on the holder').toBe('none');
+	expect(look.offCentre, 'the button is centred').toBeLessThanOrEqual(1);
+}

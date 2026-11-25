@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_control, browser_fill_marks, browser_login_page as page
-from host_access import browser_session_commands, browser_step_lifecycle
+from host_access import browser_saved_fills, browser_session_commands, browser_step_lifecycle
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import COMMAND_TIMEOUT, BrowserSessionError
 from infra import saved_login_fills, saved_login_results, saved_logins
@@ -30,8 +30,6 @@ log = logging.getLogger(__name__)
 # How long after submitting the page may take to settle before the result counts as unknown: as long as an agent's
 # own browser command may wait on a page. The password step has no limit of its own; the person ends it.
 SETTLE_LIMIT = COMMAND_TIMEOUT
-# Everything up to the submit (reading the page, checking it, typing, sending) shares one such limit too: the fill
-# holds the browser's command lock, so a page that stops answering must not hold every other command behind it.
 ASKED = ("The person has been asked to approve filling the saved login for {site} ({username}). Nothing was "
          "filled; try again once they approve it.")
 NO_BROWSER = "No browser is open for this thread, so nothing was filled. Open the sign-in page first."
@@ -120,6 +118,8 @@ async def _fill(thread_id: str, login: saved_logins.SavedLogin, runtime: Any, co
     """
     session, site = runtime.record.session, saved_logins.normalized_site(login.site)
     domain = registrable_domain(urlsplit(site).hostname or "")
+    # Everything up to the submit (reading the page, checking it, typing, sending) shares one COMMAND_TIMEOUT: the
+    # fill holds the browser's command lock, so a page that stops answering must not hold every other command.
     deadline = asyncio.get_running_loop().time() + COMMAND_TIMEOUT
     async with asyncio.timeout_at(deadline):
         endpoint = await browser_cdp.page_endpoint(command)
@@ -157,7 +157,7 @@ async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logi
             await requests.start(endpoint)
         # Before anything is typed: this document under the filled-field allowlist, and the session under the
         # saved-sign-in command limit. An unread loader id counts as every document.
-        browser_control.mark_saved_fill(thread_id, session, loader)
+        browser_saved_fills.mark_saved_fill(thread_id, session, loader)
         status = await _type(cdp, form, thread_id, login, deadline)
         if status == "no_grant":
             return status

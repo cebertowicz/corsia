@@ -5,7 +5,7 @@
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
 	import { text, duration, policyLabel, approvalReady, casReady, owner } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessItem } from '$lib/api/hostAccess';
+	import type { FillChoice, HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
 		stale,
@@ -28,7 +28,7 @@
 		/** The server's line when it refused this request's last decision. */
 		notice?: string | null;
 		/** A fill approval passes the duration the person picked; nothing else does. */
-		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
+		onApprove: (event: MouseEvent, durationSeconds?: FillChoice) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
 		/** Done, on the sheet's own head row. */
@@ -118,7 +118,7 @@
 		</section>
 
 		<div class="risk-grid">
-			<section><span class="label">For how long</span><p>{duration(lease.requested_duration_seconds)}</p></section>
+			<section><span class="label">Duration</span><p>{duration(lease.requested_duration_seconds)}</p></section>
 			{#if text(lease.expected_resources)}
 				<section><span class="label">Resources</span><p>{lease.expected_resources}</p></section>
 			{/if}
@@ -312,8 +312,6 @@
 		/* Keep the first requested exception above the sticky decision footer even
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
-		/* A segmented choice in a request sheet (the fill's duration) is finger-sized on a phone. */
-		:global(.pending-drawer .segmented .segment) { min-height: var(--touch-target); }
 		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
 		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
 		:global(.pending-drawer .decision-buttons) { gap: var(--touch-target); }

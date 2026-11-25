@@ -80,7 +80,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
         w.steps.append("may_fill")
         return w.grants.pop(0) if len(w.grants) > 1 else w.grants[0]
 
-    real_resolve, real_mark = key_store_values.resolve, browser_control.mark_saved_fill
+    real_resolve, real_mark = key_store_values.resolve, browser_saved_fills.mark_saved_fill
 
     def resolve(*args, **kwargs):
         w.steps.append("read")
@@ -137,7 +137,7 @@ def world(isolated_db, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(fill, "_owner", lambda: w.owner)
     monkeypatch.setattr(saved_login_fills, "may_fill", may_fill)
     monkeypatch.setattr(key_store_values, "resolve", resolve)
-    monkeypatch.setattr(browser_control, "mark_saved_fill", mark)
+    monkeypatch.setattr(browser_saved_fills, "mark_saved_fill", mark)
     monkeypatch.setattr(browser_cdp, "page_endpoint", endpoint)
     monkeypatch.setattr(browser_cdp, "browser_endpoint", browser)
     monkeypatch.setattr(browser_session_commands, "_command", command)
@@ -223,7 +223,7 @@ async def test_the_document_and_session_are_marked_and_the_approval_checked_just
     assert world.steps[-5:] == ["mark", "may_fill", "read", "type", "submit"]
     assert world.typed == [(USER, world.sentinel)]
     # The mark names the document checked before typing: only it gets the filled-field allowlist.
-    assert browser_control.saved_fill_session(THREAD, "s1")
+    assert browser_saved_fills.saved_fill_session(THREAD, "s1")
     assert browser_control._saved_fill_document(THREAD, "s1", world.loaders[0])
     assert not browser_control._saved_fill_document(THREAD, "s1", "a-later-document")
     _never_shown(world, caplog, text)

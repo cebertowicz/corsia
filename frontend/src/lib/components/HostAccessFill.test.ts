@@ -17,7 +17,7 @@ function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
 		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 		...overrides,
 	};
@@ -28,6 +28,27 @@ function target(): HTMLElement {
 	document.body.appendChild(element);
 	targets.push(element);
 	return element;
+}
+
+function durationSelect(host: HTMLElement): HTMLSelectElement | null {
+	return host.querySelector<HTMLSelectElement>('select[id^="fill-duration-"]');
+}
+
+function optionTexts(host: HTMLElement): string[] {
+	return [...(durationSelect(host)?.options ?? [])].map((option) => option.textContent?.trim() ?? '');
+}
+
+function selected(host: HTMLElement): string | undefined {
+	const select = durationSelect(host);
+	return select ? select.options[select.selectedIndex]?.textContent?.trim() : undefined;
+}
+
+/** Pick a choice the way the native picker does: set the value, then fire change. */
+function choose(host: HTMLElement, value: string): void {
+	const select = durationSelect(host)!;
+	select.value = value;
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	flushSync();
 }
 
 function pending(request: HostAccessFill, props: Record<string, unknown> = {}) {
@@ -51,14 +72,11 @@ it('names the agent, site and username, and approves for the duration the person
 	expect(text).toContain('https://example.com');
 	expect(text).toContain('me@example.com');
 	expect(text).toContain('Needs approval');
-	expect(text).toContain('The agent never sees it, and you can revoke this approval at any time.');
-	const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes']);
-	expect(radios[0].getAttribute('aria-checked')).toBe('true');
-	radios[1].click();
-	flushSync();
-	expect(radios[1].getAttribute('aria-checked')).toBe('true');
-	expect(radios[0].getAttribute('aria-checked')).toBe('false');
+	expect(text).toContain('The agent never sees it.');
+	expect(optionTexts(host)).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(selected(host)).toBe('5 minutes');
+	choose(host, '900');
+	expect(selected(host)).toBe('15 minutes');
 	const buttons = [...host.querySelectorAll('button')];
 	buttons.find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove).toHaveBeenCalledOnce();
@@ -90,12 +108,14 @@ it('puts the status and Done on the title row, with Done closing the sheet', asy
 	await unmount(component);
 });
 
-it('moves the duration choice with the arrow keys', async () => {
+it('draws the duration as one select named Duration, in the sheet\'s nested field', async () => {
 	const { host, component, onApprove } = pending(fill());
-	const first = host.querySelector<HTMLButtonElement>('[role="radio"]')!;
-	first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-	flushSync();
-	expect(host.querySelector('[data-seconds="1800"]')?.getAttribute('aria-checked')).toBe('true');
+	const select = durationSelect(host)!;
+	expect(select.closest('.field')?.classList.contains('nested')).toBe(true);
+	// The select's name is its own label; the drawn label is the sheet's section label, like Site and Username.
+	expect(host.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()).toBe('Duration');
+	expect(select.closest('section')?.querySelector('.section-label')?.textContent).toBe('Duration');
+	choose(host, '1800');
 	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove.mock.calls[0][1]).toBe(1800);
 	await unmount(component);
@@ -239,5 +259,81 @@ it('posts a fill decision to the fill route with the picked duration only on app
 	expect(fetch.mock.calls[1][0]).toBe('/api/host-access/leases/fills/fill-1/revoke');
 	expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
 		revision: 2, application_hash: 'a'.repeat(64),
+	});
+});
+
+// --- The duration the agent asks for, and "Until I turn it off" --------------------------------
+
+function checked(host: HTMLElement): string | undefined {
+	return selected(host);
+}
+
+function approve(host: HTMLElement): void {
+	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
+}
+
+it('starts on the duration the agent asked for, and never on Until I turn it off', async () => {
+	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
+	expect(optionTexts(host)).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(checked(host)).toBe('15 minutes');
+	const standing = [...durationSelect(host)!.options].find((option) => option.value === 'until_revoked')!;
+	expect(standing.selected).toBe(false);
+	approve(host);
+	expect(onApprove.mock.calls[0][1]).toBe(900);
+	await unmount(component);
+});
+
+it('adds the asked-for time when it is not one of the usual choices, within the cap only', async () => {
+	const asked = pending(fill({ requested_duration_seconds: 600 }));
+	expect(optionTexts(asked.host))
+		.toEqual(['5 minutes', '10 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(checked(asked.host)).toBe('10 minutes');
+	await unmount(asked.component);
+	expect(fillDurations(1800, 600)).toEqual([300, 600, 900, 1800]);
+	expect(fillDurations(900, 1800)).toEqual([300, 900]);
+	expect(fillDurations(1800, 0)).toEqual([300, 900, 1800]);
+	expect(fillDurations(1800, 90.5)).toEqual([300, 900, 1800]);
+	// Below the shortest time there is no choice at all, Until I turn it off included.
+	const none = pending(fill({ max_duration_seconds: 120 }));
+	expect(durationSelect(none.host)).toBeNull();
+	expect(none.host.textContent).not.toContain('Until I turn it off');
+	await unmount(none.component);
+	// Over the cap or not a whole number of seconds: today's default, the shortest.
+	for (const requested of [3600, 0, -1, 90.5, null]) {
+		const view = pending(fill({ requested_duration_seconds: requested as number | null, max_duration_seconds: 1800 }));
+		expect(checked(view.host)).toBe('5 minutes');
+		await unmount(view.component);
+	}
+});
+
+it('approves until revoked only when the person picks it', async () => {
+	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
+	choose(host, 'until_revoked');
+	expect(checked(host)).toBe('Until I turn it off');
+	approve(host);
+	expect(onApprove.mock.calls[0][1]).toBe('until_revoked');
+	await unmount(component);
+});
+
+it('says nothing about revoking under any choice, so nothing moves when the choice changes', async () => {
+	const { host, component } = pending(fill({ requested_duration_seconds: 900 }));
+	const explainer = 'CORSIA types the password into this site for the agent. The agent never sees it.';
+	for (const choice of ['900', 'until_revoked', '1800']) {
+		choose(host, choice);
+		expect(host.querySelector('.explainer')?.textContent).toBe(explainer);
+		expect(host.querySelector('.field .hint')).toBeNull();
+		expect(host.textContent).not.toContain('revoke');
+	}
+	await unmount(component);
+});
+
+it('posts until revoked, and no duration, when the person picks it', async () => {
+	const { apiFetch } = await import('$lib/api/request');
+	const fetch = vi.mocked(apiFetch);
+	fetch.mockReset();
+	fetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+	await decideHostAccessLease(fill(), 'approve', 'until_revoked');
+	expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+		revision: 1, application_hash: 'a'.repeat(64), until_revoked: true,
 	});
 });
