@@ -74,6 +74,7 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	}
 	await expect(editor).toContainText('Step 1:');
 	await editor.evaluate((el) => { (window as any).__replyEditor = el; });
+	const body = (await editor.textContent()) ?? '';
 	const card = width === 393
 		? page.getByRole('dialog', { name: 'Document comments' }).getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Please explain this step' })
 		: page.locator(`[data-comment-id="${rootId}"]`).last();
@@ -81,6 +82,8 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	if (width === 393) {
 		await expect(card).toContainText('Please explain this step');
 		await expect(field).toBeVisible();
+		// A sheet that is still closing is visible but not ready: its fields sit in an inert subtree, so a fill into one cannot take focus and the text goes to the focused document instead. Wait for the sheet that replaces it: no ancestor of the reply box is inert.
+		await expect.poll(() => field.evaluate((el) => !el.closest('[inert]'))).toBe(true);
 	} else if (!await field.isVisible()) await page.locator('.pane-col').getByRole('button', { name: 'Reply', exact: true }).click();
 	await field.fill('Thank you for explaining');
 	await expect.poll(async () => {
@@ -90,6 +93,7 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	const checkPane = async () => {
 		await expect(editor).toContainText('Step 1:');
 		expect(await editor.evaluate((el) => el === (window as any).__replyEditor)).toBe(true);
+		expect(await editor.textContent(), 'the document body is unchanged').toBe(body);
 		await expect(page.locator('.pane-col')).not.toContainText('No longer waiting on you.');
 		await expect(row).toHaveAttribute('aria-current', 'true');
 		expect(await row.evaluate((el) => [...document.querySelectorAll('[data-activity-row]')].indexOf(el))).toBe(position);
