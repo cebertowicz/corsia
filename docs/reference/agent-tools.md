@@ -173,7 +173,6 @@ Pack: `browser`
 | `browser_input` | Press a key, choose a dropdown option, scroll, hover, go back or forward |
 | `browser_open` | Open a URL in the browser |
 | `browser_person_step` | Let the person complete the current browser page |
-| `browser_run_steps` | Run setup steps from a System or installed skill |
 | `browser_screenshot` | Save a page screenshot |
 | `browser_snapshot` | Read the page's tree and element refs; list or switch tabs |
 | `browser_wait` | Wait for an element or a delay |
@@ -199,6 +198,7 @@ Pack: `web`
 
 | Tool | Description |
 |---|---|
+| `browser_run_steps` | Run setup steps from a System or installed skill |
 | `web_fetch` | Fetch a URL as readable text |
 | `web_search` | Search the web |
 

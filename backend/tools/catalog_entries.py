@@ -185,7 +185,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     "browser_click": _Entry("browser", summary="Click a page element", activity="Clicking"),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
     "browser_input": _Entry("browser", summary="Press a key, choose a dropdown option, scroll, hover, go back or forward", activity="Using the page"),
-    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
+    "browser_run_steps": _Entry(
+        # In the web pack: the browser pack is at the ten-tool limit a pack may hold, and this tool is only
+        # called where a skill names it, so ordinary browser work does not need to load it.
+        "web", summary="Run setup steps from a System or installed skill", activity="Running setup",
+    ),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
