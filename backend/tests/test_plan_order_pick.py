@@ -1,0 +1,78 @@
+"""The app's own pick follows plan order, as a named start does (#3160).
+
+A task can become active without a start: a comment or review task is created
+active (``feedback_nodes._create_linked_node``), and reconciliation then fills
+the free slot with the first eligible active task. That pick passes no ready
+work ranked above it, so the owner starts the higher work, or moves this one up
+and starts it. Work above that is not ready (waiting on the person) passes.
+"""
+
+from __future__ import annotations
+
+from plans import admission, service
+from plans.turn_admission import snapshot_after_admission
+from tests.plan_close_next_helpers import (
+    open_attempt, owner_plan, plan_update, revision, task,
+)
+from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
+
+
+def _comment_task(db, plan_id: str, title: str = "Answer the comments") -> str:
+    """Create a task the way a comment task is: added, made active, then reconciled."""
+    node = service.add_node(
+        plan_id, kind="task", title=title, acceptance_criteria=f"{title} is done",
+        actor_id=None, provenance="test.comment_task", db=db,
+    )
+    service.transition_node(node.id, "active", actor_id=None, provenance="test.comment_task", db=db)
+    admission.reconcile_plan(plan_id, actor_id=None, provenance="test.comment_task", db=db)
+    db.commit()
+    return node.id
+
+
+def test_a_comment_task_below_ready_work_is_not_picked(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "Ship the release")
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is None
+
+
+def test_the_turn_start_does_not_pick_it_either(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "Ship the release")
+    comment = _comment_task(db, plan.id)
+
+    snapshot_after_admission("owner", db=db)
+    db.commit()
+
+    assert open_attempt(db, comment) is None
+
+
+def test_a_comment_task_below_work_waiting_on_the_person_is_picked(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "Approve the scope", assignee="user")
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is not None
+
+
+def test_the_owner_moves_it_up_and_starts_it(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "Ship the release")
+    comment = _comment_task(db, plan.id)
+
+    plan_update(db, plan.id, "reorder", {
+        "node_id": comment, "expected_revision": revision(db, comment), "order_key": 0,
+    })
+    plan_update(db, plan.id, "start", {
+        "node_id": comment, "expected_revision": revision(db, comment),
+    })
+
+    assert open_attempt(db, comment) is not None
+
+
+def test_a_comment_task_on_an_empty_plan_is_picked(db):
+    plan = owner_plan(db)
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is not None

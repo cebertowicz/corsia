@@ -140,6 +140,23 @@ class Reconciled:
     selected: tuple[tuple[str, str], ...] = ()
 
 
+def _in_plan_order(db, plan, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop a candidate that passes ready work ranked above it.
+
+    The app's own pick follows the same order as a named start
+    (``triage_lines.out_of_order``): a task made active without a start, such as
+    a comment task, is not given the slot while higher work is ready. The owner
+    starts the higher work, or moves this up and starts it.
+    """
+    from plans import triage_lines
+
+    where = triage_lines.standing(db, plan)
+    return tuple(
+        node_id for node_id in candidates
+        if (root_id := where.root_of.get(node_id)) is None or not where.ready_above(root_id)
+    )
+
+
 def reconcile_plan(
     plan_id: str,
     *,
@@ -201,6 +218,8 @@ def reconcile_plan(
         )
     elif candidates is None:
         candidates = tuple(node_order.active_task_ids(db, plan_id))
+    if plan["owner_kind"] == "thread" and candidates:
+        candidates = _in_plan_order(db, plan, candidates)
     for node_id in candidates:
         attempt, _conflict = select(
             node_id, actor_id=actor_id, provenance=provenance,
