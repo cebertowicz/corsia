@@ -385,7 +385,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
 		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
 		// The header carries the state; the asked duration is body text, not a second amber.
-		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('For how long');
+		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('Duration');
 		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();

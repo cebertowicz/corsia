@@ -118,7 +118,7 @@
 		</section>
 
 		<div class="risk-grid">
-			<section><span class="label">For how long</span><p>{duration(lease.requested_duration_seconds)}</p></section>
+			<section><span class="label">Duration</span><p>{duration(lease.requested_duration_seconds)}</p></section>
 			{#if text(lease.expected_resources)}
 				<section><span class="label">Resources</span><p>{lease.expected_resources}</p></section>
 			{/if}

@@ -320,7 +320,7 @@ describe('HostAccessLeaseControl', () => {
 		expect(activeDialog.querySelector('.decision-head .head-label')?.textContent).toBe('Sign in with a saved login');
 		expect(activeDialog.querySelector('.decision-head h2')?.textContent).toBe('Bookkeeper');
 		expect([...activeDialog.querySelectorAll('dt.section-label')].map((label) => label.textContent))
-			.toEqual(['Site', 'Username', 'For how long', 'Time remaining']);
+			.toEqual(['Site', 'Username', 'Duration', 'Time remaining']);
 		expect([...activeDialog.querySelectorAll('dd')].slice(0, 2).map((value) => value.textContent))
 			.toEqual(['https://example.com', 'me@example.com']);
 		Array.from(activeDialog.querySelectorAll<HTMLButtonElement>('button'))

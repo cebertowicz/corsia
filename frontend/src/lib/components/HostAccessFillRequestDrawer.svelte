@@ -75,7 +75,7 @@
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
 		<section><span class="section-label">Username</span><p>{request.username}</p></section>
 		<section>
-			<span class="section-label" id={`fill-duration-${request.id}`}>For how long</span>
+			<span class="section-label" id={`fill-duration-${request.id}`}>Duration</span>
 			<div class="segmented durations" role="radiogroup" aria-labelledby={`fill-duration-${request.id}`}>
 				{#each options as choice (choice)}
 					<button

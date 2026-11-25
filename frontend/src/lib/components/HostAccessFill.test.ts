@@ -343,7 +343,7 @@ it('shows a standing grant without a countdown and revokes it as any other', asy
 	} });
 	flushSync();
 	const text = host.textContent ?? '';
-	expect(text).toContain('For how long');
+	expect(text).toContain('Duration');
 	expect(text).toContain('Until I turn it off');
 	expect(text).not.toContain('Time remaining');
 	expect(text).not.toMatch(/\d:\d\d|activating|Invalid duration/);

@@ -170,7 +170,7 @@ it('names the state in the header and the asked duration in the body', () => {
 	show(externalLease());
 	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Needs approval');
 	const durationSection = host.querySelector('.risk-grid section')!;
-	expect(durationSection.querySelector('.label')!.textContent).toBe('For how long');
+	expect(durationSection.querySelector('.label')!.textContent).toBe('Duration');
 	expect(durationSection.querySelector('p')!.textContent).toBe(duration(externalLease().requested_duration_seconds));
 	expect(host.querySelector('.decision-body .blocked-line')).toBeNull();
 	// Command and Working folder are section labels; only the exceptions heading is amber.
