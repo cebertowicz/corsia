@@ -413,12 +413,8 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
-    assert "would only share, write No and Yes" in step
-    for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
-                 "`- **Share improvements with the community:** Yes`", "`- **Share improvements with the community:** No`",
-                 "write no line, and agents share nothing and take nothing until it is answered"):
-        assert line in step, line
-    assert "context/50-USER-PROFILE.md" in step
+    assert "`Choose it on the card, and it's saved to your profile.` Leave the card open and write nothing." in step
+    assert "write no line, and agents share nothing and take nothing until it is answered" in step
     assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
     assert "no GitHub" in step
     assert "**Only use:** no GitHub question." in step
@@ -426,7 +422,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
 
 def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_question():
     step = _step(7)
-    github = step.split("**Use and share, or only share, and not `github_ready`:**", 1)[1]
+    github = step.split("**Use and share, and not `github_ready`:**", 1)[1]
 
     assert "When `github_ready`, skip the rest of this step" in github
     # One message, then one decision: the chat never asks whether they have an account.
@@ -602,6 +598,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
     assert seeded in write
     assert "replacing the profile's `- **Timezone:**` line, or adding it when there is none, with" in write
     assert "over the profile's `- **Preferred name:**` line" in write
+    assert "For profile changes, follow `references/first-run-app.md`'s ownership rule." in ref
     assert "`USER.md`" in write and "(work, place, background)" in write
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
     assert "`context/50-USER-PROFILE.md` for their time zone, the name they go by" in doc
@@ -651,8 +648,19 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert doc.count("`Here's your About you doc. What you approve goes into your profile, which every agent reads.`") == 1
     assert doc.count(ask) == 1  # the ask's reason
     assert "including agents on a cloud model" not in doc
-    # The saved line says agents keep adding to it and where to edit it.
-    assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
+    # Transfer precedes the four separate messages explaining profile ownership.
+    lines = [
+        "`Saved. Your profile is yours now: agents only suggest changes to it, and you decide.`",
+        "`To open it, ask any agent or press the donut in the message box, then its name.`",
+        "`To hand off suggestion review of any file to an agent going forward, make that agent its owner.`",
+        "`Your profile is one of your instruction files: every agent reads it. Each project has its own for its agents, and each agent has one too.`",
+    ]
+    app_step = _step(5)
+    assert all(line in app_step for line in lines)
+    assert [app_step.index(line) for line in lines] == sorted(app_step.index(line) for line in lines)
+    assert "follow the handover and messages in step 5" in doc
+    assert "`artifact_rehome` on that artifact with `new_owner_thread_id` `user`" in app_step
+    assert "If handover fails, report the problem and do not say the profile is theirs." in app_step
     # A helper's brief carries the same per-fact form and quotes only its own heading.
     assert "the suggestion form above, one call per fact and no heading in any replacement, and that it quotes its own heading only" in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
@@ -719,6 +727,8 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email
     assert "Outlook for Outlook and for both, Other for anything else" in email
+    assert "If the person owns the profile, suggest the line with `doc_comment_create`" in email
+    assert "While CORSIA owns it, write the line directly" in email
     assert "Never write it in `USER.md`, and never change the `- **Email:**` line" in email
     # Conditional on delivery: phrased so check_system_closure does not require the skill before it ships.
     assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
