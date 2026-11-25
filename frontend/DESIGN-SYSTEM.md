@@ -1156,7 +1156,7 @@ today — see §8.3).
 
 ## 5. Surface composition rules
 
-- Nothing on screen moves, closes or swaps without the person's action. New data may change a count or add a quiet line, but the open item, the scroll position and the row in view stay where they are. One exception: a chat already scrolled to its newest message stays pinned to the bottom as messages arrive.
+- What the person is looking at never moves, closes or swaps without their action. New data may fill an empty pane, change a count or add a quiet line, but the open item, the scroll position and the row in view stay where they are. One exception: a chat already scrolled to its newest message stays pinned to the bottom as messages arrive.
 
 ### 5.1 App shell — Tauri vibrancy contract
 

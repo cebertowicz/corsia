@@ -45,7 +45,7 @@
 	let phoneOpen = $state(false);
 	/** The order the person last saw, so an item that leaves is followed by what came after it. */
 	let seenKeys: string[] = [];
-	/** The open item, kept where it was while the person reads why the server let it go; released when they move on. */
+	/** The open item retained after a refusal or departure, until the person moves on. */
 	let kept = $state<ActivityQueueItem | null>(null);
 	let arrived = false;
 	let list = $state<ActivityList | undefined>(undefined);
@@ -81,6 +81,16 @@
 	$effect(() => { if (openItem) lastOpen = openItem; });
 
 	// Reconcile before the DOM update, so a vanished row never unmounts its pane or draft.
+	// Transition                     | openKey              | kept      | paneInstance remounts
+	// First read                     | first key or null    | null      | no
+	// Present key                    | unchanged            | null      | no
+	// Acted departure                | follower or null     | null      | yes
+	// Same document and thread rekey | new key              | null      | no
+	// Other departure                | unchanged            | lastOpen  | no
+	// Rows arrive in empty pane      | first key            | null      | no
+	// Explicit navigation            | selected key         | null      | yes, if changed
+	// Refused act                    | unchanged            | open item | no
+	// Scope change                   | null, then first key | null      | yes
 	$effect.pre(() => {
 		const current = store.queue?.items;
 		if (store.status !== 'ready' || !current) return;
@@ -99,7 +109,7 @@
 				const matches = doc ? current.filter((item) => {
 					const candidate = documentOf(item);
 					return item.kind === lastOpen?.kind && candidate?.artifactId === doc.artifactId
-						&& candidate.commentId === doc.commentId;
+						&& candidate.commentId === doc.commentId && item.source.thread_id === lastOpen?.source.thread_id;
 				}) : [];
 				if (matches.length === 1) {
 					openKey = matches[0].key;
@@ -243,7 +253,6 @@
 		padding-top: var(--header-bottom); box-sizing: border-box;
 	}
 	.list-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; }
-	/* Pane notices render below the pane's own header. */
 	.pane-col { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 	.nothing { margin: auto; color: var(--text-tertiary); font-size: var(--text-subhead); }
 	/* A phone shows the list or the item, never both. */

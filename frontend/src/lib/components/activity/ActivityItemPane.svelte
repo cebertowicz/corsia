@@ -67,20 +67,16 @@
 
 	let lookup = $state<DocumentLookup | { status: 'resolving' } | null>(null);
 
-	// The parent remounts this pane only when the person opens another item.
-
 	// A document item opens in Activity's workspace as its only tab; the item it replaces is closed through the
 	// ordinary close (which saves a pending edit and sends the open comment batch).
 	// Primitive inputs only: a re-read hands over new item objects, and the document must not reopen for that.
 	const docArtifactId = $derived(doc?.artifactId ?? null);
-	// A queue key may change while the same document stays open.
 	const landsOnReplies = $derived(item.kind === 'reply');
 	// A reply row opens on the thread it quotes, never the document's first unread one.
 	const replyThread = $derived(docReply?.root_id ?? doc?.commentId);
 	$effect(() => {
 		const artifactId = docArtifactId;
 		const thread = documentThread;
-		// Resolve by document identity, not the queue row's key.
 		const landOnReplies = landsOnReplies;
 		const commentId = replyThread;
 		if (!artifactId) {

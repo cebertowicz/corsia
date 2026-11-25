@@ -168,13 +168,26 @@ describe('Activity list', () => {
 		await settle();
 		const original = pane().querySelector('h1');
 		const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts')).length;
-		served = [{ ...served[0], key: 'review:new-key', source: activitySource('Another agent', 'thread-another') }, ...served.slice(1)];
+		served = [{ ...served[0], key: 'review:new-key' }, ...served.slice(1)];
 		listeners.get('doc_comment_changed')?.();
 		await settle();
 		expect(pane().querySelector('h1')).toBe(original);
 		expect(openRow()?.querySelector('strong')?.textContent).toBe(served[0].title);
 		expect(pane().textContent).not.toContain('No longer waiting on you.');
 		expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts'))).toHaveLength(reads);
+	});
+
+	it('keeps the original item when the same document returns from another thread', async () => {
+		render();
+		await settle();
+		const original = pane().querySelector('h1');
+		const originalRow = openRow();
+		served = [{ ...served[0], key: 'review:new-key', source: activitySource('Another agent', 'thread-another') }, ...served.slice(1)];
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()).toBe(originalRow);
+		expect(pane().textContent).toContain('No longer waiting on you.');
 	});
 
 	it('opens what followed after acting, once the server stops returning the item', async () => {
