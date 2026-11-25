@@ -8,7 +8,7 @@ import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { user } from '$lib/stores/auth';
 import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
-import { CommentSendRefused, sendCommentReply, type ChatComment } from '$lib/chatCommentAnchors';
+import { CommentSendRefused, sendCommentReply, type ChatComment, type SendableChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
 import { emitProductEvent } from '$lib/product_events';
@@ -26,7 +26,7 @@ function deferred() {
 	const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
 	return { promise, resolve, reject };
 }
-function setup(send: (reply: ChatComment) => Promise<void> = () => Promise.resolve(), width = 1440) {
+function setup(send: (reply: SendableChatComment) => Promise<void> = () => Promise.resolve(), width = 1440) {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
@@ -203,11 +203,31 @@ it('sends the same request again when the first press got no answer, so the serv
 	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 	const [first, again] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)));
-	expect(again).toEqual(first);
+	// The server stores one input per id, so the retry is the same request: one id, the same words and place. Only the box's own per-press comment id differs, which the route never reads.
+	expect(again.input_id).toBe(first.input_id);
+	expect({ ...again.comment, id: null }).toEqual({ ...first.comment, id: null });
 	// One comment stored, so one composer 'sent' record: the press that got no answer is not counted.
 	await vi.waitFor(() => { flushSync(); expect(box()).toBeNull(); });
 	expect(sentEvents()).toHaveLength(1);
 	expect(sentEvents()[0][2]).toMatchObject({ thread_id: 'thread', comment_count: 1, reply_count: 0 });
+});
+
+it('posts a new draft of the same words under its own new id, not under the id of an earlier press that failed', async () => {
+	const fail = { ok: false, status: 500, json: async () => ({}) };
+	const ok = { ok: true, json: async () => ({ messages: [] }) };
+	const fetchMock = vi.fn().mockResolvedValueOnce(fail).mockResolvedValueOnce(ok);
+	vi.stubGlobal('fetch', fetchMock);
+	setup(reply => postChatComment(reply, 'thread', false, true));
+	await openBox(); await post('Same words');
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[role="alert"]')).not.toBeNull(); });
+	host.querySelector<HTMLButtonElement>('button.cancel')!.click(); await settle();
+	// The person starts over on the same passage with the same words: a new draft, so a new input.
+	await openBox(); await post('Same words');
+	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+	const [first, second] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id);
+	expect(first).toBeTruthy();
+	expect(second).toBeTruthy();
+	expect(second).not.toBe(first);
 });
 
 it('posts the comment as the input its kept draft’s client id names, again on the same id after a reload', async () => {
@@ -231,14 +251,12 @@ it('posts the comment as the input its kept draft’s client id names, again on 
 	expect(fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id)).toEqual([kept.clientId, kept.clientId]);
 });
 
-it('posts a reply as the input the person’s own id names, and sends no id of its own when none is given', async () => {
+it('posts a reply as the input the person’s own id names', async () => {
 	const sent: ChatComment[] = [];
 	const message = { id: 'm1', seq: 3 };
 	const stored = { id: 'c', cid: 'c1', user_message_id: 'u1', from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '' } as never;
 	await sendCommentReply(message, stored, 'A reply', async reply => { sent.push(reply); }, 'kept-id');
 	expect(sent[0]).toMatchObject({ note: 'A reply', root_cid: 'c1', input_id: 'kept-id' });
-	await sendCommentReply(message, stored, 'A reply', async reply => { sent.push(reply); });
-	expect(sent[1].input_id).toBeUndefined();
 });
 
 it('counts no composer send for a post the server refuses', async () => {
@@ -335,7 +353,7 @@ it('shows a Retry answered with a cancelled comment in that state, with no error
 });
 
 /** The app is left and opened again over the same device storage: nothing of the page is kept. */
-function relaunch(width: number, send?: (reply: ChatComment) => Promise<void>) {
+function relaunch(width: number, send?: (reply: SendableChatComment) => Promise<void>) {
 	unmount(component as never); component = null; host.remove();
 	keptCommentDrafts.reset(); user.set({ id: 'person-1', name: 'person-1' });
 	setup(send, width);

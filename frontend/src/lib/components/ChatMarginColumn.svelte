@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { messages, type ChatComment, type Message } from '$lib/stores/threads';
-	import { sendCommentReply, type ChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
+	import { sendCommentReply, type SendableChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
 	import type { MarginAnchorSource, MarginComposer } from '$lib/docMarginSource';
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import DocMarginStack from './DocMarginStack.svelte';

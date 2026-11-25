@@ -4,7 +4,7 @@
 	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-	import { clipChatSelection, chatTextPoint, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+	import { clipChatSelection, chatTextPoint, sendCommentReply, type SendableChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentHighlight, commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
@@ -21,7 +21,7 @@
 	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
 	import './commentAnchors.css';
 
-	let { threadId, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; onSendReply: (reply: ChatComment) => Promise<void>; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
+	let { threadId, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; onSendReply: (reply: SendableChatComment) => Promise<void>; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}

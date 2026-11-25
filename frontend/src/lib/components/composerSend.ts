@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { emitProductEvent } from '$lib/product_events';
-import { CommentSendRefused, unknownSendFailure, type ChatComment } from '$lib/chatCommentAnchors';
+import { CommentSendRefused, unknownSendFailure, type SendableChatComment } from '$lib/chatCommentAnchors';
 import { retryRefusedForGood } from '$lib/chatCommentDelivery';
 import { adoptCommentThreads } from '$lib/chatCommentRefresh';
 import { apiFetch } from '$lib/api/request';
@@ -42,12 +42,6 @@ function blockedSendText(cause: ReplySendBlock, noun: 'comment' | 'reply'): stri
 function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
 	throw new CommentSendRefused(blockedSendText(cause, noun));
 }
-
-/**
- * The request a press of a box sent, by what it posts, until the server stores it. Pressing again after a
- * refusal or a lost response sends that same request, so the server sees one input, never a second copy.
- */
-const unsettledPosts = new Map<string, string>();
 
 /**
  * Whether the person can raise this chat's model's context window in its details, by the model details' own rule
@@ -92,7 +86,7 @@ async function adoptPosted(response: Response, threadId: string, noun: 'comment'
  * has stored it, with the commented rows' threads as they now stand on screen; rejects with the sentence
  * the box shows when it was not stored.
  */
-export async function postChatComment(reply: ChatComment, threadId: string | null | undefined, restarting: boolean, modelReady: boolean): Promise<void> {
+export async function postChatComment(reply: SendableChatComment, threadId: string | null | undefined, restarting: boolean, modelReady: boolean): Promise<void> {
 	// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
 	if (!threadId) throw new Error('Cannot send reply: no chat');
 	const noun = reply.root_cid ? 'reply' : 'comment';
@@ -100,15 +94,10 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 	if (blocked) refuse(blocked, noun);
 	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 	const comment = { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid };
-	// Each press makes the comment a new id, so the post is known by what it says and where.
-	const key = JSON.stringify([threadId, seq, from_off, to_off, quote, note, root_user_message_id ?? null, root_cid ?? null]);
-	let body = unsettledPosts.get(key);
-	if (!body) {
-		const viewingDocument = viewingDocumentForThread(threadId);
-		const effort = get(reasoningEffort);
-		body = JSON.stringify({ input_id: reply.input_id ?? crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
-		unsettledPosts.set(key, body);
-	}
+	// The draft's own id names the input, so pressing again after a refusal or a lost response is the same input and the server stores one comment, never a second copy.
+	const viewingDocument = viewingDocumentForThread(threadId);
+	const effort = get(reasoningEffort);
+	const body = JSON.stringify({ input_id: reply.input_id, comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
 	let response: Response;
 	try {
 		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
@@ -116,7 +105,6 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 		});
 	} catch { refuse('notAccepted', noun); }
 	await adoptPosted(response, threadId, noun, 'sent');
-	unsettledPosts.delete(key);
 	// Counted once the server holds it: a refused press, or a press again after a lost answer, is not another comment.
 	emitComposerSend(threadId, '', 0, [comment]);
 }

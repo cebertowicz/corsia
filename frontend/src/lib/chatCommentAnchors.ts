@@ -11,6 +11,9 @@ export interface ChatComment extends ChatCommentAnchor {
 	root_cid?: string;
 }
 
+/** A comment or reply ready to post: it always carries its draft's client id, the one id its post is stored under. */
+export type SendableChatComment = ChatComment & { input_id: string };
+
 /**
  * A comment or reply send that was refused; its message is the sentence the person reads in the box.
  * `final` when no press of the box can send it (its chat is deleted), so the box offers no Retry.
@@ -52,7 +55,7 @@ export function chatTextPoint(body: HTMLElement, offset: number): [Node, number]
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
  * reject instead, so every thread the reply was typed in keeps it.
  */
-export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => Promise<void>, inputId?: string): Promise<void> {
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: SendableChatComment) => Promise<void>, inputId: string): Promise<void> {
 	if (!message || !comment || typeof message.seq !== 'number') {
 		throw new CommentSendRefused('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	}
