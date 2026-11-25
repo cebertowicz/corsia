@@ -5,8 +5,8 @@ Same fixtures as ``test_mailhost_send``: local TLS fakes, the real draft and sen
 
 from __future__ import annotations
 
-import json
 import threading
+from unittest.mock import AsyncMock
 from email import message_from_bytes, policy
 
 import pytest
@@ -20,7 +20,9 @@ from connections.mailhost.endpoints import Endpoints, Server
 from connections.mailhost.errors import (
     COPY_REFUSED, MESSAGE_REFUSED, PASSWORD_REFUSED, RECIPIENTS_REFUSED, SENDER_REFUSED, MailHostError,
 )
+from api.email_drafts import send_now
 from infra.database import get_db
+from tests.test_email_drafts_api import _artifact, _owner, _shown
 from tools import mailhost_backend
 from tools.google_email import EmailDraftTool
 from tools.mail_backends import NO_BACKEND, backend_for
@@ -44,6 +46,15 @@ async def _update(host, saved: dict, **fields) -> dict:
     return await _draft(host, draft_id=saved["draft_id"], **fields)
 
 
+async def _send_with_notice(host, saved, monkeypatch):
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr("events.delivery.deliver_to_thread", notice)
+    text = (host.workspace / saved["path"]).read_text()
+    out = await send_now(_artifact(saved), _shown(saved, text), _owner(host.thread))
+    notice.assert_awaited_once()
+    return out, notice.await_args
+
+
 async def test_drafts_and_sent_copies_carry_the_flags_a_mail_app_would_set(make_host) -> None:
     host = await make_host()
     await _send(host, await _draft(host))
@@ -60,18 +71,19 @@ async def test_replacing_a_draft_removes_its_earlier_host_copy(make_host) -> Non
     assert "note" not in second
 
 
-async def test_a_confirmed_send_removes_the_drafts_copy(make_host) -> None:
+async def test_a_confirmed_send_removes_the_drafts_copy(make_host, monkeypatch) -> None:
     host = await make_host(imap={"uidplus": True})
-    out = json.loads(await _send(host, await _draft(host)))
+    out, notice = await _send_with_notice(host, await _draft(host), monkeypatch)
+    assert out == {"state": "sent"}
     assert host.built.imap.kept("Drafts") == [] and len(host.built.imap.kept("Sent")) == 1
-    assert "draft_copy_note" not in out
+    assert "draft is still in the account's Drafts folder" not in notice.args[2]
 
 
 async def test_an_unconfirmed_send_leaves_the_drafts_copy(make_host) -> None:
     host = await make_host(imap={"uidplus": True}, smtp={"drop_after_data": True})
     saved = await _draft(host)
     out = await _send(host, saved)
-    assert out == f"Error: {mailhost_backend.EMAIL_UNCONFIRMED}"
+    assert out == {"state": "unconfirmed"}
     assert len(host.built.imap.kept("Drafts")) == 1
     assert not any(command.upper().startswith("STORE") for command in host.built.imap.uid_commands)
 
@@ -97,8 +109,9 @@ async def test_a_failed_removal_is_a_note_and_never_an_error(make_host, monkeypa
     monkeypatch.setattr(imap, "remove_copy", refuse)
     second = await _update(host, first, body="One o'clock instead?")
     assert second["note"] == mailhost_backend.EARLIER_LEFT
-    out = json.loads(await _send(host, second))
-    assert out["draft_copy_note"] == "The email was sent, but its draft is still in the account's Drafts folder."
+    out, notice = await _send_with_notice(host, second, monkeypatch)
+    assert out == {"state": "sent"}
+    assert "The email was sent, but its draft is still in the account's Drafts folder." in notice.args[2]
     assert len(host.built.smtp.sent) == 1
 
 
@@ -115,11 +128,13 @@ async def test_a_refused_append_names_the_copy_refused_cause(make_host) -> None:
     ({"refused_recipients": {"pat@example.com", "lee@example.com"}}, RECIPIENTS_REFUSED),
     ({"refuse_data": True}, MESSAGE_REFUSED),
 ])
-async def test_each_smtp_refusal_has_its_own_cause_and_reopens_the_draft(make_host, tuning, cause) -> None:
+async def test_each_smtp_refusal_has_its_own_cause_and_reopens_the_draft(make_host, tuning, cause, monkeypatch) -> None:
     host = await make_host(smtp=tuning)
     saved = await _draft(host)
-    out = await _send(host, saved)
-    assert out == f"Error: Not sent: {MailHostError(cause, host=_host_name(host))}"
+    out, notice = await _send_with_notice(host, saved, monkeypatch)
+    reason = str(MailHostError(cause, host=_host_name(host)))
+    assert out == {"state": "failed", "reason": reason}
+    assert reason in notice.args[2]
     assert host.built.smtp.sent == []
     assert get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()[0] == "open"
 

@@ -52,7 +52,7 @@ async def test_a_reply_threads_under_the_message_defaults_to_reply_to_and_prefix
     saved = await _draft(host, to=[], cc=[], subject="Lunch plans", reply_to_message_id=_id(host))
     document = (host.workspace / saved["path"]).read_text()
     assert "To: team@example.com" in document and "Subject: Re: Lunch plans" in document
-    assert not (await _send(host, saved)).startswith("Error")
+    assert await _send(host, saved) == {"state": "sent"}
     [(recipients, data)] = host.built.smtp.sent
     assert recipients == ["team@example.com"]
     copies = [_parsed(raw) for folder, raw in host.built.imap.appended if folder == "Sent"]
@@ -102,7 +102,7 @@ async def test_a_reply_with_no_recipient_anywhere_is_refused(make_host) -> None:
 async def test_a_host_that_advertises_its_sent_folder_gets_the_copy_there(make_host) -> None:
     host = await make_host(imap={"folders": {"INBOX": "", "Drafts": "\\Drafts", "Sent Messages": "\\Sent"}})
     saved = await _draft(host)
-    assert not (await _send(host, saved)).startswith("Error")
+    assert await _send(host, saved) == {"state": "sent"}
     assert [folder for folder, _ in host.built.imap.appended] == ["Drafts", "Sent Messages"]
 
 
@@ -120,7 +120,7 @@ async def test_a_host_that_shows_no_such_folder_still_sends_and_still_saves_the_
     with caplog.at_level(logging.WARNING):
         saved = await _draft(host)
         out = await _send(host, saved)
-    assert not out.startswith("Error") and len(host.built.smtp.sent) == 1 and host.built.imap.appended == []
+    assert out == {"state": "sent"} and len(host.built.smtp.sent) == 1 and host.built.imap.appended == []
     assert "shows no sent folder" in caplog.text and "shows no drafts folder" in caplog.text
 
 

@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 import infra.config as config
-from api.email_drafts import draft_context
+from api.email_drafts import SendNow, draft_context, target_version
 from infra.database import get_db
 from infra.failure_reference import REFERENCE
 from registry.service import register_write
@@ -27,7 +27,7 @@ from tests.test_google_email import (  # noqa: F401  (fixtures)
     client_file,
     conductor,
     google,
-    mail,
+    mail as mail,
 )
 
 
@@ -58,6 +58,12 @@ UNSENT = _email("m-120", "Sam Lee <sam@example.com>", 1793200000000, "Half-writt
 
 def _owner(thread_id: str) -> dict:
     return {"id": get_db().execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()["user_id"]}
+
+
+def _shown(saved: dict, text: str, **fields) -> SendNow:
+    """Send now as the view sends it: the text on screen and the stored target its last read returned."""
+    row = get_db().execute("SELECT target_json FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()
+    return SendNow(text=text, target_version=target_version(dict(row)), **fields)
 
 
 def _artifact(saved: dict) -> str:
@@ -93,6 +99,7 @@ async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answer
     [read] = seen
     assert str(read.url).split("?")[0] == f"{GMAIL}/threads/t-9" and read.url.params["format"] == "full"
     assert context["status"] == "ready" and context["reason"] is None and "unreadable" not in context
+    assert isinstance(context["read_at"], str)
     assert [m["id"] for m in context["conversation"]] == ["m-110", "m-100", "m-090"]
     assert context["replied_to"] == "m-100"
     assert [m["body"] for m in context["conversation"]] == ["I can come too.", "Noon or one?", "Lunch this week?"]
@@ -114,6 +121,8 @@ async def test_a_failed_thread_read_is_the_named_unreadable_state(mail):
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert (context["status"], context["reason"], context["conversation"]) == ("error", "unreadable", [])
     assert context["replied_to"] == "m-100"
+    # A read that showed the person nothing must not let Send now skip emails newer than the agent's own read.
+    assert context["read_at"] is None
     assert REFERENCE.match(context["reference"])
 
 
@@ -335,14 +344,13 @@ async def test_only_the_draft_record_makes_a_file_an_email_draft(mail):
     copy = path.with_name("copy.md")
     copy.write_text(path.read_text(), encoding="utf-8")
     assert read_document(str(copy), user, None, mail.thread)["email_draft"] is None
-    # Once sent or discarded it is history, kept in the format it was saved in, so it opens as that file.
+    # Sent history remains an email view and opens read-only.
     db = get_db()
     try:
         db.execute("UPDATE action_drafts SET state='sent' WHERE id=?", (saved["draft_id"],))
         db.commit()
     finally:
         db.close()
-    assert read_document(str(path), user, None, mail.thread)["email_draft"] is None
-    with pytest.raises(HTTPException) as sent:
-        await draft_context(_artifact(saved), _owner(mail.thread))
-    assert sent.value.status_code == 404
+    loaded = read_document(str(path), user, None, mail.thread)
+    assert loaded["email_draft"]["state"] == "sent" and loaded["writable"] is False
+    assert (await draft_context(_artifact(saved), _owner(mail.thread)))["state"] == "sent"

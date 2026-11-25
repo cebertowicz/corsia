@@ -6,24 +6,29 @@ import logging
 from typing import Any
 
 from connections.connected_accounts import ConnectedAccountError
-from connections.microsoft import calendar, client, files, mail
+from connections.microsoft import calendar, files, mail
 from connections.microsoft.mail import thread_key
 from connections.microsoft.provider import MICROSOFT
 from connections.microsoft.errors import MicrosoftError
 from connections.mail import email_screen
 from connections.mail.email_document import (
-    EMAIL_DRAFT_FOLDER, DraftRefused, addresses, compose_document, parse_document, text_arg,
+    EMAIL_DRAFT_FOLDER, DraftRefused, addresses, compose_document, text_arg,
 )
 from infra.db_async import run_in_db
-from tools.action_delivery import deliver_claimed
 from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft
-from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.email_read import marked_message
 from tools.microsoft_account import _designated
 
 log = logging.getLogger(__name__)
+MAIL_AFTER_DRAFT = (
+    "Show the person the draft (link its path) and end your turn. They send it themselves with "
+    "Send now on the draft, or tell you what to change; you have no tool that sends email. If "
+    "they ask you in chat to send it, tell them to press Send now on the draft. If they ask for "
+    "changes, save again with microsoft_mail_draft (same draft_id) and show them the new version. "
+    "You get a notice when they send it or choose Don't send."
+)
 ACCOUNT_PARAM = {"type": "string", "description": "The Microsoft account_id returned by microsoft_status."}
 
 
@@ -173,7 +178,7 @@ class MicrosoftFilesUploadTool(_FilesTool):
 # Reviewed-draft paths, writes, and account binding are owned by tools.reviewed_drafts.
 
 class MicrosoftMailDraftTool(Tool):
-    """Save a locally reviewed Microsoft mail draft before its separate send call."""
+    """Save a Microsoft mail draft the person reviews and sends themselves with Send now."""
     self_describing_errors = True
     name = "microsoft_mail_draft"
     description = "Save a Microsoft email draft for the person to review before sending."
@@ -196,54 +201,6 @@ class MicrosoftMailDraftTool(Tool):
                 description="Microsoft email draft; the person reviews it before anything is sent.",
             )
             row = await run_in_db(open_draft, thread_id, saved["draft_id"], "email")
-            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "next": "Show the person this draft and wait for their reply before calling microsoft_mail_send."})
+            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "next": MAIL_AFTER_DRAFT})
         except (MicrosoftError, ConnectedAccountError, DraftRefused, DraftStorageRefused, DraftError) as exc:
-            return _error(exc)
-
-
-MAIL_STILL_SENDING = "Not sent: an earlier Microsoft send did not finish, so it may already have gone out. Check the person's Sent mail before saving a new draft."
-MAIL_UNCONFIRMED = "Microsoft did not confirm the send, so the email may have gone out. Do not send this draft again: check the person's Sent mail first."
-
-
-class MicrosoftMailSendTool(Tool):
-    """Send only the person-reviewed draft revision that action_gate approves."""
-    self_describing_errors = True
-    name = "microsoft_mail_send"
-    description = "Send a reviewed Microsoft mail draft only after the person's later reply."
-    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "draft_id", "revision"], "properties": {"account_id": ACCOUNT_PARAM, "draft_id": {"type": "string"}, "revision": {"type": "string"}}}
-
-    async def execute(self, **kwargs: Any) -> str:
-        draft_id, revision = kwargs.get("draft_id"), kwargs.get("revision")
-        if not isinstance(draft_id, str) or not isinstance(revision, str):
-            return "Error: Pass the draft_id and revision microsoft_mail_draft returned."
-        verdict = await check_action("email", draft_id, revision, draft_tool="microsoft_mail_draft")
-        if not isinstance(verdict, Approved):
-            return f"Error: {verdict.text}"
-        try:
-            target = json.loads(verdict.draft.get("target_json") or "{}")
-            if kwargs.get("account_id") != target.get("account_id"):
-                return "Error: account_id does not match the draft."
-            account = await _account(kwargs)
-            row = await run_in_db(_visible_account, kwargs.get("account_id"), kwargs.get("_thread_id"))
-            parsed = parse_document(verdict.data.decode("utf-8"))
-            if parsed is None:
-                return "Error: Not sent: the draft document is invalid."
-            if parsed["from"] is not None and parsed["from"].lower() != str(row["address"]).lower():
-                return "Error: Not sent: the From line does not match the Microsoft account this draft was written from."
-            return await deliver_claimed(
-                draft_id,
-                acquire=lambda: client.access_token(account),
-                provider_errors=(MicrosoftError,),
-                send=lambda token: mail.send(account, parsed["to"], parsed["subject"], parsed["body"], cc=parsed["cc"], token=token),
-                result_id=lambda result: result,
-                success=lambda _result, _external_id: json.dumps({"sent": True, "account_id": account}),
-                sign_in_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft sign-in is unavailable. Try again later.",
-                request_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft could not send this request.",
-                never_sent=lambda exc: isinstance(exc, MicrosoftError) and exc.never_sent,
-                still_sending=MAIL_STILL_SENDING,
-                claim_error="Not sent: could not check the draft. Try again.",
-                unconfirmed=MAIL_UNCONFIRMED,
-                label="microsoft_mail_send",
-            )
-        except (MicrosoftError, ConnectedAccountError, DraftError) as exc:
             return _error(exc)
