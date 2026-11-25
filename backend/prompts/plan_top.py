@@ -4,6 +4,8 @@ by someone else."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from prompts.plan_tools import in_later
 
 #: What each listed number means.
@@ -59,7 +61,7 @@ def top_more(more: int, later: int) -> str:
 
 def top_landing(
     place: int, node: str, revision: int, *, last: bool,
-    in_later: bool = False, moved: list[str] = (), cap: int = 0,
+    in_later: bool = False, moved: Sequence[str] = (), cap: int = 0,
 ) -> str:
     """The landing line an owner's own top-level add or insert gets."""
     landed = (_TOP_LANDED_LAST if last else _TOP_LANDED_AT).format(place=place)

@@ -19,6 +19,7 @@ one passive line (``tell_owner_added``, ``tell_owner_moved``) through
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -135,7 +136,7 @@ def place_of(db, plan_id: str, node_id: str) -> tuple[int, int] | None:
 
 
 def placing_reply(db, plan_row, node_id: str, *, actor, inserted: bool,
-                  moved: list[str] = ()) -> dict[str, Any] | None:
+                  moved: Sequence[str] = ()) -> dict[str, Any] | None:
     """The list and landing line an owner's own top-level add or insert gets, or None.
 
     ``moved`` holds the items the add put past the cap (``plans.plan_cap``): the
