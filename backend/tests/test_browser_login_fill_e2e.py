@@ -26,7 +26,7 @@ import pytest
 
 from host_access import (
     browser_cdp, browser_control, browser_fill_marks, browser_login_fill as fill, browser_login_page as page,
-    browser_session_commands, browser_step_lifecycle as lifecycle,
+    browser_saved_fills, browser_session_commands, browser_step_lifecycle as lifecycle,
 )
 from host_access.browser_sessions import BrowserSessionOwner
 from infra import saved_login_fills, saved_logins
@@ -314,7 +314,7 @@ async def test_a_clean_sign_in_fills_submits_and_reports_success(browser, monkey
             assert posts == [{"user": USER, "matched": True}]
             assert saved_logins.get_login(login_id).last_used_by_thread_id == browser.thread
             # From the fill on, the whole session runs only the saved-sign-in commands, on every page.
-            assert browser_session_commands.SAVED_FILL_SESSION_REFUSED in await _agent(browser, "eval", "document.title")
+            assert browser_saved_fills.SAVED_FILL_SESSION_REFUSED in await _agent(browser, "eval", "document.title")
             await _after_fill_reads(browser)
         finally:
             await browser.owner.shutdown()
