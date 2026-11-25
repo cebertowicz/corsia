@@ -166,3 +166,22 @@ def test_the_file_name_is_kept_when_the_document_has_no_title(tmp_path):
     db.execute("UPDATE artifact_identities SET title='Gone.md', path=? WHERE id='d1'", (str(tmp_path / 'Gone.md'),))
     [row] = document_rows(db, 'u1')
     assert row['title'] == 'Gone.md'
+
+
+def test_the_heading_is_read_once_per_file_version(tmp_path, monkeypatch):
+    """Listing the queue pays the head read once per document version, not once per poll."""
+    from doceditor import activity_reply_rows
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='# First title\n\nText.\n')
+    reads = []
+    real = activity_reply_rows._read_first_heading
+    monkeypatch.setattr(activity_reply_rows, '_read_first_heading',
+                        lambda path: (reads.append(path), real(path))[1])
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'First title'
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'First title' and len(reads) == 1
+    (tmp_path / 'Onboarding notes.md').write_text('# Retitled, newly edited\n\nText.\n')
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Retitled, newly edited' and len(reads) == 2
