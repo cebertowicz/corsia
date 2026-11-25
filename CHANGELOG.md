@@ -23,7 +23,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
-- Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it, and agents can no longer send email themselves, so telling an agent "send it" in chat no longer sends.
+- Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it.
+- Agents send a saved email, invite or text draft themselves, without waiting for a reply from you in chat; a draft changed since it was saved still isn't sent.
 
 ## v0.5.0 — Activity as your to-do list, plans in the order you set, steadier comments and a safer shared browser
 
