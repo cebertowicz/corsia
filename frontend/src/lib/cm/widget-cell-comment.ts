@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
-import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
-import { CELL_EDITOR, cellSource, openCellState, type OpenCell } from './widget-cell-state';
+import { blockRange, cellElement, drawnTableAt, widgetOf } from './widget-blocks';
+import { CELL_EDITOR, cellAtSpan, cellSource, openCellState, type OpenCell } from './widget-cell-state';
 import { tableCells, widgetCommentLabel } from './widget-cells';
 import { imageOnlyCell } from './widget-cell-images';
 import { imageContext } from './markdown-image';
@@ -96,21 +96,35 @@ export const textlessCellKey = (state: EditorState) => {
 };
 
 /**
- * The selection the Comment offer is raised for while the open cell is textless; null otherwise. For an empty cell it is the
+ * The selection the Comment offer is raised for while a cell is textless; null otherwise. The cell is the open one, or, in
+ * Reading, which opens no input, the drawn cell `drawn`. For an empty cell it is the
  * whole cell, placed on that cell: centred vertically in it, with its right end at the cell's right edge (beside or below the
  * table when the cell is too narrow). For a cell drawing only images it is those images' markdown, placed beside or below the
  * table so it covers none of them. Its one writer is the editor's own selection flow (`selectionOffer`), which raises it for a
- * caret there and clears it once the cell has text; the widget comment flow reads only selections drawn inside a widget.
+ * caret there and clears it once the cell has text; the widget comment flow reads only selections drawn inside a widget, and
+ * Reading's tap on a drawn cell asks here with that cell. Both paths use `selectionIn` as the sole source mapper.
  */
-export function textlessCellSelection(view: EditorView): WidgetSelection | null {
-	const cell = textlessOpenCell(view.state);
-	const widget = cell && drawnTableAt(view, cell.tableFrom);
-	const td = widget && cellElement(widget, cell);
-	if (!widget || !td) return null;
-	const images = openCellImages(view.state, cell), { state } = view;
+export function textlessCellSelection(view: EditorView, drawn?: HTMLTableCellElement): WidgetSelection | null {
+	const { state } = view;
+	let cell: OpenCell | null, widget: HTMLElement | null, td: HTMLTableCellElement | null;
+	if (drawn) {
+		widget = widgetOf(view, drawn);
+		const block = widget && blockRange(view, widget);
+		// The drawn cell's source span, not its rendered text: an empty cell has none to read, and an image-only one is textless.
+		const span = widget && block && tableCells(state.sliceDoc(block.from, block.to)).find((candidate) => cellElement(widget!, candidate) === drawn);
+		cell = block && span ? cellAtSpan(block.from, span) : null;
+		if (cell && cellSource(state, cell).trim() !== '' && !openCellImages(state, cell)) cell = null;
+		td = drawn;
+	} else {
+		cell = textlessOpenCell(state);
+		widget = cell && drawnTableAt(view, cell.tableFrom);
+		td = widget && cell ? cellElement(widget, cell) : null;
+	}
+	if (!cell || !widget || !td) return null;
+	const images = openCellImages(state, cell);
 	let raised: WidgetSelection | null;
 	if (images) {
-		// The open cell's editor stands in for its drawn images, so they are read from its source by the same test a press beside
+		// The cell's source stands in for its drawn images, so they are read from it by the same test a press beside
 		// the drawn images uses (`imageOnlyCell`), and labelled by the one shared function.
 		const { from, to } = images, text = state.sliceDoc(from, to);
 		raised = { from, to, text, top: 0, left: 0, above: true, inWidget: true, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: () => rowsBox(widget, [td]) };

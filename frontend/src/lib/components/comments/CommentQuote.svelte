@@ -8,6 +8,6 @@
 <style>
 	.quote { color: var(--text-secondary); font-size: var(--text-caption); font-style: italic; }
 	.quote.label { font-style: normal; }
-	.quote.bubble { color: var(--accent-on-fill); font-size: var(--text-callout); line-height: 1.5; }
+	.quote.bubble { color: var(--accent-on-fill); font-size: var(--text-callout); line-height: var(--lh-normal); }
 	.quote.bubble :global(.quote-line) { border-left-color: var(--accent-on-fill); }
 </style>

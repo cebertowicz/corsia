@@ -185,8 +185,9 @@ def _register_automation_tools(agent: CORSIAAgent) -> None:
     """Register this thread's schedules and the event rules it writes."""
     from tools.automations import AutomationCancelTool, AutomationListTool, AutomationScheduleTool
     from tools.event_rules import EventRulesTool
+    from tools.attention_rank import AttentionRankTool
 
-    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool()):
+    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool(), AttentionRankTool()):
         agent.tools.register(tool)
 
 

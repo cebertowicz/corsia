@@ -10,7 +10,7 @@ import { CELL_EDITOR } from './widget-cell-state';
 import { cellClicked } from './widget-cell-click';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
-import { paintOpenCell } from './widget-cell-comment';
+import { paintOpenCell, textlessCellSelection } from './widget-cell-comment';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -48,6 +48,12 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		};
 		private frame = 0;
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
+		/**
+		 * The selection moved. While the editor holds focus it is read at once, not a frame later: the editor's own focus sync runs
+		 * 10 ms after it takes focus and, with the selection in a widget, cycles focus and writes its caret over it, so a read a frame
+		 * late can come after the selection is gone (a long press on a table cell's word).
+		 */
+		private readonly moved = () => { if (this.view.hasFocus) this.read(); this.listen(); };
 		// What a click landed on, read before the cell editor's own click opens the cell and puts its editor in place of the
 		// drawn text the click hit: a click on a comment drawn in a cell opens that comment and the cell both.
 		private landed: { event: MouseEvent; widget: HTMLElement | null; ids: string[]; opener: HTMLElement | null } | null = null;
@@ -84,8 +90,20 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const widget = target && widgetOf(this.view, target);
 			// A tap that edits a cell is the cell editor's: selecting the cell's text here would take the caret off its editor.
 			if (!widget || target.closest('a') || target.closest(CELL_EDITOR) || cellClicked(this.view, target, { x: event.clientX, y: event.clientY })) return;
-			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
+			const cell = widget.matches(TABLE) ? target.closest<HTMLTableCellElement>('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
+			if (cell && !this.view.state.facet(EditorView.editable)) {
+				const textless = textlessCellSelection(this.view, cell);
+				if (textless) {
+					const range = document.createRange();
+					range.selectNodeContents(cell);
+					range.collapse(true);
+					selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
+					this.raised = true;
+					hooks.onSelect(textless);
+					return;
+				}
+			}
 			const range = document.createRange();
 			if (cell) range.selectNodeContents(cell); else range.selectNodeContents(widget);
 			selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
@@ -158,7 +176,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			view.dom.addEventListener('pointerdown', this.down, true);
 			view.dom.addEventListener('pointermove', this.move, true);
 			view.dom.addEventListener('mousedown', this.press, true);
-			document.addEventListener('selectionchange', this.listen);
+			document.addEventListener('selectionchange', this.moved);
 			view.dom.addEventListener('mouseup', this.listen);
 			view.dom.addEventListener('click', this.land, true);
 			view.dom.addEventListener('click', this.click);
@@ -177,7 +195,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 
 		destroy() {
 			cancelAnimationFrame(this.frame);
-			document.removeEventListener('selectionchange', this.listen);
+			document.removeEventListener('selectionchange', this.moved);
 			this.view.dom.removeEventListener('mouseup', this.listen);
 			this.view.dom.removeEventListener('pointerdown', this.down, true);
 			this.view.dom.removeEventListener('pointermove', this.move, true);

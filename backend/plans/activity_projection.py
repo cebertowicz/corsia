@@ -58,6 +58,39 @@ def _reachable_plan_ids(plans: dict[str, dict], roots: list[str]) -> set[str]:
         pending.extend(children.get(plan_id, []))
     return found
 
+def _stillness(
+    plan: dict,
+    leaves: list[dict],
+    reduced: dict[str, activity_reducer.ReducedNode],
+    counts: dict[str, int],
+) -> dict | None:
+    """``not_moving.read`` over compact rows: Later leaves are skipped and come off the counts."""
+    rows = [row for row in leaves if not row["later"]]
+    above = [reduced[str(row["id"])] for row in rows]
+    users = sum(
+        item.bucket == "pending_ready" and row["assignee"] == "user"
+        for row, item in zip(rows, above)
+    )
+    deadlines: list[tuple[str, str, dict[str, str] | None]] = [
+        (item.wait_deadline, item.wait_deadline_latest, None)
+        for item in above
+        if item.bucket == "waiting"
+        and item.wait_deadline is not None
+        and item.wait_deadline_latest is not None
+    ]
+    return not_moving.read_from_facts(
+        not_moving.above_cut(counts, [reduced[str(row["id"])].bucket for row in leaves if row["later"]]),
+        user_ready=users,
+        user_blocked=sum(item.bucket == "blocked" and item.user_blocker for item in above),
+        paused_by_user=sum(
+            item.bucket == "paused" and (plan["state"] == "paused" or item.user_pause)
+            for item in above
+        ),
+        wait_deadlines=deadlines,
+        child_running=any(item.child_active for item in above),
+    )
+
+
 def _reduce_plan(
     plan: dict,
     rows: list[dict],
@@ -91,39 +124,10 @@ def _reduce_plan(
     leaves, parents, counts = activity_reducer.distribution_counts(rows, reduced)
     # The rows are the open work; the settled leaves are the plan's stored counters (#731 S2-2).
     counts = {**counts, "done": counts["done"] + plan["top_done"], "failed": counts["failed"] + plan["top_failed"]}
-    user_ready = sum(
-        reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user"
-        for row in leaves
-    )
-    user_blocked = sum(
-        reduced[str(row["id"])].bucket == "blocked"
-        and reduced[str(row["id"])].user_blocker
-        for row in leaves
-    )
-    paused_by_user = sum(
-        reduced[str(row["id"])].bucket == "paused"
-        and (plan["state"] == "paused" or reduced[str(row["id"])].user_pause)
-        for row in leaves
-    )
-    deadlines = [
-        (item.wait_deadline, item.wait_deadline_latest, None)
-        for row in leaves
-        if (item := reduced[str(row["id"])]).bucket == "waiting"
-        and item.wait_deadline is not None
-        and item.wait_deadline_latest is not None
-    ]
-    still = not_moving.read_from_facts(
-        counts,
-        user_ready=user_ready,
-        user_blocked=user_blocked,
-        paused_by_user=paused_by_user,
-        wait_deadlines=deadlines,
-        child_running=any(reduced[str(row["id"])].child_active for row in leaves),
-    )
     display = operator_plan_display.display_from_facts(
         plan,
         counts,
-        still=still,
+        still=_stillness(plan, leaves, reduced, counts),
         working=any(
             reduced[str(row["id"])].label_key == "working"
             and row["assignee"] != "user"

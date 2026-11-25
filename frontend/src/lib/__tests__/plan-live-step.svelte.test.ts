@@ -80,11 +80,12 @@ afterEach(() => {
 /** The step's first try, three minutes before the tests' clock: what the server counts its open time from. */
 const firstTry = { id: 'try-1', ordinal: 1, executor: { thread_id: 'worker', label: 'Worker' }, requirements_revision: 1, selected_at: THREE_MIN_AGO, released_at: null, release_reason: null };
 
+/** A step waiting on its worker, which the server reads Working while the worker is on it. */
 function delegated(): OperatorNode {
 	const base = operatorNode({ id: 'delegated', title: 'Delegated step' });
 	return {
 		...base,
-		display: { label_key: 'waiting', tone_key: 'waiting' },
+		display: { label_key: 'working', tone_key: 'active' },
 		execution: { ...base.execution, condition: 'waiting', attempts: [firstTry] },
 		child: {
 			available: true, plan_id: 'child-plan', thread_id: 'worker',
@@ -187,6 +188,17 @@ describe('plan item live step (AS14)', () => {
 		flushSync();
 		expect(subline('Delegated step')).toBe(`Working 5 min · ${READING}`);
 		expect(liveStepElement('Delegated step')?.classList.contains('dimmed')).toBe(true);
+	});
+
+	it('shows no worker step on a delegated step the server reads Waiting, though its worker runs', () => {
+		// The worker's Turn is on other work while this step's rows wait.
+		const parked = { ...delegated(), display: { label_key: 'waiting', tone_key: 'waiting' } } as OperatorNode;
+		render([parked]);
+		startWorker();
+
+		expect(liveStepElement('Delegated step')).toBeNull();
+		expect(subline('Delegated step') ?? '').not.toContain('Working');
+		expect(spinning('Delegated step')).toBe(false);
 	});
 
 	it('reads Working, undimmed, before the Turn\'s first tool', () => {

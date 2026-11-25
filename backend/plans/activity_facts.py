@@ -14,9 +14,9 @@ from plans import (
 )
 
 
-_COMPACT_NODE_COLUMNS = """n.id,n.plan_id,n.parent_id,n.order_key,n.kind,n.workflow_step,n.state,
+_COMPACT_NODE_COLUMNS = """n.id,n.plan_id,n.parent_id,n.commitment_id,n.order_key,n.kind,n.workflow_step,n.state,
     n.assignee,n.spawned_thread_id,n.executor_thread_id,n.owner_thread_id,
-    n.requirements_revision,n.updated_at,p.owner_kind,p.owner_id"""
+    n.requirements_revision,n.updated_at,n.later,p.owner_kind,p.owner_id"""
 
 
 def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:

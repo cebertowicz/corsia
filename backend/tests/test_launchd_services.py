@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import plistlib
 import shutil
@@ -77,10 +78,17 @@ def test_service_plist_pins_python_port_workdir(tmp_path):
     assert "CORSIA_ENV" not in plist["EnvironmentVariables"]
     assert plist["KeepAlive"] is True
     assert plist["RunAtLoad"] is True
-    # The log lives with this instance's state so two checkouts on one machine
-    # never write to, truncate, or tail one shared file.
-    assert plist["StandardOutPath"] == str(tmp_path / "state" / "backend.log")
-    assert plist["StandardErrorPath"] == str(tmp_path / "state" / "backend.log")
+    # Each instance gets its own folder under ~/Library/Logs on macOS.
+    state_root = tmp_path / "state"
+    if sys.platform == "darwin":
+        key = hashlib.sha256(str(state_root.resolve()).encode()).hexdigest()[:12]
+        log_dir = tmp_path / "home" / "Library" / "Logs" / "CORSIA" / key
+        assert log_dir.is_dir()
+        log_path = log_dir / "backend.log"
+    else:
+        log_path = state_root / "backend.log"
+    assert plist["StandardOutPath"] == str(log_path)
+    assert plist["StandardErrorPath"] == str(log_path)
 
 
 def test_script_operates_only_the_checkout_it_lives_in(tmp_path):
@@ -629,7 +637,12 @@ def test_noncanonical_logs_remain_read_only(tmp_path):
     )
 
     assert proc.returncode == 0, proc.stderr
-    assert trace.read_text().strip() == f"-f {state_root}/backend.log"
+    if sys.platform == "darwin":
+        key = hashlib.sha256(str(state_root.resolve()).encode()).hexdigest()[:12]
+        log_path = home / "Library" / "Logs" / "CORSIA" / key / "backend.log"
+    else:
+        log_path = state_root / "backend.log"
+    assert trace.read_text().strip() == f"-f {log_path}"
     assert "lifecycle mutation" not in proc.stderr.lower()
 
 

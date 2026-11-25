@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from infra.failure_reference import REFERENCE
+from infra.log_files import nofollow_log_opener
 
 TAIL_BYTES = 2 * 1024 * 1024
 MAX_LINES = 60
@@ -31,7 +32,7 @@ _CREDENTIAL = re.compile(
 def _tail(path: Path) -> list[str] | None:
     """The log's last lines, or None when it couldn't be read."""
     try:
-        with path.open("rb") as log:
+        with open(path, "rb", opener=nofollow_log_opener) as log:
             log.seek(0, 2)
             size = log.tell()
             log.seek(max(0, size - TAIL_BYTES))

@@ -317,9 +317,7 @@ fn local_plan_configured(home: &Path, app_dir: &Path) -> bool {
 }
 
 fn service_log_path(app_dir: &Path) -> Result<PathBuf, String> {
-    Ok(app_paths::state_dir_for(app_dir)?
-        .join("logs")
-        .join("service.log"))
+    app_paths::log_path(app_paths::home_for_app_dir(app_dir)?, &app_paths::state_dir_for(app_dir)?, "service.log")
 }
 
 fn preferred_port(recorded: Option<u16>) -> u16 {
@@ -2414,7 +2412,7 @@ fn generated_context<R: tauri::Runtime>() -> tauri::Context<R> {
 }
 
 /// The shell's own log file in the app log folder (`~/Library/Logs/<identifier>/desktop-shell.log`). The background
-/// service logs to its own `service.log` under the state folder.
+/// service logs to its own `service.log` for the selected state folder.
 const SHELL_LOG_FILE: &str = "desktop-shell";
 
 /// Everything goes to stdout, as it always has. The shell's own lines (not its libraries') also go to `file`, so a

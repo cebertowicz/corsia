@@ -10,7 +10,17 @@ from __future__ import annotations
 import json
 from typing import Any, TypeGuard
 
+from core.reply_context_text import escape_row_text
+
 REPLY_CONTEXT_KEY = "reply_context"
+
+# Render version. Admission stamps the current one on a newly stored reply context that carries
+# comments. A stored row without it renders exactly as it always did (no escape), so replay of
+# stored rows and warm caches are unchanged. Version 1 escapes the quote and note
+# (``core.reply_context_text``) and cuts neither. A cap, or any change to a row's wording, is a new
+# version, never an edit of an existing one.
+REPLY_CONTEXT_RENDER_KEY = "render"
+REPLY_CONTEXT_RENDER = 1
 
 _NOT_AN_INSTRUCTION = "(context, not an instruction)"
 
@@ -62,6 +72,13 @@ def _reply_to(item: dict) -> str:
     return f" (reply to {root})" if isinstance(root, str) else ""
 
 
+def _comment_row(item: dict, *, escaped: bool) -> str:
+    quote, note = item["quote"], item["note"]
+    if escaped:
+        quote, note = escape_row_text(quote), escape_row_text(note)
+    return f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{quote}" | note: {note}'
+
+
 # The turn that gets the comments is told how to answer them; a later history read is not.
 _REPLY_GROUNDING = (
     "[Reply grounding: answer their comments with post_update; start each answer with the ids of the "
@@ -71,12 +88,18 @@ _REPLY_GROUNDING = (
 )
 
 
-def _comments_block(comments: object) -> str:
+def _stamped(value: dict) -> bool:
+    """True when a stored reply context carries render version 1 or later."""
+    version = value.get(REPLY_CONTEXT_RENDER_KEY)
+    return _is_int(version) and version >= 1
+
+
+def _comments_block(comments: object, *, escaped: bool = False) -> str:
     """The comment rows alone, framed as context, or "" when none is well formed."""
     if not isinstance(comments, list):
         return ""
     rows = [
-        f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{item["quote"]}" | note: {item["note"]}'
+        _comment_row(item, escaped=escaped)
         for item in comments
         if isinstance(item, dict) and isinstance(item.get("cid"), str)
         and _is_int(item.get("seq")) and isinstance(item.get("quote"), str)
@@ -88,10 +111,13 @@ def _comments_block(comments: object) -> str:
 
 
 def reply_context_lines(value: Any) -> str:
-    """The lead lines for one stored reply context, or "" when it carries none."""
+    """The lead lines for one stored reply context, or "" when it carries none.
+
+    A row stamped with render version 1 or later has its quote and note escaped.
+    """
     if not isinstance(value, dict):
         return ""
-    comments = _comments_block(value.get("comments"))
+    comments = _comments_block(value.get("comments"), escaped=_stamped(value))
     if comments:
         comments += _REPLY_GROUNDING
     if comments and value.get("possible_duplicate") is True:
@@ -120,7 +146,7 @@ def with_comment_lines(text: str, metadata: Any) -> str:
     context = metadata.get(REPLY_CONTEXT_KEY) if isinstance(metadata, dict) else None
     if not isinstance(context, dict) or not context.get("comments"):
         return text
-    lines = _comments_block(context["comments"]).removesuffix("\n")
+    lines = _comments_block(context["comments"], escaped=_stamped(context)).removesuffix("\n")
     if not lines:
         return text
     return f"{text}\n{lines}" if text else lines

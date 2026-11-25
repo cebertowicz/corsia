@@ -16,6 +16,7 @@ from automation.continuation.sources.later_review import LaterReviewSource
 from plans import later_review, lifecycle, service, status, status_cursor, wake_currency
 from plans.errors import PlanError
 from plans.plan_wake import LATER_REVIEW
+from prompts.later_review import LATER_REVIEW_MOVES
 from tests.plan_close_next_helpers import (
     OWNER, owner_plan, plan_update, revision, row, task,
 )
@@ -343,7 +344,7 @@ def test_the_wake_names_the_three_moves_it_offers(db):
     assert "edit later=false" in content and "reorder" in content and "close_node" in content
     assert "Not before the launch cut" in content
     # No dated Later row shows no date, and a dated one does.
-    assert " until " not in content
+    assert " until " not in content.replace(LATER_REVIEW_MOVES, "")
     dated = task(db, plan.id, "Dated set-aside")
     plan_update(db, plan.id, "arm_watch", {
         "node_id": dated.id, "expected_revision": revision(db, dated.id),

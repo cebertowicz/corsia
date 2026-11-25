@@ -15,7 +15,7 @@ export function openSuggestionCount(comments: DocComment[]): number {
  */
 export async function acceptAllOpen(
 	target: DocViewerTarget | null, artifactId: string,
-	hooks: { onText: (text: string) => void; onDocumentChanged: () => void },
+	hooks: { onText: (text: string, history?: { eventId: string; ids: string[] }) => void; onDocumentChanged: () => void },
 ): Promise<number> {
 	if (!target || !await flushDraft(target)) throw new Error("Couldn't save the document before accepting the suggestions");
 	let accepted = 0;
@@ -25,7 +25,8 @@ export async function acceptAllOpen(
 		// Nothing to accept comes back with a null text and revision: the screen stays as it is.
 		if (typeof result.text === 'string' && typeof result.revision === 'string') {
 			seedDraft(target, result.text, result.revision);
-			hooks.onText(result.text);
+			if (result.decision_event_id && result.accepted?.length) hooks.onText(result.text, { eventId: result.decision_event_id, ids: result.accepted });
+			else hooks.onText(result.text);
 		}
 	} catch (error) {
 		// An edit applied but not recorded is in the saved file: the shown document is read again with its comments.

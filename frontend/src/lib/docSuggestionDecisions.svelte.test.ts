@@ -35,6 +35,26 @@ describe('a suggestion decision the server applied or refused', () => {
 	});
 	afterEach(() => { vi.clearAllMocks(); error.mockRestore(); });
 
+	it('passes the receipt for one accepted suggestion to the editor', async () => {
+		api.decideSuggestion.mockResolvedValue({ text: 'accepted text', revision: 'r2', comment: { id: 'c1', decision_event_id: 'event' } });
+		const onSuggestionAccepted = vi.fn();
+		const test = setup({ onSuggestionAccepted });
+		try {
+			await test.decisions.decideOne('c1', 'accept');
+			expect(onSuggestionAccepted).toHaveBeenCalledWith('accepted text', { eventId: 'event', ids: ['c1'] });
+		} finally { test.stop(); }
+	});
+
+	it('passes the author batch receipt and its accepted ids to the editor', async () => {
+		api.decideSuggestion.mockResolvedValue({ text: 'accepted text', revision: 'r2', comment: { accepted: ['c1', 'c2'], decision_event_id: 'batch', skipped: [] } });
+		const onSuggestionAccepted = vi.fn();
+		const test = setup({ onSuggestionAccepted });
+		try {
+			await test.decisions.acceptAllFrom('ana', 'c1');
+			expect(onSuggestionAccepted).toHaveBeenCalledWith('accepted text', { eventId: 'batch', ids: ['c1', 'c2'] });
+		} finally { test.stop(); }
+	});
+
 	it('shows no error and logs when this side’s follow-up throws after the server applied the accept', async () => {
 		const onDocumentChanged = vi.fn();
 		const failure = new Error('editor gone');

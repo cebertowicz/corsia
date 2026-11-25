@@ -6,9 +6,9 @@ from pathlib import Path
 # assigned separately below. All other modules have one explicit subsystem.
 MODULE_GROUPS = {
     "Threads and messages": "message_schema message_update_schema thread_updates_schema held_replies_schema presence_schema presence_rollup_schema chat_comment_schema continuation_schema delivery_foundation_schema",
-    "Plans": "plan_schema plan_aggregates_schema plan_events_schema plan_intent_schema plan_liveness_schema plan_markdown_import_schema plan_pane_views_schema plan_status_schema unattributed_dispatch_schema",
+    "Plans": "activity_ranking_schema plan_schema plan_aggregates_schema plan_events_schema plan_intent_schema plan_liveness_schema plan_markdown_import_schema plan_pane_views_schema plan_status_schema unattributed_dispatch_schema",
     "Events and webhooks": "bulletin_schema event_intake_schema event_rule_schema event_watch_schema webhook_delivery_schema",
-    "Documents and artifacts": "artifact_identity_schema artifact_relocation_schema doc_comments_schema doc_feedback_schema doc_review_schema",
+    "Documents and artifacts": "artifact_identity_schema artifact_relocation_schema doc_comments_schema doc_feedback_schema doc_review_schema suggestion_history_schema",
     "Accounts and connections": "accounts_schema action_drafts_schema connected_accounts_schema connected_apps_schema connection_schema email_screens_schema key_store_schema vendor_account_schema",
     "Usage and measurement": "usage_schema usage_rollup_schema node_usage_schema outcome_events_schema measure_keys_schema measurement_schema measurement_prepared",
     "Context and memory": "checkpoint_schema continuity_schema continuity_staging context_change_schema fact_extraction_schema lesson_placement_check_schema learning_schema",

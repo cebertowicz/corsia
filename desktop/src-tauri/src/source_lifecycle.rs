@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn a_service_that_exits_without_a_restart_fails_well_before_the_startup_cap() {
         let home = home("rm -f LOADED", "exit 0", "exit 0");
-        let log = home.lifecycle.source.state.join("backend.log");
+        let log = crate::app_paths::log_path(home.root.path(), &home.lifecycle.source.state, "backend.log").unwrap();
         fs::create_dir_all(log.parent().unwrap()).unwrap();
         fs::write(&log, "CORSIA bundled backend refused to start: another service owns this Mac\n").unwrap();
         let mut exited = std::process::Command::new("/usr/bin/true").spawn().unwrap();

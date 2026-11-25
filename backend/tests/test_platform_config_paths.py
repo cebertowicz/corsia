@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+from pathlib import Path
+import sys
 
 import pytest
 
@@ -24,6 +27,8 @@ def test_config_keeps_workspace_and_operational_state_distinct(
     with monkeypatch.context() as patch:
         patch.setenv("CORSIA_WORKSPACE", str(workspace))
         patch.setenv("CORSIA_STATE_DIR", str(state_root))
+        patch.delenv("CORSIA_TEST_MODE", raising=False)
+        patch.setenv("CORSIA_ALLOW_HOME_WORKSPACE_IN_CI", "1")
         config = importlib.reload(config)
 
         assert config.WORKSPACE == workspace.resolve()
@@ -34,8 +39,17 @@ def test_config_keeps_workspace_and_operational_state_distinct(
             == state_root.resolve() / "analytics.duckdb"
         )
         assert config.UPLOADS_DIR == state_root.resolve() / "uploads"
-        assert config.LOGS_DIR == state_root.resolve() / "logs"
+        if sys.platform == "darwin":
+            folder = hashlib.sha256(bytes(state_root.resolve())).hexdigest()[:12]
+            assert config.LOGS_DIR == Path.home() / "Library" / "Logs" / "CORSIA" / folder
+        else:
+            assert config.LOGS_DIR == state_root.resolve() / "logs"
         assert config.RUNTIME_DIR == state_root.resolve() / "runtime"
+
+        # A disposable test instance keeps its logs in its own state root on every platform.
+        patch.setenv("CORSIA_TEST_MODE", "1")
+        config = importlib.reload(config)
+        assert config.LOGS_DIR == state_root.resolve() / "logs"
 
     importlib.reload(config)
 

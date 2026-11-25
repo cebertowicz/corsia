@@ -12,7 +12,8 @@ from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.live_text import utf16_slice
 from doceditor.quote_anchor import anchor_context, resolve_quote
-from infra import app_loop, write_effects
+import infra.app_loop as app_loop
+from infra import write_effects
 from infra.db_async import run_in_db
 
 
@@ -23,6 +24,7 @@ class Anchor:
     end: int
     prefix: str | None
     suffix: str | None
+    text: str
 
 
 @dataclass
@@ -50,25 +52,29 @@ class CreateReceipt:
 
 def browser_anchor(live, identifier: str | None) -> Anchor:
     """The span this comment's own capture reserved, anchored on the text the live document holds there now."""
+    text = live.text
     span = live.held_span(identifier)
-    quote = utf16_slice(live.text, *span) if span is not None else None
-    context = anchor_context(live.text, *span, quote) if span is not None and quote else None
+    quote = utf16_slice(text, *span) if span is not None else None
+    context = anchor_context(text, *span, quote) if span is not None and quote else None
     if span is None or not quote or context is None:
         live.release(identifier)
         raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
-    return Anchor(quote, *span, *context)
+    return Anchor(quote, span[0], span[1], context[0], context[1], text)
 
 
 def quote_anchor(live, quote: str, near: str | None) -> Anchor:
     text = live.text
     start, end = resolve_quote(text, quote, near)
-    return Anchor(quote, start, end, *(anchor_context(text, start, end, quote) or (None, None)))
+    prefix, suffix = anchor_context(text, start, end, quote) or (None, None)
+    return Anchor(quote, start, end, prefix, suffix, text)
 
 
 def image_anchor(live, quote: str, near: str | None) -> Anchor:
     """An agent's region in a document: the whole markdown of the image its quote is inside."""
-    start, end = resolve_quote(live.text, quote, near)
-    return Anchor(*widen_to_image(live.text, start, end))
+    text = live.text
+    start, end = resolve_quote(text, quote, near)
+    image_quote, image_start, image_end, prefix, suffix = widen_to_image(text, start, end)
+    return Anchor(image_quote, image_start, image_end, prefix, suffix, text)
 
 
 async def create_comment_owned(*, path: str | None, artifact_id: str | None,

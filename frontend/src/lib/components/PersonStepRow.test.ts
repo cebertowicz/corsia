@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import PersonStepRow from './PersonStepRow.svelte';
 
-const nav = vi.hoisted(() => ({ doStep: vi.fn(), plan: { nodes: [] as Array<{ id: string; state: string }> } }));
+const nav = vi.hoisted(() => ({ doStep: vi.fn(), plan: { nodes: [] as Array<{ id: string; state: string; display?: { label_key: string; tone_key: string } }> } }));
 vi.mock('$lib/stores/planQuery.svelte', () => ({
 	planQuery: () => ({ get payload() { return { plans: [{ nodes: nav.plan.nodes }] }; } }),
 }));
@@ -110,6 +110,40 @@ describe('PersonStepRow', () => {
 		expect(chip()!.textContent).toContain('Step 2');
 		expect(chip()!.querySelector('.when')).toBeNull();
 		expect(host.querySelectorAll('.ev-chip')).toHaveLength(2);
+		chip()!.click();
+		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
+	});
+
+	it('a step parked in Later reads as its plan row does: Waiting, no amber, no needs-you frame; Do → still opens it', () => {
+		nav.plan.nodes = [{ id: 'n1', state: 'pending', display: { label_key: 'waiting', tone_key: 'neutral' } }];
+		render({ card: card(1) });
+		expect(chip()!.textContent).toContain('Waiting');
+		expect(chip()!.textContent).not.toContain('Needs you');
+		expect(chip()!.classList.contains('needs-you')).toBe(false);
+		expect(chip()!.querySelector('.state-icon.waiting')?.textContent).toBe('•');
+		expect(chip()!.querySelector('.state.ask')).toBeNull();
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Waiting');
+		chip()!.click();
+		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+	});
+
+	it('a step whose row reads Needs you keeps the needs-you chip', () => {
+		nav.plan.nodes = [{ id: 'n1', state: 'pending', display: { label_key: 'needs_you', tone_key: 'attention' } }];
+		render({ card: card(1) });
+		expect(chip()!.classList.contains('needs-you')).toBe(true);
+		expect(chip()!.querySelector('.state-icon.needs-you')?.textContent).toBe('!');
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Needs you');
+	});
+
+	it('a group leads with a step that asks the person, ahead of one parked in Later', () => {
+		const cards = [card(1), card(2)];
+		nav.plan.nodes = [
+			{ id: 'n1', state: 'pending', display: { label_key: 'waiting', tone_key: 'neutral' } },
+			{ id: 'n2', state: 'pending', display: { label_key: 'needs_you', tone_key: 'attention' } },
+		];
+		render({ card: cards[1], group: cards });
+		expect(chip()!.querySelector('.title')!.textContent).toBe('Step 2');
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 2, 1 more, Needs you');
 		chip()!.click();
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
 	});

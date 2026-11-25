@@ -2,6 +2,7 @@ import type { Thread } from '$lib/stores/threads';
 import type { View } from '$lib/homePaneConfig';
 import { TRANSCRIPT_MOVED } from '$lib/sheetClearance';
 import { coarsePointer } from '$lib/selectionButtonPlace';
+import { isEditableTarget } from '$lib/editableTarget';
 
 interface ChatViewportRef {
 	captureBottomOffset: () => void;
@@ -24,17 +25,6 @@ interface HomeLifecycleOptions {
 	chatPanel: () => ChatViewportRef | undefined;
 	on: (event: string, cb: (data: any) => void) => () => void;
 	connect: () => void;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-	const element = target as HTMLElement | null;
-	if (!element) return false;
-	if (element.tagName === 'TEXTAREA') return true;
-	if (element.tagName === 'INPUT') {
-		const type = (element as HTMLInputElement).type;
-		return type !== 'file' && type !== 'submit' && type !== 'button';
-	}
-	return element.isContentEditable === true;
 }
 
 function registerConnectionRefresh(options: HomeLifecycleOptions): () => void {

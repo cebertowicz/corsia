@@ -52,18 +52,18 @@ EXCLUDED: dict[str, str] = {
     "comment_identity_moves": ("written once by schema step 199 -> 200 and read only by its reverse script; "
                                "no request path reads it"),
     **{table: NOT_IN_CENSUS for table in (
-        "action_drafts", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views", "chat_comments",
+        "action_drafts", "activity_rank_nudges", "activity_ranks", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views", "chat_comments",
         "chat_visible_content",
         "connected_account_audit",
         "connected_account_reach", "connected_accounts",
         "connected_app_audit", "connected_app_reach", "connected_apps", "connection_rules",
-        "doc_feedback_edit_items", "durable_write_intents", "event_intake_records", "event_route_decisions",
+        "doc_feedback_edit_items", "doc_suggestion_history", "durable_write_intents", "event_intake_records", "event_route_decisions",
         "event_rules",
         "email_screens", "held_replies", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
         "limit_observations", "managed_process_retirements", "measure_breaks", "measure_definitions", "measure_keys", "plan_ask_deferrals",
         "plan_markdown_import_issues", "plan_markdown_imports",
         "plan_status_dirty", "project_inference_policies", "provider_availability",
-        "self_caused_events",
+        "saved_logins", "self_caused_events",
         "vendor_account_billing_facts", "vendor_account_billing_revisions")},
 }
 

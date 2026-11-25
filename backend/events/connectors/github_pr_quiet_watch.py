@@ -6,12 +6,12 @@ workflow runs; with the webhook delivery log (``infra.webhook_delivery_log``),
 ``events.connectors.github_pr_quiet_reasons`` decides which wakes are due. A wake goes
 through ``events.delivery.deliver_to_thread``, never the watch-resolving
 variant, so it cannot end a plan wait. Every GitHub read runs in a worker
-thread with a timeout, conditional on the last ETag.
+thread with a timeout, conditional on the last ETag. Not found is an answer, kept in the PR's row.
 
-State is ``settings`` rows only, kept by ``github_pr_quiet_rows``;
-``pr_quiet_ingress_report`` rate-limits the health report. It is off under ``CORSIA_TEST_MODE=1``, when ``CORSIA_PR_QUIET_WATCH_DISABLE=1``,
-and while ``gh`` is missing or signed out (rechecked). ``GET /api/system``
-reads its status.
+State is ``settings`` rows only, kept by ``github_pr_quiet_rows``; ``pr_quiet_ingress_report``
+rate-limits the health report. It is off under ``CORSIA_TEST_MODE=1``, when
+``CORSIA_PR_QUIET_WATCH_DISABLE=1``, and while ``gh`` is missing or signed out (rechecked).
+``GET /api/system`` reads its status.
 """
 
 from __future__ import annotations
@@ -246,7 +246,15 @@ async def sweep_candidate(
     log_answers_from: datetime | None,
 ) -> list[str]:
     """Evaluate one PR; return the reasons that now count as a delivery fault."""
-    pr = await _get(runner, f"repos/{candidate.repo}/pulls/{candidate.number}")
+    if await run_in_db(rows.unfound_waiting, candidate.external_id, _now()):
+        return []
+    try:
+        pr = await _get(runner, f"repos/{candidate.repo}/pulls/{candidate.number}")
+    except feed.FeedError as exc:
+        if exc.error_class != "http_404":  # only not found is remembered; the rest still fail
+            raise
+        await run_in_db(rows.record_unfound, candidate.external_id, _now(), POLL_INTERVAL_S)
+        return []
     head = ((pr or {}).get("head") or {}).get("sha") if isinstance(pr, dict) else None
     if not isinstance(pr, dict) or pr.get("state") != "open" or not head:
         await run_in_db(rows.forget, candidate.external_id)

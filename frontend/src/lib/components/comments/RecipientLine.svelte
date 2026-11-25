@@ -39,12 +39,12 @@
 	/* Two columns: the names wrap inside the first, Retry (when the check failed) stays at the top of the second. */
 	.rl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-2); min-height: var(--space-5); }
 	/* Names are never cut, in any window: the line breaks between names, and only a name wider than the whole line breaks inside itself, so no name lives only in a hover. */
-	.rl-who { display: block; min-width: 0; padding-top: var(--space-px-3); font-size: var(--text-caption); color: var(--text-secondary); overflow-wrap: anywhere; }
+	.rl-who { display: block; min-width: 0; padding-top: var(--space-px-3); font-size: var(--text-footnote); color: var(--text-secondary); overflow-wrap: anywhere; }
 	/* A name with its comma is one box: it moves to the next row whole, and wraps inside itself only when it alone is wider than the line. */
 	.rl-item { display: inline-block; max-width: 100%; }
 	.rl-name { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	/* The link owns its padding and leaves room for its 2px focus ring and 2px offset, so the ring touches no text and no border beside it. */
-	.rl-link { background: none; border: none; padding: var(--space-px-3) var(--space-2); font: inherit; font-size: var(--text-caption); color: var(--text-secondary); cursor: pointer; text-decoration: underline; text-underline-offset: var(--space-px-2); white-space: nowrap; border-radius: var(--radius-xs); }
+	.rl-link { background: none; border: none; padding: var(--space-px-3) var(--space-2); font: inherit; font-size: var(--text-footnote); color: var(--text-secondary); cursor: pointer; text-decoration: underline; text-underline-offset: var(--space-px-2); white-space: nowrap; border-radius: var(--radius-xs); }
 	.rl-link:hover { color: var(--text-primary); }
 	.rl-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* On touch the link's own box is the 44px target, so it takes real room instead of an invisible area that would cover the field above it;

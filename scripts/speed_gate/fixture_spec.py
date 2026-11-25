@@ -57,6 +57,8 @@ SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) f
 GENERIC_SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) for name in (
     "doc_comment_writer_line", "doc_comment_acks",
 )}
+# Fixture comments share one synthetic source version; deduplication stores it once.
+GENERIC_SYNTHETIC_ROWS["doc_comment_snapshots"] = 1
 
 #: Message update provenance postdates the census too. Synthetic stress shape, built by the generic pass on
 #: real assistant messages: one state row and one plan-node link per agent update the census counts
