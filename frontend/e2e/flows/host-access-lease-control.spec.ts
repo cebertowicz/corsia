@@ -385,7 +385,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.locator('.policy-exceptions .exceptions-label')).toHaveCSS('color', warningColor);
 		await expect(dialog.locator('.decision-head .status')).toHaveText('Needs approval');
 		// The header carries the state; the asked duration is body text, not a second amber.
-		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('For how long');
+		await expect(dialog.locator('.risk-grid section').first().locator('.label')).toHaveText('Duration');
 		await expect(dialog.locator('.risk-grid section').first().locator('p')).not.toHaveCSS('color', warningColor);
 
 		const viewport = page.viewportSize();
@@ -588,7 +588,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			id: `fill-e2e-${n}`, kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
 			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', username: 'accounts-payable@example.com',
 			revision: 1, application_hash: `hash-fill-e2e-${n}`, decision_capability: `decision-fill-e2e-${n}`,
-			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: `2026-07-18T16:0${n}:00.000Z`, updated_at: `2026-07-18T16:0${n}:00.000Z`,
 			...overrides,
 		};
@@ -709,7 +709,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			if (name.lineHeight) expect(name.height, JSON.stringify(name)).toBeLessThanOrEqual(name.lineHeight + 1);
 			await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
 			await expectRowFits(page);
-			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`) });
+			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`), animations: 'disabled' });
 		});
 	}
 
@@ -885,4 +885,66 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(entry.locator('.pending-site')).toHaveAttribute('title', secondSite);
 		await expect(entry.locator('.pending-site')).toHaveText('billing.example.org');
 	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`starts on the agent's asked-for time, approves until turned off, and shows no chip for it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			let items: Record<string, unknown>[] = [fillRequest(threadId, 1, { requested_duration_seconds: 900 })];
+			const decisions: { action: string; body: unknown }[] = [];
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const url = new URL(route.request().url());
+				if (route.request().method() === 'POST') {
+					const match = /\/fills\/([^/]+)\/approve$/.exec(url.pathname);
+					expect(match, url.pathname).toBeTruthy();
+					decisions.push({ action: 'approve', body: route.request().postDataJSON() });
+					const approved = { ...items[0], state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null };
+					// As the server does: the chat's lease list never carries a standing grant.
+					items = [];
+					await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(approved) });
+					return;
+				}
+				const root = url.searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? items : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			await page.locator('.pending-request-trigger').click();
+			const dialog = page.getByRole('dialog');
+			const choices = dialog.getByRole('radio');
+			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
+			// Every choice fits in at most two lines, all four in view, and the picker never scrolls sideways.
+			const lineCounts = await choices.evaluateAll((buttons) => buttons.map((button) => {
+				const range = document.createRange();
+				range.selectNodeContents(button);
+				return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+			}));
+			expect(lineCounts.every((lines) => lines >= 1 && lines <= 2), lineCounts.join(',')).toBe(true);
+			const group = dialog.getByRole('radiogroup');
+			expect(await group.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+			for (const choice of await choices.all()) await expect(choice).toBeInViewport({ ratio: 1 });
+			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
+
+			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
+			await dialog.getByRole('button', { name: 'Approve' }).click();
+			await expect.poll(() => decisions.length).toBe(1);
+			expect(decisions[0]).toEqual({
+				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_revoked: true },
+			});
+
+			// A standing grant has no chip: no lock, no countdown and no drawer in the chat.
+			await expect(page.locator('.pending-request-trigger')).toHaveCount(0);
+			await expect(page.locator('.active-chip')).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath(`after-standing-${viewport.width}.png`), animations: 'disabled' });
+		});
+	}
 });

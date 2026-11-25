@@ -100,7 +100,7 @@ def test_a_named_active_task_is_selected_over_queued_work_ranked_below_it(db):
     assert_rows_exact(db, block)
 
 
-@pytest.mark.parametrize("operation", ["accept", "accept_with_follow_up", "archive_node"])
+@pytest.mark.parametrize("operation", ["accept", "archive_node"])
 def test_every_closing_operation_can_start_the_named_task(db, operation):
     plan = owner_plan(db)
     task_a = task(db, plan.id, "Task A")
@@ -112,6 +112,20 @@ def test_every_closing_operation_can_start_the_named_task(db, operation):
     block = next_block(close(db, plan.id, operation, task_a.id, next_node_id=task_b.id))
 
     _assert_started(block, task_b.id, "Task B is verified")
+
+
+def test_accept_with_follow_up_refuses_a_named_task_below_the_follow_up(db):
+    """The follow-up keeps its source's place, so naming Task B below it passes ready work."""
+    plan = owner_plan(db)
+    task_a = task(db, plan.id, "Task A")
+    task_b = task(db, plan.id, "Task B")
+    select(db, plan.id, task_a.id)
+    request_review(db, plan.id, task_a.id)
+
+    block = next_block(close(db, plan.id, "accept_with_follow_up", task_a.id, next_node_id=task_b.id))
+
+    assert (block["named"]["started"], block["named"]["refusal"]) == (False, "out_of_order")
+    assert open_attempt(db, task_b.id) is None
 
 
 def test_the_named_task_is_judged_after_the_close_so_its_accepted_prerequisite_counts(db):

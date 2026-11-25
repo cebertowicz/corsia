@@ -5,30 +5,79 @@ import logging
 
 import pytest
 
-from host_access import browser_cdp, browser_clipboard, browser_dom_write
+from host_access import browser_cdp, browser_cdp_targets, browser_clipboard, browser_dom_write
 from host_access.browser_cli import CommandResult
 
 
+QUOTED_PARAM = "quoted-param-7f3a"
+
+
 @pytest.mark.asyncio
-async def test_cdp_error_logs_diagnostics_and_keeps_person_facing_error(caplog):
+async def test_cdp_error_logs_method_id_and_code_but_never_its_message(caplog):
     class Socket:
         async def send(self, _message):
             pass
 
         async def recv(self):
-            return json.dumps({'id': 1, 'error': {'code': -32602, 'message': 'invalid parameters'}})
+            # A protocol error's message can quote the request's params, such as typed text.
+            return json.dumps({'id': 1, 'error': {'code': -32602, 'message': f'invalid parameters: {QUOTED_PARAM}'}})
 
     caplog.set_level(logging.DEBUG, logger=browser_cdp.__name__)
     client = browser_cdp.CdpClient('ws://page')
     client.socket = Socket()
     with pytest.raises(browser_cdp.BrowserSessionError, match="This page couldn't be checked"):
-        await client.call('Input.dispatchKeyEvent', text='a')
-    assert 'Input.dispatchKeyEvent' in caplog.text
-    assert '-32602' in caplog.text and 'invalid parameters' in caplog.text
+        await client.call('Input.dispatchKeyEvent', text=QUOTED_PARAM)
+    assert 'Input.dispatchKeyEvent (id 1) failed with code -32602' in caplog.text
+    assert QUOTED_PARAM not in caplog.text and 'invalid parameters' not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_cdp_connect_keeps_max_size_and_passes_only_a_supplied_logger(monkeypatch):
+async def test_a_batched_cdp_error_logs_method_id_and_code_but_never_its_message(caplog):
+    from host_access import browser_cdp_batch
+
+    class Socket:
+        async def send(self, _message):
+            pass
+
+        async def recv(self):
+            return json.dumps({'id': 1, 'error': {'code': -32000, 'message': f'no node: {QUOTED_PARAM}'}})
+
+    caplog.set_level(logging.DEBUG)
+    client = browser_cdp_batch.BatchingCdpClient('ws://page')
+    client.socket = Socket()
+    assert await client.call_many(None, 'DOM.describeNode', [{'backendNodeId': 1}]) == [None]
+    assert 'DOM.describeNode (id 1) failed with code -32000' in caplog.text and QUOTED_PARAM not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_every_cdp_socket_gets_a_logger_that_records_nothing_unless_a_caller_passes_one(monkeypatch, caplog):
+    seen = []
+
+    class Socket:
+        async def close(self):
+            pass
+
+    async def connect(_endpoint, **options):
+        seen.append(options.get("logger"))
+        return Socket()
+
+    monkeypatch.setattr(browser_cdp.websockets, "connect", connect)
+    caplog.set_level(logging.DEBUG)
+    async with browser_cdp.CdpClient("ws://page"):
+        pass
+    own = logging.getLogger("caller-socket")
+    async with browser_cdp.CdpClient("ws://page", logger=own):
+        pass
+    assert seen == [browser_cdp.SILENT, own]
+    # Nothing in the logging tree reaches it: not the root's level, not a handler, not logging.disable(NOTSET).
+    assert browser_cdp.SILENT.name not in logging.root.manager.loggerDict
+    assert not browser_cdp.SILENT.isEnabledFor(logging.CRITICAL)
+    browser_cdp.SILENT.critical("frame %s", QUOTED_PARAM)
+    assert QUOTED_PARAM not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cdp_connect_keeps_max_size_and_passes_a_supplied_logger_or_the_silent_one(monkeypatch):
     calls = []
 
     class Socket:
@@ -45,7 +94,7 @@ async def test_cdp_connect_keeps_max_size_and_passes_only_a_supplied_logger(monk
         pass
     async with browser_cdp.CdpClient("ws://two", max_size=456, logger=logger):
         pass
-    assert calls[0] == ("ws://one", {"max_size": 123, "open_timeout": 3, "close_timeout": 1})
+    assert calls[0] == ("ws://one", {"max_size": 123, "open_timeout": 3, "close_timeout": 1, "logger": browser_cdp.SILENT})
     assert calls[1] == ("ws://two", {"max_size": 456, "open_timeout": 3, "close_timeout": 1, "logger": logger})
 
 
@@ -125,7 +174,7 @@ def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
         def __exit__(self, *_args):
             pass
 
-    monkeypatch.setattr(browser_cdp, "urlopen", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(browser_cdp_targets, "urlopen", lambda *_args, **_kwargs: Response())
     assert browser_cdp._page_endpoint("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current") == "ws://page.test/devtools/page/current"
 
 

@@ -49,6 +49,23 @@ export function newlyFolded(previous: Map<string, boolean> | null, nodes: Operat
 	return newlyMatching(previous, nodes, (node) => node.folded);
 }
 
+/**
+ * Rows whose Later membership changed since the last render, in either
+ * direction. A crossing you can see the end of is neither removed nor folded --
+ * it stays on screen at a new place -- so it rides the wave as a sinking row
+ * does and glides to that place rather than jumping. Into a collapsed group
+ * there is no row to glide to, so the caller sends that one as a fold ghost into
+ * the group's own row. The first render only records what is already Later: rows
+ * the user never saw move are not a transition.
+ */
+export function newlyLater(previous: Map<string, boolean> | null, nodes: OperatorNode[]): OperatorNode[] {
+	if (previous === null) return [];
+	return nodes.filter((node) => {
+		const before = previous.get(node.id);
+		return before !== undefined && before !== (node.later === true);
+	});
+}
+
 export function prefersReducedMotion(): boolean {
 	return typeof window !== 'undefined'
 		&& window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
@@ -61,6 +78,8 @@ export interface FoldSnapshot {
 	rects: Map<string, DOMRect>;
 	/** The folding rows that were on screen, top to bottom. */
 	ghosts: Ghost[];
+	/** The tree's own height before the fold. */
+	height: number;
 }
 
 function flipRows(container: HTMLElement): Map<string, HTMLElement> {
@@ -92,7 +111,7 @@ export function captureFold(
 		ghosts.push({ level, clone, rect: rects.get(id)! });
 	}
 	ghosts.sort((a, b) => a.rect.top - b.rect.top);
-	return { rects, ghosts };
+	return { rects, ghosts, height: container.getBoundingClientRect().height };
 }
 
 function easing(container: HTMLElement): string {
@@ -143,10 +162,20 @@ function glide(container: HTMLElement, snapshot: FoldSnapshot, ease: string): An
 			{ duration: FOLD_BEAT_MS.slide, delay: FOLD_BEAT_MS.check, easing: ease, fill: 'backwards' },
 		));
 	}
+	// A tree that got shorter keeps its old height and eases down with its rows:
+	// the surface it sits in clips, and a last row gliding up from its old place
+	// would otherwise sit below the new bottom, unseen, until it arrived.
+	const height = container.getBoundingClientRect().height;
+	if (snapshot.height - height >= 0.5) {
+		animations.push(container.animate(
+			[{ height: `${snapshot.height}px` }, { height: `${height}px` }],
+			{ duration: FOLD_BEAT_MS.slide, delay: FOLD_BEAT_MS.check, easing: ease, fill: 'backwards' },
+		));
+	}
 	return animations;
 }
 
-/** Send one ghost from its old place to its level's fold row, then fold it away. */
+/** Send one ghost from its old place to its level's count or its Later group row, then fold it away. */
 function sendGhost(container: HTMLElement, ghost: Ghost, delay: number, ease: string): Animation | null {
 	const target = [...container.querySelectorAll<HTMLElement>('[data-fold-level]')]
 		.find((row) => row.dataset.foldLevel === ghost.level);
@@ -171,7 +200,15 @@ function sendGhost(container: HTMLElement, ghost: Ghost, delay: number, ease: st
 		{ transform: `translateY(${dy}px)`, opacity: 1, offset: at(FOLD_BEAT_MS.check + FOLD_BEAT_MS.slide) },
 		{ transform: `translateY(${dy}px) scaleY(0.2)`, opacity: 0, offset: 1 },
 	], { duration: FOLD_ROW_MS, delay, fill: 'both' });
-	void animation.finished.then(() => ghost.clone.remove(), () => ghost.clone.remove());
+	// A row going into a collapsed Later group slides in under the group's row, which
+	// stays drawn throughout: lift that row over the ghost on the tree's own surface.
+	const lifted = ghost.level.endsWith(':later');
+	if (lifted) Object.assign(target.style, { position: 'relative', zIndex: '2', background: surfaceOf(container) });
+	const settle = () => {
+		ghost.clone.remove();
+		if (lifted) for (const property of ['position', 'z-index', 'background']) target.style.removeProperty(property);
+	};
+	void animation.finished.then(settle, settle);
 	return animation;
 }
 
@@ -184,11 +221,14 @@ export interface FoldPlay {
 /** Play one fold wave over the settled DOM. */
 export function playFold(container: HTMLElement, snapshot: FoldSnapshot): FoldPlay {
 	const ease = easing(container);
-	const animations = glide(container, snapshot, ease);
+	// Ghosts aim first: a target that glides too would otherwise be measured at its
+	// old place, mid-FLIP, and the ghost would fly past where it settles.
+	const animations: Animation[] = [];
 	snapshot.ghosts.forEach((ghost, index) => {
 		const animation = sendGhost(container, ghost, index * STAGGER_MS, ease);
 		if (animation) animations.push(animation);
 	});
+	animations.push(...glide(container, snapshot, ease));
 	return {
 		stop: () => {
 			for (const animation of animations) animation.cancel();

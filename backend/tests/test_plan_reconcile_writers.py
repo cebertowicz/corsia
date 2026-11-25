@@ -46,8 +46,16 @@ def _accepted_source(db, plan_id: str) -> str:
     return source.id
 
 
-def test_a_correction_blocking_the_selected_task_selects_the_queued_task(db):
-    """`corrections.add` reconciles through `dependencies.add_dependency`."""
+def _order_key(db, node_id: str) -> int:
+    return db.execute("SELECT order_key FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0]
+
+
+def test_a_correction_blocking_the_selected_task_releases_it_and_the_queued_task_waits(db):
+    """`corrections.add` reconciles through `dependencies.add_dependency`.
+
+    The correction keeps its source's place in plan order, above queued Task B,
+    so the pick does not pass it to give B the slot (``triage_lines.in_plan_order``).
+    """
     plan = service.ensure_plan("thread", "owner", db=db)
     source = _accepted_source(db, plan.id)
     plan, task_a, a_attempt, task_b = queued_pair(db)
@@ -69,9 +77,8 @@ def test_a_correction_blocking_the_selected_task_selects_the_queued_task(db):
     assert corrected["correction"]["state"] == "pending"
     assert open_attempt(db, corrected["correction"]["id"]) is None
     assert attempt(db, a_attempt)["release_reason"] == "dependency_blocked"
-    successor = open_attempt(db, task_b)
-    assert successor is not None, "the correction left queued Task B unselected"
-    assert successor["executor_thread_id"] == "owner"
+    assert _order_key(db, corrected["correction"]["id"]) < _order_key(db, task_b)
+    assert open_attempt(db, task_b) is None
 
 
 def test_watchdog_only_edit_keeps_the_selected_attempt(db):
@@ -130,12 +137,13 @@ def test_a_rejection_never_preempts_and_its_revision_waits_to_be_taken_up(db):
     assert open_attempt(db, revision_id)["attempt_ordinal"] == 1
 
 
-def test_accept_with_follow_up_releases_and_selects_the_queued_task(db):
+def test_accept_with_follow_up_releases_and_the_queued_task_waits(db):
     """Accept with a follow-up releases the task and reconciles its plan.
 
     The service-level review writer leaves A's attempt open, so the release
     and reconcile below come from acceptance itself. The follow-up is pending
-    work and is never selected.
+    work and is never selected; it keeps A's place above queued Task B, so the
+    pick does not pass it to give B the slot (``triage_lines.in_plan_order``).
     """
     plan, task_a, a_attempt, task_b = queued_pair(db)
     review_evidence.submit(
@@ -155,7 +163,8 @@ def test_accept_with_follow_up_releases_and_selects_the_queued_task(db):
 
     assert accepted["node"]["state"] == "accepted_with_followup"
     assert attempt(db, a_attempt)["release_reason"] == "accepted"
-    assert open_attempt(db, task_b)["executor_thread_id"] == "owner"
+    assert _order_key(db, accepted["follow_up"]["id"]) < _order_key(db, task_b)
+    assert open_attempt(db, task_b) is None
     assert accepted["follow_up"]["state"] == "pending"
     assert open_attempt(db, accepted["follow_up"]["id"]) is None
 

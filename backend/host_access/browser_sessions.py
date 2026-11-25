@@ -15,7 +15,7 @@ from host_access import (
 )
 from host_access.browser_session_io import BrowserSessionIO
 from host_access.browser_session_state import (
-    BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
+    COMMAND_TIMEOUT, BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
     BrowserSetupError as BrowserSetupError,
 )
@@ -68,7 +68,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         return self._active_commands + self._queued_actions
 
     async def run(self, thread_id: str, args: Sequence[str], *,
-                  lease_id: str | None = None, timeout: float = 30.0,
+                  lease_id: str | None = None, timeout: float = COMMAND_TIMEOUT,
                   show_window: bool | None = None, session: SessionAdmission = "any",
                   pane: bool = False, navigation_url: str | None = None, notice: bool = True) -> str:
         """Run one command through the shared-browser path; `pane` marks the person's own command."""

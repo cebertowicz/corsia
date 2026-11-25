@@ -282,7 +282,8 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "My job is to give you back your time, and I measure it" in opening
-    assert "My plan for finishing your setup is in the Plan section on the right" in opening and 'shows how many tasks are left' in opening
+    assert "Take me, for example. I answer for your time across everything here" in opening
+    assert "Plan section" not in opening and "skip the rest" not in opening
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
@@ -293,7 +294,9 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert "skill `connect-tools`" in steps
     work_step = steps.split("3. **Where your work lives,**", 1)[1].split("4. **", 1)[0]
     assert not re.search(r"\bsteps? \d", work_step)
-    assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
+    handoff = app.split("## Hand over to your agents", 1)[1].strip()
+    assert handoff.startswith("If they skipped About you or did not approve it")
+    assert "After the last step that applies, post one line" in handoff
     assert "post exactly `" + HANDOFF + "`" in app
     assert "then `google_connect`" in steps
     assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in steps
@@ -407,18 +410,22 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     step = _step(7)
 
     assert step.startswith("Learning from the community.** Always.")
-    assert "CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose." in step
+    lines = [
+        "Instruction files stay short: they hold what's true for every task at their level, such as goals, preferences, limits and who decides what. How each kind of work gets done goes in its workflow: the steps, who does each, and the checks before it reaches you.",
+        "Agents get each step's instructions as it starts. When you correct something, they can change the workflow, and later runs show them whether to keep the change.",
+        "You can use workflows other people have proven, and share yours if you choose.",
+    ]
+    assert "Post each line with its own `post_update`" in step
+    assert "a preference for short answers shortens your own words, never these lines, and never drops one" in FIRST_RUN_APP.read_text()
+    assert all(f"`{line}`" in step for line in lines)
+    assert [step.index(line) for line in lines] == sorted(step.index(line) for line in lines)
     assert "Measurement" not in step
     assert "chart button" not in step
-    assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
+    assert "You can see it in Measurement from your first day; trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
-    assert "would only share, write No and Yes" in step
-    for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
-                 "`- **Share improvements with the community:** Yes`", "`- **Share improvements with the community:** No`",
-                 "write no line, and agents share nothing and take nothing until it is answered"):
-        assert line in step, line
-    assert "context/50-USER-PROFILE.md" in step
+    assert "`Choose it on the card, and it's saved to your profile.` Leave the card open and write nothing." in step
+    assert "write no line, and agents share nothing and take nothing until it is answered" in step
     assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
     assert "no GitHub" in step
     assert "**Only use:** no GitHub question." in step
@@ -426,7 +433,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
 
 def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_question():
     step = _step(7)
-    github = step.split("**Use and share, or only share, and not `github_ready`:**", 1)[1]
+    github = step.split("**Use and share, and not `github_ready`:**", 1)[1]
 
     assert "When `github_ready`, skip the rest of this step" in github
     # One message, then one decision: the chat never asks whether they have an account.
@@ -436,14 +443,15 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     assert "Do you have a GitHub account?" not in step
 
 
-def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn_it_off():
+def test_files_step_is_short_and_explains_access_and_privacy():
     step = _step(8)
     posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on:**" in step
-    assert "**Auto-approve is on:** a reviewer model checks each request to use files outside your work folder, and most start without asking you." in step
-    assert "To approve each one yourself, turn it off in [Settings › System](/settings/system#host-access-review)." in step
+    assert "- send or post as you\n   > - spend money" in step
+    assert "Auto-approve" not in step
+    assert "Keys, passwords and sign-ins you save in CORSIA, and CORSIA's own data, stay closed to agents." in step
+    assert "No safeguard is perfect: if this computer holds very sensitive information, give CORSIA its own macOS user account." in step
     assert "Access covers one chat" not in step and "still asks you" not in step
     assert "No safeguard is perfect" in step and "its own macOS user account" in step
     assert "safe" not in posted.replace("safeguard", "") and "secure" not in posted
@@ -451,9 +459,7 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
     assert "Apps you connect, like your email, follow their own privacy terms" in posted
     assert "helpers" not in step and "application" not in step
     assert "Claim no safeguard beyond those stated here" in step
-    assert "Auto-approve follows `auto_approve`. When it is false, replace the Auto-approve line with `**Auto-approve is off:** you approve each request to use files outside your work folder." in step
-    # An unreadable Auto-approve state drops only the Auto-approve advice; the own-account advice stays.
-    assert 'When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.' in step
+    assert "auto_approve" not in step
     assert len("\n".join(line for line in posted.splitlines() if line.lstrip().startswith(">"))) < 1900
 
 
@@ -463,9 +469,7 @@ def test_local_model_talk_in_step_8_shows_only_when_this_computer_can_run_one():
     local = local.split("Claim no safeguard", 1)[0]
 
     assert "Local only" not in posted and "local model" not in posted.lower() and "Local models only" not in posted
-    assert "Keeping work off cloud models" in local and "unless Local only is on" in local
-    assert "use the toggle at the top of the picker" in local and "It needs a local model that's ready" in local
-    assert "must never reach a cloud model" in local and '"Local models only"' in local
+    assert "To keep a chat off cloud models, turn on Local only in the model picker. I can also set a whole project to local models only." in local
     assert "`local_eligible` (this computer can run a local model; any other value" in FIRST_RUN_APP.read_text(encoding="utf-8")
 
 
@@ -602,6 +606,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
     assert seeded in write
     assert "replacing the profile's `- **Timezone:**` line, or adding it when there is none, with" in write
     assert "over the profile's `- **Preferred name:**` line" in write
+    assert "write (under `references/first-run-app.md`'s ownership rule) to `context/50-USER-PROFILE.md` the line" in ref
     assert "`USER.md`" in write and "(work, place, background)" in write
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
     assert "`context/50-USER-PROFILE.md` for their time zone, the name they go by" in doc
@@ -647,12 +652,25 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
     ask = "Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve."
-    # The first post says what approving does: the answers become the profile every agent and chat loads, and what a cloud model receives.
-    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " Approve also accepts every suggestion you haven't rejected.`") == 1
-    assert doc.count(ask) == 2  # the post and the ask's reason
+    # The first post explains where approved facts go; the ask retains its review instructions.
+    assert doc.count("`Here's your About you doc. What you approve goes into your profile, which every agent reads.`") == 1
+    assert doc.count(ask) == 1  # the ask's reason
     assert "including agents on a cloud model" not in doc
-    # The saved line says agents keep adding to it and where to edit it.
-    assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
+    # Transfer precedes the four separate messages explaining profile ownership.
+    lines = [
+        "`Saved. Your profile is yours now: agents only suggest changes to it, and you decide.`",
+        "`To open it, ask any agent or press the donut in the message box, then its name.`",
+        "`To hand off suggestion review of any file to an agent going forward, make that agent its owner.`",
+        "`Your profile is one of your instruction files: every agent reads it. Each project has its own for its agents, and each agent has one too.`",
+    ]
+    app_step = _step(5)
+    assert all(line in app_step for line in lines)
+    assert [app_step.index(line) for line in lines] == sorted(app_step.index(line) for line in lines)
+    assert "follow the handover and messages in step 5" in doc
+    # A late Approve, after the hand-off gave the profile to the person, never re-runs the handover.
+    assert "If the person already owns the profile (the hand-off gave it to them), section 5 suggests each change for them to decide, with no handover and no message." in doc
+    assert "`artifact_rehome` on that artifact with `new_owner_thread_id` `user`" in app_step
+    assert "If handover fails, report the problem and do not say the profile is theirs." in app_step
     # A helper's brief carries the same per-fact form and quotes only its own heading.
     assert "the suggestion form above, one call per fact and no heading in any replacement, and that it quotes its own heading only" in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
@@ -705,6 +723,18 @@ def test_a_key_saved_in_this_chat_is_not_asked_about_again_and_without_search_th
     assert "When search was already set up before this chat, the lookup opens with the one question that reference carries." in step
 
 
+def test_skipping_about_you_hands_over_profile_before_the_hand_off():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    handoff = app.split("## Hand over to your agents", 1)[1]
+    assert "If they skipped About you or did not approve it" in handoff
+    assert "use step 5's handover procedure before the hand-off, without its approval messages" in handoff
+    assert "`Agents only suggest changes to files that are yours, and you decide.`" in handoff
+    assert "If the handover fails, report the problem and do not post that line." in handoff
+    # The line belongs to this late handover only, never after step 5's own.
+    assert "once that handover succeeds, post `Agents only suggest" in handoff
+    assert "When step 5's handover already ran, do none of this." in handoff
+
+
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "`model_sources` `recheck: true`" in app
@@ -719,6 +749,8 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email
     assert "Outlook for Outlook and for both, Other for anything else" in email
+    assert "If the person owns the profile, suggest the line with `doc_comment_create`" in email
+    assert "While CORSIA owns it, write the line directly" in email
     assert "Never write it in `USER.md`, and never change the `- **Email:**` line" in email
     # Conditional on delivery: phrased so check_system_closure does not require the skill before it ships.
     assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email

@@ -177,6 +177,23 @@ def _regroup_under_its_prerequisite(db, scene):
     )
 
 
+def _step_off_its_items_side(db, scene):
+    """Add a step in Later under an item that is not: a step goes where its item is."""
+    branch = service.add_node(
+        scene.plan_id, kind="phase", title="Launch", acceptance_criteria="L",
+        intent="Hold the branch.", db=db,
+    )
+    service.add_node(
+        scene.plan_id, kind="task", title="Draft", acceptance_criteria="D",
+        intent="Draft it.", size="S", parent_id=branch.id, db=db,
+    )
+    db.commit()
+    return _operation("add", {
+        "kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "S",
+        "intent": "Do the work", "parent_id": branch.id, "later": True,
+    })(db, scene)
+
+
 def _size_before_migration(db, scene):
     """A pre-v51 plan-node table cannot persist a declared size yet."""
     db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
@@ -743,7 +760,8 @@ _CASES = {
     ("later_fields.py", '"later must be true or false"'): _operation(
         "edit", {"node_id": NODE, "expected_revision": REV, "later": "yes"},
     ),
-    ("later_fields.py", "LATER_ON_BRANCH"): _operation(
+    ("later_fields.py", 'LATER_NOT_ITEM.format( title=root["title"], side="in Later" if value else "not in Later", )'): _step_off_its_items_side,
+    ("later_fields.py", "LATER_WITHOUT_TASKS"): _operation(
         "add", {"kind": "phase", "title": "T", "acceptance_criteria": "DOD", "later": True},
     ),
     ("boundary_fields.py", "later_fields.REASON_WITHOUT_LATER"): _operation(

@@ -17,7 +17,7 @@ function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
 		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 		...overrides,
 	};
@@ -53,7 +53,7 @@ it('names the agent, site and username, and approves for the duration the person
 	expect(text).toContain('Needs approval');
 	expect(text).toContain('The agent never sees it, and you can revoke this approval at any time.');
 	const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes']);
+	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
 	expect(radios[0].getAttribute('aria-checked')).toBe('true');
 	radios[1].click();
 	flushSync();
@@ -239,5 +239,96 @@ it('posts a fill decision to the fill route with the picked duration only on app
 	expect(fetch.mock.calls[1][0]).toBe('/api/host-access/leases/fills/fill-1/revoke');
 	expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
 		revision: 2, application_hash: 'a'.repeat(64),
+	});
+});
+
+// --- The duration the agent asks for, and "Until I turn it off" --------------------------------
+
+function radios(host: HTMLElement): HTMLButtonElement[] {
+	return [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+}
+
+function checked(host: HTMLElement): string | undefined {
+	return radios(host).find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent?.trim();
+}
+
+function approve(host: HTMLElement): void {
+	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
+}
+
+it('starts on the duration the agent asked for, and never on Until I turn it off', async () => {
+	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
+	expect(radios(host).map((radio) => radio.textContent?.trim()))
+		.toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(checked(host)).toBe('15 minutes');
+	// The one focusable choice (roving tabindex) is the agent's asked-for time, so Enter there keeps it.
+	expect(radios(host).filter((radio) => radio.tabIndex === 0).map((radio) => radio.textContent?.trim())).toEqual(['15 minutes']);
+	const standing = host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!;
+	expect(standing.getAttribute('aria-checked')).toBe('false');
+	expect(standing.tabIndex).toBe(-1);
+	approve(host);
+	expect(onApprove.mock.calls[0][1]).toBe(900);
+	await unmount(component);
+});
+
+it('adds the asked-for time when it is not one of the usual choices, within the cap only', async () => {
+	const asked = pending(fill({ requested_duration_seconds: 600 }));
+	expect(radios(asked.host).map((radio) => radio.textContent?.trim()))
+		.toEqual(['5 minutes', '10 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(checked(asked.host)).toBe('10 minutes');
+	await unmount(asked.component);
+	expect(fillDurations(1800, 600)).toEqual([300, 600, 900, 1800]);
+	expect(fillDurations(900, 1800)).toEqual([300, 900]);
+	expect(fillDurations(1800, 0)).toEqual([300, 900, 1800]);
+	expect(fillDurations(1800, 90.5)).toEqual([300, 900, 1800]);
+	// Below the shortest time there is no choice at all, Until I turn it off included.
+	const none = pending(fill({ max_duration_seconds: 120 }));
+	expect(radios(none.host)).toEqual([]);
+	expect(none.host.textContent).not.toContain('Until I turn it off');
+	await unmount(none.component);
+	// Over the cap or not a whole number of seconds: today's default, the shortest.
+	for (const requested of [3600, 0, -1, 90.5, null]) {
+		const view = pending(fill({ requested_duration_seconds: requested as number | null, max_duration_seconds: 1800 }));
+		expect(checked(view.host)).toBe('5 minutes');
+		await unmount(view.component);
+	}
+});
+
+it('approves until revoked only when the person picks it', async () => {
+	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
+	host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!.click();
+	flushSync();
+	expect(checked(host)).toBe('Until I turn it off');
+	approve(host);
+	expect(onApprove.mock.calls[0][1]).toBe('until_revoked');
+	await unmount(component);
+});
+
+it('reaches Until I turn it off by the arrow keys only stepping forward from the longest time, never by wrapping', async () => {
+	const { host, component } = pending(fill());
+	const key = (key: string) => {
+		host.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')!
+			.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+		flushSync();
+		return checked(host);
+	};
+	expect(key('ArrowLeft')).toBe('30 minutes'); // wraps back to the longest time, not to Until I turn it off
+	expect(key('ArrowRight')).toBe('Until I turn it off');
+	expect(key('ArrowRight')).toBe('5 minutes');
+	expect(key('ArrowUp')).toBe('30 minutes');
+	expect(key('ArrowDown')).toBe('Until I turn it off');
+	expect(key('ArrowLeft')).toBe('30 minutes');
+	expect(key('Enter')).toBe('30 minutes');
+	await unmount(component);
+});
+
+it('posts until revoked, and no duration, when the person picks it', async () => {
+	const { apiFetch } = await import('$lib/api/request');
+	const fetch = vi.mocked(apiFetch);
+	fetch.mockReset();
+	fetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+	await decideHostAccessLease(fill(), 'approve', 'until_revoked');
+	expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+		revision: 1, application_hash: 'a'.repeat(64), until_revoked: true,
 	});
 });

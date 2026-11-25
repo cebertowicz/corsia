@@ -2,7 +2,7 @@ import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { inEditorView } from '../support/liveDocument';
 import { enterDocumentEdit } from '../support/documentReading';
-import { openReadingDocument, READING_DOC, selectReadingPassage, selectReadingTab } from '../support/phoneReading';
+import { expectCommentPill, openReadingDocument, READING_DOC, selectReadingPassage, selectReadingTab } from '../support/phoneReading';
 
 // Chromium scripted selection and keyboard stand-ins only; native phone menus/finger handles remain device checks.
 for (const width of [320, 393, 768, 1440]) {
@@ -41,7 +41,7 @@ for (const width of [320, 393, 768, 1440]) {
 				await expect(content).toHaveAttribute('contenteditable', 'false');
 				await page.screenshot({ path: info.outputPath('reading-return.png') });
 			});
-			test('fixed Comment offer and selected endpoint scroll room in Reading and Edit', async ({ page }, info) => {
+			test('Comment pill at the bottom of the screen and selected endpoint scroll room in Reading and Edit', async ({ page }, info) => {
 				await openReadingDocument(page, width, theme);
 				if (width === 1440) {
 					await selectReadingPassage(page, 'Opening passage');
@@ -54,9 +54,10 @@ for (const width of [320, 393, 768, 1440]) {
 					const offer = page.locator('.touch-comment-bar.offered');
 					await expect(offer).toBeVisible();
 					await expect(page.locator('.sel-comment')).toHaveCount(1);
-					const target = await offer.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
-					expect(target!.height).toBeGreaterThanOrEqual(44);
-					expect(target!.width).toBeGreaterThanOrEqual(44);
+					// The button pops in from 90% size, as it does beside a selection on a desktop: it is a 44 px target once that has settled.
+					const comment = offer.getByRole('button', { name: 'Comment', exact: true });
+					await expect.poll(async () => { const box = (await comment.boundingBox())!; return box.height >= 44 && box.width >= 44; }, { message: 'the button is a 44 px target' }).toBe(true);
+					await expectCommentPill(page);
 					const geometry = await offer.evaluate(el => {
 						const bar = el.getBoundingClientRect(), viewport = window.visualViewport!;
 						const scroller = document.querySelector<HTMLElement>('.doc .cm-scroller')!;
@@ -78,11 +79,11 @@ for (const width of [320, 393, 768, 1440]) {
 	}
 }
 
-// A selection taller than the screen: its end is scrolled into view and the one Comment offer stays on screen, below the last selected line.
+// A selection taller than the screen: its end is scrolled into view and the one Comment pill stays on screen, below the last selected line.
 for (const width of [320, 393]) {
 	test.describe(`@flow:doc-phone-reading @surface:documents ${width} selection taller than the screen`, () => {
 		test.beforeEach(({}, info) => test.skip(info.project.name !== 'chromium-mobile', 'touch'));
-		test('Comment stays in the fixed bar and the selected end clears it, in Reading and Edit', async ({ page }, info) => {
+		test('Comment stays a centred pill at the bottom and the selected end clears it, in Reading and Edit', async ({ page }, info) => {
 			await openReadingDocument(page, width);
 			for (const editing of [false, true]) {
 				if (editing) await enterDocumentEdit(page);
@@ -98,9 +99,10 @@ for (const width of [320, 393]) {
 					const box = (await button.boundingBox())!, viewport = page.viewportSize()!;
 					return box.height >= 44 && box.width >= 44 && box.y >= 0 && box.y + box.height <= viewport.height;
 				}).toBe(true);
-				const barTop = (await bar.boundingBox())!.y;
+				await expectCommentPill(page);
+				const pillTop = (await button.boundingBox())!.y;
 				const endBottom = await inEditorView(page, view => view.coordsAtPos(view.state.doc.length - 1)!.bottom, null);
-				expect(endBottom, 'the last selected line is not under the bar').toBeLessThanOrEqual(barTop);
+				expect(endBottom, 'the last selected line is clear of the pill').toBeLessThanOrEqual(pillTop);
 				expect(await inEditorView(page, view => view.state.selection.main.to - view.state.selection.main.from, null), 'the selection is longer than the screen').toBeGreaterThan(1000);
 				await page.screenshot({ path: info.outputPath(editing ? 'tall-edit.png' : 'tall-reading.png') });
 			}

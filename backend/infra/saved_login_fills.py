@@ -2,27 +2,28 @@
 
 An agent may have a saved login (``infra.saved_logins``) typed into a page only
 under a grant: the person approved this agent's thread filling this login, for
-a duration they chose, at most :data:`MAX_GRANT_SECONDS`. There is no automatic
-approval of any kind, and the host-access reviewer never decides a fill.
+a duration they chose, at most :data:`MAX_GRANT_SECONDS`, or until they turn it
+off. There is no automatic approval of any kind, and the host-access reviewer
+never decides a fill.
 
-- :func:`request_fill` raises a pending approval. Server code calls it, never
-  an agent: no route or tool reaches it. It names the agent from the server's
-  own thread record and the site and username from the login's public view.
+- :func:`request_fill` raises a pending approval; server code calls it, no
+  route or tool reaches it. It may carry the timed duration the agent's task
+  needs, which the drawer starts on; an agent can never ask for a standing grant.
 - :func:`approve_fill`, :func:`deny_fill` and :func:`revoke_fill` are the
-  person's, reached only through routes behind ``require_human_user``.
+  person's, behind ``require_human_user``. Only :func:`approve_fill` makes a
+  standing grant (``until_revoked``): no deadline; it ends on revoke, when
+  the login is deleted or out of date (:func:`end_for_login`), or at a restart.
+- :func:`listed` is the chat's lease list: waiting requests and timed grants
+  only. A standing grant is never listed, so no chip shows or opens one.
 - :func:`may_fill` is the fill executor's check: true only under a live grant
-  for exactly that thread and login.
+  for exactly that thread and login. A grant is not a host-access lease.
 
-A grant is not a host-access lease. It opens :func:`may_fill` and nothing else.
+Thread identity (C3): the thread id comes from the call's server-side context,
+never a tool argument; inside an agent's turn any other thread is refused.
 
-Thread identity (C3): the thread id comes from the server-side context of the
-call, never from a tool argument. When one of these functions runs inside an
-agent's turn, the thread id it is given must be that turn's own thread; a
-different one is refused, so a caller cannot act for another thread.
-
-Requests and grants live in this process's memory only. A restart drops them
-all, so the server comes back failing closed: :func:`may_fill` is false until
-the person approves again. Nothing here reads or holds a password.
+Requests and grants live in this process's memory only, standing grants
+included, so a restart fails closed until the person approves again. Nothing
+here reads or holds a password.
 """
 
 from __future__ import annotations
@@ -93,6 +94,10 @@ class _Approval:
     expires_at: str | None = None
     #: Monotonic clock deadline; a wall-clock change can't stretch a grant.
     deadline: float | None = None
+    #: The duration the agent asked for, which the person's drawer starts on; never a standing grant.
+    requested_duration_seconds: int | None = None
+    #: The person chose "Until I turn it off": an active grant with no deadline.
+    standing: bool = False
 
     @property
     def application_hash(self) -> str:
@@ -100,7 +105,9 @@ class _Approval:
         return hashlib.sha256(json.dumps(fields).encode("utf-8")).hexdigest()
 
     def live(self, now: float) -> bool:
-        return self.state == AWAITING_USER or (self.deadline is not None and now < self.deadline)
+        if self.state == AWAITING_USER:
+            return True
+        return self.state == ACTIVE and (self.standing or (self.deadline is not None and now < self.deadline))
 
 
 _lock = threading.Lock()
@@ -149,11 +156,7 @@ def _prune(now: float) -> list[_Approval]:
 
 
 def _emit(action: str, item: _Approval, properties: dict[str, Any] | None = None) -> None:
-    """Count a fill transition: the thread and, on approve, the minutes picked. Never the site, username or id.
-
-    Called outside the lock. A route runs these functions in a worker thread, so the write never blocks
-    the event loop.
-    """
+    """Count a fill transition (thread, minutes; never site, username or id). Called outside the lock."""
     product_events.emit_product_event("saved_login", action, thread_id=item.thread_id, properties=properties)
 
 
@@ -161,6 +164,36 @@ def _emit_expired(expired: list[_Approval]) -> None:
     """A grant is recorded as expired when the next read drops it; a restart first drops it uncounted."""
     for item in expired:
         _emit("fill_expired", item)
+
+
+def _minutes(seconds: int) -> int | float:
+    return seconds // 60 if seconds % 60 == 0 else round(seconds / 60, 2)
+
+
+def _login_usable(login_id: str) -> bool:
+    try:
+        return saved_logins.get_login(login_id).status == saved_logins.STATUS_OK
+    except KeyStoreError:
+        return False
+
+
+def _remove(predicate) -> list[_Approval]:
+    with _lock:
+        ended = [item for item in _approvals.values() if predicate(item)]
+        for item in ended:
+            del _approvals[item.id]
+    return ended
+
+
+def end_for_login(login_id: str, *, deleted: bool) -> None:
+    """End every request and grant for the login, standing ones included: ``fill_revoked`` on a delete,
+    ``fill_expired`` when it goes out of date. The paths that make a login unusable call this as they do,
+    so a re-save can't revive a grant."""
+    ended = _remove(lambda item: item.login_id == login_id)
+    for item in ended:
+        _emit("fill_revoked" if deleted else "fill_expired", item)
+        logger.info("saved-login fill ended with its login: approval {}", item.id)
+        _notify(item)
 
 
 def _public(item: _Approval) -> dict[str, Any]:
@@ -179,7 +212,9 @@ def _public(item: _Approval) -> dict[str, Any]:
         "revision": item.revision,
         "application_hash": item.application_hash,
         "max_duration_seconds": MAX_GRANT_SECONDS,
+        "requested_duration_seconds": item.requested_duration_seconds,
         "duration_seconds": item.duration_seconds,
+        "standing": item.standing,
         "expires_at": item.expires_at,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
@@ -197,13 +232,14 @@ def _notify(item: _Approval) -> None:
         logger.warning("saved-login fill approval {}: change nudge not sent: {}", item.id, type(exc).__name__)
 
 
-def request_fill(thread_id: str, login_id: str) -> dict[str, Any]:
+def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = None) -> dict[str, Any]:
     """Ask the person to approve this thread filling this saved login; return the request.
 
-    Called by server code only, with the thread id from the executing turn's
-    context. A request already waiting, or a grant still live, for the same
-    thread and login is returned as it is rather than raising another.
+    ``requested_seconds`` is ``None`` or whole seconds within the cap; anything else, a standing
+    grant included, raises :class:`FillDurationError` (refused, not clamped, as a lease's is).
+    A request waiting or grant live for the same thread and login is returned as it is.
     """
+    requested = None if requested_seconds is None else _duration(requested_seconds)
     clean_thread = _own_thread(thread_id)
     try:
         login = saved_logins.get_login(login_id)
@@ -213,7 +249,6 @@ def request_fill(thread_id: str, login_id: str) -> dict[str, Any]:
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     user_id, root, agent = _thread_record(clean_thread)
     now_iso = utc_now_iso()
-    existing: _Approval | None = None
     with _lock:
         expired = _prune(time.monotonic())
         existing = next(
@@ -225,25 +260,21 @@ def request_fill(thread_id: str, login_id: str) -> dict[str, Any]:
                 id=uuid.uuid4().hex, thread_id=clean_thread, root_thread_id=root, user_id=user_id, agent=agent,
                 login_id=login.id, site=login.site, username=login.username,
                 created_at=now_iso, updated_at=now_iso, revision=1, state=AWAITING_USER,
+                requested_duration_seconds=requested,
             )
             _approvals[item.id] = item
     _emit_expired(expired)
     if existing is not None:
         return _public(existing)
-    _emit("fill_requested", item)
+    _emit("fill_requested", item, None if requested is None else {"requested_minutes": _minutes(requested)})
     logger.info("saved-login fill requested: approval {} thread {} login {}", item.id, clean_thread, login.id)
     _notify(item)
     return _public(item)
 
 
 def may_fill(thread_id: str, login_id: str) -> bool:
-    """True only while the person's grant for exactly this thread and login is live.
-
-    False before approval, after it runs out, after a deny or a revoke, for any
-    other thread or login, for a thread other than the running turn's own, and
-    once the login is missing or out of date, so a live grant never retries a
-    password the site already refused.
-    """
+    """True only while the person's grant for exactly this thread and login is live, the running
+    turn is that thread, and the login is usable, so a grant never retries a refused password."""
     if not isinstance(thread_id, str) or not isinstance(login_id, str) or not thread_id or not login_id:
         return False
     running = _context_thread()
@@ -252,25 +283,28 @@ def may_fill(thread_id: str, login_id: str) -> bool:
     now = time.monotonic()
     with _lock:
         granted = any(
-            item.state == ACTIVE and item.deadline is not None and now < item.deadline
+            item.state == ACTIVE and item.live(now)
             and item.thread_id == thread_id and item.login_id == login_id
             for item in _approvals.values()
         )
     if not granted:
         return False
-    try:
-        return saved_logins.get_login(login_id).status == saved_logins.STATUS_OK
-    except KeyStoreError:
-        return False
+    if _login_usable(login_id):
+        return True
+    end_for_login(login_id, deleted=False)
+    return False
 
 
 def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, Any]]:
-    """This person's waiting requests and live grants, oldest first; one chat's when a root is named."""
+    """This person's waiting requests and live timed grants, oldest first; one chat's when a root is named.
+
+    A standing grant is left out: the chat's lock chip is for timed grants only.
+    """
     with _lock:
         expired = _prune(time.monotonic())
         items = [
             item for item in _approvals.values()
-            if item.user_id == user_id
+            if item.user_id == user_id and not item.standing
             and (root_thread_id is None or root_thread_id in (item.root_thread_id, item.thread_id))
         ]
     _emit_expired(expired)
@@ -291,9 +325,7 @@ def get(approval_id: str, *, user_id: str) -> dict[str, Any]:
 
 def _current(approval_id: str, user_id: str, state: str, revision: int, application_hash: str) -> _Approval:
     item = _approvals.get(approval_id)
-    if item is None or item.user_id != user_id or not item.live(time.monotonic()):
-        raise FillApprovalNotFound(_NO_REQUEST if state == AWAITING_USER else _NO_GRANT)
-    if item.state != state:
+    if item is None or item.user_id != user_id or item.state != state or not item.live(time.monotonic()):
         raise FillApprovalNotFound(_NO_REQUEST if state == AWAITING_USER else _NO_GRANT)
     if item.revision != revision or item.application_hash != application_hash:
         raise FillApprovalError(_NOT_CURRENT)
@@ -301,29 +333,36 @@ def _current(approval_id: str, user_id: str, state: str, revision: int, applicat
 
 
 def _duration(seconds: object) -> int:
-    if isinstance(seconds, bool) or not isinstance(seconds, int):
-        raise FillDurationError(_DURATION)
-    if not MIN_GRANT_SECONDS <= seconds <= MAX_GRANT_SECONDS:
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or not MIN_GRANT_SECONDS <= seconds <= MAX_GRANT_SECONDS:
         raise FillDurationError(_DURATION)
     return seconds
 
 
 def approve_fill(
-    approval_id: str, *, user_id: str, revision: int, application_hash: str, duration_seconds: object,
+    approval_id: str, *, user_id: str, revision: int, application_hash: str, duration_seconds: object = None,
+    until_revoked: object = False,
 ) -> dict[str, Any]:
-    """The person's yes: the grant runs for ``duration_seconds``, refused above :data:`MAX_GRANT_SECONDS`."""
-    seconds = _duration(duration_seconds)
+    """The person's yes: exactly one of ``duration_seconds`` within the cap, or ``until_revoked=True``."""
+    if until_revoked is True and duration_seconds is None:
+        seconds = None
+    elif until_revoked is False:
+        seconds = _duration(duration_seconds)
+    else:
+        raise FillDurationError(_DURATION)
     with _lock:
         item = _current(approval_id, user_id, AWAITING_USER, revision, application_hash)
         now_iso = utc_now_iso()
-        item = replace(
-            item, state=ACTIVE, revision=item.revision + 1, updated_at=now_iso, duration_seconds=seconds,
-            expires_at=(utc_now() + timedelta(seconds=seconds)).isoformat(),
-            deadline=time.monotonic() + seconds,
-        )
+        if seconds is None:
+            item = replace(item, state=ACTIVE, revision=item.revision + 1, updated_at=now_iso, standing=True)
+        else:
+            item = replace(
+                item, state=ACTIVE, revision=item.revision + 1, updated_at=now_iso, duration_seconds=seconds,
+                expires_at=(utc_now() + timedelta(seconds=seconds)).isoformat(),
+                deadline=time.monotonic() + seconds,
+            )
         _approvals[item.id] = item
-    _emit("fill_approved", item, {"duration_minutes": seconds // 60 if seconds % 60 == 0 else round(seconds / 60, 2)})
-    logger.info("saved-login fill approved: approval {} for {}s", item.id, seconds)
+    _emit("fill_approved", item, {"standing": True} if seconds is None else {"duration_minutes": _minutes(seconds)})
+    logger.info("saved-login fill approved: approval {} for {}", item.id, "until revoked" if seconds is None else f"{seconds}s")
     _notify(item)
     return _public(item)
 

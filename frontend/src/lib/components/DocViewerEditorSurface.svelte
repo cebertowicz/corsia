@@ -218,18 +218,24 @@
 	{/if}
 </div>
 
+{#snippet commentFace()}
+	<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+	Comment
+{/snippet}
+
 {#if touchReading}
-	<DocTouchCommentBar {column} offered={!!pendingSel && !listOverText} onComment={() => { if (!listOverText) onStartComment(); }} />
+	<DocTouchCommentBar {column} offered={!!pendingSel && !listOverText}>
+		<button class="sel-comment" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>{@render commentFace()}</button>
+	</DocTouchCommentBar>
 {:else if pendingSel && !listOverText}
 	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
-		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-		Comment
+		{@render commentFace()}
 	</button>
 {/if}
 
 <style>
-	/* The editor's own end room (40vh, which lets the last line scroll above a keyboard) stays; the bar's room only raises it when it would be smaller. A scroll into view leaves exactly what the bar covers clear: a margin card's field lying just above the bar must not count as hidden, or the browser re-centres the document on it. */
+	/* The editor's own end room (40vh, which lets the last line scroll above a keyboard) stays; the Comment button's room only raises it when it would be smaller. A scroll into view leaves exactly what the button covers clear: a margin card's field lying just above the bar must not count as hidden, or the browser re-centres the document on it. */
 	.touch-reading :global(.cm-content:not(.cm-md-cell-editor .cm-content)) { padding-bottom: max(40vh, calc(var(--document-comment-room, 60px) + var(--space-4))); }
 	.touch-reading :global(.cm-scroller:not(.cm-md-cell-editor .cm-scroller)) { scroll-padding-bottom: var(--document-comment-room, 60px); }
 </style>

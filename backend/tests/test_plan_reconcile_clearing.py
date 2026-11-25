@@ -71,10 +71,13 @@ def _remove_dependency(db, plan_id: str, node_id: str, prerequisite_id: str) -> 
 
 
 def _arm_watch(db, plan_id: str, node_id: str, _prerequisite_id: str) -> str:
+    # A watch on an artifact's event; a deadline alone still ranks the task (plans.triage_lines).
+    from tests.test_plan_reconcile_release import watched_artifact
+
     result = plan_update(
         db, plan_id, "arm_watch",
-        {"node_id": node_id, "condition": {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"},
-         "expected_event": "proof.ready",
+        {"node_id": node_id, "condition": {"type": "event", "value": "proof.ready"},
+         "artifact_id": watched_artifact(db, node_id), "expected_event": "proof.ready",
          "expected_revision": revision(db, node_id)},
     )
     return result["watch"]["id"]

@@ -12,7 +12,7 @@ from datetime import datetime
 
 from infra.packed_rows import fetch_all
 from plans import (
-    closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence,
+    closure, commitment_cost, later_fields, node_cost, node_cost_scoped, node_states, review_evidence,
 )
 from plans.commitment_cost import FAILED_RELEASES
 
@@ -89,7 +89,7 @@ def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str], 
 
 
 #: What ``detail`` returns for a reader that shows none of it (no executor labels).
-NO_DETAIL: tuple = (None, {}, {}, {}, {}, {})
+NO_DETAIL: tuple = (None, {}, {}, {}, {}, {}, {})
 
 
 def scope(
@@ -115,7 +115,7 @@ def id_chunks(ids: list[str] | None) -> list[list[str] | None]:
 def detail(
     projected, node_plans, executor_by_node, *, limit: int, db, scoped: bool = False,
 ) -> tuple:
-    """Executor labels, attempt history and counts, review evidence, last changes, settled reasons.
+    """Executor labels, attempt history and counts, review evidence, last changes, settled reasons, Later reasons.
 
     ``scoped`` reads each fact for the projected nodes alone, not for every node of their
     plans: the projection is then the open work of a plan and the cost follows it. A
@@ -137,6 +137,7 @@ def detail(
         labels, history, counts,
         review_evidence.latest_by_node(plan_ids, db=db, node_ids=node_ids), changed,
         closure.settled_reasons(db, [node for node, _plan in node_plans], labels=labels),
+        later_fields.latest_reasons(db, [str(node["id"]) for node, _plan in node_plans if node.get("later")]),
     )
 
 

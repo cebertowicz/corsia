@@ -203,6 +203,8 @@ for (const layout of LAYOUTS) {
 			const barClear = async (target: Locator) => {
 				const bar = page.locator('.touch-comment-bar.offered');
 				await expect(bar).toBeVisible();
+				// The button pops in from 90% size, as beside a selection on a desktop: it is a 44 px target once that has settled.
+				await expect.poll(async () => { const box = await offer.boundingBox(); return !!box && box.height >= 44 && box.width >= 44; }, { message: 'the Comment button is a 44 px target' }).toBe(true);
 				const barBox = await boxOf(bar), button = await boxOf(offer), cellBox = await rectOf(target);
 				const viewport = await page.evaluate(() => ({ top: visualViewport?.offsetTop ?? 0, height: visualViewport?.height ?? innerHeight }));
 				expect(button.height >= 44 && button.width >= 44, `the Comment button is a 44 px target (${JSON.stringify(button)})`).toBe(true);

@@ -31,8 +31,8 @@ async function offerClear(page: Page, layout: Layout) {
 		const bar = page.locator('.touch-comment-bar.offered');
 		await expect(bar, 'a phone offers the whole-cell comment in the bottom bar').toBeVisible();
 		const barBox = (await bar.boundingBox())!;
-		expect(offer!.height, 'the Comment button is a 44 px target').toBeGreaterThanOrEqual(44);
-		expect(offer!.width, 'the Comment button is a 44 px target wide').toBeGreaterThanOrEqual(44);
+		// The button pops in from 90% size, as beside a selection on a desktop: it is a 44 px target once that has settled.
+		await expect.poll(async () => { const box = await page.locator('.sel-comment').boundingBox(); return !!box && box.height >= 44 && box.width >= 44; }, { message: 'the Comment button is a 44 px target' }).toBe(true);
 		expect(barBox.y >= viewport.top && barBox.y + barBox.height <= viewport.top + viewport.height, `the bar ${JSON.stringify(barBox)} is whole on the visible page ${JSON.stringify(viewport)}`).toBe(true);
 		expect(open!.y + open!.height, `the cell being edited ${JSON.stringify(open)} is clear of the bar ${JSON.stringify(barBox)}`).toBeLessThanOrEqual(barBox.y + 1);
 	} else {

@@ -36,13 +36,13 @@
 			<dl>
 				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
 				<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>
-				<div><dt class="section-label">For how long</dt><dd>{duration(lease.duration_seconds)}</dd></div>
+				<div><dt class="section-label">Duration</dt><dd>{duration(lease.duration_seconds)}</dd></div>
 				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
 			</dl>
 		{:else}
 			<p>{lease.purpose}</p>
 			<dl>
-				<div><dt class="section-label">For how long</dt><dd>{duration(lease.requested_duration_seconds)}</dd></div>
+				<div><dt class="section-label">Duration</dt><dd>{duration(lease.requested_duration_seconds)}</dd></div>
 				<div><dt class="section-label">Reviewer</dt><dd>{lease.reviewer?.display_name ?? lease.reviewer?.model ?? 'Unavailable'}</dd></div>
 				<div><dt class="section-label">Approval</dt><dd>{lease.application_review_result?.approval_mode === 'automatic' ? 'Automatic reviewer approval' : 'User approval'}</dd></div>
 				<div><dt class="section-label">Time remaining</dt><dd>{remaining(lease, nowMs)}</dd></div>
@@ -64,8 +64,8 @@
 
 <style>
 	/* Sticky within AdaptiveDrawer's own .drawer-body scroll, not a second
-	   nested scroller — the same technique DecisionChip already uses for its
-	   header in this exact shared drawer. A percentage/flex height chain
+	   nested scroller, so the header stays in this shared drawer's one
+	   scroll. A percentage/flex height chain
 	   through .drawer-body's max-height-capped flex item does not reliably
 	   resolve (verified empirically), so sticky is the robust fix. */
 	.active-drawer {
