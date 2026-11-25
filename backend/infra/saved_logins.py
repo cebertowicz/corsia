@@ -54,7 +54,7 @@ _LOGIN_ID = re.compile(r"[0-9a-f]{32}")
 #: Unicode control characters (NUL included) and unpaired surrogates, which no page can be typed.
 _REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
 
-_SITE_REFUSAL = "A saved login's site is an https address, such as https://example.com."
+_SITE_REFUSAL = "CORSIA saves logins only for sites whose address starts with https://."
 _USERNAME_REFUSAL = f"A username is 1-{USERNAME_MAX} characters with no control characters."
 _PASSWORD_EMPTY = "Type the password first."
 _PASSWORD_REFUSAL = f"A password is 1-{VALUE_MAX} characters with no control characters. Nothing was saved."

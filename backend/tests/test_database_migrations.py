@@ -117,6 +117,168 @@ def test_a_migration_that_breaks_referential_integrity_is_rolled_back(tmp_path, 
     assert _digest(path) == before
 
 
+def _add_untouched_orphan(path: Path) -> None:
+    """An orphan the migration never touches: it was already in the database."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE other_parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE other_child (
+            id INTEGER PRIMARY KEY,
+            other_parent_id INTEGER REFERENCES other_parent(id)
+        );
+        INSERT INTO other_child (id, other_parent_id) VALUES (5, 99);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_an_orphan_the_migration_did_not_create_does_not_block_it(
+    tmp_path, ladder, caplog
+):
+    """A pre-existing orphan in an untouched table no longer rolls back updates."""
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE added (id INTEGER PRIMARY KEY)")
+    path = _database(tmp_path, 1)
+    _add_untouched_orphan(path)
+
+    conn = sqlite3.connect(path)
+    # The app's connections return sqlite3.Row; the log must still name the table.
+    conn.row_factory = sqlite3.Row
+    try:
+        with caplog.at_level("WARNING", logger="infra.database_migrations"):
+            assert migrate_to_current(conn, 2).migrated
+        assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 2
+        # The old orphan is kept as it was; the migration does not repair data.
+        assert [tuple(row) for row in conn.execute("PRAGMA foreign_key_check")] == [
+            ("other_child", 5, "other_parent", 0)
+        ]
+        kept = [r.getMessage() for r in caplog.records if "predate it" in r.getMessage()]
+        assert len(kept) == 1
+        assert "('other_child', 5, 'other_parent', 0)" in kept[0]
+        assert "sqlite3.Row" not in kept[0]
+    finally:
+        conn.close()
+
+
+def test_an_orphan_the_migration_creates_still_fails_beside_an_old_one(tmp_path, ladder):
+    """A pre-existing orphan elsewhere does not hide one the migration makes."""
+    def orphans_a_child(conn: sqlite3.Connection) -> None:
+        conn.execute("DELETE FROM parent WHERE id=1")
+
+    ladder[1] = orphans_a_child
+    path = _database(tmp_path, 1)
+    _add_untouched_orphan(path)
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        with pytest.raises(MigrationError) as raised:
+            migrate_to_current(conn, 2)
+        message = str(raised.value.__cause__)
+        assert "foreign_key_check failed" in message
+        assert "('child', 10, 'parent', 0)" in message
+        assert "sqlite3.Row" not in message
+        assert "other_child" not in message
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def test_a_new_orphan_in_a_without_rowid_table_is_not_hidden_by_an_old_one(
+    tmp_path, ladder
+):
+    """WITHOUT ROWID orphans all report rowid NULL; the count still tells."""
+    path = _database(tmp_path, 1)
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE tag (
+            name TEXT PRIMARY KEY,
+            parent_id INTEGER REFERENCES parent(id)
+        ) WITHOUT ROWID;
+        INSERT INTO tag (name, parent_id) VALUES ('old', 99);
+        """
+    )
+    conn.commit()
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == [("tag", None, "parent", 0)]
+    conn.close()
+
+    ladder[1] = lambda conn: conn.execute(
+        "INSERT INTO tag (name, parent_id) VALUES ('new', 98)"
+    )
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError, match="foreign_key_check failed"):
+            migrate_to_current(conn, 2)
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def _rebuild_parent(keep: str):
+    """The ladder's rebuild shape: create X_new, copy, drop X, rename X_new to X."""
+    def step(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE parent_new (id INTEGER PRIMARY KEY, label TEXT)")
+        conn.execute(f"INSERT INTO parent_new SELECT * FROM parent WHERE {keep}")
+        conn.execute("DROP TABLE parent")
+        conn.execute("ALTER TABLE parent_new RENAME TO parent")
+
+    return step
+
+
+def _add_old_child_orphan(path: Path) -> None:
+    """An orphan already in the referencing table before the parent is rebuilt."""
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO child (id, parent_id) VALUES (11, 7)")
+    conn.commit()
+    conn.close()
+
+
+def test_a_rebuilt_table_that_drops_parent_rows_still_fails(tmp_path, ladder):
+    """A rebuild that loses a referenced parent row raises, beside an old orphan."""
+    ladder[1] = _rebuild_parent(keep="id <> 1")
+    path = _database(tmp_path, 1)
+    _add_old_child_orphan(path)
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError) as raised:
+            migrate_to_current(conn, 2)
+        message = str(raised.value.__cause__)
+        assert "foreign_key_check failed" in message
+        assert "'child', 10, 'parent'" in message
+        assert "'child', 11," not in message
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def test_a_rebuilt_table_that_keeps_every_row_passes_beside_an_old_orphan(
+    tmp_path, ladder
+):
+    """The same rebuild copying every row migrates; the old orphan stays as it was."""
+    ladder[1] = _rebuild_parent(keep="1")
+    path = _database(tmp_path, 1)
+    _add_old_child_orphan(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        assert migrate_to_current(conn, 2).migrated
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == [
+            ("child", 11, "parent", 0)
+        ]
+    finally:
+        conn.close()
+
+
 def test_a_migration_with_a_mismatched_rebuilt_table_index_is_rolled_back(
     tmp_path, ladder
 ):

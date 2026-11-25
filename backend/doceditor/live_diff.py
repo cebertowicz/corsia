@@ -40,16 +40,22 @@ def _edges(lines: list[str]) -> list[int]:
     return result
 
 
-def _line_opcodes(before: list[str], after: list[str]):
+def _line_positions(lines: list[str]) -> dict[str, int]:
+    positions = {}
+    for index, line in enumerate(lines):
+        positions[line] = -1 if line in positions else index
+    return positions
+
+
+def _line_opcodes(before: list[str], after: list[str], *, positions=None):
     """Align unique, ordered matches once; ambiguous alignments keep the matcher.
 
     When every common line has one position and those positions increase, all
     equal blocks are forced. SequenceMatcher emits these same blocks but can
     repeatedly scan the remaining document to rediscover each one.
     """
-    positions = {}
-    for index, line in enumerate(after):
-        positions[line] = -1 if line in positions else index
+    if positions is None:
+        positions = _line_positions(after)
     seen, previous = set(), -1
     for line in before:
         if line not in positions:

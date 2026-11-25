@@ -102,7 +102,14 @@ state = default_state_root()
 move_preview_layout(Path(sys.argv[2]), state)
 print(state)
 ' "$resources/backend" "$app_dir")" || exit 1
-mkdir -p "$state_dir/logs"
+LOGS_DIR="$(PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$resources/python/bin/python3" -I -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from infra.log_files import logs_dir
+print(logs_dir(Path(sys.argv[2])))
+' "$resources/backend" "$state_dir")" || exit 1
+mkdir -p "$LOGS_DIR" || exit 1
 
 # launchd starts this launcher with no arguments. Scripted invocations retain
 # their explicit arguments, while the launchd default is always loopback.
@@ -131,7 +138,8 @@ fi
 if [ "$service_port" != "unknown" ]; then
   export BACKEND_PORT="$service_port"
 fi
-exec >>"$state_dir/logs/service.log" 2>&1
+[ ! -L "$LOGS_DIR/service.log" ] || rm -f "$LOGS_DIR/service.log" || exit 1
+exec >>"$LOGS_DIR/service.log" 2>&1
 # Refuse to compete with a different CORSIA job. A deliberate refusal exits
 # successfully so KeepAlive does not turn PK4 into a respawn loop.
 launchctl_command="${CORSIA_TEST_LAUNCHCTL:-launchctl}"

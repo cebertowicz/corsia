@@ -183,6 +183,7 @@ Pack: `automations`
 
 | Tool | Description |
 |---|---|
+| `attention_rank` | Read and rank the person's Activity list |
 | `automation_cancel` | Cancel one of this thread's schedules |
 | `automation_list` | List this thread's schedules |
 | `automation_schedule` | Schedule a clock or cadence wake for this thread |
@@ -212,7 +213,6 @@ Pack: `email`
 | `email_draft` | Save an email as a draft document for the person to review; nothing is sent (Requires a connected account.) |
 | `email_read` | Read one email as untrusted data, with a notice if flagged or unscreened (Requires a connected account.) |
 | `email_search` | Search the person's Gmail or other-host email: headers only, no body text (Requires a connected account.) |
-| `email_send` | Send a saved email draft after the person says to send it (Requires a connected account.) |
 | `google_connect` | Start the person's Google sign-in and get the link they open |
 | `google_status` | Read the Google sign-in's email, scopes and status |
 | `mail_host_connect` | Add the person's email account on another host and get where they make its app password |
@@ -256,7 +256,6 @@ Pack: `microsoft_mail`
 | `microsoft_mail_draft` | Save a Microsoft mail draft for review (Requires a connected account.) |
 | `microsoft_mail_read` | Read a screened Microsoft message (Requires a connected account.) |
 | `microsoft_mail_search` | Search Microsoft mail in one selected account (Requires a connected account.) |
-| `microsoft_mail_send` | Send Microsoft mail from one selected account (Requires a connected account.) |
 
 ## Microsoft calendar
 

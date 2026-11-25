@@ -14,6 +14,7 @@ text, so no refusal echoes what was sent.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,10 +25,16 @@ from infra.db_async import run_in_db
 from infra.key_store_values import KeyStoreError
 from infra.queries import get_thread_for_user
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/saved-logins", tags=["saved-logins"])
 
-_NO_THREAD = "No chat has that id."
-_BAD_BODY = "This request needs the chat it's for."
+_NO_THREAD = "Couldn’t find this chat. Sign in again in another chat to save the login."
+_BAD_BODY = "Couldn’t do that: the request didn’t name a valid chat. Send it again with the chat’s id."
+#: The person's words for a delete with nothing to delete; the saved-logins module keeps its neutral text.
+_NO_LOGIN_TO_DELETE = "There’s no saved login to delete."
+#: Save's answer to any other key store refusal. The offer is kept, so Save can be pressed again;
+#: the refusal's own fixed text goes to the log with the thread id, never to the person.
+_SAVE_FAILED = "Couldn’t save the login. Try again."
 #: Largest body read: a JSON object holding one thread id, which is a 36-character UUID, with ample room.
 MAX_BODY_BYTES = 1024
 
@@ -70,13 +77,22 @@ async def get_offer(thread_id: str, user: dict = Depends(require_human_user)) ->
 
 @router.post("/offer/save")
 async def save_offer(request: Request, user: dict = Depends(require_person_write)) -> dict:
-    """Save the thread's confirmed offer as the signed-in person, then drop it; 409 when none is held."""
-    key = await _session_key(await _thread_id(request), user)
+    """Save the thread's confirmed offer as the signed-in person, then drop it.
+
+    409 with ``NO_OFFER`` when no confirmed offer is held, which includes a
+    closed or relaunched browser; 500 with fixed text for any other key store
+    refusal, the offer kept and the refusal's fixed text logged; 400 for a bad
+    body; 404 when the person has no such chat.
+    """
+    thread_id = await _thread_id(request)
+    key = await _session_key(thread_id, user)
     try:
         await run_in_db(saved_login_offers.save_offer, key, saved_by=user["id"])
     except KeyStoreError as refused:
-        status = 409 if str(refused) == saved_login_offers.NO_OFFER else 400
-        raise HTTPException(status, str(refused)) from None
+        if str(refused) == saved_login_offers.NO_OFFER:
+            raise HTTPException(409, str(refused)) from None
+        log.error("Saving a login for thread %s failed: %s", thread_id, refused)
+        raise HTTPException(500, _SAVE_FAILED) from None
     return {"saved": True}
 
 
@@ -95,9 +111,9 @@ async def list_saved_logins(_user: dict = Depends(require_human_user)) -> dict:
 
 @router.delete("/{login_id}")
 async def delete_saved_login(login_id: str, _user: dict = Depends(require_person_write)) -> dict:
-    """Delete one saved login and its password."""
+    """Delete one saved login and its password; 404 when there is no such login."""
     try:
         await run_in_db(saved_logins.delete_login, login_id)
-    except KeyStoreError as refused:
-        raise HTTPException(404, str(refused)) from None
+    except KeyStoreError:
+        raise HTTPException(404, _NO_LOGIN_TO_DELETE) from None
     return {"deleted": login_id}

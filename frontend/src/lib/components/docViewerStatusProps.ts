@@ -4,11 +4,18 @@ import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { DocumentAsk } from '$lib/stores/documentBar';
+import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 export interface DocViewerStatusProps {
 	presence?: Snippet;
+	touchReading?: boolean;
+	editing?: boolean;
+	canEdit?: boolean;
+	onEnterEdit?: () => void;
+	onDone?: () => void;
 	/** The ask's card, docked to the canvas's bottom edge; its buttons come before the document in tab order. */
 	reviewBar?: Snippet;
+	commentTaskBar?: ReviewBarState;
 	ask?: DocumentAsk | null;
 	commentsOpen?: boolean;
 	commentsLoading?: boolean;

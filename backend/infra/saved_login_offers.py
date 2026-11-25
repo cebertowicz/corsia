@@ -35,9 +35,12 @@ from infra.saved_logins import (
     logins_for_site, normalized_site, password_matches, save_login, validated_password, validated_username,
 )
 
-_SESSION_REFUSAL = "A save offer needs the browser session it came from."
-_OWN_SITE_REFUSAL = "CORSIA doesn't save a login for CORSIA itself."
-NO_OFFER = "No sign-in is waiting to be saved."
+_SESSION_REFUSAL = (
+    "The shared browser this sign-in came from has closed, so it can’t be saved. "
+    "It’s offered again the next time you sign in."
+)
+_OWN_SITE_REFUSAL = "CORSIA doesn’t save a login for CORSIA itself."
+NO_OFFER = "Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in."
 
 
 @dataclass(frozen=True)
@@ -69,8 +72,8 @@ _lock = threading.Lock()
 _offers: dict[str, _Offer] = {}
 #: The username from the first page of a two-page sign-in: session key to (site, username).
 _usernames: dict[str, tuple[str, str]] = {}
-#: The offer_login call still checking the database for each session. A drop or a newer call
-#: removes or replaces its claim, so an offer checked before a drop is never stored after it.
+#: The offer_login or save_offer call still working for each session. A drop or a newer offer_login
+#: removes or replaces its claim, so an offer checked or put back after a drop is never stored.
 _claims: dict[str, object] = {}
 
 
@@ -177,15 +180,32 @@ def save_offer(session_key: str | None, *, saved_by: str, db: sqlite3.Connection
     """Save the session's pending offer as the person ``saved_by``; return the login id.
 
     An unconfirmed offer is refused and kept. A confirmed one and the noted
-    username leave memory first, so a failed save keeps nothing either.
+    username leave memory first, so a second Save can't save it twice. A failed
+    save keeps the offer so Save can be pressed again: it is put back unless Not
+    now, the browser closing or a newer sign-in came meanwhile. The noted
+    username is not put back; confirming already used it.
     """
+    claim = object()
     with _lock:
         offer = _offers.get(session_key) if session_key is not None else None
         if session_key is None or offer is None or not offer.confirmed:
             raise KeyStoreError(NO_OFFER)
         del _offers[session_key]
         _usernames.pop(session_key, None)
-    return save_login(site=offer.site, username=offer.username, password=offer.password, saved_by=saved_by, db=db)
+        _claims[session_key] = claim
+    try:
+        return save_login(
+            site=offer.site, username=offer.username, password=offer.password, saved_by=saved_by, db=db,
+        )
+    except BaseException:
+        with _lock:
+            if _claims.get(session_key) is claim and session_key not in _offers:
+                _offers[session_key] = offer
+        raise
+    finally:
+        with _lock:
+            if _claims.get(session_key) is claim:
+                del _claims[session_key]
 
 
 def drop_offer(session_key: str | None) -> None:

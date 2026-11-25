@@ -107,7 +107,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'child', title: 'Open child', parent_id: 'phase', depth: 1 }),
 			node({ id: 'open-sibling', title: 'Open sibling' }),
 		];
-		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['child'] }) });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, expandBranchesByDefault: true }) });
 		await settle();
 		// 'phase' itself is terminal, but its child is still open, so it must
 		// not be treated as finished for ordering (mirrors the server's rule

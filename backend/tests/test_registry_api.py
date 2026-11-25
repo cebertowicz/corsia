@@ -92,6 +92,39 @@ def _archive_session(thread_id: str) -> None:
 
 
 @pytest.mark.integration
+def test_get_artifact_by_id_checks_access_and_lifecycle(integration_client):
+    from infra.database import get_db
+    from registry import models
+
+    owner = _mk_session()
+    artifact = _register(integration_client, owner, title="Document").json()["artifact"]
+    artifact_id = artifact["id"]
+    db = get_db()
+    try:
+        db.execute("UPDATE artifact_registrations SET surfacing='settled' WHERE artifact_id=?", (artifact_id,))
+        db.commit()
+    finally:
+        db.close()
+    url = f"/api/artifacts/{artifact_id}"
+    response = integration_client.get(url, params={"token": _TOKEN})
+    assert response.status_code == 200
+    assert response.json()["artifact"]["id"] == artifact_id
+    assert integration_client.get(url, params={"token": _OTHER_TOKEN}).status_code == 404
+    assert integration_client.get("/api/artifacts/no-such-id", params={"token": _TOKEN}).status_code == 404
+    models.retire(artifact_id)
+    assert integration_client.get(url, params={"token": _TOKEN}).status_code == 404
+
+    person_owned = models.register_artifact(
+        integration="workspace", type="document", external_id=f"shared-{uuid.uuid4().hex}",
+        parent_thread_id="project:example", path="/workspace/.worktrees/example/doc.md",
+        metadata={"supervisor_thread_id": owner},
+    )
+    response = integration_client.get(f"/api/artifacts/{person_owned['id']}", params={"token": _TOKEN})
+    assert response.status_code == 200
+    assert response.json()["artifact"]["path"] == "/workspace/.worktrees/example/doc.md"
+
+
+@pytest.mark.integration
 class TestRegisterAndResolve:
     def test_register_then_resolve_roundtrip(self, integration_client):
         sid = _mk_session()

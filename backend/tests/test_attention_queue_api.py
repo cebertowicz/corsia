@@ -153,7 +153,7 @@ def test_answering_the_last_item_empties_the_queue(db, monkeypatch):
     )
 
     empty = queue_client.get("/api/attention/queue").json()
-    assert empty == {"current": None, "count": 0, "items": []}
+    assert empty == {"current": None, "count": 0, "items": [], "ranker": None}
 
 
 def test_another_user_sees_none_of_it(db, monkeypatch):
@@ -161,7 +161,7 @@ def test_another_user_sees_none_of_it(db, monkeypatch):
     stranger = _attention_client(db, monkeypatch, user_id="user-2")
 
     assert stranger.get("/api/attention/queue").json() == {
-        "current": None, "count": 0, "items": [],
+        "current": None, "count": 0, "items": [], "ranker": None,
     }
 
 

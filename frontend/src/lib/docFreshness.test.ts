@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { formatFreshness, shouldOfferVerification, type DocumentFreshness } from './docFreshness';
+import { formatFreshness, freshnessStatusText, shouldOfferVerification, type DocumentFreshness } from './docFreshness';
 
 function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -45,5 +45,18 @@ describe('shouldOfferVerification', () => {
 		expect(shouldOfferVerification(freshness({ due_at: '2026-10-08T12:00:00Z' }))).toBe(false);
 		expect(shouldOfferVerification(freshness({ due_at: '2026-09-29T12:00:00Z' }))).toBe(false);
 		vi.useRealTimers();
+	});
+});
+
+describe('freshnessStatusText', () => {
+	it('is empty with no freshness', () => expect(freshnessStatusText(null)).toBe(''));
+	it('is the phrase while current', () => {
+		const presentation = formatFreshness(freshness());
+		expect(freshnessStatusText(presentation)).toBe(presentation.phrase);
+	});
+	it('names the last verification date once overdue', () => {
+		const presentation = formatFreshness(freshness({ state: 'overdue' }));
+		expect(presentation.overdue).toBe(true);
+		expect(freshnessStatusText(presentation)).toMatch(/^Overdue · /);
 	});
 });

@@ -51,6 +51,13 @@ describe('acceptAllOpen', () => {
 		expect(mocks.loadComments).toHaveBeenCalledWith('art-1');
 	});
 
+	it('carries the batch receipt to the editor as one history step', async () => {
+		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: ['c1', 'c2'], decision_event_id: 'event', text: 'new text', revision: 'r2' });
+		const h = hooks();
+		await acceptAllOpen(target, 'art-1', h);
+		expect(h.onText).toHaveBeenCalledWith('new text', { eventId: 'event', ids: ['c1', 'c2'] });
+	});
+
 	it('changes nothing on screen when there was nothing to accept', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: [], skipped: [], text: null, revision: null });
 		const h = hooks();
