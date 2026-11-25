@@ -4,14 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityQueueItem } from '$lib/api/activityQueue';
 import { activityFrameItems, activityItem, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
 
-const { mobile, mutate, emit, closeTab } = vi.hoisted(() => ({
+const { mobile, mutate, emit, closeTab, listeners } = vi.hoisted(() => ({
 	mobile: { store: null as null | import('svelte/store').Writable<boolean> },
 	mutate: vi.fn(),
 	emit: vi.fn(),
 	closeTab: vi.fn(),
+	listeners: new Map<string, () => void>(),
 }));
 
-vi.mock('$lib/ws/events', () => ({ on: () => () => {} }));
+vi.mock('$lib/ws/events', () => ({ on: (event: string, handler: () => void) => { listeners.set(event, handler); return () => listeners.delete(event); } }));
 vi.mock('$lib/ws', () => ({ on: () => () => {} }));
 vi.mock('$lib/stores/viewport', async (original) => {
 	const { writable: w } = await import('svelte/store');
@@ -141,6 +142,39 @@ describe('Activity list', () => {
 		await settle();
 		expect(openRow()).toBe(rows()[6]);
 		expect(nextButton().disabled).toBe(true);
+	});
+
+	it('keeps an item that leaves on a re-read open until Next', async () => {
+		render();
+		await settle();
+		rows()[4].click();
+		await settle();
+		const original = pane().querySelector('h1');
+		const title = served[4].title;
+		served = served.filter((item) => item.key !== 'task:sign-build');
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(title);
+		expect(pane().textContent).toContain('No longer waiting on you.');
+		nextButton().click();
+		await settle();
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(served[4].title);
+		expect(pane().textContent).not.toContain('No longer waiting on you.');
+	});
+
+	it('follows the same document under a new key without reopening its pane', async () => {
+		render();
+		await settle();
+		const original = pane().querySelector('h1');
+		const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts')).length;
+		served = [{ ...served[0], key: 'review:new-key', source: activitySource('Another agent', 'thread-another') }, ...served.slice(1)];
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(served[0].title);
+		expect(pane().textContent).not.toContain('No longer waiting on you.');
+		expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts'))).toHaveLength(reads);
 	});
 
 	it('opens what followed after acting, once the server stops returning the item', async () => {

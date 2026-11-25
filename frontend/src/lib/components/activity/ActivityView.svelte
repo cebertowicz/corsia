@@ -11,7 +11,7 @@
 	import type { ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { followerOf, keepInPlace, nextKey } from './activityItems';
+	import { documentOf, followerOf, keepInPlace, nextKey } from './activityItems';
 
 	/**
 	 * Activity: everything waiting on the person, ranked by the scope's conductor (CORSIA in the workspace), with the
@@ -49,6 +49,11 @@
 	let kept = $state<ActivityQueueItem | null>(null);
 	let arrived = false;
 	let list = $state<ActivityList | undefined>(undefined);
+	let listScroll: HTMLElement;
+	let paneInstance = $state(0);
+	let lastOpen: ActivityQueueItem | null = null;
+	let refusedKeep = false;
+	let advancing: string | null = null;
 
 	$effect(() => {
 		void projectId;
@@ -57,6 +62,10 @@
 			phoneOpen = false;
 			seenKeys = [];
 			kept = null;
+			lastOpen = null;
+			refusedKeep = false;
+			advancing = null;
+			paneInstance += 1;
 			arrived = false;
 			emitProductEvent('activity', 'opened', { scope: projectId ? 'project' : 'workspace' });
 			return store.start();
@@ -69,24 +78,41 @@
 	const openItem = $derived(openIndex >= 0 ? items[openIndex] : null);
 	const nextDisabled = $derived(nextKey(items, openKey) === null);
 
-	// Each read: the first opens the top item; later ones keep the open item open while the list re-sorts around it,
-	// and when it has left (acted on, or settled elsewhere) open what followed it.
-	$effect(() => {
-		const current = items;
-		if (store.status !== 'ready') return;
+	$effect(() => { if (openItem) lastOpen = openItem; });
+
+	// Reconcile before the DOM update, so a vanished row never unmounts its pane or draft.
+	$effect.pre(() => {
+		const current = store.queue?.items;
+		if (store.status !== 'ready' || !current) return;
 		untrack(() => {
+			const row = listScroll?.querySelector<HTMLElement>('[data-activity-row][aria-current="true"]');
+			const top = row?.getBoundingClientRect().top;
+			const instance = paneInstance;
 			const keys = current.map((item) => item.key);
 			if (!arrived) {
 				arrived = true;
 				openKey = keys[0] ?? null;
-			} else if (openKey && !keys.includes(openKey)) {
-				openKey = followerOf(seenKeys, openKey, current);
-				if (!openKey) phoneOpen = false;
-				void refocus();
-			} else if (!openKey && keys.length) {
-				openKey = keys[0];
-			}
-			seenKeys = keys;
+			} else if (openKey && !keys.includes(openKey) && advancing === openKey) {
+				advance(current, openKey);
+			} else if (openKey && !keys.includes(openKey) && lastOpen) {
+				const doc = documentOf(lastOpen);
+				const matches = doc ? current.filter((item) => {
+					const candidate = documentOf(item);
+					return item.kind === lastOpen?.kind && candidate?.artifactId === doc.artifactId
+						&& candidate.commentId === doc.commentId;
+				}) : [];
+				if (matches.length === 1) {
+					openKey = matches[0].key;
+					kept = null;
+				} else kept = lastOpen;
+			} else if (!openKey && keys.length) openKey = keys[0];
+			else if (openKey && keys.includes(openKey)) kept = null;
+			seenKeys = keepInPlace(current, kept, seenKeys).map((item) => item.key);
+			if (row && top !== undefined && row.getClientRects().length) void tick().then(() => {
+				if (paneInstance !== instance) return;
+				const updated = listScroll?.querySelector<HTMLElement>('[data-activity-row][aria-current="true"]');
+				if (updated) listScroll.scrollTop += updated.getBoundingClientRect().top - top;
+			});
 		});
 	});
 
@@ -99,8 +125,37 @@
 
 	/** Opening another row, or Next, is moving on: a kept item is let go. */
 	function moveTo(key: string) {
-		if (kept && kept.key !== key) kept = null;
+		if (key !== openKey) {
+			advancing = null;
+			refusedKeep = false;
+			kept = null;
+			paneInstance += 1;
+		}
 		openKey = key;
+	}
+
+	function advance(current: readonly ActivityQueueItem[], key: string) {
+		advancing = null;
+		kept = null;
+		const following = followerOf(seenKeys, key, current);
+		if (following) moveTo(following);
+		else { openKey = null; phoneOpen = false; paneInstance += 1; }
+		void refocus();
+	}
+
+	async function acted(instance: number) {
+		if (instance !== paneInstance) return;
+		const key = openKey;
+		const keep = refusedKeep;
+		refusedKeep = false;
+		if (!keep && key) {
+			advancing = key;
+			const current = store.queue?.items ?? [];
+			if (!current.some((item) => item.key === key)) advance(current, key);
+		}
+		await store.reload();
+		await tick();
+		if (advancing === key) advancing = null;
 	}
 
 	function open(key: string) {
@@ -150,7 +205,7 @@
 
 <div class="activity" class:phone={$isMobile} class:phone-item={$isMobile && phoneOpen && openItem}>
 	<section class="list-col" aria-label="Activity">
-		<div class="list-scroll">
+		<div class="list-scroll" bind:this={listScroll}>
 			<ActivityList
 				bind:this={list}
 				{items}
@@ -169,8 +224,9 @@
 	</section>
 	<section class="pane-col" bind:offsetWidth={paneWidth} aria-label={openItem ? openItem.title : 'Nothing open'}>
 		{#if openItem}
-			{#key openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} onActed={() => store.reload()} onKeep={() => { kept = openItem; }} onOpenChat={openChat} />
+			{#key paneInstance}
+				{@const mountedInstance = paneInstance}
+				<ActivityItemPane item={openItem} {workspaceKey} noLonger={!!kept && kept.kind !== 'reply' && !(store.queue?.items ?? []).some((item) => item.key === openKey)} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
 			<div class="nothing">Nothing to open.</div>
@@ -186,7 +242,8 @@
 		/* The app's header names Activity in the band above the list. */
 		padding-top: var(--header-bottom); box-sizing: border-box;
 	}
-	.list-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+	.list-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; }
+	/* Pane notices render below the pane's own header. */
 	.pane-col { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 	.nothing { margin: auto; color: var(--text-tertiary); font-size: var(--text-subhead); }
 	/* A phone shows the list or the item, never both. */
