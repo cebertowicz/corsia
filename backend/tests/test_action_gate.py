@@ -1,4 +1,4 @@
-"""The send gate: the person wrote in this live turn, after the draft's last recorded save."""
+"""The send check: the thread's own open draft, still holding the bytes and revision it was saved with."""
 from __future__ import annotations
 
 import os
@@ -115,30 +115,6 @@ async def test_person_wrote_after_the_recorded_draft_passes(deleg_db, workspace)
 
 
 @pytest.mark.asyncio
-async def test_no_turn_identity_is_refused(deleg_db, workspace):
-    from infra import state
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    state._current_thread_id.set(THREAD)
-    state._current_turn_identity.set(None)
-    assert _text(await _gate(draft)) == action_gate.NO_TURN
-
-
-@pytest.mark.asyncio
-async def test_turn_that_is_no_longer_running_is_refused(deleg_db, workspace):
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    deleg_db.execute("UPDATE active_turns SET status='completed' WHERE id='t1'")
-    deleg_db.commit()
-    assert _text(await _gate(draft)) == action_gate.NO_TURN
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "marker",
     [
@@ -147,25 +123,42 @@ async def test_turn_that_is_no_longer_running_is_refused(deleg_db, workspace):
         {"completion": {"child": "x"}},              # parent completion
     ],
 )
-async def test_agent_started_turn_is_refused(deleg_db, workspace, marker):
-    from tools import action_gate
+async def test_an_agent_started_turn_can_send(deleg_db, workspace, marker):
+    from tools.action_gate import Approved
 
     draft = _draft(deleg_db, workspace)
     _admit(deleg_db, "t1", metadata=marker)
     _bind(deleg_db, "t1")
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
+    assert isinstance(await _gate(draft), Approved)
 
 
 @pytest.mark.asyncio
-async def test_person_message_queued_behind_an_agent_turn_does_not_count(deleg_db, workspace):
-    from tools import action_gate
+async def test_a_call_outside_a_live_turn_can_send(deleg_db, workspace):
+    from infra import state
+    from tools.action_gate import Approved
 
     draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1", metadata={"routed_event": "email.received"})
-    queued = _admit(deleg_db, "t2")
-    assert queued.batch is None  # waits behind the running turn
+    state._current_thread_id.set(THREAD)
+    state._current_turn_identity.set(None)
+    state._current_provider_call_id.set(None)
+    state._current_tool_invocation_id.set(None)
+    assert isinstance(await _gate(draft), Approved)
+
+
+@pytest.mark.asyncio
+async def test_a_draft_saved_after_the_persons_message_can_send(deleg_db, workspace):
+    from tools.action_drafts import record_draft
+    from tools.action_gate import Approved
+
+    draft = _draft(deleg_db, workspace)
+    _admit(deleg_db, "t1")
     _bind(deleg_db, "t1")
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
+    new = b"To: sam@example.com\nSubject: Lunch\n\nNoon at the cafe?\n"
+    (workspace / "draft.md").write_bytes(new)
+    saved = record_draft(draft["draft_id"], new, db=deleg_db)
+    deleg_db.commit()
+    result = await _gate({"draft_id": draft["draft_id"], "revision": saved["revision"]})
+    assert isinstance(result, Approved) and result.data == new
 
 
 @pytest.mark.asyncio
@@ -236,22 +229,6 @@ async def test_revision_mismatch_is_stale(deleg_db, workspace):
 
 
 @pytest.mark.asyncio
-async def test_draft_recorded_after_the_persons_message_is_not_seen(deleg_db, workspace):
-    from tools import action_gate
-    from tools.action_drafts import record_draft
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    new = b"To: sam@example.com\nSubject: Lunch\n\nNoon at the cafe?\n"
-    (workspace / "draft.md").write_bytes(new)
-    saved = record_draft(draft["draft_id"], new, db=deleg_db)
-    deleg_db.commit()
-    result = await _gate({"draft_id": draft["draft_id"], "revision": saved["revision"]})
-    assert _text(result) == action_gate.NOT_SEEN
-
-
-@pytest.mark.asyncio
 async def test_open_document_is_read_from_the_live_text(deleg_db, workspace, monkeypatch):
     from doceditor import live_tools
     from tools import action_gate
@@ -273,135 +250,8 @@ async def test_open_document_is_read_from_the_live_text(deleg_db, workspace, mon
 def test_refusal_texts_match_the_design():
     from tools import action_gate
 
-    assert action_gate.NOT_SEEN.startswith("Not sent: the person hasn't replied since")
     assert action_gate.CHANGED_OUTSIDE.startswith("Not sent: the draft was changed outside")
     assert action_gate.STALE_REVISION.startswith("Not sent: the draft has changed since")
-
-
-@pytest.mark.asyncio
-async def test_message_delivered_after_the_declaring_step_cannot_approve_the_call(
-    deleg_db, workspace,
-):
-    """A steer claimed and delivered after the call was emitted was never seen by the call."""
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1", deliver=False)  # the declaring step is written first
-    _deliver(deleg_db, "t1")              # the person's row reaches the model afterwards
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
-
-
-@pytest.mark.asyncio
-async def test_steer_between_rows_of_one_parallel_batch_cannot_approve_its_later_call(
-    deleg_db, workspace,
-):
-    """Claude Code writes one row per call of a batch; a steer landing between them was unseen."""
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _declare(deleg_db, "t1", "call-0", response="msg-1")   # call A's row
-    _deliver(deleg_db, "t1")                                 # the steer lands while A is held
-    _declare(deleg_db, "t1", CALL, response="msg-1")         # call B, same model response
-    _bind(deleg_db, "t1", deliver=False, declare=False)
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
-
-
-@pytest.mark.asyncio
-async def test_person_message_before_a_later_response_approves_its_call(deleg_db, workspace):
-    """A response written after the person's row saw it, whatever earlier responses did."""
-    from tools.action_gate import Approved
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _declare(deleg_db, "t1", "call-0", response="msg-1")
-    _deliver(deleg_db, "t1")
-    _declare(deleg_db, "t1", CALL, response="msg-2")
-    _bind(deleg_db, "t1", deliver=False, declare=False)
-    assert isinstance(await _gate(draft), Approved)
-
-
-@pytest.mark.asyncio
-async def test_message_claimed_but_not_delivered_is_refused(deleg_db, workspace):
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1", deliver=False)
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
-
-
-@pytest.mark.asyncio
-async def test_call_with_no_declaring_step_is_refused(deleg_db, workspace):
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1", declare=False)
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
-
-
-@pytest.mark.asyncio
-async def test_call_with_no_call_id_is_refused(deleg_db, workspace):
-    from infra import state
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    state._current_provider_call_id.set(None)
-    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
-
-
-@pytest.mark.asyncio
-async def test_invocation_id_is_used_when_no_provider_call_id_is_bound(deleg_db, workspace):
-    from infra import state
-    from tools.action_gate import Approved
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    state._current_provider_call_id.set(None)
-    state._current_tool_invocation_id.set(CALL)
-    assert isinstance(await _gate(draft), Approved)
-
-
-@pytest.mark.asyncio
-async def test_timestamps_compare_as_instants_not_strings(deleg_db, workspace):
-    from tools import action_gate
-    from tools.action_gate import Approved
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    deleg_db.execute("UPDATE action_drafts SET recorded_at='2026-10-14T10:00:00' WHERE id=?",
-                     (draft["draft_id"],))
-    for stamp, passes in (
-        ("2026-10-14T10:00:00.500000+00:00", True),   # later, rendered with an offset
-        ("2026-10-14T03:00:00.500000-07:00", True),   # the same instant in another offset
-        ("2026-10-14T09:59:59", False),               # earlier
-    ):
-        deleg_db.execute("UPDATE messages SET created_at=? WHERE id='t1-input'", (stamp,))
-        deleg_db.commit()
-        result = await _gate(draft)
-        if passes:
-            assert isinstance(result, Approved), stamp
-        else:
-            assert _text(result) == action_gate.NOT_SEEN
-
-
-@pytest.mark.asyncio
-async def test_unparseable_timestamp_is_refused(deleg_db, workspace):
-    from tools import action_gate
-
-    draft = _draft(deleg_db, workspace)
-    _admit(deleg_db, "t1")
-    _bind(deleg_db, "t1")
-    deleg_db.execute("UPDATE action_drafts SET recorded_at='not a time' WHERE id=?",
-                     (draft["draft_id"],))
-    deleg_db.commit()
-    assert _text(await _gate(draft)) == action_gate.NOT_SEEN
 
 
 @pytest.mark.asyncio

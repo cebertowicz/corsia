@@ -27,12 +27,12 @@ Use `project_create`, not hand-made directories; it creates `context/`, `skills/
 
 ## 2. Interview, then write the charter
 
-Check published coordination models first: only the read under "Published coordination models" in step 3; that step's question and the drafting come after the interview. A fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` from the answers.
+Check published coordination models first: only the read under "Published coordination models" in step 3; that step's question and the drafting come after the interview. A fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` and `context/PRIORITIES.md` from the answers.
 
 | Ask | Becomes |
 |---|---|
-| Outcome, for whom, why now? | Purpose and long-horizon goals |
-| The two or three objectives for the next horizon, and how we would know? | Objectives with success evidence and a review date |
+| Outcome, for whom, why now, and how would we know? | Purpose, long-horizon goals and how each is measured |
+| What comes first now, and is there a date you have set? | `context/PRIORITIES.md`: Now and Dates, per `references/priorities-files.md` |
 | What does the owner decide, and what may agents decide alone? | Owner's position and boundaries |
 | What must never happen? | Standing risks with counterweights; safety invariants |
 | What is explicitly not this? | Non-goals |
@@ -60,7 +60,7 @@ Create `shared/INDEX.md` listing the categories the project will use, each with 
 
 ## 5. Team
 
-Apply skill `agent-team-decomposition` to the roles the breakdown named: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
+Apply skill `agent-team-decomposition` to the roles the breakdown named: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources; a `PRIORITIES.md` holding what the person says that agent should solve first (`references/priorities-files.md`), which the person approves before it counts; and its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility, priorities and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
 
 Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. The CORSIA agent and every project conductor can change authorized model profiles and setup through `corsia_api` (skill `coordination-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
 

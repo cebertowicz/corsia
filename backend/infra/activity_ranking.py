@@ -35,8 +35,8 @@ def replace_ranks(db, user_id: str, scope: str, ranker: str, items: list[dict], 
     """Replace a scope inside the caller's transaction after the caller validates the list.
 
     A key missing from the queue the ranker read (``current_keys``) loses its rank here, so it
-    also leaves the last wake's seen keys: if it comes back unranked, it is new again and wakes
-    the ranker (sources/activity_ranking.py).
+    also leaves the last note's seen keys: if it comes back unranked, it is new again and is
+    included in the ranker's next passive note (sources/activity_ranking.py).
     """
     db.execute("DELETE FROM activity_ranks WHERE user_id=? AND scope=?", (user_id, scope))
     row = db.execute("SELECT seen_keys FROM activity_rank_nudges WHERE user_id=? AND scope=?",

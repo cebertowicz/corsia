@@ -93,7 +93,7 @@ describe('PlanTree row details disclosure', () => {
 
 		// No label column: every fact is its own labelled line.
 		expect(host.querySelector('.node-details dl, .node-details dt')).toBeNull();
-		expect(lines()).toEqual(['status', 'tries', 'follow-ups']);
+		expect(lines()).toEqual(['intent', 'status', 'tries', 'follow-ups']);
 		// A dependency wait stays neutral; the exact cause remains beside the four-state word.
 		expect(line('status')).toBe('Status: Waiting · Dependency is incomplete');
 		const word = host.querySelector('.node-details .word')!;
@@ -125,7 +125,7 @@ describe('PlanTree row details disclosure', () => {
 				attempt_count: 0, friction_count: 0, attempts: [],
 			},
 		}));
-		expect(lines()).toEqual(['status', 'next']);
+		expect(lines()).toEqual(['intent', 'status', 'next']);
 		expect(line('next')).toBe('Next: Outside CORSIA');
 	});
 
@@ -155,7 +155,7 @@ describe('PlanTree row details disclosure', () => {
 			},
 			evidence: { evidence: 'Targeted proof passed', artifact_ids: ['proof'], requirements_revision: 2 },
 		}));
-		expect(lines()).toEqual(['status', 'tries', 'evidence', 'evidence-note', 'evidence-note']);
+		expect(lines()).toEqual(['intent', 'status', 'tries', 'evidence', 'evidence-note', 'evidence-note']);
 		expect(line('status')).toBe('Status: Done');
 		expect(line('evidence')).toBe('Evidence: Targeted proof passed');
 		expect([...host.querySelectorAll('.evidence-note')].map((el) => squash(el.textContent)))
@@ -220,7 +220,7 @@ describe('PlanTree row details disclosure', () => {
 				},
 			},
 		}));
-		expect(lines()).toEqual(['status', 'working', 'tokens', 'own-working', 'own-tokens']);
+		expect(lines()).toEqual(['intent', 'status', 'working', 'tokens', 'own-working', 'own-tokens']);
 		expect(line('working')).toBe('Working: at least 12m 0s');
 		expect(line('tokens')).toBe('Tokens: at least 1.8M');
 		expect(line('own-working')).toBe('Working, this task alone: 2m 0s');
@@ -323,7 +323,7 @@ describe('PlanTree row details disclosure', () => {
 				user_effort: { known_plan_actions: 0, status: 'partial' },
 			},
 		}));
-		expect(lines()).toEqual(['status', 'working', 'tokens', 'cost']);
+		expect(lines()).toEqual(['intent', 'status', 'working', 'tokens', 'cost']);
 		expect(host.querySelector('.node-details details')).toBeNull();
 		expect(host.textContent).not.toContain('follow-ups');
 	});
@@ -489,7 +489,7 @@ describe('PlanTree row details disclosure', () => {
 
 	it('renders only the status line when nothing else has something to say', async () => {
 		await open(node({ id: 'bare' }));
-		expect(lines()).toEqual(['status']);
+		expect(lines()).toEqual(['intent', 'status']);
 		expect(line('status')).toBe('Status: Waiting');
 	});
 
@@ -515,7 +515,7 @@ describe('PlanTree row details disclosure', () => {
 			},
 		}));
 
-		expect(lines()).toEqual(['status', 'working', 'waiting', 'tokens', 'own-working', 'own-waiting', 'own-tokens']);
+		expect(lines()).toEqual(['intent', 'status', 'working', 'waiting', 'tokens', 'own-working', 'own-waiting', 'own-tokens']);
 		expect(line('working')).toBe('Working: at least 12m 0s');
 		expect(line('waiting')).toBe('Waiting: 5h 3m');
 		expect(line('tokens')).toBe('Tokens: at least 1.8M');

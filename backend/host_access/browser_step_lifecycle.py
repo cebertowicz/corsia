@@ -7,9 +7,9 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Literal, Mapping
 
-from host_access import browser_pane_state
+from host_access import browser_login_capture, browser_pane_state
 from host_access.browser_cdp import PasswordProbe
-from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep
+from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep, open_steps
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -149,7 +149,7 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
     return Decision()
 
 
-_steps: dict[str, BrowserStep] = {}
+_steps = open_steps
 _answers: dict[str, dict[tuple[Kind, str], Answer]] = {}
 _sessions: dict[str, str | None] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
@@ -190,6 +190,7 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
+        browser_login_capture.step_decided(thread_id, result, decision.end, decision.open_kind)
         if decision.forget_done is not None:
             answers = _answers.get(thread_id, {})
             if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
@@ -342,10 +343,8 @@ def _step_row_state(node_id: str | None) -> str | None:
 async def _settle_step(thread_id: str, step: BrowserStep) -> None:
     if step.node_id is None:
         return
-    await asyncio.to_thread(
-        _plan_write, "settle_user_step", step.node_id,
-        evidence=step.settlement_evidence, provenance=step.provenance,
-    )
+    await asyncio.to_thread(_plan_write, "settle_user_step", step.node_id,
+                            evidence=step.settlement_evidence, provenance=step.provenance)
     await _emit(f"{step.event_prefix}_settled", thread_id)
 
 

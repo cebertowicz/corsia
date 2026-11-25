@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_agent_verbs, browser_history, browser_pane_state, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_history, browser_login_capture, browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -226,30 +226,32 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
-    if shared_write:
-        try:
-            return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
-        except browser_dom_write.DomWriteRefused as exc:
-            await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
-                                    properties={"command": args[0], "reason": exc.reason})
-            raise
-    saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
-    if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
-        # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
-        # chooses the option by value or label (browser_dom_write), so this route does the same.
-        if saved_sign_in:
-            # A saved sign-in takes a dropdown choice only as browser_input's select (a fixed shape in
-            # browser_agent_verbs), never as a fill turned into one here.
-            raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
-        args = ("select", args[1], args[2])
-    history = saved_sign_in and not pane and args[0] in {"back", "forward"}
-    browser_pane_state.page_command_starting(thread_id, tuple(args))
-    async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
-        try:
-            result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-        finally:
-            # A held pane shows nothing until this restart, so it runs however the command ends.
-            await browser_pane_state.page_command_finished(thread_id, tuple(args))
+    # Capture marks every document a typing command passes through (browser_login_capture_writes).
+    async with await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes:
+        if shared_write:
+            try:
+                return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
+            except browser_dom_write.DomWriteRefused as exc:
+                await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
+                                        properties={"command": args[0], "reason": exc.reason})
+                raise
+        saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+        if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
+            # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
+            # chooses the option by value or label (browser_dom_write), so this route does the same.
+            if saved_sign_in:
+                # A saved sign-in takes a dropdown choice only as browser_input's select (a fixed shape in
+                # browser_agent_verbs), never as a fill turned into one here.
+                raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
+            args = ("select", args[1], args[2])
+        history = saved_sign_in and not pane and args[0] in {"back", "forward"}
+        browser_pane_state.page_command_starting(thread_id, tuple(args))
+        async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
+            try:
+                result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+            finally:
+                # Rule 7's marks land before the held pane restarts, and it restarts however the command ends.
+                await writes.settle(then=partial(browser_pane_state.page_command_finished, thread_id, tuple(args)))
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
@@ -327,8 +329,7 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(
         thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
-        current_session=partial(owner.session_identity, thread_id),
-    )
+        current_session=partial(owner.session_identity, thread_id))
     # Shared only once the step exists, so a refused declaration leaves the session as it was.
     await _share(runtime, thread_id, reveal=True)
 
@@ -373,6 +374,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
+        browser_login_capture.session_ended(thread_id, browser_login_capture.session_key(thread_id, session))
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

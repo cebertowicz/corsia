@@ -81,6 +81,18 @@ def _target_path(paths: dict[str, Path], path: str) -> Path:
     return target
 
 
+def _refuse_person_priorities(file_path: Path, db) -> None:
+    """Send a replace of a person-owned priorities file to a suggestion instead."""
+    from registry import service
+    from registry.shared_document_messages import owner_refusal
+    from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_scope
+
+    artifact = service.find_file_identity(str(file_path), db=db)
+    if artifact and artifact_owner(str(artifact["id"]), db=db) == UI_PRINCIPAL:
+        scope_root, _ = document_scope(file_path, workspace=Path(config.WORKSPACE), db=db)
+        raise RosterChangeError(owner_refusal(file_path, scope_root, UI_PRINCIPAL, db=db))
+
+
 def _readable_record(path: Path) -> dict[str, Any] | None:
     """Describe one readable instruction file without returning its content."""
     if not path.is_file():
@@ -231,6 +243,8 @@ class ConductorInstructionFileReplaceTool(Tool):
                 file_path = _target_path(_instruction_paths(target, db), path)
                 if not file_path.is_file():
                     raise RosterChangeError("attached instruction file is missing")
+                if file_path.name == "PRIORITIES.md":
+                    _refuse_person_priorities(file_path, db)
                 if file_path.stat().st_size > MAX_TEXT_BYTES:
                     raise RosterChangeError(f"attached instruction file exceeds the {MAX_TEXT_BYTES}-byte limit")
                 return {"path": str(file_path), "user_id": user_id}

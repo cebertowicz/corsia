@@ -246,6 +246,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Save an email as a draft document for the person to review; nothing is sent",
         activity="Drafting email",
     ),
+    "email_send": _Entry(
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
+        summary="Send a saved email draft when the person wants it sent",
+        activity="Sending email",
+    ),
     "calendar_list": _Entry(
         "email", status="active", authority="conductor-api", account_bound=True,
         summary="List the person's Google or other-host calendar events, up to 31 days at a time",
@@ -258,7 +263,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "calendar_send_invite": _Entry(
         "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
-        summary="Send a saved invite draft after the person says to send it; attendees get emails",
+        summary="Send a saved invite draft when the person wants it sent; attendees get emails",
         activity="Sending invite",
     ),
     "google_workspace": _Entry(
