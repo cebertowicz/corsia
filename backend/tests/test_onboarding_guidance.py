@@ -720,6 +720,15 @@ def test_a_key_saved_in_this_chat_is_not_asked_about_again_and_without_search_th
     assert "When search was already set up before this chat, the lookup opens with the one question that reference carries." in step
 
 
+def test_skipping_about_you_hands_over_profile_before_the_hand_off():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    handoff = app.split("## Hand over to your agents", 1)[1]
+    assert "If they skipped About you or did not approve it" in handoff
+    assert "use step 5's handover procedure before the hand-off, without its approval messages" in handoff
+    assert "`Agents only suggest changes to files that are yours, and you decide.`" in handoff
+    assert "If the handover fails, report the problem and do not post that line." in handoff
+
+
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "`model_sources` `recheck: true`" in app
