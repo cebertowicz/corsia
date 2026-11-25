@@ -4,26 +4,32 @@ import { createSession, TEST_TOKEN } from '../support/corsia';
 import { installWorkspace, openThread, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel } from '../support/heldComments';
 import { settled } from '../support/reviewFixtures';
 
-// Reply Send on a touch screen: the shared Button's tap area (its box grown 8px on every side) must be the thing a finger hits,
+// Reply Send on a touch screen: the shared Button's tap area (the invisible area the primitive adds on touch screens) must be the thing a finger hits,
 // across the whole area and not just the drawn square, and it must not run into the reply field's own area.
 const TEXT = '# Rollout plan\n\nThe team ships the commentable rollout plan in three rings, and each ring waits for the one before it.\n';
-const TAP_GROW = 8;
 const MIN_TAP = { width: 44, height: 44 };
 
 /** Where Send is, and what a finger lands on at points across and just outside its tap area. */
-const probe = (page: Page) => page.evaluate((grow) => {
+const probe = (page: Page) => page.evaluate(() => {
 	const send = document.querySelector<HTMLElement>('[data-reply-composer] button[aria-label="Send reply"]');
 	const field = document.querySelector<HTMLTextAreaElement>('[data-reply-composer] textarea');
 	if (!send || !field) throw new Error('no Send or no reply field on screen');
 	send.scrollIntoView({ block: 'center' });
 	const drawn = send.getBoundingClientRect();
-	const area = { left: drawn.left - grow, right: drawn.right + grow, top: drawn.top - grow, bottom: drawn.bottom + grow };
-	const hits = (x: number, y: number) => document.elementFromPoint(x, y) === send;
-	const edge = 1;
-	const xs = [area.left + edge, (area.left + area.right) / 2, area.right - edge];
-	const ys = [area.top + edge, (area.top + area.bottom) / 2, area.bottom - edge];
-	const inside: Record<string, boolean> = {};
-	for (const x of xs) for (const y of ys) inside[`${Math.round(x - area.left)},${Math.round(y - area.top)}`] = hits(x, y);
+	// The tap area is what a finger can hit: the primitive's invisible ::after where it draws one (centred on the button), else the button itself.
+	const after = getComputedStyle(send, '::after');
+	const grown = after.content !== 'none' && after.position === 'absolute';
+	const width = grown ? parseFloat(after.width) : drawn.width, height = grown ? parseFloat(after.height) : drawn.height;
+	const cx = (drawn.left + drawn.right) / 2, cy = (drawn.top + drawn.bottom) / 2;
+	const area = { left: cx - width / 2, right: cx + width / 2, top: cy - height / 2, bottom: cy + height / 2 };
+	// The tap area has the button's rounded corners (8px), so a corner point sits 4px in along both sides; the sides are taken 1px in.
+	const midX = (area.left + area.right) / 2, midY = (area.top + area.bottom) / 2;
+	const points: Array<[string, number, number]> = [
+		['left edge', area.left + 1, midY], ['right edge', area.right - 1, midY], ['top edge', midX, area.top + 1], ['bottom edge', midX, area.bottom - 1],
+		['top-left', area.left + 4, area.top + 4], ['top-right', area.right - 4, area.top + 4], ['bottom-left', area.left + 4, area.bottom - 4], ['bottom-right', area.right - 4, area.bottom - 4], ['centre', midX, midY],
+	];
+	const inside: Record<string, string> = {};
+	for (const [name, x, y] of points) { const el = document.elementFromPoint(x, y); inside[name] = el && send.contains(el) ? 'Send' : `${el?.tagName.toLowerCase() ?? 'nothing'}${el?.className ? '.' + String(el.className).split(' ')[0] : ''}`; }
 	const fieldBox = field.getBoundingClientRect();
 	const justLeft = document.elementFromPoint(area.left - 2, (area.top + area.bottom) / 2);
 	return {
@@ -32,9 +38,9 @@ const probe = (page: Page) => page.evaluate((grow) => {
 		inside,
 		fieldClearOfArea: fieldBox.right <= area.left + 0.5,
 		leftOfAreaIsField: justLeft === field,
-		viewport: { width: innerWidth, height: innerHeight },
+		isPrimitive: send.classList.contains('btn'),
 	};
-}, TAP_GROW);
+});
 
 test.use({ hasTouch: true, isMobile: true });
 
@@ -68,11 +74,13 @@ for (const view of [{ name: '393', width: 393, height: 852 }, { name: '320', wid
 		await settled(page);
 
 		const seen = await probe(page);
-		expect(seen.fieldClearOfArea, 'the field ends where the tap area begins, so the two never overlap').toBe(true);
-		expect(seen.leftOfAreaIsField, 'a point just left of the tap area belongs to the field').toBe(true);
+		// A finger anywhere in the tap area lands on Send.
+		for (const [point, landed] of Object.entries(seen.inside)) expect(landed, `a finger at the tap area's ${point} lands on Send`).toBe('Send');
 		expect(seen.area.width, 'the tap area is at least 44 wide').toBeGreaterThanOrEqual(MIN_TAP.width);
 		expect(seen.area.height, 'the tap area is at least 44 tall').toBeGreaterThanOrEqual(MIN_TAP.height);
-		expect(seen.drawn.width === 28 && seen.drawn.height === 28, 'Send is not the old local 28x28 square').toBe(false);
-		for (const [point, hit] of Object.entries(seen.inside)) expect(hit, `a finger at ${point} of the tap area lands on Send`).toBe(true);
+		// And the area does not run into the field's: the field ends where it begins, and a point just outside belongs to the field.
+		expect(seen.fieldClearOfArea, 'the field ends where the tap area begins, so the two never overlap').toBe(true);
+		expect(seen.leftOfAreaIsField, 'a point just left of the tap area belongs to the field').toBe(true);
+		expect(seen.isPrimitive, 'Send is the shared Button, not a local style').toBe(true);
 	});
 }
