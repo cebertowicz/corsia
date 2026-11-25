@@ -11,7 +11,7 @@ import type {
 	ThreadPlanStateEntry,
 } from '$lib/api/plans';
 import { formatMoment, parseWsTimestamp } from '$lib/time';
-import { outsideWaitReason, scheduledLine, timedWait, waitCountdown } from './planWaits';
+import { outsideWaitReason, scheduledLine, setAsideLine, timedWait, waitCountdown } from './planWaits';
 
 /** An ISO 8601 instant inside plan prose ("Waiting until 2026-09-25T12:00:00+00:00"). */
 const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?/g;
@@ -139,6 +139,8 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	const running = node.display.label_key === 'working';
 	const scheduled = scheduledLine(node, now, running || view === 'reason', view === 'clock');
 	if (scheduled) return scheduled;
+	// A branch whose open steps are all set aside says when the first comes back, without opening.
+	if (node.container && node.scheduled_until) return setAsideLine(node.scheduled_until, now);
 	const countdown = running ? null : waitCountdown(node, now);
 	const parts: string[] = [];
 	if (countdown) parts.push(countdown);

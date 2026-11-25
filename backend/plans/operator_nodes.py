@@ -268,6 +268,25 @@ def oversize(nodes: list[dict]) -> dict[str, int] | None:
     return {"open": open_nodes, "budget": OPEN_NODE_BUDGET}
 
 
+def _roll_waits_up(nodes: list[dict]) -> None:
+    """Give a waiting branch its steps' earliest outside wait, so its own row says when.
+
+    A branch with nothing running and nothing asking the person stays closed; the
+    row that stands for it names the check-back its steps wait on.
+    """
+    below: dict[str, list[dict]] = {}
+    by_id = {node["id"]: node for node in nodes}
+    for node in nodes:
+        parent = by_id.get(node["parent_id"])
+        while parent is not None:
+            below.setdefault(parent["id"], []).append(node)
+            parent = by_id.get(parent["parent_id"])
+    for node in nodes:
+        if node.get("container") and node["display"]["label_key"] == "waiting" and not node.get("wait"):
+            if wait := wait_summary.from_nodes(below.get(node["id"], [])):
+                node["wait"] = wait
+
+
 def _leaf_ids(nodes: list[dict], tree: open_tree.OpenTree | None = None) -> set[str]:
     parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     return {node["id"] for node in nodes if node["id"] not in parents}
@@ -319,6 +338,7 @@ def present_plan(
     for node in nodes:
         if node_wait := wait_summary.from_nodes([node]):
             node["wait"] = node_wait
+    _roll_waits_up(nodes)
     if wait := wait_summary.from_nodes(nodes):
         display["wait"] = wait
     elif until := wait_summary.set_aside_until(nodes):

@@ -47,9 +47,12 @@ export function waitChecksBack(until: string, now: Date = new Date()): string {
 	return at ? `checks back ${at}` : '';
 }
 
-/** A plan wait the server names on this row: a watch with a deadline, apart from set-aside, dependency and worker waits (EW11). */
+/**
+ * A plan wait the server names on this row: a watch with a deadline, apart from set-aside, dependency and worker waits (EW11).
+ * A waiting branch carries its steps' earliest such wait, so it says when without opening.
+ */
 export function isOutsideWait(node: OperatorNode): boolean {
-	return node.execution.condition === 'waiting' && !node.child && !!node.wait;
+	return (node.execution.condition === 'waiting' || node.container) && !node.child && !!node.wait;
 }
 
 /**

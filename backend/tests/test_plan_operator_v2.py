@@ -240,6 +240,44 @@ def test_operator_projects_branch_progress_from_descendant_leaves():
         db.close()
 
 
+def test_a_waiting_phase_names_its_steps_earliest_check_back():
+    """A phase over a timed check-back stays closed, so its own row carries the wait."""
+    from datetime import datetime, timedelta, timezone
+
+    from plans import operator_projection
+
+    db = _db()
+    try:
+        plan = service.ensure_plan("thread", "owner", db=db)
+        phase = service.add_node(plan.id, kind="phase", title="Phase", acceptance_criteria="c", db=db)
+        step = service.add_node(
+            plan.id, kind="task", title="Step", acceptance_criteria="c", parent_id=phase.id, db=db,
+        )
+        until = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        with service._write(db):
+            admission.activate(
+                step.id, expected_revision=step.revision, actor_id="owner", provenance="test", db=db,
+            )
+            watch_operations.arm(
+                plan.id,
+                {"node_id": step.id, "condition": {"type": "deadline", "value": until}},
+                PlanActor("owner", "user", "project"),
+                db,
+            )
+        db.commit()
+
+        payload = operator_projection.read_thread(
+            "owner", actor=PlanActor(None, "user", None, kind="user"), db=db,
+        )
+        nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
+
+        assert nodes[phase.id]["display"]["label_key"] == "waiting"
+        assert nodes[phase.id]["wait"] == nodes[step.id]["wait"]
+        assert nodes[phase.id]["wait"]["until"] == until
+    finally:
+        db.close()
+
+
 def test_a_container_is_dated_by_its_last_child_not_its_own_edits():
     """A finished wave read "yesterday" when its last child closed today (2026-09-29)."""
     from plans import operator_projection

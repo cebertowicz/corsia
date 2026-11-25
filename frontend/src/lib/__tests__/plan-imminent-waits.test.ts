@@ -123,6 +123,10 @@ describe('open rows keep plan order within their level, whatever they wait on', 
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['soon'] }) });
 		await settle();
+		// A check-back does not open its phase; the person opens it.
+		expect(rendered()).toEqual(['Phase']);
+		host.querySelector<HTMLButtonElement>('.branch-toggle')!.click();
+		await settle();
 		expect(rendered()).toEqual(['Phase', 'late', 'soon']);
 	});
 });
