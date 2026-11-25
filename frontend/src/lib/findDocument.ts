@@ -12,8 +12,10 @@ export async function findDocument(artifactId: string): Promise<DocumentLookup> 
 		if (response.status === 404) return { status: 'missing' };
 		if (!response.ok) return { status: 'failed' };
 		const { artifact } = await response.json();
-		if (!artifact?.path) return { status: 'missing' };
-		return { status: 'found', path: artifact.path, title: artifact.title ?? null };
+		// The rest of the app opens a registered document by its path, or its external id when it has none.
+		const path = artifact?.path ?? artifact?.external_id;
+		if (!path) return { status: 'missing' };
+		return { status: 'found', path, title: artifact.title ?? null };
 	} catch {
 		return { status: 'failed' };
 	}

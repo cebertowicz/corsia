@@ -17,11 +17,15 @@ describe('findDocument', () => {
 		expect(result).toEqual({ status: 'found', path: 'path' in extra ? extra.path : '/w/doc.md', title: 'Doc' });
 		expect(apiFetch).toHaveBeenCalledWith('/api/artifacts/artifact%2F1', { sessionInAddress: true });
 	});
-	it('reports missing for a retired artifact or one without a path', async () => {
+	it('opens a document without a path by its external id', async () => {
+		apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ artifact: { path: null, external_id: 'gdrive://doc-1', title: 'Doc' } })));
+		expect(await findDocument('no-path')).toEqual({ status: 'found', path: 'gdrive://doc-1', title: 'Doc' });
+	});
+	it('reports missing for a retired artifact or one with neither a path nor an external id', async () => {
 		apiFetch.mockResolvedValueOnce(new Response('', { status: 404 }));
-		apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ artifact: { path: null } })));
+		apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ artifact: { path: null, external_id: null } })));
 		expect(await findDocument('retired')).toEqual({ status: 'missing' });
-		expect(await findDocument('no-path')).toEqual({ status: 'missing' });
+		expect(await findDocument('no-address')).toEqual({ status: 'missing' });
 	});
 	it('distinguishes load errors', async () => {
 		apiFetch.mockResolvedValueOnce(new Response('', { status: 500 }));
