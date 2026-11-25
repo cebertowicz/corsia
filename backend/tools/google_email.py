@@ -1,10 +1,11 @@
-"""Email through one of the person's Gmail or mail-host accounts: save a draft document for the person to send.
+"""Email through one of the person's Gmail or mail-host accounts: save a draft document, send it past the gate.
 
-The draft is a workspace document the person reads. ``email_draft`` writes it, records its
-revision and binds it to the account it was written from. No agent tool sends email: the
-person sends the draft themselves with Send now on it (``api/email_drafts.py``, which sends
-through ``tools.email_send_approved``). What differs by host is the account's backend
-(``tools.mail_backends``).
+The draft is a workspace document the person reads and answers in chat. ``email_draft``
+writes it, records its revision and binds it to the account it was written from;
+``email_send`` sends it from that account, re-checking this thread's reach, only when
+``tools.action_gate.check_action`` approves. It builds the email from the checked draft
+and re-reads the sent-mail font at send time; for a reply it also re-reads the
+conversation and quote. What differs by host is the account's backend (``tools.mail_backends``).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from typing import Any
 
 from connections.account_errors import AccountError
@@ -36,24 +38,41 @@ from connections.mail.email_document import (
 from infra.db_async import run_in_db
 from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
+from tools.action_gate import Approved, check_action
 from tools.base import Tool
-from tools.mail_backends import MailBackend, backend_for
-from tools.mail_guard_runtime import guarded_reply
+from tools.mail_backends import Gate, MailBackend, backend_for
+from tools.mail_guard_runtime import guarded_reply, new_arrival
 
 log = logging.getLogger(__name__)
 
 NO_OPEN_DRAFT = "There is no open draft with that id in this conversation."
+BAD_DOCUMENT = (
+    "Not sent: the draft document isn't in the draft format. Save it again with email_draft, "
+    "show the person, and wait for their reply."
+)
+STILL_SENDING = (
+    "Not sent: an earlier send of this draft didn't finish, so it may already have gone out. "
+    "Check the person's Sent mail; if it isn't there, save a new draft with email_draft and "
+    "show the person."
+)
 AFTER_DRAFT = (
-    "Show the person the draft (link its path) and end your turn. They send it themselves with "
-    "Send now on the draft, or tell you what to change; you have no tool that sends email. If "
-    "they ask you in chat to send it, tell them to press Send now on the draft. If they ask for "
-    "changes, save again with email_draft (same draft_id) and show them the new version. You get "
-    "a notice when they send it or choose Don't send."
+    "Show the person the draft (link its path) and call email_send when they want it sent; "
+    "if they ask for changes, save again with email_draft and show them the new version."
+)
+FROM_MISMATCH = (
+    "Not sent: the From line doesn't match the email account this draft was written from "
+    "({account}). Save the draft again with email_draft and show the person."
 )
 OTHER_ACCOUNT = (
     "This draft was written from {address}. To use another account, save a new draft "
     "(omit draft_id) with that account_id and show the person."
 )
+NO_ACCOUNT = (
+    "Not sent: this draft isn't tied to an email account. Save it again with email_draft and "
+    "account_id, show the person, and wait for their reply."
+)
+GATE = Gate("email_send", STILL_SENDING, "Not sent: couldn't check the draft. Try again.")
+
 
 def _stop(prefix: str, stops: list[str]) -> str:
     return f"{prefix}: " + "\n\n".join(stops)
@@ -71,6 +90,11 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
     return None, None, "Couldn’t read your usual font, so this email may go out in your mail’s default font."
 
+
+UNGUARDED_REPLY = (
+    "Not sent: this reply draft has no record of when its conversation was last read. Save it "
+    "again with email_draft, then wait for the person's reply."
+)
 
 
 GUARD_GUIDANCE = (
@@ -109,7 +133,7 @@ class EmailDraftTool(Tool):
         return (
             "Save an email as a draft document the person can read, from the account named "
             "by account_id. Gmail accounts append their signature. Nothing is sent. Returns "
-            "draft_id and the draft's path. It is sent from the same account. "
+            "draft_id and revision, which email_send needs. It is sent from the same account. "
             "Pass draft_id to replace an open draft; send the whole message again. Pass "
             "reply_to_message_id, a message id from the same account, to thread the email under "
             "that message. A replaced draft stays a reply to its earlier message unless you pass "
@@ -231,3 +255,99 @@ class EmailDraftTool(Tool):
         if copy_note is not None:
             result["note"] = copy_note
         return json.dumps(result)
+
+
+# Reading and account binding are owned by tools.reviewed_drafts.
+
+class EmailSendTool(Tool):
+    self_describing_errors = True
+
+    @property
+    def name(self) -> str:
+        return "email_send"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Send a saved email draft from the email account it was written from, when the person "
+            "wants it sent. It goes out only if revision matches the one email_draft returned; "
+            "otherwise nothing is sent and the error says what to do."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "draft_id": {"type": "string", "description": "The draft_id email_draft returned."},
+                "revision": {"type": "string", "description": "The revision email_draft returned."},
+            },
+            "required": ["draft_id", "revision"],
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        draft_id, revision = kwargs.get("draft_id"), kwargs.get("revision")
+        if not isinstance(draft_id, str) or not draft_id or not isinstance(revision, str) or not revision:
+            return "Error: Pass the draft_id and revision email_draft returned."
+        try:
+            prepared = await self._prepare(kwargs.get("_thread_id"), draft_id, revision)
+        except Exception:
+            log.exception("email_send could not check the draft")
+            return "Error: Not sent: couldn't check the draft. Try again."
+        if isinstance(prepared, str):
+            return prepared
+        backend, account, message, target, guard_read_at = prepared
+        try:
+            original = None
+            if guard_read_at is not None:
+                original, newer = await new_arrival(backend, str(account["id"]), str(target["reply_to"]), guard_read_at)
+                if newer:
+                    return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft and wait for the person's reply."
+            quote_body = await backend.fetch_body(str(account["id"]), original.message_id) if original else None
+            body = str(message.get_content())
+            face, size, _ = await _font(backend, str(account["id"]))
+            mail_compose.add_html(message, body, face, size, quote_body)
+            await asyncio.to_thread(attachments.add, str(kwargs.get("_thread_id")), message, target.get("attachments") or [])
+        except (DraftRefused, AccountError) as exc:
+            return f"Error: Not sent: {exc}"
+        except Exception:
+            log.exception("email_send guard or composition failed")
+            return "Error: Not sent: couldn't check the account or prepare the message. Try again."
+        return await backend.send_email(draft_id, account, message, target, GATE)
+
+    async def _prepare(
+        self, thread_id: Any, draft_id: str, revision: str,
+    ) -> tuple[MailBackend, dict, EmailMessage, dict, datetime | None] | str:
+        """The account's backend, the account, the message and the draft's target for an approved draft, or the error."""
+        row = await run_in_db(open_draft, str(thread_id), draft_id, "email")
+        if row is not None and row["state"] == "sending":
+            return f"Error: {STILL_SENDING}"
+        verdict = await check_action("email", draft_id, revision)
+        if not isinstance(verdict, Approved):
+            return f"Error: {verdict.text}"
+        target = draft_target(verdict.draft)
+        if not target.get("account_id"):
+            return f"Error: {NO_ACCOUNT}"
+        try:
+            account = await run_in_db(resolve_for_thread, target["account_id"], thread_id)
+            backend = backend_for(account)
+        except AccountError as exc:
+            return f"Error: Not sent: {exc}"
+        try:
+            parsed = parse_document(verdict.data.decode("utf-8"))
+            if parsed is None:
+                return f"Error: {BAD_DOCUMENT}"
+            # Display only: the sender is always the bound account, never this line.
+            if parsed["from"] is not None and parsed["from"].lower() != str(account["address"]).lower():
+                return f"Error: {FROM_MISMATCH.format(account=account['address'])}"
+            message = build_message(parsed, target)
+        except (UnicodeDecodeError, ValueError):
+            return f"Error: {BAD_DOCUMENT}"
+        if not target.get("reply_to"):
+            return backend, account, message, target, None
+        if not target.get("guard_read_at"):
+            return f"Error: {UNGUARDED_REPLY}"
+        guard_read_at = datetime.fromisoformat(target["guard_read_at"])
+        if guard_read_at.tzinfo is None:
+            guard_read_at = guard_read_at.replace(tzinfo=timezone.utc)
+        return backend, account, message, target, guard_read_at

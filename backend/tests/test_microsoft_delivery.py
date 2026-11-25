@@ -282,6 +282,23 @@ async def test_mail_send_carries_cc_and_refuses_mismatched_from_before_graph(mic
     assert len(calls) == 1
 
 
+async def test_an_agent_sends_a_microsoft_draft_with_no_person_turn(microsoft, monkeypatch):
+    from infra import state
+    from tools.action_gate import ALREADY_DONE
+    from tools.microsoft_actions import MicrosoftMailSendTool
+
+    calls = _graph(monkeypatch, [Response(202, {})])
+    saved = await _mail_draft(microsoft)
+    state._current_thread_id.set(THREAD)
+    state._current_turn_identity.set(None)
+    state._current_provider_call_id.set(None)
+    state._current_tool_invocation_id.set(None)
+    args = {"_thread_id": THREAD, "account_id": microsoft, "draft_id": saved["draft_id"], "revision": saved["revision"]}
+    assert json.loads(await MicrosoftMailSendTool().execute(**args)) == {"sent": True, "account_id": microsoft}
+    assert len(calls) == 1 and _row(saved["draft_id"])["state"] == "sent"
+    assert await MicrosoftMailSendTool().execute(**args) == f"Error: {ALREADY_DONE}"
+
+
 async def test_mail_timeout_stays_claimed_and_second_send_refuses(microsoft, monkeypatch):
     calls = _graph(monkeypatch, [httpx.ReadTimeout("late response")])
     saved = await _mail_draft(microsoft)

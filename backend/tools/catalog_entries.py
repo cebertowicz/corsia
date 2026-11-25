@@ -246,6 +246,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Save an email as a draft document for the person to review; nothing is sent",
         activity="Drafting email",
     ),
+    "email_send": _Entry(
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
+        summary="Send a saved email draft after the person says to send it",
+        activity="Sending email",
+    ),
     "calendar_list": _Entry(
         "email", status="active", authority="conductor-api", account_bound=True,
         summary="List the person's Google or other-host calendar events, up to 31 days at a time",

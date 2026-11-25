@@ -38,9 +38,9 @@ STILL_SENDING = (
     "calendar_draft_invite and show the person."
 )
 AFTER_DRAFT = (
-    "Show the person the invite draft (link its path), end your turn, and call "
-    "calendar_send_invite only when their reply says to send it; if they ask for changes, "
-    "save again with calendar_draft_invite and show them the new version."
+    "Show the person the invite draft (link its path) and call calendar_send_invite when they "
+    "want it sent; if they ask for changes, save again with calendar_draft_invite and show them "
+    "the new version."
 )
 OTHER_ACCOUNT = "This invite was drafted from {address}; save a new one (omit draft_id) to use another account."
 

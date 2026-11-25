@@ -26,13 +26,12 @@ DRAFT = (
     "Pass draft_id to replace an open draft. "
 )
 SEND = (
-    "Send a saved text draft. Call it only when the person's latest message says to send this draft. It goes "
-    "out only if they wrote after the draft's last save and revision matches the one messages_draft returned; "
-    "otherwise nothing is sent and the error says what to do."
+    "Send a saved text draft, when the person wants it sent. It goes out only if revision matches the one "
+    "messages_draft returned; otherwise nothing is sent and the error says what to do."
 )
 AFTER_DRAFT = (
-    "Show the person the draft (link its path), end your turn, and call messages_send only when their reply "
-    "says to send it; if they ask for changes, save again with messages_draft and show them the new version."
+    "Show the person the draft (link its path) and call messages_send when they want it sent; if they ask for "
+    "changes, save again with messages_draft and show them the new version."
 )
 
 # States of the Mac and of Messages.
