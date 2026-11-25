@@ -11,7 +11,7 @@ is open and at least one of these holds:
   nor does an agent's check-back (``node_waits.is_check_back``) count on a
   person's task: the person owes that step;
 - an unmet dependency: an edge of its own present while its prerequisite is
-  not accepted. An edge an open ancestor hands down (``plans.node_waits``)
+  not accepted (a workflow run reads as its recorded end, as waits read it). An edge an open ancestor hands down (``plans.node_waits``)
   is that ancestor's wait, counted on it once; its roll-up spans the steps;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
@@ -112,6 +112,29 @@ def _spans_where(spans, keep) -> list[Interval]:
     return union([(start, end) for state, start, end in spans if keep(state)])
 
 
+def _read_by_waiters(spans: list[tuple[str, float, float]], ended: dict | None) -> list[tuple[str, float, float]]:
+    """A prerequisite's spans as work waiting on it reads them (``node_waits.prerequisite_state_sql``).
+
+    A pending workflow run reads as its one recorded end (``run_end.records``) from the moment
+    it was recorded: completed as accepted, failed as failed. Any other stretch reads as stored.
+    """
+    if not ended:
+        return spans
+    at = _at(ended["_recorded_at"])
+    read = {"completed": "accepted", "failed": "failed"}.get(str(ended.get("outcome")))
+    if at is None or read is None:
+        return spans
+    found = []
+    for state, start, end in spans:
+        if state != "pending" or end <= at:
+            found.append((state, start, end))
+            continue
+        if start < at:
+            found.append((state, start, at))
+        found.append((read, max(start, at), end))
+    return found
+
+
 def _edge_intervals(events: list, live: list, now: float) -> dict[str, list[Interval]]:
     """Each prerequisite's edge-present intervals, from added/removed events and live rows."""
     opened: dict[str, float] = {}
@@ -209,8 +232,14 @@ def _unmet_and_decision_time(
         node_id: _state_spans(entry["node"], entry["transitions"], now)
         for node_id, entry in by_id.items()
     }
+    from plans import run_end
+
+    ended = run_end.records(connection, prerequisites)
     unmet = {
-        node_id: _spans_where(spans[node_id], lambda state: state not in _ACCEPTED_STATES)
+        node_id: _spans_where(
+            _read_by_waiters(spans[node_id], ended.get(node_id)),
+            lambda state: state not in _ACCEPTED_STATES,
+        )
         for node_id in prerequisites if node_id in spans
     }
 

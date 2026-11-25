@@ -217,7 +217,7 @@ def record_from(db, parent_id: str | None) -> None:
 def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
     """Each listed run phase's recorded end, by phase id; a phase that has not ended is absent.
 
-    The one reader of ``workflow_run_ended``: a run writes it once, so its first row is its record.
+    The one reader of ``workflow_run_ended`` (in SQL: ``node_waits.prerequisite_state_sql``): its first row is its record.
     ``_recorded_at`` is the event timestamp, not a field in the stored payload. A record written before a
     step field existed reads that field as its empty value, so every reader sees one shape: ``gate_mode`` and
     ``gate_answer`` arrived with #2055 and ``node_ids`` with #2064, and records from before then are still stored.
