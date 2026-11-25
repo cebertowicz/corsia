@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_fill_marks as marks, browser_login_capture_writes as watch_module
+from host_access import browser_cdp, browser_fill_marks as marks, browser_page_watch as watch_module
 from host_access import browser_login_fill
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 

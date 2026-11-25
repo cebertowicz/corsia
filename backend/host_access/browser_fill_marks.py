@@ -11,7 +11,7 @@ A saved login is filled only on a clean document (browser_login_fill). Before ea
   registrable domain) in this session. A reload or navigation commits a new, clean document, but a script can
   leave stored state (a service worker, storage) that reaches every page of its site, so a fill on a marked
   site is not clean even after a reload. A page whose document or address can't be read marks the session.
-  A page watch (browser_login_capture_writes.AgentWrites) follows the page while such a command runs
+  A page watch (browser_page_watch.PageWatch) follows the page while such a command runs
   (agent_command): a navigation that commits before the script runs (an open that didn't wait for its load, a
   page that redirects itself, `wait --fn` evaluating across loads) puts the script in a document the first read
   never saw. So any other document the watch sees, at its start, during the command or at its end, marks the
@@ -32,8 +32,7 @@ from typing import AsyncIterator, Callable, Sequence
 
 from websockets.exceptions import WebSocketException
 
-from host_access import browser_cdp
-from host_access.browser_login_capture_writes import AgentWrites
+from host_access import browser_cdp, browser_page_watch
 from host_access.browser_saved_fills import same_session
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import BrowserSessionError
@@ -51,10 +50,8 @@ _PLAIN_OPTIONS = frozenset({"-i", "--full", "--load", "--url", "--text", "--stat
 # The commands whose script lives and dies with the document it ran in.
 _DOCUMENT_SCRIPT_COMMANDS = _NO_SCRIPT_COMMANDS | {"eval"}
 
-# How long the page watch may take to start, and to settle after the command.
-WATCH_TIMEOUT = 5.0
 # The page watch's class; tests stand in for it.
-_watch = AgentWrites
+_watch = browser_page_watch.PageWatch
 
 # By thread: the documents (loader ids) an agent's script ran in. A loader id names one document: a back/forward
 # cache restore makes that same document current again under the same id, so a mark on it still holds.
@@ -112,7 +109,7 @@ async def agent_command(thread_id: str, session: str | None, endpoint: str, args
         yield finished
         return
     seen: set[str] = set()
-    watch = _watch(seen.add, WATCH_TIMEOUT)
+    watch = _watch(seen.add, browser_page_watch.WATCH_TIMEOUT)
     try:
         await watch.start(endpoint)
     except BaseException:

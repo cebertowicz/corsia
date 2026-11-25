@@ -1,4 +1,4 @@
-"""The saved-login fill's marks with the real page watch (browser_fill_marks.agent_command over AgentWrites).
+"""The saved-login fill's marks with the real page watch (browser_fill_marks.agent_command over PageWatch).
 
 A script command's page watch must see every document the page showed while the command ran, so a history restore of
 the first document (which comes back under its own loader id) can't hide a document committed in between (#3361).
@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from host_access import browser_fill_marks as marks, browser_login_capture_writes as watch_module, browser_login_fill
+from host_access import browser_fill_marks as marks, browser_page_watch as watch_module, browser_login_fill
 
 THREAD = "thread-marks-watch"
 

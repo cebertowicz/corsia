@@ -1,5 +1,7 @@
-"""Mark every document an agent command passes through: one that can type (capture rule 7), or a script command
-(browser_fill_marks, for the saved-login fill).
+"""A page watch: mark every document an agent command passes through.
+
+Two callers depend on it: login capture's rule 7 (browser_login_capture, a command that can type) and the
+saved-login fill's marks (browser_fill_marks, a command that can run script). A change here changes both.
 
 A second CDP connection to the agent's page sees each main-frame Page.frameNavigated while the command runs,
 back/forward cache restores included, and a restored document keeps its loader id (checked on Chrome for
@@ -19,6 +21,11 @@ from host_access.browser_cdp import CdpClient
 from host_access.browser_cdp_targets import page_targets
 
 log = logging.getLogger(__name__)
+# How long a watch may take to start, and to settle after its command; both callers use it. A watch opened in about
+# 2 ms and settled in 1-5 ms on Chrome for Testing 152 (PR #3242); a script command's watch makes the same calls.
+# Waiting holds the agent's command, then the pane; expiring marks every document, so capture makes no offer and
+# the fill refuses the session, and the person's own sign-in still goes through. Five seconds is three orders above.
+WATCH_TIMEOUT = 5.0
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
 ANY_DOCUMENT = ""
 
@@ -33,7 +40,7 @@ def _page_ids(endpoint: str, timeout: float) -> frozenset[str]:
     return frozenset(str(target.get("id")) for target in page_targets(endpoint, timeout))
 
 
-class AgentWrites:
+class PageWatch:
     """One agent command's watch: start it before the command runs, settle it before the pane gets the page back."""
 
     def __init__(self, mark: Callable[[str], None], timeout: float, done: Callable[[], None] = lambda: None) -> None:
@@ -125,15 +132,15 @@ class AgentWrites:
             except Exception as exc:  # noqa: BLE001 - the marks are already set; no close error changes them
                 log.info("an agent command's page watch didn't close cleanly (%s)", type(exc).__name__)
 
-    async def __aenter__(self) -> AgentWrites:
+    async def __aenter__(self) -> PageWatch:
         return self
 
     async def __aexit__(self, *_: object) -> None:
         await self.settle()
 
 
-class NoWrites(AgentWrites):
-    """A command that can't type, or one from the pane: nothing to mark."""
+class NoWatch(PageWatch):
+    """A command its caller has no need to watch (for capture: one that can't type, or one from the pane)."""
 
     def __init__(self) -> None:
         super().__init__(lambda _loader: None, 0)

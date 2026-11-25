@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from host_access import browser_cdp, browser_cdp_targets, browser_login_capture_writes as capture_writes
+from host_access import browser_cdp, browser_cdp_targets, browser_page_watch as page_watch
 from host_access.browser_session_state import BrowserSessionError
 
 LISTING = [
@@ -56,9 +56,9 @@ def bad_browser(request: pytest.FixtureRequest) -> Iterator[str]:
 def test_the_resolver_and_the_watch_see_the_same_pages(browser):
     pages = browser_cdp_targets.page_targets(browser)
     assert [page["id"] for page in pages] == ["tab-1", "tab-2"]
-    assert capture_writes._page_ids(browser, 3) == frozenset({"tab-1", "tab-2"})
+    assert page_watch._page_ids(browser, 3) == frozenset({"tab-1", "tab-2"})
     by_endpoint = {page["webSocketDebuggerUrl"]: page["id"] for page in pages}
-    assert by_endpoint[browser_cdp._page_endpoint(browser)] in capture_writes._page_ids(browser, 3)
+    assert by_endpoint[browser_cdp._page_endpoint(browser)] in page_watch._page_ids(browser, 3)
     assert browser_cdp._page_endpoint(browser, "https://two.test/", "Two") == "ws://127.0.0.1/devtools/page/tab-2"
 
 
@@ -67,7 +67,7 @@ def test_a_bad_listing_is_refused_for_both(bad_browser):
         browser_cdp._page_endpoint(bad_browser)
     # The watch treats any raise from its page read as "every document is marked" (rule 7 tests).
     with pytest.raises(BrowserSessionError):
-        capture_writes._page_ids(bad_browser, 3)
+        page_watch._page_ids(bad_browser, 3)
 
 
 def test_an_unreachable_browser_is_refused_for_both():
@@ -77,4 +77,4 @@ def test_an_unreachable_browser_is_refused_for_both():
     with pytest.raises(BrowserSessionError):
         browser_cdp._page_endpoint(endpoint)
     with pytest.raises(BrowserSessionError):
-        capture_writes._page_ids(endpoint, 1)
+        page_watch._page_ids(endpoint, 1)
