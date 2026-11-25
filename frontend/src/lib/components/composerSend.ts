@@ -106,7 +106,7 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 	if (!body) {
 		const viewingDocument = viewingDocumentForThread(threadId);
 		const effort = get(reasoningEffort);
-		body = JSON.stringify({ input_id: crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
+		body = JSON.stringify({ input_id: reply.input_id ?? crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
 		unsettledPosts.set(key, body);
 	}
 	let response: Response;

@@ -4,9 +4,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { workspaceModels } from '$lib/stores/models';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
 import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
-import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
+import { CommentSendRefused, sendCommentReply, type ChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
 import { emitProductEvent } from '$lib/product_events';
@@ -24,12 +26,12 @@ function deferred() {
 	const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
 	return { promise, resolve, reject };
 }
-function setup(send: (reply: ChatComment) => Promise<void> = () => Promise.resolve()) {
+function setup(send: (reply: ChatComment) => Promise<void> = () => Promise.resolve(), width = 1440) {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
 	vi.stubGlobal('cancelAnimationFrame', () => {});
-	vi.stubGlobal('innerWidth', 1440);
+	vi.stubGlobal('innerWidth', width);
 	Object.defineProperty(Range.prototype, 'getClientRects', { value: () => [{ top: 120, bottom: 140, left: 10, right: 60 }], configurable: true });
 	host = document.createElement('div');
 	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m1"><div class="long-message-body">text more</div></div></div><div id="mount"></div>';
@@ -69,6 +71,7 @@ afterEach(() => {
 	vi.mocked(emitProductEvent).mockClear();
 	threads.set([]); workspaceModels.set([]);
 	for (const on of [anchor, second]) chatCommentDrafts.dropRoot('thread', 'm1', { ...on, quote: '', anchor_prefix: '', anchor_suffix: '' });
+	keptCommentDrafts.reset(); localStorage.clear();
 	Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.unstubAllGlobals();
 });
 
@@ -207,6 +210,33 @@ it('sends the same request again when the first press got no answer, so the serv
 	expect(sentEvents()[0][2]).toMatchObject({ thread_id: 'thread', comment_count: 1, reply_count: 0 });
 });
 
+it('posts the comment as the input its kept draft’s client id names, again on the same id after a reload', async () => {
+	const ok = { ok: true, json: async () => ({ messages: [] }) };
+	const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('network down')).mockResolvedValueOnce(ok);
+	vi.stubGlobal('fetch', fetchMock);
+	user.set({ id: 'person-1', name: 'person-1' });
+	setup(reply => postChatComment(reply, 'thread', false, true));
+	await openBox(); await post('Posted under one id');
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
+	const kept = keptCommentDrafts.get(chatCommentDrafts.rootKey('thread', 'm1', anchor));
+	expect(kept?.clientId).toBeTruthy();
+	relaunch(1440, reply => postChatComment(reply, 'thread', false, true));
+	await openBox();
+	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
+	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+	expect(fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id)).toEqual([kept!.clientId, kept!.clientId]);
+});
+
+it('posts a reply as the input the person’s own id names, and sends no id of its own when none is given', async () => {
+	const sent: ChatComment[] = [];
+	const message = { id: 'm1', seq: 3 };
+	const stored = { id: 'c', cid: 'c1', user_message_id: 'u1', from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '' } as never;
+	await sendCommentReply(message, stored, 'A reply', async reply => { sent.push(reply); }, 'kept-id');
+	expect(sent[0]).toMatchObject({ note: 'A reply', root_cid: 'c1', input_id: 'kept-id' });
+	await sendCommentReply(message, stored, 'A reply', async reply => { sent.push(reply); });
+	expect(sent[1].input_id).toBeUndefined();
+});
+
 it('counts no composer send for a post the server refuses', async () => {
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ detail: 'comment_not_sent' }) })));
 	setup(reply => postChatComment(reply, 'thread', false, true));
@@ -298,4 +328,28 @@ it('shows a Retry answered with a cancelled comment in that state, with no error
 	await retryChatComment('thread', 'input-row', 'comment');
 	expect(get(toasts)).toEqual([]);
 	expect(get(messages)[0].chat_comments).toEqual([cancelled]);
+});
+
+/** The app is left and opened again over the same device storage: nothing of the page is kept. */
+function relaunch(width: number, send?: (reply: ChatComment) => Promise<void>) {
+	unmount(component as never); component = null; host.remove();
+	keptCommentDrafts.reset(); user.set({ id: 'person-1', name: 'person-1' });
+	setup(send, width);
+}
+
+// The one composer is drawn in the margin column (wide, column up), a popover (wide, no column) or the phone's drawer; the last two are drawn outside the host.
+const typedBox = () => document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea');
+const keptEntries = () => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!).filter(name => name.startsWith('corsia:commentDraft:v1:'));
+it.each([['the margin column', 1440, false], ['the popover', 1440, true], ['the phone drawer', 393, false]] as const)('a comment typed in %s and not sent is in the box again after a reload', async (_where, width, popover) => {
+	user.set({ id: 'person-1', name: 'person-1' });
+	setup(undefined, width);
+	if (popover) host.querySelector<HTMLButtonElement>('[data-toggle-margin]')!.click();
+	await openBox();
+	const field = typedBox()!;
+	field.value = 'A comment I did not send'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	expect(keptEntries()).toHaveLength(1);
+	relaunch(width);
+	if (popover) host.querySelector<HTMLButtonElement>('[data-toggle-margin]')!.click();
+	await openBox();
+	expect(typedBox()?.value).toBe('A comment I did not send');
 });
