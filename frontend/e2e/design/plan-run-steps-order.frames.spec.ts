@@ -27,7 +27,7 @@ function done(id: string, parent: string, depth: number, title: string, workflow
 	return step(id, parent, depth, title, workflowStep, { state: 'accepted', updated_at: ago(minutesAgo), last_transition_at: ago(minutesAgo) });
 }
 
-const RUN = operatorNode({ id: 'run', title: 'Reply to Dana about Saturday', kind: 'phase', container: true, state: 'active', workflow_ref: 'general-work' } as Partial<OperatorNode>);
+const RUN = operatorNode({ id: 'run', title: 'Reply to Dana about Saturday', kind: 'phase', container: true, state: 'active', workflow_ref: 'general-work', workflow_run: true } as Partial<OperatorNode>);
 const CHECK = step('check', 'review', 2, 'Check the result independently', 'check', {
 	state: 'active',
 	display: { label_key: 'waiting', tone_key: 'waiting' },
@@ -58,7 +58,7 @@ const NODES: OperatorNode[] = [
 	done('ground', 'run', 1, 'Understand the ask and what is known', 'ground', 50),
 	done('premortem', 'run', 1, 'Think through how it could fail', 'premortem', 42),
 	done('work', 'run', 1, 'Do the work', 'work', 20),
-	step('review', 'run', 1, 'Fresh check before you see it', 'review', { kind: 'phase', container: true, state: 'active', workflow_ref: 'review-work' } as Partial<OperatorNode>),
+	step('review', 'run', 1, 'Fresh check before you see it', 'review', { kind: 'phase', container: true, state: 'active', workflow_ref: 'review-work', workflow_run: true } as Partial<OperatorNode>),
 	done('brief', 'review', 2, 'Brief a fresh reviewer', 'brief', 12),
 	CHECK,
 	after('weigh', 'review', 2, 'Weigh and address the findings', 'weigh', { id: 'check', title: 'Check the result independently' }),

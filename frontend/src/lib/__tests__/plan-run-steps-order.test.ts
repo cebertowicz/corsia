@@ -65,7 +65,7 @@ function waiting(id: string, parent: string | null, depth: number, step: string 
 describe('a workflow run shows its steps in order', () => {
 	it('keeps a general-work run 1..5 in plan order whatever each step is doing', async () => {
 		const nodes = [
-			row('Run', null, 0, 'active', null, { kind: 'phase', container: true }),
+			row('Run', null, 0, 'active', null, { kind: 'phase', container: true, workflow_run: true }),
 			row('1 Understand the ask', 'Run', 1, 'accepted', 'understand', { last_transition_at: at(50) }),
 			row('2 Plan it', 'Run', 1, 'accepted', 'plan', { last_transition_at: at(30) }),
 			row('3 Do it', 'Run', 1, 'active', 'do'),
@@ -79,9 +79,9 @@ describe('a workflow run shows its steps in order', () => {
 
 	it('keeps a nested review run in its own order under its step', async () => {
 		const nodes = [
-			row('Run', null, 0, 'active', null, { kind: 'phase', container: true }),
+			row('Run', null, 0, 'active', null, { kind: 'phase', container: true, workflow_run: true }),
 			row('1 Understand the ask', 'Run', 1, 'accepted', 'understand'),
-			row('2 Review', 'Run', 1, 'active', 'review', { kind: 'phase', container: true }),
+			row('2 Review', 'Run', 1, 'active', 'review', { kind: 'phase', container: true, workflow_run: true }),
 			row('2.1 Read it cold', '2 Review', 2, 'accepted', 'read', { last_transition_at: at(40) }),
 			waiting('2.2 Check it', '2 Review', 2, 'check', 15),
 			row('2.3 Verdict', '2 Review', 2, 'active', 'verdict'),
@@ -103,5 +103,39 @@ describe('a workflow run shows its steps in order', () => {
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['Working'] }) });
 		await settle();
 		expect(rendered()).toEqual(['Project', 'Working', 'Waits a while', 'Newer finished', 'Older finished']);
+	});
+
+	it('keeps the sort at a level that holds a step follow-up but is not a run', async () => {
+		// A follow-up of a finished run's step lands at the nearest open ancestor and keeps its step name.
+		const nodes = [
+			row('Project', null, 0, 'active', null, { kind: 'phase', container: true }),
+			row('Older finished', 'Project', 1, 'accepted', null, { last_transition_at: at(50) }),
+			row('Follow-up of a step', 'Project', 1, 'pending', 'review'),
+			row('Newer finished', 'Project', 1, 'accepted', null, { last_transition_at: at(5) }),
+			row('Working', 'Project', 1, 'active', null),
+		];
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['Working'] }) });
+		await settle();
+		expect(rendered()).toEqual(['Project', 'Follow-up of a step', 'Working', 'Newer finished', 'Older finished']);
+	});
+
+	it("keeps a run's folded steps behind its fold row, as at any level", async () => {
+		const nodes = [
+			row('Run', null, 0, 'active', null, { kind: 'phase', container: true, workflow_run: true }),
+			row('1 Understand the ask', 'Run', 1, 'accepted', 'understand', { folded: true, last_transition_at: at(3000) }),
+			row('2 Plan it', 'Run', 1, 'accepted', 'plan', { last_transition_at: at(30) }),
+			row('3 Do it', 'Run', 1, 'active', 'do'),
+			row('4 Hand over', 'Run', 1, 'pending', 'hand_over'),
+		];
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['3 Do it'] }) });
+		await settle();
+		const shown = rendered();
+		expect(shown.slice(0, 4)).toEqual(['Run', '2 Plan it', '3 Do it', '4 Hand over']);
+		expect(shown).not.toContain('1 Understand the ask');
+		expect(shown[4]).toMatch(/^\[/);
+		// Paged open, a folded step shows at the fold row, not back among the open steps.
+		[...host.querySelectorAll('button')].find((item) => /^Show \d+$/.test(item.textContent?.trim() ?? ''))!.click();
+		await settle();
+		expect(rendered().slice(0, 5)).toEqual(['Run', '2 Plan it', '3 Do it', '4 Hand over', '1 Understand the ask']);
 	});
 });
