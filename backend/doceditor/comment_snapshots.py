@@ -82,6 +82,42 @@ def read(db: sqlite3.Connection, snapshot_id: int) -> str:
     return read_many(db, [snapshot_id])[snapshot_id]
 
 
+def adopt_before_write(path, *, before: bytes | str | None = None, artifact_id: str | None = None,
+                       verify_text=None) -> None:
+    """Best-effort adoption before a file or position write; never refuse the write."""
+    db = None
+    try:
+        from infra.database import get_db, write_transaction
+        from registry import service
+
+        db = get_db()
+        if artifact_id is None:
+            artifact = service.resolve_file_identity(str(path), db=db)
+            if artifact is None:
+                return
+            artifact_id = artifact['id']
+        row = db.execute(
+            'SELECT artifact_id FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL '
+            'AND review=0 AND snapshot_id IS NULL LIMIT 1', (artifact_id,),
+        ).fetchone()
+        if row is None:
+            return
+        data = before if before is not None else path.read_bytes()
+        text = data.decode('utf-8') if isinstance(data, bytes) else data
+        with write_transaction(db, scope='adopt_comment_before_write'):
+            if verify_text is not None:
+                verify_text()
+            adopt_legacy(db, row[0], text)
+    except Exception:
+        log.warning('Could not adopt legacy comment anchors before write', exc_info=True)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                log.warning('Could not close legacy comment adoption connection', exc_info=True)
+
+
 def adopt_legacy(db: sqlite3.Connection, artifact_id: str, text: str, *, eligible=None) -> None:
     """Adopt only root selections whose stored range exactly matches these bytes."""
     if not db.in_transaction:

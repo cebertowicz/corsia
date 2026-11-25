@@ -54,6 +54,8 @@ def persist_client_positions(db, artifact_id: str, text: str | None, requested: 
     from infra.database import write_transaction
     from doceditor.quote_anchor import anchor_context
 
+    if text is not None:
+        comment_snapshots.adopt_before_write(None, before=text, artifact_id=artifact_id, verify_text=verify_text)
     requested_ids = {str(update.get('id', '')) for update in requested}
     comments = {row['id']: dict(row) for row in db.execute(
         'SELECT * FROM doc_comments WHERE artifact_id=? AND id IN (SELECT value FROM json_each(?))',
@@ -63,7 +65,10 @@ def persist_client_positions(db, artifact_id: str, text: str | None, requested: 
                   if comment.get('snapshot_id') is not None}
     invalid_source = set()
     if text is not None and candidates:
-        _, _, bad = resolve_versioned(list(candidates.values()), text, db)
+        try:
+            _, _, bad = resolve_versioned(list(candidates.values()), text, db)
+        except LookupError as exc:
+            raise AnchorConflict('comment snapshot changed during client position calculation') from exc
         invalid_source = {row['id'] for row in bad}
     legacy, versioned, invalid = [], [], []
     for update in requested:

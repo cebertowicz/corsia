@@ -123,6 +123,9 @@ def write_entry(
         f"---\n\n"
     )
 
+    if action == "updated":
+        from doceditor.comment_snapshots import adopt_before_write
+        adopt_before_write(file_path, before=existing_content)
     file_path.write_text(frontmatter + f"# {title}\n\n{body}\n", encoding="utf-8")
     logger.debug("Knowledge entry {} ({}): {}", action, category, file_path.name)
 

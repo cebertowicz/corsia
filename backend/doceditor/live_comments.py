@@ -30,7 +30,7 @@ def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
 
 
 def _rows_and_versions(artifact_id: str):
-    """Read rows and referenced versions in one SQLite read snapshot."""
+    """Read rows and versions consistently under SQLite write admission."""
     from infra.database import write_transaction
     with write_transaction(None, scope='comment_versions_read') as db:
         rows = comments.list_for_artifact(artifact_id, db=db)

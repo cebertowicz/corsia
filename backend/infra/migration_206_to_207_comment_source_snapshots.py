@@ -11,8 +11,11 @@ unchanged spans are re-measured against it instead of being searched for in the 
 Purely additive. Existing references start NULL; no past version is invented. On a
 save, valid NULL root anchors are adopted against the pre-save text before pairing with
 the published text. On comment creation, valid NULL roots are adopted against the current
-captured text in the same transaction. A demoted row can be adopted again when valid;
-an invalid row stays NULL and uses the legacy resolver until a later eligible write.
+captured text in the same transaction. Closed-document writes and position updates
+also attempt adoption against the pre-write text. A demoted row can be adopted again
+when valid; an invalid row stays NULL and uses the legacy resolver until a later
+eligible write. A change made outside CORSIA and discovered only on reload has no
+captured pre-write text, so NULL anchors continue to use the legacy resolver.
 
 Snapshots are shared by identical bytes and are collected when no anchor references one
 any more (``doceditor.comment_snapshots.collect_candidates``), so a document that is
