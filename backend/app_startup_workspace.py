@@ -44,9 +44,9 @@ def initialize_workspace(workspace: Path, logger) -> None:
             backfill.run_startup_backfill()
         except Exception:
             logger.exception("%s pane-row backfill failed; retrying next start", label)
-    from plans import plan_cap
+    from plans.public import run_plan_cap_startup_spill
 
     try:
-        plan_cap.run_startup_spill()
+        run_plan_cap_startup_spill()
     except Exception:
         logger.exception("plan cap first spill failed; retrying next start")

@@ -16,6 +16,7 @@ Nothing here writes.
 from __future__ import annotations
 
 import plans.aggregates as aggregates
+import plans.node_states as node_states
 from plans.review_request_framing import REVIEW_PROVENANCE
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
@@ -24,12 +25,13 @@ PERSON, AGENT, OTHER = 0, 1, 2
 
 
 def owning_node(db, plan_id: str, artifact_id: str):
-    """Return the live node in ``plan_id`` the document belongs to, or None."""
+    """Return the node in ``plan_id``'s work the document belongs to, or None."""
     marks = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
+    in_work = f"{node_states.in_work_sql('n')} AND {node_states.outside_retired_branch_sql('n')}"
     row = db.execute(
         f"""SELECT n.* FROM artifact_registrations r JOIN plan_nodes n ON n.id=r.origin_plan_node_id
              WHERE r.artifact_id=? AND n.plan_id=? AND r.retired_at IS NULL
-               AND r.relationship_state IN ({marks}) AND n.archived_at IS NULL
+               AND r.relationship_state IN ({marks}) AND {in_work}
              ORDER BY CASE r.relationship_state WHEN 'owner-pinned' THEN 0 ELSE 1 END, r.updated_at DESC
              LIMIT 1""",
         (artifact_id, plan_id, *OWNER_REGISTRATION_STATES),
@@ -37,8 +39,8 @@ def owning_node(db, plan_id: str, artifact_id: str):
     if row is not None:
         return row
     return db.execute(
-        """SELECT n.* FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id
-            WHERE l.artifact_id=? AND l.role='result' AND n.plan_id=? AND n.archived_at IS NULL
+        f"""SELECT n.* FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id
+            WHERE l.artifact_id=? AND l.role='result' AND n.plan_id=? AND {in_work}
             ORDER BY l.created_at DESC, n.id DESC LIMIT 1""",
         (artifact_id, plan_id),
     ).fetchone()

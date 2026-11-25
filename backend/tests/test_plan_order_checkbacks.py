@@ -136,3 +136,36 @@ def test_person_can_start_below_checkback(db):
     lower = task(db, plan.id, "Lower work")
     _deadline(db, plan.id, top)
     assert _start(db, plan.id, lower, actor=HUMAN)["admission"]["condition"] == "running"
+
+
+def _phase_with_step(db, plan_id):
+    phase = service.add_node(
+        plan_id, kind="phase", title="Running phase", acceptance_criteria="Phase is verified", db=db,
+    )
+    step = task(db, plan_id, "Step in the phase", parent_id=phase.id)
+    return phase, step
+
+
+@pytest.mark.parametrize("above", ["set_aside", "not_started"])
+def test_a_step_inside_a_lower_phase_waits_for_the_row_above_until_it_is_moved(db, above):
+    """A step under a top-level phase starts only once the top rows above it are done or moved down."""
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Top row")
+    phase, step = _phase_with_step(db, plan.id)
+    if above == "set_aside":
+        plan_update(db, plan.id, "arm_watch", {
+            "node_id": top.id, "expected_revision": revision(db, top.id),
+            "condition": {"type": "deadline",
+                          "value": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()},
+            "reason": "Revisit the plan",
+        })
+
+    with pytest.raises(service.PlanError, match="Top row"):
+        _start(db, plan.id, step)
+
+    plan_update(db, plan.id, "reorder", {
+        "node_id": top.id, "expected_revision": revision(db, top.id),
+        "order_key": service._node_row(db, phase.id)["order_key"],
+    })
+    assert service._node_row(db, top.id)["order_key"] > service._node_row(db, phase.id)["order_key"]
+    assert _start(db, plan.id, step)["admission"]["condition"] == "running"

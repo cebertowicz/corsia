@@ -310,12 +310,18 @@ def test_a_task_already_running_before_the_close_is_not_described_again(db):
 
 
 def _park(db, plan_id: str, node_id: str, **extra) -> tuple[dict, str]:
-    """Set one task aside on a watch as its executor; return the result and the watch id."""
-    deadline = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+    """Park one task on an artifact's event as its executor; return the result and the watch id.
+
+    A deadline alone is the agent's own check-back, which still ranks the task
+    above lower work (plans.triage_lines), so the wait names an artifact.
+    """
+    from tests.test_plan_reconcile_release import watched_artifact
+
     result = plan_update(db, plan_id, "arm_watch", {
         "node_id": node_id, "expected_revision": revision(db, node_id),
-        "condition": {"type": "deadline", "value": deadline},
-        "reason": "Waiting on the vendor", **extra,
+        "condition": {"type": "event", "value": "proof.ready"},
+        "artifact_id": watched_artifact(db, node_id), "expected_event": "proof.ready",
+        **extra,
     })
     return result, result["watch"]["id"]
 

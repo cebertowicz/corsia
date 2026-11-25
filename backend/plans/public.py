@@ -150,6 +150,8 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
+# Once, on the first start of a build with the cap: spill each plan past it to Later (app_startup_workspace).
+from plans.plan_cap import run_startup_spill as run_plan_cap_startup_spill
 # The byte limit used for delivered document reply context.
 from plans.person_input import WORDS_MAX_BYTES
 # The node holding a task's intent, itself unless inherited.
