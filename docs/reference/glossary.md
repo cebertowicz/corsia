@@ -22,6 +22,7 @@ Terms used in the CORSIA documentation. Where a linked page defines a term, the 
 - **Provider:** a service or server that supplies model inference. See [Models and harnesses](../how-it-works/models-and-harnesses.md).
 - **Responsibility file:** an attached instruction file describing an agent's area of work, authority and other standing context. See [Agents and threads](../how-it-works/agents-and-threads.md).
 - **Roster:** the set of agents in a scope, with each one's responsibility, paths, domains, status and notes. See [Agents and threads](../how-it-works/agents-and-threads.md).
+- **Saved login:** a site's username and password that the person saved in CORSIA, so agents can sign in to that site for them.
 - **Scope:** the level something belongs to: workspace, project or thread. Context and skills are resolved by scope. See [Scopes](../how-it-works/scopes.md).
 - **Skill:** a folder containing a `SKILL.md` that gives an agent instructions for a kind of work. See [Context and memory](../how-it-works/context-and-memory.md).
 - **State root:** the folder where CORSIA keeps its database and runtime files. See [Architecture](../how-it-works/architecture.md).
