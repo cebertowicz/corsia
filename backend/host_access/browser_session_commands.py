@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_fill_marks, browser_pane_state, browser_step_lifecycle
+from host_access import browser_fill_marks, browser_login_capture, browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -32,8 +32,7 @@ SAVED_FILL_SESSION_REFUSED = (
     "element or --load networkidle), screenshot (or screenshot --full; not on the page the login was filled on) "
     "and tab (but not tab new or tab close). Scripts, reading field values, network routes and every other "
     "command are refused. If the task needs a command that isn't on this list, tell the person in chat what you "
-    "need it for."
-)
+    "need it for.")
 _CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
 logger = logging.getLogger(__name__)
 _SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
@@ -164,12 +163,10 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if not pane and runtime.chrome is not None and runtime.chrome.exited:
         runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
     saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
-    # browser_open's own navigation: the server-built eval for the address it passed, never a pane's or a script URL.
     trusted_navigation = (navigation_url is not None and not pane and not _javascript_url(navigation_url) and
                           tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'"))
     if saved_sign_in or browser_control.saved_fill_session(thread_id, runtime.record.session):
-        if _script_config(config) or not (trusted_navigation or
-                _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
+        if _script_config(config) or not (trusted_navigation or _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(_SCRIPT_REFUSAL if saved_sign_in else SAVED_FILL_SESSION_REFUSED)
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
@@ -232,6 +229,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         # Only a command the guard let through puts the agent in the page, and marks it against a saved-login fill.
         await browser_fill_marks.before_agent_command(thread_id, runtime.record.session, endpoint, args, navigation=navigation)
         browser_pane_state.agent_acted(thread_id)
+        if browser_login_capture.writes_value(args):
+            await browser_login_capture.agent_writing(thread_id, endpoint)
     if shared_write:
         try:
             return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
@@ -375,6 +374,7 @@ async def end_session(thread_id: str, session: str) -> None:
     finally:
         browser_control.browser_closed(thread_id)
         browser_fill_marks.forget(thread_id)
+        browser_login_capture.session_ended(thread_id, f"{thread_id}:{session}")
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:
