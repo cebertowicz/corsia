@@ -439,14 +439,15 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     assert "Do you have a GitHub account?" not in step
 
 
-def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn_it_off():
+def test_files_step_is_short_and_explains_access_and_privacy():
     step = _step(8)
     posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on:**" in step
-    assert "**Auto-approve is on:** a reviewer model checks each request to use files outside your work folder, and most start without asking you." in step
-    assert "To approve each one yourself, turn it off in [Settings › System](/settings/system#host-access-review)." in step
+    assert "- send or post as you\n   > - spend money" in step
+    assert "Auto-approve" not in step
+    assert "Keys, passwords and sign-ins you save in CORSIA, and CORSIA's own data, stay closed to agents." in step
+    assert "No safeguard is perfect: if this computer holds very sensitive information, give CORSIA its own macOS user account." in step
     assert "Access covers one chat" not in step and "still asks you" not in step
     assert "No safeguard is perfect" in step and "its own macOS user account" in step
     assert "safe" not in posted.replace("safeguard", "") and "secure" not in posted
@@ -454,9 +455,7 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
     assert "Apps you connect, like your email, follow their own privacy terms" in posted
     assert "helpers" not in step and "application" not in step
     assert "Claim no safeguard beyond those stated here" in step
-    assert "Auto-approve follows `auto_approve`. When it is false, replace the Auto-approve line with `**Auto-approve is off:** you approve each request to use files outside your work folder." in step
-    # An unreadable Auto-approve state drops only the Auto-approve advice; the own-account advice stays.
-    assert 'When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.' in step
+    assert "auto_approve" not in step
     assert len("\n".join(line for line in posted.splitlines() if line.lstrip().startswith(">"))) < 1900
 
 
@@ -466,9 +465,7 @@ def test_local_model_talk_in_step_8_shows_only_when_this_computer_can_run_one():
     local = local.split("Claim no safeguard", 1)[0]
 
     assert "Local only" not in posted and "local model" not in posted.lower() and "Local models only" not in posted
-    assert "Keeping work off cloud models" in local and "unless Local only is on" in local
-    assert "use the toggle at the top of the picker" in local and "It needs a local model that's ready" in local
-    assert "must never reach a cloud model" in local and '"Local models only"' in local
+    assert "To keep a chat off cloud models, turn on Local only in the model picker. I can also set a whole project to local models only." in local
     assert "`local_eligible` (this computer can run a local model; any other value" in FIRST_RUN_APP.read_text(encoding="utf-8")
 
 
