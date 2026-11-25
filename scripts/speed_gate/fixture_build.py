@@ -39,7 +39,7 @@ from . import fixture_spec as spec
 HAND_BUILT = frozenset({"projects", "threads", "messages", "llm_usage", "plans", "plan_nodes",
                         "plan_node_attempts", "plan_node_events",
                         "presence_visits", "thread_presence", "doc_comment_tags",
-                        "doc_comment_mentions", "doc_comment_recipient_state"})
+                        "doc_comment_mentions", "doc_comment_recipient_state", "doc_comment_snapshots"})
 #: Generic tables whose rows other generic tables reference, in dependency order.
 FIRST = ("artifact_identities", "active_turns", "checkpoints")
 
@@ -199,6 +199,17 @@ def _seed_comment_recipients(db: sqlite3.Connection, manifest: dict) -> None:
         manifest["tables"][table] = {"target": count, "rows": count}
 
 
+def _seed_comment_snapshots(db: sqlite3.Connection, manifest: dict) -> None:
+    """Give fixture roots a common, byte-deduplicated commented version."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='doc_comment_snapshots'").fetchone():
+        return  # The comparison base can predate the snapshot schema.
+    text = b'Fixture anchor\n'
+    cursor = db.execute("INSERT INTO doc_comment_snapshots (digest,text) VALUES (?,?)", (hashlib.sha256(text).digest(), text))
+    db.execute("UPDATE doc_comments SET snapshot_id=?, anchor_text='Fixture anchor', from_off=0, to_off=14, "
+               "anchor_prefix='', anchor_suffix='' WHERE parent_id IS NULL", (cursor.lastrowid,))
+    manifest["tables"]["doc_comment_snapshots"] = {"target": 1, "rows": 1}
+
+
 def build_into(db: sqlite3.Connection) -> dict:
     """Fill an initialised database; returns the build manifest."""
     rng = random.Random(spec.SEED)
@@ -232,6 +243,7 @@ def build_into(db: sqlite3.Connection) -> dict:
                                              "rows": presence.seed_open_visits(db, rng)}
     _seed_generic(db, rng, pools, manifest)
     _seed_comment_recipients(db, manifest)
+    _seed_comment_snapshots(db, manifest)
     _account_for_empty_tables(manifest)
     _check_row_targets(db, manifest)
     db.commit()

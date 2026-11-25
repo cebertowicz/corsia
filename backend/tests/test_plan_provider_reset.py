@@ -115,6 +115,8 @@ async def test_known_provider_reset_waits_until_due_then_delivers_once(isolated_
     assert shown["execution"]["condition"] == "running"
     assert shown["display"]["label_key"] == "waiting"
     assert shown["status_reason"] == "Provider resets at 2099-01-01T12:00:00+00:00"
+    # A stopped selected executor is not a quiet wait: its path stays open.
+    assert shown["attention_path"][-1] == node.id
     assert projected["progress"]["distribution"]["waiting"] == 1
     assert projected["progress"]["distribution"]["pending_ready"] == 0
     assert projected["display"]["label_key"] == "waiting"

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
+from doceditor import comments, comment_recipients, comment_snapshots, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
 from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed, not_active_message
 from doceditor.comment_creation import Anchor, CreateReceipt
 from doceditor.comments import CommentAccessDenied, CommentTargetMoved  # storage raises the first too, for a reply's parent
@@ -54,24 +54,27 @@ class CommentInput:
 def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None) -> tuple:
     if duplicate is not None:
         return (duplicate["anchor_text"], duplicate["from_off"], duplicate["to_off"],
-                duplicate["anchor_prefix"], duplicate["anchor_suffix"])
+                duplicate["anchor_prefix"], duplicate["anchor_suffix"], None, None)
     if anchor is not None:
-        return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix
+        return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix, anchor.text, None
     if request.live_capture:
         raise CommentSelectionChanged("The live document closed. Reopen it; your draft is kept.")
     if request.parent_id or request.review or not request.quote:
-        return request.quote, request.start, request.end, None, None
+        return request.quote, request.start, request.end, None, None, None, None
     if request.browser:
         try:
-            context = anchor_context(read_doc_text(request.path), request.start, request.end, request.quote)
+            text = read_doc_text(request.path)
+            reason = comment_snapshots.invalid_reason(text, request.start, request.end, request.quote)
         except (OSError, ValueError):
-            context = None
-        return request.quote, request.start, request.end, *(context or (None, None))
+            text, reason = None, 'read_error'
+        if reason:
+            return request.quote, request.start, request.end, None, None, None, reason
+        return request.quote, request.start, request.end, *anchor_context(text, request.start, request.end, request.quote), text, None
     text = read_doc_text(request.path)
     start, end = resolve_quote(text, request.quote, request.near)
     if request.region is not None:
-        return doc_images.widen_to_image(text, start, end)
-    return request.quote, start, end, *(anchor_context(text, start, end, request.quote) or (None, None))
+        return *doc_images.widen_to_image(text, start, end), text, None
+    return request.quote, start, end, *(anchor_context(text, start, end, request.quote) or (None, None)), text, None
 
 
 def _image(db, request: CommentInput, quote: str | None, start: int | None) -> tuple[str | None, str]:
@@ -122,6 +125,24 @@ def _refuse_retired_target(request: CommentInput, connection) -> None:
         raise CommentTargetMoved(not_active_message(request.artifact_id))  # the reason an agent's tool shows
 
 
+def _merge_fork_feedback(connection, request: CommentInput, artifact_id: str | None, feedback: dict) -> None:
+    """Fold a submitted review fork's feedback into this comment's receipt.
+
+    A comment that submits the fork is what wakes its owners, so the wake-ups and the
+    still-undelivered batches it caused are reported once, on this receipt.
+    """
+    if request.review_request_id is None or not request.submit:
+        return
+    _pending, woken, undelivered = review_feedback.submit_fork_feedback(
+        connection, request.review_request_id, request.author_thread_id, artifact_id,
+    )
+    feedback["woken"].extend(woken)
+    known = {batch["id"] for batch in feedback["undelivered_batches"]}
+    feedback["undelivered_batches"].extend(
+        batch for batch in undelivered if batch["id"] not in known
+    )
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -131,7 +152,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             if artifact is None or not may_access_artifact(artifact['parent_thread_id'], request.user_id, db=db):
                 raise CommentAccessDenied('Artifact not found')
         duplicate = comments.get_comment(identifier, db=db)
-        quote, start, end, prefix, suffix = _anchor(request, anchor, duplicate)
+        quote, start, end, prefix, suffix, source_text, invalid = _anchor(request, anchor, duplicate)
         image_src = image_rev = None
         if request.region is not None and duplicate is None:
             image_src, image_rev = _image(db, request, quote, start)
@@ -164,6 +185,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
             )
             if created:
+                # The anchor and the text it was measured against are written in this one
+                # transaction; this is the path that knows both.
+                comment_snapshots.attach_on_create(connection, str(row["id"]), source_text, invalid)
                 _record_tags(connection, request, row)
             if row["parent_id"]:
                 # An agent reply made holding the thread's writer turn settles its saved row in this write.
@@ -187,15 +211,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 delivery_policy=delivery_policy,
             )
             feedback["delivery_policy"] = delivery_policy
-            if request.review_request_id is not None and request.submit:
-                _pending, woken, undelivered = review_feedback.submit_fork_feedback(
-                    connection, request.review_request_id, request.author_thread_id, artifact_id,
-                )
-                feedback["woken"].extend(woken)
-                known = {batch["id"] for batch in feedback["undelivered_batches"]}
-                feedback["undelivered_batches"].extend(
-                    batch for batch in undelivered if batch["id"] not in known
-                )
+            _merge_fork_feedback(connection, request, artifact_id, feedback)
         return row, registered, feedback, created
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

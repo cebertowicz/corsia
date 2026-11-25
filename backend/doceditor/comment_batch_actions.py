@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comments as store, feedback_suggestion_decisions
+from doceditor import comments as store, feedback_suggestion_decisions, suggestion_history
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import (
     DECISIONS, DocumentWriter, _record_decision_row, accept_lock, insertion_position, splice_suggestion, suggestion_span,
@@ -159,7 +159,7 @@ def _accepted_user_author(rows: list[dict[str, Any]], accepted_ids: list[str]) -
 async def _accept_batch(
     artifact: dict[str, Any], project_id: str | None, rows: list[dict[str, Any]],
     actor_thread_id: str | None, *, user_id: str, write: DocumentWriter, suggestion_accept: bool = False,
-) -> tuple[str, list[str], list[dict[str, str]], dict[str, Any] | None]:
+) -> tuple[str, list[str], list[dict[str, str]], dict[str, Any] | None, tuple[str, str] | None]:
     """Apply a batch through the live lane, or write it to disk when none is open.
 
     With ``suggestion_accept`` the write is not the person's own edit, so no edit feedback of
@@ -169,7 +169,7 @@ async def _accept_batch(
     receipt = await accept_live(
         artifact, project_id, rows, actor_thread_id, user_id=user_id, suggestion_accept=suggestion_accept)
     if receipt is not None:
-        return receipt["text"], receipt["accepted"], receipt["skipped"], receipt
+        return receipt["text"], receipt["accepted"], receipt["skipped"], receipt, None
     source = await run_off_db(read_suggestion_text, artifact["path"])
     text, accepted, skipped = _batch_text(rows, source)
     if accepted:
@@ -181,14 +181,18 @@ async def _accept_batch(
         )
         if suggestion_accept:
             await run_in_db(_drop_edit_feedback, artifact["id"], text)
-    return text, accepted, skipped, receipt
+    return text, accepted, skipped, receipt, (
+        hashlib.sha256(source.encode()).hexdigest(), hashlib.sha256(text.encode()).hexdigest()
+    ) if accepted else None
 
 
 def _record_batch(
     comment_ids: list[str], decision: str, *, decided_by: str, actor_thread_id: str | None, reason: str | None,
-) -> None:
-    """Record one decision on every id in one transaction, telling each agent author once."""
-    db = get_db()
+    hashes: tuple[str, str] | None = None, db=None,
+) -> str:
+    """Record one decision on every id in one transaction, returning its shared event id."""
+    owns_db = db is None
+    db = db or get_db()
     try:
         with write_transaction(db, scope="record_suggestion_decisions") as connection:
             decided_at = datetime.now(timezone.utc).isoformat()
@@ -201,6 +205,9 @@ def _record_batch(
                 )
                 for comment_id in comment_ids
             ]
+            if hashes is not None:
+                suggestion_history.record_history(
+                    connection, decision_event_id, decided_rows[0]["artifact_id"], decided_rows, *hashes)
             by_author: dict[str | None, list[dict[str, Any]]] = {}
             for row in decided_rows:
                 by_author.setdefault(row.get("author_thread_id"), []).append(row)
@@ -210,8 +217,10 @@ def _record_batch(
                     decided_by_thread_id=actor_thread_id, decision_event_id=decision_event_id,
                     reason=reason,
                 )
+        return decision_event_id
     finally:
-        db.close()
+        if owns_db:
+            db.close()
 
 
 async def _decide_batch(
@@ -220,16 +229,17 @@ async def _decide_batch(
     suggestion_accept: bool = False,
 ) -> dict[str, Any]:
     """Accept or reject loaded suggestions: apply the accepted ones first, then record the decisions."""
-    if decision == "reject":
-        await run_in_db(
-            _record_batch, [row["id"] for row in rows], decision,
-            decided_by=decided_by, actor_thread_id=actor_thread_id, reason=reason)
-        return {"accepted": [], "skipped": [], "text": None, "revision": None}
     async with accept_lock(artifact["id"]):
+        current = await run_in_db(_still_open_with_siblings, artifact["id"], rows)
+        if decision == "reject":
+            if current:
+                await run_in_db(
+                    _record_batch, [row["id"] for row in current], decision,
+                    decided_by=decided_by, actor_thread_id=actor_thread_id, reason=reason)
+            return {"accepted": [], "skipped": [], "text": None, "revision": None}
         return await _accept_and_record(
-            artifact, project_id, await run_in_db(_still_open_with_siblings, artifact["id"], rows),
-            decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id, write=write,
-            reason=reason, suggestion_accept=suggestion_accept)
+            artifact, project_id, current, decision, user_id=user_id, decided_by=decided_by,
+            actor_thread_id=actor_thread_id, write=write, reason=reason, suggestion_accept=suggestion_accept)
 
 
 async def _accept_and_record(
@@ -239,14 +249,15 @@ async def _accept_and_record(
 ) -> dict[str, Any]:
     if not rows:
         return {"accepted": [], "skipped": [], "text": None, "revision": None}
-    text, accepted, skipped, receipt = await _accept_batch(
+    text, accepted, skipped, receipt, hashes = await _accept_batch(
         artifact, project_id, rows, actor_thread_id, user_id=user_id, write=write,
         suggestion_accept=suggestion_accept)
+    event_id = None
     if accepted:
         try:
-            await run_in_db(
+            event_id = await run_in_db(
                 _record_batch, accepted, decision,
-                decided_by=decided_by, actor_thread_id=actor_thread_id, reason=reason)
+                decided_by=decided_by, actor_thread_id=actor_thread_id, reason=reason, hashes=hashes)
         except sqlite3.Error as exc:
             raise CommentActionError(
                 "unrecorded", f"The edit was applied to the document, but the decision could not be recorded ({exc}). "
@@ -257,6 +268,7 @@ async def _accept_and_record(
         "skipped": skipped,
         "text": text,
         "revision": receipt.get("revision") if receipt else None,
+        **({"decision_event_id": event_id} if event_id else {}),
     }
 
 

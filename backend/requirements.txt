@@ -1,6 +1,6 @@
 fastapi==0.137.0
 starlette==1.3.1
-anyio==4.13.0
+anyio==4.14.2
 uvicorn==0.49.0
 uvloop==0.22.1
 httptools==0.8.0
@@ -10,7 +10,7 @@ watchfiles==1.2.0
 websockets==16.0
 python-multipart==0.0.32
 # Runtime image validation and provider-safe media projection.
-pillow==12.2.0
+pillow==13.0.0
 # HEIC/HEIF decoding: Apple devices hand the browser a HEIC from the
 # ordinary photo picker, and plain Pillow cannot open it. Optional at
 # runtime - CORSIA degrades to a named decline without it.
@@ -23,14 +23,14 @@ openai==2.30.0
 loguru==0.7.3
 httpx==0.28.1
 # The trusted-roots file handed to gws, which can't read the macOS keychain inside the sandbox.
-certifi==2026.5.20
+certifi==2026.10.18
 # Keyless web search (MIT).
 ddgs==9.16.1
-cryptography==48.0.0
+cryptography==48.0.1
 # Opens PDFs for read_file: page text, form values and page pictures (PDFium).
 pypdfium2==5.14.0
 spake2==0.9
-packaging==26.0
+packaging==26.2
 semver==3.0.4
 readability-lxml==0.8.4.1
 json-repair==0.60.1
@@ -43,7 +43,7 @@ psutil==7.2.2
 # CalDAV events for non-Google mail hosts (BSD-2-Clause, pure Python).
 icalendar==7.3.0
 # RFC 6186/6764 SRV discovery for unknown mail hosts (ISC, pure Python).
-dnspython==2.8.0
+dnspython==2.9.2
 # The bundled Public Suffix List names a shared-browser page's registrable domain
 # (host_access/browser_domain.py). Pure Python, no dependencies, MPL-2.0.
 publicsuffixlist==1.1.0.20261010

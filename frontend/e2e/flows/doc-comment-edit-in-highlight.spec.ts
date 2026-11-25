@@ -1,6 +1,7 @@
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { ITEMS, FIRST, card, open, widen } from '../support/marginCards';
+import { enterDocumentEdit } from '../support/documentReading';
 
 /**
  * Text under a comment's highlight is the document's text, so it edits like any other: a click or tap into it, or the arrow keys,
@@ -178,6 +179,8 @@ test('@flow:doc-comment-edit-in-highlight on a phone, a key typed with the sheet
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await open(page, request, { wide: false });
+	// A touch opening is Reading and takes no typing: choose Edit first, then the tap-then-key path is the one under test.
+	await enterDocumentEdit(page);
 	await highlight(page).tap();
 	await expect(sheet(page)).toBeVisible();
 	await page.keyboard.type('Z');
@@ -200,5 +203,7 @@ test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight place
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await open(page, request, { wide: false });
+	// This journey types in the tapped highlight; a touch opening is Reading, so choose Edit first.
+	await enterDocumentEdit(page);
 	await editInsideHighlight(page, () => expect(sheet(page)).toBeVisible(), 'phone');
 });

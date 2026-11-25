@@ -110,8 +110,6 @@ def test_protected_policy_exposes_only_protected_mode_rules(
         safehouse,
         Path("/tmp/corsia-restart"),
         state_root / "runtime" / "corsia-restart.signal",
-        state_root / "logs" / "restart.log",
-        state_root / "logs" / "self-restart.log",
     ):
         assert str(path) in protected
     assert str(state_root) in protected

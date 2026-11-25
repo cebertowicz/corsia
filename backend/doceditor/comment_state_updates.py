@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from doceditor import comment_acks, comment_notifications, feedback_comments
@@ -61,6 +62,35 @@ def resolve_after_leave(connection, root_id: str, agent_id: str) -> None:
         update_comment(connection, root_id, {"resolved": True, "closed_by_agreement": True}, actor_thread_id=agent_id)
 
 
+def _pair_anchor_patch(connection, before: dict, row: dict) -> dict:
+    """Pair an explicit anchor move with the text it actually names, or retain legacy behavior."""
+    from doceditor import comment_snapshots
+    from doceditor.doc_text import read_doc_text
+    from doceditor.live_tools import find_live
+    from doceditor.quote_anchor import anchor_context
+
+    artifact = registry_models.get_artifact(row['artifact_id'], db=connection) or {}
+    path = artifact.get('path')
+    text = None
+    if path:
+        entry = find_live(Path(path))
+        try:
+            text = entry.live.snapshot[0] if entry is not None else read_doc_text(path)
+        except (OSError, ValueError):
+            pass
+    reason = (comment_snapshots.invalid_reason(text, row.get('from_off'), row.get('to_off'), row.get('anchor_text'))
+              if text is not None else 'read_error')
+    snapshot_id = None
+    if reason is None:
+        snapshot_id = comment_snapshots.intern(connection, text)
+        prefix, suffix = anchor_context(text, row['from_off'], row['to_off'], row['anchor_text'])
+        connection.execute('UPDATE doc_comments SET anchor_prefix=?,anchor_suffix=? WHERE id=?',
+                           (prefix, suffix, row['id']))
+    connection.execute('UPDATE doc_comments SET snapshot_id=? WHERE id=?', (snapshot_id, row['id']))
+    comment_snapshots.collect_candidates(connection, [before.get('snapshot_id')])
+    return store.get_comment(row['id'], db=connection)
+
+
 def update_comment(
     connection, comment_id: str, patch: dict[str, Any], *,
     actor_thread_id: str | None = None, user_name: str | None = None,
@@ -82,6 +112,8 @@ def update_comment(
     row = store.update(comment_id, fields, db=connection) if fields else before
     if row is None:
         return None
+    if not row.get('parent_id') and not row.get('review') and {'from_off', 'to_off', 'anchor_text'} & fields.keys():
+        row = _pair_anchor_patch(connection, before, row)
     acknowledged = "acked" in patch and _acknowledge(
         connection, before, bool(patch["acked"]), actor_thread_id=actor_thread_id, user_name=user_name)
     if acknowledged and not patch["acked"]:

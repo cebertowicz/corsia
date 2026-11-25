@@ -154,7 +154,7 @@ def test_the_shells_kept_downloads_are_the_backends_model_store_assets_and_logs(
     kept = [
         str(managed_omlx_paths().model_dir.relative_to(config.STATE_ROOT)),
         asset_root().relative_to(config.STATE_ROOT).parts[0],
-        config.LOGS_DIR.name,
+        config.STATE_LOGS_DIR.name,
     ]
     shell = (REPO / "desktop" / "src-tauri" / "src" / "unfinished_setup.rs").read_text(encoding="utf-8")
     declared = shell.split("pub const KEPT: [&str; 3] = [", 1)[1].split("];", 1)[0]

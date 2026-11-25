@@ -259,6 +259,7 @@ restore_previous_service_definition() {
             return 1
         fi
     fi
+    remove_service_log_symlinks "$plist" || return 1
     if restore_error="$(launchctl bootstrap "$domain" "$plist" 2>&1)"; then
         restore_status=0
     else
@@ -287,6 +288,14 @@ restored_service_restart_result() {
 
 service_definition_value() {
     plutil -extract "$2" raw "$1" 2>/dev/null
+}
+
+remove_service_log_symlinks() {
+    local key log
+    for key in StandardOutPath StandardErrorPath; do
+        log="$(service_definition_value "$1" "$key")" || continue
+        [ ! -L "$log" ] || rm -f "$log" || return 1
+    done
 }
 
 # The guidance for a loaded job under this label whose definition is not this
@@ -514,7 +523,7 @@ service_install() {
         fail "Refusing to replace unowned definition at $plist; inspect that file and reconcile it manually"
         return 1
     fi
-    mkdir -p "$LAUNCH_AGENTS_DIR"
+    mkdir -p "$LAUNCH_AGENTS_DIR" "$(dirname "$BACKEND_LOG")" || return 1
     tmp="$(mktemp "${plist}.tmp.XXXXXX")" \
         || { fail "Could not create temporary service plist for $plist"; return 1; }
     chmod 600 "$tmp" \
@@ -589,6 +598,7 @@ service_start() {
         return 0
     fi
     require_no_unmanaged_backend "$BACKEND_PORT" || return 1
+    remove_service_log_symlinks "$(service_definition_path)" || return 1
     launchctl bootstrap "$(service_domain)" "$(service_definition_path)" \
         && ok "$(service_label) bootstrapped using the installed definition (RunAtLoad starts it). Source changes are not rendered by start; run corsia service install before start, or corsia service restart."
 }
@@ -745,6 +755,7 @@ service_restart() {
     bootstrap_attempt=0
     while [ "$bootstrap_attempt" -lt "$bootstrap_attempts" ]; do
         bootstrap_attempt=$((bootstrap_attempt + 1))
+        remove_service_log_symlinks "$plist" || return 1
         if bootstrap_error="$(launchctl bootstrap "$domain" "$plist" 2>&1)"; then
             rm -f "$previous_plist"
             ok "$label restarted with the installed plist"

@@ -5,10 +5,13 @@
 	import MiddleName from './MiddleName.svelte';
 	import type { DocViewerStatusProps } from './docViewerStatusProps';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
+	import { isCommentTask, personStepAsk } from './comments/commentTask';
 	import { Button } from '$lib/components/ui';
 	import Spinner from './ui/Spinner.svelte';
-	import { formatFreshness, shouldOfferVerification } from '$lib/docFreshness';
+	import { formatFreshness, freshnessStatusText, shouldOfferVerification } from '$lib/docFreshness';
 	import { detailsNeedsUp } from '$lib/docDetailsNeeds';
+	import { observeFit } from '$lib/observeFit';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -17,10 +20,12 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
+	import DocViewerDone from './DocViewerDone.svelte';
 
 	let {
-		presence,
+		presence, touchReading = false, editing = false, canEdit = false, onEnterEdit, onDone,
 		reviewBar,
+		commentTaskBar,
 		ask = null,
 		commentsOpen = false,
 		commentsLoading = false,
@@ -76,12 +81,15 @@
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
 	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
-	 * entry, so the control says what is waiting rather than how many: Overdue, and an ask whose card is hidden, an ask
-	 * with no reason text named by its asker rather than leaving an empty leg. The amber count is this list's length, so
-	 * the number and the name can't drift apart. */
+	 * entry, so the control says what is waiting rather than how many: Overdue, an ask whose card is hidden, an ask
+	 * with no reason text named by its asker rather than leaving an empty leg, and comments waiting for your decision
+	 * while Details is closed, where its Dismiss all row is not yet on screen. The amber count is this list's length,
+	 * so the number and the name can't drift apart. */
+	let panelOpen = $state(false);
+	const taskStep = $derived(commentTaskBar && isCommentTask(commentTaskBar.read?.person_step) ? commentTaskBar.read?.person_step : null);
 	const needsUp = $derived(detailsNeedsUp(
-		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard },
-		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '' }));
+		{ overdue: !!freshnessPresentation?.overdue, hiddenAsk: !!ask && !ask.onCard, hiddenTask: !!taskStep && !panelOpen },
+		{ overdue: 'Overdue', hiddenAsk: ask ? ask.text.trim() || `${ask.who} asks` : '', hiddenTask: taskStep ? personStepAsk(taskStep) : '' }));
 	const needsCount = $derived(needsUp.length);
 	// The unsent comments, for the Comments button's accessible summary (CommentsPill's naming); the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
@@ -90,29 +98,18 @@
 	let receiptTextFits = $state(false);
 	$effect(() => {
 		const box = receiptBox, measure = receiptMeasure;
-		if (!box || !measure) return;
-		const update = () => { receiptTextFits = measure.getBoundingClientRect().width <= box.getBoundingClientRect().width; };
-		update();
-		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-		observer?.observe(box); observer?.observe(measure);
-		return () => observer?.disconnect();
+		return box && measure ? observeFit(box, measure, (fits) => { receiptTextFits = fits; }) : undefined;
 	});
 	const commentsLabel = $derived(!ready ? 'Comments unavailable until the document opens' : commentsLoading ? 'Loading comments'
 		: `${commentCount} comment${commentCount === 1 ? '' : 's'}${unreadCount ? `, ${unreadCount} unread` : ''}${unsent ? `, ${unsent} waiting for Send` : ''}${sent && !commentsOpen ? ', Sent' : ''}`);
 	const panelId = $derived(`doc-details-${targetInstanceId ?? 'doc'}`);
-	const statusText = $derived(freshnessPresentation
-		? freshnessPresentation.overdue
-			// Overdue names the last verification's date: it fits beside Mark verified at phone width, where an age cuts mid-word.
-			? `Overdue · ${freshnessPresentation.dateText ? `verified ${freshnessPresentation.dateText}` : freshnessPresentation.phrase}`
-			: freshnessPresentation.phrase
-		: '');
+	const statusText = $derived(freshnessStatusText(freshnessPresentation));
 
 	let headerEl = $state<HTMLElement | null>(null);
 	let panelEl = $state<HTMLElement | null>(null);
-	let panelOpen = $state(false);
 	let panelMax = $state<number | null>(null);
-	/** The open panel would reach down over the ask's card, so the card steps aside until it closes; Details then carries the ask. */
-	let cardCovered = $state(false);
+	/** The open panel would reach down over the ask (its card on a phone, its row in the header), so the ask steps aside until it closes; Details then carries it. */
+	let askCovered = $state(false);
 
 	$effect(() => {
 		artifactId;
@@ -125,7 +122,7 @@
 	// The panel takes the height left below its top, so it reaches its last row without scrolling wherever that fits.
 	$effect(() => {
 		const panel = panelEl;
-		if (!panelOpen || !panel) { cardCovered = false; return; }
+		if (!panelOpen || !panel) { askCovered = false; return; }
 		const fit = () => {
 			// The document can sit beside the bar entry; keep its panel within the window in either position.
 			panel.style.removeProperty('--panel-shift');
@@ -134,8 +131,8 @@
 			panel.style.setProperty('--panel-shift', `${shift}px`);
 			const top = rect.top;
 			panelMax = Math.floor(window.innerHeight - top - 8);
-			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card]')?.getBoundingClientRect();
-			cardCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
+			const box = headerEl?.querySelector<HTMLElement>('[data-ask-card], .review-bar.ask')?.getBoundingClientRect();
+			askCovered = !!box && box.height > 0 && top + Math.min(panel.scrollHeight, panelMax) > box.top - 8;
 		};
 		fit();
 		window.addEventListener('resize', fit);
@@ -222,7 +219,8 @@
 
 <!-- The document's one row: Comments and Details, drawn by the app bar or the tab strip (documentBar). -->
 {#snippet barTools()}<span class="bar-tools">
-	{#if presence}{@render presence()}{/if}
+	{#if touchReading && editing}<DocViewerDone {onDone} />{/if}
+	<span class="bar-presence" hidden={touchReading && editing} style:display={touchReading && editing ? 'none' : 'contents'}>{#if presence}{@render presence()}{/if}</span>
 	{#if urgent && !changeInBar}<button type="button" class="bar-reload bar-stale stale-control" data-file-changed aria-label="File changed · Reload" title="File changed · Reload" onclick={() => onReload?.()}>
 		<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
 		<!-- The strip's own room decides whether the words show; the ↻ mark is the phone header's compact form. -->
@@ -245,7 +243,7 @@
 	</button>
 	<!-- Details: a vertical ⋮ (the app bar's More mark turned upright), with an amber count beside it when something behind it needs you. -->
 	<button type="button" class="bar-details" data-document-details bind:this={detailsEntry} aria-expanded={panelOpen} aria-controls={panelId}
-		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onclick={() => panelOpen = !panelOpen}>
+		aria-label={`Document details${needsUp.length ? ` · ${needsUp.join(' · ')}` : ''}`} title="Document details" onpointerdown={(event) => { if (touchReading) event.preventDefault(); }} onmousedown={(event) => { if (touchReading) event.preventDefault(); }} onclick={() => panelOpen = !panelOpen}>
 		{#if needsCount}<span class="bar-needs" aria-hidden="true">{needsCount}</span>{/if}
 		<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
 	</button>
@@ -259,12 +257,13 @@
 {/snippet}
 
 {#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
-<header class="document-header" class:card-covered={cardCovered} bind:this={headerEl}>
+<header class="document-header" class:ask-covered={askCovered} bind:this={headerEl}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>
 		<div class="p-section">
-			{#if ask && (!ask.onCard || cardCovered)}<div class="p-ask" data-details-ask>
+			{#if touchReading}<button type="button" class="p-row p-edit" style:min-height="var(--touch-target)" disabled={!canEdit || editing} onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { panelOpen = false; onEnterEdit?.(); }}>Edit</button>{/if}
+			{#if ask && (!ask.onCard || askCovered)}<div class="p-ask" data-details-ask>
 				<span class="p-who"><strong><MiddleName name={ask.who} /></strong></span>
 				<span class="p-full">{ask.text}</span>
 				{#each ask.others as other (other.name)}<span class="p-full"><strong>{other.name}</strong>: {other.reason}</span>{/each}
@@ -282,6 +281,7 @@
 		{#if artifactId || (historyAvailable && onOpenHistory)}<div class="p-section">
 			<span class="p-label-row">Review</span>
 			{#if artifactId}<span class="p-row p-review"><DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} restoreTo={() => detailsEntry} /></span>{/if}
+			{#if commentTaskBar && isCommentTask(commentTaskBar.read?.person_step)}<div class="p-row"><CommentTaskDismiss bar={commentTaskBar} menu /></div>{/if}
 			{#if historyAvailable && onOpenHistory}<button type="button" class="p-row history-tool" aria-expanded={historyOpen} onclick={() => closeThen(onOpenHistory)}>History</button>{/if}
 		</div>{/if}
 		{#if paneHere}<div class="p-section"><button type="button" class="p-row" onclick={() => closeThen(() => paneOpen.set(true))}>Show panel</button></div>{/if}
@@ -305,6 +305,7 @@
 	.bar-reload.bar-stale { height: 32px; padding: 0 var(--space-2); background: var(--amber-bg); font-weight: var(--fw-medium); }
 	/* Comments and Details, 16px apart, in whichever bar draws them. */
 	.bar-tools { display: inline-flex; flex: none; align-items: center; gap: var(--space-4); }
+	:global(.strip[data-document-bar-row]) .bar-tools { gap: var(--space-1); }
 	@media (max-width: 768px) {
 		:global(.shell-header) .bar-tools { gap: var(--space-1); }
 		:global(.shell-header) .bar-new-word { display: none; }

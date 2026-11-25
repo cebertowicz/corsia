@@ -54,10 +54,12 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * a reveal that still ends under the row (the browser does not always honour the padding for a field taller than the room above the row)
  * scrolls the scroller by what is left. A revealed block holds that row at its own end, so it needs none.
  *
- * A resize brings the node back only while its end was in view: a reader who scrolled away from the field (up to
- * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size. The scroll a
- * reveal makes is not the reader's: a sheet still shrinking can leave the field below its end by the time that scroll's
- * event arrives.
+ * A resize brings the node back while its end was in view, and always while the node has focus: a reader who scrolled away
+ * from an unfocused field (up to read the thread above a long reply) is not pulled back to it when the scroller or viewport
+ * changes size, but a field the person is typing into is. A scroll the browser makes on its own (after a sheet's last shrink,
+ * say) can read the field as below the end, so for a focused field that reading never stops the resize from bringing it back.
+ * The scroll a reveal makes is not the reader's: a sheet still shrinking can leave the field below its end by the time that
+ * scroll's event arrives.
  *
  * Typing at the end of a field brings its end back as growing does: the browser's own caret reveal stops at the caret
  * line, leaving the field's padding and the Send beside it past the scroller's end when the text did not wrap.
@@ -118,7 +120,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(reveal);
 	};
-	const resized = () => { if (endShown) schedule(); };
+	const resized = () => { if (endShown || document.activeElement === node) schedule(); };
 	const typed = () => {
 		if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
 			if (node.selectionEnd === node.value.length) schedule();
