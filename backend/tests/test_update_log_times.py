@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from api import settings_restart
 from api.restart_shell import LIFECYCLE_SHELL_COMMAND
 from infra import config
-from infra.update_operation import _failure_log_tail
+from infra.update_operation import _failure_log_tail, project_update_operation
 
 TIMESTAMP = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
 
@@ -67,6 +67,23 @@ def test_lifecycle_line_is_timed_only_in_envelope(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     operation = {"status": "failed", "failure_detail": json.dumps({"log_path": str(path)})}
     assert _failure_log_tail(operation) == plain.stdout
+
+
+@pytest.mark.parametrize("outcome", ["exit 45", "timed out", "could not start"])
+def test_prepare_records_do_not_change_projected_failure_tail(tmp_path, monkeypatch, outcome):
+    path = tmp_path / "update-test.log"
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
+    operation = {"id": "test", "status": "failed", "failure_detail": json.dumps({"log_path": str(path)})}
+    output = "z" * 9000 + "\nPrepare ordinary output\n" + "x" * 5950 + "\n"
+    path.write_text(output)
+    expected = project_update_operation(operation)["log_tail"]
+    stamp = "2026-01-02T03:04:05Z "
+    path.write_text(
+        f"{stamp}Prepare started\n" + "z" * 9000 + "\nPrepare ordinary output\n"
+        f"{stamp}Prepare ended in 3s ({outcome})\n" + "x" * 5950 + "\n"
+    )
+    assert project_update_operation(operation)["log_tail"] == expected
+    assert "Prepare ordinary output" in expected
 
 
 def test_failure_tail_does_not_show_a_partial_timestamp(tmp_path, monkeypatch):
