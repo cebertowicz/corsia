@@ -672,6 +672,47 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expectRowFits(page);
 	});
 
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+		test(`cuts a long agent name before the site at ${viewport.width} px, so the registrable domain stays whole`, async ({ page, request }, testInfo) => {
+			await page.setViewportSize(viewport);
+			const title = `Saved login long name ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			const agent = 'Quarterly supplier reconciliation and accounts payable follow-up for the regional cooperative';
+			const fill = fillRequest(threadId, 1, { agent });
+			await page.route('**/api/host-access/leases**', async (route) => {
+				const root = new URL(route.request().url()).searchParams.get('root_thread_id');
+				await route.fulfill({
+					status: 200, contentType: 'application/json',
+					body: JSON.stringify({ leases: root === threadId ? [fill] : [] }),
+				});
+			});
+			await loginByUrl(page, { waitForComposer: false });
+			await selectThread(page, title);
+
+			const shown = page.locator('.pending-request-trigger .pending-site');
+			await expect(shown).toBeVisible();
+			await expect(page.locator('.pending-request-trigger .pending-owner')).toHaveText(agent);
+			// fitLabel sets the label after a frame; wait until the site's minimum is measured.
+			await expect.poll(() => shown.evaluate((element) => (element as HTMLElement).style.getPropertyValue('--label-min'))).not.toBe('');
+			const label = (await shown.textContent()) ?? '';
+			// Whole, or cut once at the front between whole labels, and always ending in the whole domain.
+			expect(label === LONG_SITE_SHOWN || (label.startsWith('…') && LONG_SITE_SHOWN.endsWith(`.${label.slice(1)}`)), label).toBe(true);
+			expect(label.endsWith('example.com'), label).toBe(true);
+			const box = await siteLine(shown);
+			expect(box.fits, JSON.stringify(box)).toBe(true);
+			// The name gives way first but stays readable: on screen, one line, cut at its end.
+			const name = await page.locator('.pending-request-trigger .pending-owner').evaluate((element) => ({
+				width: element.clientWidth, height: element.getBoundingClientRect().height,
+				lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight) || 0,
+			}));
+			expect(name.width, JSON.stringify(name)).toBeGreaterThan(40);
+			if (name.lineHeight) expect(name.height, JSON.stringify(name)).toBeLessThanOrEqual(name.lineHeight + 1);
+			await expect(page.locator('.pending-request-trigger .pending-action')).toBeVisible();
+			await expectRowFits(page);
+			await page.screenshot({ path: testInfo.outputPath(`fill-entry-long-name-${viewport.width}.png`) });
+		});
+	}
+
 	test('keeps a short agent name and the site on one row when both fit whole', async ({ page, request }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const title = `Saved login one row ${testInfo.project.name}-${Date.now()}`;

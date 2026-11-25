@@ -28,7 +28,8 @@ export function siteLabels(site: string, domain: string | null | undefined): str
 /**
  * Show the longest of `labels` that fits the element's width on one line; the last one if none does.
  * The element's own text is set here, so it renders empty, and it is refitted whenever its width changes.
- * It also sets `--label-full` to the longest label's width, so a layout can give the whole label room first.
+ * It also sets `--label-full` to the longest label's width, so a layout can give the whole label room first,
+ * and `--label-min` to the shortest label's width, so a layout never squeezes it below the domain.
  */
 export function fitLabel(node: HTMLElement, labels: string[]) {
 	let current = labels;
@@ -38,6 +39,8 @@ export function fitLabel(node: HTMLElement, labels: string[]) {
 		frame = requestAnimationFrame(() => {
 			const full = `${Math.ceil(width(current[0] ?? '', getComputedStyle(node)))}px`;
 			if (node.style.getPropertyValue('--label-full') !== full) node.style.setProperty('--label-full', full);
+			const min = `${Math.ceil(width(current.at(-1) ?? '', getComputedStyle(node)))}px`;
+			if (node.style.getPropertyValue('--label-min') !== min) node.style.setProperty('--label-min', min);
 			const room = node.clientWidth;
 			// Not laid out (hidden, or not shown yet): keep the whole site until there is room to measure.
 			if (!room) {

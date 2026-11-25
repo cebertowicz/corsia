@@ -88,13 +88,14 @@
 		/* HostAccessLeaseControl's phone breakpoint sets these two. */
 		white-space: var(--host-access-owner-wrap, nowrap);
 	}
-	/* A saved login's agent keeps its own width; the site takes the rest, shortened from the front. */
-	.pending-owner.fill { flex: 0 1 auto; }
+	/* A saved login's agent gives way first; the site keeps its whole label while it can, then shortens from the front, never below the domain. */
+	.pending-owner.fill { flex: 1 1 0; min-width: 8em; white-space: nowrap; }
 	.pending-site {
-		/* No value until fitLabel measures the label, so the fallback applies until then. */
+		/* No value until fitLabel measures the labels, so the fallbacks apply until then. */
 		--label-full: initial;
-		flex: 1 1 var(--label-full, auto);
-		min-width: 0;
+		--label-min: initial;
+		flex: 0 1 var(--label-full, auto);
+		min-width: var(--label-min, 0);
 		overflow: hidden;
 		color: var(--text-secondary);
 		font-size: var(--text-footnote);
