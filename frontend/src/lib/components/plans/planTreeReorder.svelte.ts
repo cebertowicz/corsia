@@ -40,8 +40,6 @@ export function createPlanTreeReorder(options: Options) {
 	let scrollFrame = 0;
 	let dragCursorY = 0;
 	let press: Press | null = null;
-	let stopTouchDrag: (() => void) | null = null;
-	function releaseTouchDrag() { stopTouchDrag?.(); stopTouchDrag = null; }
 	const slop = 10;
 
 	function orderedNodes(nodes: OperatorNode[], extra: OperatorNode[]): OperatorNode[] {
@@ -130,7 +128,17 @@ export function createPlanTreeReorder(options: Options) {
 		if (dragCursorY > box.bottom - edge) scroller.scrollTop += edge / 4;
 		scrollFrame = requestAnimationFrame(scrollWhileDragging);
 	}
-	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); releaseTouchDrag(); cancelAnimationFrame(scrollFrame); });
+	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); });
+	// Ordinary swipes use native scrolling; only a held reorder blocks it, so the same finger can drag
+	// a row without the browser cancelling it. WebKit decides at touchstart whether a touch's moves can
+	// be cancelled, so this listener lives on the tree from mount, not from the long press.
+	$effect(() => {
+		const tree = options.element();
+		if (!tree) return;
+		const preventDragScroll = (move: TouchEvent) => { if (press?.armed && move.cancelable) move.preventDefault(); };
+		tree.addEventListener('touchmove', preventDragScroll, { passive: false });
+		return () => tree.removeEventListener('touchmove', preventDragScroll);
+	});
 	$effect(() => {
 		if (!draft || drag || moving) return;
 		const node = options.nodes().find((candidate) => candidate.id === draft!.id);
@@ -168,19 +176,10 @@ export function createPlanTreeReorder(options: Options) {
 				const movable = options.enabled() && eligible(node) && !moving;
 				if (event.button !== 0 || !movable) return;
 				const row = event.currentTarget as HTMLElement;
-				// A new press replaces the old one, so end the old one's hold and scroll block first.
+				// A new press replaces the old one, so end the old one's hold first.
 				if (press?.timer) clearTimeout(press.timer);
-				releaseTouchDrag();
 				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
-				if (event.pointerType === 'touch') press.timer = setTimeout(() => {
-					if (press?.pointerId !== event.pointerId || press.scrolling) return;
-					press.armed = true;
-					// Ordinary swipes use native scrolling. Only a held reorder blocks it,
-					// so the same finger can drag a row without the browser cancelling it.
-					const preventDragScroll = (move: TouchEvent) => { if (move.cancelable) move.preventDefault(); };
-					document.addEventListener('touchmove', preventDragScroll, { passive: false });
-					stopTouchDrag = () => document.removeEventListener('touchmove', preventDragScroll);
-				}, LONG_PRESS_MS);
+				if (event.pointerType === 'touch') press.timer = setTimeout(() => { if (press?.pointerId === event.pointerId && !press.scrolling) press.armed = true; }, LONG_PRESS_MS);
 				(event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 			},
 			onpointermove(event: PointerEvent) {
@@ -203,7 +202,7 @@ export function createPlanTreeReorder(options: Options) {
 				const current = press;
 				if (!current || current.pointerId !== event.pointerId) return;
 				if (current.timer) clearTimeout(current.timer);
-				press = null; releaseTouchDrag(); cancelAnimationFrame(scrollFrame);
+				press = null; cancelAnimationFrame(scrollFrame);
 				if (!drag) return;
 				const next = draft, count = drag.count, visualPosition = drag.position;
 				drag = null;
@@ -211,7 +210,7 @@ export function createPlanTreeReorder(options: Options) {
 				await tick();
 				if (!(await saveMove(current.node, next.position, false))) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
 			},
-			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); releaseTouchDrag(); cancelAnimationFrame(scrollFrame); press = null; drag = null; draft = null; },
+			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); press = null; drag = null; draft = null; },
 		};
 	}
 	return {
