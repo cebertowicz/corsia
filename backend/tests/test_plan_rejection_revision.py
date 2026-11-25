@@ -650,6 +650,7 @@ def test_a_worker_is_handed_the_whole_feedback_and_criteria(monkeypatch):
         parent_plan, delegated, _plan, _leaves = _returned(db, "Write the tests")
         criteria = "\n".join(f"{n}. Criterion {n} " + "x" * 90 for n in range(1, 9))
         service.touch_node(db, delegated.id, acceptance_criteria=criteria)
+        db.commit()
         feedback = "\n".join(f"{n}. Finding {n}: " + "y" * 280 for n in range(1, 9))
         _reject(db, parent_plan.id, delegated.id, feedback=feedback)
         db.commit()
@@ -893,6 +894,7 @@ def test_the_parent_taking_the_revision_over_settles_the_seeded_step(monkeypatch
             db.commit()
             revision = _revision_of(db, delegated.id)
             db.execute("UPDATE messages SET delivery_state='delivered' WHERE thread_id='worker'")
+            db.commit()
 
             mutate(
                 parent_plan.id, operation,

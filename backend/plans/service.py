@@ -347,8 +347,10 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
         payload=recorded or None,
     )
     if new_state in _TERMINAL_STATES:
+        from plans import later_review
         from plans.worker_retirement import settle_terminal
 
+        later_review.schedule_if_top_empties(connection, node)
         settle_terminal(
             connection, node_id, new_state, event_id=event_id, actor_id=actor_id,
             provenance=provenance, settles_worker=settles_worker,

@@ -1,12 +1,9 @@
 """The weekly review of one plan's Later pile: its arm, its due read, its settle.
 
-``plans.later_review_at`` is the one home of the review time, and only two
-writes touch it: ``arm``, made inside the transaction of the first write that
-puts a task below the cut, and ``settle``, which answers a review whose time
-has come. Nothing else moves it at run time -- a second, tenth or hundredth task
-crossing the cut leaves it where the first put it -- so a plan keeps one review
-weekday however big its pile grows, and a late sweep cannot start a second
-review. The one other writer is the one-time upgrade
+``plans.later_review_at`` is the one home of the review time. ``arm`` sets
+it when the first task goes below the cut, a post-commit effect brings it
+forward when the last above-cut task settles, and ``settle`` answers a review.
+Adding more tasks below the cut does not move the time. The one-time upgrade
 ``infra.migration_195_to_196_later_review_arm``, which arms plans whose pile
 predates the review the way ``arm`` would.
 
@@ -28,6 +25,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from infra import write_effects
+from infra.database import write_transaction
 from infra.packed_rows import fetch_all
 from plans import (
     later_fields, node_order, node_waits, plan_wake, service, status_time,
@@ -85,6 +84,36 @@ def arm_node(connection, node_id: str) -> None:
              AND id=(SELECT plan_id FROM plan_nodes WHERE id=?)""",
         (_week_out(service._now()), str(node_id)),
     )
+
+
+def schedule_if_top_empties(connection, node) -> None:
+    """Recheck the committed plan once per transaction after above-cut work settles."""
+    if node["kind"] != "task" or node["later"]:
+        return
+    plan_id = str(node["plan_id"])
+    plan = connection.execute("SELECT owner_kind FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if plan is None or plan["owner_kind"] != "thread":
+        return
+    write_effects.after_commit_merged(
+        connection, ("later_review_top_empty", plan_id), [plan_id],
+        lambda ids: _arm_empty_tops(connection, ids),
+    )
+
+
+def _arm_empty_tops(connection, plan_ids: list[str]) -> None:
+    """Bring the review forward only if committed work still leaves the top empty."""
+    with write_transaction(connection, scope="later_review_empty") as db:
+        for plan_id in plan_ids:
+            rows = node_order.open_nodes_with_paths(db, plan_id)
+            tasks = [row for row, _ in rows if row["kind"] == "task"]
+            if not any(row["later"] for row in tasks) or any(not row["later"] for row in tasks):
+                continue
+            now = service._now()
+            db.execute(
+                "UPDATE plans SET later_review_at=? WHERE id=? AND owner_kind='thread' "
+                "AND (later_review_at IS NULL OR later_review_at>?)",
+                (now, plan_id, now),
+            )
 
 
 def due(db, now: str) -> list:

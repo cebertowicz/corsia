@@ -79,6 +79,134 @@ def _days_from_now(value: str, *, clock: str) -> float:
     return (late - early).total_seconds() / 86400
 
 
+def _fail_task(db, node_id):
+    service.transition_node(node_id, "failed", db=db)
+
+
+def test_last_above_line_settlement_brings_review_due_once(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    _fail_task(db, top.id)
+    now = service._now()
+    assert _review_at(db, plan.id) <= now
+    assert [r["id"] for r in later_review.due(db, now)] == [plan.id]
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+    assert later_review.due(db, now) == []
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+    next_top = task(db, plan.id, "Next work")
+    _fail_task(db, next_top.id)
+    assert [r["id"] for r in later_review.due(db, service._now())] == [plan.id]
+
+
+def test_review_is_armed_only_after_commit_and_not_after_rollback(db):
+    from infra.database import write_transaction
+    import pytest
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    before = _review_at(db, plan.id)
+    with pytest.raises(RuntimeError, match="rollback"):
+        with write_transaction(db, scope="test_later_rollback"):
+            _fail_task(db, top.id)
+            assert _review_at(db, plan.id) == before
+            raise RuntimeError("rollback")
+    assert _review_at(db, plan.id) == before
+    assert row(db, top.id)["state"] == "pending"
+    with write_transaction(db, scope="test_later_commit"):
+        _fail_task(db, top.id)
+        assert _review_at(db, plan.id) == before
+    assert _review_at(db, plan.id) <= service._now()
+
+
+def test_settlement_with_no_later_does_not_arm(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) is None
+    assert later_review.due(db, service._now()) == []
+
+
+def test_settlement_with_another_above_line_task_keeps_time(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    task(db, plan.id, "Other work")
+    _below_cut(db, plan.id, "Someday")
+    before = _review_at(db, plan.id)
+    db.commit()
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) == before
+
+
+def test_settlement_of_later_task_does_not_rearm(db):
+    plan = owner_plan(db)
+    one = _below_cut(db, plan.id, "Someday")
+    _below_cut(db, plan.id, "Other someday")
+    before = _review_at(db, plan.id)
+    _fail_task(db, one["id"])
+    assert _review_at(db, plan.id) == before
+
+
+def test_last_settlement_paused_plan_is_not_due(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    lifecycle.transition(plan.id, "paused", expected_revision=service._plan_row(db, plan.id)["revision"],
+                         actor_id="user", provenance="test", db=db)
+    db.commit()
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) <= service._now()
+    assert later_review.due(db, service._now()) == []
+
+
+def test_last_settlement_scope_plan_does_not_arm(db):
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','Project','t','t')")
+    db.commit()
+    plan = service.ensure_plan("project_scope", "p", db=db)
+    top = task(db, plan.id, "Current work")
+    task(db, plan.id, "Someday", later=True)
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) is None
+
+
+def test_accept_with_follow_up_keeps_review_time(db):
+    from plans import mutations
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    service.transition_node(top.id, "active", db=db)
+    mutations.request_review(top.id, evidence="verified", actor_id="owner", db=db)
+    before = _review_at(db, plan.id)
+    _, follow_up = service.accept_with_follow_up(
+        top.id, title="Follow up", acceptance_criteria="Done", verification_result="passed",
+        verified_by="test", db=db,
+    )
+    assert not row(db, follow_up.id)["later"]
+    assert _review_at(db, plan.id) == before
+
+
+def test_send_back_revision_keeps_review_time(db):
+    from plans import rejection
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    service.transition_node(top.id, "active", db=db)
+    service.transition_node(top.id, "review_requested", db=db)
+    before = _review_at(db, plan.id)
+    _, revision_node, _ = rejection.reject_submission(top.id, feedback="Revise", db=db)
+    assert not row(db, revision_node.id)["later"]
+    assert _review_at(db, plan.id) == before
+
+
 # --- the arm ---------------------------------------------------------------
 
 
