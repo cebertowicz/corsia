@@ -25,13 +25,13 @@ from functools import partial
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state
+from host_access import browser_cdp_frames, browser_login_capture_queue as _queue_state, browser_page_watch
 from host_access.browser_cdp import CdpClient, PasswordProbe, border_rect
 from host_access.browser_login_capture_cdp import call_on as _call_on, frame_tree as _frame_tree, world as _world
 from host_access.browser_login_capture_cdp import READ_ACCOUNT as _READ_ACCOUNT, READ_LOGIN as _READ_LOGIN
 from host_access.browser_login_capture_policy import is_submit, switches_tab, writes_value
 from host_access.browser_login_capture_queue import QueueItem as _QueueItem, enqueue as _queue, tasks as _tasks
-from host_access.browser_login_capture_writes import ANY_DOCUMENT as _ANY_DOCUMENT, AgentWrites, NoWrites
+from host_access.browser_page_watch import ANY_DOCUMENT as _ANY_DOCUMENT, NoWatch, PageWatch
 from host_access.browser_domain import registrable_domain
 from host_access.browser_steps import password_step
 from host_access.browser_session_state import BrowserSessionError
@@ -41,10 +41,6 @@ log = logging.getLogger(__name__)
 # Measured on PR #3242 (figures in its body); one second bounds a delay that can interrupt a person's thought
 # (Nielsen, "Response Times: The 3 Important Limits"). A timeout skips capture; the click still goes through.
 CAPTURE_TIMEOUT = 1.0
-# An agent typing command's page watch (rule 7) opened in about 2 ms and settled in 1-5 ms on Chrome for Testing
-# 152 (PR #3242). Waiting holds the agent's command, then the pane; expiring marks every document, so the
-# session makes no offer and the person's sign-in still goes through. Five seconds is three orders above that.
-WATCH_TIMEOUT = 5.0
 _WORLD = "corsia-login-capture"
 session_key = saved_login_offers.session_key
 
@@ -107,19 +103,19 @@ def _mark(thread_id: str, loader: str) -> None:
     _state(thread_id).marks[loader] = None
 
 
-async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> AgentWrites:
+async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> PageWatch:
     """Start rule 7's watch before an agent command runs; settle it before the pane gets the page back.
 
     A command that can't type marks nothing. A batch that types and switches tabs marks every document.
     """
     if not writes_value(args):
-        return NoWrites()
+        return NoWatch()
     if switches_tab(args):
         _mark(thread_id, _ANY_DOCUMENT)
-        return NoWrites()
+        return NoWatch()
     state = _state(thread_id)
     marks, state.watches = state.marks, state.watches + 1  # a late settle can't mark the next session
-    writes = AgentWrites(marks.setdefault, WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
+    writes = PageWatch(marks.setdefault, browser_page_watch.WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
     try:
         await writes.start(endpoint)
     except BaseException:
