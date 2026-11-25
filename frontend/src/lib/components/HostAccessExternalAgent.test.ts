@@ -19,9 +19,10 @@ afterEach(async () => {
 
 function show(lease: HostAccessLease, stale = false) {
 	component = mount(HostAccessPendingRequestDrawer, { target: host, props: {
-		lease, stale, deciding: false, rejectDisabled: stale,
+		// As the control passes them: a stale read blocks Approve, never Reject.
+		lease, stale, deciding: false, rejectDisabled: false,
 		approveDisabled: stale || !approvalReady(lease),
-		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
 	} });
 	flushSync();
 }
@@ -108,12 +109,15 @@ it('blocks an incomplete launch and shows plain missing-command copy outside cod
 	external.command = '';
 	expect(approvalReady(lease)).toBe(false);
 	show(lease);
-	expect(button('Approve')).toBeUndefined();
+	// Approve stays in its place, disabled; Reject keeps its place beside it.
+	expect(button('Approve')?.disabled).toBe(true);
 	expect(button('Reject')?.disabled).toBe(false);
 	const missing = host.querySelector('.launch-missing')!;
 	expect(missing.textContent).toBe('Command missing');
 	expect(missing.closest('code')).toBeNull();
-	expect(host.querySelector('.approval-blocked')).not.toBeNull();
+	expect(host.querySelector('.blocked-line')?.textContent)
+		.toBe('This request is missing details CORSIA needs to check it, so you can’t approve it. Reject it and the agent can ask again.');
+	expect(button('Retry')).toBeUndefined();
 });
 
 it('names a missing working folder and prevents approval', () => {
@@ -124,7 +128,7 @@ it('names a missing working folder and prevents approval', () => {
 	expect(approvalReady(lease)).toBe(false);
 	show(lease);
 	expect(host.querySelector('.launch-missing')?.textContent).toBe('Working folder missing');
-	expect(button('Approve')).toBeUndefined();
+	expect(button('Approve')?.disabled).toBe(true);
 });
 
 it('rejects malformed directory, duplicate launch, extra repo field and excessive duration', () => {
@@ -146,10 +150,32 @@ it('rejects malformed directory, duplicate launch, extra repo field and excessiv
 	expect(duration(1_801)).toBe('Invalid duration');
 });
 
-it('preserves stale decision guards for an otherwise complete external request', () => {
+it('preserves the stale Approve guard for an otherwise complete external request', () => {
 	show(externalLease(), true);
 	expect(button('Approve')?.disabled).toBe(true);
-	expect(button('Reject')?.disabled).toBe(true);
-	expect(host.querySelector('.approval-blocked')!.textContent)
-		.toContain('Refresh authoritative state before deciding.');
+	expect(button('Reject')?.disabled).toBe(false);
+	const blocked = host.querySelector('.blocked-line')!;
+	expect(blocked.querySelector('span')!.textContent)
+		.toBe('Couldn’t check that this request is still current, so you can’t approve it.');
+	expect(blocked.querySelector('button')!.textContent?.trim()).toBe('Retry');
+	expect(blocked.querySelector('button')!.classList.contains('ghost')).toBe(true);
+	expect(host.textContent).not.toContain('Approval is blocked');
+	// Pinned in the footer, above the decision, so a disabled Approve always shows why.
+	expect(blocked.parentElement!.classList.contains('decision-actions')).toBe(true);
+	expect(blocked.nextElementSibling!.classList.contains('decision-buttons')).toBe(true);
+	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Couldn’t check');
+});
+
+it('names the state in the header and the asked duration in the body', () => {
+	show(externalLease());
+	expect(host.querySelector('.decision-head .status')!.textContent?.trim()).toBe('Needs approval');
+	const durationSection = host.querySelector('.risk-grid section')!;
+	expect(durationSection.querySelector('.label')!.textContent).toBe('For how long');
+	expect(durationSection.querySelector('p')!.textContent).toBe(duration(externalLease().requested_duration_seconds));
+	expect(host.querySelector('.decision-body .blocked-line')).toBeNull();
+	// Command and Working folder are section labels; only the exceptions heading is amber.
+	const labels = [...host.querySelectorAll('.policy-exceptions .launch-label')];
+	expect(labels.map((label) => label.textContent)).toEqual(['Command', 'Working folder']);
+	expect(labels.every((label) => label.classList.contains('label'))).toBe(true);
+	expect(host.querySelectorAll('.policy-exceptions .exceptions-label')).toHaveLength(1);
 });
