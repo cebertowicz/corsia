@@ -36,21 +36,15 @@ for (const width of [1440, 393]) {
     const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } });
     expect(response.ok()).toBeTruthy();
     const items = (await response.json()).items;
-    const before = process.env.ACTIVITY_BEFORE === '1';
-    expect(items.some((item: { key: string }) => item.key.startsWith('chat-reply:'))).toBe(before);
+    expect(items.some((item: { key: string }) => item.key.startsWith('chat-reply:'))).toBe(false);
     expect(items.some((item: { key: string }) => item.key.startsWith('doc-reply:'))).toBe(true);
     await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
     await openAppPastLanding(page);
     if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
     await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
     await expect(page.getByText('Document question', { exact: false }).first()).toBeVisible();
-    if (before) await expect(page.getByText('Chat question', { exact: false }).first()).toBeVisible();
-    else await expect(page.getByText('Chat question', { exact: false })).toHaveCount(0);
-    if (process.env.ACTIVITY_OUT) await page.screenshot({ path: path.join(process.env.ACTIVITY_OUT, `${before ? 'before' : 'after'}-${width}.png`), animations: 'disabled' });
-    const docRow = page.locator('[data-activity-row]').filter({ hasText: 'Document question' });
-    await docRow.click();
-    await page.waitForTimeout(1500);
-    if (process.env.ACTIVITY_OUT) await page.screenshot({ path: path.join(process.env.ACTIVITY_OUT, `${before ? 'before' : 'after'}-document-${width}.png`), animations: 'disabled' });
-    console.log('DOCUMENT_OPENED', width, await page.getByText('Document context', { exact: false }).count());
+    await expect(page.getByText('Chat question', { exact: false })).toHaveCount(0);
+    await page.locator('[data-activity-row]').filter({ hasText: 'Document question' }).click();
+    await expect(page.getByText('Document context', { exact: false }).first()).toBeVisible();
   });
 }
