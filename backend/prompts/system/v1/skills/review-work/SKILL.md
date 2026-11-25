@@ -21,7 +21,7 @@ Give a fresh reviewer:
 
 Do not give the author's reasoning, assumptions or view of the result.
 
-If a deadline means the result must go before a review can return, tell the person it is unreviewed when you ask their yes; with it, send it then. The review still runs: if it finds a problem, tell them at once. The Review and Hand over steps stay open until the review returns; the hand-over then records that the result went early and what the review found.
+If a deadline means the result must go before a review can return, tell the person it is unreviewed when you ask their yes; with it, send it then. The review still runs: if it finds a problem, tell them at once. The review step stays open until the review returns; the hand-over then records that the result went early and what the review found.
 
 ## Check
 

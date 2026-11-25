@@ -31,12 +31,4 @@ workflow:
       instruction: "## Review"
       quality:
         - {name: pass-then-corrected, good: "no correction from the person against this run within 7 days of a PASS", observed: signal, when: "lagging:7"}
-    - id: handover
-      title: Delivery
-      required: true
-      check: "result checked against Done when where the person will use it; the hand-over opens with the result, then open Assumed lines, open or rejected review findings, and decisions made for them; anything that went outside had the person's yes for that action, is recorded, and has proof it landed or is said to be not done"
-      after: [review]
-      difficulty: {default: routine}
-      instruction: "## Hand over"
-      quality:
         - {name: accepted-first-try, good: "the person used or approved the result without sending it back; no reply is not acceptance", observed: signal, when: completion}

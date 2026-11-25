@@ -89,7 +89,6 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
         "premortem": "Risks",
         "work": "Work",
         "review": "Fresh review",
-        "handover": "Delivery",
     }),
     ("review-work", {
         "brief": "Brief",
