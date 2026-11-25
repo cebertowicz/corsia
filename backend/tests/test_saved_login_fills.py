@@ -414,7 +414,7 @@ def test_each_fill_transition_counts_once_with_only_the_thread_and_minutes(world
         assert private not in payloads
 
 
-# --- The duration an agent asks for, and the person's "Until I revoke it" ------------------------
+# --- The duration an agent asks for, and the person's "Until I turn it off" ----------------------
 
 #: A plain fake value for saving a login again; never a real password.
 RESAVED = "resaved-fake-value"

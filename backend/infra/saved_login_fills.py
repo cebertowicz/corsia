@@ -94,7 +94,7 @@ class _Approval:
     deadline: float | None = None
     #: The duration the agent asked for, which the person's drawer starts on; never a standing grant.
     requested_duration_seconds: int | None = None
-    #: The person chose "Until I revoke it": an active grant with no deadline.
+    #: The person chose "Until I turn it off": an active grant with no deadline.
     standing: bool = False
 
     @property

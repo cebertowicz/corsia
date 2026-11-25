@@ -125,7 +125,7 @@ export interface HostAccessFill {
 	/** The time the agent's task needs, where the drawer's choice starts; never a standing grant. */
 	requested_duration_seconds: number | null;
 	duration_seconds: number | null;
-	/** The person chose "Until I revoke it": active with no deadline, so no countdown. */
+	/** The person chose "Until I turn it off": active with no deadline, so no countdown. */
 	standing: boolean;
 	expires_at: string | null;
 	created_at: string;

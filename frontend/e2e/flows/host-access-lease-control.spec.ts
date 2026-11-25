@@ -887,7 +887,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 	});
 
 	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
-		test(`starts on the agent's asked-for time, approves until revoked, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+		test(`starts on the agent's asked-for time, approves until turned off, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
 			await page.setViewportSize(viewport);
 			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
 			const threadId = await createSession(request, title);
@@ -921,9 +921,9 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.locator('.pending-request-trigger').click();
 			const dialog = page.getByRole('dialog');
 			const choices = dialog.getByRole('radio');
-			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I revoke it']);
+			await expect(choices).toHaveText(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
 			await expect(dialog.getByRole('radio', { name: '15 minutes' })).toHaveAttribute('aria-checked', 'true');
-			await expect(dialog.getByRole('radio', { name: 'Until I revoke it' })).toHaveAttribute('aria-checked', 'false');
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'false');
 			// Every choice fits in at most two lines, all four in view, and the picker never scrolls sideways.
 			const lineCounts = await choices.evaluateAll((buttons) => buttons.map((button) => {
 				const range = document.createRange();
@@ -936,9 +936,9 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			for (const choice of await choices.all()) await expect(choice).toBeInViewport({ ratio: 1 });
 			await page.screenshot({ path: testInfo.outputPath(`requested-15-${viewport.width}.png`), animations: 'disabled' });
 
-			await dialog.getByRole('radio', { name: 'Until I revoke it' }).click();
-			await expect(dialog.getByRole('radio', { name: 'Until I revoke it' })).toHaveAttribute('aria-checked', 'true');
-			await page.screenshot({ path: testInfo.outputPath(`until-revoked-${viewport.width}.png`), animations: 'disabled' });
+			await dialog.getByRole('radio', { name: 'Until I turn it off' }).click();
+			await expect(dialog.getByRole('radio', { name: 'Until I turn it off' })).toHaveAttribute('aria-checked', 'true');
+			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
 			await dialog.getByRole('button', { name: 'Approve' }).click();
 			await expect.poll(() => decisions.length).toBe(1);
 			expect(decisions[0]).toEqual({
@@ -951,7 +951,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`), animations: 'disabled' });
 			await chip.click();
 			const active = page.getByRole('dialog');
-			await expect(active).toContainText('Until I revoke it');
+			await expect(active).toContainText('Until I turn it off');
 			await expect(active).not.toContainText('Time remaining');
 			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`), animations: 'disabled' });
 			await active.getByRole('button', { name: 'Revoke approval' }).click();
