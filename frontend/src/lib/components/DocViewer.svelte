@@ -169,8 +169,8 @@
 		openImageOr: (id, otherwise) => { images.openOr([id], { id }, otherwise); pickedComments.set(new Set([id])); }, onLanded: () => onLanded?.(),
 	});
 	export function jumpToUnread(id: string, beforeText?: () => void) { replyNavigation.goTo(id, beforeText); }
-	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
-	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
+	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text, except a press inside the card already focused, which leaves the page where it is.
+	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => { if (placement || id !== focusedComment) focusInText(id, placement); else commentUI.selectMarkerThread(id); }); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
