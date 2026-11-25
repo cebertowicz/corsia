@@ -12,3 +12,11 @@ export function paneCoordinates(event: PointerEvent | WheelEvent, canvas: HTMLCa
 	const point = { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
 	return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
 }
+
+/** The size, pixel density and theme the pane asks the page to take, or null while the canvas has no size. */
+export function paneAppearance(canvas: HTMLCanvasElement, scheme: string) {
+	const bounds = canvas.getBoundingClientRect();
+	if (bounds.width < 1 || bounds.height < 1) return null;
+	const touch = window.matchMedia?.('(pointer: coarse)').matches === true;
+	return { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme, ...(touch ? { touch: true } : {}) };
+}

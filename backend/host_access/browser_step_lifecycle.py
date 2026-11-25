@@ -343,10 +343,8 @@ def _step_row_state(node_id: str | None) -> str | None:
 async def _settle_step(thread_id: str, step: BrowserStep) -> None:
     if step.node_id is None:
         return
-    await asyncio.to_thread(
-        _plan_write, "settle_user_step", step.node_id,
-        evidence=step.settlement_evidence, provenance=step.provenance,
-    )
+    await asyncio.to_thread(_plan_write, "settle_user_step", step.node_id,
+                            evidence=step.settlement_evidence, provenance=step.provenance)
     await _emit(f"{step.event_prefix}_settled", thread_id)
 
 
@@ -390,6 +388,11 @@ def password_page(thread_id: str) -> bool:
 
 def password_step(thread_id: str) -> PasswordStep | None:
     return step if isinstance(step := _steps.get(thread_id), PasswordStep) else None
+
+
+def held_pages(thread_id: str) -> bool:
+    """Whether this session has given the person a page (a step is open, or one was settled or declined)."""
+    return thread_id in _steps or bool(_answers.get(thread_id))
 
 
 def finished_visit(thread_id: str, visit: str) -> bool:
