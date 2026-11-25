@@ -166,6 +166,62 @@ def test_repeat_review_when_priorities_change_and_not_before(db, tmp_path, monke
     assert _top_empties_again(db, plan.id) == [plan.id]
 
 
+def test_project_priorities_written_after_review_count_as_changed(db, tmp_path, monkeypatch):
+    import os
+    from core.workspace_layout import resolve_project_root
+    from infra import config
+    from infra.platform_paths import WorkspaceSelection
+
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(config, "WORKSPACE", str(workspace))
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="test-workspace", root=workspace.resolve(), name="Test workspace",
+    ))
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Proj','t','t')")
+    db.execute("UPDATE threads SET project_id='proj' WHERE id='owner'")
+    db.commit()
+    (workspace / "projects" / "proj").mkdir(parents=True)
+    assert db.execute("SELECT project_id FROM threads WHERE id='owner'").fetchone()["project_id"] == "proj"
+    root = resolve_project_root(workspace, "proj", db=db)
+    assert root is not None and root != workspace.resolve()
+    priorities = root / "context" / "PRIORITIES.md"
+    priorities.parent.mkdir(parents=True)
+    priorities.write_text("1. Ship the release\n")
+    reviewed = service._now()
+    at = datetime.fromisoformat(reviewed).timestamp()
+    os.utime(priorities, (at - 3600, at - 3600))
+    assert later_review._priorities_written_after(db, "owner", reviewed) is False
+    os.utime(priorities, (at + 60, at + 60))
+    assert later_review._priorities_written_after(db, "owner", reviewed) is True
+
+
+def test_unreadable_priorities_file_is_logged_not_dropped(db, tmp_path, monkeypatch, caplog):
+    import errno
+    from pathlib import Path
+
+    path = tmp_path / "PRIORITIES.md"
+    monkeypatch.setattr(
+        "registry.priorities_ownership.agent_priorities_files",
+        lambda thread_id, *, workspace, db: [path],
+    )
+    real_stat = Path.stat
+
+    def denied(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(errno.EACCES, "denied", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        assert later_review._priorities_written_after(db, "owner", service._now()) is False
+    assert any("PRIORITIES.md" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        monkeypatch.setattr(Path, "stat", real_stat)
+        assert later_review._priorities_written_after(db, "owner", service._now()) is False
+    assert caplog.records == []
+
+
 def test_weekly_review_is_sent_on_an_unchanged_pile(db):
     plan = owner_plan(db)
     _below_cut(db, plan.id, "Someday")

@@ -12,7 +12,7 @@ from pathlib import Path
 THREADS_DIR = ".threads"
 
 # The errors ``Path.exists`` and ``Path.is_symlink`` read as "nothing there".
-_ABSENT_ERRNOS = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+ABSENT_ERRNOS = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
 
 
 def resolve_workspace_root(workspace: str | Path) -> Path:
@@ -71,7 +71,7 @@ class ThreadRootResolver:
         try:
             mode = os.lstat(destination).st_mode
         except OSError as error:
-            if error.errno not in _ABSENT_ERRNOS:
+            if error.errno not in ABSENT_ERRNOS:
                 raise
             return destination
         if stat.S_ISLNK(mode):

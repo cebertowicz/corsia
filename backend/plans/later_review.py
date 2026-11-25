@@ -34,6 +34,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
+from core.workspace_layout import ABSENT_ERRNOS
 from infra import config, write_effects
 from infra.database import TransactionOwnershipError, write_transaction
 from infra.packed_rows import fetch_all
@@ -188,7 +189,12 @@ def _priorities_written_after(db, thread_id: str, instant: str) -> bool:
         try:
             if path.stat().st_mtime > parsed.timestamp():
                 return True
-        except OSError:
+        except OSError as error:
+            if error.errno not in ABSENT_ERRNOS:
+                logger.warning(
+                    "priorities file %s could not be read (%s); counted as unchanged, "
+                    "the weekly Later review stays armed", path, type(error).__name__,
+                )
             continue
     return False
 
