@@ -27,37 +27,20 @@ def _agent(source: dict) -> str:
     return 'An agent' if not source.get('thread_id') or label in (None, '', 'Untitled thread', UNKNOWN_THREAD_SOURCE['thread_label']) else label
 
 
-_TITLE_CACHE_MAX = 1024
-_title_cache: dict[tuple[str, int, int], str] = {}  # (path, mtime_ns, size) -> first heading
-
-
 def _first_heading(path: str) -> str:
     """The document's own title: the text of its first heading, '' when none is within the head.
 
     A bounded read only — the first heading sits near the top of every real document, and an
-    unreadable or heading-less file keeps its registry title. Live buffers are not consulted:
-    the title names the row, and the saved file is what the registry points at. Resolved
-    headings are cached per (path, stamp), so listing the queue pays the head read once per
-    file version: later polls pay a stat, and only documents whose content changed re-read.
+    unreadable or heading-less file keeps its registry title. Only regular files are opened:
+    a fifo would block the reader (the doc_text read route guards the same way). Live buffers
+    are not consulted: the title names the row, and the saved file is what the registry
+    points at.
     """
     try:
-        stamp = Path(path).stat()
-    except OSError:
-        return ''
-    key = (path, stamp.st_mtime_ns, stamp.st_size)
-    if (cached := _title_cache.get(key)) is not None:
-        return cached
-    heading = _read_first_heading(path)
-    if len(_title_cache) >= _TITLE_CACHE_MAX:  # bounded: re-resolving a title is one head read
-        _title_cache.clear()
-    _title_cache[key] = heading
-    return heading
-
-
-def _read_first_heading(path: str) -> str:
-    """Read the bounded head and return the first heading's text, '' when there is none."""
-    try:
-        with open(path, 'rb') as handle:
+        document = Path(path)
+        if not document.is_file():
+            return ''
+        with document.open('rb') as handle:
             head = handle.read(_TITLE_HEAD_BYTES)
     except OSError:
         return ''
@@ -71,13 +54,23 @@ def _read_first_heading(path: str) -> str:
 
 
 def _row_title(row) -> str:
-    """The row names the document: its registry title, or the document's own first heading
-    when the registry holds only the file's name (the approved naming rule)."""
+    """The registry's name for the document, as the row carries it until ``resolve_row_titles``
+    replaces a bare file name with the document's own heading (the approved naming rule)."""
     title = clip_title(_flat(row['artifact_title']))
     name = str(row['artifact_path'] or '').replace('\\', '/').rsplit('/', 1)[-1]
-    if title and title != name:
-        return title
-    return clip_title(_flat(_first_heading(str(row['artifact_path'] or '')))) or title or name or 'A document'
+    return title or name or 'A document'
+
+
+def resolve_row_titles(rows: list[dict]) -> None:
+    """Name each given row by its document's own heading when the registry holds only the
+    file's name (the approved naming rule). The queue calls this on the page it is returning,
+    so a poll pays at most one bounded head read per returned row; rows the cut drops were
+    never read. Internal: ``detail.heading_path`` marks a candidate row and is consumed here.
+    """
+    for row in rows:
+        path = row['detail'].pop('heading_path', '')
+        if path and (heading := clip_title(_flat(_first_heading(path)))):
+            row['title'] = heading
 
 
 def _document_row(artifact: str, rows: list, sources: dict) -> dict:
@@ -90,14 +83,19 @@ def _document_row(artifact: str, rows: list, sources: dict) -> dict:
         label = _agent(sources[row['author_thread_id']])
         if label not in agents:
             agents.append(label)
+    registered = clip_title(_flat(latest['artifact_title']))
+    name = str(latest['artifact_path'] or '').replace('\\', '/').rsplit('/', 1)[-1]
+    detail = {'artifact_id': artifact, 'unread': len(rows), 'latest_reply_id': latest['latest_unread_id'],
+              'agents': agents, 'threads': [{'root_id': root, 'reply_id': reply} for root, reply in threads.items()]}
+    if registered in ('', name) and (path := str(latest['artifact_path'] or '')):
+        detail['heading_path'] = path  # resolve_row_titles consumes it on the returned page
     return {
         'renderer': 'document', 'kind': 'document', 'key': f'doc:{artifact}',
         'external_id': f'doc:{artifact}',
         'title': _row_title(latest),
         'raised_at': latest['created_at'], 'source': sources[latest['author_thread_id']],
         'open': {'artifact_id': artifact, 'comment_id': latest['root_id']},
-        'detail': {'artifact_id': artifact, 'unread': len(rows), 'latest_reply_id': latest['latest_unread_id'],
-                   'agents': agents, 'threads': [{'root_id': root, 'reply_id': reply} for root, reply in threads.items()]},
+        'detail': detail,
         'priority': 0,
     }
 

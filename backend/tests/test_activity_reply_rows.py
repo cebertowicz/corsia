@@ -1,8 +1,9 @@
 import json
+import os
 import sqlite3
 
 from infra.schema import SCHEMA_SQL
-from doceditor.activity_reply_rows import document_rows
+from doceditor.activity_reply_rows import document_rows, resolve_row_titles
 
 
 def test_document_unread_and_ownership():
@@ -144,7 +145,9 @@ def test_file_named_row_uses_the_documents_first_heading(tmp_path):
     db = _doc_db()
     _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
               body='# Onboarding: who owns which file\n\nWho owns what.\n')
-    [row] = document_rows(db, 'u1')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)  # what the queue does to the page it returns
+    [row] = rows
     assert row['title'] == 'Onboarding: who owns which file'
 
 
@@ -152,7 +155,9 @@ def test_a_registry_title_that_is_not_the_file_name_beats_the_heading(tmp_path):
     db = _doc_db()
     _file_doc(db, tmp_path, title='Onboarding guide', file_name='onboarding-notes.md',
               body='# Written title\n\nText.\n')
-    [row] = document_rows(db, 'u1')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
     assert row['title'] == 'Onboarding guide'
 
 
@@ -160,28 +165,33 @@ def test_the_file_name_is_kept_when_the_document_has_no_title(tmp_path):
     db = _doc_db()
     _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
               body='Just text, no heading.\n')
-    [row] = document_rows(db, 'u1')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
     assert row['title'] == 'Onboarding notes.md'
     # A file that went away keeps its registry name too; nothing is invented.
     db.execute("UPDATE artifact_identities SET title='Gone.md', path=? WHERE id='d1'", (str(tmp_path / 'Gone.md'),))
-    [row] = document_rows(db, 'u1')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
     assert row['title'] == 'Gone.md'
 
 
-def test_the_heading_is_read_once_per_file_version(tmp_path, monkeypatch):
-    """Listing the queue pays the head read once per document version, not once per poll."""
-    from doceditor import activity_reply_rows
+def test_the_title_read_happens_only_for_the_returned_page(tmp_path):
+    """Building rows reads no file; only the page the queue resolves pays the head read."""
     db = _doc_db()
     _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
-              body='# First title\n\nText.\n')
-    reads = []
-    real = activity_reply_rows._read_first_heading
-    monkeypatch.setattr(activity_reply_rows, '_read_first_heading',
-                        lambda path: (reads.append(path), real(path))[1])
+              body='# Onboarding: who owns which file\n\nWho owns what.\n')
     [row] = document_rows(db, 'u1')
-    assert row['title'] == 'First title'
-    [row] = document_rows(db, 'u1')
-    assert row['title'] == 'First title' and len(reads) == 1
-    (tmp_path / 'Onboarding notes.md').write_text('# Retitled, newly edited\n\nText.\n')
-    [row] = document_rows(db, 'u1')
-    assert row['title'] == 'Retitled, newly edited' and len(reads) == 2
+    assert row['title'] == 'Onboarding notes.md'  # built, unread
+    assert row['detail']['heading_path']
+    resolve_row_titles([row])  # the page cut kept this row
+    assert row['title'] == 'Onboarding: who owns which file'
+    assert 'heading_path' not in row['detail']  # internal mark consumed, never sent on
+
+
+def test_a_fifo_never_blocks_the_title_read(tmp_path):
+    from doceditor.activity_reply_rows import _first_heading
+    fifo = tmp_path / 'pipe.md'
+    os.mkfifo(fifo)
+    assert _first_heading(str(fifo)) == ''
