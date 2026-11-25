@@ -92,11 +92,10 @@ def test_text_that_is_not_a_credential_is_left_alone(text):
     assert sanitize_credential_text(text) == text
 
 
-# A quoted header name now counts the way the unquoted form already did, literal example values
-# included; the header rule has no placeholder check (tracked in #3312).
+# A quoted header name counts the way the unquoted form does; a placeholder value counts in neither (#3312).
 @pytest.mark.parametrize(("text", "counts"), [
-    ('headers={"Authorization": "Bearer YOUR_API_KEY"}', True),  # gitleaks:allow
-    ("Authorization: Bearer YOUR_API_KEY", True),  # gitleaks:allow
+    ('headers={"Authorization": "Bearer YOUR_API_KEY"}', False),  # gitleaks:allow
+    ("Authorization: Bearer YOUR_API_KEY", False),  # gitleaks:allow
     ("headers={'Authorization': f'Bearer {api_key}'}", False),
     ("headers={'Authorization': 'Bearer ' + token}", False),
 ])
