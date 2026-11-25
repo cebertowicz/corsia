@@ -22,6 +22,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Browse a project's documents from its pane even when no chat is open.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
+- On a phone, the bar at the top of the screen is now evenly frosted over the chat as it scrolls beneath it; before, its lower part let the chat show through unblurred and ended in a hard line.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
 - Plan task details now show the reading of the goal the task works under and what done means.
