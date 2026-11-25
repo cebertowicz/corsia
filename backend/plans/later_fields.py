@@ -100,11 +100,12 @@ def item_root_id(connection, node_id: str) -> str:
 def item_tasks(connection, root_id: str, *, exclude: str | None = None) -> list:
     """The open tasks of the item under ``root_id``, leaving out the subtree at ``exclude``."""
     return connection.execute(
-        "WITH RECURSIVE down(id) AS ("
-        f" SELECT n.id FROM plan_nodes n WHERE n.id=? AND n.id IS NOT ? AND {node_states.in_work_sql('n')}"
-        " UNION ALL SELECT c.id FROM plan_nodes c JOIN down ON c.parent_id=down.id"
+        "WITH RECURSIVE down(id, plan_id) AS ("
+        f" SELECT n.id, n.plan_id FROM plan_nodes n WHERE n.id=? AND n.id IS NOT ? AND {node_states.in_work_sql('n')}"
+        " UNION ALL SELECT c.id, c.plan_id FROM down"
+        " CROSS JOIN plan_nodes c ON c.plan_id=down.plan_id AND c.parent_id=down.id"  # idx_plan_nodes_tree
         f" WHERE c.id IS NOT ? AND {node_states.in_work_sql('c')})"
-        " SELECT n.* FROM plan_nodes n JOIN down ON n.id=down.id"
+        " SELECT n.* FROM down CROSS JOIN plan_nodes n ON n.id=down.id"
         f" WHERE n.kind='task' AND {node_states.open_sql('n')}",
         (root_id, exclude, exclude),
     ).fetchall()
@@ -290,11 +291,19 @@ def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | Non
         for task_id in held:
             admission.release(task_id, "later", db=db)
     if not changed["later"]:
-        # A pull back stays where it was put; the lowest other unstarted item makes room.
+        # A pull back stays where it was put; the lowest other unstarted item makes room,
+        # and the answer names what moved, as an add's landing does.
         from plans import plan_cap
+        from prompts import plan_top as top_text
 
-        plan_cap.pulled_back(db, [node_id], actor_id=common["actor_id"])
-    if not changed["later"] or not held or any(attempts.open_attempt(db, task_id) for task_id in held):
+        moved = plan_cap.pulled_back(db, [node_id], actor_id=common["actor_id"])
+        result = admission.result(node_id, db=db)
+        if moved:
+            result["landing"] = top_text.top_made_room(
+                [str(service._node_row(db, root)["title"]) for root in moved], cap=plan_cap.CAP,
+            )
+        return result
+    if not held or any(attempts.open_attempt(db, task_id) for task_id in held):
         return admission.result(node_id, db=db)
     admission.reconcile_plan(
         slot.plan_id, actor_id=common["actor_id"], provenance=common["provenance"],

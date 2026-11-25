@@ -97,12 +97,27 @@ def test_a_pull_back_stays_and_the_lowest_other_makes_room(db):
     })["node"]["id"]
     assert _later(db, added)
 
-    plan_update(db, plan.id, "edit", {
+    result = plan_update(db, plan.id, "edit", {
         "node_id": added, "expected_revision": revision(db, added), "later": False,
     })
 
     assert not _later(db, added)
     assert _later(db, filled[-1])
+    # The agent is told what made room, in the same words an add's landing uses.
+    assert result["landing"] == f"To keep {CAP} items waiting to start, this moved to Later: 'Task {CAP - 1}'."
+
+
+def test_a_pull_back_with_room_moves_nothing_and_says_nothing(db):
+    plan = owner_plan(db)
+    pulled = task(db, plan.id, "Pulled").id
+    plan_update(db, plan.id, "edit", {"node_id": pulled, "expected_revision": revision(db, pulled), "later": True})
+
+    result = plan_update(db, plan.id, "edit", {
+        "node_id": pulled, "expected_revision": revision(db, pulled), "later": False,
+    })
+
+    assert not _later(db, pulled)
+    assert "landing" not in result
 
 
 def test_the_first_spill_runs_once_over_every_agent_plan(db):

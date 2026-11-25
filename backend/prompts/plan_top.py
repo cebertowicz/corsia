@@ -73,6 +73,11 @@ def top_landing(
     return line
 
 
+def top_made_room(titles: Sequence[str], *, cap: int) -> str:
+    """The line a pull back from Later gets when lower items moved to Later to make room."""
+    return _TOP_MOVED_LATER.format(cap=cap, titles="; ".join(f"'{title}'" for title in titles)).lstrip()
+
+
 def top_added_by(
     who: str, title: str, node: str, revision: int, place: int,
 ) -> str:
