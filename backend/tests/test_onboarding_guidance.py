@@ -730,6 +730,9 @@ def test_skipping_about_you_hands_over_profile_before_the_hand_off():
     assert "use step 5's handover procedure before the hand-off, without its approval messages" in handoff
     assert "`Agents only suggest changes to files that are yours, and you decide.`" in handoff
     assert "If the handover fails, report the problem and do not post that line." in handoff
+    # The line belongs to this late handover only, never after step 5's own.
+    assert "once that handover succeeds, post `Agents only suggest" in handoff
+    assert "When step 5's handover already ran, do none of this." in handoff
 
 
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
