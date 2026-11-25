@@ -27,7 +27,7 @@ def _bundle_with_recording_python(contents: Path) -> Path:
     infra = resources / "backend" / "infra"
     infra.mkdir(parents=True)
     (infra / "__init__.py").write_text("")
-    for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
+    for module in ("platform_paths.py", "service_file.py", "fs_durability.py", "log_files.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
     (contents / "Info.plist").write_text(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -95,7 +95,9 @@ def _launch(
         check=True,
         timeout=30,
     )
-    return (state / "logs" / "service.log").read_text()
+    from infra.log_files import logs_dir
+
+    return (logs_dir(state, home=home or _home(state)) / "service.log").read_text()
 
 
 def _service_file(state: Path, content: str | dict) -> None:
@@ -135,9 +137,30 @@ def test_launcher_moves_a_preview_flat_folder_into_state_before_starting(tmp_pat
     assert (app_dir / "state" / "corsia.db").read_text() == "preview database"
     assert not (app_dir / "corsia.db").exists()
     assert not (app_dir / "logs").exists()
-    # The moved log keeps its history and the new start appends to it.
-    assert log.startswith("preview log\n")
+    # The existing preview migration retains the old log; on macOS new output
+    # goes to the new log folder instead of appending to that historical file.
+    old_log = (app_dir / "state" / "logs" / "service.log").read_text()
+    if sys.platform == "darwin":
+        assert old_log == "preview log\n"
+        assert not log.startswith("preview log\n")
+    else:
+        assert old_log.startswith("preview log\n")
     assert (app_dir / "service.json").is_file()
+
+
+def test_launcher_replaces_service_log_symlink(tmp_path):
+    from infra.log_files import logs_dir
+
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    path = logs_dir(state, home=_home(state)) / "service.log"
+    path.parent.mkdir(parents=True)
+    target = tmp_path / "target"
+    target.write_text("untouched")
+    path.symlink_to(target)
+    _launch(launcher, state, "--port", "18788")
+    assert target.read_text() == "untouched"
+    assert path.is_file() and not path.is_symlink()
 
 
 def test_launcher_starts_without_arguments_on_loopback_and_uses_bundle_generation(tmp_path):

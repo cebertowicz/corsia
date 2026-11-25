@@ -10,7 +10,7 @@ watchfiles==1.2.0
 websockets==16.0
 python-multipart==0.0.32
 # Runtime image validation and provider-safe media projection.
-pillow==12.3.0
+pillow==13.0.0
 # HEIC/HEIF decoding: Apple devices hand the browser a HEIC from the
 # ordinary photo picker, and plain Pillow cannot open it. Optional at
 # runtime - CORSIA degrades to a named decline without it.

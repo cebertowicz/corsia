@@ -33,7 +33,7 @@ def test_agent_facing_wording():
 
 def rows():
     return [tuple(row) for row in get_db().execute(
-        "SELECT created_at, login_id, site, username, thread_id, result FROM saved_login_fill_audit"
+        "SELECT created_at, login_id, site, thread_id, result FROM saved_login_fill_audit"
     )]
 
 
@@ -48,7 +48,7 @@ def test_result_is_recorded_without_password_and_survives_deletion(login, caplog
         audit = rows()
         assert len(audit) == 1
         assert audit[0][0]
-        assert audit[0][1:] == (login, "https://example.com", "alice", "agent", "filled" if succeeded else "rejected")
+        assert audit[0][1:] == (login, "https://example.com", "agent", "filled" if succeeded else "rejected")
         assert result == (saved_login_results.FILLED if succeeded else saved_login_results.REJECTED).format(
             site="https://example.com", username="alice"
         )
@@ -76,7 +76,7 @@ def test_unknown_fill_records_each_attempt_without_changing_login(login, caplog,
             assert saved_login_results.fill_unknown("agent", login) is None
         audit = rows()
         assert len(audit) == 2
-        assert all(row[0] and row[1:] == (login, "https://example.com", "alice", "agent", "unknown") for row in audit)
+        assert all(row[0] and row[1:] == (login, "https://example.com", "agent", "unknown") for row in audit)
         assert saved_logins.get_login(login) == before
         assert "sentinel-unique-for-test" not in repr((audit, logs, caplog.text))  # gitleaks:allow
     finally:

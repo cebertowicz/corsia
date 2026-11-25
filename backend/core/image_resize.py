@@ -364,6 +364,8 @@ def _encode_image(
             img.save(buf, format="JPEG", quality=quality)
             return buf.getvalue(), "image/jpeg"
 
+        if img.mode == "I":
+            img = img.convert("I;16")
         save_kwargs: dict = {}
         if img.mode == "RGBA":
             save_kwargs["optimize"] = True

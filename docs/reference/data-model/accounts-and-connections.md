@@ -267,7 +267,6 @@ Source: `backend/infra/key_store_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `login_id` | TEXT | No | Yes | — | — |
 | `site` | TEXT | No | Yes | — | — |
-| `username` | TEXT | No | Yes | — | — |
 | `thread_id` | TEXT | No | Yes | — | — |
 | `result` | TEXT | No | Yes | — | — |
 

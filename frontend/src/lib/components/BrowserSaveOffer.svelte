@@ -13,6 +13,21 @@
 	 * The offer to save a login the person just made in this pane, laid over the bottom edge of the page, never resizing it.
 	 * It asks the server only after the person typed or pasted into a password page, never polls,
 	 * and never shows or asks for a password.
+	 *
+	 * States: Closed (no offer); Asking (Save and Not now); Saving (Save loading); Failed (Asking plus the error line, Save
+	 * retries); Refused (the server's sentence in the question's place, Close only); Saved (the confirmation line); Fading.
+	 * Every open state is hidden, unchanged, while a password page shows, so the dock never covers that page's notice; focus
+	 * in it moves to the page first. Each event, from each state:
+	 * - A sign-in answered with an offer (a password page closes after the person typed): from any state it shows Asking with
+	 *   that offer, clearing any error, refusal, confirmation and timer. The one exception is Saving with the same login,
+	 *   which stays Saving, since the answer on its way describes that login.
+	 * - A sign-in answered empty: no change. If the dock is closed, the next navigation asks once more.
+	 * - A save answer: Saving becomes Saved, Refused (a 404 or 409 sentence) or Failed. An answer for an offer that was
+	 *   replaced, or from before a reset, changes nothing.
+	 * - Not now or Close: any open state becomes Closed, and the server forgets the offer.
+	 * - A navigation to another site: any open state becomes Closed. On the same site: no change.
+	 * - The confirmation hold ends: Saved becomes Fading, then Closed.
+	 * - A reset (another thread, a reconnect, the pane closing): any state becomes Closed.
 	 */
 	let { threadId, passwordPage, onrestorefocus }: {
 		threadId: string;
@@ -89,8 +104,8 @@
 		askAgain = next === null && !retry;
 		if (!next) return;
 		// Each sign-in replaces the offer the server holds and Save stores the held one, so the dock always shows the newest:
-		// the person saves only the login they were shown.
-		if (offer && phase === 'asking' && !saving && sameOffer(offer, next)) return;
+		// the person saves only the login they were shown. A save of this same login already on its way keeps its answer.
+		if (offer && saving && sameOffer(offer, next)) return;
 		timers.forEach(clearTimeout);
 		timers = [];
 		shown++;

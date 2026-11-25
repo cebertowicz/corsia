@@ -21,9 +21,9 @@ def _record(thread_id: str, login_id: str, result: Literal["filled", "rejected",
         elif result == "rejected":
             saved_logins.mark_out_of_date(login_id, db=conn)
         conn.execute(
-            "INSERT INTO saved_login_fill_audit (created_at, login_id, site, username, thread_id, result) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (utc_now_iso(), login.id, login.site, login.username, thread_id, result),
+            "INSERT INTO saved_login_fill_audit (created_at, login_id, site, thread_id, result) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (utc_now_iso(), login.id, login.site, thread_id, result),
         )
     return login
 

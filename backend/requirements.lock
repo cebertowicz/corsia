@@ -80,7 +80,7 @@ opentelemetry-sdk==1.42.1
 opentelemetry-semantic-conventions==0.63b1
 packaging==26.2
 pathlib_abc==0.5.2
-pillow==12.3.0
+pillow==13.0.0
 pillow-heif==1.7.0
 platformdirs==4.10.0
 pluggy==1.6.0

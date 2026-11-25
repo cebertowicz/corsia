@@ -645,6 +645,72 @@ describe('save-login offer: Save, Not now and closing', () => {
 		expect(button('Save').disabled).toBe(false);
 	});
 
+	it.each([['a refused save', 409, { detail: 'Saving isn’t available for this sign-in. Unless the login is already saved, it’s offered again the next time you sign in.' }], ['a failed save', 500, {}]])('offers Save again when the person signs in with the same account after %s', async (_name, status, body) => {
+		saveStatus = status;
+		saveBody = body;
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		// Before: a refusal left only Close; a failure left the error line.
+		if (status === 409) expect(button('Save')).toBeUndefined(); else expect(dock()!.querySelector('.error')).not.toBeNull();
+		await signIn(socket, canvas);
+		expect(dock()!.textContent).toContain('sam@example.com');
+		expect(button('Save')).toBeTruthy();
+		expect(button('Save').disabled).toBe(false);
+		expect(button('Not now')).toBeTruthy();
+		expect(dock()!.querySelector('.error')).toBeNull();
+		expect(dock()!.querySelector('.question')!.textContent).not.toBe((body as { detail?: string }).detail);
+	});
+
+	it('keeps a save of the same login on its way when that login is offered again, and shows its answer', async () => {
+		let release: (value: unknown) => void = () => {};
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.endsWith('/save') ? new Promise((resolve) => { release = resolve; }) : base(input, init)));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		await signIn(socket, canvas);
+		expect(button('Save').disabled).toBe(true);
+		release({ ok: true, status: 200, json: async () => ({ saved: true }) });
+		await settle();
+		expect(dock()!.textContent).toContain('Saved');
+	});
+
+	it('asks about a new sign-in made while Saved shows, and the old confirmation no longer closes it', async () => {
+		vi.useFakeTimers();
+		offers = [OFFER, { ...OFFER, username: 'alex@example.com' }];
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		expect(dock()!.textContent).toContain('Saved');
+		await signIn(socket, canvas);
+		expect(dock()!.textContent).toContain('alex@example.com');
+		expect(button('Save')).toBeTruthy();
+		await vi.advanceTimersByTimeAsync(CONFIRMATION_HOLD_MS + 1000);
+		flushSync();
+		expect(dock()).not.toBeNull();
+		expect(dock()!.classList.contains('fading')).toBe(false);
+	});
+
+	it('ignores a save answer that lands after the pane disconnected', async () => {
+		let release: (value: unknown) => void = () => {};
+		const base = fetch as unknown as (input: string, init?: RequestInit) => Promise<unknown>;
+		vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.endsWith('/save') ? new Promise((resolve) => { release = resolve; }) : base(input, init)));
+		const { socket, canvas } = render();
+		await signIn(socket, canvas);
+		button('Save').click();
+		await settle();
+		socket.close();
+		await settle();
+		release({ ok: true, status: 200, json: async () => ({ saved: true }) });
+		await settle();
+		expect(dock()).toBeNull();
+		expect(liveText()).not.toContain('Saved');
+	});
+
 	it('steps aside while a password page shows, so the page notice stays visible, and comes back if no sign-in follows', async () => {
 		const { socket, canvas } = render();
 		await signIn(socket, canvas);

@@ -60,6 +60,7 @@ function isNode(v: unknown): boolean {
 	if (!isStrArray(v.waiting_on)) return false;
 	if (v.assignee !== undefined && !isStrOrNull(v.assignee)) return false;
 	if (v.workflow_step !== undefined && !isStrOrNull(v.workflow_step)) return false;
+	if (v.workflow_run !== undefined && typeof v.workflow_run !== 'boolean') return false;
 	if (typeof v.folded !== 'boolean' || typeof v.container !== 'boolean' || !isStr(v.last_transition_at)) return false;
 	if (!isObject(v.executor) || !isStr(v.executor.label) || !isExecution(v.execution) || !isDisplay(v.display)) return false;
 	if (v.status_reason !== undefined && !isStrOrNull(v.status_reason)) return false;
