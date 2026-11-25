@@ -21,23 +21,22 @@
 	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
 	import { decisionBlocked, owner, pendingLabel, staleBlocks, text } from '$lib/hostAccess/leaseFormat';
 	import {
-		focusRestoreIntentForDecision,
+		decisionTargets, focusRestoreIntentForDecision, refocusAfterFailedDecision,
 		restoreComposerFocusAfterLeaseRemoval,
 		type FocusRestoreIntent,
 	} from '$lib/hostAccess/focusRestore';
 	import {
 		decideHostAccessLease,
 		fetchHostAccessLeases,
-		HostAccessApiError,
 		type HostAccessLease, type HostAccessItem, type HostAccessTimed,
 		type HostAccessLeaseDecision,
 	} from '$lib/api/hostAccess';
+	import { decisionFailure } from '$lib/hostAccess/decisionFailure';
 	import { token } from '$lib/stores/auth';
 	import { on } from '$lib/ws/events';
 
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
 	const STALE = 'Couldn’t check host access.';
-	const DECISION_UNCONFIRMED = 'Couldn’t confirm whether your choice went through. Retry to check.';
 	const REVIEWER_UNAVAILABLE_MESSAGE = 'Host access couldn’t start because its reviewer model can’t run. Choose another reviewer model in Settings › System, then ask the agent to request access again.';
 	const ACTIVATION_FAILED_MESSAGE = 'Host access couldn’t start. Ask the agent to request access again.';
 
@@ -58,7 +57,8 @@
 
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
-	let error = $state('');
+	/** The one line for a failed decision, kept on that request's drawer after the re-read while it is listed. */
+	let decisionNotice = $state<{ leaseId: string; message: string } | null>(null);
 	let activationFailure = $state('');
 	let failureIds = new Set<string>();
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
@@ -108,19 +108,13 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || STALE : activationFailure || null,
+		stale ? STALE : activationFailure || null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);
 	const decidingLeaseId = $derived(
 		leases.find((lease) => inFlightDecisionIds.has(lease.id))?.id ?? null,
 	);
-
-	function enclosingLeaseControl(event: MouseEvent): Element | null {
-		return event.currentTarget instanceof Element
-			? event.currentTarget.closest('[data-adaptive-drawer], .active-chip') // the drawer is portaled out of the chip
-			: null;
-	}
 
 	function openActiveDrawer(lease: HostAccessTimed, event: MouseEvent): void {
 		openActiveTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
@@ -129,12 +123,14 @@
 
 	function closeActiveDrawer(): void {
 		openActiveLeaseId = null;
+		decisionNotice = null;
 		openActiveTrigger?.focus();
 		openActiveTrigger = null;
 	}
 
 	function closePendingDrawer(): void {
 		pendingOpen = false;
+		decisionNotice = null;
 		pendingTriggerEl?.focus();
 	}
 
@@ -157,25 +153,14 @@
 	}
 
 	async function refresh(requestedThreadId = threadId): Promise<void> {
-		if (!text(requestedThreadId)) {
+		// No chat, or signed out: nothing to show.
+		if (!text(requestedThreadId) || !get(token)) {
 			generation += 1;
 			activeRequest?.abort();
 			activeRequest = null;
 			focusRestoreIntent = null;
 			leases = [];
 			stale = false;
-			error = '';
-			return;
-		}
-		const currentToken = get(token);
-		if (!currentToken) {
-			generation += 1;
-			activeRequest?.abort();
-			activeRequest = null;
-			focusRestoreIntent = null;
-			leases = [];
-			stale = false;
-			error = '';
 			return;
 		}
 		const requestGeneration = ++generation;
@@ -194,17 +179,15 @@
 			const nextLeases = Array.isArray(response.leases) ? response.leases : [];
 			await reconcileAuthoritativeLeases(nextLeases, requestedThreadId);
 			stale = false;
-			error = '';
 		} catch (caught) {
 			if (requestGeneration !== generation || threadId !== requestedThreadId) return;
 			if (caught instanceof DOMException && caught.name === 'AbortError') return;
 			if (leases.length === 0) {
 				stale = false;
-				error = '';
 				return;
 			}
 			console.warn('Could not refresh host access', caught); // the raw error goes to the log, never the screen
-			stale = true; error = STALE;
+			stale = true;
 		} finally {
 			if (requestGeneration === generation && threadId === requestedThreadId) {
 				if (activeRequest === controller) activeRequest = null;
@@ -215,19 +198,18 @@
 	async function decide(
 		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
-		decisionControl: Element | null = null, durationSeconds?: number,
+		event: MouseEvent | null = null, durationSeconds?: number,
 	): Promise<void> {
 		const currentToken = get(token);
 		if (!currentToken || decisionBlocked(lease, staleBlocks(stale, decision), decidingLeaseId)) return;
 		const decisionThreadId = lease.root_thread_id;
 		const decisionAttempt = claimDecision(lease.id);
 		if (!decisionAttempt) return;
-		focusRestoreIntent = focusRestoreIntentForDecision(
-			decision, lease.id, decisionThreadId, decisionControl,
-		);
-		error = '';
+		const { pressed, panel, control } = decisionTargets(event, decision);
+		focusRestoreIntent = focusRestoreIntentForDecision(decision, lease.id, decisionThreadId, control);
+		decisionNotice = null;
 		activationFailure = '';
-		let refreshTruth = true;
+		let refreshTruth = true, failed = false;
 		try {
 			const result = await decideHostAccessLease(lease, decision, durationSeconds);
 			if (decision === 'approve' && result.state === 'blocked'
@@ -238,27 +220,22 @@
 			}
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
-			if (!(caught instanceof HostAccessApiError)) console.warn('Could not send host-access decision', caught);
-			error = caught instanceof HostAccessApiError ? caught.message : DECISION_UNCONFIRMED;
-			if (
-				caught instanceof HostAccessApiError
-				&& (caught.status === 404 || caught.status === 409)
-			) {
-				// The mutation lost its CAS race; replace local state from HTTP.
-			} else {
-				stale = true;
-				refreshTruth = false;
-				if (focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;
+			failed = true;
+			// One line in the drawer; the server's words never reach the status strip.
+			const failure = decisionFailure(caught, decision, lease.kind);
+			if (failure.notice) decisionNotice = { leaseId: lease.id, message: failure.notice };
+			refreshTruth = failure.refresh;
+			if (failure.gone) {
+				focusRestoreIntent = focusRestoreIntentForDecision(decision, lease.id, decisionThreadId, control, true);
 			}
+			if (!refreshTruth && focusRestoreIntent?.leaseId === lease.id) focusRestoreIntent = null;
 		} finally {
-			if (
-				refreshTruth
-				&& isCurrentDecision(lease.id, decisionAttempt)
-				&& threadId === decisionThreadId
-			) {
+			if (refreshTruth && isCurrentDecision(lease.id, decisionAttempt) && threadId === decisionThreadId) {
 				await refresh(decisionThreadId);
 			}
 			releaseDecision(lease.id, decisionAttempt);
+			// Still listed, so its drawer stays open: give focus back to what the person pressed.
+			if (failed && leases.some((item) => item.id === lease.id)) void refocusAfterFailedDecision(pressed, panel);
 		}
 	}
 
@@ -267,7 +244,7 @@
 		activationFailure = '';
 		leases = [];
 		stale = false;
-		error = '';
+		decisionNotice = null;
 		focusRestoreIntent = null;
 		openActiveLeaseId = null;
 		pendingOpen = false;
@@ -364,11 +341,10 @@
 								open={openActiveLeaseId === lease.id}
 								deciding={decidingLeaseId === lease.id}
 								disabled={decisionBlocked(lease, stale, decidingLeaseId)}
+								notice={decisionNotice?.leaseId === lease.id ? decisionNotice.message : null}
 								onOpen={(event) => { openActiveDrawer(lease, event); }}
 								onClose={closeActiveDrawer}
-								onRevoke={(event) => {
-									void decide(lease, 'revoke', enclosingLeaseControl(event));
-								}}
+								onRevoke={(event) => { void decide(lease, 'revoke', event); }}
 							/>
 						{/each}
 					</div>
@@ -386,7 +362,7 @@
 			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel={pendingLabel(currentPending)} flushBottom
+					ariaLabel={pendingLabel(currentPending)} flushBottom opaque headless
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>
@@ -396,11 +372,11 @@
 						deciding={decidingLeaseId === currentPending.id}
 						rejectDisabled={decisionBlocked(currentPending, staleBlocks(stale, 'reject'), decidingLeaseId)}
 						approveDisabled={stale || decidingLeaseId !== null}
-						onApprove={(_event, durationSeconds) => { void decide(currentPending, 'approve', null, durationSeconds); }}
-						onReject={(event) => { void decide(
-							currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,
-						); }}
+						notice={decisionNotice?.leaseId === currentPending.id ? decisionNotice.message : null}
+						onApprove={(event, durationSeconds) => { void decide(currentPending, 'approve', event, durationSeconds); }}
+						onReject={(event) => { void decide(currentPending, 'reject', event); }}
 						onRetry={() => { void refresh(); }}
+						onClose={closePendingDrawer}
 					/>
 				</AdaptiveDrawer>
 			{/key}
@@ -410,12 +386,7 @@
 
 <style>
 	.thread-host-access {
-		--host-access-available-height: calc(
-			100dvh
-			- var(--header-bottom)
-			- var(--input-bar-height, 100px)
-			- 24px
-		);
+		--host-access-available-height: calc(100dvh - var(--header-bottom) - var(--input-bar-height, 100px) - 24px);
 		position: absolute;
 		z-index: 11;
 		left: 0;
@@ -484,6 +455,7 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
+			--host-access-owner-wrap: normal;
 			--host-access-eyebrow-display: none;
 		}
 	}
