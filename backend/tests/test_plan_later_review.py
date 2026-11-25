@@ -124,17 +124,23 @@ def test_review_is_armed_only_after_commit_and_not_after_rollback(db):
     assert _review_at(db, plan.id) <= service._now()
 
 
-def test_unscoped_settlement_keeps_weekly_review(db):
+def test_unscoped_settlement_keeps_weekly_review(db, caplog):
     plan = owner_plan(db)
     top = task(db, plan.id, "Current work")
     _below_cut(db, plan.id, "Someday")
     db.commit()
     before = _review_at(db, plan.id)
     db.execute("UPDATE plans SET later_review_at=later_review_at WHERE id=?", (plan.id,))
-    _fail_task(db, top.id)
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        _fail_task(db, top.id)
     db.commit()
     assert row(db, top.id)["state"] == "failed"
     assert _review_at(db, plan.id) == before
+    assert any(
+        record.levelname == "WARNING" and plan.id in record.getMessage()
+        and "early Later review not scheduled" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_settlement_with_no_later_does_not_arm(db):

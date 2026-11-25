@@ -23,6 +23,7 @@ surfaces.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from infra import write_effects
@@ -37,6 +38,8 @@ from plans.node_waits import encoded_ids
 from prompts import later_pull
 from prompts import later_review as text
 from prompts.plan_tools import bounded_text
+
+logger = logging.getLogger(__name__)
 
 #: One week between reviews of the same pile. A plan's review weekday is set by
 #: its first task below the cut, so plans spread across the week on their own.
@@ -100,8 +103,10 @@ def schedule_if_top_empties(connection, node) -> None:
             lambda ids: _arm_empty_tops(connection, ids),
         )
     except TransactionOwnershipError:
-        # An unowned transaction cannot schedule the effect; the weekly review remains the backstop.
-        return
+        logger.warning(
+            "early Later review not scheduled for plan %s: the settlement's transaction "
+            "is not owned here; the weekly review stays armed", plan_id,
+        )
 
 
 def _arm_empty_tops(connection, plan_ids: list[str]) -> None:
