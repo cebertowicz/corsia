@@ -263,7 +263,7 @@ it('starts on the duration the agent asked for, and never on Until I revoke it',
 	expect(checked(host)).toBe('15 minutes');
 	// The one focusable choice (roving tabindex) is the agent's asked-for time, so Enter there keeps it.
 	expect(radios(host).filter((radio) => radio.tabIndex === 0).map((radio) => radio.textContent?.trim())).toEqual(['15 minutes']);
-	const standing = host.querySelector<HTMLButtonElement>('[data-seconds="until_turned_off"]')!;
+	const standing = host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!;
 	expect(standing.getAttribute('aria-checked')).toBe('false');
 	expect(standing.tabIndex).toBe(-1);
 	approve(host);
@@ -294,13 +294,13 @@ it('adds the asked-for time when it is not one of the usual choices, within the 
 	}
 });
 
-it('approves until turned off only when the person picks it', async () => {
+it('approves until revoked only when the person picks it', async () => {
 	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
-	host.querySelector<HTMLButtonElement>('[data-seconds="until_turned_off"]')!.click();
+	host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!.click();
 	flushSync();
 	expect(checked(host)).toBe('Until I revoke it');
 	approve(host);
-	expect(onApprove.mock.calls[0][1]).toBe('until_turned_off');
+	expect(onApprove.mock.calls[0][1]).toBe('until_revoked');
 	await unmount(component);
 });
 
@@ -352,13 +352,13 @@ it('shows a standing grant without a countdown and revokes it as any other', asy
 	await unmount(drawer);
 });
 
-it('posts until turned off, and no duration, when the person picks it', async () => {
+it('posts until revoked, and no duration, when the person picks it', async () => {
 	const { apiFetch } = await import('$lib/api/request');
 	const fetch = vi.mocked(apiFetch);
 	fetch.mockReset();
 	fetch.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
-	await decideHostAccessLease(fill(), 'approve', 'until_turned_off');
+	await decideHostAccessLease(fill(), 'approve', 'until_revoked');
 	expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
-		revision: 1, application_hash: 'a'.repeat(64), until_turned_off: true,
+		revision: 1, application_hash: 'a'.repeat(64), until_revoked: true,
 	});
 });

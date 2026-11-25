@@ -887,7 +887,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 	});
 
 	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
-		test(`starts on the agent's asked-for time, approves until turned off, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+		test(`starts on the agent's asked-for time, approves until revoked, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
 			await page.setViewportSize(viewport);
 			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
 			const threadId = await createSession(request, title);
@@ -938,11 +938,11 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 			await dialog.getByRole('radio', { name: 'Until I revoke it' }).click();
 			await expect(dialog.getByRole('radio', { name: 'Until I revoke it' })).toHaveAttribute('aria-checked', 'true');
-			await page.screenshot({ path: testInfo.outputPath(`until-turned-off-${viewport.width}.png`), animations: 'disabled' });
+			await page.screenshot({ path: testInfo.outputPath(`until-revoked-${viewport.width}.png`), animations: 'disabled' });
 			await dialog.getByRole('button', { name: 'Approve' }).click();
 			await expect.poll(() => decisions.length).toBe(1);
 			expect(decisions[0]).toEqual({
-				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_turned_off: true },
+				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_revoked: true },
 			});
 
 			const chip = page.locator('.active-chip-trigger');

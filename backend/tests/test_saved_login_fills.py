@@ -423,7 +423,7 @@ RESAVED = "resaved-fake-value"
 def _approve_standing(row, user_id=PERSON):
     return fills.approve_fill(
         row["id"], user_id=user_id, revision=row["revision"], application_hash=row["application_hash"],
-        until_turned_off=True,
+        until_revoked=True,
     )
 
 
@@ -445,8 +445,8 @@ def test_an_agent_may_ask_for_the_time_its_task_needs_and_it_is_kept_on_the_requ
 
 
 @pytest.mark.parametrize("requested", [
-    1801, 3600, 0, -1, 60.0, 900.5, "900", True, False, "indefinite", "until_turned_off", "standing",
-    float("inf"), {"until_turned_off": True}, [900],
+    1801, 3600, 0, -1, 60.0, 900.5, "900", True, False, "indefinite", "until_revoked", "standing",
+    float("inf"), {"until_revoked": True}, [900],
 ])
 def test_an_agent_cannot_ask_for_a_standing_or_out_of_range_duration(world, requested):
     with pytest.raises(fills.FillDurationError):
@@ -456,7 +456,7 @@ def test_an_agent_cannot_ask_for_a_standing_or_out_of_range_duration(world, requ
     assert world["nudges"] == []
 
 
-def test_until_turned_off_stays_live_past_the_cap_until_revoked(world, monkeypatch):
+def test_until_revoked_stays_live_past_the_cap_until_revoked(world, monkeypatch):
     login = world["login"]
     row = fills.request_fill(AGENT_THREAD, login, requested_seconds=900)
     granted = _approve_standing(row)
@@ -478,7 +478,7 @@ def test_until_turned_off_stays_live_past_the_cap_until_revoked(world, monkeypat
     assert fills.listed(PERSON) == []
 
 
-def test_until_turned_off_ends_at_a_restart(world):
+def test_until_revoked_ends_at_a_restart(world):
     _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
     assert fills.may_fill(AGENT_THREAD, world["login"]) is True
     restarted = importlib.reload(fills)
@@ -486,16 +486,59 @@ def test_until_turned_off_ends_at_a_restart(world):
     assert restarted.listed(PERSON) == []
 
 
-def test_until_turned_off_ends_when_its_login_goes_out_of_date_and_a_resave_does_not_revive_it(world):
+def test_until_revoked_ends_when_its_login_goes_out_of_date_and_a_resave_does_not_revive_it(world):
     login = world["login"]
     _approve_standing(fills.request_fill(AGENT_THREAD, login))
     _approve_standing(fills.request_fill(AGENT_THREAD, world["other_login"]))
-    saved_logins.mark_out_of_date(login)
-    # No list shows it live once its login is out of date.
+    saved_logins.mark_out_of_date(login)  # by no path that ends its grants
+    # The check at use fails closed and ends it; no read sweeps for it.
+    assert fills.may_fill(AGENT_THREAD, login) is False
     assert [row["site"] for row in fills.listed(PERSON)] == ["https://example.org"]
     saved_logins.save_login(site="https://example.com", username="me@example.com", password=RESAVED, saved_by=PERSON)
     assert fills.may_fill(AGENT_THREAD, login) is False
     assert fills.may_fill(AGENT_THREAD, world["other_login"]) is True
+
+
+def test_reading_the_list_or_one_request_does_not_look_up_any_login(world, monkeypatch):
+    _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    _approve(fills.request_fill(AGENT_THREAD, world["other_login"]))
+    looked_up: list[object] = []
+    monkeypatch.setattr(saved_logins, "get_login", lambda *args, **kwargs: looked_up.append(args))
+    rows = fills.listed(PERSON)
+    fills.get(rows[0]["id"], user_id=PERSON)
+    assert len(rows) == 2 and looked_up == []
+
+
+def test_a_login_going_out_of_date_ends_its_waiting_requests_too(world, monkeypatch):
+    from infra import product_events, saved_login_results
+
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    login = world["login"]
+    _approve_standing(fills.request_fill(AGENT_THREAD, login))
+    waiting = fills.request_fill(OTHER_THREAD, login, requested_seconds=900)
+    kept = fills.request_fill(OTHER_THREAD, world["other_login"])
+    events.clear()
+    world["nudges"].clear()
+    saved_login_results.fill_failed(AGENT_THREAD, login)
+    assert [row["id"] for row in fills.listed(PERSON)] == [kept["id"]]
+    assert [args for args, _ in events] == [("saved_login", "fill_expired")] * 2
+    assert {kwargs["thread_id"] for _, kwargs in events} == {AGENT_THREAD, OTHER_THREAD}
+    assert len(world["nudges"]) == 2
+    # The person's approve gets the closed-request answer an ended request already gives, for either choice.
+    for choice in ({"duration_seconds": 900}, {"until_revoked": True}):
+        with pytest.raises(fills.FillApprovalNotFound, match="^This sign-in request is closed. Ask the agent to try "
+                           "again if it still needs to sign in.$"):
+            fills.approve_fill(waiting["id"], user_id=PERSON, revision=waiting["revision"],
+                               application_hash=waiting["application_hash"], **choice)
+    assert fills.may_fill(OTHER_THREAD, login) is False
+    # The waiting agent's next ask gets the out-of-date answer it already gets, with the person's step.
+    with pytest.raises(fills.FillApprovalError) as refused:
+        fills.request_fill(OTHER_THREAD, login)
+    assert str(refused.value) == (
+        "The saved login for https://example.com (me@example.com) is out of date. "
+        "The person has a step to sign in to https://example.com themselves."
+    )
 
 
 def test_a_rejected_fill_ends_the_grant_before_the_login_can_be_saved_again(world):
@@ -510,12 +553,12 @@ def test_a_rejected_fill_ends_the_grant_before_the_login_can_be_saved_again(worl
 
 
 @pytest.mark.parametrize("extra", [
-    {"duration_seconds": 600, "until_turned_off": True},
-    {"duration_seconds": None, "until_turned_off": False},
-    {"until_turned_off": 1},
-    {"until_turned_off": "yes"},
+    {"duration_seconds": 600, "until_revoked": True},
+    {"duration_seconds": None, "until_revoked": False},
+    {"until_revoked": 1},
+    {"until_revoked": "yes"},
 ])
-def test_approve_needs_exactly_one_of_a_duration_or_until_turned_off(world, extra):
+def test_approve_needs_exactly_one_of_a_duration_or_until_revoked(world, extra):
     row = fills.request_fill(AGENT_THREAD, world["login"])
     with pytest.raises(fills.FillDurationError):
         fills.approve_fill(row["id"], user_id=PERSON, revision=row["revision"],
@@ -535,7 +578,7 @@ def _routes_client():
 
 
 @pytest.mark.parametrize("kind", ["api", "service"])
-def test_an_agent_token_cannot_approve_until_turned_off(world, kind):
+def test_an_agent_token_cannot_approve_until_revoked(world, kind):
     from infra.accounts import issue_token
 
     session, _ = issue_token(PERSON, kind="session")
@@ -543,13 +586,13 @@ def test_an_agent_token_cannot_approve_until_turned_off(world, kind):
     fills.request_fill(AGENT_THREAD, world["login"], requested_seconds=900)
     with _client() as client:
         pending = _listed(client, session)
-        response = _post(client, machine, pending, "approve", pending["decision_capability"], until_turned_off=True)
+        response = _post(client, machine, pending, "approve", pending["decision_capability"], until_revoked=True)
         assert response.status_code == 403
         assert fills.may_fill(AGENT_THREAD, world["login"]) is False
         assert _listed(client, session)["state"] == "awaiting_user"
 
 
-def test_the_route_refuses_both_or_neither_and_approves_until_turned_off(world):
+def test_the_route_refuses_both_or_neither_and_approves_until_revoked(world):
     from infra.accounts import issue_token
 
     session, _ = issue_token(PERSON, kind="session")
@@ -558,12 +601,16 @@ def test_the_route_refuses_both_or_neither_and_approves_until_turned_off(world):
         pending = _listed(client, session)
         assert pending["requested_duration_seconds"] == 900 and pending["standing"] is False
         capability = pending["decision_capability"]
-        for body in ({"duration_seconds": 600, "until_turned_off": True}, {}, {"until_turned_off": False},
-                     {"until_turned_off": "true"}, {"until_turned_off": 1}, {"duration_seconds": None}):
+        for body in ({"duration_seconds": 600, "until_revoked": True}, {}, {"until_revoked": False},
+                     {"until_revoked": "true"}, {"until_revoked": 1}, {"duration_seconds": None}):
             response = _post(client, session, pending, "approve", capability, **body)
             assert 400 <= response.status_code < 500, body
+        for body in ({"duration_seconds": 600, "until_revoked": True}, {}):  # both, and neither
+            response = _post(client, session, pending, "approve", capability, **body)
+            assert response.status_code == 422, body
+            assert "Pick one: a duration or until revoked." in response.text, body
         assert fills.may_fill(AGENT_THREAD, world["login"]) is False
-        granted = _post(client, session, pending, "approve", capability, until_turned_off=True)
+        granted = _post(client, session, pending, "approve", capability, until_revoked=True)
         assert granted.status_code == 200
         assert granted.json()["standing"] is True and granted.json()["expires_at"] is None
         assert fills.may_fill(AGENT_THREAD, world["login"]) is True

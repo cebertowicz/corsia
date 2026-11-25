@@ -11,7 +11,7 @@ never decides a fill.
   needs, which the drawer starts on; an agent can never ask for a standing grant.
 - :func:`approve_fill`, :func:`deny_fill` and :func:`revoke_fill` are the
   person's, behind ``require_human_user``. Only :func:`approve_fill` makes a
-  standing grant (``until_turned_off``): no deadline; it ends on revoke, when
+  standing grant (``until_revoked``): no deadline; it ends on revoke, when
   the login is deleted or out of date (:func:`end_for_login`), or at a restart.
 - :func:`may_fill` is the fill executor's check: true only under a live grant
   for exactly that thread and login. A grant is not a host-access lease.
@@ -183,19 +183,11 @@ def _remove(predicate) -> list[_Approval]:
     return ended
 
 
-def _end_unusable_grants() -> None:
-    """End grants whose login is gone or out of date by any path, so a re-save can't revive them."""
-    with _lock:
-        login_ids = {item.login_id for item in _approvals.values() if item.state == ACTIVE}
-    unusable = {login_id for login_id in login_ids if not _login_usable(login_id)}
-    if unusable:
-        _emit_expired(_remove(lambda item: item.state == ACTIVE and item.login_id in unusable))
-
-
 def end_for_login(login_id: str, *, deleted: bool) -> None:
-    """A delete ends every request and grant for the login (``fill_revoked``); out of date ends its
-    grants, standing ones included (``fill_expired``), and a waiting request stays."""
-    ended = _remove(lambda item: item.login_id == login_id and (deleted or item.state == ACTIVE))
+    """End every request and grant for the login, standing ones included: ``fill_revoked`` on a delete,
+    ``fill_expired`` when it goes out of date. The paths that make a login unusable call this as they do,
+    so a re-save can't revive a grant."""
+    ended = _remove(lambda item: item.login_id == login_id)
     for item in ended:
         _emit("fill_revoked" if deleted else "fill_expired", item)
         logger.info("saved-login fill ended with its login: approval {}", item.id)
@@ -303,7 +295,6 @@ def may_fill(thread_id: str, login_id: str) -> bool:
 
 def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, Any]]:
     """This person's waiting requests and live grants, oldest first; one chat's when a root is named."""
-    _end_unusable_grants()
     with _lock:
         expired = _prune(time.monotonic())
         items = [
@@ -318,7 +309,6 @@ def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, An
 
 def get(approval_id: str, *, user_id: str) -> dict[str, Any]:
     """One of this person's requests or grants, or :class:`FillApprovalNotFound`."""
-    _end_unusable_grants()
     with _lock:
         expired = _prune(time.monotonic())
         item = _approvals.get(approval_id)
@@ -345,12 +335,12 @@ def _duration(seconds: object) -> int:
 
 def approve_fill(
     approval_id: str, *, user_id: str, revision: int, application_hash: str, duration_seconds: object = None,
-    until_turned_off: object = False,
+    until_revoked: object = False,
 ) -> dict[str, Any]:
-    """The person's yes: exactly one of ``duration_seconds`` within the cap, or ``until_turned_off=True``."""
-    if until_turned_off is True and duration_seconds is None:
+    """The person's yes: exactly one of ``duration_seconds`` within the cap, or ``until_revoked=True``."""
+    if until_revoked is True and duration_seconds is None:
         seconds = None
-    elif until_turned_off is False:
+    elif until_revoked is False:
         seconds = _duration(duration_seconds)
     else:
         raise FillDurationError(_DURATION)
@@ -367,7 +357,7 @@ def approve_fill(
             )
         _approvals[item.id] = item
     _emit("fill_approved", item, {"standing": True} if seconds is None else {"duration_minutes": _minutes(seconds)})
-    logger.info("saved-login fill approved: approval {} for {}", item.id, "until turned off" if seconds is None else f"{seconds}s")
+    logger.info("saved-login fill approved: approval {} for {}", item.id, "until revoked" if seconds is None else f"{seconds}s")
     _notify(item)
     return _public(item)
 

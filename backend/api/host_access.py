@@ -59,12 +59,12 @@ class FillApproval(LeaseMutation):
     """The person's yes to a saved-login fill: the duration they picked, or until they revoke it; exactly one."""
 
     duration_seconds: StrictInt | None = None
-    until_turned_off: StrictBool = False
+    until_revoked: StrictBool = False
 
     @model_validator(mode="after")
     def _one_choice(self) -> "FillApproval":
-        if (self.duration_seconds is None) != self.until_turned_off:
-            raise ValueError("Pick a duration or until revoked, not both.")
+        if (self.duration_seconds is None) != self.until_revoked:
+            raise ValueError("Pick one: a duration or until revoked.")
         return self
 
 
@@ -159,7 +159,7 @@ async def approve_fill(approval_id: str, body: FillApproval,
                        user: dict = Depends(require_human_user),
                        capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
     return await _decide_fill("approve", approval_id, body, user, capability, duration_seconds=body.duration_seconds,
-                              until_turned_off=body.until_turned_off)
+                              until_revoked=body.until_revoked)
 
 
 @router.post("/fills/{approval_id}/reject")

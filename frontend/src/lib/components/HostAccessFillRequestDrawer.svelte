@@ -40,7 +40,7 @@
 	} = $props();
 
 	const ready = $derived(approvalReady(request));
-	const STANDING = 'until_turned_off' as const;
+	const STANDING = 'until_revoked' as const;
 	const choices = $derived(fillDurations(request.max_duration_seconds, request.requested_duration_seconds));
 	const options = $derived<FillChoice[]>(choices.length ? [...choices, STANDING] : []);
 	let picked = $state<FillChoice | null>(null);
