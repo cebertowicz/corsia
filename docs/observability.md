@@ -202,7 +202,9 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 | `thread.seen_mark` | A mark-read or mark-unread request succeeds, is refused, or fails | backend |
 | `activity.opened` | The Activity view opens | frontend |
 | `activity.row_opened` | A row in Activity's list is opened | frontend |
-| `activity.next` | Next moves Activity to the following row | frontend |
+| `activity.tab_opened` | A person switches Activity tabs | frontend |
+| `activity.dismissed` | A notification is dismissed | frontend |
+| `activity.marked_all_read` | Mark all read succeeds | frontend |
 | `activity.acted` | A press in Activity's band (answer, send, don't send, done) succeeds, is refused, or fails | frontend |
 
 ### Documents
@@ -337,7 +339,9 @@ Caller-supplied properties merge with defaults. Caller properties win on key col
 | `thread.seen_mark` | `mark` ∈ `read \| unread`; `outcome` ∈ `succeeded \| refused \| failed`; bounded `reason` ∈ `missing \| never_opened \| internal_error` on refusal or failure |
 | `activity.opened` | `scope` ∈ `workspace \| project` |
 | `activity.row_opened` | `kind` (the row's kind only, e.g. `decision`); no title, key or thread |
-| `activity.next` | No properties. |
+| `activity.tab_opened` | `tab` ∈ `tasks \| notifications` |
+| `activity.dismissed` | No properties. |
+| `activity.marked_all_read` | `count` (documents marked read) |
 | `activity.acted` | `kind`; `action` ∈ `answer \| send \| dont_send \| done`; `outcome` ∈ `succeeded \| refused \| failed`; `reason` on refusal: `gone \| changed \| rejected \| unavailable \| forbidden \| signed_out`, or the server's not-sent reason code |
 | `navigation.thread_open` | `click_to_first_page_ms`, `click_to_settled_ms` (null when the open never reached it); `outcome` ∈ `settled \| abandoned \| error`; `source` ∈ `sidebar \| link \| history \| other`; `artifacts_awaited` (whether the open waited on an artifact pane's list); `message_count_bucket` ∈ `0 \| 1-50 \| 51-500 \| 500+` (what the open actually loaded). No thread id, title, or content. |
 | `navigation.artifact_open` | `click_to_content_ms` (null on error or abandonment); `outcome` ∈ `settled \| abandoned \| error`; `kind` (artifact type only, e.g. `document`) |

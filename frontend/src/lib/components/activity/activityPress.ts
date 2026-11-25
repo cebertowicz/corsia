@@ -41,7 +41,7 @@ export function answerPressed(outcome: AnswerOutcome): Pressed {
 		// The re-read shows the decision's latest revision, to answer again.
 		case 'stale': return { outcome: 'refused', reason: 'changed', text: 'This decision changed. Showing the latest.' };
 		case 'rejected': return { outcome: 'refused', reason: 'rejected', text: outcome.message };
-		case 'unauthorized': return { outcome: 'refused', reason: 'unavailable', text: 'This decision isn’t available.' };
+		case 'unauthorized': return { outcome: 'refused', reason: 'unavailable', text: 'This decision isn’t available.', final: true };
 		default: return { outcome: 'failed', text: 'Couldn’t save your answer. Try again.' };
 	}
 }

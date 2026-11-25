@@ -1,4 +1,5 @@
 import { flushSync, mount, tick, unmount } from "svelte";
+import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ThreadPlanPane from "$lib/components/plans/ThreadPlanPane.svelte";
 import PlanHeadControls from "$lib/components/plans/PlanHeadControls.svelte";
@@ -449,10 +450,11 @@ describe("ThreadPlanPane", () => {
     expect(host.textContent).not.toContain("t1");
   });
 
-  it("names genuine human decisions and hands off to the canonical dock", async () => {
-    const { __reset, focusRequest } =
-      await import("$lib/stores/attentionDock.svelte");
+  it("names genuine human decisions and hands off to Activity", async () => {
+    const { __reset } = await import("$lib/stores/attentionDock.svelte");
+    const { activityOpenRequest } = await import("$lib/stores/activityOpen");
     __reset();
+    activityOpenRequest.set(null);
     const payload = envelope("t1");
     payload.attention = { awaiting_count: 2 };
     routedFetch({
@@ -476,21 +478,19 @@ describe("ThreadPlanPane", () => {
     expect(host.querySelector(".decision-chip")).toBeFalsy();
     expect(host.textContent).not.toContain("P5 needs one canonical home");
 
-    let requests = 0;
-    const stop = focusRequest.subscribe(() => {
-      requests += 1;
-    });
     indicator.click();
     await settle();
-    stop();
-    expect(requests).toBeGreaterThan(1);
+    // The indicator opens Activity on its top to-do; a decision is answered there.
+    expect(get(activityOpenRequest)).toEqual({ externalId: null });
     expect(host.querySelector(".decision-chip")).toBeFalsy();
+    activityOpenRequest.set(null);
   });
 
   it("opens a refreshed non-head decision row in this thread", async () => {
-    const { __reset, activeId, queue } =
-      await import("$lib/stores/attentionDock.svelte");
+    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    const { activityOpenRequest } = await import("$lib/stores/activityOpen");
     __reset();
+    activityOpenRequest.set(null);
     activeThreadId.set("t1");
     const source = { ...SOURCE, thread_id: "t1", thread_label: "This thread" };
     const head = decisionItem({ id: "decision-head", title: "Head decision", source });
@@ -515,10 +515,8 @@ describe("ThreadPlanPane", () => {
 
     expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     expect(host.textContent).toContain("Refreshed tail decision");
-    let active: string | null = null;
-    const stopActive = activeId.subscribe((value) => (active = value));
-    stopActive();
-    expect(active).toBe("decision-tail");
+    expect(get(activityOpenRequest)).toEqual({ externalId: "decision-tail" });
+    activityOpenRequest.set(null);
     __reset();
   });
 

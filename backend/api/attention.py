@@ -1,15 +1,4 @@
-"""User-attention HTTP surface (coordination MVP S6b).
-
-Thin endpoints over the tested attention lifecycle (S6a), parent disposition
-(S5b), and review-profile execution (S5a):
-
-- ``GET  /api/attention/raised``            — raised rows, optionally scoped to a thread
-- ``GET  /api/attention/rollup``            — pull-only parent roll-up (no badge/wake)
-- ``GET  /api/attention/{id}/review``       — the review-profile result for a card
-- ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
-- ``GET  /api/attention/queue``             — the one queue the user works through
-- ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
-- ``POST /api/attention/notifications/read`` — mark Activity notifications read
+"""User-attention queue, review, and lifecycle HTTP endpoints.
 
 ``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
 semantics remain covered by backend tests while #921 decides whether raised rows
@@ -24,17 +13,19 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from infra.auth import authenticate, may_access_artifact, owns_thread, require_user, require_user_header_only
+from infra.auth import authenticate, may_access_artifact, owns_thread, require_user
 from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
+from api.attention_notifications import router as notifications_router
 from doceditor import review_bar
 from plans import public
 from registry import artifact_record as AR
 from registry import attention
 
 router = APIRouter(prefix="/api/attention", tags=["attention"])
+router.include_router(notifications_router)
 
 
 def _require_user(token: str) -> dict:
@@ -357,42 +348,6 @@ async def post_clear(artifact_id: str, body: ClearBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await public.drive_threads(woken)
     return asdict(result)
-
-
-class NotificationDocument(BaseModel):
-    artifact_id: str
-    through_reply_id: str
-
-
-class NotificationsReadBody(BaseModel):
-    documents: list[NotificationDocument]
-
-
-def _mark_notifications_read(user_id: str, documents: list[NotificationDocument]) -> None:
-    from api.doc_comment_access import _artifact_for_read
-    from doceditor import comment_thread_views
-
-    db = get_db()
-    try:
-        # The artifact routes' own gate, for every document before anything is written.
-        live = [(_artifact_for_read(doc.artifact_id, user_id, db), doc.through_reply_id) for doc in documents]
-    finally:
-        db.close()
-    try:
-        comment_thread_views.mark_documents_read(user_id, live)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="reply not found") from exc
-
-
-@router.post("/notifications/read")
-async def post_notifications_read(body: NotificationsReadBody,
-                                  user: dict = Depends(require_user_header_only)):
-    """Mark Activity notifications read: Done, dismiss, and Mark all read share this one call.
-
-    Each document is read up to the reply the person was shown; a later reply stays unread.
-    """
-    await run_in_db(lambda: _mark_notifications_read(user["id"], body.documents))
-    return {"read": len(body.documents)}
 
 
 class DisposeBody(BaseModel):

@@ -35,7 +35,7 @@
 	import type { ArtifactLeafProps } from '$lib/artifactLeafProps';
 
 	let {
-		threadId, targetThreadId = null, notice, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
+		threadId, targetThreadId = null, notice, protectReplyLanding = false, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
 	}: ArtifactLeafProps = $props();
 
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
@@ -291,6 +291,7 @@
 					<DocViewer
 						bind:this={viewer}
 						{target}
+						{protectReplyLanding}
 						{escapeCloses}
 						onClose={() => onEscapeClose?.()}
 						{onSignal}

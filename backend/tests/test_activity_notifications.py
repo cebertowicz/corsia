@@ -10,13 +10,15 @@ from plans import person_comment_task
 
 def _client(monkeypatch, user_id='owner-token') -> TestClient:
     from api import attention as api_attention
+    from api import attention_notifications
     from tests.test_attention_queue_api import _immediate
 
     monkeypatch.setattr(api_attention, 'run_in_db', _immediate)
+    monkeypatch.setattr(attention_notifications, 'run_in_db', _immediate)
     app = FastAPI()
     app.include_router(api_attention.router)
     app.dependency_overrides[api_attention.require_user] = lambda: {'id': user_id}
-    app.dependency_overrides[api_attention.require_user_header_only] = lambda: {'id': user_id}
+    app.dependency_overrides[attention_notifications.require_user_header_only] = lambda: {'id': user_id}
     return TestClient(app)
 
 

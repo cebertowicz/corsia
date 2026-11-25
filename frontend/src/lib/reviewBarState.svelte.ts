@@ -7,6 +7,8 @@ import { isCommentTask, personStepAsk } from '$lib/components/comments/commentTa
 import { createReviewBarRetry } from '$lib/reviewBarRetry';
 
 export const REVIEW_ANSWERED = Symbol('review-answered');
+/** Context key: Activity's place in a review's unread replies ("1 of 3 replies"), shown after the ask; empty when none. */
+export const REVIEW_REPLIES = Symbol('review-replies');
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';

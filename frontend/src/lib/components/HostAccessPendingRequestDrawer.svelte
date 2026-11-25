@@ -206,8 +206,8 @@
 		min-height: 0;
 	}
 	/* Sticky within AdaptiveDrawer's own .drawer-body scroll, not a second
-	   nested scroller — the same technique DecisionChip already uses for its
-	   header in this exact shared drawer. A percentage/flex height chain
+	   nested scroller, so the header stays in this shared drawer's one
+	   scroll. A percentage/flex height chain
 	   through .drawer-body's max-height-capped flex item does not reliably
 	   resolve (verified empirically), so sticky is the robust fix, not a
 	   nested `.decision-body { overflow-y: auto }` region. */

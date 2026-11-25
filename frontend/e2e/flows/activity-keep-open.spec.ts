@@ -53,15 +53,21 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	], doc.threadId, replyId);
 	addTasks(doc.threadId, 'Another item', 2, 10);
 	await activity(page, width);
-	const row = page.locator('[data-activity-row]').filter({ hasText: 'Please explain this step' });
+	await page.getByRole('tab', { name: /Notifications/ }).click();
+	const row = page.locator('[data-activity-row]').filter({ hasText: doc.name });
 	await expect(row).toBeVisible();
 	const queueBefore = await (await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } })).json();
-	expect(queueBefore.items.some((item: { key: string }) => item.key === `doc-reply:${doc.artifactId}:${rootId}`)).toBe(true);
+	expect(queueBefore.notifications.items.some((item: { key: string }) => item.key === `doc:${doc.artifactId}`)).toBe(true);
 	await row.click();
 	const editor = page.locator('.pane-col .cm-content');
 	await expect(editor).toContainText('Step 1:');
+	const activityBar = page.getByRole('region', { name: 'Replies to your comments' });
+	await expect(activityBar).toBeVisible();
+	await expect(activityBar.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
 	if (width === 393) {
 		await page.getByRole('button', { name: 'Close comments' }).click();
+		// Wait for the sheet's close transition before reopening (#3328).
+		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeHidden();
 		await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
 	}
 	const top = (await row.boundingBox())!.y;
@@ -75,20 +81,25 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	await expect(editor).toContainText('Step 1:');
 	await editor.evaluate((el) => { (window as any).__replyEditor = el; });
 	const body = (await editor.textContent()) ?? '';
-	const card = width === 393
-		? page.getByRole('dialog', { name: 'Document comments' }).getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Please explain this step' })
-		: page.locator(`[data-comment-id="${rootId}"]`).last();
-	const field = card.locator('textarea').first();
+	const card = page.getByRole('region', { name: /^Comment by/ }).filter({ hasText: 'Please explain this step' });
+	const field = card.getByRole('textbox', { name: 'Reply' });
 	if (width === 393) {
 		await expect(card).toContainText('Please explain this step');
 		await expect(field).toBeVisible();
-		// A sheet that is still closing is visible but not ready: its fields sit in an inert subtree, so a fill into one cannot take focus and the text goes to the focused document instead. Wait for the sheet that replaces it: no ancestor of the reply box is inert.
+		// The closing sheet can remain visible but inert until its replacement is ready.
 		await expect.poll(() => field.evaluate((el) => !el.closest('[inert]'))).toBe(true);
-	} else if (!await field.isVisible()) await page.locator('.pane-col').getByRole('button', { name: 'Reply', exact: true }).click();
+	} else if (!await field.isVisible()) {
+		await page.locator('.pane-col .cm-comment-anchor').first().click();
+		await expect(field).toBeVisible();
+	}
+	await field.focus();
+	await expect(field).toBeFocused();
 	await field.fill('Thank you for explaining');
+	await expect(field).toHaveValue('Thank you for explaining');
+	await expect(editor).not.toContainText('Thank you for explaining');
 	await expect.poll(async () => {
 		const queue = await (await request.get('/api/attention/queue', { params: { token: TEST_TOKEN, view: 'activity' } })).json();
-		return queue.items.some((item: { key: string }) => item.key === `doc-reply:${doc.artifactId}:${rootId}`);
+		return queue.notifications.items.some((item: { key: string }) => item.key === `doc:${doc.artifactId}`);
 	}).toBe(false);
 	const checkPane = async () => {
 		await expect(editor).toContainText('Step 1:');
@@ -107,8 +118,13 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	await checkPane();
 	if (width === 393) {
 		await page.getByRole('dialog', { name: 'Document comments' }).getByRole('button', { name: 'Close', exact: true }).click();
+		// Wait for the sheet's close transition before reopening (#3328).
+		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeHidden();
 		await expect(field).toBeHidden();
-	} else await page.keyboard.press('Escape');
+	} else {
+		await page.keyboard.press('Escape');
+		await expect(field).toBeHidden();
+	}
 	await frame('opened');
 	if (width === 393) {
 		await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
@@ -116,7 +132,10 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 		await row.click();
 	} else await checkRow();
 	await checkPane();
-	if (!await field.isVisible()) await page.locator('.pane-col').getByRole('button', { name: 'Reply', exact: true }).click();
+	await page.locator('.pane-col .cm-comment-anchor').first().click();
+	await expect(field).toBeVisible();
+	await expect(field).toHaveValue('Thank you for explaining');
+	await checkPane();
 	await field.fill('Thank you for explaining');
 	const response = page.waitForResponse((r) => r.url().includes(`/api/artifacts/${doc.artifactId}/comments`) && r.request().method() === 'POST');
 	await card.getByRole('button', { name: 'Send reply' }).click();
@@ -124,12 +143,18 @@ for (const width of [1440, 393]) test(`replying keeps its now-read Activity row 
 	await expect(card).toContainText('Thank you for explaining');
 	await expect(field).toBeVisible();
 	await checkPane();
-	if (width === 393) await page.getByRole('button', { name: 'Close comments' }).click();
-	else await page.keyboard.press('Escape');
+	if (width === 393) {
+		await page.getByRole('dialog', { name: 'Document comments' }).getByRole('button', { name: 'Close', exact: true }).click();
+		// Wait for the sheet's close transition before reopening (#3328).
+		await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeHidden();
+	} else await page.keyboard.press('Escape');
 	await frame('sent');
 	if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
 	await checkRow();
+	await page.getByRole('tab', { name: /Your tasks/ }).click();
 	await page.locator('[data-activity-row]').filter({ hasText: 'Another item 00' }).click();
+	if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+	await page.getByRole('tab', { name: /Notifications/ }).click();
 	await expect(row).toHaveCount(0);
 	await frame('another');
 });
