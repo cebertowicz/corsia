@@ -16,7 +16,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from host_access import browser_login_capture as capture, browser_pane, browser_session_commands, browser_steps
-from host_access import browser_step_lifecycle as lifecycle
+from host_access import browser_login_capture_writes as capture_writes, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_cli import CommandResult
 from host_access.browser_control import PageAccess
@@ -64,27 +64,63 @@ class FakePage:
         self.hidden = set(hidden)
         self.calls: list[tuple[str, dict]] = []
         self.hang = False
+        self.watchers: list[asyncio.Queue] = []
+        self.pages = {"page-1"}  # the browser's page targets: this one, plus any a click opens
 
     def client(self, _endpoint: str) -> FakeCdp:
         return FakeCdp(self)
+
+    def navigate(self, loader: str, *, frame: str = "top", parent: str | None = None) -> None:
+        """A document load (or a back/forward cache restore, which keeps its loader) in one of the page's frames."""
+        if parent is None:
+            self.loader = loader
+        for queue in self.watchers:
+            queue.put_nowait({"method": "Page.frameNavigated",
+                              "params": {"frame": {"id": frame, "loaderId": loader, **({"parentId": parent} if parent else {})}}})
+
+
+class FakeSocket:
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue = asyncio.Queue()
+
+    async def recv(self) -> str:
+        message = await self.queue.get()
+        if isinstance(message, BaseException):
+            raise message
+        return json.dumps(message)
 
 
 class FakeCdp:
     def __init__(self, page: FakePage) -> None:
         self.page = page
         self.contexts: dict[int, str] = {}
+        self.socket = FakeSocket()
+        self.sent = 0
 
     async def __aenter__(self) -> FakeCdp:
         return self
 
     async def __aexit__(self, *_args) -> None:
-        return None
+        if self.socket.queue in self.page.watchers:
+            self.page.watchers.remove(self.socket.queue)
+
+    def next_request(self) -> int:
+        return self.sent + 1
+
+    async def send(self, method: str, **params) -> int:
+        self.sent += 1
+        request = self.sent
+        self.socket.queue.put_nowait({"id": request, "result": await self.call(method, **params)})
+        return request
 
     async def call(self, method: str, **params):
         page = self.page
         page.calls.append((method, params))
         if page.hang:
             await asyncio.Future()
+        if method == "Page.enable":
+            page.watchers.append(self.socket.queue)
+            return {}
         if method == "Page.getFrameTree":
             (top, origin), *children = page.frames
             return {"frameTree": {
@@ -135,7 +171,18 @@ async def settled_submit(thread_id: str, session_key: str, endpoint: str) -> Non
 
 def use_page(monkeypatch, page: FakePage) -> FakePage:
     monkeypatch.setattr(capture, "_QuietCdp", page.client)
+    monkeypatch.setattr(capture_writes, "quiet_cdp", page.client)
+    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: frozenset(page.pages))
     return page
+
+
+async def agent_typed(endpoint: str = "ws://page", args=("fill", "@e1", "x")) -> None:
+    """An agent command that types and changes nothing else: watched, then settled."""
+    await (await capture.agent_writes(THREAD, endpoint, args)).settle()
+
+
+def no_page(_endpoint: str):
+    raise OSError("no page")
 
 
 def open_step(monkeypatch, nodes=frozenset({7}), visit="doc-1") -> browser_steps.PasswordStep:
@@ -367,7 +414,9 @@ async def test_rule4_a_failing_holder_logs_fixed_text_only(monkeypatch, holder, 
     use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person@example.com")}))
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
-    assert "saved-login capture skipped a submit it couldn't read" in caplog.text
+    # The holder failed, not the page read, and the line says which.
+    assert "saved-login capture couldn't hand a submit to the offer holder" in caplog.text
+    assert "couldn't read" not in caplog.text
     assert MARKER not in caplog.text
     assert capture._state(THREAD).pending is None
 
@@ -522,7 +571,7 @@ def test_rule7_which_agent_commands_mark_the_document(args, writes):
 @pytest.mark.asyncio
 async def test_rule7_an_agent_mark_on_the_document_stops_offers_and_username_notes(monkeypatch, holder):
     page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}, accounts={"top": "person@example.com"}))
-    await capture.agent_writing(THREAD, "ws://page")
+    await agent_typed()
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
     lifecycle._steps.pop(THREAD)
@@ -539,22 +588,43 @@ async def test_rule7_an_agent_mark_on_the_document_stops_offers_and_username_not
 @pytest.mark.asyncio
 async def test_rule7_session_end_clears_marks_and_an_unreadable_page_marks_every_document(monkeypatch, holder):
     page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
-    await capture.agent_writing(THREAD, "ws://page")
+    await agent_typed()
     capture.session_ended(THREAD)
     open_step(monkeypatch)
     await settled_submit(THREAD, KEY, "ws://page")
     assert holder.names() == ["offer_login"]
     holder.calls.clear()
-    await capture.agent_writing(THREAD, "")
+    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    await agent_typed()
     page.loader = "doc-9"
     await settled_submit(THREAD, KEY, "ws://page")
     assert holder.calls == [("drop_offer", KEY)]
 
 
+@pytest.mark.parametrize(("args", "switches"), [
+    (("batch", "tab 2", "fill @e1 x"), True), (("batch", "--bail", "fill @e1 x", "tab new"), True),
+    (("batch", "click @e1", "fill @e2 x", "click @e3"), False), (("tab", "2"), False), (("batch", "'unclosed"), True),
+])
+def test_rule7_which_batches_switch_tabs(args, switches):
+    assert capture.switches_tab(args) is switches
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("args", "marked"), [(("fill", "@e1", "x"), True), (("click", "@e1"), False)])
-async def test_rule7_the_agent_command_path_marks_before_a_writing_command_runs(monkeypatch, args, marked):
-    order = []
+async def test_rule7_a_typing_batch_that_switches_tabs_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    await agent_typed(args=("batch", "tab 2", "fill @e1 x"))
+    page.loader = "doc-7"
+    open_step(monkeypatch, visit="doc-7")
+    await settled_submit(THREAD, KEY, "ws://page")
+    assert holder.calls == []
+
+
+def _agent_path(monkeypatch, page: FakePage, *loads: str, run=None):
+    """The real agent command path; the run loads `loads` in turn, as a batch's clicks or opens would.
+
+    `finished` records, when the held pane restarts, which documents were marked by then.
+    """
+    marked_at_finish: list[dict] = []
 
     async def page_endpoint(_command):
         return "ws://page"
@@ -562,31 +632,198 @@ async def test_rule7_the_agent_command_path_marks_before_a_writing_command_runs(
     async def check_page_access(*_args, **_kwargs):
         return PageAccess(None, False)
 
-    async def agent_writing(thread_id, endpoint):
-        order.append(("mark", thread_id, endpoint))
-
-    async def run_admitted(_runtime, ran, **_kwargs):
-        order.append(("run", ran[0]))
+    async def run_admitted(_runtime, _ran, **_kwargs):
+        for loader in loads:
+            page.navigate(loader)
+        if run is not None:
+            await run()
         return CommandResult(0, "{}", ""), False
 
     async def finished(*_args):
-        return None
-
-    async def not_dropdown(*_args):
-        return False
+        marked_at_finish.append(dict(capture._state(THREAD).marks))
 
     monkeypatch.setattr(browser_session_commands.browser_cdp, "page_endpoint", page_endpoint)
     monkeypatch.setattr(browser_session_commands.browser_control, "check_page_access", check_page_access)
-    monkeypatch.setattr(browser_session_commands.browser_dom_write, "is_dropdown", not_dropdown)
     monkeypatch.setattr(browser_session_commands.browser_pane_state, "has_pane", lambda _thread: False)
     monkeypatch.setattr(browser_session_commands.browser_pane_state, "page_command_finished", finished)
-    monkeypatch.setattr(capture, "agent_writing", agent_writing)
     owner = SimpleNamespace(_run_admitted=run_admitted, _model_result=lambda _result, _record: "ok",
                             session_identity=lambda _thread: "session-1")
     runtime = SimpleNamespace(record=SimpleNamespace(binding="bound", session="session-1", profile=None, copy_of=None,
                                                      shared=False))
-    assert await browser_session_commands._run_action(owner, runtime, THREAD, args, None, 10, False) == "ok"
-    assert order == ([("mark", THREAD, "ws://page")] if marked else []) + [("run", args[0])]
+
+    async def agent(args):
+        return await browser_session_commands._run_action(owner, runtime, THREAD, args, None, 10, False)
+    return agent, marked_at_finish
+
+
+async def person_offered_on(monkeypatch, holder, page: FakePage, loader: str) -> bool:
+    holder.calls.clear()
+    page.loader = loader
+    open_step(monkeypatch, visit=loader)
+    await settled_submit(THREAD, KEY, "ws://page")
+    lifecycle._steps.pop(THREAD, None)
+    return holder.names() == ["offer_login"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", [("fill", "@e1", "x"), ("click", "@e1")])
+async def test_rule7_only_a_command_that_can_type_marks_its_document(monkeypatch, holder, args):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent, _finish = _agent_path(monkeypatch, page)
+    assert await agent(args) == "ok"
+    assert await person_offered_on(monkeypatch, holder, page, "doc-1") is (args[0] == "click")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["click @e1", "open https://accounts.example.com/next"])
+async def test_rule7_a_batch_that_loads_a_document_then_types_marks_the_new_document(monkeypatch, holder, first):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent, finish = _agent_path(monkeypatch, page, "doc-2")
+    assert await agent(("batch", first, "fill @e2 agent-value")) == "ok"
+    # Marked before the held pane restarts, so no person submit can be read on an unmarked doc-2.
+    assert "doc-2" in finish[0]
+    assert not await person_offered_on(monkeypatch, holder, page, "doc-2")
+    assert await person_offered_on(monkeypatch, holder, page, "doc-3")
+
+
+@pytest.mark.asyncio
+async def test_rule7_every_document_a_batch_passes_through_is_marked_and_no_other(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    # click, fill, click: the agent's value sits in doc-2, which back would restore from the cache.
+    agent, _finish = _agent_path(monkeypatch, page, "doc-2", "doc-3")
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value", "click @e3")) == "ok"
+    for loader in ("doc-1", "doc-2", "doc-3"):
+        assert not await person_offered_on(monkeypatch, holder, page, loader)
+    # The two-page sign-in: the person's password page after the agent's username page still offers.
+    assert await person_offered_on(monkeypatch, holder, page, "doc-4")
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_batch_that_opens_a_popup_then_types_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def click_opens_popup():
+        # agent-browser moves to the popup, so the fill lands in a document this page's watch never sees.
+        page.pages.add("page-2")
+
+    agent, finish = _agent_path(monkeypatch, page, run=click_opens_popup)
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value")) == "ok"
+    assert capture._ANY_DOCUMENT in finish[0]
+    assert not await person_offered_on(monkeypatch, holder, page, "popup-doc")
+
+
+@pytest.mark.asyncio
+async def test_rule7_an_unreadable_page_list_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    agent, finish = _agent_path(monkeypatch, page)
+    monkeypatch.setattr(capture_writes, "_page_ids", lambda _endpoint, _timeout: no_page(_endpoint))
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert capture._ANY_DOCUMENT in finish[0]
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_watch_that_fails_to_close_still_settles_and_restarts_the_pane(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def close_fails(*_args):
+        raise RuntimeError("socket state")
+
+    monkeypatch.setattr(FakeCdp, "__aexit__", close_fails)
+    agent, finish = _agent_path(monkeypatch, page, "doc-2")
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert set(finish[0]) == {"doc-1", "doc-2"}
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_session_that_ends_during_a_watch_keeps_its_marks_out_of_the_next(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def session_ends_then_watch_breaks():
+        capture.session_ended(THREAD)
+        for queue in page.watchers:
+            queue.put_nowait(OSError("Chrome exited"))
+        page.navigate("doc-2")
+
+    agent, _finish = _agent_path(monkeypatch, page, run=session_ends_then_watch_breaks)
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert capture._state(THREAD).marks == {} and capture._state(THREAD).watches == 0
+    assert await person_offered_on(monkeypatch, holder, page, "doc-3")
+
+
+@pytest.mark.asyncio
+async def test_rule7_an_open_watch_keeps_its_thread_through_a_prune(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+    writes = await capture.agent_writes(THREAD, "ws://page", ("fill", "@e1", "x"))
+    capture._state(THREAD).marks.clear()  # an open watch with nothing marked yet
+    capture._prune(THREAD)
+    page.navigate("doc-2")
+    await writes.settle()
+    assert not await person_offered_on(monkeypatch, holder, page, "doc-2")
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_frame_load_or_a_cache_restore_marks_by_the_main_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def frame_then_back():
+        page.navigate("frame-doc", frame="child", parent="top")
+        page.navigate("doc-1")
+
+    agent, finish = _agent_path(monkeypatch, page, "doc-2", run=frame_then_back)
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert set(finish[0]) == {"doc-1", "doc-2"}
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_watch_that_breaks_mid_command_marks_every_document(monkeypatch, holder):
+    page = use_page(monkeypatch, FakePage(fields={7: ("top", MARKER, "person")}))
+
+    async def break_watch():
+        for queue in page.watchers:
+            queue.put_nowait(OSError("the page target went away"))
+        page.navigate("doc-2")
+
+    agent, finish = _agent_path(monkeypatch, page, run=break_watch)
+    assert await agent(("batch", "click @e1", "fill @e2 agent-value")) == "ok"
+    assert capture._ANY_DOCUMENT in finish[0]
+    assert not await person_offered_on(monkeypatch, holder, page, "doc-5")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["unreadable", "hangs", "strange"])
+async def test_rule7_a_watch_that_fails_to_start_or_settle_marks_every_document_and_never_raises(monkeypatch, failure):
+    page = use_page(monkeypatch, FakePage())
+    monkeypatch.setattr(capture, "WATCH_TIMEOUT", 0.02)
+
+    async def hang_at_settle():
+        page.hang = True
+
+    agent, finish = _agent_path(monkeypatch, page, run=hang_at_settle if failure == "hangs" else None)
+    if failure == "unreadable":
+        monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    elif failure == "strange":
+        monkeypatch.setattr(capture_writes, "quiet_cdp", lambda _endpoint: SimpleNamespace())
+    assert await agent(("fill", "@e1", "x")) == "ok"
+    assert finish and capture._ANY_DOCUMENT in finish[0]
+
+
+@pytest.mark.asyncio
+async def test_rule7_a_cancel_while_settling_marks_every_document_and_still_restarts_the_pane(monkeypatch):
+    page = use_page(monkeypatch, FakePage())
+    settling = asyncio.Event()
+
+    async def hang_at_settle():
+        page.hang = True
+        settling.set()
+
+    agent, finish = _agent_path(monkeypatch, page, run=hang_at_settle)
+    task = asyncio.create_task(agent(("fill", "@e1", "x")))
+    await settling.wait()
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finish and capture._ANY_DOCUMENT in finish[0]
 
 
 # Rule 8 -----------------------------------------------------------------------------------------------------
@@ -692,7 +929,7 @@ async def test_later_non_login_submit_drops_earlier_offer(monkeypatch, holder, l
     if later == "different":
         page.fields[8] = ("top", "another-value", "person")
     elif later == "marked":
-        await capture.agent_writing(THREAD, "ws://page")
+        await agent_typed()
     else:
         monkeypatch.setattr(capture, "CAPTURE_TIMEOUT", 0.01)
         page.hang = True
@@ -793,10 +1030,12 @@ async def test_failed_step_drops_prior_offer_when_latest_queued_call_is_skipped(
 @pytest.mark.asyncio
 async def test_any_document_mark_is_never_evicted(monkeypatch):
     page = use_page(monkeypatch, FakePage())
-    await capture.agent_writing(THREAD, "")
+    monkeypatch.setattr(capture_writes, "quiet_cdp", no_page)
+    await agent_typed()
+    use_page(monkeypatch, page)
     for number in range(100):
         page.loader = f"document-{number}"
-        await capture.agent_writing(THREAD, "ws://page")
+        await agent_typed()
     assert capture._marked(THREAD, "another-document")
     assert capture._ANY_DOCUMENT in capture._state(THREAD).marks
 
