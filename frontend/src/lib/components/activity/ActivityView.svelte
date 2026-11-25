@@ -3,7 +3,6 @@
 	import { get } from 'svelte/store';
 	import { isMobile } from '$lib/stores/viewport';
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
-	import { stale as attentionStale } from '$lib/stores/attentionQueueState.svelte';
 	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 	import { activityOpenRequest } from '$lib/stores/activityOpen';
 	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
@@ -321,7 +320,7 @@
 				markAllFailed={markAllFailed ? 'Couldn’t mark these read. Try again.' : null}
 				{loading}
 				failure={store.status === 'error' ? store.failure : null}
-				stale={store.status === 'ready' && (store.failure !== null || $attentionStale)}
+				stale={store.status === 'ready' && store.failure !== null}
 				onTab={(to) => void switchTab(to)}
 				onOpen={open}
 				onDismiss={(key) => void dismiss(key)}
@@ -337,7 +336,7 @@
 			{#key paneInstance}
 				{@const mountedInstance = paneInstance}
 				{@const mountedKey = openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && (store.failure !== null || $attentionStale)} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
+				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>

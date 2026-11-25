@@ -62,7 +62,7 @@ for (const width of [1440, 393]) {
   await page.getByRole('button', { name: 'Answer', exact: true }).click();
   await expect(page.getByText('Showing last known items.')).toHaveCount(0);
  });
- test(`@surface:attention the shared queue failure and recovery show in Activity at ${width}`, async ({ page }) => {
+ test(`@surface:attention a separate queue failure does not mark fresh Activity rows stale at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
   await openActivity(page, width);
   let fail = true;
@@ -74,7 +74,7 @@ for (const width of [1440, 393]) {
    await state.reload();
   });
   await reload();
-  await expect(page.getByText('Showing last known items.').filter({ visible: true })).toBeVisible();
+  await expect(page.getByText('Showing last known items.')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: first.title })).toBeVisible();
   fail = false;
   await reload();
@@ -85,10 +85,10 @@ for (const width of [1440, 393]) {
   await openActivity(page, width);
   await page.getByRole('radio', { name: 'Something else' }).check();
   await page.getByRole('textbox', { name: 'Your answer' }).fill('Half-typed answer');
-  if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+  if (width === 393) await page.locator('main').getByRole('button', { name: 'Your tasks', exact: true }).click();
   await page.locator('[data-activity-row]').filter({ hasText: second.title }).click();
   await expect(page.getByRole('heading', { name: second.title })).toBeVisible();
-  if (width === 393) await page.locator('main').getByRole('button', { name: 'Activity', exact: true }).click();
+  if (width === 393) await page.locator('main').getByRole('button', { name: 'Your tasks', exact: true }).click();
   await page.locator('[data-activity-row]').filter({ hasText: first.title }).click();
   await expect(page.getByRole('textbox', { name: 'Your answer' })).toHaveValue('Half-typed answer');
  });

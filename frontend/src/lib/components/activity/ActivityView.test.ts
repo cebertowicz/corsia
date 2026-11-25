@@ -332,7 +332,7 @@ describe('Activity list', () => {
 		expect(host.textContent).not.toContain('Showing last known items.');
 	});
 
-	it('keeps rows and shows the notice when the attention queue re-read fails, then clears it on recovery', async () => {
+	it('does not mark fresh Activity rows stale when the separate attention queue read fails', async () => {
 		const attention = await import('$lib/stores/attentionQueueState.svelte');
 		attention.__reset();
 		token.set('test-token');
@@ -345,7 +345,7 @@ describe('Activity list', () => {
 		await attention.reload();
 		await settle();
 		expect(rows()).toHaveLength(count);
-		expect(host.textContent).toContain('Showing last known items.');
+		expect(host.textContent).not.toContain('Showing last known items.');
 		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('view=activity')
 			? base(input, init) : respond(200, { current: null, count: 0, items: [] }));
 		await attention.reload();
