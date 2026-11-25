@@ -2,6 +2,7 @@
 	import { mount, unmount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import type { ChangeDesc } from '@codemirror/state';
+	import type { SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
 	import type { CommentRange, ScrollOrigin } from '$lib/cm/comment-marks';
 	import type { CommentSelection } from '$lib/stores/commentSelection';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
@@ -18,9 +19,10 @@
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
+	import EmailSendBar from './EmailSendBar.svelte';
 	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
-	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
+	import { fetchEmailDraftContext, readEmailDraftState } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 	import DocStaleChoice from './DocStaleChoice.svelte';
@@ -45,6 +47,7 @@
 		pendingComment = null,
 		scrollTo,
 		onSave,
+		onFlush = async () => true,
 		onSelect,
 		onAnchorFocus,
 		onCaretAway,
@@ -65,6 +68,8 @@
 		tabInstanceId = null,
 		onDocumentPlace,
 		artifactId = null,
+		onSuggestionHistory,
+		onSuggestionHistoryRecovery,
 		onUseFile,
 	}: {
 		docState: DocState;
@@ -79,6 +84,8 @@
 		pendingComment?: CommentSelection | null;
 		scrollTo: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
 		onSave: () => void;
+		/** Saves every pending edit and resolves once the server holds them; false when the save failed. */
+		onFlush?: () => Promise<boolean>;
 		onSelect: (selection: PendingSelection | null) => void;
 		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		onCaretAway?: () => void;
@@ -102,11 +109,14 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
 		artifactId?: string | null;
+		onSuggestionHistory?: (entry: SuggestionHistoryEntry, before: string, after: string) => Promise<boolean>;
+		onSuggestionHistoryRecovery?: () => void;
 		/** The viewer's one content writer after the first load (also a clean reload's): the file's text the person chose after a stale refusal goes into the editor through it. */
 		onUseFile: (content: ViewerContent) => void;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
+	let sendEnded = $state(false);
 	// An email draft keeps its text in the editor, with the warnings above it and the read-only conversation below. The
 	// editor sits in the same wrapper either way, so editing the header never remounts it. `readAttempt` counts the
 	// person's retries of a failed read; each one reads the draft's context again.
@@ -153,6 +163,7 @@
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function coveredBySheet(from: number, opening: boolean) { return editor?.coveredBySheet(from, opening); }
 	export function editorView() { return editor?.editorView(); }
+	export function acceptSuggestion(text: string, eventId: string, ids: string[]) { return editor?.acceptSuggestion(text, eventId, ids) ?? false; }
 	export function clearInputSelection() { editor?.clearInputSelection(); }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
@@ -180,7 +191,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap" use:showsSaveBar={tabInstanceId ?? ''}>
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} readOnly={readOnly || sendEnded} {reading} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {onSuggestionHistory} {onSuggestionHistoryRecovery} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		<!-- A refusal stays on screen while a choice's write runs (the draft is 'saving' then, with no error), so Details is not closed and rebuilt. -->
 		{#if saveError || refusedStale}
 			<div class="save-error" role="alert">{saveError || EDITOR_STALE_STATUS}{#if tabInstanceId && refusedStale}<DocStaleChoice tabKey={tabInstanceId} {onUseFile} />{/if}</div>
@@ -189,6 +200,11 @@
 {/snippet}
 
 <div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
+	{#if docState === 'ready' && draft && artifactId}
+		{#key artifactId}
+			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} targetVersion={email?.targetVersion ?? null} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
+		{/key}
+	{/if}
 	{#if docState === 'loading' || docState === 'error'}
 		<DocLoadState state={docState} name={documentName} {onRetry} />
 	{:else}

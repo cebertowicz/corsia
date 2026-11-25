@@ -40,6 +40,7 @@
 	class="btn {variant} {size}"
 	class:loading
 	disabled={isDisabled}
+	aria-busy={loading ? 'true' : undefined}
 	aria-label={ariaLabel}
 	{...(description ? { 'aria-description': description } : {})}
 	aria-disabled={ariaDisabled ? 'true' : undefined}

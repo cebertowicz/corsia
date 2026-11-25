@@ -56,15 +56,22 @@ export function createPlanTreeReorder(options: Options) {
 	function siblings(node: OperatorNode): OperatorNode[] {
 		return options.nodes().filter((candidate) => candidate.parent_id === node.parent_id && (!candidate.folded || candidate.id === node.id));
 	}
+	/** A run's steps show in plan order, so they move among every unfolded step (`planOrderGroup`). */
+	function inRun(node: OperatorNode): boolean {
+		return options.nodes().find((candidate) => candidate.id === node.parent_id)?.workflow_run === true;
+	}
+	function orderGroup(node: OperatorNode) {
+		return planOrderGroup(node, options.now(), options.openBlocked(), inRun(node));
+	}
 	function eligible(node: OperatorNode): boolean {
-		return node.user_actions.includes('reorder') && planOrderGroup(node, options.now(), options.openBlocked()) !== null;
+		return node.user_actions.includes('reorder') && orderGroup(node) !== null;
 	}
 	function hasMenu(node: OperatorNode): boolean {
 		return node.user_actions.some((action) => action !== 'reorder') || eligible(node) || !!node.comment_attention;
 	}
 	function peers(node: OperatorNode): OperatorNode[] {
-		const group = planOrderGroup(node, options.now(), options.openBlocked());
-		return group ? siblings(node).filter((candidate) => planOrderGroup(candidate, options.now(), options.openBlocked()) === group) : [];
+		const own = orderGroup(node);
+		return own ? siblings(node).filter((candidate) => orderGroup(candidate) === own) : [];
 	}
 	function availability(node: OperatorNode) {
 		const group = peers(node);

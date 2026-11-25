@@ -218,6 +218,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         async with contextlib.aclosing(browser_pane_input.pane_messages(pane, stats)) as messages:
             async for data in messages:
                 kind = data.get("type")
+                await browser_pane.before_person_input(thread_id, kind, data, connection_token)  # Before a submit lands.
                 if kind == "navigate":
                     _request_navigate(thread_id, connection_token, data, report)
                 elif kind == "appearance":

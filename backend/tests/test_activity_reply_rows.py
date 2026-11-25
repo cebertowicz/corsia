@@ -50,14 +50,13 @@ def test_chat_unread_endpoint_and_ownership():
     place_comments(db, 't', 'user', meta, '1')
     db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','t','assistant','answer','2',3)")
     db.execute("INSERT INTO chat_comment_answers VALUES ('t','user','c1.1','answer','2')")
+    _doc(db, 'd1', 't', author='t')
     rows = reply_rows(db,'u1', reviewed_artifact_ids=set())
-    assert len(rows) == 1
-    assert rows[0]['open'] == {'thread_id':'t','message_id':'target'}
-    assert rows[0]['title'] == 'Thread replied to your comment “why?”'
-    assert {k: rows[0]['detail'][k] for k in ('thread_id','message_id','cid','assistant_message_id')} == {'thread_id':'t','message_id':'user','cid':'c1.1','assistant_message_id':'answer'}
+    # The document reply remains, while the unread chat reply stays in chat.
+    assert [row['key'] for row in rows] == ['doc-reply:d1:rootd1']
     assert reply_rows(db,'u2', reviewed_artifact_ids=set()) == []
     db.execute("INSERT INTO chat_comment_views(user_id,user_message_id,cid,seen_at) VALUES ('u1','user','c1.1','2')")
-    assert reply_rows(db,'u1', reviewed_artifact_ids=set()) == []
+    assert [row['key'] for row in reply_rows(db,'u1', reviewed_artifact_ids=set())] == ['doc-reply:d1:rootd1']
 
 
 def _doc_db(owner_thread_title='One'):

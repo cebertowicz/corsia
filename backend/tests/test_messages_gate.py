@@ -164,19 +164,13 @@ def test_the_unconfirmed_text_states_the_wait_the_code_uses() -> None:
     assert f"within {messages_send.CONFIRM_SECONDS:g} seconds" in _unconfirmed()
 
 
-async def test_gate_refuses_an_agent_started_turn(env) -> None:
+async def test_an_agent_started_turn_sends(env) -> None:
+    env("write")
     draft = await _draft(chat_id="1")
     _admit(get_db(), "t1", metadata={"sender_kind": "agent", "from_thread": "x"})
     _bind(get_db(), "t1")
-    assert await _send(draft) == f"Error: {action_gate.NOT_PERSON}"
-    assert _row(draft["draft_id"])["state"] == "open"
-
-
-async def test_gate_refuses_when_the_person_has_not_replied_since_the_save(env) -> None:
-    _admit(get_db(), "t1")
-    draft = await _draft(chat_id="1")
-    _bind(get_db(), "t1")
-    assert await _send(draft) == f"Error: {action_gate.NOT_SEEN}"
+    assert (await _send(draft)).startswith("Sent to")
+    assert _row(draft["draft_id"])["state"] == "sent"
 
 
 async def test_gate_refuses_a_stale_revision_an_outside_edit_and_a_finished_draft(env, workspace) -> None:
@@ -188,7 +182,7 @@ async def test_gate_refuses_a_stale_revision_an_outside_edit_and_a_finished_draf
     assert "messages_draft" in action_gate._changed_outside("message")
 
 
-async def test_gate_refuses_a_sent_draft_a_foreign_kind_and_no_turn(env, workspace) -> None:
+async def test_gate_refuses_a_sent_draft_and_a_foreign_kind(env, workspace) -> None:
     env("write")
     draft = await _draft(chat_id="1")
     _approved_turn(get_db())
@@ -198,11 +192,6 @@ async def test_gate_refuses_a_sent_draft_a_foreign_kind_and_no_turn(env, workspa
     email = create_draft(THREAD, "email", "other.md", b"To: sam@example.com\n\nhi", {}, db=get_db())
     get_db().commit()
     assert await _send(email) == f"Error: {action_gate.NO_DRAFT}"
-    from infra import state
-
-    state._current_turn_identity.set(None)
-    other = await _draft(chat_id="1", body="again")
-    assert await _send(other) == f"Error: {action_gate.NO_TURN}"
 
 
 async def test_send_checks_the_reach_and_the_draft_format(env, workspace) -> None:

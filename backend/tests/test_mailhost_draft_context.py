@@ -55,7 +55,7 @@ async def test_a_reply_draft_saved_with_the_old_in_reply_to_line_still_sends_thr
     await convert_open_drafts()
     assert "In reply to:" not in path.read_text()
     out = await _send(host, saved)
-    assert not out.startswith("Error"), out
+    assert out == {"state": "sent"}, out
     [(_, raw)] = host.built.smtp.sent
     message = message_from_bytes(raw, policy=policy.default)
     assert message["In-Reply-To"] == "<orig@example.com>"

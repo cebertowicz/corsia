@@ -4,14 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityQueueItem } from '$lib/api/activityQueue';
 import { activityFrameItems, activityItem, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
 
-const { mobile, mutate, emit, closeTab } = vi.hoisted(() => ({
+const { mobile, mutate, emit, closeTab, listeners } = vi.hoisted(() => ({
 	mobile: { store: null as null | import('svelte/store').Writable<boolean> },
 	mutate: vi.fn(),
 	emit: vi.fn(),
 	closeTab: vi.fn(),
+	listeners: new Map<string, () => void>(),
 }));
 
-vi.mock('$lib/ws/events', () => ({ on: () => () => {} }));
+vi.mock('$lib/ws/events', () => ({ on: (event: string, handler: () => void) => { listeners.set(event, handler); return () => listeners.delete(event); } }));
 vi.mock('$lib/ws', () => ({ on: () => () => {} }));
 vi.mock('$lib/stores/viewport', async (original) => {
 	const { writable: w } = await import('svelte/store');
@@ -141,6 +142,52 @@ describe('Activity list', () => {
 		await settle();
 		expect(openRow()).toBe(rows()[6]);
 		expect(nextButton().disabled).toBe(true);
+	});
+
+	it('keeps an item that leaves on a re-read open until Next', async () => {
+		render();
+		await settle();
+		rows()[4].click();
+		await settle();
+		const original = pane().querySelector('h1');
+		const title = served[4].title;
+		served = served.filter((item) => item.key !== 'task:sign-build');
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(title);
+		expect(pane().textContent).toContain('No longer waiting on you.');
+		nextButton().click();
+		await settle();
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(served[4].title);
+		expect(pane().textContent).not.toContain('No longer waiting on you.');
+	});
+
+	it('follows the same document under a new key without reopening its pane', async () => {
+		render();
+		await settle();
+		const original = pane().querySelector('h1');
+		const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts')).length;
+		served = [{ ...served[0], key: 'review:new-key' }, ...served.slice(1)];
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()?.querySelector('strong')?.textContent).toBe(served[0].title);
+		expect(pane().textContent).not.toContain('No longer waiting on you.');
+		expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/artifacts'))).toHaveLength(reads);
+	});
+
+	it('keeps the original item when the same document returns from another thread', async () => {
+		render();
+		await settle();
+		const original = pane().querySelector('h1');
+		const originalRow = openRow();
+		served = [{ ...served[0], key: 'review:new-key', source: activitySource('Another agent', 'thread-another') }, ...served.slice(1)];
+		listeners.get('doc_comment_changed')?.();
+		await settle();
+		expect(pane().querySelector('h1')).toBe(original);
+		expect(openRow()).toBe(originalRow);
+		expect(pane().textContent).toContain('No longer waiting on you.');
 	});
 
 	it('opens what followed after acting, once the server stops returning the item', async () => {
@@ -492,7 +539,7 @@ describe('Activity’s bottom band at rest', () => {
 		expect(start).toBeGreaterThan(-1);
 		expect(shellSource.slice(start, shellSource.indexOf('}', start))).toContain('display: inline;');
 		// It must come after the rule that hides them, or that rule wins.
-		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by {'));
+		expect(start).toBeGreaterThan(shellSource.indexOf('.rb-dock .rb-dock-sep, .rb-dock:not(.open) .rb-dock-by {'));
 	});
 });
 
@@ -546,12 +593,14 @@ describe('a reply row in a document with two replied threads', () => {
 		served = [replyRow('reply:first', 'c-first', 'r-first', 1), replyRow('reply:second', 'c-second', 'r-second', 2)];
 		const fetchStub = vi.mocked(fetch);
 		const queue = fetchStub.getMockImplementation()!;
-		fetchStub.mockImplementation(async (input) => String(input).includes('/api/threads/thread-plans/artifacts')
-			? respond(200, { nodes: [{ kind: 'artifact', id: 'art-later', name: 'later.md', title: 'Later row', path: '/docs/later.md' }], needs_attention: [] })
+		fetchStub.mockImplementation(async (input) => /\/api\/artifacts\/art-later(?:\?|$)/.test(String(input))
+			? respond(200, { artifact: { id: 'art-later', title: 'Later row', path: '/docs/later.md' } })
 			: queue(input));
 		render();
 		await settle();
 		expect(activityTab()).toMatchObject({ landOn: 'new-replies', landOnCommentId: 'c-first' });
+		expect(buttonNamed('Reply')).toBeDefined();
+		expect(buttonNamed('Open in chat')).toBeUndefined();
 
 		rows()[1].click();
 		await settle();

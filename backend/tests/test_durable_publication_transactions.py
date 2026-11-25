@@ -185,9 +185,13 @@ def test_filesystem_work_is_outside_sqlite_writer(durable_scope, monkeypatch, op
         monkeypatch.setattr(Path, name, guarded(getattr(Path, name), name))
     for name in (
         "claim_bound_file", "stage_bound_file", "stage_bound_bytes", "copy_bound_file",
-        "replace_if_expected", "restore_claimed_file", "_sha256_file",
+        "restore_claimed_file", "_sha256_file",
     ):
         monkeypatch.setattr(durable_writes, name, guarded(getattr(durable_writes, name), name))
+    from registry import durable_write_preconditions
+    for name in ("replace_if_expected", "restore_claimed_file"):
+        monkeypatch.setattr(durable_write_preconditions, name,
+                            guarded(getattr(durable_write_preconditions, name), name))
 
     _run(durable_scope, operation, source)
 
@@ -333,7 +337,8 @@ def test_cleanup_commit_failure_keeps_committed_publication_recoverable(
     retained = target.read_bytes()
     def no_second_write(*args, **kwargs):
         pytest.fail("recovery must not replace an already committed target")
-    monkeypatch.setattr(durable_writes, "replace_if_expected", no_second_write)
+    from registry import durable_write_preconditions
+    monkeypatch.setattr(durable_write_preconditions, "replace_if_expected", no_second_write)
     durable_writes.recover_write_intents(workspace=workspace)
     assert target.read_bytes() == retained
     assert service.find_file_identity(str(target), db=db)["id"] == identity["id"]

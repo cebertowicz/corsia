@@ -23,5 +23,5 @@ export function noteDocumentLoad(artifactId: string | null, draft: EmailDraftInf
 /** A live frame's newer reading of the header, for a document its load found to be an email draft. */
 export function noteLiveHeader(artifactId: string | undefined, draft: EmailDraftInfo | undefined): void {
 	if (!artifactId || !draft) return;
-	emailDraftHeaders.update((all) => ({ ...all, [artifactId]: draft }));
+	emailDraftHeaders.update((all) => ({ ...all, [artifactId]: { ...all[artifactId], ...draft } }));
 }

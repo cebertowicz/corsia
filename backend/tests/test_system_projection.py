@@ -327,3 +327,19 @@ def test_projection_is_advertised_only_inside_ordinary_read_scope(monkeypatch) -
     monkeypatch.setattr("core.system_projection._agent_readable", real_agent_readable)
     assert ensure_system_projection(STATE_ROOT / "ws") is None
     assert not (STATE_ROOT / "ws" / ".corsia").exists()
+
+
+def test_the_app_bundle_carries_the_coordination_models_beside_its_backend() -> None:
+    """The locator finds the models at ``docs/`` beside ``backend/``, so the app must ship them there."""
+    repo = Path(__file__).resolve().parents[2]
+    backend_dir = repo / "backend"
+    assert coordination_models_dir() == backend_dir.parent / "docs" / "coordination-models"
+
+    resources = json.loads((repo / "desktop" / "src-tauri" / "tauri.conf.json").read_text())["bundle"]["resources"]
+    assert resources["../bundle/backend"] == "backend"
+    assert resources["../bundle/docs"] == "docs"
+
+    build = (repo / "desktop" / "scripts" / "build-macos-bundle.sh").read_text()
+    assert 'rsync -a --delete "$ROOT/docs/coordination-models/" "$BUNDLE_ROOT/docs/coordination-models/"' in build
+    assert 'PYTHONPATH="$APP/Contents/Resources/backend"' in build
+    assert '|| fail "$APP does not carry every System manifest source"' in build

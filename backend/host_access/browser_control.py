@@ -11,7 +11,7 @@ from host_access import browser_cdp_frames, browser_pane_state, browser_step_lif
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
-from infra import state
+from infra import saved_login_offers, state
 
 log = logging.getLogger(__name__)
 
@@ -222,6 +222,22 @@ def hide_field_values(snapshot: str) -> str:
     return "\n".join(lines)
 
 
+async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reopen: Callable[[], Awaitable[None]]) -> None:
+    """After back or forward, load the page again as a new navigation once the session has held a page.
+
+    A page that was in a person step or under the password read guard can come back from the back-forward
+    cache, or from its history entry, with its document and filled values. History doesn't say which entry
+    that was, so once a session has held any page, every back and forward loads fresh. A failed check
+    fails closed: the agent gets no page.
+    """
+    try:
+        result = await probe(_known_nodes(thread_id))
+    except Exception as exc:
+        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+    if result.visible_nodes or _guarded_visits.get(thread_id) or browser_step_lifecycle.held_pages(thread_id):
+        await reopen()
+
+
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
                               session: str | None = None,
                               current_session: Callable[[], str | None] | None = None) -> None:
@@ -328,9 +344,10 @@ def person_input(thread_id: str) -> None:
 
 
 def browser_closed(thread_id: str) -> None:
-    """Clear read guards and agent presence; the session hook owns step cleanup."""
+    """Clear read guards, agent presence and any save-login offer; the session hook owns step cleanup."""
     browser_pane_state.agent_left(thread_id)
     _guarded_visits.pop(thread_id, None)
+    saved_login_offers.drop_thread(thread_id)
 
 
 async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...], resolve: Resolve | None) -> None:

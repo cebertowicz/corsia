@@ -8,7 +8,8 @@ for anyone. The ``saved_logins`` table (``infra.key_store_schema``) holds what
 may be shown: the site, the username, whether the login is out of date, who
 saved it and when it was last used.
 
-No HTTP route and no agent tool reaches this module. :func:`password_for_fill`
+No agent tool reaches this module, and only the person's own routes
+(``api.saved_logins``) list, save and delete logins. :func:`password_for_fill`
 is the one reader of a password, for the server's own fill, and
 :func:`blanking_values` the one reader of them all, for blanking them out of
 what the browser returns to agents. A test pins which modules may name either.
@@ -19,6 +20,7 @@ Errors raised here carry fixed text and never a value.
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import re
 import sqlite3
@@ -52,7 +54,7 @@ _LOGIN_ID = re.compile(r"[0-9a-f]{32}")
 #: Unicode control characters (NUL included) and unpaired surrogates, which no page can be typed.
 _REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
 
-_SITE_REFUSAL = "A saved login's site is an https address, such as https://example.com."
+_SITE_REFUSAL = "CORSIA saves logins only for sites whose address starts with https://."
 _USERNAME_REFUSAL = f"A username is 1-{USERNAME_MAX} characters with no control characters."
 _PASSWORD_EMPTY = "Type the password first."
 _PASSWORD_REFUSAL = f"A password is 1-{VALUE_MAX} characters with no control characters. Nothing was saved."
@@ -124,7 +126,8 @@ def _no_control(text: str) -> bool:
     return not any(unicodedata.category(char) in _REFUSED_CATEGORIES for char in text)
 
 
-def _username(username: object) -> str:
+def validated_username(username: object) -> str:
+    """The username exactly as given: 1 to ``USERNAME_MAX`` characters with no control characters."""
     if not isinstance(username, str) or not 1 <= len(username) <= USERNAME_MAX or not _no_control(username):
         raise KeyStoreError(_USERNAME_REFUSAL)
     return username
@@ -156,7 +159,7 @@ def save_login(
     current password; its id and ``created_at`` stay.
     """
     clean_site = normalized_site(site)
-    clean_username = _username(username)
+    clean_username = validated_username(username)
     clean_password = validated_password(password)
     if not isinstance(saved_by, str) or not saved_by:
         raise KeyStoreError(_SAVED_BY_REFUSAL)
@@ -186,6 +189,12 @@ def logins_for_site(site: object, *, db: sqlite3.Connection | None = None) -> li
     rows = _db(db).execute(
         f"SELECT {_COLUMNS} FROM saved_logins WHERE site = ? ORDER BY username", (normalized_site(site),),
     ).fetchall()
+    return [SavedLogin(*tuple(row)) for row in rows]
+
+
+def list_logins(*, db: sqlite3.Connection | None = None) -> list[SavedLogin]:
+    """Every saved login, by site and then username. Never a password."""
+    rows = _db(db).execute(f"SELECT {_COLUMNS} FROM saved_logins ORDER BY site, username").fetchall()
     return [SavedLogin(*tuple(row)) for row in rows]
 
 
@@ -239,6 +248,19 @@ def password_for_fill(login_id: object, *, db: sqlite3.Connection | None = None)
     if not value:
         raise KeyStoreError(_NO_LOGIN)
     return value
+
+
+def password_matches(login_id: object, password: object, *, db: sqlite3.Connection | None = None) -> bool:
+    """Whether ``password`` is this login's saved password. Answers yes or no and never returns the value.
+
+    For the save offer only, to make no offer when the person signed in with the password already saved.
+    A test pins which modules may name it.
+    """
+    if not isinstance(password, str):
+        return False
+    name = entry_name(_login_id(login_id))
+    saved = key_store_values.resolve(_db(db), [name]).get(name)
+    return bool(saved) and hmac.compare_digest(saved.encode("utf-8"), password.encode("utf-8"))
 
 
 def blanking_values(*, db: sqlite3.Connection | None = None) -> frozenset[str]:

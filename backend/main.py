@@ -101,6 +101,7 @@ from api.google import router as google_router
 from api.microsoft import router as microsoft_router
 from api.messages import router as messages_router
 from api.keys import router as keys_router
+from api.saved_logins import router as saved_logins_router
 
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,7 @@ async def _emit_error_api(request: Request, exc: Exception):
 app.include_router(system_router)
 app.include_router(system_perf_router)
 app.include_router(keys_router)
+app.include_router(saved_logins_router)
 app.include_router(google_router)
 app.include_router(microsoft_router)
 app.include_router(messages_router)

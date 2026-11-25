@@ -1,7 +1,7 @@
 """Build comment position frames on the live document's owning event loop."""
 from __future__ import annotations
 
-from doceditor import comments
+from doceditor import comment_snapshots, comments, snapshot_reanchor
 from doceditor.comment_anchoring import resolve_threads
 from infra.db_async import run_in_db
 from doceditor.live_text import clone, follow_spans
@@ -29,11 +29,28 @@ def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
     return ranges
 
 
+def _rows_and_versions(artifact_id: str):
+    """Read rows and versions consistently under SQLite write admission."""
+    from infra.database import write_transaction
+    with write_transaction(None, scope='comment_versions_read') as db:
+        rows = comments.list_for_artifact(artifact_id, db=db)
+        versions = comment_snapshots.read_many(db, (row['snapshot_id'] for row in rows if row.get('snapshot_id') is not None))
+        return rows, versions
+
+
 async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
     """Resolve and capture ranges, digest and vector together without yielding."""
-    rows = await run_in_db(comments.list_for_artifact, artifact_id)
+    if reload:
+        rows, versions = await run_in_db(_rows_and_versions, artifact_id)
+    else:
+        rows = await run_in_db(comments.list_for_artifact, artifact_id)
     live = entry.live
-    resolve_threads(rows, live.text, ranges=None if reload else live.ranges)
+    if reload:
+        # These frames draw the cards, so a detached comment gets a nearby place for its
+        # card. A list response leaves the stored offsets alone; that is what an agent reads.
+        snapshot_reanchor.resolve_versioned(rows, live.text, versions=versions, detached_point=True)
+    else:
+        resolve_threads(rows, live.text, ranges=live.ranges)
     # A decided suggestion that lost its place keeps its last offsets, which a
     # later, shorter text can leave past the end; it then has no live place.
     placed = [row for row in rows

@@ -25,7 +25,10 @@ from pydantic import BaseModel, Field, model_validator
 from api.comment_post_timing import COMMENT_TIMING_HEADER, log_comment_timing
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
+from doceditor import (
+    comment_audience, comments as store, doc_images, feedback_batches, feedback_state,
+    image_regions, snapshot_reanchor,
+)
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
@@ -42,7 +45,6 @@ from doceditor.comment_actions import (
 from doceditor.comment_batch_actions import accept_all_open, decide_all_from_author
 from doceditor.comments import CommentTargetMoved, CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
-from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, require_user_header_only
 from infra.database import get_db, write_transaction
 from api.doc_comment_access import NotCommentable, _artifact_for_read, _artifact_for_write, _assert_owns_artifact, not_commentable_response
@@ -193,21 +195,21 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
                 text = read_doc_text(artifact["path"] if artifact else None)
             except (OSError, ValueError):
                 text = None
-            updates = []
-            for update in body.updates:
-                prepared = dict(update)
-                comment = store.get_comment(str(update.get("id", "")), db=db)
-                if text is not None and comment and comment.get("anchor_text"):
-                    context = anchor_context(
-                        text,
-                        update.get("from_off"),
-                        update.get("to_off"),
-                        comment["anchor_text"],
-                    )
-                    if context is not None:
-                        prepared["anchor_prefix"], prepared["anchor_suffix"] = context
-                updates.append(prepared)
-            return store.update_positions(live_id, updates, db=db)
+            def verify_text():
+                current_artifact = registry_models.get_artifact(live_id, db=db)
+                current_path = current_artifact.get('path') if current_artifact else None
+                if current_path and find_live(Path(current_path)) is not None:
+                    raise HTTPException(409, 'Live comment positions are saved by the server')
+                try:
+                    current_text = read_doc_text(current_path)
+                except (OSError, ValueError):
+                    current_text = None
+                if current_path != (artifact.get('path') if artifact else None) or current_text != text:
+                    raise HTTPException(409, 'Document changed while saving comment positions')
+            try:
+                return snapshot_reanchor.persist_client_positions(db, live_id, text, body.updates, verify_text=verify_text)
+            except snapshot_reanchor.AnchorConflict as exc:
+                raise HTTPException(409, 'Comment changed while saving positions') from exc
         finally:
             db.close()
 
@@ -229,15 +231,41 @@ def _person_writer(user: dict, saved: dict):
     """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
-        _suggestion_author: str | None, accepted: tuple[str, ...],
+        _suggestion_author: str | None, accepted: tuple[str, ...], *, suppress_feedback: bool = False,
     ) -> dict:
         receipt = await save_document_text(
             DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-            expected_sha256=expected_sha256, accepted=accepted,
+            expected_sha256=expected_sha256, accepted=accepted, suppress_feedback=suppress_feedback,
         )
         saved.update(text=text, revision=receipt["revision"])
         return receipt
     return write
+
+
+class SuggestionHistoryTransition(BaseModel):
+    event_id: str
+    ids: list[str]
+    direction: str
+    expected_sha256: str
+    text: str
+
+
+@router.post("/artifacts/{artifact_id}/suggestions/history")
+async def suggestion_history_transition(artifact_id: str, token: str, body: SuggestionHistoryTransition):
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    from doceditor.suggestion_history_actions import transition_suggestion_history
+
+    saved: dict = {}
+    try:
+        return await transition_suggestion_history(
+            artifact_id, body.event_id, body.ids, body.direction, body.expected_sha256, body.text,
+            user_id=user['id'], write=_person_writer(user, saved))
+    except CommentActionError as exc:
+        return decision_refusal(exc)
+    except DocumentSaveError as exc:
+        raise document_save_http_exception(exc) from exc
 
 
 @router.post("/artifacts/{artifact_id}/suggestions/accept-all")
