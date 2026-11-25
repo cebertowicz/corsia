@@ -3,7 +3,7 @@ import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
 import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
-import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence, type MapPos } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage, postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -42,6 +42,8 @@ interface DocViewerImagesOptions {
 	comments: () => DocComment[];
 	artifactId: () => string | null;
 	target: () => DocViewerTarget | null;
+	/** The thread whose tab holds the open image: the leaf's own, which is not the document's thread when the leaf shows another thread's document. */
+	tabThreadId: () => string | null;
 	readOnly: () => boolean;
 	text: () => string;
 	session: () => LiveDocumentSession | undefined;
@@ -104,9 +106,9 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		else void openAt(image, focus).then((opened) => { if (!opened) otherwise(); });
 	}
 	/** The document changed under an open image: it keeps to its markdown. */
-	function remap(mapPos: (pos: number) => number) {
-		const target = options.target();
-		if (target?.threadId) remapTabDocumentImage(target.threadId, target.instanceId, mapPos);
+	function remap(mapPos: MapPos) {
+		const target = options.target(), key = options.tabThreadId();
+		if (target && key) remapTabDocumentImage(key, target.instanceId, mapPos);
 	}
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),

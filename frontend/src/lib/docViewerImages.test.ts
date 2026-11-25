@@ -19,14 +19,14 @@ const TARGET: DocViewerTarget = { instanceId: 'tab-1', path: 'doc.md', name: 'do
 const batch = { pendingCount: 0 } as unknown as DocFeedback;
 const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, top: 0 };
 
-function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null; imageCacheKey?: string } = {}) {
+function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null; imageCacheKey?: string; tabThreadId?: string | null } = {}) {
 	const onOpenImage = overrides.onOpenImage === undefined ? vi.fn() : overrides.onOpenImage;
 	const showInText = vi.fn();
 	const imageCacheKey = { value: overrides.imageCacheKey ?? 'open-1' };
 	const comments = [onImage('one'), onImage('two'), onImage('later', 40, 54), comment('text', { from: 10, to: 24 })];
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
-		artifactId: () => (overrides.artifactId === undefined ? 'a1' : overrides.artifactId), target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
+		artifactId: () => (overrides.artifactId === undefined ? 'a1' : overrides.artifactId), target: () => (overrides.target === undefined ? TARGET : overrides.target), tabThreadId: () => (overrides.tabThreadId === undefined ? 't1' : overrides.tabThreadId), readOnly: () => false,
 		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch, showInText,
 		imageCacheKey: () => imageCacheKey.value,
 	});
@@ -110,7 +110,13 @@ describe('opening a document image from its comments', () => {
 		const mapPos = (pos: number) => pos + 1;
 		viewer().images.remap(mapPos);
 		expect(remapTabDocumentImage).toHaveBeenCalledWith('t1', 'tab-1', mapPos);
-		viewer({ target: { ...TARGET, threadId: null } }).images.remap(mapPos);
+		viewer({ tabThreadId: null }).images.remap(mapPos);
 		expect(remapTabDocumentImage).toHaveBeenCalledOnce();
+	});
+
+	it('keeps the image held by the leaf’s tab on its markdown when the leaf shows another thread’s document', () => {
+		const mapPos = (pos: number) => pos + 1;
+		viewer({ tabThreadId: 'host-thread' }).images.remap(mapPos);
+		expect(remapTabDocumentImage).toHaveBeenCalledWith('host-thread', 'tab-1', mapPos);
 	});
 });

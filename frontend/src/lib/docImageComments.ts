@@ -123,8 +123,14 @@ export function groupRows<T extends { regionNumber?: number | null }>(comments: 
 	return rows;
 }
 
-/** An open image follows its markdown through edits, as its comments do. */
-export function remapOccurrence<T extends ImageOccurrence>(image: T, mapPos: (pos: number) => number): T {
-	const from = mapPos(image.from), to = mapPos(image.to);
+/** Where a position goes through an edit; `assoc` says which side of text inserted exactly at it the position stays on. */
+export type MapPos = (pos: number, assoc: -1 | 1) => number;
+
+/**
+ * An open image follows its markdown through edits, as its comments do. Text inserted exactly at the image's start or
+ * end lands outside it, so only text inserted inside the markdown stretches it.
+ */
+export function remapOccurrence<T extends ImageOccurrence>(image: T, mapPos: MapPos): T {
+	const from = mapPos(image.from, 1), to = mapPos(image.to, -1);
 	return from === image.from && to === image.to ? image : { ...image, from, to };
 }
