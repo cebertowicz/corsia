@@ -42,7 +42,7 @@
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
 	import { createViewerSuggestionHistory } from '$lib/docViewerSuggestionHistory.svelte';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
-	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
+	import { reload as reloadAttentionQueue } from '$lib/stores/attentionQueueState.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus, { type PresenceView } from './DocPresenceStatus.svelte';

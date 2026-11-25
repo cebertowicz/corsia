@@ -41,8 +41,6 @@ import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 import { activityOpenRequest, openActivity } from '$lib/stores/activityOpen';
 import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 import { consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
-import { activeId, expandedId, goneReply } from '$lib/stores/attentionDock.svelte';
-import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
 import { connectionState } from '$lib/stores/connection';
 import { token, user } from '$lib/stores/auth';
 
@@ -344,19 +342,7 @@ describe('Activity list', () => {
 });
 
 describe('what a press comes to, reported in Activity', () => {
-	const dockState = () => ({
-		expanded: get(expandedId), active: get(activeId), notice: get(answerNotice), gone: get(goneReply), answers: get(answers),
-	});
-	const dockAtRest = { expanded: null, active: null, notice: null, gone: null, answers: {} };
 	const dropServed = (key: string) => { served = served.filter((item) => item.key !== key); };
-
-	beforeEach(() => {
-		expandedId.set(null);
-		activeId.set(null);
-		answerNotice.set(null);
-		goneReply.set(null);
-		answers.set({});
-	});
 
 	it('sends a held message once and advances after the server confirms delivery', async () => {
 		let finish!: (response: Response) => void;
@@ -406,7 +392,6 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(openRow()).toBe(rows()[5]);
 		expect(rows()).toHaveLength(7);
 		expect(host.querySelector('.count')?.textContent).toBe('6');
-		expect(dockState()).toEqual(dockAtRest);
 
 		rows()[6].click();
 		await settle();
@@ -458,7 +443,6 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(buttonNamed('Answer')!.disabled).toBe(true);
 		expect(openRow()).toBe(rows()[1]);
 		expect(pane().querySelector('h1')?.textContent).toBe(activityFrameItems()[1].title);
-		expect(dockState()).toEqual(dockAtRest);
 	});
 
 	it('shows a closed decision fallback when the refusal has no sentence', async () => {
@@ -560,8 +544,6 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(alert()).toBe('Couldn’t save your answer. Try again.');
 		expect(buttonNamed('Try again')!.disabled).toBe(false);
 		expect(openRow()).toBe(rows()[1]);
-		// The dock's drawer must not open on this decision the next time a chat shows.
-		expect(dockState()).toEqual(dockAtRest);
 
 		fail = false;
 		buttonNamed('Try again')!.click();
@@ -570,7 +552,6 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(keys[1]).toBe(keys[0]);
 		expect(rows()).toHaveLength(6);
 		expect(alert()).toBeNull();
-		expect(dockState()).toEqual(dockAtRest);
 	});
 
 	it('puts Try again on the button that failed', async () => {

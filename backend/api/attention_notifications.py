@@ -38,5 +38,9 @@ def _mark_notifications_read(user_id: str, documents: list[NotificationDocument]
 async def post_notifications_read(body: NotificationsReadBody,
                                   user: dict = Depends(require_user_header_only)):
     """Mark documents read up to the replies shown; later replies remain unread."""
+    from api.attention import QUEUE_ITEMS_CAP
+
+    if len(body.documents) > QUEUE_ITEMS_CAP:
+        raise HTTPException(status_code=422, detail="Too many documents")
     await run_in_db(lambda: _mark_notifications_read(user["id"], body.documents))
     return {"read": len(body.documents)}

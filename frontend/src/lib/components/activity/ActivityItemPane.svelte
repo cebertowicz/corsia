@@ -28,7 +28,7 @@
 	 * The open item, in the pane the chat uses for documents. A document opens in Activity's own workspace (never a
 	 * chat's), read for the chat it came from; every other kind gets the same frame. Each control settles the item
 	 * through the call its own surface already uses; the list then re-reads, and the item leaves only when the server
-	 * stops returning it. Every outcome of a press is reported here; nothing here writes the dock's state.
+	 * stops returning it. Every outcome of a press is reported here; nothing here writes the attention queue's state.
 	 */
 	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat }: {
 		item: ActivityQueueItem;
@@ -218,7 +218,7 @@
 {#snippet failureLine()}
 	<!-- One flex item, so the reference sits under its line on the band's wrapping row, not beside the buttons. -->
 	{#if failure}<div class="act-failure-row"><p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}</div>
-	{:else if held?.error}<!-- Why the last Send didn't go, as the dock shows it until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
+	{:else if held?.error}<!-- Why the last Send didn't go, shown here until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
 {#if doc}

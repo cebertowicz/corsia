@@ -451,7 +451,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("names genuine human decisions and hands off to Activity", async () => {
-    const { __reset } = await import("$lib/stores/attentionDock.svelte");
+    const { __reset } = await import("$lib/stores/attentionQueueState.svelte");
     const { activityOpenRequest } = await import("$lib/stores/activityOpen");
     __reset();
     activityOpenRequest.set(null);
@@ -487,7 +487,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("opens a refreshed non-head decision row in this thread", async () => {
-    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    const { __reset, queue } = await import("$lib/stores/attentionQueueState.svelte");
     const { activityOpenRequest } = await import("$lib/stores/activityOpen");
     __reset();
     activityOpenRequest.set(null);
@@ -521,7 +521,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("reports a stale decision row instead of swallowing the click", async () => {
-    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    const { __reset, queue } = await import("$lib/stores/attentionQueueState.svelte");
     __reset();
     activeThreadId.set("t1");
     const decision = decisionItem({
@@ -547,7 +547,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("renders its own thread's rows and the plan's total when that spans more", async () => {
-    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    const { __reset, queue } = await import("$lib/stores/attentionQueueState.svelte");
     __reset();
     activeThreadId.set("t1");
     const own = decisionItem({
@@ -579,7 +579,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("clears a stale right-pane decision handoff instead of swallowing the click", async () => {
-    const { __reset } = await import("$lib/stores/attentionDock.svelte");
+    const { __reset } = await import("$lib/stores/attentionQueueState.svelte");
     __reset();
     const payload = envelope("t1");
     payload.attention = { awaiting_count: 1 };

@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
 	import PlanDrillView from './PlanDrillView.svelte';
-	import { checkDecision, type DecisionCheck } from '$lib/stores/attentionDock.svelte';
+	import { checkDecision, type DecisionCheck } from '$lib/stores/attentionQueueState.svelte';
 	import { openActivity } from '$lib/stores/activityOpen';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
@@ -13,7 +13,7 @@
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId } from '$lib/stores/threads';
-	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { visibleQueue } from '$lib/stores/attentionQueueState.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorNodeAction } from '$lib/api/plans';

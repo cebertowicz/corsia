@@ -365,6 +365,6 @@
 	.phone .list-col { width: 100%; border-right: 0; }
 	.phone .pane-col { display: none; }
 	.phone.phone-item .list-col { display: none; }
-	/* On a phone the app bar carries back and Next, so the item's tab row sits below it rather than in it. */
+	/* On a phone the app bar carries back, so the item's tab row sits below it rather than in it. */
 	.phone.phone-item .pane-col { display: flex; margin-top: var(--header-bottom); }
 </style>

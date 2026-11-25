@@ -48,6 +48,15 @@ def mark_documents_read(user_id: str, documents: list[tuple[str, str]]) -> None:
 
     db = get_db()
     try:
+        # Validate the complete request before any chunk can commit. A bad reply in a
+        # later chunk must not leave earlier documents marked read.
+        pairs = set(documents)
+        found = {(row["artifact_id"], row["id"]) for row in db.execute(
+            "SELECT artifact_id, id FROM doc_comments WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps([reply_id for _, reply_id in pairs]),),
+        )}
+        if found != pairs:
+            raise ValueError("reply_not_found")
         for start in range(0, len(documents), _READ_CHUNK):
             chunk = dict(documents[start:start + _READ_CHUNK])
             with write_transaction(db, scope="mark_documents_read") as connection:
