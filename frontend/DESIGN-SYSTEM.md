@@ -686,18 +686,19 @@ Two compensating patterns:
    it; in that standalone mode `100vh` is the full screen height while
    the layout viewport is shorter, so the shell sizes to `100dvh` under
    `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
-2. **3-stop linear gradient on glass headers** (ChatHeader, AppShellBar
-   on mobile):
+2. **Even frosted bar on the phone header** (`Header.svelte`
+   `.shell-header::before` at `max-width: 768px`): `--glass-blur` with one
+   flat tint and no gradient or mask:
    ```css
-   background-image: linear-gradient(
-     180deg,
-     color-mix(in srgb, var(--bg-primary) 45%, transparent) 0%,
-     color-mix(in srgb, var(--bg-primary) 25%, transparent) 50%,
-     transparent 100%
-   );
+   background-image: none;
+   background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);
+   mask-image: none;
    ```
-   Replaces the inset rim on mobile (which read as a hairline seam between
-   iOS status bar and our chrome).
+   No mask: WebKit masks the blurred backdrop too, so a fading mask shows
+   the unblurred content through the lower header and ends in a hard line.
+   Under `prefers-reduced-transparency` the bar is solid
+   `--header-top-base`. Replaces the inset rim on mobile (which read as a
+   hairline seam between iOS status bar and our chrome).
 
 **Safe-area insets:** `--safe-bottom: env(safe-area-inset-bottom, 0px)`
 and `--safe-top: env(safe-area-inset-top, 0px)`. Use these for any
@@ -1172,7 +1173,7 @@ The app's outer shell coordinates four moving parts:
 
 **On mobile / PWA:** body pins to `--bg-primary` (no vibrancy behind);
 sidebar still uses thick glass but blurs `--bg-secondary` rather than the
-desktop. Mobile glass headers add a 3-stop gradient (§2.13).
+desktop. The phone header is an even frosted bar with a flat tint (§2.13).
 
 **`AppShellBar`** is a slim chrome strip used on non-chat views (Settings,
 Project) — same drag region + traffic-light inset as ChatHeader, but
@@ -1198,7 +1199,7 @@ the `Section` primitive (different aesthetic — see §3.6 note).
 `ChatHeader` and `AppShellBar` use `--glass-thin` + `--glass-blur` +
 `--glass-rim`. Height = `var(--header-height)` (60 desktop / 64 mobile; 44 Tauri shell — set via `[data-shell="tauri"]`).
 
-**Mobile:** rim suppressed, replaced by 3-stop gradient (§2.13).
+**Mobile:** rim suppressed; the bar is an even frosted bar with a flat tint (§2.13).
 
 **Tauri shell:** `:global(html[data-shell="tauri"]) .header.shell-inset`
 adds `padding-left: 88px` when sidebar collapsed (clears traffic lights).
@@ -1290,8 +1291,8 @@ Use `--safe-bottom` and `--safe-top`. Examples:
 - ChatHeader `height: calc(var(--header-height) + env(safe-area-inset-top))`.
 - InputBar bottom padding includes `var(--safe-bottom)`.
 
-### 6.3 Mobile glass gradient
-Replaces inset rim on mobile glass headers. See §2.13 for the recipe.
+### 6.3 Mobile glass header
+An even frosted bar replaces the inset rim on the phone header. See §2.13 for the recipe.
 
 ### 6.4 Swipe gestures
 Sidebar session rows: rubber-band 0.35×, dominance 1.4×, haptic blip on

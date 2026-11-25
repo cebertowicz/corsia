@@ -362,4 +362,12 @@ describe('Header glass layers', () => {
 		expect(phoneHeader).toContain('height: var(--header-bottom);');
 		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));');
 	});
+
+	it('makes the phone header solid when transparency is reduced', () => {
+		// Reduced transparency turns --glass-blur off, so a part-transparent tint would show the
+		// transcript sharp through the bar.
+		const at = headerSource.indexOf('@media (max-width: 768px) and (prefers-reduced-transparency: reduce)');
+		expect(at).toBeGreaterThan(-1);
+		expect(rule(headerSource.slice(at), '.shell-header::before')).toContain('background-color: var(--header-top-base);');
+	});
 });

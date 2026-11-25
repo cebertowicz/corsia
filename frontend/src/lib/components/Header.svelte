@@ -376,4 +376,8 @@
 		.h-act.overflowable { display: none; }
 		.h-overflow { display: flex; }
 	}
+	/* With reduced transparency --glass-blur is none (app.css), so the phone bar is solid. */
+	@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
+		.shell-header::before { background-color: var(--header-top-base); }
+	}
 </style>
