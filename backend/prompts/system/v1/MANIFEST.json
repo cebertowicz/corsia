@@ -262,10 +262,10 @@
       "sha256": "e38d08303a38eb082ecaaa5258eb637782eb2edd5d90406b4a377c7923cb0a7e"
     },
     {
-      "bytes": 8287,
+      "bytes": 8401,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "fae58854bddeb4591b32e51183983ec907186cb22f8477b3d42f9737ff56a638"
+      "sha256": "2ba464d5d3d3221e2f33bbb0c9412c9561126451e5619eecbd4405dd2dc8e7dd"
     },
     {
       "bytes": 6035,
@@ -470,6 +470,12 @@
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
       "sha256": "e4d87199e693df821fe3e68e08b4fea751f2bd6ee4a29a2103f2a61358806937"
+    },
+    {
+      "bytes": 6962,
+      "kind": "skill",
+      "path": "skills/voice-profiles/SKILL.md",
+      "sha256": "bdf8a533b3cc783b74fa0a41bd74902b98aa014052febd2e56d7f12095e762a7"
     },
     {
       "bytes": 5585,

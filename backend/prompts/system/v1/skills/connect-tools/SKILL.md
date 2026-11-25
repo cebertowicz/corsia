@@ -73,6 +73,7 @@ Some connections need a permission macOS lets only the person give, such as Full
 - The agent that will use the connection has read something real through it.
 - The connection is noted where other agents look (skill `memory-placement`, unless your tools already list it), so they reuse it instead of connecting again.
 - If the work needs to hear about changes, the first one has arrived.
+- For a mail or messaging tool, the person's writing guide is built or extended from it (skill `voice-profiles`).
 
 Then tell the person in one line what you can now see and still can't.
 
