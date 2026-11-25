@@ -134,8 +134,12 @@ def place_of(db, plan_id: str, node_id: str) -> tuple[int, int] | None:
     return roots.index(node_id), len(roots)
 
 
-def placing_reply(db, plan_row, node_id: str, *, actor, inserted: bool) -> dict[str, Any] | None:
+def placing_reply(db, plan_row, node_id: str, *, actor, inserted: bool,
+                  moved: list[str] = ()) -> dict[str, Any] | None:
     """The list and landing line an owner's own top-level add or insert gets, or None.
+
+    ``moved`` holds the items the add put past the cap (``plans.plan_cap``): the
+    line says whether this one went to Later, or which ones did to make room.
 
     None for a nested add, an add by anyone but the plan's owner (they are told
     through ``tell_owner_added``), and a live worker's plan: a worker has one job
@@ -158,8 +162,12 @@ def placing_reply(db, plan_row, node_id: str, *, actor, inserted: bool) -> dict[
     facts = status._facts(db, plan_row, actor, service._now(), costs=False)
     top = compose(db, str(plan_row["id"]), facts, include=node_id)
     place, total = where
+    from plans.plan_cap import CAP
+
+    others = [str(service._node_row(db, root)["title"]) for root in moved if root != node_id]
     landing = text.top_landing(
         place, node_id, int(node["revision"]), last=not inserted and place == total - 1,
+        in_later=node_id in moved, moved=others, cap=CAP,
     )
     return {"top_of_plan": top.shown(), "landing": landing}
 

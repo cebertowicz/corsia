@@ -77,6 +77,10 @@ def edit_many(
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common, reconcile_move=False,
     ))
+    if changed.get("later") is False:
+        from plans import plan_cap
+
+        plan_cap.pulled_back(db, [entry["node_id"] for entry in applied], actor_id=common["actor_id"])
     # Each move's own reconcile is deferred to this one, after every row is placed.
     moved = "parent_id" in changed and bool(applied)
     return {

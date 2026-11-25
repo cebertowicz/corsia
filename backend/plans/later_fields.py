@@ -121,6 +121,8 @@ def _refuse_live_helper(connection, node, *, actor_id: str | None) -> None:
 def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | None) -> dict:
     """Apply an edit that names the cut, and free the slot when the cut moved onto it.
 
+    A pull back applies the cap on unstarted work (``plans.plan_cap``) after it.
+
     Moving the task that holds the executor's slot below the cut is a park: the
     attempt is released, the plan reconciles, and the answer carries the same
     ``next`` block a park returns, so an agent never holds a slot its own edit
@@ -144,6 +146,11 @@ def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | Non
     mutations.edit_node(node_id, **changed, **expected(params), **common)
     if changed["later"] and held:
         admission.release(node_id, "later", db=db)
+    if not changed["later"]:
+        # A pull back stays where it was put; the lowest other unstarted item makes room.
+        from plans import plan_cap
+
+        plan_cap.pulled_back(db, [node_id], actor_id=common["actor_id"])
     if not changed["later"] or not held or attempts.open_attempt(db, node_id) is not None:
         return admission.result(node_id, db=db)
     admission.reconcile_plan(
