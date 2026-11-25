@@ -3,6 +3,7 @@ import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
+import { claimDecision, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
 import { token } from '$lib/stores/auth';
 import { emit } from '$lib/ws/events';
 import type { HostAccessLease } from '$lib/api/hostAccess';
@@ -134,6 +135,38 @@ afterEach(() => {
 });
 
 describe('HostAccessLeaseControl', () => {
+	it('keeps one decision in flight per lease', () => {
+		const attempt = claimDecision('helper-test')!;
+		expect(claimDecision('helper-test')).toBeNull();
+		expect(isCurrentDecision('helper-test', attempt)).toBe(true);
+		releaseDecision('helper-test', attempt);
+		expect(isCurrentDecision('helper-test', attempt)).toBe(false);
+	});
+	it.each([
+		['reviewer_unavailable', 'Host access could not start because the reviewer is unavailable; ask the agent to request access again once the reviewer can run.'],
+		['activation_failed', 'Host access could not start; ask the agent to request access again.'],
+		['raw secret detail', 'Host access could not start; ask the agent to request access again.'],
+	])('shows a safe message when approval returns blocked: %s', async (reason, message) => {
+		let decided = false;
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'POST') {
+				decided = true;
+				return response({ ...waitingLease, state: 'blocked', terminal_reason: reason });
+			}
+			return response({ leases: decided ? [] : [waitingLease] });
+		}));
+		component = mountControl();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Review temporary host access"]')).toBeTruthy());
+		const dialog = await openPendingDrawer();
+		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Approve')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain(message));
+		expect(host.textContent).not.toContain('raw secret detail');
+		emit('host_access_changed', {});
+		await tick();
+		expect(host.textContent).toContain(message);
+	});
+
 	it('shows the full reviewed questionnaire and performs one explicit approval', async () => {
 		let state: HostAccessLease = waitingLease;
 		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

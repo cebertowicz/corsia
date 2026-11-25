@@ -1,7 +1,5 @@
 <script module lang="ts">
-	import { get as getStoreValue, writable } from 'svelte/store';
-
-	const inFlightDecisionAttempts = writable(new Map<string, symbol>());
+	import { claimDecision, inFlightDecisionAttempts, isCurrentDecision, releaseDecision } from './hostAccessDecisionAttempts';
 
 	/*
 	 * "A lease is asking the user right now" is deliberately NOT a module
@@ -11,31 +9,6 @@
 	 * bound out per instance instead, and cleared on teardown.
 	 */
 
-	function claimDecision(leaseId: string): symbol | null {
-		const attempt = Symbol(leaseId);
-		let claimed = false;
-		inFlightDecisionAttempts.update((current) => {
-			if (current.has(leaseId)) return current;
-			const next = new Map(current);
-			next.set(leaseId, attempt);
-			claimed = true;
-			return next;
-		});
-		return claimed ? attempt : null;
-	}
-
-	function isCurrentDecision(leaseId: string, attempt: symbol): boolean {
-		return getStoreValue(inFlightDecisionAttempts).get(leaseId) === attempt;
-	}
-
-	function releaseDecision(leaseId: string, attempt: symbol): void {
-		inFlightDecisionAttempts.update((current) => {
-			if (current.get(leaseId) !== attempt) return current;
-			const next = new Map(current);
-			next.delete(leaseId);
-			return next;
-		});
-	}
 </script>
 
 <script lang="ts">
@@ -63,6 +36,8 @@
 	import { on } from '$lib/ws/events';
 
 	const EXPIRY_REFRESH_BACKOFF_MS = [2_000, 4_000, 30_000] as const;
+	const REVIEWER_UNAVAILABLE_MESSAGE = 'Host access could not start because the reviewer is unavailable; ask the agent to request access again once the reviewer can run.';
+	const ACTIVATION_FAILED_MESSAGE = 'Host access could not start; ask the agent to request access again.';
 
 	let {
 		threadId,
@@ -82,6 +57,7 @@
 	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
+	let activationFailure = $state('');
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
 	let nowMs = $state(Date.now());
 	let generation = 0;
@@ -129,7 +105,7 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || 'Couldn’t check host access. Try again.' : null,
+		stale ? error || 'Couldn’t check host access. Try again.' : activationFailure || null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);
@@ -252,9 +228,15 @@
 			decision, lease.id, decisionThreadId, decisionControl,
 		);
 		error = '';
+		activationFailure = '';
 		let refreshTruth = true;
 		try {
-			await decideHostAccessLease(lease, decision);
+			const result = await decideHostAccessLease(lease, decision);
+			if (decision === 'approve' && result.state === 'blocked'
+				&& isCurrentDecision(lease.id, decisionAttempt) && threadId === decisionThreadId) {
+				activationFailure = result.terminal_reason === 'reviewer_unavailable'
+					? REVIEWER_UNAVAILABLE_MESSAGE : ACTIVATION_FAILED_MESSAGE;
+			}
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';
@@ -282,6 +264,7 @@
 
 	$effect(() => {
 		const selectedThreadId = threadId;
+		activationFailure = '';
 		leases = [];
 		stale = false;
 		error = '';
@@ -362,9 +345,9 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="Not current" size="sm" />
+						{#if stale}<StatePill state="error" label="Not current" size="sm" />{/if}
 						<span>{staleNotice}</span>
-						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
+						{#if stale}<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>{/if}
 					</div>
 				{:else if transitionalStatus}
 					<div class="status-row" role="status">
