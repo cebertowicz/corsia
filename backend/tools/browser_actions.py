@@ -3,6 +3,7 @@
 from typing import Any
 
 from tools.base import Tool
+from tools.browser_input import BrowserInputTool as BrowserInputTool
 from tools.browser_runtime import _declare_person_step, _execution_context, _run
 
 

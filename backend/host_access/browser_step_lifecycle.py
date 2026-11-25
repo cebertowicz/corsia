@@ -387,6 +387,11 @@ def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
 
 
+def held_pages(thread_id: str) -> bool:
+    """Whether this session has given the person a page (a step is open, or one was settled or declined)."""
+    return thread_id in _steps or bool(_answers.get(thread_id))
+
+
 def finished_visit(thread_id: str, visit: str) -> bool:
     """Whether a password step ended on this visit, so what the person typed may still be there (Answer.finished)."""
     return _answers.get(thread_id, {}).get(("password", visit), Answer(0)).finished
