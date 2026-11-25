@@ -8,7 +8,11 @@ import json
 
 import pytest
 
-from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credential_text
+from host_access.credential_sanitizer import (
+    REDACTION_MARKER,
+    contains_credential,
+    sanitize_credential_text,
+)
 from tools.query_projects import _history_line
 from tools.result_sanitizer import sanitize_result
 
@@ -86,3 +90,15 @@ def test_escaped_value_keeps_its_closing_escape():
 ])
 def test_text_that_is_not_a_credential_is_left_alone(text):
     assert sanitize_credential_text(text) == text
+
+
+# A quoted header name now counts the way the unquoted form already did, literal example values
+# included; the header rule has no placeholder check (tracked in #3312).
+@pytest.mark.parametrize(("text", "counts"), [
+    ('headers={"Authorization": "Bearer YOUR_API_KEY"}', True),  # gitleaks:allow
+    ("Authorization: Bearer YOUR_API_KEY", True),  # gitleaks:allow
+    ("headers={'Authorization': f'Bearer {api_key}'}", False),
+    ("headers={'Authorization': 'Bearer ' + token}", False),
+])
+def test_quoted_header_counts_like_the_unquoted_form(text, counts):
+    assert contains_credential(text) is counts
