@@ -5,9 +5,11 @@ import type { ImageCommentSurface, DocImageComments } from '$lib/docImageComment
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
+import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 /** What DocCommentSurface takes; `resolvedOpen` is bindable. */
 export interface DocCommentSurfaceProps {
+	commentTaskBar?: ReviewBarState;
 	state: CommentSurfaceState;
 	onThreadMissing?: (remaining: string[]) => void;
 	/** The column opened on its own at load, so opening it does not hide the sidebar or the Workspace panel. */
