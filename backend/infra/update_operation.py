@@ -4,9 +4,46 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
+from infra.log_files import nofollow_log_opener
+from infra.update_prepare_output import UTC_TIMESTAMP_PATTERN
+
 _LOG_TAIL_CHARS = 6000
+_TIMESTAMP_PREFIX = rf"{UTC_TIMESTAMP_PATTERN} ".encode()
+_PREPARE_RECORD = re.compile(
+    rb"(?m)^" + _TIMESTAMP_PREFIX
+    + rb"Prepare (?:started|ended in \d+s \((?:exit -?\d+|timed out|could not start)\))\n"
+)
+
+
+def _display_log_bytes(data: bytes) -> bytes:
+    data = _PREPARE_RECORD.sub(b"", data)
+    return re.sub(rb"(?m)^" + _TIMESTAMP_PREFIX, b"", data)
+
+
+def _read_display_tail(handle) -> str:
+    """Read enough complete lines to bound the displayed content, not its log prefixes."""
+    position = handle.seek(0, os.SEEK_END)
+    data = b""
+    while position:
+        size = min(position, 8192)
+        position -= size
+        handle.seek(position)
+        data = handle.read(size) + data
+        if position == 0:
+            break
+        newline = data.find(b"\n")
+        if newline >= 0:
+            complete = _display_log_bytes(data[newline + 1:])
+            if len(complete) >= _LOG_TAIL_CHARS:
+                return complete[-_LOG_TAIL_CHARS:].decode(errors="replace")
+            if newline > _LOG_TAIL_CHARS:
+                return (data[:newline + 1] + complete)[-_LOG_TAIL_CHARS:].decode(errors="replace")
+        elif len(data) > _LOG_TAIL_CHARS:
+            return data[-_LOG_TAIL_CHARS:].decode(errors="replace")
+    return _display_log_bytes(data)[-_LOG_TAIL_CHARS:].decode(errors="replace")
 
 
 def _failure_log_tail(operation: dict) -> str | None:
@@ -20,12 +57,10 @@ def _failure_log_tail(operation: dict) -> str | None:
         from infra.config import LOGS_DIR
 
         resolved_logs = LOGS_DIR.resolve()
-        resolved_path = Path(log_path).resolve()
-        resolved_path.relative_to(resolved_logs)
-        with resolved_path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            handle.seek(max(0, size - _LOG_TAIL_CHARS))
-            return handle.read().decode(errors="replace")[-_LOG_TAIL_CHARS:]
+        path = Path(log_path).absolute()
+        path.parent.resolve().relative_to(resolved_logs)
+        with open(path, "rb", opener=nofollow_log_opener) as handle:
+            return _read_display_tail(handle)
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
 

@@ -84,5 +84,5 @@
 	<div class="mention-region" transition:transition use:settleHeight={{ enabled: !$prefersReducedMotion }} onpointerdown={preserveCaret} onclick={(event) => event.stopPropagation()}><AgentOptions {id} label="Agents to tag" {matches} active={Math.min(active, matches.length - 1)} {choose} {status} retry={roster.load} /></div>
 {/if}
 <style>
-	.mention-region { padding-top: var(--space-2); overflow: clip; }
+	.mention-region { padding-top: var(--space-2); overflow: clip; font-size: var(--text-subhead); }
 </style>

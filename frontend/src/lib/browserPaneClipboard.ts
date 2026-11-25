@@ -12,10 +12,19 @@ function failureMessage(error: unknown, key: string): string | null {
  return `CORSIA couldn’t ${key === 'v' ? 'paste' : key === 'x' ? 'cut' : 'copy'}. Try again.`;
 }
 
+function shortcut(event: KeyboardEvent, keys: string[]): boolean {
+ const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+ return event.type === 'keydown' && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && keys.includes(event.key.toLowerCase());
+}
+
+/** The platform paste shortcut. On an editable key target it is left to the native paste, whose event carries the
+ * text with no clipboard permission; reading the clipboard from a key handler shows a second confirmation in Safari
+ * and the desktop app. */
+export function isPasteKey(event: KeyboardEvent): boolean { return shortcut(event, ['v']); }
+
 export function clipboardKey<T>(event: KeyboardEvent, get: () => BrowserPaneClipboard<T>, fail: (error: string, cut: boolean) => void, clear: () => void = () => {}): boolean {
  const key = event.key.toLowerCase();
- const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
- if (event.type !== 'keydown' || !(mac ? event.metaKey : event.ctrlKey) || event.altKey || !['c', 'x', 'v'].includes(key)) return false;
+ if (!shortcut(event, ['c', 'x', 'v'])) return false;
  const clipboard = get();
  void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).then(() => { if (key !== 'v') clear(); }).catch(error => { const message = failureMessage(error, key); if (message) fail(message, key === 'x' && !(error instanceof EmptySelection)); });
  return true;

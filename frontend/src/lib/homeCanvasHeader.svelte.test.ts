@@ -1,0 +1,38 @@
+import { flushSync } from 'svelte';
+import { get } from 'svelte/store';
+import { afterEach, expect, it, vi } from 'vitest';
+import { canvasHeader } from '$lib/stores/canvasHeader';
+import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+import { syncCanvasHeader } from '$lib/homeCanvasHeader';
+
+afterEach(() => {
+	activityPhoneItem.set(null);
+	canvasHeader.set(null);
+});
+
+it('re-runs the effect that syncs the header when the phone Activity item changes', () => {
+	const runs = vi.fn();
+	const stop = $effect.root(() => {
+		$effect(() => {
+			runs();
+			syncCanvasHeader({
+				threadSettingsOpen: false, compactArtifact: null, contextAttachTarget: null, activeView: 'activity',
+				uiScopeName: null, activeThreadId: null, conductorThreadId: null, threads: [],
+				closeThreadSettings: () => {}, closeSettings: () => {}, closeDocuments: () => {},
+			});
+		});
+	});
+	flushSync();
+	expect(get(canvasHeader)?.title).toBe('Activity');
+
+	activityPhoneItem.set({ backLabel: 'Your tasks', onBack: () => {} });
+	flushSync();
+	expect(get(canvasHeader)?.backLabel).toBe('Your tasks');
+
+	activityPhoneItem.set(null);
+	flushSync();
+	expect(get(canvasHeader)?.title).toBe('Activity');
+	expect(get(canvasHeader)?.backLabel).toBeUndefined();
+	expect(runs).toHaveBeenCalledTimes(3);
+	stop();
+});

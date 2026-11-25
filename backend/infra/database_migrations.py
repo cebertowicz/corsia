@@ -67,6 +67,7 @@ import os
 import re
 import shutil
 import sqlite3
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -262,6 +263,11 @@ from infra.migration_200_to_201_update_notice_at import migrate_200_to_201
 from infra.migration_201_to_202_node_usage_groups import migrate_201_to_202
 from infra.migration_202_to_203_feedback_recipients import migrate_202_to_203
 from infra.migration_203_to_204_comment_search import migrate_203_to_204
+from infra.migration_204_to_205_saved_logins import migrate_204_to_205
+from infra.migration_205_to_206_activity_ranking import migrate_205_to_206
+from infra.migration_206_to_207_suggestion_history import migrate_206_to_207
+from infra.migration_207_to_208_comment_source_snapshots import migrate_207_to_208
+from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -360,6 +366,13 @@ class MigrationResult:
 #: These are squashed into one clean schema before release, so a released
 #: build never inherits the ladder.
 MIGRATIONS: dict[int, MigrationStep] = {}
+
+ADDITIVE_STEPS: frozenset[int] = frozenset({208})
+"""From-versions whose steps only create tables or indexes and never branch on data.
+
+The additive-step authorizer proof checks each marked step. An unmarked step
+always takes the full foreign-key validation path.
+"""
 
 
 # The checkpoints table as schema 7 defines it. Deliberately a copy of
@@ -953,6 +966,11 @@ MIGRATIONS[200] = migrate_200_to_201
 MIGRATIONS[201] = migrate_201_to_202
 MIGRATIONS[202] = migrate_202_to_203
 MIGRATIONS[203] = migrate_203_to_204
+MIGRATIONS[204] = migrate_204_to_205
+MIGRATIONS[205] = migrate_205_to_206
+MIGRATIONS[206] = migrate_206_to_207
+MIGRATIONS[207] = migrate_207_to_208
+MIGRATIONS[208] = migrate_208_to_209
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -1110,6 +1128,9 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     connection, and a separate reader cannot see the caller's uncommitted
     changes, so it captures exactly the pre-migration state.
 
+    A clone or WAL fold that the file system or SQLite refuses is logged and falls
+    back to the page copy. A clone that does not hold the locked state stops the
+    migration: it means the clone's consistency reasoning is wrong.
     Returns the backup path, or None for an in-memory database with no file.
     """
     source = _connection_database_path(conn)
@@ -1130,6 +1151,8 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
             clone_database(source, target, expected_user_version=from_version)
         except CloneUnsupported as unsupported:
             log.info("Pre-migration backup copies pages: %s", unsupported)
+        except (OSError, sqlite3.Error):
+            log.warning("Pre-migration backup clone failed for %s; copying pages", source, exc_info=True)
         else:
             startup_progress.backup_step(0, 0, 1)
             return target
@@ -1200,20 +1223,97 @@ def _changed_tables(
     )
 
 
-def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
+ForeignKeyViolation = tuple[str, int | None, str, int]
+
+
+def _foreign_key_violations(conn: sqlite3.Connection) -> Counter[ForeignKeyViolation]:
+    """Every row whose foreign key points at a missing parent row, counted.
+
+    Counted, not a set: a WITHOUT ROWID table reports rowid NULL, so two
+    orphans in it share one key and only the count tells a new one apart.
+    """
+    return Counter(
+        (row[0], row[1], row[2], row[3])
+        for row in conn.execute("PRAGMA foreign_key_check")
+    )
+
+
+def _backup_foreign_key_violations(
+    backup_path: Path, tables: set[str],
+) -> Counter[ForeignKeyViolation]:
+    """Read old violations only for tables with violations after migration."""
+    # Both backup writers close a self-contained snapshot before returning it.
+    # Immutable avoids creating WAL/SHM files beside that snapshot on read.
+    uri = backup_path.resolve().as_uri() + "?mode=ro&immutable=1"
+    backup = sqlite3.connect(uri, uri=True)
+    try:
+        old_tables = {
+            row[0] for row in backup.execute("SELECT name FROM sqlite_schema WHERE type='table'")
+        }
+        violations: Counter[ForeignKeyViolation] = Counter()
+        for table in sorted(tables & old_tables):
+            quoted_table = table.replace('"', '""')
+            violations.update(
+                (row[0], row[1], row[2], row[3])
+                for row in backup.execute(f'PRAGMA foreign_key_check("{quoted_table}")')
+            )
+        return violations
+    finally:
+        backup.close()
+
+
+def _validate(
+    conn: sqlite3.Connection,
+    changed_tables: list[str],
+    violations_before: Counter[ForeignKeyViolation] | None,
+    backup_path: Path | None,
+    additive_new_tables: list[str] | None,
+) -> None:
     """Check the migrated database inside the transaction, before commit.
 
-    Foreign keys are checked across the whole database; page structure and
-    row-to-index agreement only for tables the migration created or rebuilt.
-    Data-only steps rely on SQLite maintaining their indexes.
+    Foreign keys: only violations the migration introduced fail it. An orphan
+    row that was already there before the first step is not this migration's
+    doing, and failing on it would roll back every later update with no way
+    forward. Declared additive steps cannot change existing rows or foreign-key
+    definitions, so only newly created tables need an FK check. Every other
+    file-backed migration checks the whole database, including data-only deletes,
+    then compares violating tables against the backup. In-memory databases have
+    no backup, so use their pre-step full check. Renames or renumbering can make
+    an old orphan look new, which fails safe.
+
+    Page structure and row-to-index agreement are checked only for tables the
+    migration created or rebuilt. Data-only steps rely on SQLite maintaining
+    their indexes.
 
     No whole-database ``quick_check``: its b-tree walk is one VM operation, so
     on a 25 GB database it ran 61 s without a progress callback, past the
     desktop's 60 s startup stall, while checking pages no step touched.
     """
-    broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if additive_new_tables is None:
+        violations_after = _foreign_key_violations(conn)
+        if violations_before is None:
+            violations_before = (
+                _backup_foreign_key_violations(backup_path, {row[0] for row in violations_after})
+                if violations_after and backup_path is not None else Counter()
+            )
+    else:
+        violations_after = Counter()
+        for table in additive_new_tables:
+            quoted_table = table.replace('"', '""')
+            violations_after.update(
+                (row[0], row[1], row[2], row[3])
+                for row in conn.execute(f'PRAGMA foreign_key_check("{quoted_table}")')
+            )
+        violations_before = Counter()
+    # Counter subtraction keeps only keys whose count rose.
+    broken = sorted((violations_after - violations_before).elements(), key=repr)
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
+    if violations_before:
+        log.warning(
+            "Migration kept %d foreign key violations that predate it, e.g. %s",
+            violations_before.total(), sorted(violations_before, key=repr)[:5],
+        )
     for table in changed_tables:
         quoted_table = table.replace('"', '""')
         integrity = conn.execute(
@@ -1289,13 +1389,28 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 # opened before startup began publishing.
                 startup_progress.watch(conn)
                 before_schema = _schema_snapshot(conn)
+                violations_before = _foreign_key_violations(conn) if backup_path is None else None
                 for done, version in enumerate(steps, start=1):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
                     startup_progress.mark("migrating", done=done, total=len(steps))
                 conn.execute(f"PRAGMA user_version={target_version}")
                 startup_progress.mark("validating")
-                _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
+                after_schema = _schema_snapshot(conn)
+                additive_new_tables = None
+                if backup_path is not None and all(version in ADDITIVE_STEPS for version in steps):
+                    old_tables = {name for kind, name, _, _, _ in before_schema if kind == "table"}
+                    additive_new_tables = sorted(
+                        name for kind, name, _, _, _ in after_schema
+                        if kind == "table" and name not in old_tables
+                    )
+                _validate(
+                    conn,
+                    _changed_tables(before_schema, after_schema),
+                    violations_before,
+                    backup_path,
+                    additive_new_tables,
+                )
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from
                 # the room check *before* any copy is made, and an in-memory

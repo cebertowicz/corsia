@@ -8,6 +8,13 @@ import pytest
 from api.restart_shell import spawn_restart_lifecycle
 
 
+@pytest.fixture(autouse=True)
+def isolate_lifecycle_results(tmp_path, monkeypatch):
+    from infra import config
+
+    monkeypatch.setattr(config, "STATE_LOGS_DIR", tmp_path / "state-logs")
+
+
 @pytest.mark.parametrize(
     "scenario",
     ["refusal", "stop_failure", "bootout_timeout", "bootout_unloaded", "killed", "success"],

@@ -4,7 +4,6 @@ import ThreadPlanPane from '$lib/components/plans/ThreadPlanPane.svelte';
 import PlanHeadControls from '$lib/components/plans/PlanHeadControls.svelte';
 import PlanDrillView from '$lib/components/plans/PlanDrillView.svelte';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
-import ActivityView from '$lib/components/activity/ActivityView.svelte';
 import { threads, activeThreadId } from '$lib/stores/threads';
 import { _resetProjectsForTests } from '$lib/stores/projects';
 import { token } from '$lib/stores/auth';
@@ -12,7 +11,7 @@ import { connectionState } from '$lib/stores/connection';
 import { uiScope } from '$lib/stores/uiScope';
 import { resetPlanRuntimeForTests } from '$lib/stores/plans.svelte';
 import { resetObserversForTests } from '$lib/stores/planQuery.svelte';
-import type { ActivityIndexEnvelope, OperatorEnvelope, OperatorNode } from '$lib/api/plans';
+import type { OperatorEnvelope, OperatorNode } from '$lib/api/plans';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
 import { CHILD_AVAILABLE, node as treeNode } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
@@ -172,31 +171,5 @@ describe('a nested subagent plan', () => {
 		flushSync();
 		expect(titles()).toEqual(['Delegated step', '{Scheduled}']);
 		expect(host.querySelector('.child-tree .scheduled-row')?.getAttribute('data-depth')).toBe('1');
-	});
-});
-
-describe('the Activity plan row', () => {
-	it('gathers scheduled work in an expanded plan', async () => {
-		const index = {
-			plan: { id: 'p-a', owner_kind: 'thread', owner_id: 'thread-a', state: 'active', revision: 1, updated_at: '2026-08-14T12:00:00Z' },
-			owner: { label: 'Plan for thread-a', project_id: null, thread_id: 'thread-a' },
-			progress: { open: 3, liveness: 'advancing' }, has_nodes: true,
-			display: planDisplay('working', 'active'), priority_at: '2026-08-14T12:00:00Z',
-		};
-		const list: ActivityIndexEnvelope = {
-			contract_version: 1, representation: 'activity_scope_index', as_of: '2026-08-14T12:00:00Z',
-			target: { kind: 'workspace_scope', id: 'workspace', label: 'Workspace' }, revision_token: 'rev',
-			plans: [index], attention: { awaiting_count: 0 },
-		} as ActivityIndexEnvelope;
-		const nodes = [operatorNode({ id: 'open', title: 'Open work', state: 'active' }), op('A', 48), op('B', 72)];
-		const detail = threadEnvelope(nodes, 3);
-		detail.target = { kind: 'thread', id: 'thread-a', label: 'Plan for thread-a' };
-		vi.stubGlobal('fetch', vi.fn(async (url: string) => respond(String(url).includes('/operator/threads/') ? detail : list)));
-		threads.set([{ id: 'thread-a', user_id: 'u', profile: 'personal', title: 'A', model: null, project_id: null, created_at: 'x', updated_at: 'x' }]);
-		component = mount(ActivityView, { target: host, props: { projectId: null, scopeName: 'Workspace', onSelectThread: vi.fn() } });
-		await settle();
-		(host.querySelector('.row-summary[aria-label="Expand Plan for thread-a"]') as HTMLButtonElement).click();
-		await settle();
-		expect(titles()).toEqual(['Open work', '{Scheduled}']);
 	});
 });

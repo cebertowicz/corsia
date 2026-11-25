@@ -65,6 +65,10 @@ describe('decodeOperatorEnvelope', () => {
 			broken(evidenced, (node) => { delete node.evidence.artifact_ids; }),
 			broken(waiting, (node) => { node.execution.causes[0] = 'waiting'; }),
 			broken(() => true, (node) => { delete node.requirements_revision; }),
+			broken(() => true, (node) => { delete node.intent; }),
+			broken(() => true, (node) => { node.intent_is_person_comment = 'yes'; }),
+			broken(() => true, (node) => { node.intent_owner_name = 7; }),
+			broken(() => true, (node) => { node.acceptance_criteria = null; }),
 			broken(() => true, (node) => { node.node_cost.rolled.tokens = {}; }),
 		]) expect(decodeOperatorEnvelope(body)).toBeNull();
 	});

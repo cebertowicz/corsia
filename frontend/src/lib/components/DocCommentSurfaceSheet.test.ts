@@ -70,7 +70,9 @@ describe('the phone composer sheet over a commented cell', () => {
 		const viewport = new EventTarget();
 		vi.stubGlobal('visualViewport', viewport);
 		const { onRevealDraft } = openSheet({ kind: 'draft' });
-		expect(document.querySelector('.drawer-panel')).not.toBeNull();
+		const panel = document.querySelector('.drawer-panel')!;
+		expect(panel.classList.contains('compact')).toBe(false);
+		expect(panel.querySelector('.drawer-done')?.textContent).toBe('Close');
 		await vi.waitFor(() => expect(onRevealDraft).toHaveBeenCalledTimes(1));
 		expect(onRevealDraft).toHaveBeenLastCalledWith(true);
 		viewport.dispatchEvent(new Event('resize'));

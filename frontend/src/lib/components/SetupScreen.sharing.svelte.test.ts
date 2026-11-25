@@ -8,7 +8,7 @@ vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const LINE = 'This helps improve CORSIA. It sends counts of what you use, tagged with a random number that changes every week. It never sends your name, email or anything you write. Turn it off to stop.';
+const LINE = 'Sharing lets CORSIA send counts of what you use, tagged with a random number that changes every week, to help improve it. It never sends your name, email or anything you write.';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;

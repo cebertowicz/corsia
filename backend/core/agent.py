@@ -185,8 +185,9 @@ def _register_automation_tools(agent: CORSIAAgent) -> None:
     """Register this thread's schedules and the event rules it writes."""
     from tools.automations import AutomationCancelTool, AutomationListTool, AutomationScheduleTool
     from tools.event_rules import EventRulesTool
+    from tools.attention_rank import AttentionRankTool
 
-    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool()):
+    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool(), AttentionRankTool()):
         agent.tools.register(tool)
 
 
@@ -363,11 +364,11 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(ListKnowledgeTool())
     from tools.browser import BrowserOpenTool, BrowserScreenshotTool, BrowserCloseTool
     from tools.browser_actions import BrowserSnapshotTool, BrowserClickTool, BrowserFillTool, BrowserEvalTool, BrowserWaitTool
-    from tools.browser_actions import BrowserPersonStepTool
+    from tools.browser_actions import BrowserPersonStepTool, BrowserInputTool
     from tools.browser_run_steps import BrowserRunStepsTool
     agent.tools.register(BrowserOpenTool(workspace=workspace))
     for tool in (BrowserSnapshotTool(), BrowserClickTool(), BrowserFillTool(), BrowserScreenshotTool(workspace=workspace),
-                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserRunStepsTool(), BrowserWaitTool(), BrowserCloseTool()):
+                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserRunStepsTool(), BrowserWaitTool(), BrowserCloseTool(), BrowserInputTool()):
         agent.tools.register(tool)
 
     _register_document_tools(agent, workspace)

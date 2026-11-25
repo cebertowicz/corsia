@@ -80,7 +80,10 @@ class StatementTally:
         monkeypatch.setattr(database, "_make_connection", opening)
         for obj in gc.get_objects():
             if isinstance(obj, sqlite3.Connection):
-                obj.set_trace_callback(self._record)
+                try:
+                    obj.set_trace_callback(self._record)
+                except sqlite3.ProgrammingError:
+                    continue
                 self.armed.append(obj)
 
     def disarm(self) -> None:

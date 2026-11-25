@@ -129,6 +129,11 @@ class ChromeProcess:
                 shutil.rmtree(temporary)
             raise
 
+    @property
+    def exited(self) -> bool:
+        """Chrome ended without our close: it crashed, was killed, or the person quit its window."""
+        return not self.closed and self.process.returncode is not None
+
     def release_stream(self) -> None:
         if self.stream_reservation is not None:
             self.stream_reservation.close()

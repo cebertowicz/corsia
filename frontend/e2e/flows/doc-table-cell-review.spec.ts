@@ -193,18 +193,30 @@ for (const layout of LAYOUTS) {
 			await frame(page, `f4-typed-at-click-${at}`);
 		});
 
-		test('the Comment offer covers no text: inside an empty cell, and beside or below the table for selected text', async ({ page }) => {
+		test('the Comment offer covers no text: on a phone the bottom bar clears the cell being edited; elsewhere inside an empty cell, and beside or below the table for selected text', async ({ page }) => {
 			test.setTimeout(120_000);
 			await openTableDocument(page, layout, { text: DOC, quoted: QUOTED });
 			const keys = await keysOf(page);
 			const offer = page.locator('.sel-comment');
+			const phone = layout.project === 'chromium-mobile';
+			// A phone's offer is the fixed bottom bar's button: the bar is whole on the visible page, its button is a 44 px target and the cell being edited is clear of the bar.
+			const barClear = async (target: Locator) => {
+				const bar = page.locator('.touch-comment-bar.offered');
+				await expect(bar).toBeVisible();
+				const barBox = await boxOf(bar), button = await boxOf(offer), cellBox = await rectOf(target);
+				const viewport = await page.evaluate(() => ({ top: visualViewport?.offsetTop ?? 0, height: visualViewport?.height ?? innerHeight }));
+				expect(button.height >= 44 && button.width >= 44, `the Comment button is a 44 px target (${JSON.stringify(button)})`).toBe(true);
+				expect(barBox.y >= viewport.top && barBox.y + barBox.height <= viewport.top + viewport.height, `the bar is whole on the visible page (${JSON.stringify({ barBox, viewport })})`).toBe(true);
+				expect(cellBox.y + cellBox.height, `the cell being edited is clear of the bar (${JSON.stringify({ cellBox, barBox })})`).toBeLessThanOrEqual(barBox.y + 1);
+			};
 			const empty = cell(page, 3, 1);
 			await empty.scrollIntoViewIfNeeded();
 			await empty.click();
 			await editorInCell(page, empty);
 			await expect(offer).toBeVisible();
 			const inside = await boxOf(offer), cellBox = await rectOf(empty);
-			expect(inside.x >= cellBox.x - 1 && inside.y >= cellBox.y - 1 && inside.x + inside.width <= cellBox.x + cellBox.width + 1 && inside.y + inside.height <= cellBox.y + cellBox.height + 1,
+			if (phone) await barClear(empty);
+			else expect(inside.x >= cellBox.x - 1 && inside.y >= cellBox.y - 1 && inside.x + inside.width <= cellBox.x + cellBox.width + 1 && inside.y + inside.height <= cellBox.y + cellBox.height + 1,
 				`the offer sits inside the empty cell's box (${JSON.stringify({ inside, cellBox })})`).toBe(true);
 			await frame(page, `f5-empty-offer-${at}`);
 			// The offer goes with the first character and comes back while it is still leaving: it is back whole, where it was.
@@ -223,9 +235,12 @@ for (const layout of LAYOUTS) {
 			for (let char = 0; char < 'Some words'.length; char++) await page.keyboard.press('Shift+ArrowRight');
 			await expect(offer).toBeVisible();
 			const shown = await boxOf(offer), table = await rectOf(firstTable(page));
-			const covered = (await textBoxes(page)).filter((text) => intersects(text, shown));
-			expect(covered, `the offer covers no text (${JSON.stringify({ shown, table, covered })})`).toEqual([]);
-			expect(!intersects(shown, table), `and lies outside the table (${JSON.stringify({ shown, table })})`).toBe(true);
+			if (phone) await barClear(plain);
+			else {
+				const covered = (await textBoxes(page)).filter((text) => intersects(text, shown));
+				expect(covered, `the offer covers no text (${JSON.stringify({ shown, table, covered })})`).toEqual([]);
+				expect(!intersects(shown, table), `and lies outside the table (${JSON.stringify({ shown, table })})`).toBe(true);
+			}
 			await frame(page, `f5-selected-offer-${at}`);
 		});
 

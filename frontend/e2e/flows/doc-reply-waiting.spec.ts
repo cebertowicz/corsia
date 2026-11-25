@@ -558,7 +558,9 @@ for (const theme of ['light', 'dark'] as const) {
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
 			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
-			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
+			// The phone sheet's heading carries the count on its Open button beside the title; the popover keeps it in the title.
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText(width <= 768 ? 'Comments' : 'Comments 3');
+			if (width <= 768) await expect(page.locator('[data-doc-comments-drawer] .drawer-heading').getByRole('button', { name: 'Open · 3' })).toHaveAttribute('aria-pressed', 'true');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			await shot(page, `03-three-replies-${theme}-${width}`);
 			await shotRailClosed(page, `03-three-replies-${theme}-${width}-rail-closed`, width);
@@ -593,7 +595,7 @@ for (const width of [1440, 393]) {
 
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 1920, 393]) {
-		test(`${TAG} ${theme} ${width}px: transparent controls above the transcript with a decision`, async ({ page, request }, testInfo) => {
+		test(`${TAG} ${theme} ${width}px: scroll and plan controls above the transcript with a decision`, async ({ page, request }, testInfo) => {
 			test.setTimeout(60_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
@@ -606,7 +608,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
 			await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
 			sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
-			// An existing decision starts collapsed; a newly arriving decision auto-opens.
+			// The plan pill remains available while a decision is waiting in Activity.
 			seedDecision(threadId);
 			await loginByUrl(page);
 			await openThread(page, threadTitle);
@@ -615,16 +617,9 @@ for (const theme of ['light', 'dark'] as const) {
 			await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
 			await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
 			await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
-			const dock = page.locator('.attention-dock');
-			await expect(dock).toBeVisible();
 			const arrow = page.locator('.chat-attention-stack > .chat-scroll-control');
 			await expect(arrow).toBeVisible();
 			await expect(page.locator('.chat-scroll-control:visible, .scroll-fab:visible')).toHaveCount(1);
-			await expect(dock.locator('.chat-scroll-control')).toHaveCount(0);
-			for (const surface of [dock, page.locator('.chat-attention-stack')]) {
-				const background = await surface.evaluate(el => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
-				expect(background).toEqual({ color: 'rgba(0, 0, 0, 0)', image: 'none' });
-			}
 			if (width === 393) {
 				const plan = page.locator('.plan-progress-chip');
 				await expect(plan).toBeVisible();
@@ -634,28 +629,8 @@ for (const theme of ['light', 'dark'] as const) {
 				expect(arrowBox.width).toBeGreaterThanOrEqual(44);
 				expect(planBox.height).toBeGreaterThanOrEqual(44);
 			}
-			await expect.poll(async () => {
-				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-				return dock.locator('.dock-bar').count();
-			}).toBe(1);
-			const bar = dock.locator('.dock-bar');
-			await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-			await bar.focus();
-			await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-			await bar.evaluate(el => el.blur());
-			if (width !== 393) {
-				await bar.hover();
-				await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-				await page.mouse.move(0, 0);
-			}
 			await shot(page, `12-backdrop-needs-you-${theme}-${width}`, 5);
 			if (width === 393) {
-				await bar.click();
-				const decisionDrawer = page.getByRole('dialog', { name: /^Decision —/ });
-				await expect(decisionDrawer).toBeVisible();
-				await shot(page, `13-decision-expanded-${theme}-${width}`, 5);
-				await page.keyboard.press('Escape');
-				await expect(decisionDrawer).toBeHidden();
 				await page.locator('.plan-progress-chip').click();
 				const drawer = page.getByRole('dialog', { name: /^Plan —/ });
 				await expect(drawer).toBeVisible();

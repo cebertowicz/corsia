@@ -33,6 +33,8 @@ export interface ArtifactTab {
 	status: ArtifactTabStatus;
 	/** Where the viewer should go once this tab's comments load; consumed once. */
 	landOn?: DocumentLanding;
+	/** With `landOn`: the one thread to land on, in place of the first unread; consumed with it. */
+	landOnCommentId?: string;
 	/** A pressed link still resolving to a file: the tab shows its loading state until then (`artifactLinkTabs`). */
 	link?: ArtifactLink;
 }
@@ -56,6 +58,8 @@ export interface OpenArtifactInput {
 	title: string;
 	/** Set by the waiting-reply handoff, never by an ordinary document opener. */
 	landOn?: DocumentLanding;
+	/** With `landOn`: the thread a reply was made on, when the opener knows which one. */
+	landOnCommentId?: string;
 }
 
 export interface OpenSubagentInput {

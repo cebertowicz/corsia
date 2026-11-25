@@ -8,7 +8,7 @@ import type { createTaskMenu } from './taskMenu.svelte';
 
 type Draft = { id: string; targetId: string; position: number; before: boolean };
 type Drag = { id: string; offsets: Record<string, number>; position: number; count: number };
-type Press = { node: OperatorNode; pointerId: number; x: number; y: number; lastY: number; scroll: HTMLElement | null; armed: boolean; scrolling: boolean; timer: ReturnType<typeof setTimeout> | null };
+type Press = { node: OperatorNode; pointerId: number; x: number; y: number; scroll: HTMLElement | null; armed: boolean; scrolling: boolean; timer: ReturnType<typeof setTimeout> | null };
 /** Saves one move through the pane's user-action path; the server's refusal, or null once it landed. */
 type ApplyMove = (node: OperatorNode, position: number) => Promise<string | null> | void;
 
@@ -56,15 +56,22 @@ export function createPlanTreeReorder(options: Options) {
 	function siblings(node: OperatorNode): OperatorNode[] {
 		return options.nodes().filter((candidate) => candidate.parent_id === node.parent_id && (!candidate.folded || candidate.id === node.id));
 	}
+	/** A run's steps show in plan order, so they move among every unfolded step (`planOrderGroup`). */
+	function inRun(node: OperatorNode): boolean {
+		return options.nodes().find((candidate) => candidate.id === node.parent_id)?.workflow_run === true;
+	}
+	function orderGroup(node: OperatorNode) {
+		return planOrderGroup(node, options.now(), options.openBlocked(), inRun(node));
+	}
 	function eligible(node: OperatorNode): boolean {
-		return node.user_actions.includes('reorder') && planOrderGroup(node, options.now(), options.openBlocked()) !== null;
+		return node.user_actions.includes('reorder') && orderGroup(node) !== null;
 	}
 	function hasMenu(node: OperatorNode): boolean {
 		return node.user_actions.some((action) => action !== 'reorder') || eligible(node) || !!node.comment_attention;
 	}
 	function peers(node: OperatorNode): OperatorNode[] {
-		const group = planOrderGroup(node, options.now(), options.openBlocked());
-		return group ? siblings(node).filter((candidate) => planOrderGroup(candidate, options.now(), options.openBlocked()) === group) : [];
+		const own = orderGroup(node);
+		return own ? siblings(node).filter((candidate) => orderGroup(candidate) === own) : [];
 	}
 	function availability(node: OperatorNode) {
 		const group = peers(node);
@@ -122,6 +129,16 @@ export function createPlanTreeReorder(options: Options) {
 		scrollFrame = requestAnimationFrame(scrollWhileDragging);
 	}
 	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); });
+	// Ordinary swipes use native scrolling; only a held reorder blocks it, so the same finger can drag
+	// a row without the browser cancelling it. WebKit decides at touchstart whether a touch's moves can
+	// be cancelled, so this listener lives on the tree from mount, not from the long press.
+	$effect(() => {
+		const tree = options.element();
+		if (!tree) return;
+		const preventDragScroll = (move: TouchEvent) => { if (press?.armed && move.cancelable) move.preventDefault(); };
+		tree.addEventListener('touchmove', preventDragScroll, { passive: false });
+		return () => tree.removeEventListener('touchmove', preventDragScroll);
+	});
 	$effect(() => {
 		if (!draft || drag || moving) return;
 		const node = options.nodes().find((candidate) => candidate.id === draft!.id);
@@ -159,7 +176,9 @@ export function createPlanTreeReorder(options: Options) {
 				const movable = options.enabled() && eligible(node) && !moving;
 				if (event.button !== 0 || !movable) return;
 				const row = event.currentTarget as HTMLElement;
-				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, lastY: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
+				// A new press replaces the old one, so end the old one's hold first.
+				if (press?.timer) clearTimeout(press.timer);
+				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
 				if (event.pointerType === 'touch') press.timer = setTimeout(() => { if (press?.pointerId === event.pointerId && !press.scrolling) press.armed = true; }, LONG_PRESS_MS);
 				(event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 			},
@@ -170,8 +189,7 @@ export function createPlanTreeReorder(options: Options) {
 				const distance = Math.hypot(event.clientX - current.x, event.clientY - current.y);
 				if (!current.armed) {
 					if (distance > slop) { current.scrolling = true; suppressClick = true; if (current.timer) clearTimeout(current.timer); }
-					if (current.scrolling && current.scroll) current.scroll.scrollTop += current.lastY - event.clientY;
-					current.lastY = event.clientY; return;
+					return;
 				}
 				if (distance <= slop && !drag) return;
 				if (!eligible(node) || !options.enabled() || moving) { current.scrolling = true; return; }

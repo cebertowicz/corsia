@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plans import operator_plan_display as plan_header, user_steering
+from plans import operator_node_state, operator_plan_display as plan_header, user_steering
 
 
 def _artifact_fields(link: dict) -> dict:
@@ -34,11 +34,15 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
             "witnessed": False,
         }
     execution = state["execution"]
-    # Precedence decides disclosure: only a primarily blocked node opens its
-    # ancestor path. A paused, review, or terminal node keeps its blocker as a
-    # detail cause without widening what the tree opens by default.
+    # Quiet waits keep their causes without opening a path. Shown blocks,
+    # action owed to the person, and selected work whose executor stopped
+    # (it reads waiting but is not a quiet wait) need this disclosure.
     attention_path = (
-        [*node["path"], node["id"]] if execution["condition"] == "blocked" else []
+        [*node["path"], node["id"]]
+        if operator_node_state.shown_condition(state) == "blocked"
+        or state["requires_user_action"]
+        or state["executor_stopped"]
+        else []
     )
     return {
         "id": node["id"],
@@ -46,12 +50,18 @@ def present_node(node: dict, review_targets: dict[str, dict], state: dict, plan_
         "depth": node["depth"],
         "kind": node["kind"],
         "workflow_step": node["workflow_step"],  # ``node_states.parent_ids`` reads it
+        # A run (``workflow_fields.build_run``, nested runs included) is a phase naming a
+        # workflow; the pane shows its children, the run's steps, in the run's order.
+        "workflow_run": node["kind"] == "phase" and node["workflow_ref"] is not None,
         "title": node["title"],
         "description": node["description"],
         # A person step names only this plan's open dependents; cross-plan
         # dependents remain private to their plan owner.
         "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
         "acceptance_criteria": node["acceptance_criteria"],
+        **{key: state[key] for key in (
+            "intent", "intent_is_person_comment", "intent_parent_title", "intent_owner_name", "intent_run_title",
+        )},
         "state": node["state"],
         "unmet_dependencies": list(node["unmet_dependencies"]),
         "held_by": node["held_by"],

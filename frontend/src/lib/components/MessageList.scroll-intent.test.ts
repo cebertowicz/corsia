@@ -190,6 +190,55 @@ describe('the first-run opening live edge', () => {
 
 		expect(el.scrollTop).toBe(CONTENT);
 	});
+
+	/**
+	 * A fresh install's first chat: the opening types out, the transcript lands on
+	 * its first line and holds there until the reveal ends. The person's first send
+	 * must then bring their message and the reply into view; before this was fixed
+	 * the landing never released, so every send's pin was swallowed and no
+	 * scroll-to-bottom control showed until the person scrolled by hand.
+	 */
+	it('releases the opening landing when the reveal ends, so the first send follows', async () => {
+		const realScrollIntoView = Element.prototype.scrollIntoView;
+		Element.prototype.scrollIntoView = function () { (this.closest('.messages') as HTMLElement).scrollTop = 0; };
+		try {
+			const opening = { id: 'opening', thread_id: THREAD_ID, role: 'assistant', content: 'Hi. A long opening.', seq: 1,
+				created_at: '2026-08-01T00:00:00Z', metadata: { first_run_opening: true } };
+			messages.set([{ ...opening, typewriterPos: 3 }] as never);
+			const list = renderList();
+			const el = scroller();
+			// While it types, the opening alone fits the viewport.
+			let height = VIEWPORT;
+			Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => height });
+			await tick();
+			runFrames();
+			runFrames();
+			expect(el.scrollTop).toBe(0);
+			expect(followingLiveEdge()).toBe(true);
+
+			// The reveal ends and the rows it held back show below the fold.
+			messages.set([
+				opening,
+				{ id: 'reply', thread_id: THREAD_ID, role: 'assistant', content: 'Ready.', seq: 2, created_at: '2026-08-01T00:00:30Z' },
+			] as never);
+			height = CONTENT;
+			flushSync();
+			runFrames();
+			// No scroll event fires, yet the control to the latest shows.
+			expect(followingLiveEdge()).toBe(false);
+
+			// The composer's send asks for the live edge.
+			list.scrollToBottom();
+			await tick();
+			flushSync();
+			runFrames();
+
+			expect(el.scrollTop).toBe(CONTENT);
+			expect(followingLiveEdge()).toBe(true);
+		} finally {
+			Element.prototype.scrollIntoView = realScrollIntoView;
+		}
+	});
 });
 
 describe('the shared bottom action', () => {

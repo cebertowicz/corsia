@@ -1,8 +1,16 @@
+import { fromStore } from 'svelte/store';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import type { Thread } from '$lib/stores/threads';
 import type { ContextAttachTarget } from '$lib/stores/contextAttach';
 import type { View } from '$lib/homePaneConfig';
 import type { SettingsDrill } from '$lib/stores/settingsNavigation';
+import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+
+/**
+ * On a phone, the Activity item open on screen: back to the list, and Next. Read here, not passed in, so the effect
+ * that calls syncCanvasHeader re-runs when it changes.
+ */
+const phoneItem = fromStore(activityPhoneItem);
 
 export interface CompactArtifactHeader {
 	title: string;
@@ -45,7 +53,15 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 		return;
 	}
 	if (input.activeView === 'activity') {
-		canvasHeader.set({ title: input.uiScopeName ?? 'Workspace' });
+		const item = phoneItem.current;
+		canvasHeader.set(item
+			? {
+				title: '',
+				backLabel: item.backLabel,
+				links: true,
+				onBack: item.onBack,
+			}
+			: { title: 'Activity' });
 		return;
 	}
 	if (input.activeView === 'settings') {

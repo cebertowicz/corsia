@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -25,6 +25,10 @@ _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream",
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
                    "Use the browser tools to navigate and interact with the page.")
+_CHROME_RESTARTED = "The browser had closed, so it was started again. Open the page you were on again."
+logger = logging.getLogger(__name__)
+_SAVED_DROPDOWN_REFUSAL = ("That target is a dropdown, and in a browser session with a saved sign-in a fill can't "
+                           "choose a dropdown's option. Nothing was changed. Choose it with browser_input's select.")
 
 
 def raise_cleanup_failures(failures: Sequence[BaseException | None]) -> None:
@@ -66,11 +70,14 @@ async def preserve_cancelled(owner: Any, runtime: Any) -> None:
     await asyncio.shield(owner._close_one(runtime))
 
 
-def restart_notice(notices: set[str], thread_id: str, notice: str | None) -> str | None:
-    if thread_id not in notices:
+SESSION_RESTARTED = "The browser restarted; you may need to sign in again."
+
+
+def restart_notice(notices: dict[str, str], thread_id: str, notice: str | None) -> str | None:
+    """Prefix a fresh session's notice, once, with why its browser started again."""
+    restart = notices.pop(thread_id, None)
+    if restart is None:
         return notice
-    notices.discard(thread_id)
-    restart = "The browser restarted; you may need to sign in again."
     return f"{restart} {notice}" if notice else restart
 
 
@@ -124,7 +131,8 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
             command == "wait" and len(args) == 2 and not args[1].startswith("-") or
             command == "screenshot" and len(args) == 2 and not args[1].startswith("-") or
             tuple(args[:2]) == ("screenshot", "--full") and len(args) == 3 and not args[2].startswith("-") or
-            command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}))
+            command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}) or
+            command in browser_agent_verbs.VERBS and browser_agent_verbs.admitted(args))
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
@@ -145,13 +153,15 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
-    if runtime.record.profile or runtime.record.copy_of:
+    if not pane and runtime.chrome is not None and runtime.chrome.exited:
+        runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
+    if (saved_sign_in := bool(runtime.record.profile or runtime.record.copy_of)) or browser_saved_fills.saved_fill_session(thread_id, runtime.record.session):
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
         if _script_config(config) or not (trusted_navigation and not pane or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
-            raise BrowserSessionError(_SCRIPT_REFUSAL)
+            raise BrowserSessionError(browser_agent_verbs.refusal(args) or (_SCRIPT_REFUSAL if saved_sign_in else browser_saved_fills.SAVED_FILL_SESSION_REFUSED))
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
     owner._queued_actions += 1
@@ -172,6 +182,27 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         runtime.action_lock.release()
 
 
+async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_window: bool | None,
+                       session: str) -> Any:
+    """Close a session whose Chrome died or was quit, and admit a fresh one on the same saved sign-in.
+
+    Its agent-browser daemon outlives Chrome, so without this every later command fails its page check.
+    The first command to see the dead browser claims the restart: it alone queues the notice, which the
+    fresh record takes once, and reports it. Another command racing it only waits on the same close.
+    """
+    record = runtime.record
+    claimed = owner._sessions.get(record.thread_id) is runtime and record.thread_id not in owner._restart_notices
+    if claimed:
+        logger.info("managed Chrome exited outside a close; starting the browser again")
+        owner._restart_notices[record.thread_id] = _CHROME_RESTARTED
+    await owner._close_runtime(runtime)
+    fresh = await owner._admit(record.thread_id, lease_id=lease_id or record.lease_id,
+                               show_window=record.shared if show_window is None else show_window, session=session)
+    if claimed:
+        await asyncio.to_thread(emit_product_event, "browser_pane", "chrome_restarted", thread_id=record.thread_id)
+    return fresh
+
+
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],
                       lease_id: str | None, timeout: float, pane: bool) -> str:
     command = partial(_command, owner, runtime, lease_id)
@@ -179,30 +210,48 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     guarded = not pane and not opening_unlaunched_session
     # A pane command is never a DOM write (_PANE_COMMANDS), so a marked field is always the agent's.
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
+    if not pane and args[0] in browser_agent_verbs.PERSON_INPUT and browser_pane_state.has_pane(thread_id):
+        await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
+                                properties={"command": args[0], "reason": "person_input"})
+        raise BrowserSessionError(browser_agent_verbs.PANE_INPUT_REFUSAL)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
-    note, filled_field_visit = None, False
+    note, filled_field_visit, saved_fill = None, False, False
     if guarded:
         access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
-            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
-        note, filled_field_visit = access.note, access.filled_field_visit
+            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
+            current_session=partial(owner.session_identity, thread_id))
+        note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
-    if shared_write:
-        try:
-            return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
-        except browser_dom_write.DomWriteRefused as exc:
-            await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
-                                    properties={"command": args[0], "reason": exc.reason})
-            raise
-    browser_pane_state.page_command_starting(thread_id, tuple(args))
-    try:
-        result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-    finally:
-        # A held pane shows nothing until this restart, so it runs however the command ends.
-        await browser_pane_state.page_command_finished(thread_id, tuple(args))
+    # Capture marks every document a typing command passes through (browser_login_capture_writes).
+    async with await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes:
+        if shared_write:
+            try:
+                return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
+            except browser_dom_write.DomWriteRefused as exc:
+                await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
+                                        properties={"command": args[0], "reason": exc.reason})
+                raise
+        saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+        if guarded and args[0] == "fill" and len(args) == 3 and await browser_dom_write.is_dropdown(command, endpoint, args[1]):
+            # The native fill clears a dropdown's choice and still reports it filled. With the pane open a fill
+            # chooses the option by value or label (browser_dom_write), so this route does the same.
+            if saved_sign_in:
+                # A saved sign-in takes a dropdown choice only as browser_input's select (a fixed shape in
+                # browser_agent_verbs), never as a fill turned into one here.
+                raise BrowserSessionError(_SAVED_DROPDOWN_REFUSAL)
+            args = ("select", args[1], args[2])
+        history = saved_sign_in and not pane and args[0] in {"back", "forward"}
+        browser_pane_state.page_command_starting(thread_id, tuple(args))
+        async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
+            try:
+                result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+            finally:
+                # Rule 7's marks land before the held pane restarts, and it restarts however the command ends.
+                await writes.settle(then=partial(browser_pane_state.page_command_finished, thread_id, tuple(args)))
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
@@ -210,9 +259,11 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if filled_field_visit and args[0] == "snapshot":
         hidden = hidden_snapshot(result)
         if hidden is None:
-            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+            return _noted(browser_control.SAVED_FILL_SNAPSHOT_WITHHELD if saved_fill else browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
         result = hidden
     rendered = owner._model_result(result, runtime.record)
+    if saved_sign_in and not pane:
+        rendered = browser_agent_verbs.saved_result(args, rendered, unfinished)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until
@@ -278,7 +329,7 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(
         thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
-    )
+        current_session=partial(owner.session_identity, thread_id))
     # Shared only once the step exists, so a refused declaration leaves the session as it was.
     await _share(runtime, thread_id, reveal=True)
 
@@ -323,6 +374,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
+        browser_login_capture.session_ended(thread_id, browser_login_capture.session_key(thread_id, session))
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

@@ -286,7 +286,7 @@ def _build_app(bundle: Path) -> None:
     infra = resources / "backend" / "infra"
     infra.mkdir(parents=True)
     (infra / "__init__.py").write_text("")
-    for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
+    for module in ("platform_paths.py", "service_file.py", "fs_durability.py", "log_files.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
     # Read by the rollback's schema check, which never imports it.
     (infra / "schema.py").write_text(f"SCHEMA_VERSION = {APP_SCHEMA_VERSION}\n")
@@ -634,8 +634,9 @@ def test_logs_read_the_file_the_launcher_writes(app, override):
     result = app.run("logs", **extra)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    # The launcher's service_log_path(): <state root>/logs/service.log.
-    assert result.stdout.strip() == f"-f {state / 'logs' / 'service.log'}"
+    from infra.log_files import logs_dir
+
+    assert result.stdout.strip() == f"-f {logs_dir(state, home=app.home) / 'service.log'}"
 
 
 @pytest.mark.parametrize("foreign", ["another_copy", "another_version"])
@@ -691,6 +692,38 @@ def test_prepare_discard_and_ensure_use_the_app_binary_and_its_staged_copy(app):
     assert not staged.exists()
     assert app.run("ensure-current-release").returncode == 0
     assert app.launchd_calls() == []
+
+
+@pytest.mark.asyncio
+async def test_post_stage_room_refusal_runs_real_packaged_discard(app, isolated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+    from fastapi import HTTPException
+    from api import settings_restart
+    from infra import config
+    from infra.database_migrations import BackupRoomError
+
+    monkeypatch.setattr(config, "LOGS_DIR", app.root / "logs")
+    monkeypatch.setattr("infra.drain.cancel_drain_projection", lambda: None)
+    monkeypatch.setattr("automation.restart_settlement.resume_threads_detached", lambda *_args: None)
+    monkeypatch.setattr("automation.update_failure_notice.tell_conductor_detached", lambda *_args: None)
+    staged = app.stage("2.0.0", "2")
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock(
+        side_effect=[None, BackupRoomError("full", 100, 25)]
+    ))
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    monkeypatch.setattr(settings_restart, "fresh_update_target", AsyncMock(return_value=None))
+
+    with pytest.raises(HTTPException) as raised:
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "owner"}, "update", app.script, app.env(), ["restart"],
+            lambda name: app.root / name, caller_token="test",
+        )
+    assert raised.value.detail == {"code": "disk_space", "needed_bytes": 100, "free_bytes": 25}
+    assert not staged.exists()
+    drain.assert_not_awaited()
+    assert not app.launchd_calls()
 
 
 def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):

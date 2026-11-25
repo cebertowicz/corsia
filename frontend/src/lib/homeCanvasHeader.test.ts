@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { syncCanvasHeader } from '$lib/homeCanvasHeader';
+import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 
 type Input = Parameters<typeof syncCanvasHeader>[0];
 
@@ -23,7 +24,10 @@ function makeInput(overrides: Partial<Input> = {}): Input {
 	};
 }
 
-beforeEach(() => canvasHeader.set(null));
+beforeEach(() => {
+	canvasHeader.set(null);
+	activityPhoneItem.set(null);
+});
 
 function compact(overrides: Record<string, unknown> = {}) {
 	return {
@@ -90,11 +94,24 @@ describe('syncCanvasHeader — no doc', () => {
 		expect(get(canvasHeader)).toBeNull();
 	});
 
-	it('uses a non-navigating scope header for Activity instead of a conductor label', () => {
+	it('names Activity in a non-navigating header, whatever the scope', () => {
 		syncCanvasHeader(makeInput({ activeView: 'activity', uiScopeName: 'CORSIA' }));
 		const h = get(canvasHeader);
-		expect(h?.title).toBe('CORSIA');
+		expect(h?.title).toBe('Activity');
 		expect(h?.onBack).toBeUndefined();
+		expect(h?.actions).toBeUndefined();
+	});
+
+	it('gives a phone Activity item its way back to the list, and no Next', () => {
+		const onBack = vi.fn();
+		activityPhoneItem.set({ backLabel: 'Notifications', onBack });
+		syncCanvasHeader(makeInput({ activeView: 'activity' }));
+		const h = get(canvasHeader);
+		expect(h?.backLabel).toBe('Notifications');
+		expect(h?.links).toBe(true);
+		h?.onBack?.();
+		expect(onBack).toHaveBeenCalledOnce();
+		expect(h?.actions).toBeUndefined();
 	});
 
 	it('returns Documents header in documents view', () => {

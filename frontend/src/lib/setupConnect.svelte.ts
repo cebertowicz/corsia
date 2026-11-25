@@ -22,8 +22,8 @@ export type RowView = {
 };
 export interface ConnectDeps { token: () => string | null; sources: () => ModelSource[]; refreshSources: (strict?: boolean) => Promise<void> }
 export const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; account: string }> = {
-	'claude-code': { cli: 'Claude Code', uses: 'Uses your Claude subscription.', maker: 'Anthropic', account: 'Claude' },
-	codex: { cli: 'Codex', uses: 'Uses your ChatGPT subscription.', maker: 'OpenAI', account: 'ChatGPT' },
+	'claude-code': { cli: 'Claude Code', uses: 'Uses your Claude account.', maker: 'Anthropic', account: 'Claude' },
+	codex: { cli: 'Codex', uses: 'Uses your ChatGPT account.', maker: 'OpenAI', account: 'ChatGPT' },
 };
 export const POLL_MS = 3000;
 

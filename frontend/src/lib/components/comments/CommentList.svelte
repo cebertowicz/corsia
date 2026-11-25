@@ -168,7 +168,7 @@
 </div>
 
 <style>
-	.comment-jump { display: block; width: 100%; min-height: var(--space-6); padding: 0 0 0 var(--space-2); text-align: left; border: 0; border-left: 2px solid var(--border); background: none; color: var(--text-tertiary); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+	.comment-jump { display: block; width: 100%; min-height: var(--space-6); padding: 0 0 0 var(--space-2); text-align: left; border: 0; border-left: 2px solid var(--border); background: none; color: var(--text-tertiary); font: inherit; font-size: var(--text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 	:global([data-comment-id].focused) :global(.ct) .comment-jump:not(:disabled) { border-left-color: var(--accent); }
 	@media (pointer: coarse) { .comment-jump { min-height: calc(var(--space-8) - var(--space-1)); } }
 	.comment-jump:disabled { color: var(--text-tertiary); cursor: default; }
@@ -178,7 +178,7 @@
 
 	.list { display: flex; flex-direction: column; gap: var(--space-3); }
 	.list > :global([data-comment-id]) { min-width: 0; }
-	h3, summary { margin: 6px 0 2px; color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
+	h3, summary { margin: 6px 0 2px; color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	h3:first-child { margin-top: 0; }
 	.empty { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); }
 	details { display: flex; flex-direction: column; gap: 4px; }

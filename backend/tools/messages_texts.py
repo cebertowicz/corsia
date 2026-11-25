@@ -26,13 +26,12 @@ DRAFT = (
     "Pass draft_id to replace an open draft. "
 )
 SEND = (
-    "Send a saved text draft. Call it only when the person's latest message says to send this draft. It goes "
-    "out only if they wrote after the draft's last save and revision matches the one messages_draft returned; "
-    "otherwise nothing is sent and the error says what to do."
+    "Send a saved text draft, when the person wants it sent. It goes out only if revision matches the one "
+    "messages_draft returned; otherwise nothing is sent and the error says what to do."
 )
 AFTER_DRAFT = (
-    "Show the person the draft (link its path), end your turn, and call messages_send only when their reply "
-    "says to send it; if they ask for changes, save again with messages_draft and show them the new version."
+    "Show the person the draft (link its path) and call messages_send when they want it sent; if they ask for "
+    "changes, save again with messages_draft and show them the new version."
 )
 
 # States of the Mac and of Messages.
@@ -84,12 +83,11 @@ NEEDS_BODY = "Error: Pass the text to send as body."
 BAD_TO = "Error: Pass the full phone number with country code (+1…), an email, or a chat_id from messages_chats."
 AMBIGUOUS = "Error: More than one chat matches that number. Use one of these chat_ids: {ids}."
 BAD_DOCUMENT = (
-    "Not sent: the draft document isn't in the draft format. Save it again with messages_draft, "
-    "show the person, and wait for their reply."
+    "Not sent: the draft document isn't in the draft format. Save it again with messages_draft "
+    "and show the person."
 )
 NO_TARGET = (
-    "Not sent: this draft isn't tied to a chat. Save it again with messages_draft, show the person, "
-    "and wait for their reply."
+    "Not sent: this draft isn't tied to a chat. Save it again with messages_draft and show the person."
 )
 STILL_SENDING = (
     "Not sent: an earlier send of this draft didn't finish, so it may already have gone out. Don't send it "

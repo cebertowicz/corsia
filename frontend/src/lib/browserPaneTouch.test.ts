@@ -1,0 +1,86 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BrowserPaneTouch, type TextFieldKind } from './browserPaneTouch';
+import phoneTyping from '../../../backend/tests/fixtures/browser_phone_typing.json';
+
+afterEach(() => { document.body.innerHTML = ''; });
+
+describe('touch keyboard target', () => {
+ it.each([
+  ['email', 'email', 'text', 'off'], ['tel', 'tel', 'text', 'off'],
+  ['number', 'decimal', 'text', 'off'], ['one-time-code', 'numeric', 'text', 'off'],
+  ['password', 'text', 'text', 'off'],
+ ] satisfies [TextFieldKind, string, string, string][])('sets the %s field attributes', (kind, mode, type, autocomplete) => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const touch = new BrowserPaneTouch(vi.fn());
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector<HTMLInputElement>('input')!;
+  expect(document.activeElement).toBe(input);
+  expect([input.inputMode, input.type, input.autocomplete]).toEqual([mode, type, autocomplete]);
+  expect(input.spellcheck).toBe(false);
+  touch.close();
+ });
+
+ it('never invites autofill on a page field, even a password one', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const touch = new BrowserPaneTouch(vi.fn());
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'password' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector<HTMLInputElement>('input')!;
+  // The input is CORSIA's own, so a password type or a saved-login hint would offer another site's secret.
+  expect([input.type, input.autocomplete, input.getAttribute('name')]).toEqual(['text', 'off', null]);
+  expect([input.autocapitalize, input.getAttribute('autocorrect'), input.spellcheck]).toEqual(['off', 'off', false]);
+  touch.close();
+ });
+
+ it('emits the password input sequence replayed by the backend privacy test', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const send = vi.fn();
+  const touch = new BrowserPaneTouch(send);
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'password' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector('input')!;
+  input.value = 'x'; input.dispatchEvent(new InputEvent('input'));
+  input.value = 'yz'; input.dispatchEvent(new InputEvent('input'));
+  expect(send.mock.calls.map(([message]) => message)).toEqual(phoneTyping);
+  expect(input.value).toBe('');
+ });
+
+ it('forwards a completed composition once and clears the target', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const send = vi.fn();
+  const touch = new BrowserPaneTouch(send);
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'text' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector('input')!;
+  input.dispatchEvent(new CompositionEvent('compositionstart'));
+  input.value = '世界';
+  input.dispatchEvent(new InputEvent('input', { isComposing: true, inputType: 'insertCompositionText' }));
+  input.dispatchEvent(new CompositionEvent('compositionend'));
+  input.value = '世界';
+  input.dispatchEvent(new InputEvent('input', { inputType: 'insertFromComposition' }));
+  expect(send.mock.calls.map(([message]) => message)).toEqual([{ type: 'clipboard_paste', text: '世界' }]);
+  expect(input.value).toBe('');
+ });
+
+ it('forwards delete and return, including input-only mobile events', () => {
+  const wrapper = document.createElement('div');
+  const canvas = document.createElement('canvas'); wrapper.append(canvas); document.body.append(wrapper);
+  const send = vi.fn();
+  const touch = new BrowserPaneTouch(send);
+  touch.setFields([{ x: 0, y: 0, width: 100, height: 50, kind: 'textarea' }]);
+  touch.tap({ x: 5, y: 5 }, canvas, { left: 0, top: 0, scale: 1 });
+  const input = wrapper.querySelector('textarea')!;
+  input.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, cancelable: true }));
+  expect(send.mock.calls.map(([message]) => [message.eventType, message.key, message.keyCode, message.text])).toEqual([
+   ['keyDown', 'Backspace', 8, ''], ['keyUp', 'Backspace', 8, ''],
+   ['keyDown', 'Enter', 13, '\r'], ['keyUp', 'Enter', 13, ''],
+  ]);
+ });
+});

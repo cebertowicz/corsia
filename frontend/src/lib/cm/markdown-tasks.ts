@@ -66,13 +66,15 @@ class TaskCheckboxWidget extends WidgetType {
 	constructor(
 		readonly from: number,
 		readonly checked: boolean,
-		readonly label: string
+		readonly label: string,
+		readonly locked: boolean
 	) {
 		super();
 	}
 
+	// `locked` is part of identity: switching Reading and Edit must rebuild the box, not reuse one built disabled.
 	eq(other: TaskCheckboxWidget) {
-		return other.from === this.from && other.checked === this.checked && other.label === this.label;
+		return other.from === this.from && other.checked === this.checked && other.label === this.label && other.locked === this.locked;
 	}
 
 	toDOM(view: EditorView) {
@@ -82,7 +84,7 @@ class TaskCheckboxWidget extends WidgetType {
 		checkbox.className = 'cm-md-task-checkbox';
 		checkbox.type = 'checkbox';
 		checkbox.checked = this.checked;
-		checkbox.disabled = isReadOnly(view);
+		checkbox.disabled = this.locked;
 		checkbox.setAttribute('aria-label', `${this.checked ? 'Mark task incomplete' : 'Mark task complete'}: ${this.label}`);
 		control.append(checkbox);
 
@@ -129,7 +131,7 @@ function taskDecorations(view: EditorView): DecorationSet {
 				if (listMark && /^[-*+]$/.test(doc.sliceString(listMark.from, listMark.to))) {
 					hide(listMark.from, node.from);
 				}
-				hide(node.from, node.to, new TaskCheckboxWidget(node.from, checked, label));
+				hide(node.from, node.to, new TaskCheckboxWidget(node.from, checked, label, isReadOnly(view)));
 				if (checked && task && node.to < task.to) {
 					decorations.push(Decoration.mark({ class: 'cm-md-task-done' }).range(node.to, task.to));
 				}

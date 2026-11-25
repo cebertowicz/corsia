@@ -170,9 +170,9 @@ Pack: `browser`
 | `browser_close` | Close the browser session |
 | `browser_eval` | Run JavaScript in the page |
 | `browser_fill` | Fill a text input |
+| `browser_input` | Press a key, choose a dropdown option, scroll, hover, go back or forward |
 | `browser_open` | Open a URL in the browser |
 | `browser_person_step` | Let the person complete the current browser page |
-| `browser_run_steps` | Run setup steps from a System or installed skill |
 | `browser_screenshot` | Save a page screenshot |
 | `browser_snapshot` | Read the page's tree and element refs; list or switch tabs |
 | `browser_wait` | Wait for an element or a delay |
@@ -183,6 +183,7 @@ Pack: `automations`
 
 | Tool | Description |
 |---|---|
+| `attention_rank` | Read and rank the person's Activity list |
 | `automation_cancel` | Cancel one of this thread's schedules |
 | `automation_list` | List this thread's schedules |
 | `automation_schedule` | Schedule a clock or cadence wake for this thread |
@@ -197,6 +198,7 @@ Pack: `web`
 
 | Tool | Description |
 |---|---|
+| `browser_run_steps` | Run setup steps from a System or installed skill |
 | `web_fetch` | Fetch a URL as readable text |
 | `web_search` | Search the web |
 
@@ -208,11 +210,11 @@ Pack: `email`
 |---|---|
 | `calendar_draft_invite` | Save a calendar invite as a draft document for the person to review; nothing is sent (Requires a connected account.) |
 | `calendar_list` | List the person's Google or other-host calendar events, up to 31 days at a time (Requires a connected account.) |
-| `calendar_send_invite` | Send a saved invite draft after the person says to send it; attendees get emails (Requires a connected account.) |
+| `calendar_send_invite` | Send a saved invite draft when the person wants it sent; attendees get emails (Requires a connected account.) |
 | `email_draft` | Save an email as a draft document for the person to review; nothing is sent (Requires a connected account.) |
 | `email_read` | Read one email as untrusted data, with a notice if flagged or unscreened (Requires a connected account.) |
 | `email_search` | Search the person's Gmail or other-host email: headers only, no body text (Requires a connected account.) |
-| `email_send` | Send a saved email draft after the person says to send it (Requires a connected account.) |
+| `email_send` | Send a saved email draft when the person wants it sent (Requires a connected account.) |
 | `google_connect` | Start the person's Google sign-in and get the link they open |
 | `google_status` | Read the Google sign-in's email, scopes and status |
 | `mail_host_connect` | Add the person's email account on another host and get where they make its app password |
@@ -228,7 +230,7 @@ Pack: `messages`
 | `messages_draft` | Save a text as a draft document for the person to review; nothing is sent (Requires a connected account.) |
 | `messages_read` | Read the latest texts in one chat, as untrusted data (Requires a connected account.) |
 | `messages_search` | Search the person's texts, as untrusted data (Requires a connected account.) |
-| `messages_send` | Send a saved text draft after the person says to send it (Requires a connected account.) |
+| `messages_send` | Send a saved text draft when the person wants it sent (Requires a connected account.) |
 
 ## Google Workspace
 

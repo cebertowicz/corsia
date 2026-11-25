@@ -115,6 +115,18 @@ def _open_task(db, artifact_id: str) -> tuple[str | None, str | None]:
     return (str(row['id']), str(row['owner_id'])) if row else (None, None)
 
 
+def documents_with_open_task(db, artifact_ids) -> set[str]:
+    """Of these documents, the ones with an open comment task, in one read."""
+    rows = db.execute(
+        f"""SELECT DISTINCT l.artifact_id FROM plan_node_artifact_links l
+             JOIN plan_nodes n ON n.id=l.node_id
+            WHERE l.provenance=? AND l.artifact_id IN (SELECT value FROM json_each(?))
+              AND {node_states.open_sql('n')}""",
+        (PROVENANCE, json.dumps(list(artifact_ids))),
+    ).fetchall()
+    return {str(row['artifact_id']) for row in rows}
+
+
 def _close(db, node_id: str, reason: str) -> bool:
     """Close the task without deciding or reading anything; a paused plan or held task stays."""
     if review_evidence.stop_reason(db, service._node_row(db, node_id)) is not None:

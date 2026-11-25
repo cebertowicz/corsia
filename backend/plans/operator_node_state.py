@@ -7,14 +7,19 @@ from datetime import datetime, timezone
 
 from plans import admission, node_states, node_time, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
-from plans import operator_node_facts as facts
+from plans import operator_node_facts as facts, operator_intent
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
     ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
     review_deferred, row_asks_user,
 )
-#: Leaves whose primary condition opens their path by default. Paused work
-#: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
+#: Leaves whose shown condition makes them current work. Being current does
+#: not open a path by itself: the sheet opens a current leaf's path only while
+#: it reads Working or its timed wait ends soon, and ``attention_path`` opens a
+#: shown block, an ask owed to the person, or a stopped selected executor
+#: (a stall or provider reset: selected work that reads waiting, not a quiet
+#: wait). Paused work (a whole-plan pause or
+#: a node pause hold) is "Collapsed by default" in the
 #: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a pause
 #: stays current while a plan or item pause defers its ask (``ask_deferred``).
 CURRENT_CONDITIONS = frozenset({"running", "waiting", "blocked", "review"})
@@ -169,6 +174,7 @@ def _display(
         str(execution["condition"]),
         None if review is None else str(review["kind"]),
         asks_user=asks_user,
+        later=bool(node.get("later")),
         child_working=_child_plan_working(execution),
         # A stopped selected executor makes an otherwise-running row wait.
         executor_stopped=stopped is not None,
@@ -227,9 +233,10 @@ def project(
     list's facts (``execution``, ``display``, ``requires_user_action``). It
     skips the reads behind the rest: ``executor.label``, ``evidence`` and
     ``last_transition_at`` are None, a settled node's recorded reason is not in
-    ``status_reason``, and ``execution`` has no attempts and zero counts.
+    ``status_reason``; intent fields are empty; ``execution`` has no attempts and zero counts.
     """
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
+    intent_by_node = {} if lean else operator_intent.read([str(node["id"]) for node, _plan in node_plans], db=db)
     executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
     labels, history, attempt_counts, evidence, changed, settled_because = (
         facts.NO_DETAIL if lean else facts.detail(
@@ -246,7 +253,6 @@ def project(
         detail_ids=detail_ids, stable=stable,
     ), named=stable and costs)
     states: dict[str, dict] = {}
-
     for item in projected:
         for node in item.nodes:
             execution = executions[node["id"]]
@@ -257,17 +263,16 @@ def project(
             commitment_id = str(node["commitment_id"])
             is_commitment_root = node["id"] == commitment_id
             sequenced_after = after(execution, titles)
-            stopped = operator_stopped.at(
-                stops.get(executor_id), node, item.plan, execution,
-            )
+            stopped = operator_stopped.at(stops.get(executor_id), node, item.plan, execution)
             asks_user = row_asks_user(node, review, execution)
-            deferred_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
+            paused_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
             states[node["id"]] = {
+                **intent_by_node.get(node["id"], operator_intent.EMPTY),
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
-                    execution, sequenced_after, stopped, deferred_ask=deferred_ask) or _sent_back(node),
+                    execution, sequenced_after, stopped, deferred_ask=paused_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
@@ -276,7 +281,8 @@ def project(
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
-                "requires_user_action": asks_user and not deferred_ask,
+                "requires_user_action": asks_user and not (paused_ask or ask_deferred(later=bool(node.get("later")))),
+                "executor_stopped": stopped is not None,
             }
     return states
 
@@ -332,13 +338,14 @@ def leaf_bucket_from_facts(
     unactionable_user_block: bool = False,
     plan_paused: bool = False,
     node_paused: bool = False,
+    later: bool = False,
 ) -> str:
     """Reduce compact lifecycle facts into the canonical distribution bucket."""
     if state in service._ACCEPTED_STATES:
         return "done"
     if state == "failed":
         return state
-    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused, later=later):
         return "paused"
     if condition == "review":
         return "review_human" if review_kind in _HUMAN_REVIEWS else "review_parent_agent"
@@ -353,7 +360,7 @@ def leaf_bucket_from_facts(
     return "pending_ready"
 
 
-def leaf_bucket(node: dict) -> str:
+def leaf_bucket(node: dict, *, later: bool = False) -> str:
     """Name the one bucket a leaf counts in, by its canonical lifecycle/condition."""
     review, label = node["review"] or {}, str(node["display"]["label_key"])
     return leaf_bucket_from_facts(
@@ -366,6 +373,7 @@ def leaf_bucket(node: dict) -> str:
         unactionable_user_block=unactionable_user_hold(node),
         plan_paused=plan_paused(node["execution"]),
         node_paused=node_paused(node["execution"]),
+        later=later,
     )
 
 

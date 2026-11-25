@@ -16,7 +16,6 @@ from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
 from connections.calendar_document import attendee_emails, compose_document
 from tools import action_gate, calendar_list, gmail_backend
-from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
 from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
 
@@ -77,18 +76,17 @@ def test_first_description_lines_and_email_refusal_bytes_are_pinned():
         "person to review; nothing is sent, and it is later sent from the same account"
     )
     assert CalendarSendInviteTool().description.splitlines()[0] == (
-        "Send a saved invite draft, from the account it was drafted from, after the person says to "
-        "send it; attendees get emails"
+        "Send a saved invite draft, from the account it was drafted from, when the person wants it "
+        "sent; attendees get emails"
     )
     assert action_gate.CHANGED_OUTSIDE == (
         "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
-        "again and keep their changes when you save it with email_draft, then show the person "
-        "and wait for their reply."
+        "again and keep their changes when you save it with email_draft, then show the person."
     )
     assert action_gate._changed_outside("invite") == (
         "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
         "again and keep their changes when you save it with calendar_draft_invite, then show "
-        "the person and wait for their reply."
+        "the person."
     )
 
 
@@ -164,18 +162,14 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["not_seen", "stale", "changed"])
+@pytest.mark.parametrize("case", ["stale", "changed"])
 async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, monkeypatch, case):
     data = b"From: person@example.com\nTitle: Planning\nWhen: 2026-10-15T09:00:00-07:00 to 2026-10-15T10:00:00-07:00\nAttendees: sam@example.com\n\nAgenda\n"
     draft = _draft(deleg_db, workspace, data=data, kind="invite")
     _admit(deleg_db, case)
     _bind(deleg_db, case)
     revision = draft["revision"]
-    if case == "not_seen":
-        draft = record_draft(draft["draft_id"], data, db=deleg_db)
-        deleg_db.commit()
-        expected = f"Error: {action_gate.NOT_SEEN}"
-    elif case == "stale":
+    if case == "stale":
         revision = "0" * 64
         expected = f"Error: {calendar_list.NO_OPEN_DRAFT}"
     else:
@@ -186,7 +180,7 @@ async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, 
         expected = (
             "Error: Not sent: the draft was changed outside the draft tools, maybe by the person. "
             "Read it again and keep their changes when you save it with calendar_draft_invite, "
-            "then show the person and wait for their reply."
+            "then show the person."
         )
     assert await CalendarSendInviteTool().execute(
         _thread_id="sender-self", draft_id=draft["draft_id"], revision=revision,

@@ -22,11 +22,15 @@ from tools.conductor_instruction_files import (
 )
 
 
-def _setup(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, filename="ROLE.md"):
     import infra.config as config
 
     workspace = tmp_path / "workspace"
+    from infra.platform_paths import WorkspaceSelection
     monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="test-workspace", root=workspace.resolve(), name="Test workspace",
+    ))
     db = get_db()
     try:
         db.execute(
@@ -37,7 +41,7 @@ def _setup(tmp_path, monkeypatch):
         target = make_session(db, prefix="target")
         ordinary = make_session(db, prefix="ordinary")
         foreign = make_session(db, project_id="other-project", prefix="foreign")
-        path = workspace / ".threads" / target / "context" / "ROLE.md"
+        path = workspace / ".threads" / target / "context" / filename
         db.execute(
             "UPDATE threads SET bootloader_files=? WHERE id=?",
             (json.dumps([str(path)]), target),
@@ -88,6 +92,31 @@ async def test_pin_cross_scope_conductors_cannot_read_instruction_files(isolated
             result = await tool.execute(target, requested, _thread_id=caller)
             assert result == "Error: Conductor and target must share a scope."
             assert "private instruction" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["PRIORITIES.md", "ROLE.md"])
+async def test_replace_refuses_only_person_owned_priorities(isolated_db, tmp_path, monkeypatch, filename):
+    from registry import models, service
+
+    conductor, target, _, _, path = _setup(tmp_path, monkeypatch, filename)
+    db = get_db()
+    try:
+        artifact = service.register_write_strict(conductor, str(path), db=db)
+        models.rehome_artifact(integration=artifact["integration"], type=artifact["type"],
+                               external_id=artifact["external_id"], new_owner_thread_id="ui",
+                               actor_thread_id=None, authority="test", reason="test", source_path="test", db=db)
+    finally:
+        db.close()
+    revision = hashlib.sha256(path.read_bytes()).hexdigest()
+    result = await ConductorInstructionFileReplaceTool().execute(
+        target, str(path), revision, "changed", _thread_id=conductor,
+    )
+    if filename == "PRIORITIES.md":
+        assert "Only the person edits it directly" in result and "doc_comment_create" in result
+        assert path.read_text() == "# Role\nOriginal\n"
+    else:
+        assert "revision" in json.loads(result) and path.read_text() == "changed"
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ export interface ServerComment {
 	replacement?: string | null;
 	insert_after?: boolean | number;
 	decision?: 'accepted' | 'rejected' | null;
+	decision_event_id?: string | null;
 	decided_by?: string | null;
 	orphaned?: boolean;
 	/** An open suggestion edited inside: it keeps its place and quote, and cannot be accepted. */

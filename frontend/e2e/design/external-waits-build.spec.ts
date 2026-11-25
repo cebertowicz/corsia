@@ -268,12 +268,6 @@ async function holdTurn(page: Page, request: APIRequestContext, m: Made, user: s
 	await expect(page.getByRole('button', { name: 'Stop turn' })).toBeVisible({ timeout: 10_000 });
 }
 
-async function openActivity(page: Page) {
-	await page.locator('aside.sidebar').getByText('Activity', { exact: true }).click();
-	await expect(page.getByRole('heading', { name: /Waiting \(\d+\)/ })).toBeVisible({ timeout: 15_000 });
-	await page.getByRole('button', { name: /Waiting \(\d+\)/ }).click();
-}
-
 async function drawer(page: Page, open: boolean) {
 	// On a phone the rail sits behind the main surface, which slides right to open it.
 	const box = await page.locator('main.main').boundingBox().catch(() => null);
@@ -399,33 +393,6 @@ test('frame 4: the non-Focus face', async ({ page, request }) => {
 	await shot(page, '4-non-focus-face');
 });
 
-test('frame 5: Activity Waiting, expanded', async ({ page, request }) => {
-	test.setTimeout(150_000);
-	await boot(page, request, [
-		{ title: 'Quality review', agent: true, kind: 'waiting', label: 'CI on PR #1194', until: atToday(23, 59) },
-		r2Wait('waiting', atToday(23, 46)),
-		{ title: 'Weekly digest', agent: true, kind: 'aside' },
-	]);
-	await openActivity(page);
-	await expect(page.locator('.owner-copy .wait')).toHaveCount(2);
-	await expect(page.locator('.owner-copy').filter({ hasText: /Set aside until/ })).toHaveCount(1);
-	await shot(page, '5-activity-waiting-expanded');
-});
-
-test('frame 8: Activity Waiting at 393, set-aside subline visible', async ({ page, request }) => {
-	test.setTimeout(150_000);
-	await boot(page, request, [
-		{ title: 'Quality review', agent: true, kind: 'waiting', label: 'CI on PR #1194', until: atToday(23, 59) },
-		r2Wait('waiting', atToday(23, 46)),
-		{ title: 'Weekly digest', agent: true, kind: 'aside' },
-	]);
-	await openActivity(page);
-	await view(page, 393, 852, 'light');
-	await expect(page.locator('.owner-copy > .set-aside')).toBeVisible();
-	await expect(page.locator('.owner-copy > .set-aside')).toContainText(/Set aside until/);
-	await shot(page, '8-activity-waiting-393');
-});
-
 test('frame 9: the static chip when the thread has no run to open', async ({ page, request }) => {
 	test.setTimeout(150_000);
 	await setFocusMode(request, true);
@@ -461,7 +428,7 @@ test('frame 7: a parent child chip', async ({ page, request }) => {
 });
 
 // Frame names (`copy-<n>-<width>`) are the evidence index's names; each test title says what its frames show.
-test('plan copy: open-agent control, missing-task and closed-decision notices', async ({ page, request }, info) => {
+test('plan copy: open-agent control and missing-task notice', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured with a pointer.');
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
@@ -480,13 +447,6 @@ test('plan copy: open-agent control, missing-task and closed-decision notices', 
 		}, by('Docs refresh').id);
 		await expect(page.getByText('That task isn’t in this plan.')).toBeVisible();
 		await shot(page, `copy-2-${width}`);
-		await page.evaluate(async () => {
-			const path = '/src/lib/stores/attentionDock.svelte.ts';
-			const { reportOpenDecision } = await import(/* @vite-ignore */ path);
-			reportOpenDecision('empty');
-		});
-		await expect(page.getByText('That decision is closed.').last()).toBeVisible();
-		await shot(page, `copy-3-${width}`);
 	}
 });
 
@@ -518,14 +478,14 @@ test('plan copy: oversize count and resolved decision', async ({ page, request }
 });
 
 
-test('plan copy: task details, read-only discussion, task menu, empty pane, activity row', async ({ page }, info) => {
+test('plan copy: task details, read-only discussion, task menu, empty pane', async ({ page }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
 	test.setTimeout(150_000);
 	for (const width of [1920, 393]) {
-		for (const row of [6, 7, 8, 10, 15, 17]) {
-			if ((row === 15 || row === 17) && width === 393) continue; // These labels are hidden on phones.
+		for (const row of [6, 7, 8, 10, 15]) {
+			if (row === 15 && width === 393) continue; // This label is hidden on phones.
 			await view(page, width, width === 393 ? 852 : 1080, 'light');
-			await page.goto('/_design?frame=attention-dock&scenario=empty');
+			await page.goto('/_design');
 			await page.evaluate(async (selected) => {
 				const load = (path: string) => import(/* @vite-ignore */ path);
 				const { mount, flushSync } = await load('/node_modules/.vite/deps/svelte.js');
@@ -546,10 +506,6 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 					const { activeThreadId } = await load('/src/lib/stores/threads.ts');
 					activeThreadId.set(null);
 					mount(Component, { target: host, props: { sections: [{ title: 'Plan', kind: 'plan' }] } });
-				} else if (selected === 17) {
-					const { default: Component } = await load('/src/lib/components/activity/ActivityPlanRow.svelte');
-					const row = { entry: { plan: { id: 'p', revision: 1 }, owner: { thread_id: 't', label: 'Example chat', type: 'thread' }, progress: { open: 1, liveness: 'waiting' }, has_nodes: false, display: { label_key: 'waiting', tone_key: 'waiting' }, priority_at: new Date().toISOString() }, thread: null, ownerType: 'thread', state: 'waiting' };
-					mount(Component, { target: host, props: { row, onSelectThread: () => {} } });
 				} else {
 					const { default: Component } = await load('/src/lib/components/plans/PlanNodeDetails.svelte');
 					const item = node({ title: 'Review task' });
@@ -559,8 +515,8 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 				}
 				flushSync();
 			}, row);
-			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'Waiting, this task alone:';
-			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : 'Waiting, this task alone:';
+			await expect(page.getByText(text)).toBeVisible();
 			await shot(page, `copy-${row}-${width}`);
 		}
 	}
@@ -578,7 +534,7 @@ test('plan copy: the plan pane when its plan is forbidden', async ({ page }, inf
 			await page.unroute('**/api/plans/operator/threads/**');
 			await page.route('**/api/plans/operator/threads/**', route => route.fulfill({ status: state.status, json: state.json }));
 			await view(page, width, width === 393 ? 852 : 1080, 'light');
-			await page.goto('/_design?frame=attention-dock&scenario=empty');
+			await page.goto('/_design');
 			// The pane alone, at the plan drawer's width on desktop and full width on a phone.
 			await page.evaluate(async (paneWidth) => {
 				const load = (path: string) => import(/* @vite-ignore */ path);

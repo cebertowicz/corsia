@@ -3,6 +3,8 @@ import path from 'node:path';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 import { inContentEditorView, inEditorView } from './liveDocument';
+import { enterDocumentEdit } from './documentReading';
+import { settled } from './reviewFixtures';
 
 /**
  * The document, layouts and helpers the table-cell editing specs share (`flows/doc-table-cell-*.spec.ts`). Frames for the
@@ -67,10 +69,8 @@ async function seed(page: Page, text: string, readOnly: boolean) {
 	return { title, fileName, docPath, params, threadId, artifactId: (await seeded.json()).artifact.id as string };
 }
 
-/** Resolves once every animation and transition that ends (the sidebar's slide, a button's pop) has ended. */
-export const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
-	.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-	.map((a) => a.finished.catch(() => null))).then(() => undefined));
+/** The one settle helper, shared with the review specs: waits out every animation and transition that ends (the sidebar's slide, a button's pop, a sheet's late slide-in). */
+export { settled };
 
 /**
  * Resolves once the phone sheet around `target`, if it is in one, has finished sliding in. `settled` cannot tell: the sheet's
@@ -84,7 +84,7 @@ export const sheetAtRest = (target: Locator) => target.evaluate((el) => new Prom
 }));
 
 /** Seed the document (and, when writable, a comment on `quoted`, words in one table cell by default), then open it in the canvas at `layout`. */
-export async function openTableDocument(page: Page, layout: { width: number; height: number }, { readOnly = false, text = DOC, quoted = 'trailhead sign points the wrong way' } = {}): Promise<Seeded> {
+export async function openTableDocument(page: Page, layout: { width: number; height: number }, { readOnly = false, text = DOC, quoted = 'trailhead sign points the wrong way', editing = true } = {}): Promise<Seeded> {
 	await page.setViewportSize({ width: layout.width, height: layout.height });
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 	const doc = await seed(page, text, readOnly);
@@ -111,6 +111,8 @@ export async function openTableDocument(page: Page, layout: { width: number; hei
 	// At phone width choosing the document closes the sidebar, and the page slides back into place after the table is drawn.
 	// An action taken during that slide finds its target moving, and Playwright scrolls the document to bring it into view.
 	await settled(page);
+	// Existing cell-editing journeys explicitly choose Edit on touch; Reading journeys opt out.
+	if (editing && !readOnly) await enterDocumentEdit(page);
 	return { title: doc.title, docPath: doc.docPath, params: doc.params, commentId, threadId: doc.threadId, artifactId: doc.artifactId };
 }
 

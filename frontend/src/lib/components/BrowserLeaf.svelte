@@ -3,12 +3,14 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { drawFrame, FrameScrollShift } from '$lib/browserPane';
 	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
+	import { PaneAppearance } from '$lib/browserPaneAppearance';
 	import { agentColor } from '$lib/docPresence';
-	import { BrowserPaneInput, keyMessage, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneInput, isPersonText, keyMessage, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneTouch } from '$lib/browserPaneTouch';
 	import { BrowserPaneStats } from '$lib/browserPaneStats';
-	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
+	import { BrowserPaneClipboard, clipboardKey, clipboardReply, isPasteKey } from '$lib/browserPaneClipboard';
 	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
@@ -16,6 +18,7 @@
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import BrowserToolbar from '$lib/components/BrowserToolbar.svelte';
 	import BrowserPageStatus from '$lib/components/BrowserPageStatus.svelte';
+	import BrowserSaveOffer from '$lib/components/BrowserSaveOffer.svelte';
 	import { threads } from '$lib/stores/threads';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { on } from '$lib/ws/events';
@@ -25,6 +28,9 @@
 
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
+	// An editable key target lets the platform paste run natively; after a finger or pen press the canvas keeps focus, so no on-screen keyboard opens.
+	let keyTarget: HTMLTextAreaElement;
+	let touchFocus = false;
 	let socket: WebSocket | null = null;
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
@@ -48,25 +54,34 @@
 	let image = $state<HTMLImageElement | null>(null);
 	let streaming = $state(false);
 	let opening = false;
+	let saveOffer: BrowserSaveOffer | undefined;
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
-	let lastAppearance = '';
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
 	let decodeWarned = false;
 	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
+	const appearance = new PaneAppearance(() => canvas, () => socket, () => get(theme));
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const stats = new BrowserPaneStats(() => socket?.bufferedAmount ?? 0);
-	const send = (message: object) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(stats.stamp(message))); };
+	const send = (message: object) => {
+		if (socket?.readyState !== WebSocket.OPEN) return;
+		if (isPersonText(message)) saveOffer?.typed();
+		socket.send(JSON.stringify(stats.stamp(message)));
+	};
+	const touchInput = new BrowserPaneTouch(send, event => sendMouse(event, true));
 	const paneInput = new BrowserPaneInput(send, delta => {
+		touchInput.close();
 		frameScroll.shift(delta);
 		redraw();
 	});
 
 	function resetInput() {
+		saveOffer?.reset();
 		stats.stop();
 		clipboard?.dispose();
 		paneErrors.resetUndo();
 		paneInput.reset();
+		touchInput.clear();
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
 	}
@@ -80,16 +95,16 @@
 		agent.reset();
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
-		lastAppearance = '';
+		appearance.forget();
 		socket = next;
 		// A stream is usable only after the server confirms an existing browser page.
 		streaming = false;
 		next.onopen = () => {
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
 			stats.start(send);
-			sendAppearance();
+			appearance.send();
 			// A newly opened socket can beat the canvas's first layout; send again once it is laid out.
-			requestAnimationFrame(() => sendAppearance());
+			requestAnimationFrame(() => appearance.send());
 		};
 		next.onmessage = (event) => { if (socket === next) drawMessage(event.data); };
 		next.onclose = () => {
@@ -116,6 +131,7 @@
 		if (typeof nextUrl === 'string') {
 			url = nextUrl;
 			domain = typeof nextDomain === 'string' ? nextDomain : null;
+			saveOffer?.navigated(domain);
 		}
 		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url, domain));
 	}
@@ -129,15 +145,18 @@
 		}
 		if (paneErrors.handle(message)) return;
 		if (clipboardReply(message, clipboard)) return;
+		if (message.type === 'text_fields') { touchInput.setFields(message.fields); return; }
+		if (message.type === 'text_field_blurred') { touchInput.close(); return; }
 		if (message.type === 'browser_target_changed') {
-			lastAppearance = '';
-			sendAppearance();
+			touchInput.clear();
+			appearance.forget();
+			appearance.send();
 			return;
 		}
 		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
 			passwordPage = message.visible;
-			// Emptied on each password page, so the next one announces again.
-			announcement = passwordPage ? '' : 'Agent can see the page again';
+			// Emptied on each password page, so the next one announces again. Reads stay refused for the rest of the visit.
+			announcement = passwordPage ? '' : 'The password step is over';
 			if (passwordPage) agent.clearMark();
 			return;
 		}
@@ -205,56 +224,23 @@
 
 	function redraw() {
 		if (!canvas || !image || !width || !height) return;
-		const { bounds, scale, left, top } = placement();
-		const backingWidth = Math.round(bounds.width * devicePixelRatio);
-		const backingHeight = Math.round(bounds.height * devicePixelRatio);
-		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
-		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-			canvas.width = backingWidth;
-			canvas.height = backingHeight;
-		}
-		const context = canvas.getContext('2d');
-		if (!context) return;
-		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
-		// store so no strip of the earlier picture survives beside the new one.
-		// Predicted scroll also moves the visible rectangle, so it needs the same clear.
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, canvas.width, canvas.height);
-		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
-		// top-left corner with blank space beside it, so draw only the page's part of the frame.
-		// Frame pixels per page pixel; above 1 on a high-density pane.
-		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
-		drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, frameScroll.translation, scale);
-		placeMarker();
-	}
-
-	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
-	function sendAppearance() {
-		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
-		const bounds = canvas.getBoundingClientRect();
-		if (bounds.width < 1 || bounds.height < 1) return;
-		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme) };
-		const key = JSON.stringify(appearance);
-		if (key === lastAppearance) return;
-		lastAppearance = key;
-		socket.send(key);
+		if (drawFrame(canvas, image, width, height, placement(), frameScroll.translation)) placeMarker();
 	}
 
 	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
 		return paneCoordinates(event, canvas, width, height, clamp);
 	}
 
-	function sendMouse(event: PointerEvent) {
+	function sendMouse(event: PointerEvent, overlay = false) {
 		if (socket?.readyState !== WebSocket.OPEN || !width || !height) return;
 		if (!event.isPrimary) return;
 		const point = coordinates(event, event.type !== 'pointerdown' && (event.type !== 'pointermove' || activePointer !== null));
 		if (!point) return;
-		if (event.pointerType === 'touch') event.preventDefault();
+		if (event.pointerType === 'touch' && !overlay) event.preventDefault();
 		if (event.type === 'pointerdown') {
-			canvas.focus();
+			if (!overlay) { touchFocus = event.pointerType === 'touch' || event.pointerType === 'pen'; canvas.focus(); }
 			activePointer = event.pointerId;
-			canvas.setPointerCapture(event.pointerId);
+			if (!overlay) canvas.setPointerCapture(event.pointerId);
 			// Move before pressing because Chrome may use the last cursor position for a press.
 			paneInput.press(event, point);
 		} else if (event.type === 'pointermove') {
@@ -262,8 +248,9 @@
 			if (event.pointerType === 'touch' && activePointer !== null) agent.clearMark();
 			paneInput.move(event, point, placement().scale);
 		} else {
-			paneInput.release(event, point, event.type === 'pointercancel');
-			if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+			const tapped = paneInput.release(event, point, event.type === 'pointercancel');
+			if (tapped && event.pointerType === 'touch' && !overlay) touchInput.tap(point, canvas, placement());
+			if (!overlay && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 			activePointer = null;
 		}
 	}
@@ -279,15 +266,23 @@
 		paneInput.wheel(point, wheelPixels(event, height));
 	}
 
-	function sendKey(event: KeyboardEvent) {
+	/** `editable` is true for the key target, where the native paste that follows fires pastePage with the text. */
+	function sendKey(event: KeyboardEvent, editable = false) {
 		if (socket?.readyState !== WebSocket.OPEN) return;
-		event.preventDefault();
 		paneInput.flush();
+		if (editable && isPasteKey(event)) return;
+		event.preventDefault();
 		if (clipboardKey(event, () => clipboard ??= new BrowserPaneClipboard(
-			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
+			send,
 			navigator.clipboard, data => new ClipboardItem(data)
 		), (error, cut) => paneErrors.set('clipboard', error, cut), () => paneErrors.set('clipboard', null))) return;
 		send(keyMessage(event));
+	}
+
+	function pastePage(event: ClipboardEvent) {
+		event.preventDefault();
+		const text = event.clipboardData?.getData('text/plain');
+		if (text && socket?.readyState === WebSocket.OPEN) { paneErrors.set('clipboard', null); send({ type: 'clipboard_paste', text }); }
 	}
 
 	async function go(targetUrl = url) {
@@ -326,9 +321,9 @@
 		const observer = new ResizeObserver(() => {
 			redraw();
 			clearTimeout(fitTimer);
-			fitTimer = setTimeout(sendAppearance, 150);
+			fitTimer = setTimeout(() => appearance.send(), 150);
 		});
-		const unsubscribeTheme = theme.subscribe(() => sendAppearance());
+		const unsubscribeTheme = theme.subscribe(() => appearance.send());
 		observer.observe(canvas);
 		// Untracked, so a new frame does not rebuild the observer and cancel a pending fit or pointer move.
 		untrack(redraw);
@@ -375,9 +370,11 @@
 			</span>
 		{/if}
 		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
-		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		<textarea bind:this={keyTarget} class="pane-keys" aria-label="Type into the shared browser" autocomplete="off" autocapitalize="off" spellcheck="false" onkeydown={event => sendKey(event, true)} onkeyup={event => sendKey(event, true)} onpaste={pastePage} oninput={() => { keyTarget.value = ''; }}></textarea>
+		<canvas bind:this={canvas} tabindex="-1" aria-label="Shared browser" onfocus={() => { if (!touchFocus) keyTarget.focus({ preventScroll: true }); }} onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={event => sendKey(event)} onkeyup={event => sendKey(event)}></canvas>
 		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
+		<BrowserSaveOffer bind:this={saveOffer} {threadId} {passwordPage} onrestorefocus={() => canvas.focus()} />
 	</div>
 </div>
 
@@ -393,6 +390,7 @@
 	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
 	.password-notice.top { top: 10px; bottom: auto; }
 	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+	.pane-keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; color: transparent; caret-color: transparent; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; transition: opacity 160ms ease; }
 	.browser-page.ended canvas { opacity: 0.4; }
 	@media (prefers-reduced-motion: reduce) { canvas, .browser-page::after, .agent-field-marker, .agent-field-marker.shown { transition: none; } }

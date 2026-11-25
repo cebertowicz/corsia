@@ -65,6 +65,19 @@ OPENAI_LIMITS = {
 NO_LIMITS = None
 
 
+def test_png_encode_mode_i_clips_to_16_bit():
+    """Preserve Pillow 12's PNG output for signed 32-bit grayscale pixels."""
+    from core.image_resize import _encode_image
+
+    image = Image.new("I", (5, 1))
+    for x, value in enumerate((-1, 0, 500, 65535, 65536)):
+        image.putpixel((x, 0), value)
+    data, mime = _encode_image(image, "image/png")
+    with Image.open(io.BytesIO(data)) as result:
+        assert mime == "image/png"
+        assert [result.getpixel((x, 0)) for x in range(5)] == [0, 0, 500, 65535, 65535]
+
+
 class TestNoLimits:
 
     def test_concurrent_resize_preserves_global_pixel_limit(self, monkeypatch):

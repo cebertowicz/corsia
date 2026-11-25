@@ -13,8 +13,7 @@
 	import { closesPhoneNav, phoneNavOver } from '$lib/stores/phoneNav.svelte';
 	import { get } from 'svelte/store';
 	import {
-		threadWorkspaces, emptyWorkspace, openSubagentConversationTab,
-		openLegacyDiscussionArchiveTab,
+		threadWorkspaces, emptyWorkspace,
 	} from '$lib/stores/artifactWorkspace';
 	import { docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { toasts } from '$lib/stores/toast';
@@ -131,10 +130,14 @@
 	// On phones an open rail covers the Settings content; the System Updates row is then not visible.
 	const settingsSurfaceVisible = $derived(!$isMobile || !sidebarOpen);
 
-	function browseDocumentsForThread(threadId: string) {
-		docPickerTarget.set({ threadId });
+	function browseDocuments() {
 		paneOpen.set(false);
 		onDocuments('all');
+	}
+
+	function browseDocumentsForThread(threadId: string) {
+		docPickerTarget.set({ threadId });
+		browseDocuments();
 	}
 
 	$effect(() => {
@@ -166,32 +169,6 @@
 	function openSkillDocumentsFromThreadSettings() {
 		threadSettingsOpen.set(false);
 		openDocumentsForSkills();
-	}
-
-	async function openActivityChild(
-		parentThreadId: string,
-		nodeId: string | null,
-		childThreadId: string,
-		title: string,
-		stepId?: string,
-	) {
-		await onSelectThread(parentThreadId);
-		openSubagentConversationTab(parentThreadId, {
-			threadId: childThreadId,
-			title,
-			// A rolled subagent has no plan step, so no return point to remember.
-			sourceNodeId: nodeId ?? undefined,
-			sourceStepId: stepId,
-		});
-	}
-
-	async function openActivityDiscussion(
-		parentThreadId: string,
-		artifactId: string,
-		title: string,
-	) {
-		await onSelectThread(parentThreadId);
-		openLegacyDiscussionArchiveTab(parentThreadId, { artifactId, title });
 	}
 
 	function attachmentInputForDrop(target: EventTarget | null, app: HTMLElement): HTMLInputElement | null {
@@ -270,15 +247,7 @@
 				onBrowseSkills={openSkillDocumentsFromThreadSettings}
 			/>
 		{:else if activeView === 'activity'}
-			<ActivityView
-				projectId={$uiScope?.id ?? null}
-				scopeName={$uiScope?.name ?? 'Workspace'}
-				onMeasurement={onMeasurement}
-				onSelectThread={onSelectThread}
-				onOpenChild={openActivityChild}
-				onOpenLegacyDiscussion={openActivityDiscussion}
-					{onGoWorkspace}
-			/>
+			<ActivityView projectId={$uiScope?.id ?? null} {onSelectThread} onHeaderInset={(width) => (artifactHeaderInset = width)} />
 		{:else if activeView === 'chat'}
 			<ChatArtifactSplit
 				bind:chatPanelRef
@@ -286,7 +255,6 @@
 				{isDraggingOver}
 				onOpenLightbox={onOpenLightbox}
 				onAutoCreateThread={onAutoCreateThread}
-				onOpenDocuments={(documentId) => onDocuments('all', documentId)}
 				onArtifactHeaderInset={(width) => (artifactHeaderInset = width)}
 			/>
 		{:else if activeView === 'settings'}
@@ -321,6 +289,7 @@
 			{protectArtifactSplit}
 			onPickProject={onPickProjectAndClosePane}
 			onBrowseDocuments={browseDocumentsForThread}
+			onBrowseProjectDocuments={browseDocuments}
 		/>
 	{/if}
 	</div>

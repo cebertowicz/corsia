@@ -22,6 +22,12 @@ export function keyText(event: KeyboardEvent) {
 	return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 }
 
+/** A message that carries what the person typed or pasted, as opposed to a pointer move or a page command. */
+export function isPersonText(message: object): boolean {
+	const { type } = message as { type?: unknown };
+	return type === 'input_keyboard' || type === 'clipboard_paste';
+}
+
 /** The keyboard message the shared page receives for one key event. */
 export function keyMessage(event: KeyboardEvent) {
 	return {
@@ -84,22 +90,25 @@ export class BrowserPaneInput {
 		this.onScroll({ x: delta.deltaX, y: delta.deltaY });
 	}
 
-	release(event: PointerPosition, point: PanePoint, cancelled = false): void {
+	release(event: PointerPosition, point: PanePoint, cancelled = false): boolean {
 		this.flush();
 		const touch = this.touch;
 		if (event.pointerType === 'touch') {
-			if (!touch || event.pointerId !== touch.start.pointerId) return;
-			if (!touch.dragging && !cancelled) {
+			if (!touch || event.pointerId !== touch.start.pointerId) return false;
+			const tapped = !touch.dragging && !cancelled;
+			if (tapped) {
 				this.pressedButton = 'left';
 				this.mouse('mouseMoved', touch.point);
 				this.mouse('mousePressed', touch.point);
 				this.mouse('mouseReleased', point);
 			}
 			this.touch = null;
+			return tapped;
 		} else if (this.pressed === event.pointerId) {
 			this.mouse('mouseReleased', point);
 			this.pressed = null;
 		}
+		return false;
 	}
 
 

@@ -13,7 +13,7 @@
 	let { messageId, threadId, comments, listed, fromList, closing, narrow, anchor, bounds, panel = $bindable(null), dialog = $bindable(null), onReply, onBack, onClose, onClosed }: {
 		messageId: string; threadId: string; comments: ChatComment[]; listed: boolean; fromList: boolean; closing: boolean; narrow: boolean;
 		anchor: ComponentProps<typeof Popover>['anchor']; bounds: ComponentProps<typeof Popover>['bounds']; panel?: HTMLElement | null; dialog?: HTMLElement | null;
-		onReply: (note: string) => Promise<void>; onBack: () => void; onClose: () => void; onClosed: () => void;
+		onReply: (note: string, inputId: string) => Promise<void>; onBack: () => void; onClose: () => void; onClosed: () => void;
 	} = $props();
 
 	const name = $derived(listed ? `${comments.length} comments` : 'Comment');
@@ -24,7 +24,7 @@
 	<ChatCommentThreads {messageId} {threadId} {comments} {listed} opened={!listed} onReply={listed ? undefined : onReply} keepReplyVisible={!listed && keep} />
 {/snippet}
 {#if narrow}
-	<AdaptiveDrawer bind:panel keepsText ariaLabel={name} heading={name} leading={fromList ? backButton : undefined} doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} {onClose} {onClosed}>
+	<AdaptiveDrawer bind:panel keepsText ariaLabel={name} heading={name} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} {onClose} {onClosed}>
 		{@render body(true)}
 	</AdaptiveDrawer>
 {:else}

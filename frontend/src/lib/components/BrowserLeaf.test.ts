@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
+import phoneTyping from '../../../../backend/tests/fixtures/browser_phone_typing.json';
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { emit } from '$lib/ws/events';
 import { get } from 'svelte/store';
@@ -122,6 +123,65 @@ describe('BrowserLeaf drawing', () => {
 	});
 });
 
+describe('BrowserLeaf touch typing', () => {
+	it('focuses a field for touch typing and forwards its text without retaining it', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'email' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		flushSync();
+		const input = host.querySelector<HTMLInputElement>('input[data-pane-field]');
+		expect(input).not.toBeNull();
+		expect(document.activeElement).toBe(input);
+		expect(input?.inputMode).toBe('email');
+		input!.value = 'x';
+		input!.dispatchEvent(new Event('input', { bubbles: true }));
+		expect(input!.value).toBe('');
+		input!.value = 'yz';
+		input!.dispatchEvent(new Event('input', { bubbles: true }));
+		expect(input!.value).toBe('');
+		const typing = socket.sent.filter(message => message.type === 'input_keyboard' || message.type === 'clipboard_paste');
+		expect(typing.map(({ id: _id, ...message }) => message)).toEqual(phoneTyping);
+		canvas.dispatchEvent(pointer('pointerdown', 90, 65, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 90, 65, 'touch'));
+		expect(document.activeElement).not.toBe(input);
+	});
+	it('closes the keyboard target when the page moves focus away or the person drags', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'password' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		const input = host.querySelector<HTMLInputElement>('[data-pane-field]')!;
+		expect([input.type, input.autocomplete]).toEqual(['text', 'off']);
+		input.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		input.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		expect(document.activeElement).toBe(input);
+		expect(socket.sent.filter(message => message.type === 'input_mouse' && message.eventType === 'mousePressed')).toHaveLength(2);
+		input.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		window.dispatchEvent(pointer('pointermove', 35, 50, 'touch'));
+		window.dispatchEvent(pointer('pointerup', 35, 50, 'touch'));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35, 'touch'));
+		socket.receive({ type: 'text_field_blurred' });
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'touch'));
+		canvas.dispatchEvent(pointer('pointermove', 35, 50, 'touch'));
+		canvas.dispatchEvent(pointer('pointerup', 35, 50, 'touch'));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+	});
+	it('does not create a keyboard target on a mouse click', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		socket.receive({ type: 'text_fields', fields: [{ x: 10, y: 5, width: 40, height: 20, kind: 'password' }] });
+		canvas.dispatchEvent(pointer('pointerdown', 20, 35));
+		canvas.dispatchEvent(pointer('pointerup', 20, 35));
+		expect(host.querySelector('[data-pane-field]')).toBeNull();
+	});
+});
+
 describe('BrowserLeaf clipboard shortcuts', () => {
  it('keeps each pane failure until its own source clears, showing the newest', () => {
   const { socket } = render();
@@ -175,6 +235,36 @@ describe('BrowserLeaf clipboard shortcuts', () => {
   await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: 'clipboard_paste', text: 'host text' }));
   canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true }));
   expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a', modifiers: 2 }));
+ });
+ it('leaves a pointer paste to the native paste and forwards its text without reading the clipboard', async () => {
+  const readText = vi.fn();
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(), readText } });
+  const { canvas, socket } = render();
+  await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+  canvas.dispatchEvent(pointer('pointerdown', 20, 35, 'mouse'));
+  canvas.dispatchEvent(pointer('pointerup', 20, 35, 'mouse'));
+  const keys = host.querySelector<HTMLTextAreaElement>('textarea.pane-keys')!;
+  expect(document.activeElement).toBe(keys);
+  const shortcut = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true });
+  keys.dispatchEvent(shortcut);
+  expect(shortcut.defaultPrevented).toBe(false);
+  const paste = Object.assign(new Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { getData: (type: string) => type === 'text/plain' ? 'from a password manager' : '' } });
+  keys.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  expect(socket.sent).toContainEqual({ type: 'clipboard_paste', text: 'from a password manager' });
+  expect(readText).not.toHaveBeenCalled();
+  expect(keys.value).toBe('');
+  const typed = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true });
+  keys.dispatchEvent(typed);
+  expect(typed.defaultPrevented).toBe(true);
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a' }));
+ });
+ it.each(['touch', 'pen'])('keeps keyboard focus on the canvas after a %s press, so no on-screen keyboard opens', async pointerType => {
+  const { canvas } = render();
+  await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+  canvas.dispatchEvent(pointer('pointerdown', 90, 65, pointerType));
+  canvas.dispatchEvent(pointer('pointerup', 90, 65, pointerType));
+  expect(document.activeElement).toBe(canvas);
  });
 });
 
@@ -348,7 +438,7 @@ describe('BrowserLeaf agent presence', () => {
 		socket.receive({ type: 'browser_password_page', visible: false });
 		flushSync();
 		expect([ring(), seam()]).toEqual([true, true]);
-		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('Agent can see the page again');
+		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('The password step is over');
 		// The announcement is for assistive technology only; the toolbar shows no status for it.
 		expect(host.querySelector('.status')).toBeNull();
 	});

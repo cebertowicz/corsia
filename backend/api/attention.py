@@ -1,14 +1,4 @@
-"""User-attention HTTP surface (coordination MVP S6b).
-
-Thin endpoints over the tested attention lifecycle (S6a), parent disposition
-(S5b), and review-profile execution (S5a):
-
-- ``GET  /api/attention/raised``            — raised rows, optionally scoped to a thread
-- ``GET  /api/attention/rollup``            — pull-only parent roll-up (no badge/wake)
-- ``GET  /api/attention/{id}/review``       — the review-profile result for a card
-- ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
-- ``GET  /api/attention/queue``             — the one queue the user works through
-- ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
+"""User-attention queue, review, and lifecycle HTTP endpoints.
 
 ``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
 semantics remain covered by backend tests while #921 decides whether raised rows
@@ -18,6 +8,7 @@ receive a typed surface or stop being raised.
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -27,12 +18,14 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
+from api.attention_notifications import router as notifications_router
 from doceditor import review_bar
 from plans import public
 from registry import artifact_record as AR
 from registry import attention
 
 router = APIRouter(prefix="/api/attention", tags=["attention"])
+router.include_router(notifications_router)
 
 
 def _require_user(token: str) -> dict:
@@ -156,11 +149,15 @@ def _summarize_raised(thread_id: str | None, user_id: str, *, db=None) -> list[d
             _db.close()
 
 
-# Upper bound on the ordered `items` the queue response carries.
-QUEUE_ITEMS_CAP = 50
+# Upper bound on the rows each list in the queue response carries (Your tasks, and Notifications).
+# The approved Activity design shows the whole list, not the first few. The scale budget is 300
+# items per list; 3,000 is ten times that (test_activity_queue_timing.py), so a list's count and
+# its rows agree everywhere inside the budget.
+# `count` stays uncapped, so anything past the cap is still counted.
+QUEUE_ITEMS_CAP = 3000
 
 
-def _queue_for(user_id: str, *, db=None) -> list[dict]:
+def _queue_for(user_id: str, *, db=None, raw: bool = False, annotated=None) -> list[dict]:
     """The one queue, user-global: it names no plan target, by design.
 
     A decision is listed only where Activity would count it, so the dock and
@@ -171,20 +168,21 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
     """
     _db = db or get_db()
     try:
-        annotated = public.annotate_attention(
-            _authorized_raised(None, user_id, db=_db), db=_db,
-        )
+        if annotated is None:
+            annotated = public.annotate_attention(
+                _authorized_raised(None, user_id, db=_db), db=_db,
+            )
         ordered = public.attention_queue([*annotated, *public.held_reply_queue_rows(_db, user_id)])
         counted = public.activity_counted_plan_ids(
             {row["detail"]["plan_id"] for row in ordered if row["renderer"] == "decision"},
             actor=public.PlanActor(None, user_id, None, kind="user"), db=_db,
         )
-        return [
-            {"external_id": row["external_id"], "renderer": row["renderer"],
-             "detail": row["detail"]}
-            for row in ordered
-            if row["renderer"] != "decision" or row["detail"]["plan_id"] in counted
-        ]
+        rows = [row for row in ordered
+                if row["renderer"] != "decision" or row["detail"]["plan_id"] in counted]
+        if raw:
+            return rows
+        return [{"external_id": row["external_id"], "renderer": row["renderer"],
+                 "detail": row["detail"]} for row in rows]
     finally:
         if not db:
             _db.close()
@@ -202,22 +200,87 @@ async def get_raised(user: dict = Depends(require_user), thread_id: str | None =
     return {"items": rows}
 
 
-@router.get("/queue")
-async def get_queue(user: dict = Depends(require_user)):
-    """The one queue the user works through — head item plus how many wait.
+def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+    """Compose and rank one authorized view's tasks; return uncapped rows, ranker and scope.
 
-    User-global on purpose: it takes no plan id, so a decision raised by a
-    subagent two levels down is reachable from wherever the user already is.
-    One item at a time (PRD-PLANS E8). `items` is the same ordered read, capped,
-    so the user can choose which waiting item to answer next; `current` is
-    always `items[0]`.
+    Activity's Notifications list is never ranked, so the ranker and its wake see tasks only.
     """
-    rows = await run_in_db(lambda: _queue_for(user["id"]))
-    return {
-        "current": rows[0] if rows else None,
-        "count": len(rows),
-        "items": rows[:QUEUE_ITEMS_CAP],
-    }
+    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view)
+    return rows, ranker, scope
+
+
+def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+    """Return (ranked tasks, notifications newest first, ranker, scope), both lists uncapped."""
+    from collections import Counter
+    from loguru import logger
+    from infra.activity_queue_base import shape
+    from infra.activity_rank_scope import ranker_for
+    from infra.activity_ranking import apply_ranks
+    from infra.activity_urgency import sort_key
+
+    if project_id:
+        public.check_operator_project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
+    annotated = public.annotate_attention(_authorized_raised(None, user_id, db=db), db=db)
+    rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
+    notifications: list[dict] = []
+    if view == 'activity':
+        from doceditor.activity_reply_rows import document_rows
+        projected = public.activity_plan_rows(db, user_id, annotated)
+        documents = document_rows(db, user_id)
+        rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
+        # A reviewed document's replies ride on its review row; Approve ends the review and
+        # the next read lists the document in Notifications.
+        unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}
+        reviewed = set()
+        for row in rows:
+            if row['kind'] == 'review' and row['detail']['artifact_id'] in unread:
+                row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
+                reviewed.add(row['detail']['artifact_id'])
+        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]
+    if project_id:
+        rows = [r for r in rows if r['source'].get('project_id') == project_id]
+        notifications = [r for r in notifications if r['source'].get('project_id') == project_id]
+    notifications.sort(key=lambda r: r['key'])
+    notifications.sort(key=lambda r: r['raised_at'] or '', reverse=True)
+    for row in notifications:
+        row.pop('priority', None)
+    rows.sort(key=sort_key)
+    scope, ranker = ranker_for(db, user_id, project_id)
+    rows = apply_ranks(db, user_id, scope, rows)
+    for row in rows:
+        row.pop('priority', None)
+    counts = dict(Counter(row['kind'] for row in rows))
+    ranked = sum(row['rank'] is not None for row in rows)
+    logger.info('activity queue scope={} kinds={} ranked={} unranked={} notifications={}',
+                scope, counts, ranked, len(rows)-ranked, len(notifications))
+    return rows, notifications, ranker, scope
+
+
+def _queue_response(user_id: str, project_id: str | None, view: str | None):
+    db = get_db()
+    try:
+        try:
+            rows, notifications, ranker, _ = activity_lists(db, user_id, project_id=project_id, view=view)
+        except public.OperatorNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        response = {'current': rows[0] if rows else None, 'count': len(rows),
+                    'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}
+        if view == 'activity':
+            response['notifications'] = {'count': len(notifications),
+                                         'items': notifications[:QUEUE_ITEMS_CAP]}
+        return response
+    finally:
+        db.close()
+
+
+@router.get("/queue")
+async def get_queue(user: dict = Depends(require_user), project_id: str | None = None,
+                    view: Literal['activity'] | None = None):
+    """Read the selected view of the person's ordered queue; no view is the dock's.
+
+    An unknown view is refused (422), never served as the dock's list.
+    """
+    return await run_in_db(lambda: _queue_response(user['id'], project_id, view))
 
 
 @router.get("/rollup")

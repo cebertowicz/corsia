@@ -7,9 +7,9 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Literal, Mapping
 
-from host_access import browser_pane_state
+from host_access import browser_login_capture, browser_pane_state
 from host_access.browser_cdp import PasswordProbe
-from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep
+from host_access.browser_steps import DONE_STATES, BrowserStep, PasswordStep, PersonStep, open_steps
 from infra.database import get_db
 from infra.product_events import emit_product_event
 
@@ -38,7 +38,6 @@ class Event:
     name: str
     result: PasswordProbe | None = None
     session: str | None = None
-    source: str = "agent"
     instruction: str = ""
 
 
@@ -154,15 +153,20 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
     return Decision()
 
 
-_steps: dict[str, BrowserStep] = {}
+_steps = open_steps
 _answers: dict[str, dict[tuple[Kind, str], Answer]] = {}
 _sessions: dict[str, str | None] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 
 
 async def step_event(thread_id: str, event: Event, *,
-                     observer: browser_pane_state.Observer | None = None) -> Decision:
-    """Decide under the transition lock; notify the caller once before applying lifecycle effects."""
+                     observer: browser_pane_state.Observer | None = None,
+                     page: browser_pane_state.PageProbe | None = None) -> Decision:
+    """Decide under the transition lock; notify the caller once before applying lifecycle effects.
+
+    ``page`` is the agent's own probe of the page this event observed; a step it opens keeps it to
+    re-probe its page while no pane can (AR6).
+    """
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
         step = _steps.get(thread_id)
         current_state = StepState(step, _answers.get(thread_id, {}), session=_sessions.get(thread_id))
@@ -190,6 +194,7 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
+        browser_login_capture.step_decided(thread_id, result, decision.end, decision.open_kind)
         if decision.forget_done is not None:
             answers = _answers.get(thread_id, {})
             if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
@@ -199,15 +204,15 @@ async def step_event(thread_id: str, event: Event, *,
             if decision.open_kind == "password":
                 opened: BrowserStep = PasswordStep(result.visit, result.host, result.target,
                                                   session=event.session, occurrence=decision.occurrence,
-                                                  nodes=result.visible_nodes)
+                                                  nodes=result.visible_nodes, page=page)
             else:
                 opened = PersonStep(result.visit, result.host, result.target, instruction=event.instruction,
-                                    session=event.session, occurrence=decision.occurrence)
+                                    session=event.session, occurrence=decision.occurrence, page=page)
             await _open_step(thread_id, opened)
         if (current := _steps.get(thread_id)) is not None:
             if decision.step_nodes is not None and isinstance(current, PasswordStep):
                 current.nodes = decision.step_nodes
-            if decision.monitor is False:
+            if decision.monitor is False and current.page is None:
                 _stop_reprobe(current)
             elif decision.monitor is True and (current.reprobe is None or current.reprobe.done()):
                 _start_reprobe(thread_id, current)
@@ -244,8 +249,14 @@ def person_input(thread_id: str) -> None:
         step.input_seen.set()
 
 
+def _page_sources(thread_id: str, step: BrowserStep) -> list[browser_pane_state.PageProbe]:
+    """Every connected pane's probe; with none, the agent's own probe of the step's page, so a sign-in the
+    person finishes with no pane open still ends its step."""
+    return browser_pane_state.pane_probes(thread_id) or ([step.page] if step.page is not None else [])
+
+
 def _start_reprobe(thread_id: str, step: BrowserStep) -> None:
-    if browser_pane_state.pane_probes(thread_id) and (step.reprobe is None or step.reprobe.done()):
+    if _page_sources(thread_id, step) and (step.reprobe is None or step.reprobe.done()):
         step.reprobe = asyncio.create_task(_reprobe_loop(thread_id, step))
 
 
@@ -277,7 +288,7 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
 
 async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
     """Deliver only this step's own target observations through the same transition."""
-    probes = browser_pane_state.pane_probes(thread_id)
+    probes = _page_sources(thread_id, step)
     current = _steps.get(thread_id)
     if current is None or current is not step or not probes:
         return False
@@ -297,7 +308,8 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
         if session == step.session:
             return True
         result = None
-    await step_event(thread_id, Event("probe", result, session=session, source="pane"), observer=source.observer)
+    # A step this probe opens (a new visit's password field) keeps the agent's own probe of the same page.
+    await step_event(thread_id, Event("probe", result, session=session), observer=source.observer, page=step.page)
     return _steps.get(thread_id) is step and current.reprobe is not None
 
 
@@ -335,10 +347,8 @@ def _step_row_state(node_id: str | None) -> str | None:
 async def _settle_step(thread_id: str, step: BrowserStep) -> None:
     if step.node_id is None:
         return
-    await asyncio.to_thread(
-        _plan_write, "settle_user_step", step.node_id,
-        evidence=step.settlement_evidence, provenance=step.provenance,
-    )
+    await asyncio.to_thread(_plan_write, "settle_user_step", step.node_id,
+                            evidence=step.settlement_evidence, provenance=step.provenance)
     await _emit(f"{step.event_prefix}_settled", thread_id)
 
 
@@ -378,6 +388,11 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
+
+
+def held_pages(thread_id: str) -> bool:
+    """Whether this session has given the person a page (a step is open, or one was settled or declined)."""
+    return thread_id in _steps or bool(_answers.get(thread_id))
 
 
 def finished_visit(thread_id: str, visit: str) -> bool:

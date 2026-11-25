@@ -73,7 +73,7 @@ describe('setup connect stop', () => {
 		release();
 		await signing;
 
-		expect(flow.row(source)).toMatchObject({ meta: 'Uses your ChatGPT subscription.' });
+		expect(flow.row(source)).toMatchObject({ meta: 'Uses your ChatGPT account.' });
 		expect(flow.row(source).error).toBeUndefined();
 		expect(flow.attempts.codex).toEqual({ attempt: 'none' });
 	});

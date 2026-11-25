@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from tests.test_google_email import _row
 from infra.database import get_db
 
@@ -10,7 +11,7 @@ from mailhost_helpers import authority, conductor, env, servers  # noqa: F401
 from test_mailhost_send import _draft, _send, make_host  # noqa: F401
 from test_mailhost_threads_folders_invites import ORIGINAL, _id
 from tools import mail_guard_runtime
-from tools.google_email import EmailSendTool
+
 
 
 @pytest.mark.asyncio
@@ -36,13 +37,13 @@ async def test_newer_host_message_stops_then_new_draft_sends(make_host, monkeypa
                            "body": f"<untrusted-email>{message.body}</untrusted-email>"})
 
     monkeypatch.setattr(mail_guard_runtime, "screened_message", screen)
-    stopped = await _send(host, saved)
-    assert "Not sent" in stopped and "New details" in stopped
+    with pytest.raises(HTTPException) as stopped:
+        await _send(host, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not host.built.smtp.sent
-    assert 'seen_newer' not in EmailSendTool().parameters['properties']
     replacement = await _draft(host, to=[], cc=[], subject='Lunch', reply_to_message_id=_id(host, uid=6))
     result = await _send(host, replacement)
-    assert not result.startswith("Error"), result
+    assert result == {'state': 'sent'}, result
     assert len(host.built.smtp.sent) == 1
 
 
@@ -76,7 +77,7 @@ async def test_host_malformed_date_header_uses_provider_arrival(make_host, monke
     _with_internal_dates(host.built.imap, monkeypatch, {5: datetime.now(timezone.utc) - timedelta(days=1)})
     saved = await _draft(host, to=[], cc=[], subject='Lunch', reply_to_message_id=_id(host))
     result = await _send(host, saved)
-    assert not result.startswith('Error'), result
+    assert result == {'state': 'sent'}, result
     assert len(host.built.smtp.sent) == 1
 
 
@@ -94,6 +95,7 @@ async def test_host_same_second_new_arrival_is_shown_and_stops_send(make_host, m
     async def screen(account, message):
         return json.dumps({'subject': message.headers['subject'], 'screen': {'state': 'clean'}, 'body': message.body})
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
-    result = await _send(host, saved)
-    assert 'Not sent' in result and 'New details' in result
+    with pytest.raises(HTTPException) as stopped:
+        await _send(host, saved)
+    assert stopped.value.status_code == 409 and stopped.value.detail['state'] == 'newer'
     assert not host.built.smtp.sent

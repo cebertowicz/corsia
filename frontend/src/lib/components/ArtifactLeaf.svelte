@@ -32,20 +32,16 @@
 	import {
 		abandonArtifactOpen, beginArtifactOpen, failArtifactOpen, markArtifactRendered,
 	} from '$lib/openTimingRuntime';
+	import type { ArtifactLeafProps } from '$lib/artifactLeafProps';
 
-	let { threadId, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {} }: {
-		threadId: string | null;
-		mode: 'rail' | 'expanded' | 'compact';
-		/** Compact only: Escape hands the canvas back to chat. */
-		escapeCloses?: boolean;
-		onEscapeClose?: () => void;
-		onOpenLightbox?: (url: string) => void;
-	} = $props();
+	let {
+		threadId, targetThreadId = null, notice, protectReplyLanding = false, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
+	}: ArtifactLeafProps = $props();
 
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
 
-	const viewerTarget = (t: ArtifactTab) => targetForTab(t, $uiScope?.id ?? null, threadId);
+	const viewerTarget = (t: ArtifactTab) => targetForTab(t, $uiScope?.id ?? null, targetThreadId ?? threadId);
 
 	// Every tab opens in the document viewer. A file the backend says is an image
 	// is switched to the image viewer for as long as this leaf is mounted; nothing
@@ -258,10 +254,11 @@
 					{imageTabIds}
 					onSelect={selectTab}
 					onClose={requestCloseTab}
-					onCollapse={collapse}
+					onCollapse={collapsible ? collapse : undefined}
 				/>
 			</div>
 		{/if}
+		{#if notice}{@render notice()}{/if}
 		<div class="leaf-body" class:document-canvas={!!target || !!linkTab} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'browser' && activeTab.threadId}
 				<BrowserLeaf threadId={activeTab.threadId} />
@@ -294,6 +291,7 @@
 					<DocViewer
 						bind:this={viewer}
 						{target}
+						{protectReplyLanding}
 						{escapeCloses}
 						onClose={() => onEscapeClose?.()}
 						{onSignal}

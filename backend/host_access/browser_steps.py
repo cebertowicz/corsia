@@ -38,6 +38,8 @@ class BrowserStep:
     reprobe: asyncio.Task | None = field(default=None, repr=False)
     last_input: float | None = None
     input_seen: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    # The agent's own probe of the step's page target, re-probed while no pane can (browser_step_lifecycle).
+    page: browser_pane_state.PageProbe | None = field(default=None, repr=False, kw_only=True)
 
     provenance: ClassVar[str]
     event_prefix: ClassVar[str]
@@ -110,6 +112,14 @@ class PersonStep(BrowserStep):
             "The agent can't see this page and carries on once you're past it."
             f"\n\n{self.instruction}"
         )
+
+
+# Each thread's open step. browser_step_lifecycle alone writes it; others read it here, so none imports the lifecycle.
+open_steps: dict[str, BrowserStep] = {}
+
+
+def password_step(thread_id: str) -> PasswordStep | None:
+    return step if isinstance(step := open_steps.get(thread_id), PasswordStep) else None
 
 
 def publish_password_page(thread_id: str, visible: bool) -> None:

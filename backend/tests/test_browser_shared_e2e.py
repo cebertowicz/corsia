@@ -12,6 +12,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import signal
 import statistics
 from threading import Thread
 import tempfile
@@ -20,9 +21,11 @@ import time
 from uuid import uuid4
 
 import pytest
+import websockets
 
 from host_access import (
-    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
+    browser_cdp, browser_cdp_frames, browser_control, browser_dom_frames, browser_dom_write, browser_pane_state, browser_screencast,
+    browser_session_commands, browser_steps,
     browser_step_lifecycle as lifecycle,
 )
 from tools import browser_runtime, browser_run_steps
@@ -88,6 +91,56 @@ window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# A link inside a frame, 40px from the frame's left and 30px from its top; the page above it holds other
+# elements at the same distance from the page's corner, which is where a frame-relative box wrongly lands.
+FRAME_LINK = """<!doctype html><title>Frame inner</title><body style="margin:0">
+<a id=go href="#" style="position:absolute;left:40px;top:30px;display:block;width:100px;height:20px">Go</a>
+<script>
+window.clicks = 0;
+document.querySelector('#go').addEventListener('click', event => { event.preventDefault(); window.clicks++; });
+</script>"""
+# The same link under a white sheet that fills the frame.
+FRAME_COVERED = FRAME_LINK + '<div style="position:fixed;inset:0;background:white"></div>'
+FRAME_OUTER = """<!doctype html><title>Frame outer</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:600px;height:240px;border:0"></iframe>"""
+# Two frames laid out alike, side by side; the second one's link is under the sheet that fills that frame.
+FRAME_TWINS = """<!doctype html><title>Frame twins</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0"></iframe>
+<iframe src="/frame-covered.html" style="width:300px;height:120px;border:0"></iframe>"""
+# Two embeds laid out alike, the second below the fold, as repeated video players or payment widgets are.
+FRAME_TWINS_OFF_SCREEN = """<!doctype html><title>Frame twins off screen</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>
+<div style="height:3000px">spacer</div>
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+# Two embeds laid out alike, both in view, the second only 20px tall: its link sits below its own fold.
+FRAME_TWINS_SCROLLED = """<!doctype html><title>Frame twins scrolled</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="/frame-link.html" style="width:300px;height:20px;border:0;display:block"></iframe>"""
+# The same embed twice: once in the page, and once inside a cross-site wrapper at its corner, as embed wrappers
+# and ad slots nest it. __WRAP__ is the wrapper's address.
+FRAME_NESTED = """<!doctype html><title>Frame nested</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="/frame-link.html" style="width:300px;height:120px;border:0;display:block"></iframe>
+<iframe src="__WRAP__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+FRAME_WRAP = """<!doctype html><title>Frame wrapper</title><body style="margin:0">
+<iframe src="__FRAME__" style="width:300px;height:120px;border:0;display:block"></iframe>"""
+# Controls under a full-page layer that lets clicks through (pointer-events: none), as toast and
+# overlay containers do, and one control under a layer that really covers it.
+LAYER = """<!doctype html><title>Layer fixture</title>
+<nav><button id=nav>Menu</button></nav>
+<main><a id=card href="#card">Open the card</a></main>
+<div style="position:relative"><button id=blocked>Blocked</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="position:fixed;inset:0;z-index:10;pointer-events:none"></div>
+<script>
+window.clicks = {nav: 0, card: 0, blocked: 0};
+for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', event => {
+  event.preventDefault(); window.clicks[id]++; });
+</script>"""
+
 # A popup sign-in, as "Sign in with ..." buttons open one; the popup closes itself once the sign-in finishes.
 POPUP = """<!doctype html><title>Popup fixture</title>
 <button id=open onclick="window.open('/popup-target.html', 'signin', 'width=400,height=400')">Sign in</button>"""
@@ -114,6 +167,24 @@ SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
 document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
+KEEP = """<!doctype html><title>Kept</title><script>localStorage.setItem('kept', '1');</script>"""
+STORAGE = """<!doctype html><title>Storage</title><script>document.title = 'kept=' + localStorage.getItem('kept');</script>"""
+
+# A form submitted on Enter, whose choice and typed text land in the title (a saved sign-in cannot read page text).
+CHOICE_FORM = """<!doctype html><title>Choice form</title>
+<form><select id=choice><option value=a>Ay</option><option value=b>Bee</option></select><input id=q value=x>
+<div id=hover>Over</div><div style="height:3000px"></div></form>
+<script>
+document.querySelector('form').addEventListener('submit', event => {
+  event.preventDefault(); document.title = 'sent:' + document.querySelector('#choice').value + ':' + document.querySelector('#q').value;
+});
+document.querySelector('#hover').addEventListener('mouseover', () => { window.hovered = true; });
+</script>"""
+
+# A dropdown and a button under a white overlay, and an option label that must not reach an agent.
+COVERED = """<!doctype html><title>Covered fixture</title>
+<div style="position:relative"><select id=cs><option value=x>Secret option label</option></select>
+<button id=cb>Secret button text</button><div style="position:absolute;inset:0;background:white"></div></div>"""
 
 
 @contextmanager
@@ -121,11 +192,32 @@ def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
-             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>"}
+             "/choice.html": CHOICE_FORM.encode(), "/covered.html": COVERED.encode(),
+             "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode(),
+             "/frame-twins.html": FRAME_TWINS.encode(), "/frame-twins-scrolled.html": FRAME_TWINS_SCROLLED.encode(),
+             "/popup.html": POPUP.encode(), "/popup-target.html": b"<!doctype html><title>Popup target</title>",
+             "/layer.html": LAYER.encode(), "/keep.html": KEEP.encode(), "/storage.html": STORAGE.encode()}
+    frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered",
+                   "/frame-twins-off-same.html": "same", "/frame-twins-off-cross.html": "cross"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
             body = pages.get(self.path)
+            port = self.server.server_port
+            if self.path in ("/frame-nested-same.html", "/frame-nested-cross.html"):
+                # The wrapper is on another site (localhost); its own frame is on the wrapper's site, in the
+                # wrapper's process, or back on the page's site, in a process of its own.
+                inner = "same" if self.path.endswith("-same.html") else "cross"
+                body = FRAME_NESTED.replace("__WRAP__", f"http://localhost:{port}/frame-wrap-{inner}.html").encode()
+            elif self.path in ("/frame-wrap-same.html", "/frame-wrap-cross.html"):
+                inner = "/frame-link.html" if self.path.endswith("-same.html") else f"http://127.0.0.1:{port}/frame-link.html"
+                body = FRAME_WRAP.replace("__FRAME__", inner).encode()
+            if body is None and self.path in frame_pages:
+                # localhost is another site than 127.0.0.1, so Chrome runs that frame in its own process.
+                frame = {"same": "/frame-link.html", "covered": "/frame-covered.html",
+                         "cross": f"http://localhost:{self.server.server_port}/frame-link.html"}[frame_pages[self.path]]
+                outer = FRAME_TWINS_OFF_SCREEN if self.path.startswith("/frame-twins-off-") else FRAME_OUTER
+                body = outer.replace("__FRAME__", frame).encode()
             if body is None:
                 self.send_error(404)
                 return
@@ -250,6 +342,232 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
     finally:
         await owner.shutdown()
         profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path, monkeypatch):
+    """F1: on a session with a saved sign-in, select, scroll, hover and press act in the page; a key off the list is refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        # Linux refuses a saved profile at admission, so the job's browser would run without one. The record
+        # still carries it, and that is what puts a session behind the saved-sign-in command rules.
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verbs-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"))).startswith("Error:")
+            record = owner._sessions[thread_id].record
+            assert record.profile or record.copy_of
+            with pytest.raises(BrowserSessionError):
+                await owner.run(thread_id, ("eval", "1"), session="existing")
+            assert await owner.run(thread_id, ("select", "#choice", "b"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("hover", "#hover"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("scroll", "down", "300"), session="existing") == "Done."
+            assert "clicked" in await owner.run(thread_id, ("click", "#q"), session="existing")
+            with pytest.raises(BrowserSessionError, match="Enter, Tab, Shift\\+Tab"):
+                await owner.run(thread_id, ("press", "Control+a"), session="existing")
+            assert await owner.run(thread_id, ("press", "Enter"), session="existing") == "Done."
+            assert "sent:b:x" in await owner.run(thread_id, ("get", "title"), session="existing")
+    finally:
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_copy_starts_signed_in_without_opening_a_tab_in_the_holders_browser(monkeypatch):
+    """A second agent starts from the holder's sign-in right after the holder's browser relaunches on another site.
+
+    Reading the sign-in must not open a tab or load a page in the holder's browser: that is what stalled the
+    copy past its limit and started it signed out.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"copy-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    holder, other = f"copy-holder-{uuid4().hex}", f"copy-copy-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-copy-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            other_site = origin.replace("127.0.0.1", "localhost")
+            assert (await owner.run(holder, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            await owner.close_thread(holder)
+            for attempt in range(3):
+                # The holder's agent was on the signed-in site, then moved to another one.
+                await owner.run(holder, ("open", f"{origin}/cookies.html"))
+                await owner.run(holder, ("open", f"{other_site}/keep.html"))
+                async with websockets.connect(owner._sessions[holder].chrome.endpoint, max_size=None) as watch:
+                    await watch.send(json.dumps({"id": 1, "method": "Target.setDiscoverTargets", "params": {"discover": True}}))
+                    while json.loads(await asyncio.wait_for(watch.recv(), 5)).get("id") != 1:
+                        pass  # The tabs already open are announced before the answer.
+                    started = time.monotonic()
+                    assert (await owner.run(other, ("open", f"{origin}/cookies.html"))).startswith("holder=1"), attempt
+                    seconds = time.monotonic() - started
+                    opened = []
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        while True:
+                            event = json.loads(await asyncio.wait_for(watch.recv(), 0.5))
+                            info = event.get("params", {}).get("targetInfo", {})
+                            if event.get("method") == "Target.targetCreated" and info.get("type") == "page":
+                                opened.append(info.get("url"))
+                assert opened == [], (attempt, opened)
+                assert owner._sessions[other].record.copy_of == holder
+                assert owner._sessions[other].record.profile_notice is None, attempt
+                assert seconds < 20, (attempt, seconds)
+                assert "kept=1" in await owner.run(other, ("open", f"{other_site}/storage.html")), attempt
+                await asyncio.gather(owner.close_thread(other), owner.close_thread(holder))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pane", [False, True], ids=["pane-closed", "pane-open"])
+async def test_select_by_ref_and_visible_label_shows_the_option_chosen_in_the_next_snapshot(monkeypatch, pane):
+    """F1: the agent names a dropdown by its snapshot ref and an option by the label it reads there; the next
+    snapshot shows that option chosen, with or without the person watching."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"verbs-label-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-label", instance_key=uuid4().hex)
+    monkeypatch.setattr(browser_session_commands, "emit_product_event", lambda *_args, **_kwargs: None)
+    if pane:
+        browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"), show_window=pane,
+                                        session="new")).startswith("Error:")
+            before = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            ref = re.search(r"combobox \[[^\]]*ref=(e\d+)\]: Ay", before)
+            assert ref and re.search(r'option "Ay" \[selected', before), before
+            assert await owner.run(thread_id, ("select", f"@{ref[1]}", "Bee"), session="existing") == ("ok" if pane else '{"selected": ["Bee"]}')
+            after = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            assert re.search(r"combobox \[[^\]]*\]: Bee", after), after
+            assert re.search(r'option "Bee" \[selected', after) and not re.search(r'option "Ay" \[selected', after), after
+            assert await cdp_value(owner, thread_id, "document.querySelector('#choice').value") == "b"
+    finally:
+        if pane:
+            browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_back_to_a_fragment_address_after_a_held_page_loads_a_new_document(tmp_path, monkeypatch):
+    """F1: going back to an address with a #fragment can't restore what was typed, once the session held a page."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verbs-back-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-back", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            where = "location.pathname + location.hash"
+            await owner.run(thread_id, ("open", f"{origin}/choice.html"))
+            await owner.run(thread_id, ("open", f"{origin}/form.html#step"), session="existing")
+            await owner.run(thread_id, ("fill", "#field", "typed"), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "typed"
+            await owner.run(thread_id, ("open", f"{origin}/plain.html"), session="existing")
+            # The session has held a page (the password guard applied to an earlier visit).
+            browser_control._guarded_visits[thread_id] = {"earlier": browser_control.PasswordReadGuard("earlier", frozenset())}
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            # The same entry, address and fragment kept, with a fresh document.
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
+            assert await cdp_value(owner, thread_id, "document.querySelector('#field').value") == "old"
+            # The reload added no entry and dropped no forward entry: back gets past it, and forward returns.
+            assert await owner.run(thread_id, ("back",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/choice.html"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/form.html#step"
+            assert await owner.run(thread_id, ("forward",), session="existing") == "Done."
+            assert await cdp_value(owner, thread_id, where) == "/plain.html"
+    finally:
+        browser_control._guarded_visits.pop(thread_id, None)
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_sign_in_shows_an_agent_no_page_text_in_a_target_verbs_error(tmp_path, monkeypatch):
+    """F1: agent-browser names the element covering a target; the agent gets a fixed text for it."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_agent_verbs as verbs, browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"verb-errors-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verb-errors", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            await owner.run(thread_id, ("open", f"{origin}/covered.html"))
+            for verb in ("hover", "select", "scrollintoview"):
+                tail = ("Secret option label",) if verb == "select" else ()
+                assert await owner.run(thread_id, (verb, "#nope", *tail), session="existing") == verbs.NOT_FOUND
+            for target in ("#cs", "#cb"):
+                assert await owner.run(thread_id, ("hover", target), session="existing") == verbs.COVERED
+            for verb, target in (("select", "#cs"), ("scrollintoview", "#cb")):
+                tail = ("Secret option label",) if verb == "select" else ()
+                result = await owner.run(thread_id, (verb, target, *tail), session="existing")
+                assert result == verbs.ACKNOWLEDGED and "Secret" not in result
+    finally:
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", [signal.SIGKILL, signal.SIGTERM])
+async def test_an_agents_next_command_after_its_chrome_ends_gets_a_working_signed_in_browser(monkeypatch, ending):
+    """Chrome crashing (SIGKILL) or being quit (SIGTERM) leaves the next command a fresh browser, still signed in."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"restart-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    thread = f"restart-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-restart-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert (await owner.run(thread, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            # Chrome writes a new cookie to the profile some seconds after it is set; a close writes it at once.
+            await owner.close_thread(thread)
+            await owner.run(thread, ("open", f"{origin}/plain.html"))
+            profile = owner._sessions[thread].record.profile
+            assert profile is not None
+            chrome = owner._sessions[thread].chrome
+            os.kill(chrome.process.pid, ending)
+            await asyncio.wait_for(chrome.process.wait(), 10)
+            first = await owner.run(thread, ("open", f"{origin}/cookies.html"))
+            assert first.startswith("holder=1"), first
+            assert "started again" in first, first
+            assert owner._sessions[thread].chrome is not chrome and owner._sessions[thread].record.profile == profile
+            assert (await owner.run(thread, ("open", f"{origin}/cookies.html"))).startswith("holder=1")
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(thread)
         assert profile is not None
         browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
         import shutil
@@ -433,6 +751,97 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
         await owner.close_thread(thread_id)
 
 
+async def frame_link_ref(owner: BrowserSessionOwner, thread_id: str, *, links: int = 1) -> str:
+    """The agent's ref for the link inside the frame (the last of ``links``), once the frames have loaded."""
+    for _ in range(50):
+        snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+        found = re.findall(r'link \\?"Go\\?" \[ref=(e\d+)\]', snapshot)
+        if len(found) >= links:
+            return f"@{found[-1]}"
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"the frame's link never appeared in the snapshot: {snapshot}")
+
+
+async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site: bool) -> int:
+    """How many times the page inside the frame saw its link clicked."""
+    if not cross_site:
+        return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
+    # Cross-site frames are flattened sessions on the page connection.
+    seen = []
+    async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+        pending = [cdp]
+        while pending:
+            parent = pending.pop()
+            for child, _owner, _loader in await browser_cdp_frames.child_frames(cdp, parent):
+                href = (await child.call("Runtime.evaluate", expression="location.href", returnByValue=True))["result"].get("value")
+                seen.append(href)
+                if isinstance(href, str) and href.endswith("/frame-link.html"):
+                    return (await child.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+                pending.append(child)
+    raise AssertionError(f"no frame target shows the fixture's frame: {seen}")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option():
+    """With no pane open, a fill on a dropdown chooses the option by label or value, as the pane-open write does.
+
+    The native fill cleared the choice (no option selected) and still answered that it filled the target.
+    A fill on a text field still goes to the native fill.
+    """
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"closed-fill-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-closed-fill", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/writes.html"), session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            found = re.search(r"combobox[^\[\n]*\[[^\]]*ref=(e\d+)\]", snapshot)
+            assert found, snapshot
+            ref = "@" + found[1]
+            by_label = await owner.run(thread_id, ("fill", "#choice", "Bee"), session="existing")
+            chosen_by_label = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            by_value = await owner.run(thread_id, ("fill", ref, "a"), session="existing")
+            chosen_by_value = await cdp_value(owner, thread_id, "document.querySelector('#choice').value")
+            text = await owner.run(thread_id, ("fill", "#user", "agent"), session="existing")
+            typed = await cdp_value(owner, thread_id, "document.querySelector('#user').value")
+        assert (chosen_by_label, chosen_by_value, typed) == ("b", "a", "agent")
+        assert "filled" not in by_label and "Bee" in by_label, by_label
+        assert "filled" not in by_value and "a" in by_value, by_value
+        assert "filled" in text, text
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through(monkeypatch):
+    """With the pane open, a click by ref reaches a control under a pointer-events: none layer,
+    as the person's click would, and a control under a layer that takes clicks is still refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-layer-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-layer", instance_key=uuid4().hex)
+    monkeypatch.setattr(browser_session_commands, "emit_product_event", lambda *_args, **_kwargs: None)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/layer.html"), show_window=True, session="new")).startswith("Error:")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            refs = {name: re.search(rf'"{label}" \[ref=(e\d+)\]', snapshot) for name, label in
+                    (("nav", "Menu"), ("card", "Open the card"), ("blocked", "Blocked"))}
+            assert all(refs.values()), snapshot
+            assert await owner.run(thread_id, ("click", f"@{refs['nav'][1]}"), session="existing") == "ok"
+            assert await owner.run(thread_id, ("click", f"@{refs['card'][1]}"), session="existing") == "ok"
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", f"@{refs['blocked'][1]}"), session="existing")
+            assert await cdp_value(owner, thread_id, "window.clicks") == {"nav": 1, "card": 1, "blocked": 0}
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
 async def _shared_page_path(owner: BrowserSessionOwner, thread_id: str) -> str | None:
     """The path of the page the pane shows, read through the resolver the pane and the agent share."""
     async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
@@ -450,6 +859,212 @@ async def _shared_page_reaches(owner: BrowserSessionOwner, thread_id: str, path:
             break
         await asyncio.sleep(0.25)
     return seen, tabs
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("page", "cross_site"), [("frame-same.html", False), ("frame-cross.html", True)])
+async def test_a_click_on_a_link_inside_a_frame_applies_to_that_link(page, cross_site):
+    """A link in a same-origin frame and in a cross-site frame (its own process) is clicked, not refused as covered."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            assert await owner.run(thread_id, ("click", ref), session="existing") == "ok"
+            assert await frame_clicks(owner, thread_id, cross_site=cross_site) == 1
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_probe_and_write_walk_find_the_same_documents():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-walk-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-walk", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/frame-cross.html"), session="new")).startswith("Error:")
+            await frame_link_ref(owner, thread)
+            endpoint = await owner.page_endpoint(thread)
+            async with browser_cdp.CdpClient(endpoint) as page:
+                _, documents = await browser_cdp_frames.search_page(page, browser_cdp._password_inputs, browser_cdp._visible)
+                probe_ids = set()
+                for session, _shown in documents.values():
+                    tree = (await session.call("Page.getFrameTree"))["frameTree"]
+                    probe_ids.add(tree["frame"]["id"])
+                    probe_ids.update(browser_dom_frames._descendants(tree))
+            async with browser_cdp.CdpClient(endpoint) as page:
+                tree = (await page.call("Page.getFrameTree"))["frameTree"]
+                walk = await browser_dom_frames.walk_frames(page)
+                write_ids = {tree["frame"]["id"]}
+                cross_owner = None
+                for frame in walk.frames:
+                    if frame.cross_process:
+                        cross_owner = frame.owner
+                        await frame.session.call(
+                            "Runtime.evaluate", expression="document.body.insertAdjacentHTML('beforeend', '<input type=password>')")
+                    frame_id = frame.frame_id
+                    if frame_id is None:
+                        frame_id = (await frame.session.call("Page.getFrameTree"))["frameTree"]["frame"]["id"]
+                    write_ids.add(frame_id)
+            assert len(probe_ids) >= 2 and probe_ids == write_ids
+            probe = await browser_cdp.page_password_probe(endpoint, {})
+            assert cross_owner is not None
+            assert any(browser_cdp_frames.frame_owner(key) == cross_owner for key in probe.present_nodes)
+    finally:
+        await owner.close_thread(thread)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_holds_cap_counts_an_unchecked_document_as_a_match(monkeypatch):
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread = f"frame-cap-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-frame-cap", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread, ("open", f"{origin}/plain.html"), session="new")).startswith("Error:")
+            await cdp_value(owner, thread, "document.body.insertAdjacentHTML('beforeend', '<div></div>'.repeat(20)); null")
+            box = {"x": 900000, "y": 900000, "width": 11, "height": 13}
+            async with browser_cdp.CdpClient(await owner.page_endpoint(thread)) as page:
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 100)
+                assert await browser_dom_frames._holds(page, None, box) is False
+                monkeypatch.setattr(browser_dom_frames, "_HOLDS_LIMIT", 5)
+                assert await browser_dom_frames._holds(page, None, box) is True
+    finally:
+        await owner.close_thread(thread)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_inside_a_frame_is_still_refused():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-covered-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-covered", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-covered-outer.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            assert await frame_clicks(owner, thread_id, cross_site=False) == 0
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_in_one_of_two_frames_laid_out_alike_is_refused_as_ambiguous():
+    """The ref names the covered frame's link; the other frame's uncovered look-alike is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+            assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-twins-off-same.html", "frame-twins-off-cross.html"])
+async def test_a_link_in_an_embed_below_the_fold_with_a_look_alike_in_view_is_refused_as_ambiguous(page):
+    """The ref names the lower embed's link; the look-alike in view is not clicked in its place."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-off-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-off", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="more than one frame"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            if page == "frame-twins-off-same.html":
+                clicks = "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)"
+                assert await cdp_value(owner, thread_id, clicks) == [0, 0]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_link_below_its_own_frames_fold_is_never_written_in_a_look_alike_frame():
+    """The ref names the short frame's link, out of that frame's own view; the taller twin's link is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-twins-scrolled-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-twins-scrolled", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-twins-scrolled.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id, links=2)
+            refused = None
+            try:
+                await owner.run(thread_id, ("click", ref), session="existing")
+            except browser_dom_write.DomWriteRefused as exc:
+                refused = exc
+            clicks = await cdp_value(owner, thread_id, "[...document.querySelectorAll('iframe')].map(frame => frame.contentWindow.clicks)")
+            # Refused as ambiguous, or written in the short frame if measuring the box scrolled it into its view.
+            assert (refused is not None and refused.reason == "ambiguous" and clicks == [0, 0]) or (
+                refused is None and clicks == [0, 1]), (refused, clicks)
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["frame-nested-same.html", "frame-nested-cross.html"])
+async def test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike(page):
+    """The ref names the nested embed's link; the page's own look-alike embed, laid out alike, is never clicked."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-nested-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-nested", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            try:
+                # The snapshot lists the page's embed first and the nested one last.
+                ref = await frame_link_ref(owner, thread_id, links=2)
+            except AssertionError:
+                # agent-browser 0.31.2 lists the page's own embed's link but not the nested one's, so no ref can
+                # name the nested link.
+                snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+                assert len(re.findall(r'link \\?"Go\\?"', snapshot)) == 1, snapshot
+            else:
+                with pytest.raises(browser_dom_write.DomWriteRefused):
+                    await owner.run(thread_id, ("click", ref), session="existing")
+            assert await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks") == 0
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
 
 
 @pytest.mark.integration
@@ -540,8 +1155,11 @@ async def test_a_settled_password_visit_refuses_reads_of_its_hidden_field_by_ref
             assert steps == ["opened", "settled"]
             refs = re.findall(r"textbox \[ref=(e\d+)\]", snapshot)
             assert len(refs) == 2, snapshot
-            assert "123456" in await owner.run(thread_id, ("get", "value", f"@{refs[1]}"), session="existing")
-            assert "person" in await owner.run(thread_id, ("get", "value", "#user"), session="existing")
+            # The person filled the password field on this page, so until it reloads or navigates the other fields'
+            # values aren't read either, even by ref.
+            for command in (("get", "value", f"@{refs[1]}"), ("get", "value", "#user")):
+                with pytest.raises(BrowserSessionError, match="filled in a password field on this page"):
+                    await owner.run(thread_id, command, session="existing")
             for command in (("get", "value", "#pw"), ("get", "attr", "#pw", "value"), ("get", "value", "input[type=password]"),
                             ("eval", "pw.value")):
                 with pytest.raises(BrowserSessionError, match="has shown a password field"):

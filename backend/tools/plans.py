@@ -213,6 +213,7 @@ def _mutation_operation(
             workflow_task_fields.validate_creation_reference(params, workflows)
             workflow_version = workflow_task_fields.creation_version(params, workflows)
             workflow_steps = workflow_task_fields.creation_run(params, workflows)
+        in_later = public.titles_in_later(db, plan_id, params)
         result = mutate(
             plan_id,
             operation,
@@ -226,6 +227,7 @@ def _mutation_operation(
         )
         if operation in {"add", "insert"}:
             workflow_task_fields.append_add_notice(result.result, db, workflows)
+        public.tell_left_later(db, in_later, result.result)
         public.withhold_admission(result.result, recipient=thread_id, plan_id=plan_id, db=db)
         if isinstance(result.result.get("next"), dict):
             public.withhold_next(result.result["next"], recipient=thread_id, plan_id=plan_id, db=db)

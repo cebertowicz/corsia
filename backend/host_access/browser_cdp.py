@@ -18,10 +18,16 @@ from host_access.browser_session_state import BrowserSessionError
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
 log = logging.getLogger(__name__)
+# Every CDP socket's logger: outside the logging tree and above CRITICAL, so no frame ever reaches a log.
+SILENT = logging.Logger("corsia.cdp-socket", logging.CRITICAL + 1)
 # The CDP plain-text search matches tag names, attribute names and values, and text, in every
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
 _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
+# One browser-wide call (Storage.getCookies/setCookies, Target.getTargets) is answered by the browser
+# process, not a page, so a stuck tab can't hold it; a live browser answers in milliseconds even with
+# thousands of cookies. Past 5 s the browser itself isn't answering and the caller gives up on it.
+BROWSER_CALL_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)
@@ -41,9 +47,11 @@ class PasswordProbe:
 class CdpClient:
     """Small request/response CDP client; the session owner supplies its endpoint."""
 
-    def __init__(self, endpoint: str, *, max_size: int | None = 2**20) -> None:
+    def __init__(self, endpoint: str, *, max_size: int | None = 2**20, logger: logging.Logger | None = None) -> None:
         self.endpoint = endpoint
         self._max_size = max_size
+        # Silent unless a caller passes a logger, so websocket frame contents never reach a log.
+        self._logger = logger or SILENT
         self._next_id = 0
         self.session_id: str | None = None
         self.parents: dict[int, int] = {}
@@ -78,15 +86,11 @@ class CdpClient:
             if response.get("id") != request_id:
                 self._event(response)
                 continue
-            if "error" in response:
-                error = response["error"]
-                if isinstance(error, dict):
-                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
-                else:
-                    log.debug("CDP %s failed with an invalid error response", method)
-                raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
-            if not isinstance(result, dict):
+            if "error" in response or not isinstance(result, dict):
+                code = response["error"].get("code") if isinstance(response.get("error"), dict) else None
+                # Method, id and numeric code only: an error's message can quote the request's params.
+                log.debug("CDP %s (id %s) failed with code %s", method, request_id, code if isinstance(code, int) else None)
                 raise BrowserSessionError("This page couldn't be checked")
             return result
 
@@ -104,7 +108,7 @@ class CdpClient:
                         parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1)
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1, logger=self._logger)
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -343,8 +347,7 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
 
 def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
-    parsed = urlparse(browser_endpoint)
-    listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
+    listing = urlunparse(("http", urlparse(browser_endpoint).netloc, "/json/list", "", "", ""))
     try:
         with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
             targets = json.load(response)
@@ -354,8 +357,7 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
         raise BrowserSessionError("This page couldn't be checked")
     pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
     if expected_url:
-        pages.sort(key=lambda target: (target.get("url") != expected_url,
-                                       expected_title is not None and target.get("title") != expected_title))
+        pages.sort(key=lambda page: (page.get("url") != expected_url, expected_title not in (None, page.get("title"))))
     for target in pages:
         endpoint = target.get("webSocketDebuggerUrl")
         if isinstance(endpoint, str) and endpoint.startswith("ws"):
@@ -363,17 +365,19 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
     raise BrowserSessionError("This page couldn't be checked")
 
 
-async def border_rect(cdp: browser_cdp_frames.Session, **node: object) -> Rect | None:
+async def border_rect(cdp: browser_cdp_frames.Session, *, strict: bool = False, **node: object) -> Rect | None:
     """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
         model = await cdp.call("DOM.getBoxModel", **node)
+        border = model.get("model", {}).get("border")
+        if not isinstance(border, list) or len(border) < 8:
+            raise BrowserSessionError(browser_cdp_frames.PAGE_CHECK_FAILED)
+        x, y = border[0], border[1]
+        return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
     except BrowserSessionError:
+        if strict:
+            raise
         return None
-    border = model.get("model", {}).get("border")
-    if not isinstance(border, list) or len(border) < 8:
-        return None
-    x, y = border[0], border[1]
-    return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
 
 
 async def _visible(cdp: browser_cdp_frames.Session, node: int) -> bool:

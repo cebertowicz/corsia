@@ -177,18 +177,19 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "memory", status="suspect", summary="List knowledge base entries",
         activity="Listing knowledge",
     ),
-    "browser_open": _Entry(
-        "browser", summary="Open a URL in the browser", activity="Opening",
-    ),
+    "browser_open": _Entry("browser", summary="Open a URL in the browser", activity="Opening"),
     "browser_snapshot": _Entry(
         "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
-    "browser_click": _Entry(
-        "browser", summary="Click a page element", activity="Clicking",
-    ),
+    "browser_click": _Entry("browser", summary="Click a page element", activity="Clicking"),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
-    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
+    "browser_input": _Entry("browser", summary="Press a key, choose a dropdown option, scroll, hover, go back or forward", activity="Using the page"),
+    "browser_run_steps": _Entry(
+        # In the web pack: the browser pack is at the ten-tool limit a pack may hold, and this tool is only
+        # called where a skill names it, so ordinary browser work does not need to load it.
+        "web", summary="Run setup steps from a System or installed skill", activity="Running setup",
+    ),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
@@ -247,7 +248,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_send": _Entry(
         "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
-        summary="Send a saved email draft after the person says to send it",
+        summary="Send a saved email draft when the person wants it sent",
         activity="Sending email",
     ),
     "calendar_list": _Entry(
@@ -262,7 +263,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "calendar_send_invite": _Entry(
         "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
-        summary="Send a saved invite draft after the person says to send it; attendees get emails",
+        summary="Send a saved invite draft when the person wants it sent; attendees get emails",
         activity="Sending invite",
     ),
     "google_workspace": _Entry(

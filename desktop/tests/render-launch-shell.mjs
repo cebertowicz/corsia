@@ -108,7 +108,7 @@ async function assertState(page, state) {
 	const expected = {
 		starting: ['Starting CORSIA…', true, false, false, false, 'secondary', 'primary', 'off', 'Off'],
 		'startup-failure': ['CORSIA couldn’t start', false, true, true, false, 'secondary', 'primary', 'off', 'Off'],
-		'background-off': ['Keep CORSIA running', false, false, false, false, 'secondary', 'primary', 'off', 'Off'],
+		'background-off': ['Keep CORSIA running', false, false, true, false, 'secondary', 'secondary', 'off', 'Off'],
 		'background-on': ['Starting CORSIA…', false, false, false, false, 'secondary', 'primary', 'on', 'On'],
 		'quit-failure': ['CORSIA couldn’t quit', false, true, true, true, 'primary', 'secondary', 'off', 'Off'],
 	}[state];

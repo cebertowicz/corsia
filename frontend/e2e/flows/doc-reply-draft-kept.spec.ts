@@ -207,13 +207,13 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await expect(reply, 'the text stays in the field').toHaveValue(DRAFT);
 			expect(await reason.evaluate((line) => {
 				const probe = document.createElement('span');
-				probe.style.cssText = 'color: var(--red-text); font-size: var(--text-caption)';
+				probe.style.cssText = 'color: var(--red-text); font-size: var(--text-footnote)';
 				line.parentElement!.append(probe);
 				const want = getComputedStyle(probe), got = getComputedStyle(line);
 				const looks = [got.color === want.color, got.fontSize === want.fontSize];
 				probe.remove();
 				return looks;
-			}), 'the reason has the card’s error look: caption size, error colour').toEqual([true, true]);
+			}), 'the reason has the card’s error look: footnote size, error colour').toEqual([true, true]);
 			const after = await spaceBelow(reason);
 			expect(Math.abs(after.gap - before.gap), 'the space under the reason is the space that was under the field').toBeLessThanOrEqual(1);
 			if (phone(page)) {

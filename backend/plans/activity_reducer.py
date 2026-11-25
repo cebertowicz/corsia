@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from plans import (
     admission_projection,
@@ -12,6 +12,7 @@ from plans import (
     operator_node_state,
     operator_nodes,
     operator_stopped,
+    parked_work,
     projections,
     service,
     wait_causes,
@@ -36,6 +37,9 @@ class ReducedNode:
     user_pause: bool
     wait_deadline: str | None
     wait_deadline_latest: str | None
+    # Every cause admission sees for the row, the same list the full read gives
+    # parked_work, so both reads park the same commitments.
+    causes: tuple[dict, ...] = field(default=(), compare=False)
 
 
 def _execution_facts(
@@ -105,7 +109,7 @@ def reduce_node(
         causes=causes,
     )
     needs_user = asks_user and not operator_display_state.ask_deferred(
-        plan_paused=paused, node_paused=node_paused,
+        plan_paused=paused, node_paused=node_paused, later=bool(row["later"]),
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,
@@ -119,6 +123,7 @@ def reduce_node(
         condition,
         review_kind,
         asks_user=asks_user,
+        later=bool(row["later"]),
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
     )
@@ -136,6 +141,7 @@ def reduce_node(
         unactionable_user_block=bool(row["has_user_block"]) and not needs_user,
         plan_paused=paused,
         node_paused=node_paused,
+        later=bool(row["later"]),
     )
     return ReducedNode(
         condition=condition,
@@ -153,6 +159,7 @@ def reduce_node(
         user_pause=bool(row["has_user_pause"]),
         wait_deadline=row["wait_deadline"],
         wait_deadline_latest=row["wait_deadline_latest"],
+        causes=tuple(causes),
     )
 
 
@@ -176,11 +183,8 @@ def plan_state(
     if leaves is None:
         leaves = node_states.leaves(rows)
     counted = node_states.in_play(rows, leaf_rows=leaves, parents=parents)
-    incomplete = [
-        reduced[str(row["id"])]
-        for row in leaves
-        if row["state"] not in service._TERMINAL_STATES
-    ]
+    open_leaves = [row for row in leaves if row["state"] not in service._TERMINAL_STATES]
+    incomplete = [reduced[str(row["id"])] for row in open_leaves]
     conditions = [item.condition for item in incomplete]
     delegated_moving = any(item.child_working for item in incomplete)
     moving = any(
@@ -199,6 +203,14 @@ def plan_state(
         ),
         moving=moving,
         delegated_moving=delegated_moving,
+        parked_commitments=parked_work.parked_commitments(
+            open_leaves,
+            {
+                str(row["id"]): "running" if item.child_working else item.condition
+                for row, item in zip(open_leaves, incomplete)
+            },
+            {str(row["id"]): list(item.causes) for row, item in zip(open_leaves, incomplete)},
+        ),
     )
 
 

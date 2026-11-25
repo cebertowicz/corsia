@@ -5,9 +5,11 @@ import type { ImageCommentSurface, DocImageComments } from '$lib/docImageComment
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
+import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 /** What DocCommentSurface takes; `resolvedOpen` is bindable. */
 export interface DocCommentSurfaceProps {
+	commentTaskBar?: ReviewBarState;
 	state: CommentSurfaceState;
 	onThreadMissing?: (remaining: string[]) => void;
 	/** The column opened on its own at load, so opening it does not hide the sidebar or the Workspace panel. */
@@ -17,6 +19,8 @@ export interface DocCommentSurfaceProps {
 	anchorAtClick?: boolean;
 	/** The canvas the card stays inside. */
 	bounds?: HTMLElement | null;
+	/** Keep the focused reply landing visible when a host notice sits above this canvas. */
+	protectReplyLanding?: boolean;
 	/** The pane is a drawer over the canvas: the margin column has no room. */
 	narrow: boolean;
 	/** A phone: a card or the composer is the sheet. Anywhere else with no margin they are a popover at the click; a surface that does not say follows `narrow`. */
@@ -56,7 +60,7 @@ export interface DocCommentSurfaceProps {
 	readOnly?: boolean;
 	/** A decision is in flight (`busy`): the editor holds still, and while it is an Accept the suggestion `id` is marked busy. */
 	onSuggestionBusy?: (busy: boolean, id?: string) => void;
-	onSuggestionAccepted?: (text: string) => void;
+	onSuggestionAccepted?: (text: string, history?: { eventId: string; ids: string[] }) => void;
 	/** The server applied an accepted edit but could not record the decision: read the shown document again. */
 	onDocumentChanged?: () => void;
 	load?: CommentLoad;
