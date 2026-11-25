@@ -1045,9 +1045,17 @@ pattern and record why the primitive was not part of that slice.
 
 ### 4.1 SegmentedControl
 
-For three-way choices that should read as one control, not three buttons.
-Used today inline in `InputBar.svelte` (effort levels: Auto / Off / Low /
-Med / High / Max).
+For a choice of two or three options that should read as one control, not
+separate buttons. Used today as the `.segmented` class in `app.css`
+(Settings › Theme, Sort models in `AddLocalModelSheet.svelte`).
+
+**When it fits, and what to use when it doesn't.** A segmented control
+takes 2 or 3 options, each label a word or a short number, and every label
+stays on one line at 393px. With four or more options, a set that can grow
+(an asked-for value added to the list), or any label that would wrap at
+393px, use a select inside `Field` (§3.4; the Text field role in §0.1): one
+line at every width, 44px on touch, the native picker on a phone, the
+current value shown. A wrapped label inside a segment is never the fix.
 
 ```ts
 interface Props<T extends string> {
