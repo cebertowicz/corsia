@@ -46,6 +46,8 @@
 	// The server's confirmation can land a moment after the page settles, so one empty answer earns one more ask.
 	let askAgain = false;
 	let generation = 0;
+	// Counts the offers shown: a save answer for an offer that a newer one has replaced changes nothing on screen.
+	let shown = 0;
 	let timers: ReturnType<typeof setTimeout>[] = [];
 	let wasPasswordPage = false;
 
@@ -85,7 +87,13 @@
 		const next = await fetchSaveOffer(threadId);
 		if (mine !== generation) return;
 		askAgain = next === null && !retry;
-		if (!next || offer) return;
+		if (!next) return;
+		// Each sign-in replaces the offer the server holds and Save stores the held one, so the dock always shows the newest:
+		// the person saves only the login they were shown.
+		if (offer && phase === 'asking' && !saving && sameOffer(offer, next)) return;
+		timers.forEach(clearTimeout);
+		timers = [];
+		shown++;
 		offer = next;
 		username = next.username;
 		phase = 'asking';
@@ -95,6 +103,9 @@
 		saving = false;
 		announcement = text.announce(next);
 	}
+
+	const sameOffer = (a: SaveOffer, b: SaveOffer) =>
+		a.site === b.site && a.domain === b.domain && a.username === b.username && a.update === b.update;
 
 	function close() {
 		if (dock?.contains(document.activeElement)) onrestorefocus();
@@ -138,6 +149,12 @@
 		});
 	});
 
+	// The dock steps aside while a password page shows, so it never covers that page's notice. This runs before the dock
+	// leaves the DOM, so focus still in it moves to the page rather than dropping to the document.
+	$effect.pre(() => {
+		if (passwordPage) untrack(() => { if (dock?.contains(document.activeElement)) onrestorefocus(); });
+	});
+
 	let lastThread = untrack(() => threadId);
 	$effect(() => {
 		const id = threadId;
@@ -154,9 +171,9 @@
 		failure = null;
 		// Emptied while the save runs, so the same failure line twice in a row is still a change the live region reads out.
 		announcement = '';
-		const mine = generation;
+		const mine = generation, mineShown = shown;
 		const result = await saveOffer(threadId);
-		if (mine !== generation || !offer) return;
+		if (mine !== generation || mineShown !== shown || !offer) return;
 		saving = false;
 		// Save was disabled while it ran, so focus may have dropped to the document. Focus moves only if it is still in the
 		// dock or on the document: a person who went on to type somewhere else (the chat, say) keeps their place.
@@ -239,7 +256,7 @@
 </script>
 
 <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
-{#if offer}
+{#if offer && !passwordPage}
 	<div
 		bind:this={dock}
 		class="save-offer"
