@@ -3,7 +3,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadPastFirstRunLanding, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { createSession, loadPastFirstRunLanding, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { agentsBody, createAgent, createProject, kpiBody, mockAveragePeriods, mockPeriod, mockWindows, selectProjectScope, sizeCoverage } from '../support/measurement-fixture';
 import { waitForMainSlideToSettle } from '../support/sidebar';
 
@@ -218,7 +218,7 @@ function overrunDetail(offender: Offender): string {
 
 // ---- Populated disposable data -------------------------------------------
 
-type Seed = { projectId: string; projectName: string; agentId: string; agentTitle: string };
+type Seed = { projectId: string; projectName: string; agentId: string; agentTitle: string; chatTitle: string };
 
 /** One unbroken token wider than a phone: what a pasted URL or hash does to a row. */
 const LONG_TOKEN = `example.test/${'z'.repeat(90)}`;
@@ -251,7 +251,7 @@ const DEBUG_VERSION = {
 /**
  * Create the project and agent on the disposable backend and answer the four
  * reads whose real data the disposable instance cannot populate: measurement,
- * the Activity plan index, the agent's transcript, and Debug version data.
+ * the Activity queue, the agent's transcript, and Debug version data.
  * `hold` and `versionHold` let negative controls withhold a required read
  * until they choose to release it.
  */
@@ -268,6 +268,8 @@ async function seed(
 	const project = await createProject(request, `Phone guard project ${suffix} with-a-long-unbroken-name-${'x'.repeat(28)}`);
 	const agentTitle = `Phone guard agent ${suffix}-${'y'.repeat(28)}`;
 	const agentId = await createAgent(request, agentTitle, project.id);
+	const chatTitle = `Phone guard workspace chat ${suffix}`;
+	await createSession(request, chatTitle);
 	await page.route('**/api/measurement/**', async (route) => {
 		const url = new URL(route.request().url());
 		if (url.pathname.endsWith('/agents')) {
@@ -365,20 +367,16 @@ async function seed(
 		await versionHold;
 		return route.fulfill({ json: DEBUG_VERSION });
 	});
-	// One active plan for the seeded agent, so Activity renders a project group and a row.
-	await page.route('**/api/plans/activity/scopes/workspace', async (route) => {
-		const at = '2026-10-01T12:00:00Z';
-		return route.fulfill({ json: {
-			contract_version: 1, representation: 'activity_scope_index', as_of: at, revision_token: 'phone-guard',
-			target: { kind: 'workspace_scope', id: 'workspace', label: 'Workspace' },
-			attention: { awaiting_count: 0 },
-			plans: [{
-				plan: { id: 'phone-guard-plan', owner_kind: 'thread', owner_id: agentId, state: 'active', revision: 1, updated_at: at },
-				owner: { label: agentTitle, project_id: project.id, thread_id: agentId },
-				progress: { open: 2, liveness: 'advancing' }, has_nodes: true,
-				display: { label_key: 'working', tone_key: 'active' }, priority_at: at,
-			}],
-		} });
+	// Activity's ranked queue includes a long, unbroken title raised by the seeded agent.
+	await page.route(/\/api\/attention\/queue\?(.*&)?view=activity/, (route) => {
+		const at = new Date().toISOString();
+		return route.fulfill({ json: { count: 1, items: [{
+			key: 'review:phone-guard', external_id: 'review:phone-guard', renderer: 'review', kind: 'review',
+			title: LONG_TOKEN, raised_at: at,
+			source: { thread_id: agentId, thread_label: agentTitle, project_id: null, project_label: null, parent_reviewed: true },
+			open: { artifact_id: 'phone-guard-artifact' }, detail: { artifact_id: 'phone-guard-artifact' },
+			rank: { position: 1, reason: 'Phone width coverage', ranked_by: agentId, ranked_at: at },
+		}], ranker: { thread_id: agentId, label: agentTitle } } });
 	});
 	await page.route(`**/api/threads/${agentId}/messages**`, async (route) => {
 		const message = (id: string, role: 'user' | 'assistant', content: string, n: number, metadata: object | null = null) => ({
@@ -392,7 +390,7 @@ async function seed(
 			has_more: false, oldest_id: null,
 		} });
 	});
-	return { projectId: project.id, projectName: project.name, agentId, agentTitle };
+	return { projectId: project.id, projectName: project.name, agentId, agentTitle, chatTitle };
 }
 
 // ---- Proving the surface before measuring ----------------------------------
@@ -400,12 +398,14 @@ async function seed(
 /**
  * A surface is measured only after these hold, each a web-first assertion that
  * waits for the page instead of a fixed delay: the reader is signed in (the
- * seeded agent, which only an authenticated read returns, is listed),
+ * seeded chat or agent, which only an authenticated read returns, is listed),
  * and nothing on the page is still loading or has failed.
  */
 async function signedIn(page: Page, data: Seed, timeout = 20_000) {
 	await expect(page.getByRole('button', { name: /^Toggle sidebar/ })).toBeVisible({ timeout });
-	await expect(page.getByText(data.agentTitle).first(), 'the seeded agent is listed, so the read was authenticated').toBeAttached({ timeout });
+	const sidebar = page.locator('aside.sidebar');
+	const seededRow = sidebar.getByText(data.chatTitle, { exact: true }).or(sidebar.getByText(data.agentTitle, { exact: true }));
+	await expect(seededRow.first(), 'the seeded chat is listed, so the read was authenticated').toBeAttached({ timeout });
 }
 
 async function loaded(page: Page, scope: string, timeout = 20_000) {
@@ -555,21 +555,18 @@ const VIEW_TARGETS: Record<string, Target> = {
 		},
 		ready: async (page, data, timeout = 20_000) => {
 			await expect(page.locator('.rail-nav button[title="Activity"][aria-current="page"]'), 'the Activity view is open').toHaveCount(1, { timeout });
-			await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible({ timeout });
-			await expect(page.locator('.activity-group').getByText(data.agentTitle).first(), 'Activity lists the seeded plan').toBeVisible({ timeout });
-			await loaded(page, '.activity-work', timeout);
+			await expect(page.locator('section[aria-label="Activity"] [data-activity-row]').filter({ hasText: LONG_TOKEN }), 'Activity lists the seeded item').toBeVisible({ timeout });
+			await loaded(page, '.activity', timeout);
 		},
 	},
 	chat: {
 		open: async (page, data) => {
-			// A reader picks the thread back up from Activity's Continue list.
-			await clickRail(page, 'Activity');
-			await expect(page.locator('.rail-nav button[title="Activity"][aria-current="page"]'), 'the Activity view is open').toHaveCount(1);
-			await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible();
-			await loaded(page, '.activity-work');
-			const resume = page.locator('.resume-row').filter({ hasText: data.agentTitle });
-			await expect(resume, 'Activity Continue lists the seeded plan').toBeVisible();
-			await resume.click();
+			// Open the project, then the agent in its sidebar, as a phone reader does.
+			await clickRail(page, 'Jump to a project or chat');
+			await page.locator('.palette input').fill(data.projectName);
+			await page.locator('.palette button.res').filter({ hasText: data.projectName }).first().click();
+			await openSidebar(page);
+			await page.locator('aside.sidebar').getByText(data.agentTitle, { exact: true }).click();
 			// The assistant's reply sits under the "Worked" disclosure; a reader opens it to read the answer.
 			await page.getByRole('button', { name: 'Expand Worked' }).click();
 			// The tool chip opens into its rows, each with its phrase and outcome.
@@ -790,7 +787,7 @@ test.describe('@flow:no-sideways-scroll @surface:shell no page scrolls sideways 
 		test('a signed-out page is not measured as the app', async ({ page, request }, testInfo) => {
 			const data = await seed(page, request, testInfo);
 			await page.goto('/');
-			await expect(signedIn(page, data, 3_000)).rejects.toThrow(/seeded agent is listed|Toggle sidebar/);
+			await expect(signedIn(page, data, 3_000)).rejects.toThrow(/seeded chat is listed|Toggle sidebar/);
 		});
 
 		test('the wrong view is not measured as the expected one', async ({ page, request }, testInfo) => {

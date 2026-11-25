@@ -756,7 +756,9 @@ start_backend() {
         port_wait=$((port_wait + 1))
     done
     echo "  Starting CORSIA backend on :$BACKEND_PORT..."
+    mkdir -p "$(dirname "$BACKEND_LOG")" || return 1
     cd "$BACKEND_DIR"
+    [ ! -L "$BACKEND_LOG" ] || rm -f "$BACKEND_LOG" || return 1
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
         CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \

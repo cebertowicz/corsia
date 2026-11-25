@@ -78,7 +78,7 @@ describe('plan indent: details sit under their row', () => {
 		const nodes = [node({ id: 'a', title: 'Parent', child: CHILD_AVAILABLE })];
 		const wrapper = node({ id: 'w', title: 'Worker step', depth: 0 });
 		const sibling = node({ id: 'w2', title: 'Worker second step', depth: 0 });
-		const inner = node({ id: 's1', title: 'Worker substep', parent_id: 'w', depth: 1 });
+		const inner = node({ id: 's1', title: 'Worker substep', parent_id: 'w', depth: 1, state: 'active' });
 		component = mount(PlanTree, {
 			target: host,
 			props: withFolds({

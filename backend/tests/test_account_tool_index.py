@@ -7,7 +7,7 @@ from tools.registry import ToolRegistry
 from tools.tool_surface import pack_index
 
 ACCOUNT_TOOLS = (
-    "email_search", "email_read", "email_draft", "email_send", "calendar_list",
+    "email_search", "email_read", "email_draft", "calendar_list",
     "calendar_draft_invite", "calendar_send_invite", "microsoft_mail_search",
     "microsoft_calendar_list", "microsoft_files_list", "messages_chats", "messages_read", "messages_search",
     "messages_draft", "messages_send",
@@ -48,4 +48,7 @@ def test_index_reads_no_account_state(monkeypatch):
 
 def test_pack_load_still_returns_every_account_tool():
     names = {name for pack in ("email", "microsoft_mail") for name in pack_members()[pack]}
-    assert {"email_send", "calendar_send_invite", "microsoft_mail_search"} <= names
+    assert {"calendar_send_invite", "microsoft_mail_search"} <= names
+    assert {"email_send", "microsoft_mail_send"}.isdisjoint(names)
+    assert {"email_send", "microsoft_mail_send"}.isdisjoint(TOOL_CATALOG)
+    assert all(f"- {name}:" not in render() for name in ("email_send", "microsoft_mail_send"))

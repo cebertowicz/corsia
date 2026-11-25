@@ -68,7 +68,8 @@ def _scene(thread_id: str, *, criteria: str | None = None) -> dict:
         ids = {task_a.id: "<A>", queued.id: "<Q>", task_b.id: "<B>", blocked.id: "<D>"}
         return {
             "thread_id": thread_id, "identity": identity, "plan_id": plan.id,
-            "a": task_a.id, "b": task_b.id, "labels": {**ids, thread_id: "<thread>"},
+            "a": task_a.id, "b": task_b.id, "queued": queued.id,
+            "labels": {**ids, thread_id: "<thread>"},
             "params": close_params(db, "request_review", task_a.id),
         }
     finally:
@@ -186,6 +187,14 @@ async def test_a_codex_close_without_next_node_id_is_actionable_from_field_names
     isolated_db, monkeypatch,
 ):
     scene = _scene(mk_session("codex-schema-without-next"))
+    # The app's pick never passes ready work above, so the queued work ranks first here.
+    db = get_db()
+    try:
+        service.reorder_node(scene["queued"], 0, db=db)
+        db.commit()
+        scene["params"] = close_params(db, "request_review", scene["a"])
+    finally:
+        db.close()
 
     text, raw = await _codex(scene, _close_arguments(scene, named=False), monkeypatch)
 

@@ -24,7 +24,7 @@ import pytest
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import feedback_batches
 from infra.database import get_db, write_transaction
-from plans import admission, handoff_brief, review_requests, service
+from plans import admission, closure, handoff_brief, review_requests, service
 from plans.boundary import PlanActor, mutate
 from plans.feedback_nodes import AGENT_FRAMING, PROVENANCE
 from tests.plan_close_next_helpers import (
@@ -91,7 +91,9 @@ def _without_creation_event(db, node_id: str):
     """Return a task with no ``node_created`` event, as a row older than the log is.
 
     The event log is append-only, so the event cannot be removed: the row is
-    copied from the real task instead, and the copy never had one.
+    copied from the real task instead, and the copy never had one. The real
+    task is closed, so the copy is the only one: an open original would rank
+    above it, and the app's pick never passes ready work above.
     """
     row = dict(service._node_row(db, node_id), id=uuid.uuid4().hex)
     row["order_key"] += 1
@@ -101,6 +103,7 @@ def _without_creation_event(db, node_id: str):
     assert db.execute(
         "SELECT COUNT(*) FROM plan_node_events WHERE node_id=?", (row["id"],),
     ).fetchone()[0] == 0
+    closure.close_node(node_id, reason="Replaced by its copy", db=db)
     return service.get_node(row["id"], db=db)
 
 

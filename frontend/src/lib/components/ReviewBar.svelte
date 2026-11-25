@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui';
 	import { on } from '$lib/ws';
 	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
+	import { isCommentTask } from './comments/commentTask';
 	import ReviewBarShell from './ReviewBarShell.svelte';
 	import { createReviewBarState, DRAFT_OPEN, type ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
@@ -14,7 +15,7 @@
 	 */
 	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
 		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean;
-		/** Answered from the card docked to the document canvas's bottom edge; without it the ask keeps its row (an image's header). */
+		/** Answered from the card docked to the document canvas's bottom edge. The caller docks only on a phone or a short touch screen; without it the ask keeps its row in the header (also an image's). */
 		docked?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
@@ -44,6 +45,7 @@
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
 	const busy = $derived(bar.phase === 'sending' || bar.accepting);
 	const personStep = $derived(bar.read?.person_step ?? null);
+	$effect(() => { if (isCommentTask(personStep)) capsuleClearance = 0; });
 	let personReceipt = $state<'done' | 'wont_do' | null>(null);
 	/** A send keeps the layout it came from: the note stays mounted while its own send is in flight. */
 	const noting = $derived(bar.phase === 'noting' || (busy && bar.sendingFrom === 'noting'));
@@ -167,9 +169,9 @@
 	}
 </script>
 
-{#if personStep || personReceipt}
-	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} {docked} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} onDismissed={() => void bar.load()} />
-{:else if bar.visible}
+{#if (personStep && !isCommentTask(personStep)) || personReceipt}
+	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} {docked} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} />
+{:else if !isCommentTask(personStep) && bar.visible}
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
 		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}

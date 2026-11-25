@@ -177,25 +177,53 @@ def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
     was skipped. A failed offset/context write also leaves the computed response
     valid; the next read retries persistence.
     """
-    threads = store.list_for_artifact(artifact_id, db=db)
-    ranges = None
-    if text is None and path:
-        from pathlib import Path
-        from doceditor.live_tools import find_live
-        entry = find_live(Path(path))
-        if entry is not None:
-            text, ranges = entry.live.snapshot
-            persist = False
-    try:
-        if text is None:
-            text = read_doc_text(path)
-    except (OSError, ValueError) as exc:
-        log.info("document comment anchoring skipped for %s: %s", artifact_id, exc)
-        return threads, False
-    updates = resolve_threads(threads, text, ranges=ranges)
-    if updates and persist:
+    if db is None:
+        from infra.database import get_db
+        owned = get_db()
         try:
-            store.update_positions(artifact_id, updates, db=db)
-        except sqlite3.Error as exc:  # a list response must not fail after re-anchoring
-            log.warning("document comment anchor persistence failed for %s: %s", artifact_id, exc)
-    return threads, True
+            return anchored_threads(artifact_id, path, owned, text=text, persist=persist)
+        finally:
+            owned.close()
+
+    from doceditor import snapshot_reanchor
+
+    supplied_text = text
+    for _attempt in range(3):
+        threads = store.list_for_artifact(artifact_id, db=db)
+        current_text, ranges, save = supplied_text, None, persist
+        if current_text is None and path:
+            from pathlib import Path
+            from doceditor.live_tools import find_live
+            entry = find_live(Path(path))
+            if entry is not None:
+                current_text, ranges = entry.live.snapshot
+                save = False
+        try:
+            if current_text is None:
+                current_text = read_doc_text(path)
+        except (OSError, ValueError) as exc:
+            log.info("document comment anchoring skipped for %s: %s", artifact_id, exc)
+            return threads, False
+        if ranges is not None:
+            resolve_threads(threads, current_text, ranges=ranges)
+            return threads, True
+        try:
+            legacy, updates, invalid = snapshot_reanchor.resolve_versioned(threads, current_text, db)
+        except LookupError:
+            # A concurrent update may have collected the version after the row read.
+            # Re-read the row; a persistent broken reference remains an error.
+            if supplied_text is None and _attempt < 2:
+                continue
+            raise
+        if save and (legacy or updates or invalid):
+            try:
+                snapshot_reanchor.persist_updates(db, artifact_id, current_text, updates, legacy_updates=legacy, invalid=invalid)
+            except snapshot_reanchor.AnchorConflict:
+                if supplied_text is None:
+                    continue  # Refresh both rows and document text before retrying.
+                break  # The caller owns supplied bytes; do not invent a newer version.
+            except sqlite3.Error as exc:  # a list response must not fail after re-anchoring
+                log.warning("document comment anchor persistence failed for %s: %s", artifact_id, exc)
+        return threads, True
+    log.warning("document comment anchoring raced repeatedly for %s; next read will retry", artifact_id)
+    return store.list_for_artifact(artifact_id, db=db), False

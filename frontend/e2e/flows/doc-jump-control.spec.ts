@@ -11,6 +11,7 @@ import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
 import { headerSend, headerSentStatus, holdDocumentComments, seedHeldComments, shownHeaderSend } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
+import { enterDocumentEdit } from '../support/documentReading';
 
 
 const TAG = '@surface:doc-jump-control';
@@ -442,6 +443,8 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(noticeBounds.y);
 
 			// Move the editing caret to the end: the last line must remain visible above the notice.
+			// A caret needs Edit; a touch opening is Reading, so choose Edit here (a no-op with a mouse).
+			await enterDocumentEdit(page);
 			await page.locator('.doc .cm-content').click();
 			await page.keyboard.press('ControlOrMeta+End');
 			await page.keyboard.press('ArrowLeft');

@@ -500,9 +500,7 @@ def test_blocked_paths_liveness_and_server_owned_current_next(db):
 
     # Its only blocked leaf is sequenced behind open work: a wait, not a block.
     assert parent["progress"]["liveness"] == "waiting"
-    assert nodes[ids["blocked"]]["attention_path"] == [
-        ids["phase"], ids["track"], ids["blocked"],
-    ]
+    assert nodes[ids["blocked"]]["attention_path"] == []
     assert nodes[ids["next"]]["attention_path"] == []
     assert ids["blocked"] in parent["current_node_ids"]
     assert parent["next_node_ids"] == [ids["next"]]
@@ -837,9 +835,35 @@ def test_operator_node_carries_its_assignee(db):
     nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
 
     assert nodes[mine.id]["assignee"] == "user"
+    assert nodes[mine.id]["requires_user_action"] is True
+    assert nodes[mine.id]["attention_path"] == [mine.id]
     assert nodes[mine.id]["waiting_on"] == ["Ship it"]
     assert nodes[agent.id]["assignee"] is None
     assert nodes[agent.id]["waiting_on"] == []
+
+
+def test_operator_node_says_which_rows_are_workflow_runs(db):
+    """The pane shows a run's children in the run's order, so it needs to know a run from a row with a step name."""
+    plan = service.ensure_plan("thread", "parent", db=db)
+    phase = service.add_node(plan.id, kind="phase", title="Plain phase", acceptance_criteria="done", db=db)
+    run = service.add_node(plan.id, kind="phase", title="Run", acceptance_criteria="done", db=db)
+    nested = service.add_node(plan.id, kind="phase", title="Nested run", acceptance_criteria="done", parent_id=run.id, db=db)
+    step = _task(plan.id, "Step", db=db, parent_id=run.id)
+    follow_up = _task(plan.id, "Follow-up of a step", db=db, parent_id=phase.id)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET workflow_ref='general-work' WHERE id=?", (run.id,))
+        db.execute("UPDATE plan_nodes SET workflow_ref='review-work', workflow_step='review' WHERE id=?", (nested.id,))
+        db.execute(
+            "UPDATE plan_nodes SET workflow_ref='general-work', workflow_step=? WHERE id IN (?, ?)",
+            ("do", step.id, follow_up.id),
+        )
+
+    payload = _projection().read_thread("parent", actor=_actor(), db=db)
+    nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
+
+    assert {name: nodes[node.id]["workflow_run"] for name, node in (
+        ("phase", phase), ("run", run), ("nested", nested), ("step", step), ("follow_up", follow_up),
+    )} == {"phase": False, "run": True, "nested": True, "step": False, "follow_up": False}
 
 
 def test_person_step_lists_only_open_same_plan_work_waiting_on_it(db):

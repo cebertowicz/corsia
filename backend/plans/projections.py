@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from infra.packed_rows import fetch_all
-from plans import aggregates, node_states, open_tree, wait_causes
+from plans import aggregates, node_states, open_tree, parked_work, wait_causes
 from plans.delegation_epoch import (  # noqa: F401
     delegated_work_returned, open_delegated_node_ids, open_delegated_work, open_row_sql,
 )
@@ -91,6 +91,14 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         ),
         moving=moving,
         delegated_moving=delegated_moving,
+        parked_commitments=parked_work.parked_commitments(
+            incomplete,
+            {
+                key: "running" if wait_causes.child_is_working(execution) else execution["condition"]
+                for key, execution in projected.items()
+            },
+            {key: execution["causes"] for key, execution in projected.items()},
+        ),
     )
     memo[plan_id] = state
     return state

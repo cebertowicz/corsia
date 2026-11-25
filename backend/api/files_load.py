@@ -12,8 +12,8 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
-from connections.mail.email_document import email_draft_view
-from tools.reviewed_drafts import draft_at
+from connections.mail.email_document import email_draft_view, parse_document
+from tools.reviewed_drafts import draft_record_at
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
 from registry.document_supervisor import is_multi_person, ownership as document_ownership
@@ -124,9 +124,14 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         ownership = document_ownership(
             db, art, user_id=user_id, workspace=config.WORKSPACE, multi_person=multi_person,
         ) if art else None
-        draft = draft_at(p, "email", db=db)
+        draft = draft_record_at(p, "email", db=db)
     finally:
         db.close()
+    if draft and draft["state"] != "open":
+        # A sent or declined draft stays as it went, read-only. It opens as an email only in the current format:
+        # drafts settled before that format open as the file they were saved as.
+        writable = False
+        draft = draft if parse_document(text) is not None else None
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
     from infra.guidance_targets import document_target, guidance_target
 
@@ -140,7 +145,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             "revision": revision(raw), "writable": writable, "artifact": art,
             "freshness": freshness, "ownership": ownership, "_recorded": recorded,
             # The draft record makes this file an email draft, which the viewer opens as an email.
-            "email_draft": email_draft_view(draft["id"], text) if draft else None,
+            "email_draft": email_draft_view(draft["id"], text, draft["state"]) if draft else None,
             "_document": (p, document) if document else None,
             "_notification": notification}
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
-import { EditorState, StateEffect } from '@codemirror/state';
+import { Compartment, EditorState, StateEffect } from '@codemirror/state';
 import { history, undo } from '@codemirror/commands';
 import { insertNewlineContinueMarkup, markdown, markdownKeymap } from '@codemirror/lang-markdown';
 import { forceParsing } from '@codemirror/language';
@@ -9,6 +9,7 @@ import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
 import { markdownTasks, toggleTasksOnSelection } from './markdown-tasks';
+import { documentInputPolicy } from './document-reading';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 import { emitProductEvent } from '$lib/product_events';
@@ -121,6 +122,38 @@ describe('markdown tasks', () => {
 		view.dom.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
 		expect(view.state.doc.toString()).toBe('- [ ] locked\n');
 		expect(toggleTasksOnSelection(view)).toBe(false);
+	});
+
+	it('leaves a task alone in Reading and toggles it again after Edit, through the editor input policy', () => {
+		const mode = new Compartment();
+		const state = EditorState.create({
+			doc: '- [ ] reading item\n',
+			selection: { anchor: 0 },
+			extensions: [history(), markdown({ extensions: GFM }), markdownLivePreview, markdownTasks, mode.of(documentInputPolicy(false, true))]
+		});
+		const view = new EditorView({ state, parent: document.body });
+		if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+		views.push(view);
+		const box = () => view.dom.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+
+		// Reading: the box is disabled, a click on its control and the keyboard toggle change nothing, and no product event is sent.
+		expect(box().disabled).toBe(true);
+		box().closest('.cm-md-task-control')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(toggleTasksOnSelection(view)).toBe(false);
+		expect(view.state.doc.toString()).toBe('- [ ] reading item\n');
+		expect(emitProductEvent).not.toHaveBeenCalled();
+
+		// Edit: the same widget is rebuilt enabled and a click toggles the source marker.
+		view.dispatch({ effects: mode.reconfigure(documentInputPolicy(false, false)) });
+		expect(box().disabled).toBe(false);
+		box().click();
+		expect(view.state.doc.toString()).toBe('- [x] reading item\n');
+
+		// Back to Reading: inert again.
+		view.dispatch({ effects: mode.reconfigure(documentInputPolicy(false, true)) });
+		expect(box().disabled).toBe(true);
+		box().closest('.cm-md-task-control')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(view.state.doc.toString()).toBe('- [x] reading item\n');
 	});
 
 	it('keeps comment decorations anchored across a toggle', () => {

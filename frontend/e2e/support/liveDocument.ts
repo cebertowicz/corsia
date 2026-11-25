@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page, type WebSocket, type WebSocketRoute } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
+import { enterDocumentEdit } from './documentReading';
 
 export interface LiveDocument {
 	artifactId: string;
@@ -126,6 +127,8 @@ export async function openLiveDocument(page: Page, document: LiveDocument, expec
 }
 
 export async function typeAtDocumentEnd(page: Page, text: string): Promise<void> {
+	// A touch opening is Reading, which takes no typing; choose Edit first (a no-op for a mouse opening).
+	await enterDocumentEdit(page);
 	const editor = page.locator('.cm-content');
 	await editor.click();
 	await page.keyboard.press('ControlOrMeta+End');
@@ -197,6 +200,8 @@ async function lineEnd(line: ReturnType<Page['locator']>): Promise<{ x: number; 
  * comment, and the caret after the deletion stays there.
  */
 export async function deleteRenderedLine(page: Page, text: string): Promise<void> {
+	// Backspace removes text; a touch opening is Reading, so choose Edit first (a no-op for a mouse opening).
+	await enterDocumentEdit(page);
 	const before = await renderedCount(page, text);
 	expect(before).toBeGreaterThan(0);
 	const inDocument = await documentCount(page, text);

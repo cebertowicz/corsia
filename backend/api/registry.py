@@ -233,6 +233,30 @@ async def resolve_artifact(
     return {"found": row is not None, "artifact": row}
 
 
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact(artifact_id: str, token: str):
+    """Resolve an accessible, active artifact independently of pane visibility."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+
+    def _get() -> dict | None:
+        db = get_db()
+        try:
+            art = models.get_artifact(artifact_id, db=db)
+            if (art is None or art.get("state") != "active"
+                    or not may_access_artifact(art["parent_thread_id"], user["id"], db=db)):
+                return None
+            return art
+        finally:
+            db.close()
+
+    row = await run_in_db(_get)
+    if row is None:
+        raise HTTPException(404, "Artifact not found")
+    return {"artifact": row}
+
+
 class ArtifactPatch(BaseModel):
     description: str
 

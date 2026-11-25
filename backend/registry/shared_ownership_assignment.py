@@ -258,7 +258,9 @@ def apply_shared_ownership(
         details = ", ".join(f"{row.path} ({row.rule})" for row in unassigned)
         raise ValueError(f"shared ownership assignment has unassignable files: {details}")
     root = _scope_root(workspace, project_id, db)
-    assert root is not None
+    if root is None:
+        # A project whose folder is gone has no shared files to own; nothing is recorded.
+        return rows
     applied: list[Assignment] = []
     with write_transaction(db, scope="assign_shared_ownership") as connection:
         for row in rows:

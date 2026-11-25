@@ -100,6 +100,8 @@ const pill = (page: Page) => page.locator('[data-comments-entry]');
 /** The sheet shows this word's comment, and no other thread's. */
 async function expectOpenOn(page: Page, word: Word, why: string) {
 	await expect(sheet(page), `${why}: the comment sheet opens`).toBeVisible();
+	await expect(sheet(page).locator('.drawer-done')).toHaveText('Close');
+	await expect(sheet(page)).toHaveCSS('border-top-left-radius', '28px');
 	await expect(sheet(page).getByText(WORDS[word]), `${why}: it shows this word's comment`).toBeVisible();
 	for (const other of (Object.keys(WORDS) as Word[]).filter((w) => w !== word)) await expect(sheet(page).getByText(WORDS[other]), `${why}: not ${other}'s`).toHaveCount(0);
 }

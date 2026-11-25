@@ -25,6 +25,8 @@ def test_answer_selects_the_active_dependent_it_unblocks(db):
     plan, _source, decision = _raised_decision(db)
     dependent = _task(plan.id, "Apply the chosen option", db=db)
     service.add_dependency(dependent.id, decision["node_id"], db=db)
+    # The app's pick never passes ready work above, so the dependent ranks first.
+    service.reorder_node(dependent.id, 0, db=db)
     service.transition_node(dependent.id, "active", db=db)
     assert _open_attempt(db, dependent.id) is None
 

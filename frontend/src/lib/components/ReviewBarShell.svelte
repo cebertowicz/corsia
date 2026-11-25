@@ -1,5 +1,10 @@
+<script lang="ts" module>
+	/** Context key: a surface that sets it true keeps the asker's name on a docked card's resting line (Activity). */
+	export const ASKER_AT_REST = Symbol('askerAtRest');
+</script>
+
 <script lang="ts">
-	import { tick, type Snippet } from 'svelte';
+	import { getContext, tick, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
 	import { cubicIn } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -15,12 +20,10 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, docked = false, named = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', suppressed = false, docked = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
-		/** The ask answers from a card docked to the document canvas's bottom edge, at every width: at rest the question on one line above the answers; a tap opens it to the asker and the full question. */
+		/** The ask answers from a card docked to the document canvas's bottom edge: at rest the question on one line above the answers; a tap opens it to the asker and the full question. The caller docks only on a phone or a short touch screen; elsewhere the ask keeps its row. */
 		docked?: boolean;
-		/** Docked: the asker's name stays on the resting line (a comment task, whose line is about who commented). */
-		named?: boolean;
 		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
 		/** How many others also asked. */
@@ -42,6 +45,7 @@
 		actions: Snippet;
 	} = $props();
 
+	const askerAtRest = getContext<boolean | undefined>(ASKER_AT_REST) === true;
 	const expandable = $derived(ask !== '');
 	let expanded = $state(false);
 	/** The docked card, opened by a tap on its question. A new ask starts it closed. */
@@ -116,9 +120,9 @@
 <!-- Docked to the document canvas's left, right and bottom edges. A review ask cuts one thing per line: at rest the question alone, then the answers; opened, the asker takes its own line above the full question. -->
 <div class="rb-dock-slot" bind:this={slotEl}>
 {#if view === 'ask' && who}
-	<section class="rb-dock" class:suppressed class:noting class:named class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+	<section class="rb-dock" class:suppressed class:noting class:asker={askerAtRest} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
 		<button type="button" class="rb-dock-ask" title={full || ask} aria-expanded={cardOpen} aria-label={lineLabel || `${who.name}${plus ? ` +${plus}` : ''}: ${full || ask}`} onclick={() => (cardOpen = !cardOpen)}>
-			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen && !named}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
+			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
 		</button>
 		{#if (cardOpen || noting) && others.length}
 			<ul class="rb-others">
@@ -206,7 +210,7 @@
 	.rb-dock-slot { display: contents; }
 	.rb-dock { position: absolute; z-index: 5; left: calc(-1 * var(--canvas-pad-inline, 0px)); right: calc(-1 * var(--canvas-pad-inline, 0px)); bottom: calc(-1 * var(--canvas-pad-bottom, 0px)); box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-4); row-gap: var(--space-1); padding: var(--space-3) calc(var(--space-3) + var(--canvas-pad-inline, 0px)) calc(var(--space-2) + var(--safe-bottom, 0px)); border: 1px solid var(--border-subtle); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--bg-secondary); box-shadow: var(--glass-elevation-1); font-size: var(--text-footnote); color: var(--text-secondary); }
 	/* Hidden under a comment sheet, and while the Details panel would reach down over it (Details then carries the ask). */
-	.rb-dock.suppressed, :global(.card-covered) .rb-dock { visibility: hidden; pointer-events: none; }
+	.rb-dock.suppressed, :global(.ask-covered) .rb-dock, :global(.ask-covered) .review-bar.ask { visibility: hidden; pointer-events: none; }
 	.rb-dock :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; transition: none; }
 	.rb-dock-ask { position: relative; flex: 1 0 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-primary); font: inherit; font-size: var(--text-subhead); line-height: var(--lh-normal); text-align: left; cursor: pointer; }
 	/* At rest the question is one line; its tap area reaches up through the card's top padding and border and 8px down, so it is 44px without making the card taller. The answers sit above it, so they keep their own 44px. */
@@ -217,15 +221,14 @@
 	/* The name stays on one line, cut in the middle (MiddleName). */
 	.rb-dock-who { display: inline-grid; max-width: 60%; vertical-align: bottom; font-weight: var(--fw-semibold); }
 	.rb-dock-sep { margin-inline: var(--space-1); color: var(--text-tertiary); }
-	.rb-dock:not(.named) .rb-dock-sep, .rb-dock:not(.named):not(.open) .rb-dock-by { display: none; }
-	.rb-dock.open:not(.named) .rb-dock-by { display: flex; min-width: 0; white-space: normal; }
-	.rb-dock.open:not(.named) .rb-dock-who { display: block; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
-	/* A comment task holds one line: Dismiss all ends it where the card is wide enough, else wraps to its own row. */
-	.rb-dock.named .rb-dock-ask { flex: 1 1 auto; }
+	.rb-dock .rb-dock-sep, .rb-dock:not(.open) .rb-dock-by { display: none; }
+	.rb-dock.open .rb-dock-by { display: flex; min-width: 0; white-space: normal; }
+	/* Activity: at rest the asker leads the question on its one line. */
+	.rb-dock.asker:not(.open) .rb-dock-by, .rb-dock.asker:not(.open) .rb-dock-sep { display: inline; }
+	.rb-dock.open .rb-dock-who { display: block; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 	.rb-dock .rb-others { flex: 1 0 100%; padding-left: 0; }
 	.rb-dock .rb-status { flex: 1 0 100%; }
 	.rb-dock .rb-status:empty { display: none; }
-	.rb-dock.named .rb-status { order: 3; }
 	/* What Approve also does: left-aligned under the question and never cut. Beside the answers while its whole text fits there, else on its own line above them. */
 	.rb-dock :global(.rb-derived) { flex: 1 1 auto; width: max-content; max-width: 100%; min-width: 0; margin: 0; }
 	.rb-dock.open :global(.rb-derived) { flex-basis: 100%; white-space: normal; }
@@ -234,7 +237,7 @@
 	/* Touch: 44px answers, and the question's tap area (8px below its line) keeps 8px clear of the answers' row. */
 	@media (any-pointer: coarse), (max-width: 48rem) {
 		.rb-dock :global(.btn) { min-height: var(--touch-target); }
-		.rb-dock:not(.named) .rb-dock-ask { margin-bottom: var(--space-3); }
+		.rb-dock .rb-dock-ask { margin-bottom: var(--space-3); }
 	}
 	.rb-dock.receipt, .rb-dock.stale { flex-wrap: nowrap; column-gap: var(--space-2); padding-top: var(--space-2); }
 	.rb-dock .rb-receipt { flex: 1 1 0; min-width: 0; color: var(--text-secondary); }
@@ -299,9 +302,12 @@
 	.rb-capsule { display: contents; }
 	/* While a comment sheet is up, one verdict group is on screen at a time: the answer row is not drawn, and gives up its height, so no blank band is left where it was and a landscape sheet does not cover the text under the bar. The phone capsule below slides away instead. */
 	.review-bar.ask.suppressed .rb-row2 { display: none; }
+	/* In the header, what Approve also accepts is the status slot's neutral line beside the buttons, as it was: it takes the room the buttons leave, and the empty status gives it up. */
+	.rb-capsule :global(.rb-derived) { flex: 1 1 0; min-width: 0; margin: 0; color: var(--text-secondary); }
+	.rb-capsule:has(:global(.rb-derived)) .rb-status:empty { flex: 0 0 0; }
 	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
 	/* The note grows at every width, with the same bounded scrolling used by the narrow canvas. */
-	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
+	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-input); line-height: var(--space-6); resize: none; overflow-y: auto; }
 	.rb-capsule :global(.rb-note::placeholder), .rb-dock :global(.rb-note::placeholder) { color: var(--text-tertiary); }
 	.rb-capsule :global(.rb-note:focus), .rb-dock :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
 	.rb-icon { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
@@ -328,6 +334,11 @@
 		.review-bar.ask .rb-status:not(:empty) { flex-basis: 100%; }
 		.review-bar.noting :global(.rb-note) { flex: 1 0 100%; order: 1; height: auto; min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
+	}
+
+	/* What Approve also accepts is short and belongs to that button, so it keeps the buttons' row until the canvas is too narrow for both. A refusal or a sending message still takes its own row. 32rem is 512px here (a container query's rem is 16px whatever the root size), a round width above the measured need at the app's 15px root: the row's insets (44px + 24px), Send back + Approve (153px), the two 8px gaps and the longest line, 'Also accepts 99 suggestions' (157px; 150px at 2) come to 395px (387px at 2), so the line keeps the buttons' row from 395px up. */
+	@container doc-canvas (max-width: 32rem) {
+		.review-bar.ask .rb-capsule :global(.rb-derived) { flex-basis: 100%; }
 	}
 
 	/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */

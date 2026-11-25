@@ -145,7 +145,7 @@ def edit_node(
         _assert_revision(node, expected_revision)
         moved = regroup.plan(connection, node, parent_id) if parent_id is not _UNSET else None
         if later is not _UNSET:
-            later_fields.validate_carries_later(node["kind"])
+            later_fields.validate_later_edit(connection, node, later, actor_id=actor_id)
         if node["assignee"] == "user" and description is not None:
             from plans.boundary_fields import _user_step_description
 

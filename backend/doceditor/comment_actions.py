@@ -10,7 +10,6 @@ document save lives in the API layer, which this module does not import.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import sqlite3
 import uuid
@@ -19,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 from weakref import WeakValueDictionary
 
-from doceditor import comments as store, feedback_suggestion_decisions
+from doceditor import comments as store, feedback_suggestion_decisions, suggestion_history
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_validation import validate_create
 from doceditor.doc_text import read_suggestion_text
@@ -52,7 +51,7 @@ _accept_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 def accept_lock(artifact_id: str) -> asyncio.Lock:
-    """One document's Accepts, one at a time from loading siblings through recording the decision.
+    """Serialize one document's suggestion decisions from loading through recording.
 
     An insertion's place depends on its accepted siblings, so the next Accept must read every earlier
     one's recorded decision. Callers hold a strong reference while waiting or working, so an idle
@@ -167,6 +166,7 @@ def validate_decision_reason(reason: str | None) -> str | None:
 def record_decision(
     comment_id: str, *, decision: str, decided_by: str,
     decided_by_thread_id: str | None, reason: str | None = None, db=None,
+    hashes: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Record one decision and return the decided row."""
     reason = validate_decision_reason(reason)
@@ -178,6 +178,8 @@ def record_decision(
             decided_by_thread_id=decided_by_thread_id, decision_event_id=decision_event_id,
             decided_at=decided_at,
         )
+        if hashes is not None:
+            suggestion_history.record_history(connection, decision_event_id, row["artifact_id"], [row], *hashes)
         feedback_suggestion_decisions.record_suggestion_decisions(
             connection, [row], decision=DECISIONS[decision], decided_by=decided_by,
             decided_by_thread_id=decided_by_thread_id, decision_event_id=decision_event_id,
@@ -243,14 +245,10 @@ async def decide_suggestion(
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
-    if decision != "accept":
-        lock: contextlib.AbstractAsyncContextManager = contextlib.nullcontext()
-    else:
-        artifact_id = await run_in_db(store.get_artifact_id_for_comment, comment_id)
-        if artifact_id is None:
-            raise CommentActionError("not_found", "Comment not found")
-        lock = accept_lock(artifact_id)
-    async with lock:
+    artifact_id = await run_in_db(store.get_artifact_id_for_comment, comment_id)
+    if artifact_id is None:
+        raise CommentActionError("not_found", "Comment not found")
+    async with accept_lock(artifact_id):
         return await _decide_suggestion(
             comment_id, decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id,
             write=write, include_document=include_document, reason=reason)
@@ -288,24 +286,27 @@ async def _decide_suggestion(
             "before deciding it again.",
         )
     live_receipt = None
+    hashes = None
     if decision == "accept":
         from doceditor.live_suggestions import accept_live
         live_receipt = await accept_live(artifact, project_id, [comment], actor_thread_id, user_id=user_id, single=True)
         if live_receipt is None:
             document_text = await run_off_db(read_suggestion_text, artifact["path"])
+            updated_text = applied_text(comment, document_text)
             await write(
-                artifact["path"], applied_text(comment, document_text), project_id,
+                artifact["path"], updated_text, project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
                 str(comment["author"]) if comment["author_kind"] == "user" else None, (comment_id,),
             )
+            hashes = (hashlib.sha256(document_text.encode()).hexdigest(), hashlib.sha256(updated_text.encode()).hexdigest())
 
     def _record():
         db = get_db()
         try:
             return record_decision(
                 comment_id, decision=decision, decided_by=decided_by,
-                decided_by_thread_id=actor_thread_id, reason=reason, db=db,
+                decided_by_thread_id=actor_thread_id, reason=reason, db=db, hashes=hashes,
             )
         finally:
             db.close()

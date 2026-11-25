@@ -3,14 +3,13 @@ import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
+import { settled } from '../support/reviewFixtures';
 import { installWorkspace, isolatedDb, openThread, setDebugVersionOverlay, setMockCorsiaAgentModel } from '../support/heldComments';
 
 // The comment box names who gets a comment, under a new comment and under a reply, on a wide screen and on a phone.
 const TEXT = '# Rollout plan\n\nThe team ships the commentable rollout plan in three rings, and each ring waits for the one before it.\n\n';
 const WORD = 'commentable';
 const auth = { token: TEST_TOKEN };
-
-const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))).then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))));
 
 /** The line, the field and Send as the person sees them: each box inside the viewport and inside the nearest scroller that holds the reply; also where that scroller stands. */
 const visibleTogether = (page: Page) => page.evaluate(() => {

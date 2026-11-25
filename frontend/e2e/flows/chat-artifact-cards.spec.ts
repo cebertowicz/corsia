@@ -6,6 +6,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
+import { expectAskPlacement } from '../support/askPlacement';
 import { syntheticPng } from '../support/syntheticImages';
 
 /**
@@ -173,8 +174,11 @@ for (const [label, width, theme] of SURFACES) {
 			const held = new Promise<void>((resolve) => { release = resolve; });
 			await page.route('**/api/attention/*/clear', async (route) => { await held; await route.continue(); });
 			await row.click();
-			const reviewBar = page.locator('[data-ask-card]');
+			// A phone's ask is the docked card; on a larger screen it is the row in the document header (its receipt is a `.review-bar` too).
+			const form = width === 393 ? 'docked' : 'header';
+			const reviewBar = page.locator(form === 'docked' ? '[data-ask-card]' : '.review-bar');
 			await expect(reviewBar).toBeVisible();
+			await expectAskPlacement(page, form);
 			await reviewBar.getByRole('button', { name: 'Approve', exact: true }).click();
 			await expect(row).toHaveAttribute('data-card-state', 'approved');
 			await screenshot(page, `chat-card-answer-flip-${width}-${theme}`);
