@@ -58,6 +58,8 @@
 
 <style>
 	.pending-request-trigger {
+		/* fitRow sets this on a saved login's row; until it does, the name's 8em fallback applies. */
+		--owner-floor: initial;
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
