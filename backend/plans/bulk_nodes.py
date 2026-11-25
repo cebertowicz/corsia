@@ -67,22 +67,37 @@ def edit_many(
 
     Returns:
         ``{"changed": [{"node_id", "revision"}], "refused": [{"node_id", "reason"}]}``,
-        each in the caller's order, plus ``next`` when the call freed a slot.
+        each in the caller's order, plus ``next`` when the call freed a slot, and
+        ``landing`` when a pull back moved other items to Later to make room, as the
+        single edit names them.
     """
-    from plans import mutations
+    from plans import later_fields, mutations
 
     # As the single edit does (``later_fields.edit_across_cut``): only an edit that
-    # puts tasks in Later takes the slot off them; a regroup or a promotion keeps it.
-    held = _held_slots(db, node_ids) if changed.get("later") is True else {}
+    # puts work in Later takes the slot off it, from whichever task of each named
+    # item holds one; a regroup or a promotion keeps it.
+    owners = later_fields.item_task_ids(db, node_ids) if changed.get("later") is True else {}
+    held = _held_slots(db, list(owners))
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common, reconcile_move=False,
     ))
+    landing: dict[str, str] = {}
+    if changed.get("later") is False:
+        from plans import plan_cap
+        from prompts import plan_top as top_text
+
+        made_room = plan_cap.pulled_back(db, [entry["node_id"] for entry in applied], actor_id=common["actor_id"])
+        if made_room:
+            landing["landing"] = top_text.top_made_room(
+                [str(service._node_row(db, root)["title"]) for root in made_room], cap=plan_cap.CAP,
+            )
     # Each move's own reconcile is deferred to this one, after every row is placed.
     moved = "parent_id" in changed and bool(applied)
     return {
         "changed": applied,
         "refused": _refused(node_ids, reasons),
-        **_free_slot(plan_id, held, applied, common, acting, closed=False, reconcile=moved),
+        **landing,
+        **_free_slot(plan_id, held, applied, common, acting, closed=False, reconcile=moved, owners=owners),
     }
 
 
@@ -200,6 +215,7 @@ def _held_slots(db, node_ids) -> dict:
 def _free_slot(
     plan_id: str, held: dict, applied: list[dict], common: dict,
     acting: str | None, *, closed: bool, archived: bool = False, reconcile: bool = False,
+    owners: dict[str, str] | None = None,
 ) -> dict:
     """Release every slot this call took off a task, reconcile once, and report next.
 
@@ -212,10 +228,11 @@ def _free_slot(
 
     db = common["db"]
     done = {entry["node_id"] for entry in applied}
+    owners = owners or {}
     reason = "archived" if archived else service.CLOSED if closed else "later"
     freed = [
         node_id for node_id in held
-        if node_id in done and admission.release(node_id, reason, db=db)
+        if owners.get(node_id, node_id) in done and admission.release(node_id, reason, db=db)
     ]
     if not freed and not reconcile:
         return {}

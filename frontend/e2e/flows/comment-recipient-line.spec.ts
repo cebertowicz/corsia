@@ -16,7 +16,7 @@ const visibleTogether = (page: Page) => page.evaluate(() => {
 	const pick = (selector: string) => document.querySelector(selector) as HTMLElement | null;
 	const line = pick('.ct-compose .rl');
 	const field = pick('.ct-compose textarea.ct-input');
-	const send = pick('.ct-compose [data-send-reply]');
+	const send = pick('.ct-compose button[aria-label="Send reply"]');
 	let scroller: HTMLElement | null = null;
 	for (let parent = line?.parentElement ?? null; parent && !scroller; parent = parent.parentElement) if (/auto|scroll/.test(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight + 1) scroller = parent;
 	const view = scroller?.getBoundingClientRect();

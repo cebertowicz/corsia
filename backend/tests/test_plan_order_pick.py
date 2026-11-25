@@ -9,6 +9,8 @@ and starts it. Work above that is not ready (waiting on the person) passes.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from plans import admission, service
 from plans.turn_admission import snapshot_after_admission
 from tests.plan_close_next_helpers import (
@@ -108,3 +110,25 @@ def test_a_passed_over_task_still_wakes_its_idle_owner(db):
     assert open_attempt(db, comment) is None
     wake = plan_liveness.wake_for(str(plan.owner_id), db)
     assert wake is not None and wake["status"] == plan_liveness.ARMED
+
+
+def test_a_comment_task_below_a_check_back_is_not_picked(db):
+    """A row held only by its agent's own timed check-back holds the pick, as it holds a start."""
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Read the numbers")
+    plan_update(db, plan.id, "arm_watch", {
+        "node_id": top.id, "expected_revision": revision(db, top.id),
+        "condition": {"type": "deadline", "value": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()},
+        "reason": "Read them once the week is in",
+    })
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is None
+
+
+def test_a_comment_task_below_only_later_work_is_picked(db):
+    plan = owner_plan(db)
+    task(db, plan.id, "After launch", later=True)
+    comment = _comment_task(db, plan.id)
+
+    assert open_attempt(db, comment) is not None

@@ -92,7 +92,7 @@ describe('a workflow run shows its steps in order', () => {
 		expect(rendered()).toEqual(['Run', '1 Understand the ask', '2 Review', '2.1 Read it cold', '2.2 Check it', '2.3 Verdict', '3 Hand over']);
 	});
 
-	it('leaves a level that is not a run in its existing sort', async () => {
+	it('shows a level that is not a run in plan order, finished rows below newest first', async () => {
 		const nodes = [
 			row('Project', null, 0, 'active', null, { kind: 'phase', container: true }),
 			row('Older finished', 'Project', 1, 'accepted', null, { last_transition_at: at(50) }),
@@ -102,7 +102,7 @@ describe('a workflow run shows its steps in order', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['Working'] }) });
 		await settle();
-		expect(rendered()).toEqual(['Project', 'Working', 'Waits a while', 'Newer finished', 'Older finished']);
+		expect(rendered()).toEqual(['Project', 'Waits a while', 'Working', 'Newer finished', 'Older finished']);
 	});
 
 	it('keeps the sort at a level that holds a step follow-up but is not a run', async () => {

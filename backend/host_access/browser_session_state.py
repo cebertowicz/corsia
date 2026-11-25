@@ -10,6 +10,8 @@ from host_access import browser_cli, browser_identity as identity, browser_repor
 from host_access.browser_chrome import ChromeProcess
 
 BrowserTerminalState = Literal["running", "resetting", "closed", "death_unverified"]
+# How long one browser command may run before its owner gives up on it, when its caller names no limit.
+COMMAND_TIMEOUT = 30.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,6 +7,7 @@ on:
       - 'backend/host_access/browser_*.py'
       - 'backend/host_access/processes.py'
       - 'backend/tools/browser_*.py'
+      - 'backend/infra/saved_logins.py'
       - 'backend/tests/*browser*.py'
       - 'backend/requirements.lock'
       - '.github/workflows/browser-native.yml'
@@ -108,11 +109,26 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike" \
             "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through" \
             "backend/tests/test_browser_shared_e2e.py::test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option" \
+            backend/tests/test_browser_login_fill_e2e.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all twenty-two must actually run (the frame click and the off-screen twins run for
-          # a same-origin and a cross-site frame, the nested embed for a frame on its wrapper's site and on the page's,
-          # the select by ref with the pane closed and open).
-          grep -q " 22 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all twenty-two, and the saved-login fill's nine, must actually run (the frame click
+          # and the off-screen twins run for a same-origin and a cross-site frame, the nested embed for a frame on its
+          # wrapper's site and on the page's, the select by ref with the pane closed and open).
+          grep -q " 31 passed" "$RUNNER_TEMP/setup-steps.log"
+      - name: Verify saved logins stay out of agent output and logs on real Chrome
+        env:
+          CORSIA_BROWSER_E2E: '1'
+        run: |
+          # The runner resolves agent-browser from PATH; give it the pinned native binary by that name.
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -sf "$CORSIA_NATIVE_BROWSER_BINARY" "$RUNNER_TEMP/browser-bin/agent-browser"
+          # Same as the native owner fixture: without CI, stock native keeps Chrome's sandbox.
+          set -o pipefail
+          PATH="$RUNNER_TEMP/browser-bin:$PATH" env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
+            backend/tests/test_browser_output_blanking.py backend/tests/test_browser_runtime_logging.py \
+            -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/saved-login-guard.log"
+          # A skip would pass silently; every blanking and logging check must actually run.
+          grep -q " 10 passed" "$RUNNER_TEMP/saved-login-guard.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'

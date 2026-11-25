@@ -100,7 +100,39 @@ export interface HostAccessScript {
 	decision_capability?: string;
 }
 
-export type HostAccessItem = HostAccessLease | HostAccessScript;
+/**
+ * An agent's request to have a saved login filled into a page, and once the
+ * person approves it, the timed grant. It is not a host-access lease: it shares
+ * only this approval surface, so code reading the list branches on `kind`.
+ */
+export interface HostAccessFill {
+	id: string;
+	kind: 'fill';
+	state: 'awaiting_user' | 'active';
+	thread_id: string;
+	root_thread_id: string;
+	agent: string;
+	site: string;
+	/**
+	 * The site's registrable domain (Public Suffix List). A host with none, such as an IP address, is its own
+	 * domain; null only when the site has no host.
+	 */
+	domain: string | null;
+	username: string;
+	revision: number;
+	application_hash: string;
+	max_duration_seconds: number;
+	duration_seconds: number | null;
+	expires_at: string | null;
+	created_at: string;
+	updated_at: string;
+	decision_capability?: string;
+}
+
+export type HostAccessItem = HostAccessLease | HostAccessScript | HostAccessFill;
+
+/** An item that runs for a set time once approved. */
+export type HostAccessTimed = HostAccessLease | HostAccessFill;
 
 export interface HostAccessLeaseList {
 	leases: HostAccessItem[];
@@ -154,12 +186,17 @@ export async function fetchHostAccessLeases(
 	return responseJson<HostAccessLeaseList>(response);
 }
 
+const DECISION_PATH = { script: 'scripts/', fill: 'fills/' } as const;
+
 export async function decideHostAccessLease(
 	lease: HostAccessItem,
 	decision: HostAccessLeaseDecision,
+	/** A fill approval's duration, which the person picks; nothing else takes one. */
+	durationSeconds?: number,
 ): Promise<HostAccessLease> {
+	const prefix = lease.kind === 'script' || lease.kind === 'fill' ? DECISION_PATH[lease.kind] : '';
 	const response = await apiFetch(
-		`/api/host-access/leases/${lease.kind === 'script' ? 'scripts/' : ''}${encodeURIComponent(lease.id)}/${decision}`,
+		`/api/host-access/leases/${prefix}${encodeURIComponent(lease.id)}/${decision}`,
 		{
 			method: 'POST',
 			headers: {
@@ -169,6 +206,7 @@ export async function decideHostAccessLease(
 			body: JSON.stringify({
 				...(lease.kind === 'script' ? {} : { revision: lease.revision }),
 				application_hash: lease.application_hash,
+				...(lease.kind === 'fill' && decision === 'approve' ? { duration_seconds: durationSeconds } : {}),
 			}),
 		},
 	);

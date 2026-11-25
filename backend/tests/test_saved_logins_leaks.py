@@ -28,9 +28,14 @@ BACKEND = Path(__file__).resolve().parents[1]
 #: or blanks browser output joins this list on purpose, in its own reviewed change.
 READER_ALLOWLIST = frozenset({
     "infra/saved_logins.py",
+    # C6: blanks every saved password out of what the browser returns to an agent.
+    "host_access/browser_output_blanking.py",
+    # The fill executor: reads one saved password, under a live approval, to type it into the page.
+    "host_access/browser_login_fill.py",
     "tests/test_saved_logins.py",
     "tests/test_saved_logins_leaks.py",
     "tests/test_saved_logins_keys_routes.py",
+    "tests/test_saved_login_fills_leaks.py",
 })
 READERS = ("password_for_fill", "blanking_values")
 

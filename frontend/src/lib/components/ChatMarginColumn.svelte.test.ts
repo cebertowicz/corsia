@@ -7,7 +7,7 @@ import ChatMarginColumn from './ChatMarginColumn.svelte';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 
-vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('$lib/stores/attentionQueueState.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
 let host: HTMLElement;
 let scroller: HTMLElement;
@@ -99,7 +99,7 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
 	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
-	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLElement>('[data-send-reply]')!.click();
+	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLElement>('button[aria-label="Send reply"]')!.click();
 	flushSync();
 	expect(sent).toHaveLength(1);
 	expect(sent[0]).toMatchObject({ messageId: 'm1', quote: 'runs at 2 AM', note: 'Please change it', root_user_message_id: 's1', root_cid: 'c1' });
@@ -165,7 +165,7 @@ it('says why a card\'s reply is refused when its message has no place in history
 	card.querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
 	card.querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
-	card.querySelector<HTMLElement>('[data-send-reply]')!.click();
+	card.querySelector<HTMLElement>('button[aria-label="Send reply"]')!.click();
 	await tick();
 	flushSync();
 	expect(sent).toHaveLength(0);

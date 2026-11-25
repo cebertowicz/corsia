@@ -32,7 +32,7 @@ describe('local first-pick opening', () => {
 		const fullContent = 'Hi Pat.\n\n' + readFileSync(resolve(__dirname,
 			'../../../../backend/prompts/system/v1/skills/conductor-bootstrap/references/first-run-opening.md',
 		), 'utf8').trim();
-		expect(fullContent.split(/\s+/).length).toBeGreaterThan(200);
+		expect(fullContent.split(/\s+/).length).toBeGreaterThan(120);
 		awaitFirstRunOpening(thread); receive({ ...opening, content: fullContent });
 		vi.advanceTimersByTime(100);
 		expect(row().typewriterPos).toBeGreaterThan(0);

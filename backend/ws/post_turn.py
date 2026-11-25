@@ -13,11 +13,9 @@ from loguru import logger
 
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.thread_title_constants import DEFAULT_THREAD_TITLE
 from infra.thread_titles import retitle_thread, write_thread_title
 from core.thread_history import generate_thread_title
-
-
-DEFAULT_THREAD_TITLE = "New Chat"
 
 
 async def ensure_thread_title(

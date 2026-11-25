@@ -136,6 +136,7 @@ def edit_node(
         from plans.size_fields import validate_size
 
         size = validate_size(size)
+    named = None if later is _UNSET else bool(later)
     with service._connection(db) as connection, service._write(connection):
         node = service._live_node_row(connection, node_id)
         if node["kind"] == "task" and size is None:
@@ -144,8 +145,7 @@ def edit_node(
             raise service.PlanInputError(TASK_SIZE_REQUIRED)
         _assert_revision(node, expected_revision)
         moved = regroup.plan(connection, node, parent_id) if parent_id is not _UNSET else None
-        if later is not _UNSET:
-            later_fields.validate_later_edit(connection, node, later, actor_id=actor_id)
+        crosses, item_moves = later_fields.crossing(connection, node, named, actor_id=actor_id)
         if node["assignee"] == "user" and description is not None:
             from plans.boundary_fields import _user_step_description
 
@@ -157,8 +157,7 @@ def edit_node(
             node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        crosses = later is not _UNSET and bool(later) != bool(node["later"])
-        if not (restated or size_changed or crosses or moved) and difficulty_rerated is None:
+        if not (restated or size_changed or moved or item_moves) and difficulty_rerated is None:
             return service._node_from_row(connection, node)
         requirements_changed = (
             next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
@@ -167,7 +166,7 @@ def edit_node(
         # its only writer.
         columns = {**(moved.columns if moved else {}),
                    **({"size": next_size} if size_changed else {}),
-                   **({"later": int(bool(later))} if crosses else {})}
+                   **({"later": int(bool(named))} if crosses else {})}
         if restated:
             columns.update(title=next_title, description=next_description, intent=next_intent,
                            acceptance_criteria=next_dod, watchdog_budget_seconds=next_watchdog,
@@ -188,9 +187,10 @@ def edit_node(
             regroup.reconcile(connection, node, actor_id=actor_id, provenance=provenance)
         _record_edit_events(
             connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
-            difficulty_rerated, node["size"], next_size, actor_id, provenance, crosses, bool(later), reason,
+            difficulty_rerated, node["size"], next_size, actor_id, provenance, crosses, bool(named), reason,
         )
-        return service._node_from_row(connection, updated)
+        later_fields.after_edit(connection, node_id, named, bool(moved), reason=reason, actor_id=actor_id, provenance=provenance)
+        return service._node_from_row(connection, service._node_row(connection, node_id))
 
 
 def _record_edit_events(
@@ -245,7 +245,7 @@ def insert_node(
     spawn_kind: str | None = None,
     watchdog_budget_seconds: int | None = None,
     actor_id: str | None = None,
-    provenance: str = "plan_mutation", db=None, later: bool = False,
+    provenance: str = "plan_mutation", db=None, later: bool | None = None,
 ) -> PlanNode:
     """Insert a DOD-bearing node before a sibling or append within a parent."""
     with service._connection(db) as connection, service._write(connection):

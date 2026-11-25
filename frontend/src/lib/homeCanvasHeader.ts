@@ -57,17 +57,9 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 		canvasHeader.set(item
 			? {
 				title: '',
-				backLabel: 'Activity',
+				backLabel: item.backLabel,
 				links: true,
 				onBack: item.onBack,
-				actions: [{
-					id: 'activity-next',
-					label: `${item.position} of ${item.count} · Next ›`,
-					title: item.nextTitle === null ? 'This is the last one' : `Next: ${item.nextTitle}`,
-					onClick: item.onNext,
-					primary: true,
-					disabled: item.nextDisabled,
-				}],
 			}
 			: { title: 'Activity' });
 		return;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import plans.aggregates as aggregates
 import plans.errors as errors
 import plans.service as service
 from plans import workflow_fields
@@ -25,6 +26,30 @@ def _unsettled_parent(connection, parent_id: str | None) -> str | None:
             return parent_id
         parent_id = parent["parent_id"]
     return None
+
+
+def _source_spot(connection, source, parent_id: str | None) -> int | None:
+    """The follow-up's place among ``parent_id``'s open children: where its source sits.
+
+    Plan order is priority, so a redo, or what an accepted step left over, keeps
+    its source's place instead of dropping to the bottom (and from there into
+    Later past the cap). A settled source has left the open order, so the
+    follow-up takes its place; an open one keeps it, with the follow-up right
+    after. A follow-up that lands higher up the tree sits where its source's
+    branch sits. None (last) when the source is not under ``parent_id``.
+    """
+    anchor = source
+    while anchor["parent_id"] != parent_id:
+        if anchor["parent_id"] is None:
+            return None
+        anchor = service._node_row(connection, anchor["parent_id"])
+    mark = (anchor["order_key"], str(anchor["id"]))
+    rows = connection.execute(
+        "SELECT id, order_key FROM plan_nodes WHERE plan_id=? AND parent_id IS ? "
+        f"AND {aggregates.open_siblings_sql(connection)}",
+        (source["plan_id"], parent_id),
+    ).fetchall()
+    return sum(1 for row in rows if (row["order_key"], str(row["id"])) <= mark)
 
 
 def add_follow_up(
@@ -62,11 +87,12 @@ def add_follow_up(
             errors.require_node_revision(source, expected_revision)
         follow_up_id = service._id()
         step_fields = workflow_fields.follow_up_step_fields(connection, source, step)
+        parent_id = _unsettled_parent(connection, source["parent_id"])
         follow_up = service._create_node(
             connection, source["plan_id"], kind="task", title=title,
             acceptance_criteria=acceptance_criteria,
-            parent_id=_unsettled_parent(connection, source["parent_id"]),
-            order_key=None, description=description,
+            parent_id=parent_id, order_key=_source_spot(connection, source, parent_id),
+            description=description,
             size=size, intent=intent, **step_fields,
             intent_node_id=(None if intent is not None else _canonical_intent(connection, source["id"])),
             checkpoint_exception=False, assignee=source["assignee"],

@@ -16,6 +16,7 @@ from registry.document_ownership import (
 )
 from registry.shared_document_messages import (
     missing_category_message,
+    owner_refusal,
     structure_owned_message,
 )
 from registry.shared_principals import (
@@ -23,6 +24,7 @@ from registry.shared_principals import (
     acting_owner,
     resolve_explicit_owner,
     scope_conductor,
+    scope_relative,
 )
 from registry.shared_target import SharedTarget
 from registry.shared_write_errors import (
@@ -122,6 +124,20 @@ def _creation_owner(
         raise DurableWritePolicyError(str(exc)) from exc
 
 
+def _refuse_priorities(candidate: Path, scope_root: Path, *, workspace: Path, db) -> None:
+    """Point any writer refused on a priorities file to a suggestion to the person."""
+    from registry.priorities_ownership import is_priorities_path
+
+    if candidate.name != "PRIORITIES.md" or not is_priorities_path(candidate, workspace=workspace, db=db):
+        return
+    if not candidate.exists():
+        raise DurableWritePolicyError(
+            f"{scope_relative(candidate, scope_root)} is created only by the conductor, or by the CORSIA "
+            "agent outside a project, and then belongs to the person. Ask it to create the file."
+        )
+    raise DurableWritePolicyError(owner_refusal(candidate, scope_root, UI_PRINCIPAL, db=db))
+
+
 def _shared_candidate(
     target: Path,
     *,
@@ -156,6 +172,8 @@ def _shared_candidate(
             return None
         raise DurableWritePolicyError(structure_owned_message("The scope root", conductor_id))
     if parts[0] == ".threads":
+        if not structure_owner:
+            _refuse_priorities(candidate, scope_root, workspace=workspace, db=db)
         if len(parts) >= 3 and (parts[1] == thread_id or structure_owner):
             return None
         raise DurableWritePolicyError(
@@ -165,6 +183,7 @@ def _shared_candidate(
     if parts[0] != "shared":
         if structure_owner:
             return None
+        _refuse_priorities(candidate, scope_root, workspace=workspace, db=db)
         raise DurableWritePolicyError(structure_owned_message(f"{parts[0]}/", conductor_id))
     return scope_root, candidate, authoritative_project, conductor_id, parts
 

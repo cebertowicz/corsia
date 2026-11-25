@@ -63,9 +63,9 @@
 		padding: 0 var(--canvas-pad-inline) var(--canvas-pad-bottom);
 	}
 	/* The box the docked control is placed against, inside the canvas's padding, as the document's box is. */
-	.box { position: relative; height: 100%; }
-	.scroll { height: 100%; overflow-y: auto; }
+	.box { position: relative; height: 100%; --control-clearance: 10rem; }
+	.scroll { height: 100%; overflow-y: auto; scroll-padding-bottom: var(--control-clearance); }
 	/* The docked control covers the canvas bottom; the content keeps its last lines clear of it. */
-	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) 10rem; }
+	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) var(--control-clearance); }
 	:global(.activity.phone) .canvas { --canvas-pad-inline: var(--space-3); }
 </style>

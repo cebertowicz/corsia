@@ -1,8 +1,10 @@
 import type {
 	HostAccessLease,
 	HostAccessItem,
+	HostAccessTimed,
 	HostAccessPolicyException,
 	HostAccessRepoPolicy,
+	HostAccessLeaseDecision,
 } from '$lib/api/hostAccess';
 
 export function text(value: unknown): value is string {
@@ -104,7 +106,24 @@ export function decisionBlocked(
 	return stale || blockingLeaseId !== null || !casReady(lease);
 }
 
+/**
+ * Whether a failed read blocks this decision: Approve and Revoke, never Reject. Every reject route checks
+ * the request's revision and hash on the server, so a Reject sent from the last view either ends that same
+ * request or is refused as changed, and the person can always say no.
+ */
+export function staleBlocks(stale: boolean, decision: HostAccessLeaseDecision): boolean {
+	return stale && decision !== 'reject';
+}
+
 export function approvalReady(lease: HostAccessItem | null): boolean {
+	if (lease?.kind === 'fill') {
+		return lease.state === 'awaiting_user' && casReady(lease)
+			&& text(lease.agent) && text(lease.site) && text(lease.username)
+			// The server always offers the shortest choice; a request that doesn't is not approvable, and the
+			// drawer says so rather than dropping Approve with no word.
+			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= FILL_DURATIONS_SECONDS[0]
+			&& validTime(lease.created_at);
+	}
 	if (lease?.kind === 'script') {
 		return lease.state === 'awaiting_user' && casReady(lease)
 			&& text(lease.script_name) && text(lease.purpose) && text(lease.user_request)
@@ -138,6 +157,7 @@ export function approvalReady(lease: HostAccessItem | null): boolean {
 
 export function owner(lease: HostAccessItem): string {
 	if (lease.kind === 'script') return lease.root_thread_id;
+	if (lease.kind === 'fill') return text(lease.agent) ? lease.agent.trim() : 'An agent';
 	return text(lease.root_thread_title)
 		? lease.root_thread_title.trim()
 		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown chat');
@@ -145,6 +165,7 @@ export function owner(lease: HostAccessItem): string {
 
 /** The pending chip's and drawer's accessible name. */
 export function pendingLabel(request: HostAccessItem): string {
+	if (request.kind === 'fill') return 'Review a request to sign in with a saved login';
 	return request.kind === 'script'
 		? 'Review permission for this script to act as your agent and use the agents’ GitHub account'
 		: 'Review temporary host access';
@@ -167,7 +188,18 @@ export function cadence(seconds: number | null): string {
 	return count === 1 ? `Every ${unit}` : `Every ${count} ${unit}s`;
 }
 
-export function remaining(lease: HostAccessLease, nowMs: number): string {
+/**
+ * The durations a person can give a saved-login fill: from one sign-in's worth to the
+ * 30-minute cap every approval of an agent shares (the host-access lease limit). The
+ * first, shortest one is the default.
+ */
+export const FILL_DURATIONS_SECONDS = [300, 900, 1_800] as const;
+
+export function fillDurations(max: number): number[] {
+	return FILL_DURATIONS_SECONDS.filter((seconds) => seconds <= max);
+}
+
+export function remaining(lease: HostAccessTimed, nowMs: number): string {
 	if (lease.expires_at === null) return 'activating';
 	if (!validTime(lease.expires_at)) return 'unknown';
 	const total = Math.max(0, Math.ceil((Date.parse(lease.expires_at) - nowMs) / 1000));

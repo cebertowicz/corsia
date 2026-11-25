@@ -136,6 +136,10 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
         if answer.declined:
             return Decision(("R8",), refusal="password_declined")
         if not result.visible_nodes <= answer.nodes:
+            # Listing tabs reads only each tab's title and address, so it is refused like any command here
+            # but asks the person for nothing: an agent leaving a page it shouldn't be on gets no task for it.
+            if event.name == "list_tabs":
+                return Decision(("R9",), refusal="password_no_step")
             return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
         # R14: the person finished these fields, so the page is the agent's again. A declare asks for
         # a different step (e-signature, MFA), so it goes on to R10/R11.
@@ -270,8 +274,9 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
         while True:
             step.input_seen.clear()
             due = next_probe if step.last_input is None else min(next_probe, step.last_input + REPROBE_AFTER_INPUT)
-            try:
-                await asyncio.wait_for(step.input_seen.wait(), max(0.0, due - clock()))
+            try:  # Not wait_for: on Python 3.11 it swallows a stop that lands with input (#3364).
+                async with asyncio.timeout(max(0.0, due - clock())):
+                    await step.input_seen.wait()
             except TimeoutError:
                 break
         step.last_input = None
@@ -356,10 +361,8 @@ async def _close_unfinished(step: BrowserStep) -> None:
     if step.node_id is None:
         return
     try:
-        await asyncio.to_thread(
-            _plan_write, "close_user_step", step.node_id,
-            reason=SESSION_ENDED_REASON, provenance=step.provenance,
-        )
+        await asyncio.to_thread(_plan_write, "close_user_step", step.node_id,
+                                reason=SESSION_ENDED_REASON, provenance=step.provenance)
     except Exception:
         log.warning("browser step %s stays open after its session ended", step.node_id, exc_info=True)
 

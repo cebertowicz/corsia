@@ -294,8 +294,8 @@ describe('Header for an open Activity item on a phone', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	function openItem(nextDisabled = false) {
-		activityPhoneItem.set({ position: 2, count: 7, nextDisabled, nextTitle: nextDisabled ? null : 'Next one', onBack: () => {}, onNext: () => {} });
+	function openItem() {
+		activityPhoneItem.set({ backLabel: 'Notifications', onBack: () => {} });
 		syncCanvasHeader({
 			threadSettingsOpen: false, compactArtifact: null, contextAttachTarget: null, activeView: 'activity',
 			uiScopeName: null, activeThreadId: null, conductorThreadId: null, threads: [],
@@ -306,26 +306,21 @@ describe('Header for an open Activity item on a phone', () => {
 
 	afterEach(() => activityPhoneItem.set(null));
 
-	it('reads ‹ Activity, with its label kept at phone width', () => {
+	it('reads ‹ Notifications, with its label kept at phone width', () => {
 		openItem();
 		const header = host.querySelector('.shell-header')!;
 		expect(header.classList.contains('links')).toBe(true);
-		expect(host.querySelector('.h-back .h-back-label')?.textContent).toBe('Activity');
+		expect(host.querySelector('.h-back .h-back-label')?.textContent).toBe('Notifications');
 		// The phone rule hides every Back label; the Activity item's header brings its label back.
 		expect(rule(phone, '.h-back-label')).toContain('display: none;');
 		expect(rule(phone, '.links .h-back-label')).toContain('display: inline;');
 	});
 
-	it('draws Back and “N of M · Next ›” in the link colour, and a last-item Next grey', () => {
+	it('draws Back in the link colour, with no Next beside it', () => {
 		openItem();
 		expect(host.querySelector('.shell-header')!.classList.contains('links')).toBe(true);
-		const next = host.querySelector<HTMLButtonElement>('.h-act')!;
-		expect(next.textContent).toBe('2 of 7 · Next ›');
-		expect(next.disabled).toBe(false);
+		expect(host.querySelector('.h-act')).toBeNull();
 		expect(rule(headerSource, '.links .h-back, .links .h-act:not(:disabled)')).toContain('color: var(--accent-text);');
-		openItem(true);
-		expect(host.querySelector<HTMLButtonElement>('.h-act')!.disabled).toBe(true);
-		expect(rule(headerSource, '.h-act:disabled')).toContain('color: var(--text-tertiary);');
 	});
 
 	it('leaves other back headers as they were', () => {
@@ -342,20 +337,37 @@ describe('Header glass layers', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
-		// An unmasked blur layer ends in a hard line across the transcript.
-		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
+	it('keeps the full blur, in both spellings, on the phone header layer', () => {
+		const phoneLayer = rule(phone, '.shell-header::before');
+		expect(phoneLayer).not.toMatch(/backdrop-filter: none;/);
 		const base = rule(headerSource, '.shell-header::before');
+		expect(base).toMatch(/\n\t\tbackdrop-filter: var\(--glass-blur\);/);
 		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
-		expect(base).toMatch(/mask-image: linear-gradient/);
 	});
 
-	it('keeps the phone glass opaque behind the header row', () => {
-		// The transcript shows through wherever the mask is below 1, so it stays opaque down to
-		// the bottom of the row's glyphs, 9px below the row centre, and only then fades.
-		expect(rule(phone, '.shell-header')).toContain('padding-top: var(--header-pad-top);');
-		expect(rule(phone, '.shell-header::before')).toContain(
-			'mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);',
-		);
+	it('draws the phone header as an even frosted bar with no fade', () => {
+		// WebKit masks the blurred backdrop too: a fading mask shows the unblurred transcript
+		// through the lower header and ends in a hard line, so the phone layer has no mask and
+		// one flat tint over the whole box.
+		const phoneLayer = rule(phone, '.shell-header::before');
+		expect(phoneLayer).toContain('-webkit-mask-image: none;');
+		expect(phoneLayer).toMatch(/\n\t\t\tmask-image: none;/);
+		expect(phoneLayer).toContain('background-image: none;');
+		expect(phoneLayer).toContain('background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);');
+		expect(phoneLayer).not.toMatch(/gradient/);
+	});
+
+	it('keeps the phone header box at its height, with the row below the iOS top-edge band', () => {
+		const phoneHeader = rule(phone, '.shell-header');
+		expect(phoneHeader).toContain('height: var(--header-bottom);');
+		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));');
+	});
+
+	it('makes the phone header solid when transparency is reduced', () => {
+		// Reduced transparency turns --glass-blur off, so a part-transparent tint would show the
+		// transcript sharp through the bar.
+		const at = headerSource.indexOf('@media (max-width: 768px) and (prefers-reduced-transparency: reduce)');
+		expect(at).toBeGreaterThan(-1);
+		expect(rule(headerSource.slice(at), '.shell-header::before')).toContain('background-color: var(--header-top-base);');
 	});
 });

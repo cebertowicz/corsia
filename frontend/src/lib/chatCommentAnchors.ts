@@ -5,9 +5,14 @@ export interface ChatComment extends ChatCommentAnchor {
 	messageId: string;
 	seq: number;
 	note: string;
+	/** The draft's one client id, which the server takes the post's input by, so a press again after a restart stores nothing twice. */
+	input_id?: string;
 	root_user_message_id?: string;
 	root_cid?: string;
 }
+
+/** A comment or reply ready to post: it always carries its draft's client id, the one id its post is stored under. */
+export type SendableChatComment = ChatComment & { input_id: string };
 
 /**
  * A comment or reply send that was refused; its message is the sentence the person reads in the box.
@@ -50,7 +55,7 @@ export function chatTextPoint(body: HTMLElement, offset: number): [Node, number]
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
  * reject instead, so every thread the reply was typed in keeps it.
  */
-export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => Promise<void>): Promise<void> {
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: SendableChatComment) => Promise<void>, inputId: string): Promise<void> {
 	if (!message || !comment || typeof message.seq !== 'number') {
 		throw new CommentSendRefused('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	}
@@ -58,7 +63,7 @@ export function sendCommentReply(message: { id: string; seq?: number | null } | 
 		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,
 		from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote,
 		anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note,
-		root_user_message_id: comment.user_message_id, root_cid: comment.cid,
+		root_user_message_id: comment.user_message_id, root_cid: comment.cid, input_id: inputId,
 	});
 }
 

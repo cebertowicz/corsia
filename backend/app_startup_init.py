@@ -42,6 +42,19 @@ def initialize_startup(logger) -> None:
     recover_interrupted_held_replies()
     sweep_owed_status()
     initialize_workspace(WORKSPACE, logger)
+    _hand_priorities_to_person(WORKSPACE, logger)
+
+
+def _hand_priorities_to_person(workspace, logger) -> None:
+    """Run the one-time priorities repair; on error, log it and retry at the next start."""
+    from infra.database import write_transaction
+    from registry.priorities_ownership import migrate_priorities_ownership
+
+    try:
+        with write_transaction(None, scope="priorities_person_ownership") as db:
+            migrate_priorities_ownership(workspace, db=db)
+    except Exception:
+        logger.exception("priorities ownership repair failed; it runs again at the next start")
 
 
 async def initialize_startup_off_loop(logger) -> None:

@@ -537,42 +537,23 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	});
 
-	for (const width of [1440, 393] as const) test(`held Send stays below an occupied decision stack (${width})`, async ({ page, request }, testInfo) => {
+	for (const width of [1440, 393] as const) test(`held Send stays visible in chat (${width})`, async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		await page.setViewportSize({ width, height: width === 1440 ? 900 : 852 });
 		const title = `held-stack-${Date.now()}`;
 		const threadId = await createSession(request, title);
 		const doc = await seedTextDocument(request, threadId, title, 'stack');
 		await seedHeldComments(request, doc.artifactId, 3);
-		const detail = {
-			id: 'held-stack-decision', plan_id: 'plan-1', node_id: 'node-1', source_node_id: 'node-1',
-			thread_id: threadId, title: 'Choose the review scope', context: 'Choose what to review next.',
-			tradeoff: 'Breadth or depth.', recommendation: 'A', rationale: 'Finish the current review.',
-			options: [{ id: 'A', label: 'Current document', detail: 'Finish this review.' }, { id: 'B', label: 'All documents', detail: 'Review everything.' }],
-			other_enabled: true, order_key: 0, revision: 1, raised_at: new Date().toISOString(),
-			source: { thread_id: threadId, thread_label: 'Reviewer', project_id: null, project_label: null, archived: false, parent_reviewed: false },
-		};
-		const queued = { external_id: detail.id, renderer: 'decision', detail };
-		await page.route('**/api/attention/queue', (route) => route.fulfill({
-			status: 200, contentType: 'application/json', body: JSON.stringify({ current: queued, count: 1, items: [queued] }),
-		}));
 		await installWorkspace(page, threadId, [doc], 0);
 		await openThread(page, threadId, title);
 		await turnOffDocumentComments(page);
 		if (width === 393) await backToChat(page).click();
 		else await page.getByRole('button', { name: 'Collapse Files' }).click();
-		const dock = page.locator('.chat-attention-stack .attention-dock');
-		await expect(dock).toBeVisible();
 		await expect(chatSend(page)).toHaveText('Send 3 comments');
 		await expect(chatSend(page)).toBeInViewport({ ratio: 1 });
-		// The dock wrapper includes negative-margin shadow gutters; measure the actual decision action.
-		const dockBox = (await dock.locator('.dock-bar').boundingBox())!;
-		const sendBox = (await chatSend(page).boundingBox())!;
-		expect(sendBox.y, 'decision remains above held comments').toBeGreaterThanOrEqual(dockBox.y + dockBox.height);
 		await captureFrame(page, 'stack-priority-occupied', String(width) as '1440' | '393');
 		await chatSend(page).click();
 		await expect(chatSendGroup(page)).toHaveCount(0);
-		await expect(dock).toBeVisible();
 		expect(deliveredBatches(doc.artifactId, 'document-held')).toBe(1);
 	});
 

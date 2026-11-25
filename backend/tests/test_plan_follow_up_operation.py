@@ -174,14 +174,15 @@ def test_a_standalone_follow_up_inherits_its_source_placement_but_no_other_threa
     assert (created["owner_thread_id"], created["executor_thread_id"]) == (None, None)
 
 
-def test_a_standalone_follow_up_appends_after_its_siblings(db):
+def test_a_standalone_follow_up_sits_right_after_its_open_source(db):
+    """Plan order is priority, so a sidetrack follow-up does not drop to the bottom."""
     plan = _plan(db)
     source = _task(db, plan.id, "First")
     later = _task(db, plan.id, "Second")
 
     created = _row(db, _follow_up(db, plan.id, source.id).result["follow_up"]["id"])
 
-    assert created["order_key"] > _row(db, later.id)["order_key"]
+    assert _row(db, source.id)["order_key"] < created["order_key"] < _row(db, later.id)["order_key"]
 
 
 def test_a_follow_up_chain_of_five_keeps_every_link(db):
