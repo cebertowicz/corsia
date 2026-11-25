@@ -50,7 +50,9 @@ for (const [kind, filename] of [
 		}
 		await page.screenshot({ path: testInfo.outputPath(`tab-${width}-${kind}-${changed ? 'changed' : 'normal'}.png`) });
 		if (width === 900) {
-			await expect(page.getByRole('button', { name: `${filename} · Open files, 1`, exact: true })).toBeInViewport({ ratio: 1 });
+			// Above the phone width the open-files list opens from "Files (n)" beside the panel toggle, as before the one-row header; the name is no button there.
+			await expect(page.getByRole('button', { name: 'Files (1)', exact: true })).toBeInViewport({ ratio: 1 });
+			await expect(page.getByRole('button', { name: `${filename} · Open files, 1`, exact: true })).toHaveCount(0);
 			return;
 		}
 		const tab = page.getByRole('tab', { selected: true });

@@ -976,3 +976,26 @@ test.describe('desktop row below 600px canvas (900 closed)', () => {
 		await expect(page.locator('.document-metadata time'), 'the freshness line waits behind Details').toBeHidden();
 	});
 });
+
+/** As shipped at f51bbda8e, above the phone width the ask offers its three answers, and with open suggestions Approve all with what it accepts; the phone's own two answers are the legs above. */
+for (const [width, mode] of [[1440, 'closed'], [1280, 'default']] as const) test.describe(`desktop ask answers (${width})`, () => {
+	test.use({ hasTouch: false, isMobile: false });
+	test(`@surface:review-bar the ask keeps Approve with changes, Approve all and its hint at ${width}`, async ({ page, request }, info) => {
+		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
+		const doc = await seed(request, `Desktop answers ${width}`);
+		raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+		const reviewer = await createSession(request, 'Desktop suggester');
+		for (const step of [1, 2]) {
+			const result = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: { artifact_id: doc.artifactId, quote: `Step ${step}: the rollout`, replacement: `Phase ${step}: the rollout`, body: 'Use phase.', as_session_id: reviewer } });
+			expect(result.ok()).toBeTruthy();
+		}
+		await open(page, doc, mode, 'light');
+		await page.setViewportSize({ width, height: 900 }); await settled(page);
+		const row = page.locator('.review-bar.ask');
+		await expect(row.getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
+		await expect(row.getByRole('button', { name: 'Approve with changes', exact: true })).toBeVisible();
+		await expect(row.getByRole('button', { name: 'Send back', exact: true })).toBeVisible();
+		await expect(row.getByText('Approve all accepts the 2 open suggestions.')).toBeVisible();
+		await expect(row.locator('.rb-derived'), 'the phone-only line is not drawn').toHaveCount(0);
+	});
+});

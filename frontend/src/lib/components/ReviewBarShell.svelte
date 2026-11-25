@@ -328,7 +328,7 @@
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
 	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and the note's send button, as the phone capsule does. */
 	/* There, a status takes its own row above the buttons too, rather than wrapping a word per line beside them. */
-	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
+	/* A rem here is the app root's font size, which is 15px, so 37.5rem is 562.5px, not the 600px canvas breakpoint the document's row collapses at (measured in the browser). */
 	@container doc-canvas (max-width: 37.5rem) {
 		.review-bar.ask .rb-row2 { flex-wrap: wrap; }
 		.review-bar.ask .rb-status:not(:empty):not(.hint) { flex-basis: 100%; }
