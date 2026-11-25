@@ -127,7 +127,7 @@ jobs:
             backend/tests/test_browser_output_blanking.py backend/tests/test_browser_runtime_logging.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/saved-login-guard.log"
           # A skip would pass silently; every blanking and logging check must actually run.
-          grep -q " 9 passed" "$RUNNER_TEMP/saved-login-guard.log"
+          grep -q " 10 passed" "$RUNNER_TEMP/saved-login-guard.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'
