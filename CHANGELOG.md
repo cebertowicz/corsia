@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
+- Activity separates your tasks from document reply notifications, groups replies by document, and lets you mark them read there. Decisions and messages to review are now in Activity instead of above the chat input.
 - Activity shows instructions for tasks assigned to you.
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.

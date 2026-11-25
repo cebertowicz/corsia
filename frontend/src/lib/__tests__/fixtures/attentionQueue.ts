@@ -1,7 +1,7 @@
 /** Shared fixtures matching the production `/api/attention/queue` contract. */
 import { vi } from 'vitest';
 
-import type { ActivityQueue, ActivityQueueItem, ActivityRank } from '$lib/api/activityQueue';
+import type { ActivityDocumentDetail, ActivityQueue, ActivityQueueItem, ActivityRank } from '$lib/api/activityQueue';
 import type {
 	AttentionQueue,
 	AttentionQueueItem,
@@ -151,7 +151,7 @@ function rank(position: number, reason: string): ActivityRank {
 	return { position, reason, ranked_by: 'thread-conductor', ranked_at: '2026-11-24T04:10:00Z' };
 }
 
-const RENDERER = { review: 'review', decision: 'decision', task: 'task', reply: 'reply', message: 'held-reply' } as const;
+const RENDERER = { review: 'review', decision: 'decision', task: 'task', document: 'document', message: 'held-reply' } as const;
 
 export function activityItem(
 	over: Partial<ActivityQueueItem> & Pick<ActivityQueueItem, 'key' | 'kind'>,
@@ -169,7 +169,7 @@ export function activityItem(
 	};
 }
 
-/** The seven items the approved frames draw, in their order: every kind at least once. */
+/** The seven to-dos the approved frames draw, in their order: every to-do kind at least once, and a review with replies. */
 export function activityFrameItems(): ActivityQueueItem[] {
 	const conductor = activitySource('CORSIA Conductor', 'thread-conductor');
 	const ecosystem = activitySource('Ecosystem', 'thread-ecosystem');
@@ -234,12 +234,12 @@ export function activityFrameItems(): ActivityQueueItem[] {
 			}).detail as HeldReplyDetail,
 		}),
 		activityItem({
-			key: 'reply:later-row', kind: 'reply',
-			title: "Structured Plans replied to your comment on the plan pane's Later row.",
+			key: 'review:later-row', kind: 'review',
+			title: "Approve the plan pane's Later row.",
 			raised_at: ago(26), source: activitySource('Structured Plans', 'thread-plans'),
-			open: { artifact_id: 'art-later', comment_id: 'c-root' },
-			rank: rank(7, "Nothing waits on it; it's here so you see the reply."),
-			detail: { artifact_id: 'art-later', root_id: 'c-root', reply_id: 'c-reply' },
+			open: { artifact_id: 'art-later' },
+			rank: rank(7, 'Nothing else waits on it; it carries replies to your comments.'),
+			detail: { artifact_id: 'art-later', unread_replies: 3 },
 		}),
 	];
 }
@@ -262,6 +262,27 @@ export function activityFortyItems(): ActivityQueueItem[] {
 	return [...activityFrameItems().slice(0, 3), long, ...rest];
 }
 
-export function activityQueueBody(items: ActivityQueueItem[] = activityFrameItems()): ActivityQueue {
-	return { count: items.length, items, ranker: { thread_id: 'thread-conductor', label: 'CORSIA Conductor' } };
+/** A document with unread replies to the person's comments, as Notifications lists it. */
+export function activityDocument(
+	key: string, over: Partial<ActivityDocumentDetail> = {}, raisedHoursAgo = 2,
+): ActivityQueueItem {
+	const artifactId = over.artifact_id ?? `art-${key}`;
+	return activityItem({
+		key: `doc:${artifactId}`, kind: 'document', external_id: `doc:${artifactId}`,
+		title: `${key}.md`, raised_at: ago(raisedHoursAgo), source: activitySource('Structured Plans', 'thread-plans'),
+		open: { artifact_id: artifactId, comment_id: over.threads?.[0]?.root_id ?? `${key}-root` },
+		detail: {
+			artifact_id: artifactId, unread: 2, latest_reply_id: `${key}-reply-2`, agents: ['Structured Plans'],
+			threads: [{ root_id: `${key}-root`, reply_id: `${key}-reply-2` }], ...over,
+		},
+	});
+}
+
+export function activityQueueBody(
+	items: ActivityQueueItem[] = activityFrameItems(), notifications: ActivityQueueItem[] = [],
+): ActivityQueue {
+	return {
+		count: items.length, items, ranker: { thread_id: 'thread-conductor', label: 'CORSIA Conductor' },
+		notifications: { count: notifications.length, items: notifications },
+	};
 }

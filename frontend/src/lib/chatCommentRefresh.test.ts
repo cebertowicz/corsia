@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({ handlers: new Map<string, (frame: any) => unkn
 vi.mock('$lib/ws', () => ({ on: (name: string, handler: (frame: any) => unknown) => { state.handlers.set(name, handler); return () => state.handlers.delete(name); } }));
 vi.mock('$lib/stores/auth', () => ({ token: writable('test-token') }));
 vi.mock('$lib/stores/threads', () => ({ activeThreadId: writable('thread'), messages: writable([]) }));
-vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('$lib/stores/attentionQueueState.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
 import { adoptCommentThreads, watchChatCommentThreads } from './chatCommentRefresh';
 import { messages } from '$lib/stores/threads';

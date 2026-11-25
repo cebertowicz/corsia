@@ -20,6 +20,8 @@ export type DocViewerProps = {
 	covered?: boolean;
 	/** An image covers the document, or it is still being put back after a tab return: it is not on screen, so its replies are not marked read and the bar draws none of its controls. */
 	offScreen?: boolean;
+	/** Keep a reply landing visible beneath the host's notice and the comments popover. */
+	protectReplyLanding?: boolean;
 	/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
 	onLanded?: () => void;
 };

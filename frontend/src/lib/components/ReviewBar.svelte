@@ -6,7 +6,7 @@
 	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
 	import { isCommentTask } from './comments/commentTask';
 	import ReviewBarShell from './ReviewBarShell.svelte';
-	import { createReviewBarState, DRAFT_OPEN, REVIEW_ANSWERED, type ReviewBarState } from '$lib/reviewBarState.svelte';
+	import { createReviewBarState, DRAFT_OPEN, REVIEW_ANSWERED, REVIEW_REPLIES, type ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
 	/**
@@ -27,6 +27,7 @@
 	} = $props();
 
 	const activityAnswered = getContext<(() => void) | undefined>(REVIEW_ANSWERED);
+	const activityReplies = getContext<(() => string) | undefined>(REVIEW_REPLIES);
 	function answered() { onAnswered?.(); activityAnswered?.(); }
 
 	const ACCEPT_FAILED = 'Couldn’t accept the suggestions. Try again.';
@@ -41,7 +42,7 @@
 
 	const read = $derived(bar.read);
 	const asker = $derived(read?.asker?.name ?? 'An agent');
-	const ask = $derived(read?.ask_reason ?? '');
+	const ask = $derived([read?.ask_reason ?? '', activityReplies?.() ?? ''].filter(Boolean).join(' · '));
 	const holdIds = $derived(read?.hold_ids ?? []);
 	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
