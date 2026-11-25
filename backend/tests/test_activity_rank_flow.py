@@ -166,7 +166,7 @@ def test_nudge_records_passive_note(db, monkeypatch):
     assert events[0][0] == ('activity_rank', 'digest')
     assert events[0][1]['properties'] == {'scope_kind': 'project', 'unranked': 1, 'new': 1}
     assert _notes(db)[0]['summary'] == (
-        f'Activity: 1 new items waiting on the person, auto-ordered by urgency (keys: {key}). '
+        f'Activity: 1 new item waiting on the person, auto-ordered by urgency (keys: {key}). '
         'Review the order with attention_rank (tools_load names=["attention_rank"]) '
         'when you next work through Activity.'
     )

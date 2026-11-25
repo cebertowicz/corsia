@@ -74,12 +74,13 @@ def test_queue_count_and_activity_awaiting_count_agree(db, monkeypatch):
     assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 1
 
 
-def test_held_replies_share_the_blocking_level_and_sort_oldest_first(db, monkeypatch):
+def test_held_replies_sort_above_decisions_then_oldest_first(db, monkeypatch):
     raise_decision(db, "child", "child", title="A decision")
     later = _hold(db, "child", "later")
     earlier = _hold(db, "other-root", "earlier")
-    db.execute("UPDATE held_replies SET created_at='2026-01-02' WHERE id=?", (later["id"],))
-    db.execute("UPDATE held_replies SET created_at='2026-01-01' WHERE id=?", (earlier["id"],))
+    # Both raised after the decision, so only their priority can put them first.
+    db.execute("UPDATE held_replies SET created_at='2999-01-02' WHERE id=?", (later["id"],))
+    db.execute("UPDATE held_replies SET created_at='2999-01-01' WHERE id=?", (earlier["id"],))
     db.commit()
     client = _attention_client(db, monkeypatch)
 

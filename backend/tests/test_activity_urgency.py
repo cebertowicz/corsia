@@ -33,6 +33,19 @@ def row(renderer, key, raised_at):
             'source': {}, 'detail': {'artifact_id': key}}
 
 
+def test_within_a_level_the_canonical_priority_comes_before_age():
+    from infra.activity_urgency import sort_key
+    rows = [
+        {'renderer': 'decision', 'key': 'decision-late-plan-order', 'priority': 2, 'raised_at': '2026-01-01'},
+        {'renderer': 'decision', 'key': 'decision-first-plan-order', 'priority': 0, 'raised_at': '2026-01-05'},
+        {'renderer': 'held-reply', 'key': 'held-newest', 'priority': -1, 'raised_at': '2026-01-09'},
+        {'renderer': 'review', 'key': 'review-oldest', 'raised_at': '2025-12-01'},
+    ]
+    assert [r['key'] for r in sorted(rows, key=sort_key)] == [
+        'held-newest', 'decision-first-plan-order', 'decision-late-plan-order', 'review-oldest',
+    ]
+
+
 def test_renderer_levels_and_unknown_default():
     from infra.activity_urgency import sort_key
     assert [sort_key({'renderer': kind, 'key': kind})[0] for kind in

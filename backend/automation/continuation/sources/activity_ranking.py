@@ -11,7 +11,9 @@ from infra.database import get_db, write_transaction
 from infra.product_events import emit_product_event
 from plans.public import thread_paused_since
 
-# A set forgets seen keys no longer in the queue, so a returning item is new again.
+# The note lands in the ranker's context on its next turn, and attention_rank returns every
+# item, so the key list only names what arrived. 500 characters (about a dozen task keys,
+# a few hundred tokens at most) keeps a burst of arrivals to one short line in that context.
 KEYS_MAX_CHARS = 500
 
 # Scope -> the last failure logged for it, so a scope that keeps failing logs once until its
@@ -71,6 +73,7 @@ def _enqueue_if_due(read_db, db, user_id: str, project_id: str | None, thread_id
     new = len(new_keys)
     if not ranker or ranker['thread_id'] != thread_id or not new:
         return False
+    # Stamp the whole queue, so a key that leaves and returns is new again.
     keys = json.dumps(sorted(row['key'] for row in rows))
     with write_transaction(db, scope='activity_rank_nudge') as tx:
         # Another sweep may have nudged this scope while the queue was read.
@@ -79,7 +82,8 @@ def _enqueue_if_due(read_db, db, user_id: str, project_id: str | None, thread_id
         key_list = ', '.join(new_keys)
         if len(key_list) > KEYS_MAX_CHARS:
             key_list = key_list[:KEYS_MAX_CHARS - 1].rstrip() + '…'
-        summary = (f'Activity: {new} new items waiting on the person, auto-ordered by urgency '
+        items = 'item' if new == 1 else 'items'
+        summary = (f'Activity: {new} new {items} waiting on the person, auto-ordered by urgency '
                    f'(keys: {key_list}). Review the order with attention_rank (tools_load names=["attention_rank"]) '
                    'when you next work through Activity.')
         append_thread_context_note(tx, thread_id=thread_id, summary=summary,
