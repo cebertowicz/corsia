@@ -145,10 +145,7 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	// A countdown already says when a plain deadline ends; don't say it twice.
 	const saysDeadline = node.status_reason?.startsWith('Waiting until ')
 		&& (running || (countdown !== null && node.status_reason === timedWait(node)?.reason));
-	if (node.status_reason && !saysDeadline) {
-		const reason = localizeInstants(node.status_reason, now);
-		parts.push(node.child && !running ? reason.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase()) : reason);
-	}
+	if (node.status_reason && !saysDeadline) parts.push(localizeInstants(node.status_reason, now));
 	if (!parts.length && node.review) parts.push(node.review.label);
 	if (!parts.length && node.requires_user_action) {
 		const ask = node.artifacts.find((artifact) => artifact.role === 'attention');

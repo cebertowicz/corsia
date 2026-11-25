@@ -308,12 +308,13 @@
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
 			>
-				<button class="later-toggle" type="button" aria-expanded={item.open} aria-label={`Later, ${item.members.length} tasks`}
-					aria-controls={item.open ? item.members.map((member) => rowControls.rowId(member.id)).join(' ') : undefined}
-					onclick={() => item.open ? reveal.collapseScheduled(item.level) : reveal.openScheduled(item.level)}>
-					<span class="row-body"><PlanGroupFace /></span>
-					<span class="later-action">{item.open ? 'Collapse' : item.members.length > LATER_PAGE ? `Show ${LATER_PAGE} of ${item.members.length}` : `Show ${item.members.length}`}</span>
-				</button>
+				<span class="row-body"><PlanGroupFace /></span>
+				<PlanLevelToggle
+					single shown={item.open ? Math.min(item.members.length, reveal.laterShown(item.level)) : 0} total={item.members.length} page={LATER_PAGE} noun="later tasks"
+					controls={item.members.map((member) => rowControls.rowId(member.id)).join(' ')}
+					onShow={() => reveal.openScheduled(item.level)}
+					onCollapse={() => reveal.collapseScheduled(item.level)}
+				/>
 			</div>
 		{:else if item.kind === 'later-page'}
 			<div class="tree-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} style={depthStyle(depthOffset + item.depth + 1)}>
@@ -342,11 +343,6 @@
 	/* The reserve tracks the same <=620px breakpoint as the 44px chevron and chips: desktop furniture is measured at 110px plus a two-digit count margin; touch keeps its 148px reserve. */
 	.plan-tree { --plan-indent-reserve: 122px; position: relative; display: flex; flex-direction: column; }
 	@media (max-width: 620px) { .plan-tree { --plan-indent-reserve: 148px; } }
-	.tree-row.scheduled-row { padding: 0; }
-	.later-toggle { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 38px; padding: 6px 8px 6px calc(8px + var(--indent)); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-	.later-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.later-action { margin-left: auto; padding: var(--space-1) 2px var(--space-1) var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); }
-	@media (max-width: 620px) { .later-toggle { min-height: 44px; } }
 	.tree-row.can-drag { touch-action: pan-y; }
 	.tree-row.dragging { position: relative; z-index: 3; background: var(--bg-primary); box-shadow: var(--shadow-chip); }
 	/* Rows ease aside only while a drag is live. On drop the offsets clear in the same render as the DOM reorder, so the swap must be instant: a transition there slides the dropped row in from a slot past its place. */

@@ -1,5 +1,5 @@
 import type { OperatorNode } from '$lib/api/plans';
-import { isLaterMember, isScheduledMember, scheduledClusters } from './planScheduled';
+import { isLaterMember, scheduledAtMs, scheduledClusters } from './planScheduled';
 import type { ScheduledView } from './planDisplay';
 import type { FoldLevelView } from './planFoldLevels';
 
@@ -177,8 +177,8 @@ export interface ArrangeInput {
 
 /**
  * Render order: a workflow run's unfolded steps in the run's order, whatever their states.
- * At every other level its still-open rows in plan order, then its
- * finished-but-not-yet-folded rows newest settled first, then its revealed
+ * At every other level its still-open rows in plan order, then its one Later
+ * row (tasks set below the cut), then its finished-but-not-yet-folded rows newest settled first, then its revealed
  * folded rows (also newest first), then its one fold row -- so the top row of
  * every level is always its current or next item. Each row is followed by its
  * own subtree, so a level's fold row closes that level.
@@ -229,18 +229,10 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 		// A workflow run's steps are a sequence: they show in the run's own order (plan order), each row with its own
 		// state and time, nested runs included; its folded steps page open at its fold row as at any level.
 		const runLevel = isRunLevel(level, byId);
-		if (runLevel) {
-			for (const node of [...unfolded, ...revealed]) push(node);
-		} else {
-			for (const node of ordinary) push(node);
-			for (const node of [...finished, ...revealed]) push(node);
-		}
-		const view = levels.get(level);
-		if (view && input.isLevelOpen(level)) {
-			items.push({ kind: 'fold', key: `fold:${level}`, level, depth: view.depth, view, shown: revealed.length });
-		}
-		// Quiet scheduled work: one group row, from the first member. A member's children follow its row (or its cluster) once the group is open.
-		if (!runLevel && scheduled.length >= 1) {
+		// Below the cut: one Later row after the level's open rows and before its finished work.
+		// A member's children follow its row (or its cluster) once the row is open.
+		const later = () => {
+			if (runLevel || scheduled.length === 0) return;
 			for (const node of scheduled) {
 				emitted.add(node.id);
 				grouped.add(node.id);
@@ -248,13 +240,14 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 			const isOpen = input.isScheduledOpen?.(level) ?? false;
 			const depth = scheduled[0].depth;
 			items.push({ kind: 'scheduled', key: `scheduled:${level}`, level, depth, members: scheduled, open: isOpen });
-			const now = input.now!;
-			const undated = scheduled.filter((node) => !isScheduledMember(node, now));
-			const dated = scheduledClusters(scheduled.filter((node) => isScheduledMember(node, now))).flatMap((cluster) => cluster.members);
+			// A member that comes back on its own date shows that date, however near; the rest show their rank.
+			const undated = scheduled.filter((node) => scheduledAtMs(node) === null);
+			const dated = scheduledClusters(scheduled.filter((node) => scheduledAtMs(node) !== null)).flatMap((cluster) => cluster.members);
 			// Dated first, soonest first: they are few and come back on their own, so a
 			// long undated pile never pages them out of sight (J3).
 			const ordered = [...dated, ...undated];
 			const count = isOpen ? Math.min(ordered.length, input.laterShown?.(level) ?? ordered.length) : 0;
+			// A closed or paged-off member hides its subtree too, so the stray-row sweep below must not surface it.
 			for (const node of ordered.slice(count)) tuckAway(node.id);
 			for (const cluster of scheduledClusters(ordered.slice(0, Math.min(count, dated.length)))) {
 				const [only] = cluster.members;
@@ -267,6 +260,19 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 				emit(node.id);
 			});
 			if (isOpen && scheduled.length > LATER_PAGE) items.push({ kind: 'later-page', key: `later-page:${level}`, level, depth, shown: count, total: scheduled.length });
+		};
+		// A workflow run's steps are a sequence: they show in the run's own order (plan order), each row with its own
+		// state and time, nested runs included; its folded steps page open at its fold row as at any level.
+		if (runLevel) {
+			for (const node of [...unfolded, ...revealed]) push(node);
+		} else {
+			for (const node of ordinary) push(node);
+			later();
+			for (const node of [...finished, ...revealed]) push(node);
+		}
+		const view = levels.get(level);
+		if (view && input.isLevelOpen(level)) {
+			items.push({ kind: 'fold', key: `fold:${level}`, level, depth: view.depth, view, shown: revealed.length });
 		}
 	};
 	emit(ROOT_LEVEL);

@@ -8,9 +8,10 @@ import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
 
 /**
- * W11 + W12: a wait that ends soon stands out (soonest first, a countdown inside
- * the hour). Only finished work folds: a wait days away stays its own row.
- * A task scheduled until a date wears a snooze clock.
+ * W11 + W12: a wait that ends soon stands out (a countdown inside the hour), but
+ * every open row keeps its plan-order place: plan order is priority, so no wait
+ * is sorted above or below other work. Only finished work folds: a wait days
+ * away stays its own row. A task scheduled until a date wears a snooze clock.
  */
 
 const NOW = new Date(2026, 8, 25, 10, 0);
@@ -69,8 +70,8 @@ function row(id: string): Element {
 	return found!;
 }
 
-describe('waits that end soonest come first within their level', () => {
-	it('sorts timed waits soonest-ending first, after the level\'s other open work', async () => {
+describe('open rows keep plan order within their level, whatever they wait on', () => {
+	it('never sorts timed waits around the level\'s other open work', async () => {
 		const nodes = [
 			wait('in three hours', 180),
 			wait('in ten minutes', 10),
@@ -79,10 +80,10 @@ describe('waits that end soonest come first within their level', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['Plain task', 'in ten minutes', 'in two hours', 'in three hours']);
+		expect(rendered()).toEqual(['in three hours', 'in ten minutes', 'Plain task', 'in two hours']);
 	});
 
-	it('puts a wait with no end time below the timed ones', async () => {
+	it('leaves a wait with no end time where the plan puts it', async () => {
 		// Behind a prerequisite the projection says blocked; the row still reads Waiting.
 		const behind = wait('after a dependency', null);
 		behind.execution = {
@@ -98,12 +99,12 @@ describe('waits that end soonest come first within their level', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['Plain task', 'in ten minutes', 'on an event', 'after a dependency']);
+		expect(rendered()).toEqual(['on an event', 'after a dependency', 'in ten minutes', 'Plain task']);
 	});
 
-	it('keeps queued ready work with the open work, above every wait', async () => {
-		// Ready work nobody is moving reads Waiting ("Not started"), yet nothing but
-		// the agent's turn holds it, so it never sinks below a wait that may never end.
+	it('keeps queued ready work in its plan-order place, below the waits ranked above it', async () => {
+		// Ready work nobody is moving reads Waiting ("Not started"); it is not lifted above
+		// waits the plan ranks higher: moving it up is a reorder, the owner's call.
 		const nodes = [
 			wait('on an event', null),
 			wait('in ten minutes', 10),
@@ -111,10 +112,10 @@ describe('waits that end soonest come first within their level', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['Queued task', 'in ten minutes', 'on an event']);
+		expect(rendered()).toEqual(['on an event', 'in ten minutes', 'Queued task']);
 	});
 
-	it('sorts siblings under one parent the same way', async () => {
+	it('keeps siblings under one parent in plan order the same way', async () => {
 		const nodes = [
 			node({ id: 'phase', title: 'Phase', state: 'active' }),
 			wait('late', 300, false, { parent_id: 'phase', depth: 1 }),
@@ -122,7 +123,7 @@ describe('waits that end soonest come first within their level', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['soon'] }) });
 		await settle();
-		expect(rendered()).toEqual(['Phase', 'soon', 'late']);
+		expect(rendered()).toEqual(['Phase', 'late', 'soon']);
 	});
 });
 
@@ -170,7 +171,7 @@ describe('a wait ending within the hour counts down', () => {
 });
 
 describe('only finished work folds: a wait days away stays a row', () => {
-	it('keeps waits ending days out as visible rows, soonest first, outside the fold row', async () => {
+	it('keeps waits ending days out as visible rows, in plan order, outside the fold row', async () => {
 		const nodes = [
 			wait('a week', 7 * 24 * 60),
 			wait('soon', 30),
@@ -179,7 +180,7 @@ describe('only finished work folds: a wait days away stays a row', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['Plain task', 'soon', 'two days', 'a week']);
+		expect(rendered()).toEqual(['a week', 'soon', 'two days', 'Plain task']);
 		expect(host.querySelectorAll('.fold-row').length).toBe(0);
 	});
 

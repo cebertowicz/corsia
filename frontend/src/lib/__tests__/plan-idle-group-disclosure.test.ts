@@ -43,6 +43,9 @@ function waiting(id: string, hours: number): OperatorNode {
 	});
 }
 
+/** The same wait, set by the server below the plan's cut. */
+const laterWait = (id: string, hours: number): OperatorNode => ({ ...waiting(id, hours), later: true });
+
 function tree(child: OperatorNode): OperatorNode[] {
 	return [
 		node({ id: 'group', title: 'Group', kind: 'phase', container: true, state: 'active' }),
@@ -83,8 +86,8 @@ describe('idle plan-group disclosure', () => {
 		expect(index.defaultExpandedBranches.has('group')).toBe(true);
 	});
 
-	it('does not default-open a group for a current leaf gathered into Scheduled', () => {
-		const nodes = tree(waiting('scheduled', 48));
+	it('does not default-open a group for a current leaf gathered into Later', () => {
+		const nodes = tree(laterWait('scheduled', 48));
 		const input: Parameters<typeof indexPlanNodes>[1] & { now: number } = {
 			maxDepth: 6, currentNodeIds: ['scheduled'], now: NOW,
 		};
@@ -92,8 +95,8 @@ describe('idle plan-group disclosure', () => {
 		expect(index.defaultExpandedBranches.has('group')).toBe(false);
 	});
 
-	it('keeps scheduled and finished rows hidden below the initially collapsed group until the user opens it', async () => {
-		component = mount(PlanTree, { target: host, props: withFolds({ nodes: tree(waiting('scheduled', 48)), currentNodeIds: ['scheduled'] }) });
+	it('keeps Later and finished rows hidden below the initially collapsed group until the user opens it', async () => {
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: tree(laterWait('scheduled', 48)), currentNodeIds: ['scheduled'] }) });
 		await settle();
 		expect(groupToggle().getAttribute('aria-expanded')).toBe('false');
 		expect(host.querySelector('.scheduled-row')).toBeNull();
@@ -119,7 +122,7 @@ describe('idle plan-group disclosure', () => {
 		['blocked attention', node({ id: 'blocked', title: 'blocked', parent_id: 'group', depth: 1, attention_path: ['blocked'] }), [], true],
 		['review raised', node({ id: 'review', title: 'review', parent_id: 'group', depth: 1, state: 'review_requested' }), ['review'], true],
 		['imminent timed wait', waiting('soon', 12), ['soon'], true],
-		['later scheduled wait', waiting('later', 48), ['later'], false],
+		['Later scheduled wait', laterWait('later', 48), ['later'], false],
 		['paused work', node({ id: 'paused', title: 'paused', parent_id: 'group', depth: 1, execution: { condition: 'paused', primary_reason: null, causes: [], selection: null, conflict: null, attempt_count: 0, friction_count: 0, attempts: [] } }), [], false],
 	] as const)('%s opens the group', async (_state, child, currentNodeIds, expanded) => {
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes: tree(child), currentNodeIds: [...currentNodeIds] }) });
@@ -134,7 +137,7 @@ describe('idle plan-group disclosure', () => {
 	});
 
 	// Svelte 5 destroys a keyed-each batch only when every removed item has an out transition, so a
-	// level's Scheduled and fold rows (which had none) kept the whole batch on screen after a close.
+	// level's Later and fold rows (which had none) kept the whole batch on screen after a close.
 	describe('closing an opened group with real motion', () => {
 		const paused = () => node({
 			id: 'paused', title: 'paused', parent_id: 'group', depth: 1,
@@ -158,10 +161,10 @@ describe('idle plan-group disclosure', () => {
 			Element.prototype.animate = animate;
 		});
 
-		it('removes the group\'s Scheduled, fold and paused rows together once the exit motion ends', async () => {
+		it('removes the group\'s Later, fold and paused rows together once the exit motion ends', async () => {
 			const nodes = [
 				node({ id: 'group', title: 'Group', kind: 'phase', container: true, state: 'active' }),
-				paused(), waiting('scheduled', 48),
+				paused(), laterWait('scheduled', 48),
 				node({ id: 'done', title: 'Done', parent_id: 'group', depth: 1, state: 'accepted', folded: true }),
 			];
 			component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['scheduled'] }) });

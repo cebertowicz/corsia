@@ -117,7 +117,7 @@ describe('a Later member’s reason', () => {
 
 	it('reads whole for a dated member as well, whose row subline carries only its date', () => {
 		const due = new Date(Date.now() + 48 * 3_600_000).toISOString();
-		render(operatorNode({ scheduled_until: due, later_reason: LONG }));
+		render(operatorNode({ later: true, scheduled_until: due, later_reason: LONG }));
 		expect(host.querySelector('.later-reason')?.textContent).toBe(`Later: ${LONG}`);
 	});
 
