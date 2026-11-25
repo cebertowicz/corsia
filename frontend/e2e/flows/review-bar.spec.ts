@@ -956,3 +956,23 @@ for (const theme of ['light', 'dark'] as const) {
 		}
 	});
 }
+
+/** As shipped at f51bbda8e: a canvas of 600px or less keeps only the owner row and holds the freshness line behind Document details, even where the toggle that opens it (37.5rem) is not yet drawn.
+    The app's root font size is 15px, so 37.5rem is 562.5px and a canvas between the two thresholds is the one that tells a px query from a rem one. */
+test.describe('desktop row below 600px canvas (900 closed)', () => {
+	test.use({ hasTouch: false, isMobile: false });
+	test('@surface:review-bar a 580px canvas holds the freshness line behind Details as at f51bbda8e', async ({ page, request }, info) => {
+		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
+		const doc = await seed(request, 'Narrow row 900', { sharedAsOf: '2026-09-12' });
+		await open(page, doc, 'closed', 'light');
+		await page.setViewportSize({ width: 900, height: 900 }); await settled(page);
+		const canvas = await page.locator('.leaf-body.document-canvas').evaluate((el) => {
+			const style = getComputedStyle(el);
+			return { width: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), toggleAt: 37.5 * parseFloat(getComputedStyle(document.documentElement).fontSize) };
+		});
+		expect(canvas.width, 'the canvas is narrower than the 600px threshold').toBeLessThanOrEqual(600);
+		expect(canvas.width, 'and wider than the 37.5rem toggle threshold').toBeGreaterThan(canvas.toggleAt);
+		await expect(page.locator('.document-metadata .metadata-owner'), 'owner and supervisor stay in view').toBeVisible();
+		await expect(page.locator('.document-metadata time'), 'the freshness line waits behind Details').toBeHidden();
+	});
+});

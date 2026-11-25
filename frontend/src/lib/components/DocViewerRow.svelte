@@ -142,8 +142,9 @@
 	.identity-details { flex: 1; min-width: 0; display: none; flex-direction: column; align-items: flex-start; border: 0; padding: var(--space-px-2) 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: var(--space-px-2); border-radius: var(--radius-sm); }
 	.identity-age { display: none; }
-	@container doc-canvas (max-width: 37.5rem) {
-		.identity-details:has(.identity-age) { display: flex; min-height: var(--touch-target); justify-content: center; }
+	/* As before the one-row header, the canvas has two thresholds: 600px collapses the owner row behind Document details and swaps History to its icon; the toggle that opens it, and the other phone-size tool spacing, start at 37.5rem. */
+	@container doc-canvas (max-width: 600px) {
+		.identity-details { min-height: var(--touch-target); justify-content: center; }
 		.identity-age { display: flex; width: 100%; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
 		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
@@ -153,15 +154,18 @@
 		.document-metadata:not(.expanded):not(.has-ownership), .document-metadata.has-ownership:not(.expanded) > :not(.metadata-owner) { display: none; }
 		.has-ownership .metadata-owner { flex-basis: 100%; }
 		.history-tool svg { display: block; }
-		/* The count and Resolved sit closer, so "N comments · N unread" and "Resolved · N" keep one row in a narrow header. */
-		.tool-send :global(.comment-status:has(+ .resolved-tool)) { padding-inline-end: var(--space-1); }
-		.tool-send .resolved-tool { padding-inline-start: var(--space-1); }
 		.history-tool .label { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-3); }
+		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
+	}
+	@container doc-canvas (max-width: 37.5rem) {
+		.identity-details:has(.identity-age) { display: flex; }
+		/* The count and Resolved sit closer, so "N comments · N unread" and "Resolved · N" keep one row in a narrow header. */
+		.tool-send :global(.comment-status:has(+ .resolved-tool)) { padding-inline-end: var(--space-1); }
+		.tool-send .resolved-tool { padding-inline-start: var(--space-1); }
 		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
-		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
 	}
 </style>
