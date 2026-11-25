@@ -22,7 +22,7 @@ from tools.conductor_instruction_files import (
 )
 
 
-def _setup(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, filename="ROLE.md"):
     import infra.config as config
 
     workspace = tmp_path / "workspace"
@@ -41,7 +41,7 @@ def _setup(tmp_path, monkeypatch):
         target = make_session(db, prefix="target")
         ordinary = make_session(db, prefix="ordinary")
         foreign = make_session(db, project_id="other-project", prefix="foreign")
-        path = workspace / ".threads" / target / "context" / "ROLE.md"
+        path = workspace / ".threads" / target / "context" / filename
         db.execute(
             "UPDATE threads SET bootloader_files=? WHERE id=?",
             (json.dumps([str(path)]), target),
@@ -95,10 +95,11 @@ async def test_pin_cross_scope_conductors_cannot_read_instruction_files(isolated
 
 
 @pytest.mark.asyncio
-async def test_replace_refuses_person_owned_attached_instruction(isolated_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("filename", ["PRIORITIES.md", "ROLE.md"])
+async def test_replace_refuses_only_person_owned_priorities(isolated_db, tmp_path, monkeypatch, filename):
     from registry import models, service
 
-    conductor, target, _, _, path = _setup(tmp_path, monkeypatch)
+    conductor, target, _, _, path = _setup(tmp_path, monkeypatch, filename)
     db = get_db()
     try:
         artifact = service.register_write_strict(conductor, str(path), db=db)
@@ -111,8 +112,11 @@ async def test_replace_refuses_person_owned_attached_instruction(isolated_db, tm
     result = await ConductorInstructionFileReplaceTool().execute(
         target, str(path), revision, "changed", _thread_id=conductor,
     )
-    assert "Only the person edits it directly" in result and "doc_comment_create" in result
-    assert path.read_text() == "# Role\nOriginal\n"
+    if filename == "PRIORITIES.md":
+        assert "Only the person edits it directly" in result and "doc_comment_create" in result
+        assert path.read_text() == "# Role\nOriginal\n"
+    else:
+        assert "revision" in json.loads(result) and path.read_text() == "changed"
 
 
 @pytest.mark.asyncio

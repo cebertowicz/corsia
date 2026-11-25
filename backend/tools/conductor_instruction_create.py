@@ -130,16 +130,16 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
         writes = _install_paths(target, kind, name, content, supporting_files)
         before = {path: path.read_bytes() if path.exists() else None for path in writes}
         current_revision = "absent" if all(value is None for value in before.values()) else _bundle_revision(before)
-        if kind == "priorities" and current_revision != "absent":
-            raise RosterChangeError("priorities file already exists; suggest changes to its owner")
         changed = before != writes
+        if kind == "priorities" and changed and current_revision != "absent":
+            raise RosterChangeError("priorities file already exists; suggest changes to its owner")
         if changed and expected_revision != current_revision:
             raise RosterChangeError(f"instruction bundle changed; current revision is {current_revision}; read current files and retry")
     # The guidance save closes its own pooled connection, which rolls back this thread's open
     # transaction, so it runs between the check and the attach, as the replace tool's save does.
     history = _save_bundle(writes, before, actor, kwargs) if changed else {}
     primary = next(iter(writes))
-    if kind == "priorities":
+    if kind == "priorities" and before[primary] is None:
         from registry import service
 
         try:

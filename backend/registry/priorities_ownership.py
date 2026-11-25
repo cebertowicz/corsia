@@ -60,7 +60,9 @@ def migrate_priorities_ownership(workspace: Path, *, db) -> int:
         if project:
             paths.append(root / "context" / "PRIORITIES.md")
         for path in paths:
-            if not path.is_file() or path.is_symlink() or not is_priorities_path(path, workspace=workspace, db=db):
+            # The glob and the project roots above already place each path at one of the two
+            # priorities locations, so no per-file projects scan is needed here.
+            if not path.is_file() or path.is_symlink():
                 continue
             artifact = service.find_file_identity(str(path), db=db)
             if artifact is None:

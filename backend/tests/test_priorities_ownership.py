@@ -47,12 +47,13 @@ def test_ordinary_agent_is_sent_to_the_person_only_for_priorities(ownership_scop
     agent_file = scope['root'] / '.threads' / scope['owner'] / 'context' / 'PRIORITIES.md'
     agent_file.parent.mkdir(parents=True, exist_ok=True)
     agent_file.write_text('content\n')
-    for path in (context / 'PRIORITIES.md', agent_file):
-        with pytest.raises(DurableWritePolicyError) as refused:
-            _managed(scope, path, 'other', 'changed\n')
-        assert 'doc_comment_create' in str(refused.value)
-        assert 'Only the person edits it directly.' in str(refused.value)
-        assert 'conductor thread' not in str(refused.value)
+    with pytest.raises(DurableWritePolicyError, match='created only by the conductor'):
+        _managed(scope, context / 'PRIORITIES.md', 'other', 'changed\n')
+    with pytest.raises(DurableWritePolicyError) as refused:
+        _managed(scope, agent_file, 'other', 'changed\n')
+    assert 'doc_comment_create' in str(refused.value)
+    assert 'Only the person edits it directly.' in str(refused.value)
+    assert 'conductor thread' not in str(refused.value)
     with pytest.raises(DurableWritePolicyError, match='conductor thread') as refused:
         _managed(scope, context / 'OTHER.md', 'other', 'changed\n')
     assert 'doc_comment_create' not in str(refused.value)
@@ -82,6 +83,20 @@ def test_startup_completes_when_the_priorities_repair_fails(ownership_scope, mon
     _hand_priorities_to_person(ownership_scope['workspace'], Logger())
     assert logged == ['priorities ownership repair failed; it runs again at the next start']
     assert not get_setting('priorities_person_ownership_v1', db=ownership_scope['db'])
+
+
+def test_agent_cannot_create_its_own_priorities(ownership_scope):
+    import pytest
+    from registry.shared_write_errors import DurableWritePolicyError
+    from tests.test_owner_only_edit import _managed
+
+    scope = ownership_scope
+    path = scope['root'] / '.threads' / scope['owner'] / 'context' / 'PRIORITIES.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(DurableWritePolicyError, match='created only by the conductor'):
+        _managed(scope, path, 'owner', 'made up\n')
+    assert not path.exists()
+    _managed(scope, path.parent / 'NOTES.md', 'owner', 'fine\n')
 
 
 def test_thread_priority_refuses_agent_and_conductor(ownership_scope):

@@ -160,6 +160,13 @@ async def test_priorities_registration_owner_and_existing_refusal(isolated_db, t
         db.close()
     result = await tool.execute(target, "priorities", receipt["revision"], "changed", _thread_id=actor)
     assert result.startswith("Error:") and path.read_text() == "# Priorities\n"
+    retry = json.loads(await tool.execute(target, "priorities", receipt["revision"], "# Priorities\n", _thread_id=actor))
+    assert retry["ok"] is True and path.read_text() == "# Priorities\n"
+    db = get_db()
+    try:
+        assert artifact_owner(service.find_file_identity(str(path), db=db)["id"], db=db) == "ui"
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio
