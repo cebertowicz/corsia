@@ -887,7 +887,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 	});
 
 	for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
-		test(`starts on the agent's asked-for time, approves until turned off, and revokes it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
+		test(`starts on the agent's asked-for time, approves until turned off, and shows no chip for it at ${viewport.width} px`, async ({ page, request }, testInfo) => {
 			await page.setViewportSize(viewport);
 			const title = `Saved login standing ${viewport.width} ${testInfo.project.name}-${Date.now()}`;
 			const threadId = await createSession(request, title);
@@ -896,17 +896,13 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await page.route('**/api/host-access/leases**', async (route) => {
 				const url = new URL(route.request().url());
 				if (route.request().method() === 'POST') {
-					const match = /\/fills\/([^/]+)\/(approve|revoke)$/.exec(url.pathname);
+					const match = /\/fills\/([^/]+)\/approve$/.exec(url.pathname);
 					expect(match, url.pathname).toBeTruthy();
-					decisions.push({ action: match![2], body: route.request().postDataJSON() });
-					const decided = { ...items[0], decision_capability: 'decision-fill-e2e-active' };
-					items = match![2] === 'approve'
-						? [{ ...decided, state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null }]
-						: [];
-					await route.fulfill({
-						status: 200, contentType: 'application/json',
-						body: JSON.stringify(match![2] === 'approve' ? items[0] : { ...decided, state: 'revoked' }),
-					});
+					decisions.push({ action: 'approve', body: route.request().postDataJSON() });
+					const approved = { ...items[0], state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null };
+					// As the server does: the chat's lease list never carries a standing grant.
+					items = [];
+					await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(approved) });
 					return;
 				}
 				const root = url.searchParams.get('root_thread_id');
@@ -945,19 +941,10 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 				action: 'approve', body: { revision: 1, application_hash: 'hash-fill-e2e-1', until_revoked: true },
 			});
 
-			const chip = page.locator('.active-chip-trigger');
-			await expect(chip).toHaveAccessibleName('Saved login');
-			await expect(chip.locator('.countdown')).toHaveText('On');
-			await page.screenshot({ path: testInfo.outputPath(`standing-chip-${viewport.width}.png`), animations: 'disabled' });
-			await chip.click();
-			const active = page.getByRole('dialog');
-			await expect(active).toContainText('Until I turn it off');
-			await expect(active).not.toContainText('Time remaining');
-			await page.screenshot({ path: testInfo.outputPath(`standing-drawer-${viewport.width}.png`), animations: 'disabled' });
-			await active.getByRole('button', { name: 'Revoke approval' }).click();
+			// A standing grant has no chip: no lock, no countdown and no drawer in the chat.
+			await expect(page.locator('.pending-request-trigger')).toHaveCount(0);
 			await expect(page.locator('.active-chip')).toHaveCount(0);
-			expect(decisions[1]).toEqual({ action: 'revoke', body: { revision: 2, application_hash: 'hash-fill-e2e-1' } });
-			await page.screenshot({ path: testInfo.outputPath(`after-revoke-${viewport.width}.png`), animations: 'disabled' });
+			await page.screenshot({ path: testInfo.outputPath(`after-standing-${viewport.width}.png`), animations: 'disabled' });
 		});
 	}
 });

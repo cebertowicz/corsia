@@ -214,8 +214,6 @@ export function fillStartingChoice(choices: number[], requested: number | null):
 
 /** The person's standing choice for a fill: this agent, this login, until they turn it off. */
 export const UNTIL_TURNED_OFF_LABEL = 'Until I turn it off';
-/** A standing fill grant's chip, in place of a countdown. */
-export const STANDING_CHIP_LABEL = 'On';
 
 export function remaining(lease: HostAccessTimed, nowMs: number): string {
 	if (lease.expires_at === null) return 'activating';

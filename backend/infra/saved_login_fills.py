@@ -13,6 +13,8 @@ never decides a fill.
   person's, behind ``require_human_user``. Only :func:`approve_fill` makes a
   standing grant (``until_revoked``): no deadline; it ends on revoke, when
   the login is deleted or out of date (:func:`end_for_login`), or at a restart.
+- :func:`listed` is the chat's lease list: waiting requests and timed grants
+  only. A standing grant is never listed, so no chip shows or opens one.
 - :func:`may_fill` is the fill executor's check: true only under a live grant
   for exactly that thread and login. A grant is not a host-access lease.
 
@@ -294,12 +296,15 @@ def may_fill(thread_id: str, login_id: str) -> bool:
 
 
 def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, Any]]:
-    """This person's waiting requests and live grants, oldest first; one chat's when a root is named."""
+    """This person's waiting requests and live timed grants, oldest first; one chat's when a root is named.
+
+    A standing grant is left out: the chat's lock chip is for timed grants only.
+    """
     with _lock:
         expired = _prune(time.monotonic())
         items = [
             item for item in _approvals.values()
-            if item.user_id == user_id
+            if item.user_id == user_id and not item.standing
             and (root_thread_id is None or root_thread_id in (item.root_thread_id, item.thread_id))
         ]
     _emit_expired(expired)

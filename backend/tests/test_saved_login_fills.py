@@ -470,8 +470,8 @@ def test_until_revoked_stays_live_past_the_cap_until_revoked(world, monkeypatch)
     clock = fills.time.monotonic
     monkeypatch.setattr(fills.time, "monotonic", lambda: clock() + fills.MAX_GRANT_SECONDS * 100)
     assert fills.may_fill(AGENT_THREAD, login) is True
-    [listed] = fills.listed(PERSON)
-    assert listed["id"] == granted["id"] and listed["state"] == "active" and listed["standing"] is True
+    held = fills.get(granted["id"], user_id=PERSON)
+    assert held["state"] == "active" and held["standing"] is True
     assert fills.may_fill(OTHER_THREAD, login) is False  # another thread
     assert fills.may_fill(AGENT_THREAD, world["other_login"]) is False  # another login
     assert fills.may_fill("worker-thread", login) is False  # not even its own subagent
@@ -479,7 +479,7 @@ def test_until_revoked_stays_live_past_the_cap_until_revoked(world, monkeypatch)
                                 application_hash=granted["application_hash"])
     assert revoked["state"] == "revoked"
     assert fills.may_fill(AGENT_THREAD, login) is False
-    assert fills.listed(PERSON) == []
+    assert fills._approvals == {}
 
 
 def test_until_revoked_ends_at_a_restart(world):
@@ -487,30 +487,31 @@ def test_until_revoked_ends_at_a_restart(world):
     assert fills.may_fill(AGENT_THREAD, world["login"]) is True
     restarted = importlib.reload(fills)
     assert restarted.may_fill(AGENT_THREAD, world["login"]) is False
-    assert restarted.listed(PERSON) == []
+    assert restarted._approvals == {}
 
 
 def test_until_revoked_ends_when_its_login_goes_out_of_date_and_a_resave_does_not_revive_it(world):
     login = world["login"]
     _approve_standing(fills.request_fill(AGENT_THREAD, login))
-    _approve_standing(fills.request_fill(AGENT_THREAD, world["other_login"]))
+    other = _approve_standing(fills.request_fill(AGENT_THREAD, world["other_login"]))
     saved_logins.mark_out_of_date(login)  # by no path that ends its grants
     # The check at use fails closed and ends it; no read sweeps for it.
     assert fills.may_fill(AGENT_THREAD, login) is False
-    assert [row["site"] for row in fills.listed(PERSON)] == ["https://example.org"]
+    assert list(fills._approvals) == [other["id"]]
     saved_logins.save_login(site="https://example.com", username="me@example.com", password=RESAVED, saved_by=PERSON)
     assert fills.may_fill(AGENT_THREAD, login) is False
     assert fills.may_fill(AGENT_THREAD, world["other_login"]) is True
 
 
 def test_reading_the_list_or_one_request_does_not_look_up_any_login(world, monkeypatch):
-    _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
-    _approve(fills.request_fill(AGENT_THREAD, world["other_login"]))
+    standing = _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    timed = _approve(fills.request_fill(AGENT_THREAD, world["other_login"]))
     looked_up: list[object] = []
     monkeypatch.setattr(saved_logins, "get_login", lambda *args, **kwargs: looked_up.append(args))
     rows = fills.listed(PERSON)
-    fills.get(rows[0]["id"], user_id=PERSON)
-    assert len(rows) == 2 and looked_up == []
+    fills.get(standing["id"], user_id=PERSON)
+    fills.get(timed["id"], user_id=PERSON)
+    assert [row["id"] for row in rows] == [timed["id"]] and looked_up == []
 
 
 def test_a_login_going_out_of_date_ends_its_waiting_requests_too(world, monkeypatch):
@@ -525,7 +526,7 @@ def test_a_login_going_out_of_date_ends_its_waiting_requests_too(world, monkeypa
     events.clear()
     world["nudges"].clear()
     saved_login_results.fill_failed(AGENT_THREAD, login)
-    assert [row["id"] for row in fills.listed(PERSON)] == [kept["id"]]
+    assert list(fills._approvals) == [kept["id"]]
     assert [args for args, _ in events] == [("saved_login", "fill_expired")] * 2
     assert {kwargs["thread_id"] for _, kwargs in events} == {AGENT_THREAD, OTHER_THREAD}
     assert len(world["nudges"]) == 2
@@ -618,10 +619,33 @@ def test_the_route_refuses_both_or_neither_and_approves_until_revoked(world):
         assert granted.status_code == 200
         assert granted.json()["standing"] is True and granted.json()["expires_at"] is None
         assert fills.may_fill(AGENT_THREAD, world["login"]) is True
-        active = _listed(client, session)
-        assert active["state"] == "active" and active["standing"] is True
-        assert _post(client, session, active, "revoke", active["decision_capability"]).status_code == 200
-        assert fills.may_fill(AGENT_THREAD, world["login"]) is False
+
+
+def _chat_list(client, credential, query):
+    response = client.get(f"/api/host-access/leases{query}", headers={
+        "Authorization": f"Bearer {credential}", INTERACTIVE_UI_HEADER: "1",
+    })
+    assert response.status_code == 200
+    return response
+
+
+def test_the_chats_lease_list_leaves_out_a_standing_grant_and_keeps_a_timed_one(world):
+    """The chat's lock chip is for timed grants only: a standing grant is in no lease list."""
+    from infra.accounts import issue_token
+
+    session, _ = issue_token(PERSON, kind="session")
+    standing = _approve_standing(fills.request_fill(AGENT_THREAD, world["login"]))
+    timed = _approve(fills.request_fill(AGENT_THREAD, world["other_login"]), seconds=900)
+    assert fills.may_fill(AGENT_THREAD, world["login"]) is True  # still live, only not listed
+    assert [row["id"] for row in fills.listed(PERSON)] == [timed["id"]]
+    assert [row["id"] for row in fills.listed(PERSON, AGENT_THREAD)] == [timed["id"]]
+    with _client() as client:
+        for query in (f"?root_thread_id={AGENT_THREAD}", "", "?nonterminal_only=true"):
+            response = _chat_list(client, session, query)
+            rows = [row for row in response.json()["leases"] if row["kind"] == "fill"]
+            assert [row["id"] for row in rows] == [timed["id"]], query
+            assert rows[0]["state"] == "active" and rows[0]["standing"] is False
+            assert standing["id"] not in response.text
 
 
 def test_deleting_a_login_ends_every_request_and_grant_for_it(world, monkeypatch):
@@ -640,7 +664,7 @@ def test_deleting_a_login_ends_every_request_and_grant_for_it(world, monkeypatch
         response = client.delete(f"/api/saved-logins/{login}", headers={"Authorization": f"Bearer {session}"})
         assert response.status_code == 200
     assert fills.may_fill(AGENT_THREAD, login) is False
-    assert [row["id"] for row in fills.listed(PERSON)] == [kept["id"]]
+    assert list(fills._approvals) == [kept["id"]]
     assert pending["id"] not in fills._approvals
     assert [args for args, _ in events] == [("saved_login", "fill_revoked")] * 2
     assert {kwargs["thread_id"] for _, kwargs in events} == {AGENT_THREAD, OTHER_THREAD}

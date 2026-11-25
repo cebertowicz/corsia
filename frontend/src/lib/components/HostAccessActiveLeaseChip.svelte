@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessActiveLeaseDrawer from './HostAccessActiveLeaseDrawer.svelte';
-	import { owner, remaining, STANDING_CHIP_LABEL } from '$lib/hostAccess/leaseFormat';
+	import { owner, remaining } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessTimed } from '$lib/api/hostAccess';
 
 	/**
@@ -35,8 +35,6 @@
 	} = $props();
 
 	const fill = $derived(lease.kind === 'fill');
-	/** A fill the person approved until they revoke it: no countdown, revoked as any other. */
-	const standing = $derived(lease.kind === 'fill' && lease.standing === true);
 </script>
 
 <div class="active-chip">
@@ -68,7 +66,7 @@
 				<path d="M12 16h.01" />
 			{/if}
 		</svg>
-		<span class="countdown" class:standing aria-hidden="true">{standing ? STANDING_CHIP_LABEL : remaining(lease, nowMs)}</span>
+		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
 	{#key lease.id}
 		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom opaque headless {open} onClose={onClose}>
@@ -120,8 +118,6 @@
 		min-width: 3.2em;
 		text-align: right;
 	}
-	/* A word, not a countdown: no reserved digit width. */
-	.countdown.standing { min-width: 0; }
 
 	@media (max-width: 720px) {
 		.active-chip-trigger { min-height: 44px; }

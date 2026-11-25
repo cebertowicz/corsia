@@ -322,36 +322,6 @@ it('reaches Until I turn it off by the arrow keys only stepping forward from the
 	await unmount(component);
 });
 
-it('shows a standing grant without a countdown and revokes it as any other', async () => {
-	const standing = fill({ state: 'active', revision: 2, standing: true, duration_seconds: null, expires_at: null });
-	const chipHost = target();
-	const chip = mount(HostAccessActiveLeaseChip, { target: chipHost, props: {
-		lease: standing, nowMs: Date.parse('2026-01-01T00:00:00Z'), open: false, deciding: false, disabled: false,
-		onOpen: vi.fn(), onClose: vi.fn(), onRevoke: vi.fn(),
-	} });
-	flushSync();
-	const trigger = chipHost.querySelector('.active-chip-trigger')!;
-	expect(trigger.getAttribute('aria-label')).toBe('Saved login');
-	expect(trigger.querySelector('.countdown')?.textContent).toBe('On');
-	expect(trigger.textContent).not.toMatch(/\d:\d\d|activating/);
-	await unmount(chip);
-
-	const host = target();
-	const onRevoke = vi.fn();
-	const drawer = mount(HostAccessActiveLeaseDrawer, { target: host, props: {
-		lease: standing, nowMs: Date.parse('2026-01-01T00:05:00Z'), disabled: false, deciding: false, onRevoke, onClose: vi.fn(),
-	} });
-	flushSync();
-	const text = host.textContent ?? '';
-	expect(text).toContain('Duration');
-	expect(text).toContain('Until I turn it off');
-	expect(text).not.toContain('Time remaining');
-	expect(text).not.toMatch(/\d:\d\d|activating|Invalid duration/);
-	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revoke approval')?.click();
-	expect(onRevoke).toHaveBeenCalledOnce();
-	await unmount(drawer);
-});
-
 it('posts until revoked, and no duration, when the person picks it', async () => {
 	const { apiFetch } = await import('$lib/api/request');
 	const fetch = vi.mocked(apiFetch);
