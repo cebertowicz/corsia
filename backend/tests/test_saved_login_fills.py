@@ -125,7 +125,7 @@ def test_an_out_of_date_login_cannot_be_requested(world):
     assert fills.listed(PERSON) == []
     # Saving it again makes it usable again.
     saved_logins.save_login(
-        site="https://example.com", username="me@example.com", password="[REDACTED]", saved_by=PERSON,
+        site="https://example.com", username="me@example.com", password="fake-password-for-tests", saved_by=PERSON,  # gitleaks:allow
     )
     assert fills.request_fill(AGENT_THREAD, world["login"])["state"] == "awaiting_user"
 
