@@ -210,9 +210,15 @@ async def linked_windows(browser: CdpClient, target_id: str) -> bool:
 class Requests:
     """The page's sign-in requests, by id and start time only, never URL or body. Only those started at or after
     the submit count: one the page started before it (its own polling or a stream) neither holds nor makes the
-    result. `seen` is how many started after the submit."""
+    result. `seen` is how many started after the submit.
 
-    def __init__(self) -> None:
+    A sign-in request is a POST to the saved site's registrable domain: the form sends nowhere else (find_form
+    refuses another site and a GET form). Analytics, captcha and other sites' calls, and the page's own reads,
+    neither hold the result nor make it 'rejected'. Only that comparison is kept from a request's URL.
+    """
+
+    def __init__(self, site_domain: str) -> None:
+        self.site_domain = site_domain
         self.seen = 0
         self._open: dict[str, float] = {}
         self._submitted: float | None = None
@@ -235,11 +241,21 @@ class Requests:
         request = params.get("requestId") if isinstance(params, dict) else None
         if not isinstance(request, str):
             return
-        if method == "Network.requestWillBeSent" and params.get("type") in _SIGN_IN_REQUESTS:
+        if method == "Network.requestWillBeSent" and params.get("type") in _SIGN_IN_REQUESTS and self._to_site(params):
             self.seen += self._since_submit(now)
             self._open[request] = now
         elif method in {"Network.loadingFinished", "Network.loadingFailed"}:
             self._open.pop(request, None)
+
+    def _to_site(self, params: dict) -> bool:
+        sent = params.get("request")
+        if not isinstance(sent, dict) or not isinstance(sent.get("url"), str) or sent.get("method") != "POST":
+            return False
+        try:
+            host = urlsplit(sent["url"]).hostname
+        except ValueError:
+            return False
+        return host is not None and host != "" and registrable_domain(host) == self.site_domain
 
     async def start(self, endpoint: str) -> None:
         self._cdp = await CdpClient(endpoint).__aenter__()

@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 # How long after submitting the page may take to settle before the result counts as unknown: as long as an agent's
 # own browser command may wait on a page. The password step has no limit of its own; the person ends it.
 SETTLE_LIMIT = COMMAND_TIMEOUT
+# Everything up to the submit (reading the page, checking it, typing, sending) shares one such limit too: the fill
+# holds the browser's command lock, so a page that stops answering must not hold every other command behind it.
 ASKED = ("The person has been asked to approve filling the saved login for {site} ({username}). Nothing was "
          "filled; try again once they approve it.")
 NO_BROWSER = "No browser is open for this thread, so nothing was filled. Open the sign-in page first."
@@ -118,13 +120,17 @@ async def _fill(thread_id: str, login: saved_logins.SavedLogin, runtime: Any, co
     """
     session, site = runtime.record.session, saved_logins.normalized_site(login.site)
     domain = registrable_domain(urlsplit(site).hostname or "")
-    endpoint = await browser_cdp.page_endpoint(command)
-    browser = await browser_cdp.browser_endpoint(command, page.PAGE_CHECK_FAILED)
+    deadline = asyncio.get_running_loop().time() + COMMAND_TIMEOUT
+    async with asyncio.timeout_at(deadline):
+        endpoint = await browser_cdp.page_endpoint(command)
+        browser = await browser_cdp.browser_endpoint(command, page.PAGE_CHECK_FAILED)
     async with browser_cdp.CdpClient(endpoint) as cdp:
-        loader = browser_cdp.loader_id(await cdp.call("Page.getFrameTree"))
-        if not await _clean(thread_id, session, loader, domain, browser, endpoint):
+        async with asyncio.timeout_at(deadline):
+            loader = browser_cdp.loader_id(await cdp.call("Page.getFrameTree"))
+            clean = await _clean(thread_id, session, loader, domain, browser, endpoint)
+        if not clean:
             return "not_clean"
-        return await _fill_on(cdp, thread_id, login, session, endpoint, loader, domain)
+        return await _fill_on(cdp, thread_id, login, session, endpoint, loader, domain, deadline)
 
 
 async def _clean(thread_id: str, session: str | None, loader: str, domain: str, browser: str, endpoint: str) -> bool:
@@ -137,19 +143,22 @@ async def _clean(thread_id: str, session: str | None, loader: str, domain: str, 
 
 
 async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logins.SavedLogin, session: str | None,
-                   endpoint: str, loader: str, domain: str) -> str:
-    form = await page.find_form(cdp, saved_logins.normalized_site(login.site), saved_logins.normalized_site)
-    if isinstance(form, str):
-        return form
-    if browser_cdp.loader_id(await cdp.call("Page.getFrameTree")) != loader:
-        return "changed"
-    requests = page.Requests()
+                   endpoint: str, loader: str, domain: str, deadline: float) -> str:
+    """Each step up to the submit ends by `deadline`; a timeout counts as the failure of the step it stopped."""
+    async with asyncio.timeout_at(deadline):
+        form = await page.find_form(cdp, saved_logins.normalized_site(login.site), saved_logins.normalized_site)
+        if isinstance(form, str):
+            return form
+        if browser_cdp.loader_id(await cdp.call("Page.getFrameTree")) != loader:
+            return "changed"
+    requests = page.Requests(domain)
     try:
-        await requests.start(endpoint)
+        async with asyncio.timeout_at(deadline):
+            await requests.start(endpoint)
         # Before anything is typed: this document under the filled-field allowlist, and the session under the
         # saved-sign-in command limit. An unread loader id counts as every document.
         browser_control.mark_saved_fill(thread_id, session, loader)
-        status = await _type(cdp, form, thread_id, login)
+        status = await _type(cdp, form, thread_id, login, deadline)
         if status == "no_grant":
             return status
         try:
@@ -159,7 +168,9 @@ async def _fill_on(cdp: browser_cdp.CdpClient, thread_id: str, login: saved_logi
             if status == "typed":
                 status = "uncertain"
                 requests.submitted(asyncio.get_running_loop().time())
-                if await page.submit(cdp, form) in {"enter", "clicked"}:
+                async with asyncio.timeout_at(deadline):
+                    sent = await page.submit(cdp, form)
+                if sent in {"enter", "clicked"}:
                     status = "unknown"
                     status = await _settled(endpoint, domain, requests)
                 else:
@@ -182,13 +193,15 @@ async def _record_unknown(thread_id: str, login: saved_logins.SavedLogin) -> Non
         log.warning("saved-login fill result couldn't be recorded: %s", type(exc).__name__)
 
 
-async def _type(cdp: browser_cdp.CdpClient, form: page.SignInForm, thread_id: str, login: saved_logins.SavedLogin) -> str:
+async def _type(cdp: browser_cdp.CdpClient, form: page.SignInForm, thread_id: str, login: saved_logins.SavedLogin,
+                deadline: float) -> str:
     """'no_grant' when nothing was read, so nothing was typed; else type_values's status, or 'uncertain'."""
     text = await asyncio.to_thread(_saved_value, thread_id, login.id)
     if text is None:
         return "no_grant"
     try:
-        return await page.type_values(cdp, form, login.username, text)
+        async with asyncio.timeout_at(deadline):
+            return await page.type_values(cdp, form, login.username, text)
     except Exception as exc:  # noqa: BLE001 - the error is reduced to its type; the value never leaves here
         log.warning("saved-login fill couldn't type: %s", type(exc).__name__)
         return "uncertain"
@@ -215,7 +228,8 @@ async def _settled(endpoint: str, site_domain: str, requests: page.Requests) -> 
     It re-probes REPROBE_AFTER_INPUT after the submit and after each change, and settles once the page's
     document, host and visible password field have held for REPROBE_EVERY with no sign-in request started
     since the submit still open. One still open at SETTLE_LIMIT, however slow, leaves the result 'unknown':
-    a slow server is never read as a rejected password.
+    a slow server is never read as a rejected password. Each probe ends by the same limit, so a page that stops
+    answering ends the wait there too.
     """
     clock = asyncio.get_running_loop().time
     deadline, last, still_since = clock() + SETTLE_LIMIT, None, clock()
@@ -223,7 +237,8 @@ async def _settled(endpoint: str, site_domain: str, requests: page.Requests) -> 
         await asyncio.sleep(browser_step_lifecycle.REPROBE_AFTER_INPUT)
         try:
             # A CdpClient logs no frame, so a typed value a page keeps in an attribute never reaches a log.
-            probe = await browser_cdp.page_password_probe(endpoint, {})
+            async with asyncio.timeout(deadline - clock()):
+                probe = await browser_cdp.page_password_probe(endpoint, {})
         except Exception:  # noqa: BLE001 - a page mid-navigation can't be probed; the next probe decides
             last = None
             continue

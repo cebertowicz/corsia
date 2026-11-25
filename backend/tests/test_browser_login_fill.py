@@ -50,6 +50,9 @@ REAL_SETTLED = fill._settled
 
 
 class Requests:
+    def __init__(self, _site_domain) -> None:
+        pass
+
     async def start(self, _endpoint):
         return None
 
@@ -534,14 +537,17 @@ async def test_the_result_waits_for_the_page_to_settle_as_the_password_step_does
         await asyncio.sleep(0)
 
     monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
-    monkeypatch.setattr(fill, "asyncio", SimpleNamespace(sleep=sleep, get_running_loop=lambda: SimpleNamespace(time=lambda: now[0])))
-    tracker = page.Requests()
+    monkeypatch.setattr(fill, "asyncio", SimpleNamespace(sleep=sleep, timeout=asyncio.timeout,
+                                                       get_running_loop=lambda: SimpleNamespace(time=lambda: now[0])))
+    tracker = page.Requests("example.com")
     tracker.seen = requests_seen
     assert await fill._settled(ENDPOINT, "example.com", tracker) == expected
 
 
-def _sent(tracker: page.Requests, request: str, now: float, kind: str = "XHR") -> None:
-    tracker.note({"method": "Network.requestWillBeSent", "params": {"requestId": request, "type": kind}}, now)
+def _sent(tracker: page.Requests, request: str, now: float, kind: str = "XHR", method: str = "POST",
+          url: str = "https://login.example.com/session") -> None:
+    tracker.note({"method": "Network.requestWillBeSent",
+                  "params": {"requestId": request, "type": kind, "request": {"url": url, "method": method}}}, now)
 
 
 def _finished(tracker: page.Requests, request: str, now: float) -> None:
@@ -549,7 +555,7 @@ def _finished(tracker: page.Requests, request: str, now: float) -> None:
 
 
 def test_only_sign_in_requests_started_since_the_submit_count_and_stay_open_until_they_finish():
-    tracker = page.Requests()
+    tracker = page.Requests("example.com")
     _sent(tracker, "poll", 9.0)
     tracker.submitted(10.0)
     _sent(tracker, "sign-in", 10.5)
@@ -559,6 +565,50 @@ def test_only_sign_in_requests_started_since_the_submit_count_and_stay_open_unti
     _finished(tracker, "sign-in", 500.0)
     assert not tracker.open_since_submit()
     assert tracker.seen == 1
+
+
+# Analytics, a captcha, the page's own reads: none of them is the form's POST to the saved site.
+NOT_SIGN_IN = {
+    "same_site_get": {"method": "GET", "url": "https://example.com/api/poll"},
+    "other_site_post": {"url": "https://analytics.example.net/collect"},
+    "captcha_post": {"url": "https://captcha.example.org/verify"},
+    "lookalike_post": {"url": "https://example.com.example.net/login"},
+    "no_url": {"url": ""},
+}
+
+
+@pytest.mark.parametrize("request_shape", sorted(NOT_SIGN_IN))
+def test_only_a_post_to_the_saved_sites_domain_is_a_sign_in_request(request_shape):
+    tracker = page.Requests("example.com")
+    tracker.submitted(10.0)
+    _sent(tracker, "other", 10.5, **NOT_SIGN_IN[request_shape])
+    assert tracker.seen == 0 and not tracker.open_since_submit()
+    _sent(tracker, "sign-in", 10.6, url="https://example.com/login")
+    assert tracker.seen == 1 and tracker.open_since_submit()
+    # Nothing of a request's URL is kept: only the comparison's answer.
+    assert "example.net" not in repr(vars(tracker)) and "/login" not in repr(vars(tracker))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_shape", sorted(NOT_SIGN_IN))
+async def test_a_request_that_isnt_the_sign_in_never_makes_the_result_rejected(monkeypatch, request_shape):
+    """The submit never reached the site (an empty required field, a client check, a waiting captcha)."""
+    tracker = page.Requests("example.com")
+    now = asyncio.get_running_loop().time()
+    tracker.submitted(now)
+    _sent(tracker, "other", now, **NOT_SIGN_IN[request_shape])
+    _finished(tracker, "other", now)
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", True)]) == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_post_to_the_saved_site_with_the_field_still_showing_is_rejected(monkeypatch):
+    tracker = page.Requests("example.com")
+    now = asyncio.get_running_loop().time()
+    tracker.submitted(now)
+    _sent(tracker, "sign-in", now, url="https://example.com/login")
+    _finished(tracker, "sign-in", now)
+    assert await _settle(monkeypatch, tracker, [("L1", "example.com", True)]) == "rejected"
 
 
 async def _settle(monkeypatch, tracker: page.Requests, probes, on_probe=None) -> str:
@@ -581,7 +631,7 @@ async def _settle(monkeypatch, tracker: page.Requests, probes, on_probe=None) ->
 
 
 def _submitted_with_sign_in_request() -> page.Requests:
-    tracker = page.Requests()
+    tracker = page.Requests("example.com")
     now = asyncio.get_running_loop().time()
     tracker.submitted(now)
     _sent(tracker, "sign-in", now)
@@ -611,7 +661,7 @@ async def test_a_sign_in_request_that_finishes_lets_the_page_decide(monkeypatch,
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("shown", "expected"), [(True, "rejected"), (False, "signed_in")])
 async def test_a_request_the_page_started_before_the_submit_doesnt_hold_the_result(monkeypatch, shown, expected):
-    tracker = page.Requests()
+    tracker = page.Requests("example.com")
     now = asyncio.get_running_loop().time()
     _sent(tracker, "poll", now - 1)
     tracker.submitted(now)
@@ -653,3 +703,89 @@ async def test_a_slow_correct_sign_in_marks_nothing_out_of_date_and_records_unkn
     assert saved_logins.get_login(world.login_id).status != saved_logins.STATUS_OUT_OF_DATE
     assert world.owner.declared == [] and world.typed
     _never_shown(world, caplog, text)
+
+
+@pytest.mark.asyncio
+async def test_an_analytics_post_after_the_submit_marks_nothing_out_of_date(world, monkeypatch, caplog):
+    """The field still shows and a request to another site finished: the result is unknown, never rejected."""
+    called = _results(monkeypatch)
+
+    class Analytics(REAL_REQUESTS):
+        async def start(self, _endpoint):
+            return None
+
+        async def stop(self):
+            return None
+
+        def submitted(self, now):
+            super().submitted(now)
+            _sent(self, "beacon", now, url="https://analytics.example.net/collect")
+            _finished(self, "beacon", now)
+
+    monkeypatch.setattr(page, "Requests", Analytics)
+    monkeypatch.setattr(fill, "_settled", REAL_SETTLED)
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_AFTER_INPUT", 0.01)
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_EVERY", 0.03)
+    monkeypatch.setattr(fill, "SETTLE_LIMIT", 0.3)
+
+    async def probe(_endpoint, _known):
+        return browser_cdp.PasswordProbe("L1", "example.com", frozenset({1}), "T1", present_nodes=frozenset())
+
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+    text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == fill.UNKNOWN.format(site=SITE, username=USER)
+    assert called == ["fill_unknown"]
+    assert saved_logins.get_login(world.login_id).status != saved_logins.STATUS_OUT_OF_DATE
+    assert world.owner.declared == []
+    _never_shown(world, caplog, text)
+
+
+# A page that stops answering: the fill ends by its deadline, frees the browser's command lock, and a reply
+# that would come later is never read into the result.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("hung", "expected"), [
+    ("linked_windows", "page"), ("find_form", "page"), ("type_values", "uncertain"), ("submit", "uncertain"),
+])
+async def test_a_page_that_never_answers_ends_the_fill_and_frees_the_lock(world, monkeypatch, caplog, hung, expected):
+    monkeypatch.setattr(fill, "COMMAND_TIMEOUT", 0.05)
+    called = _results(monkeypatch)
+    waits: list[str] = []
+
+    async def never(*_args):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            waits.append("stopped")
+            raise
+        return "typed"
+
+    monkeypatch.setattr(page, hung, never)
+    async with asyncio.timeout(5):
+        text = await fill.fill_saved_login(THREAD, world.login_id)
+    assert text == fill.REFUSED[expected].format(site=SITE, username=USER)
+    assert waits == ["stopped"] and not world.owner.runtime.action_lock.locked()
+    # Once typing began, the end still records its one unknown row; before it, nothing was read or recorded.
+    assert called == (["fill_unknown"] if expected == "uncertain" else [])
+    assert ("read" in world.steps) == (expected == "uncertain")
+    assert "TimeoutError" in caplog.text
+    _never_shown(world, caplog, text)
+
+
+@pytest.mark.asyncio
+async def test_a_settle_probe_that_never_answers_ends_at_the_settle_limit(monkeypatch):
+    monkeypatch.setattr(browser_step_lifecycle, "REPROBE_AFTER_INPUT", 0.01)
+    monkeypatch.setattr(fill, "SETTLE_LIMIT", 0.2)
+    stopped: list[bool] = []
+
+    async def never(_endpoint, _known):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.append(True)
+            raise
+
+    monkeypatch.setattr(browser_cdp, "page_password_probe", never)
+    tracker = page.Requests("example.com")
+    async with asyncio.timeout(5):
+        assert await fill._settled(ENDPOINT, "example.com", tracker) == "unknown"
+    assert stopped == [True]
