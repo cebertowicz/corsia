@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3614,
+      "bytes": 3576,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
+      "sha256": "d59f8d1f38f9093a83915fbebf2f2a84c902ac969fd65331eb823ddcf99a4cf2"
     },
     {
       "bytes": 389,
@@ -124,12 +124,6 @@
       "sha256": "573be7b1036f53f05e60af73d9f7d547eafb3402052304f856a6d3f43fa696c3"
     },
     {
-      "bytes": 3541,
-      "kind": "skill",
-      "path": "skills/agent-experience/SKILL.md",
-      "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
-    },
-    {
       "bytes": 5445,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
@@ -160,10 +154,10 @@
       "sha256": "e9fc822835e368071ac6c8627f7777c2a7e4d9bda0dab88752ebbfdd1a30563e"
     },
     {
-      "bytes": 3700,
+      "bytes": 3611,
       "kind": "skill",
       "path": "skills/backlog-intake/SKILL.md",
-      "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
+      "sha256": "d49c3f9af3663d382fd95b1d41a9cb377f4b50c5ec8fdbdcdd9530313c70a2f2"
     },
     {
       "bytes": 10112,
@@ -190,10 +184,10 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 28857,
+      "bytes": 28876,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "8fe08906835a94227a2d1713b2e68b8088b292c31b1e1eed5d76398ccf347e09"
+      "sha256": "0bd079df56311e49d77a0fcfdd4800ceb3672bd7ff471f550ae72be00bfc97c0"
     },
     {
       "bytes": 742,
@@ -268,10 +262,10 @@
       "sha256": "fae58854bddeb4591b32e51183983ec907186cb22f8477b3d42f9737ff56a638"
     },
     {
-      "bytes": 6035,
+      "bytes": 6044,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "881ad673645b6becdf297e0f681e07b8697f141e6ea675f45511f67688d0c347"
+      "sha256": "47fb50c83322fb0f9e64223a4d91e8f0b6a7c0f2d7c6cd961b012aa283a98542"
     },
     {
       "bytes": 3954,
@@ -298,16 +292,10 @@
       "sha256": "087aec1d96f28392addebc03f7c5dcc61bab1b53875f842c2cb2b7496bd2284d"
     },
     {
-      "bytes": 1529,
+      "bytes": 1243,
       "kind": "skill",
       "path": "skills/decision-brief/corsia.yaml",
-      "sha256": "6b63ac77ebfd2b95cebe9dc7cb7ad407a12411f079fd3a9ceb74cd1b5f21bf7d"
-    },
-    {
-      "bytes": 5507,
-      "kind": "skill",
-      "path": "skills/engineering-standards/SKILL.md",
-      "sha256": "fd74dc1306bc8cab9ad79060175df3b7cb225d6ac21b312c21ce37f09c6151f5"
+      "sha256": "c327bc21aecaf6f031eb410371f7d59857a1d52b4646c4b0b6bb3cd802f161d8"
     },
     {
       "bytes": 4889,
@@ -434,12 +422,6 @@
       "kind": "skill",
       "path": "skills/prioritization/SKILL.md",
       "sha256": "7e09b71c5ff3a6568b7775a937f39b1ebbc2291bb2aa79a503b1a91f57f55c84"
-    },
-    {
-      "bytes": 3878,
-      "kind": "skill",
-      "path": "skills/product-thinking/SKILL.md",
-      "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
     },
     {
       "bytes": 2697,
