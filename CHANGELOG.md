@@ -29,6 +29,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - First run is shorter and shows how you steer your agents: your profile becomes yours when you approve your About you doc (or at the end of setup if you skip it), agents then suggest changes to it for you to accept, setup explains workflows, the access step drops the Auto-approve paragraph, and the opening message is cut from 241 words to 143: what an agent is, that CORSIA is one too, and a one-line project.
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On a touch screen, Comment is again the round accent button, centred at the bottom of the screen above the keyboard, with no bar behind it; a selected last line still never sits under it.
+- On a touch screen, the Comment button no longer covers the buttons of a task or review request at the bottom of a document, or the new-comments jump button on a narrow screen: it sits just above them while they show, and goes back to the bottom of the screen when they leave.
 - On a phone, the bar at the top of the screen is now evenly frosted over the chat as it scrolls beneath it; before, its lower part let the chat show through unblurred and ended in a hard line.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
