@@ -2,6 +2,7 @@
 
 import sqlite3
 
+from doceditor.comment_thread_views import _READ_CHUNK
 from doceditor.feedback_state import _SCOPE_CHUNK, annotate_pane, unread_comment_rows, unread_item_ids
 from infra.schema import SCHEMA_SQL
 
@@ -33,6 +34,12 @@ def test_the_pane_query_reads_its_documents_through_their_index():
     plan = " | ".join(row[3] for row in db.execute(f"EXPLAIN QUERY PLAN SELECT DISTINCT root.artifact_id {sql}", params))
     assert "SCAN item" not in plan, plan
     assert "idx_doc_comments_artifact (artifact_id=?)" in plan, plan
+
+
+def test_a_full_chunk_binds_no_more_than_sqlites_oldest_default_limit():
+    for chunk in (_SCOPE_CHUNK, _READ_CHUNK):
+        sql, params = unread_comment_rows("owner", tuple(f"doc-{n}" for n in range(chunk)))
+        assert len(params) == sql.count("?") <= 999, (chunk, len(params))
 
 
 def test_the_pane_marks_its_own_documents_the_same_as_before():

@@ -66,6 +66,26 @@ describe('each await on a comment post ends inside its bound', () => {
 	});
 });
 
+describe('a post waiting its turn for a browser connection', () => {
+	it('goes out once, under its draft\'s id, when its request only starts 20 s after the press', async () => {
+		// The browser queues a request while its few connections per origin are held: nothing is sent until one frees,
+		// and an abort meanwhile cancels it unsent.
+		const fetch = vi.fn((_input: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+			const sent = setTimeout(() => resolve(new Response(JSON.stringify({ comment: { id: 'draft-1', body: 'Too vague' } }), { status: 200 })), 20_000);
+			init?.signal?.addEventListener('abort', () => { clearTimeout(sent); reject(new DOMException('aborted', 'AbortError')); });
+		}));
+		vi.stubGlobal('fetch', fetch);
+		const post = watch(postTop('artifact', 'draft-1', fields));
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(post.error).toBeUndefined();
+		expect(post.settled).toBe(true);
+		const posts = fetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(JSON.parse(String(posts[0][1]?.body)).client_id).toBe('draft-1');
+		expect(posts[0][1]?.signal?.aborted).toBe(false);
+	});
+});
+
 describe('the timing header', () => {
 	const headerOf = (call: unknown[]) => new Headers((call[1] as RequestInit).headers).get(COMMENT_TIMING_HEADER);
 

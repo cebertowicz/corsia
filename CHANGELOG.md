@@ -9,6 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A comment on an image, or on any text, that the server refuses now says why in its box in a document that is not live, as it already did in a live one, and a refused image comment names the image by its folder and file name instead of a path on your computer.
+- A comment posted while the app is busy with other requests, as on a phone reaching CORSIA remotely, now waits up to a minute for its turn to be sent instead of failing after 12 seconds without being sent; a server that never answers now takes up to about 3 minutes, not about 30 seconds, to say it couldn't confirm the comment.
 - A comment that fails to post is now logged with how it was refused (its status and short code, never its words), so a failed comment can be traced to its cause.
 - A host access request now shows its details as plain labelled sections, with Reject as a button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
@@ -17,6 +18,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
+- Activity refreshes quickly again on documents with many comments, and keeps one refresh open at a time, so a comment or other post from a phone over remote access is no longer held waiting for a free connection until it fails.
 - Activity separates your tasks from document reply notifications, groups replies by document, and lets you mark them read there. Each notification names its document by its title rather than its file name, and its count and the bar count only the replies to your comments; marking a document read there still clears all of its unread items, not just the counted replies. Decisions and messages to review are now in Activity instead of above the chat input; Activity also tells you when the list may be out of date.
 - Activity shows instructions for tasks assigned to you.
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
