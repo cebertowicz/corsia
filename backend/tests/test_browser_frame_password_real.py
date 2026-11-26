@@ -299,3 +299,21 @@ async def test_a_password_field_in_a_cross_origin_frame_opens_the_step_and_stays
         resolve_search = _resolver(endpoint, await _element_box(endpoint, "q"))
         with pytest.raises(BrowserSessionError, match="until you open another page or reload"):
             await browser_control.require_page_access(THREAD, probe, ("get", "value", "@e1"), resolve=resolve_search)
+
+
+@pytest.mark.asyncio
+async def test_a_long_list_naming_the_search_word_is_checked_and_left(plan):  # noqa: F811
+    """One DOM.setChildNodes event for a long list passes 1 MiB (#3392): the check still answers, open passes,
+    and a sign-in field added to that list is still found and guarded."""
+    rows = "Array.from({length: 12000}, (_, i) => `<div class='row item' data-k='${'y'.repeat(40)}'>password ${i}</div>`)"
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=f"document.body.innerHTML = '<div id=list>' + {rows}.join('') + '</div>'; 0")
+        probe = partial(browser_cdp.page_password_probe, endpoint)
+        assert not (await probe({})).visible_nodes
+        assert await browser_control.require_page_access(THREAD, probe, ('open', 'https://example.com/')) is None
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression="document.getElementById('list').insertAdjacentHTML('beforeend',"
+                           " '<input type=password style=\"position:fixed;left:10px;top:10px;width:120px;height:24px\">')")
+        with pytest.raises(BrowserSessionError, match='asks for a password'):
+            await browser_control.require_page_access(THREAD, probe, ('snapshot',))

@@ -124,7 +124,9 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
     out-of-process (cross-origin) frame (browser_cdp_frames keys their nodes), and transfers only the matching
     nodes, never the whole DOM. A field in a frame is visible only while each frame element above it is.
     """
-    async with CdpClient(endpoint) as cdp:
+    # No message cap: on a long list, one DOM.setChildNodes event for a match's ancestors can pass 1 MiB, and a
+    # capped socket closes (1009) on every check of that page, refusing every agent command (#3392).
+    async with CdpClient(endpoint, max_size=None) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = loader_id(frame)
         host = main_host(frame)
