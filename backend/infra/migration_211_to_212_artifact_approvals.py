@@ -1,9 +1,9 @@
-"""Schema 210 -> 211: approved artifact versions."""
+"""Schema 211 -> 212: approved artifact versions."""
 
 import sqlite3
 
 
-def migrate_210_to_211(conn: sqlite3.Connection) -> None:
+def migrate_211_to_212(conn: sqlite3.Connection) -> None:
     """Create the approval record and indexes in the migration transaction."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS artifact_approvals (
