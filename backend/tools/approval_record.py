@@ -66,8 +66,6 @@ class ApprovalRecordTool(Tool):
                         continue
                     visible.append(artifact)
                 result['artifacts'] = visible
-                if result['tie_status'] == 'tied' and not visible:
-                    result['tie_status'] = 'none tied'
                 return result
             finally:
                 db.close()

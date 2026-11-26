@@ -76,4 +76,6 @@ async def test_script_channel_scopes_approved_documents(ownership_scope, monkeyp
         return json.loads(response['stdout'])
 
     assert len((await call(scope['other']))['artifacts']) == 1
-    assert (await call(outsider))['artifacts'] == []
+    hidden = await call(outsider)
+    assert hidden['artifacts'] == []
+    assert hidden['tie_status'] == 'tied'  # withheld documents never read as "none tied"
