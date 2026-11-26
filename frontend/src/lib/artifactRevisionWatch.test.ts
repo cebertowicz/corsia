@@ -7,6 +7,7 @@ vi.mock('$lib/api/docs', () => ({ fetchRevision: mocks.fetchRevision }));
 
 import { checkThreadRevisions, startArtifactRevisionWatch } from './artifactRevisionWatch';
 import { emit } from '$lib/ws/events';
+import { COMMENT_POST_TIMEOUT_MS } from '$lib/api/boundedRequest';
 import { token } from '$lib/stores/auth';
 import { threads } from '$lib/stores/threads';
 import { uiScope } from '$lib/stores/uiScope';
@@ -69,7 +70,7 @@ describe('artifact revision watch', () => {
 
 			emit('artifacts_changed', { artifact_id: 'art-1' });
 			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalledTimes(1));
-			expect(mocks.fetchRevision).toHaveBeenCalledWith('/a.md', 'project-1', 'art-1');
+			expect(mocks.fetchRevision).toHaveBeenCalledWith('/a.md', 'project-1', 'art-1', COMMENT_POST_TIMEOUT_MS);
 		} finally {
 			stop();
 		}
@@ -135,7 +136,7 @@ describe('artifact revision watch', () => {
 		try {
 			window.dispatchEvent(new Event('focus'));
 			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalledTimes(1));
-			expect(mocks.fetchRevision).toHaveBeenCalledWith('/a.md', 'project-1', 'art-1');
+			expect(mocks.fetchRevision).toHaveBeenCalledWith('/a.md', 'project-1', 'art-1', COMMENT_POST_TIMEOUT_MS);
 		} finally {
 			stop();
 		}
@@ -150,7 +151,7 @@ describe('artifact revision watch', () => {
 		const stop = startArtifactRevisionWatch();
 		try {
 			emit('artifacts_changed', { artifact_id: 'art-1' });
-			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalledWith('/child.md', 'project-1', 'art-1'));
+			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalledWith('/child.md', 'project-1', 'art-1', COMMENT_POST_TIMEOUT_MS));
 		} finally {
 			stop();
 		}
@@ -345,6 +346,98 @@ describe('artifact revision watch', () => {
 				expect(tabOf('thread-a', visible).latestRevision).toBe('r4');
 			} finally {
 				stop();
+			}
+		});
+
+		it('gives a hint its own look when the tab saved while its probe waited for a slot', async () => {
+			open('thread-a', 'art-1', '/a.md');
+			open('thread-a', 'art-2', '/b.md');
+			const waiting = open('thread-b', 'art-3', '/c.md');
+			const stop = startArtifactRevisionWatch();
+			try {
+				window.dispatchEvent(new Event('focus'));
+				await settle();
+				expect(held.map((probe) => probe.path)).toEqual(['/a.md', '/b.md']);
+				// The waiting probe's answer will be for the old baseline, so the
+				// hint it absorbs must still get a look against the new one.
+				markTabSaved('thread-b', waiting, 'r5');
+				emit('artifacts_changed', { artifact_id: 'art-3' });
+				await releaseAll('r6');
+				const calls = mocks.fetchRevision.mock.calls.map(([path]) => path);
+				expect(calls.filter((path) => path === '/c.md')).toHaveLength(2);
+				expect(tabOf('thread-b', waiting).latestRevision).toBe('r6');
+			} finally {
+				stop();
+			}
+		});
+
+		it('sends a waiting probe with the project its tab was checked in, after a project switch', async () => {
+			open('thread-a', 'art-1', '/a.md');
+			open('thread-a', 'art-2', '/b.md');
+			open('thread-b', 'art-3', '/c.md');
+			const stop = startArtifactRevisionWatch();
+			try {
+				window.dispatchEvent(new Event('focus'));
+				await settle();
+				expect(held.map((probe) => probe.path)).toEqual(['/a.md', '/b.md']);
+				uiScope.set({ id: 'project-2', name: 'Project 2', color: '#000' });
+				await releaseAll();
+				const waited = mocks.fetchRevision.mock.calls.find(([path]) => path === '/c.md');
+				expect(waited?.[1]).toBe('project-1');
+			} finally {
+				stop();
+			}
+		});
+
+		it('frees the slots of two probes that never answer, so a later sweep still checks', async () => {
+			vi.useFakeTimers();
+			try {
+				const first = open('thread-a', 'art-1', '/a.md');
+				open('thread-a', 'art-2', '/b.md');
+				// A request that never answers ends at the limit it is given, as readWithin ends it.
+				mocks.fetchRevision.mockImplementation((_path: string, _projectId: string | null, _artifactId: string | null, within?: number) => (
+					new Promise((_, reject) => {
+						if (within) setTimeout(() => reject(new Error('timed out')), within);
+					})
+				));
+				const stop = startArtifactRevisionWatch();
+				try {
+					window.dispatchEvent(new Event('focus'));
+					await vi.advanceTimersByTimeAsync(0);
+					expect(mocks.fetchRevision).toHaveBeenCalledTimes(2);
+					await vi.advanceTimersByTimeAsync(COMMENT_POST_TIMEOUT_MS);
+					mocks.fetchRevision.mockImplementation((_path: string, _projectId: string | null, artifactId: string | null) => (
+						Promise.resolve({ ...revision('r1'), artifact_id: artifactId })
+					));
+					window.dispatchEvent(new Event('focus'));
+					await vi.advanceTimersByTimeAsync(0);
+					expect(mocks.fetchRevision).toHaveBeenCalledTimes(4);
+					expect(tabOf('thread-a', first).latestRevision).toBe('r1');
+				} finally {
+					stop();
+				}
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('starts the next watch with every slot free when the last one stopped with probes hung', async () => {
+			open('thread-a', 'art-1', '/a.md');
+			open('thread-a', 'art-2', '/b.md');
+			open('thread-b', 'art-3', '/c.md');
+			let stop = startArtifactRevisionWatch();
+			try {
+				window.dispatchEvent(new Event('focus'));
+				await settle();
+				expect(held.map((probe) => probe.path)).toEqual(['/a.md', '/b.md']);
+				stop();
+				stop = startArtifactRevisionWatch();
+				emit('artifacts_changed', { artifact_id: 'art-3' });
+				await settle();
+				expect(mocks.fetchRevision.mock.calls.map(([path]) => path)).toContain('/c.md');
+			} finally {
+				stop();
+				await releaseAll();
 			}
 		});
 	});

@@ -43,8 +43,8 @@ export class ReviewRefusal extends Error {
 	constructor(readonly code: string, message: string) { super(message); }
 }
 
-// Decision: a read the person is waiting on gets the same budget as a comment post, so the app has one wait
-// budget for a single request; shared on purpose, so they change together. A GET is safe to abort.
+// The review read has the review requests' own limit (REVIEW_REQUEST_TIMEOUT_MS), not the comment post's, which
+// counts the browser's connection wait. A GET is safe to abort.
 export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead> {
 	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/review`, {}, REVIEW_REQUEST_TIMEOUT_MS);
 	if (!response.ok) throw new Error(`${response.status}`);

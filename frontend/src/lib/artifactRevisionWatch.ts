@@ -8,6 +8,9 @@ import { emitProductEvent } from '$lib/product_events';
 import { uiScope } from '$lib/stores/uiScope';
 import { activeThreadId } from '$lib/stores/activeThreadId';
 import { threadWorkspaces, applyTabRevisionCheck } from '$lib/stores/artifactWorkspace';
+import {
+	PROBE_TIMEOUT_MS, ProbeCancelled, releaseProbeSlot, resetProbeSlots, takeProbeSlot,
+} from '$lib/revisionProbeSlots';
 
 /**
  * Keeps every open tab's "latest known revision" honest.
@@ -20,39 +23,13 @@ import { threadWorkspaces, applyTabRevisionCheck } from '$lib/stores/artifactWor
  */
 
 /**
- * Background probes may hold at most this many of the browser's connections at
- * once. Safari over HTTP/1.1 opens six per origin, and a request the person
- * just made (a comment post) waits in the browser while all six are held. A
- * foreground sweep sends one probe per open document tab, so without a limit
- * it can hold all six. Probes the person asked for (a link press, a draft
- * load, an image view) call fetchRevision directly, outside this limit, and
- * never queue behind a sweep.
+ * Starts the next watcher run with every slot free and no tab check pending, and
+ * withdraws the probes still waiting. A check left from the stopped run never
+ * absorbs the next run's hints; its late answer still applies only to an unchanged baseline.
  */
-const MAX_BACKGROUND_PROBES = 2;
-
-interface SlotWaiter {
-	visible: () => boolean;
-	grant: () => void;
-}
-
-let probesInFlight = 0;
-const slotWaiters: SlotWaiter[] = [];
-
-/** Takes a slot now (null) or returns the wait for one. */
-function takeProbeSlot(visible: () => boolean): Promise<void> | null {
-	if (probesInFlight < MAX_BACKGROUND_PROBES) {
-		probesInFlight += 1;
-		return null;
-	}
-	return new Promise((grant) => slotWaiters.push({ visible, grant }));
-}
-
-/** Hands the slot to the visible tab's waiting probe first, otherwise the oldest. */
-function releaseProbeSlot(): void {
-	const visibleIndex = slotWaiters.findIndex((waiter) => waiter.visible());
-	const [next] = slotWaiters.splice(visibleIndex >= 0 ? visibleIndex : 0, 1);
-	if (next) next.grant();
-	else probesInFlight -= 1;
+function resetProbes(): void {
+	pendingChecks.clear();
+	resetProbeSlots();
 }
 
 /** A tab identity and baseline are the guard against a late probe re-dirtying a save. */
@@ -73,6 +50,8 @@ type SweepProbes = Map<string, Probe>;
 
 interface PendingCheck {
 	queued: boolean;
+	/** A hint arrived while this probe waited for a slot and is owed a look if the probe's answer goes unused. */
+	absorbedHint: boolean;
 	probe: Probe | null;
 }
 
@@ -111,14 +90,17 @@ function startProbe(target: ProbeTarget, sweep: SweepProbes | null): Probe {
 	const shared = sweep?.get(fileKey(target));
 	if (shared) return shared;
 	const probe = { started: false } as Probe;
+	// The scope the tab was checked against when scheduled, not whichever is loaded when a slot frees.
+	const projectId = get(uiScope)?.id ?? null;
+	const { owner, wait } = takeProbeSlot(() => isVisibleFile(target));
 	const send = () => {
 		probe.started = true;
-		const result = fetchRevision(target.path, get(uiScope)?.id ?? null, target.artifactId);
+		const result = fetchRevision(target.path, projectId, target.artifactId, PROBE_TIMEOUT_MS);
 		// Released on a side branch, so the tabs waiting on `result` hear it no later.
-		result.then(releaseProbeSlot, releaseProbeSlot);
+		const release = () => releaseProbeSlot(owner);
+		result.then(release, release);
 		return result;
 	};
-	const wait = takeProbeSlot(() => isVisibleFile(target));
 	probe.result = wait ? wait.then(send) : send();
 	sweep?.set(fileKey(target), probe);
 	return probe;
@@ -142,9 +124,10 @@ function scheduleTabCheck(threadId: string, instanceId: string, sweep: SweepProb
 		// A probe still waiting for a slot will read the newest revision when it
 		// goes out; one already on the wire may predate this change.
 		if (!pending.probe || pending.probe.started) pending.queued = true;
+		else pending.absorbedHint = true;
 		return;
 	}
-	const next: PendingCheck = { queued: false, probe: null };
+	const next: PendingCheck = { queued: false, absorbedHint: false, probe: null };
 	pendingChecks.set(key, next);
 	void runTabChecks(threadId, instanceId, key, next, sweep);
 }
@@ -159,6 +142,7 @@ async function runTabChecks(
 	try {
 		do {
 			pending.queued = false;
+			pending.absorbedHint = false;
 			const tab = get(threadWorkspaces)[threadId]?.tabs.find((entry) => entry.instanceId === instanceId);
 			// A link tab still resolving names no file yet, so there is nothing to probe.
 			if (!tab || tab.kind !== 'document' || tab.link || !get(token)) return;
@@ -181,14 +165,21 @@ async function runTabChecks(
 						writable: result.writable,
 						artifactId: result.artifact_id,
 					});
+				} else if (pending.absorbedHint) {
+					// The tab's baseline moved while the probe waited, so its answer is
+					// unused; the hint it stood in for gets its own look.
+					pending.queued = true;
 				}
-			} catch {
+			} catch (error) {
+				if (error instanceof ProbeCancelled) return;
 				// A failed probe is not evidence that the document is gone — leave the
 				// tab exactly as it was rather than inventing an unavailable state.
 				if (!reportedProbeFailure) {
 					reportedProbeFailure = true;
 					emitProductEvent('artifact', 'revision_probe_failed');
 				}
+				// The hint this probe stood in for still gets its look.
+				if (pending.absorbedHint) pending.queued = true;
 			}
 		} while (pending.queued);
 	} finally {
@@ -266,6 +257,7 @@ export function startArtifactRevisionWatch(): () => void {
 
 	return () => {
 		offChanged?.();
+		resetProbes();
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('focus', onForeground);
 			document.removeEventListener('visibilitychange', onVisible);
