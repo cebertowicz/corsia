@@ -61,6 +61,9 @@
 	const document = $derived(documentDetailOf(item));
 	const doc = $derived(documentOf(item));
 	const sourceThread = $derived(item.source.thread_id);
+	function chatButtonLabel(name: string) {
+		return name === 'Untitled thread' || name.length > 24 ? 'Open the chat' : `Open ${name}’s chat`;
+	}
 	// The open document keeps its original lookup context until the person moves on.
 	const documentThread = untrack(() => item.source.thread_id);
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
@@ -335,7 +338,7 @@
 			<h1 class="dh">{item.title}</h1>
 			{#snippet chatButton()}
 				{#if sourceThread}
-					<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>{item.source.thread_label === 'Untitled thread' ? 'Open the chat' : `Open ${item.source.thread_label}’s chat`}</Button>
+					<span class="chat-action"><Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}><span class="chat-label">{chatButtonLabel(item.source.thread_label)}</span></Button></span>
 				{/if}
 			{/snippet}
 			{#if missingDraft}
@@ -349,6 +352,9 @@
 {/if}
 
 <style>
+	.chat-action { display: inline-flex; min-width: 0; max-width: 100%; }
+	.chat-action :global(button) { min-width: 0; max-width: 100%; }
+	.chat-label { overflow: hidden; text-overflow: ellipsis; }
 	.no-longer { margin: 0; padding: var(--space-2) var(--space-5); color: var(--text-secondary); font-size: var(--text-subhead); }
 	.doc-pane { position: relative; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; --comment-jump-margin: var(--space-8); }
 	/* The document bar is in the leaf's notice slot, just below its tab strip. */

@@ -171,9 +171,21 @@ describe('Activity list', () => {
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(alert()).toContain('Couldn’t remove this draft. Try again.'));
 		const actions = buttonNamed('Don’t send')!.parentElement!;
-		expect(actions).toBe(buttonNamed('Open the chat')!.parentElement);
+		expect(actions).toBe(buttonNamed('Open the chat')!.parentElement!.parentElement);
 		expect(actions.nextElementSibling?.getAttribute('role')).toBe('alert');
 		expect(rows()).toHaveLength(1);
+	});
+
+	it.each([
+		['123456789012345678901234', 'Open 123456789012345678901234’s chat'],
+		['1234567890123456789012345', 'Open the chat'],
+	])('labels the missing draft chat for a %s name', async (name, label) => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			source: activitySource(name, 'thread-1'),
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		const onSelectThread = render(); await settle();
+		buttonNamed(label)!.click();
+		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
 	});
 
 	it('opens an untitled missing draft chat with a natural label', async () => {
