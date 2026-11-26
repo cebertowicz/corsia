@@ -317,3 +317,17 @@ async def test_a_long_list_naming_the_search_word_is_checked_and_left(plan):  # 
                            " '<input type=password style=\"position:fixed;left:10px;top:10px;width:120px;height:24px\">')")
         with pytest.raises(BrowserSessionError, match='asks for a password'):
             await browser_control.require_page_access(THREAD, probe, ('snapshot',))
+
+
+@pytest.mark.asyncio
+async def test_a_list_past_the_page_check_cap_stays_refused(plan, monkeypatch):  # noqa: F811
+    """A page whose list passes the probe's message cap fails closed, naming the way out, never open."""
+    monkeypatch.setattr(browser_cdp, 'PAGE_PROBE_MAX_MESSAGE', 2**20)
+    rows = "Array.from({length: 12000}, (_, i) => `<div class='row item' data-k='${'y'.repeat(40)}'>password ${i}</div>`)"
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=f"document.body.innerHTML = '<div id=list>' + {rows}.join('') + '</div>'; 0")
+        probe = partial(browser_cdp.page_password_probe, endpoint)
+        with pytest.raises(BrowserSessionError) as refused:
+            await browser_control.require_page_access(THREAD, probe, ('open', 'https://example.com/'))
+        assert str(refused.value) == browser_control.PAGE_CHECK_REFUSED

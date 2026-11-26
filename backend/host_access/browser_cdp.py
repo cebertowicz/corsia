@@ -28,6 +28,10 @@ _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 # process, not a page, so a stuck tab can't hold it; a live browser answers in milliseconds even with
 # thousands of cookies. Past 5 s the browser itself isn't answering and the caller gives up on it.
 BROWSER_CALL_TIMEOUT = 5.0
+# The page check's own message cap (#3392). One DOM.setChildNodes for a long list carries every row: measured on
+# Chrome 152, 323-362 bytes a row (12,000 to 100,000 rows, 0- and 40-character attributes). 400 bytes x 160,000
+# rows covers any list a person works through; a page past it closes the socket (1009) and stays refused.
+PAGE_PROBE_MAX_MESSAGE = 400 * 160_000
 
 
 @dataclass(frozen=True)
@@ -124,9 +128,7 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
     out-of-process (cross-origin) frame (browser_cdp_frames keys their nodes), and transfers only the matching
     nodes, never the whole DOM. A field in a frame is visible only while each frame element above it is.
     """
-    # No message cap: on a long list, one DOM.setChildNodes event for a match's ancestors can pass 1 MiB, and a
-    # capped socket closes (1009) on every check of that page, refusing every agent command (#3392).
-    async with CdpClient(endpoint, max_size=None) as cdp:
+    async with CdpClient(endpoint, max_size=PAGE_PROBE_MAX_MESSAGE) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = loader_id(frame)
         host = main_host(frame)
