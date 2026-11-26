@@ -7,7 +7,7 @@ import { get } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
 import * as Y from 'yjs';
 import DocViewer from './DocViewer.svelte';
-import { PostTimeoutError } from '$lib/api/boundedRequest';
+import { COMMENT_POST_TIMEOUT_MS, PostTimeoutError } from '$lib/api/boundedRequest';
 import { connectionState } from '$lib/stores/connection';
 import { emit } from '$lib/ws/events';
 import { encodeUpdate } from '$lib/stores/documentWire';
@@ -62,7 +62,7 @@ beforeEach(() => {
 			to_off: fields.to_off, author: 'you', author_kind: 'user', created_at: '2026-11-18T00:00:00Z', parent_id: null, review: false, resolved: false,
 			replies: [], tagged_agent_ids: [...new Set<string>(fields.tagged_agent_ids ?? [])].sort() };
 		store.rows.set(fields.client_id, row);
-		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(12_000); }
+		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(COMMENT_POST_TIMEOUT_MS); }
 		return row;
 	});
 });
