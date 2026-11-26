@@ -44,17 +44,53 @@ def index():
     return result
 
 
-def effective(owner_id: str, project_id: str | None, workspace: Path, db):
-    """Return effective and local skills for one persistent owner."""
+def effective(owner_id: str, project_id: str | None, workspace: Path, db, scope: str = "thread"):
+    """Return the owner's effective skills and the local skills at one scope (its own, or its project's)."""
     from core.skill_resolution import local_skill_inventory, resolve_effective_skills
 
     resolution = resolve_effective_skills(
         thread_id=owner_id, project_id=project_id, workspace=workspace, db=db,
     )
     local = local_skill_inventory(
-        scope="thread", thread_id=owner_id, project_id=project_id, workspace=workspace, db=db,
+        scope=scope, thread_id=owner_id, project_id=project_id, workspace=workspace, db=db,
     )
     return resolution.included, local
+
+
+def installed_library_origins(owner_id: str, db) -> dict[str, dict[str, Any]]:
+    """Read this owner's installed library copies with one indexed relation query."""
+    from events.connectors.library import INSTALLED_SKILL_TYPE, LIBRARY_INTEGRATION
+    from library.installed import read_origin
+
+    rows = db.execute(
+        """SELECT identities.external_id, identities.path
+             FROM artifact_identities AS identities
+             JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
+             WHERE identities.integration=? AND identities.type=? AND identities.state='active'
+               AND registrations.parent_thread_id=?
+               AND registrations.relationship_state IN ('owner-active', 'owner-pinned')""",
+        (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE, owner_id),
+    ).fetchall()
+    origins: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        path = row["path"]
+        external_id = row["external_id"]
+        if not isinstance(path, str) or not isinstance(external_id, str):
+            continue
+        origin = read_origin(Path(path).parent)
+        if origin is not None:
+            origins[external_id.rpartition("/")[2]] = origin
+    return origins
+
+
+def local_edits_refusal(owner_id: str, name: str, folder: Path, paths: list[str], exact: bool) -> dict[str, Any]:
+    """Stop before replacing an edited copy, naming the edits and the token to confirm with."""
+    return {
+        "error": "local_edits",
+        "message": f"{edits_lead(paths, exact)}; review them before choosing whether to discard them",
+        "changed_files": paths if exact else [],
+        "local_edits_digest": local_edits_digest(owner_id, name, folder),
+    }
 
 
 def library_origin(row) -> dict[str, Any] | None:

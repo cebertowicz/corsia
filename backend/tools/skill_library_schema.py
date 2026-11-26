@@ -6,7 +6,8 @@ DESCRIPTION = (
     "Only the actual project conductor or workspace CORSIA agent may use fetch_pack with a blueprint name; "
     "it fetches the current index version into that agent's thread. If there is no conductor, continue without the pack. "
     "After fetching, read manifest.yaml at the returned path and propose to the person which parts to adopt, never all of it. "
-    "Skills are installed in your persistent owner's thread; updates and withdrawals are reported, and copies are not changed without your action."
+    "Skills are installed in your persistent owner's thread; updates and withdrawals are reported, and copies are not changed without your action. "
+    "A project's lead agent may pass scope project to install, update or remove one copy every agent in the project sees."
 )
 
 
@@ -22,6 +23,8 @@ def parameters():
             "discard_local_edits": {"type": "boolean", "default": False,
                                     "description": "update/remove only: set true only with the local_edits_digest returned after reviewing affected files"},
             "local_edits_digest": {"type": "string", "description": "update/remove only: exact digest returned by local_edits; it confirms the listed edits may be discarded"},
+            "scope": {"type": "string", "enum": ["thread", "project"], "default": "thread",
+                      "description": "install/update/remove only: project changes the whole project's copy; the project's lead agent only"},
         },
         "required": ["action"],
     }

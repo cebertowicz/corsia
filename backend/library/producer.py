@@ -19,7 +19,7 @@ from events.connectors.library import (
 )
 from infra.db_async import run_off_db
 from library.installed import local_edits, read_origin
-from library.items import item_manifest, source_ref
+from library.items import corsia_authored, item_manifest, source_ref
 
 
 log = logging.getLogger(__name__)
@@ -63,17 +63,22 @@ def produce_once() -> int:
         payload = _notice_payload(row, items, index.generations)
         if payload is None:
             continue
-        if payload["event_type"] == ITEM_CHANGED_EVENT and not use_community_improvements:
+        if payload["event_type"] == ITEM_CHANGED_EVENT and not _offered(payload, items, use_community_improvements):
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     for row in _newest_pack_rows(_installed_rows(artifact_type=INSTALLED_PACK_TYPE)):
         payload = _pack_notice_payload(row, items, index.generations)
-        if payload is None or (payload["event_type"] == PACK_CHANGED_EVENT and not use_community_improvements):
+        if payload is None or (payload["event_type"] == PACK_CHANGED_EVENT and not _offered(payload, items, use_community_improvements)):
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
+
+
+def _offered(payload: dict[str, Any], items: dict[str, dict[str, Any]], use_community_improvements: bool) -> bool:
+    """A newer version is offered when the person uses community improvements or CORSIA wrote the item."""
+    return use_community_improvements or corsia_authored(items[payload["name"]])
 
 
 def _newest_pack_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
