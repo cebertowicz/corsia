@@ -114,7 +114,7 @@
 <style>
 	.chat-pane { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; padding-top: var(--header-bottom); background: var(--bg-primary); }
 	.strip { position: absolute; inset: 0 var(--header-right-controls-inset, 0px) auto 0; height: var(--header-height); z-index: 11; overflow: hidden; }
-	.jump { position: absolute; bottom: var(--space-4); left: 50%; transform: translateX(-50%); z-index: 2; }
+	.jump { position: absolute; bottom: var(--space-4); left: var(--space-3); z-index: 2; }
 	.bar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: var(--text-subhead); }
 	.bar strong { color: var(--text-primary); } .who { display: flex; align-items: flex-start; gap: var(--space-2); } .who > div > div { margin-top: var(--space-1); }
 	.scroll { overflow-y: auto; padding: var(--space-5) var(--space-5) 40vh; font-size: var(--text-body); line-height: var(--lh-relaxed); }
