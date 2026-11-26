@@ -52,7 +52,7 @@ EXCLUDED: dict[str, str] = {
     "comment_identity_moves": ("written once by schema step 199 -> 200 and read only by its reverse script; "
                                "no request path reads it"),
     **{table: NOT_IN_CENSUS for table in (
-        "action_drafts", "activity_rank_nudges", "activity_ranks", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views", "chat_comments",
+        "action_drafts", "activity_rank_nudges", "activity_ranks", "artifact_approvals", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views", "chat_comments",
         "chat_visible_content",
         "connected_account_audit",
         "connected_account_reach", "connected_accounts",
