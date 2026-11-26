@@ -11,6 +11,7 @@ import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, sendCommentReply, type ChatComment, type SendableChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
+import { createMentionSelection } from './comments/mentionSelection';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
 import { emitProductEvent } from '$lib/product_events';
 
@@ -495,6 +496,37 @@ describe('a chat opened with kept comments in it', () => {
 		expect(box()?.value).toBe('On the launch date');
 		expect(host.querySelector('td .cm-comment-pending')?.textContent).toBe('Friday');
 		chatCommentDrafts.dropRoot('thread', 'm1', cell);
+	});
+
+	it('one kept before its passage was, whose offsets no longer read its pressed quote, opens unplaced and sends nothing', async () => {
+		const posts = chatRoute();
+		// An older version kept the text and offsets only; its press kept the quote.
+		const key = chatCommentDrafts.rootKey('thread', 'm1', anchor), tags = createMentionSelection('Kept before places');
+		keptCommentDrafts.keepReply(key, 'Kept before places', tags);
+		keptCommentDrafts.claim(key, 'Kept before places', tags, undefined, { chat: { threadId: 'thread', messageId: 'm1', seq: 1, ...anchor } });
+		setup(send, 1440, { m1: 'next more' }); await settle();
+		expect(box()?.value).toBe('Kept before places');
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe(commentFailure('comment_quote_gone', null, 'comment', 'sent', 'thread').text);
+		expect(host.querySelector('.cm-comment-pending')).toBeNull();
+		await unsentComments.settled();
+		expect(posts()).toEqual([]);
+		expect(keptCommentDrafts.get(key)?.send).toBeUndefined();
+		keptCommentDrafts.forget(key);
+	});
+
+	it('a pressed reply going on its own draws its comment’s highlight as sending', async () => {
+		chatRoute(() => new Promise(() => {}));
+		const key = chatCommentDrafts.replyKey('one'), tags = createMentionSelection('Agreed, Monday works');
+		keptCommentDrafts.keepReply(key, 'Agreed, Monday works', tags);
+		keptCommentDrafts.claim(key, 'Agreed, Monday works', tags, undefined, { chat: { threadId: 'thread', messageId: 'm1', seq: 1, ...anchor, root_user_message_id: 'u1', root_cid: 'c1' } });
+		setup(send);
+		messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [
+			{ id: 'one', cid: 'c1', user_message_id: 'u1', ...anchor, note: 'Why?', created_at: '2026-11-26T00:00:00Z', answers: [] },
+		] }] as never);
+		await settle();
+		await vi.waitFor(() => { flushSync(); expect(host.querySelector('[data-comment-ids="one"]')?.getAttribute('aria-label')).toMatch(/^Your reply on .* is sending\.$/); });
+		expect(host.querySelector('[data-comment-ids="one"]')?.classList.contains('cm-comment-pending')).toBe(true);
+		keptCommentDrafts.forget(key);
 	});
 
 	it('with no kept comment, opens no box and moves nothing into view', async () => {

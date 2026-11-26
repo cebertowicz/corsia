@@ -10,6 +10,7 @@ import { posting } from './commentPostTiming';
 import { connectionState } from './connection';
 import { keptCommentDrafts } from './keptCommentDrafts.svelte';
 import { toasts } from './toast';
+import { withoutTextKept } from './draftKept';
 import { isChat, replyOf, sendable, sendUnsent } from '$lib/unsentCommentSend';
 import { unsentOutcome, unsentReason } from '$lib/unsentCommentOutcome';
 import { CommentSendRefused } from '$lib/chatCommentAnchors';
@@ -31,11 +32,12 @@ let pumping: Promise<void> | null = null;
 
 /**
  * The name of the draft's document or image, for a notice when no box of it is on screen: the one its press kept, else its
- * key's path; a reply's, the document or image its thread is on. A chat's is its title, kept at its press.
+ * key's path; a reply's, the document or image its thread is on. A chat's is its title, kept at its press; one with no
+ * title kept reads as the sidebar names an untitled chat.
  */
 function nameOf(key: string, kept: string | undefined): string {
 	if (kept) return kept;
-	if (onChat(key)) return 'a chat';
+	if (onChat(key)) return 'New Chat';
 	const reply = replyOf(key);
 	if (reply) return nameOf(reply.scope, undefined);
 	if (!key.startsWith('document:')) return 'an image';
@@ -64,7 +66,8 @@ function posted(key: string, text: string, taggedAgentIds: string[]): void {
 
 /**
  * It will not go as it is, or an earlier version went: the draft keeps its words with the reason and is never sent again
- * without the person. The reason shows in its box when one is on screen; otherwise a notice names the document, once.
+ * without the person. The reason shows in its box when one is on screen; otherwise a notice names the document, once,
+ * without the box's word that the text stays there.
  */
 function stopped(key: string, message: string, freshId: boolean, final: boolean): void {
 	const draft = keptCommentDrafts.get(key);
@@ -73,7 +76,7 @@ function stopped(key: string, message: string, freshId: boolean, final: boolean)
 	keptCommentDrafts.unsend(key);
 	if (onChat(key)) chatCommentDrafts.refused(key, message, final);
 	else commentDraft.update((value) => value?.key === key ? { ...value, error: message } : value);
-	const toast = keptCommentDrafts.onScreen(key) ? null : toasts.show(`Your comment on ${nameOf(key, draft.send?.name)}, “${firstWords(draft.body)}”: ${message}`, 'error');
+	const toast = keptCommentDrafts.onScreen(key) ? null : toasts.show(`Your comment on ${nameOf(key, draft.send?.name)}, “${firstWords(draft.body)}”: ${withoutTextKept(message)}`, 'error');
 	keptCommentDrafts.toast(key, toast);
 }
 

@@ -8,6 +8,7 @@ import { findModelById, workspaceModels } from '$lib/stores/models';
 import { reasoningEffort, threads } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 import { viewingDocumentForThread } from '$lib/stores/documentViewport';
+import { TEXT_KEPT } from '$lib/stores/draftKept';
 import { canEditCheckpointWindow } from './v7/modelWarning';
 
 /** What a send asks the runtime to do with the turn in flight. */
@@ -63,7 +64,7 @@ function windowEditable(threadId: string): boolean {
  * Only the box keeps the text, so only a box line says so.
  */
 export function commentFailure(detail: unknown, reference: unknown, noun: 'comment' | 'reply', act: 'sent' | 'retried', threadId: string): { text: string; final: boolean } {
-	const kept = act === 'sent' ? ' Your text stays here to copy.' : '';
+	const kept = act === 'sent' ? ` ${TEXT_KEPT}` : '';
 	if (detail === 'chat_not_found') return { text: `This chat is deleted, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
 	if (detail === 'comment_quote_gone') return { text: `The text this ${noun} quotes isn’t in the chat, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
 	if (detail === 'comment_model_cap') {

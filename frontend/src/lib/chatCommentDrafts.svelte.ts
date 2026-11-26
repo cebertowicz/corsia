@@ -37,6 +37,8 @@ export const chatCommentDrafts = {
 	posting(): boolean { return Object.values(status).some(state => state.posting); },
 	get(commentId: string): string { return keptCommentDrafts.get(replyKey(commentId))?.body ?? ''; },
 	reply(commentId: string): Draft | undefined { return read(replyKey(commentId)); },
+	/** Its reply was pressed and not yet posted, refused or edited since: it goes on its own (`unsentComments`). */
+	replyPressed(commentId: string): boolean { return !!keptCommentDrafts.get(replyKey(commentId))?.send; },
 	set(commentId: string, text: string): void { write(replyKey(commentId), text); },
 	/** The key the reply's field shows its draft under (`keptCommentDrafts.shown`). */
 	replyKey,

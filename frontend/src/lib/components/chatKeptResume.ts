@@ -31,6 +31,14 @@ export function bodyOf(root: ParentNode, messageId: string): HTMLElement | null 
 	return messageBody(root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`));
 }
 
+/**
+ * A draft kept before its passage was (an older version) has only its offsets, which are exact in a sent message: they
+ * hold while the message reaches them and, when its press kept the quote, still read that quote.
+ */
+function offsetsHold(text: string, at: { from_off: number; to_off: number }, quote: string | undefined): boolean {
+	return at.to_off <= text.length && (quote === undefined || text.slice(at.from_off, at.to_off) === quote);
+}
+
 /** The one kept new comment in this chat whose box opens with it: pressed before typed, then the furthest down. */
 function keptToOpen(root: HTMLElement, threadId: string, rows: Row[]) {
 	const kept = keptCommentDrafts.keys().flatMap(key => {
@@ -49,8 +57,7 @@ function keptToOpen(root: HTMLElement, threadId: string, rows: Row[]) {
 export function resumeKept(root: HTMLElement, threadId: string, rows: Row[], boxFree: boolean): ResumedBox | null {
 	const chosen = boxFree ? keptToOpen(root, threadId, rows) : undefined;
 	const text = chosen?.body.textContent ?? '';
-	// A draft kept before its passage was (an older version) has only its offsets, which are exact in a sent message.
-	const holds = !chosen || (chosen.draft.place ? chatPlaceHolds(text, chosen.draft.place) : chosen.at.to_off <= text.length);
+	const holds = !chosen || (chosen.draft.place ? chatPlaceHolds(text, chosen.draft.place) : offsetsHold(text, chosen.at, chosen.draft.send?.chat?.quote));
 	// Its passage gone, it is refused here, before anything is sent: it goes nowhere on its own.
 	if (chosen && !holds) {
 		keptCommentDrafts.unsend(chosen.key);

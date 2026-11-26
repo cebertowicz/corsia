@@ -491,6 +491,43 @@ describe('a pressed chat comment or reply goes on its own', () => {
 		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
 	});
 
+	it.each([['a titled chat', 'Q3 launch', 'Q3 launch'], ['an untitled one, as the sidebar names it', null, 'New Chat']] as const)('%s: its notice names the chat its press was on, without the box’s word that the text stays there', async (_name, title, named) => {
+		const page = await open();
+		const { threads } = await import('./threads'), { chatPress, chatCommentDrafts } = await import('$lib/chatCommentDrafts.svelte');
+		threads.set(title ? [{ id: 'thread-1', title } as never] : []);
+		const drafts = page.drafts.keptCommentDrafts, key = page.drafts.chatDraftKey('thread-1', 'm1', CHAT), tags = page.tags.createMentionSelection('Move it to Monday please');
+		drafts.keep(key, 'Move it to Monday please', tags, { from: 4, to: 10, quote: 'Friday', prefix: 'Due ', suffix: ' noon' });
+		// What the box's press keeps (`chatPress`), read from the chat's title when Comment is pressed.
+		drafts.claim(key, 'Move it to Monday please', tags, undefined, chatPress(CHAT));
+		answers.push(answer(400, 'comment_quote_gone'));
+		await connect(page);
+		const [notice] = get(page.toast.toasts).map((toast) => toast.message);
+		expect(notice).toBe(`Your comment on ${named}, “Move it to Monday please”: The text this comment quotes isn’t in the chat, so this comment couldn’t be sent.`);
+		// The box keeps its whole line, the text with it.
+		expect(chatCommentDrafts.root('thread-1', 'm1', CHAT)?.error).toBe('The text this comment quotes isn’t in the chat, so this comment couldn’t be sent. Your text stays here to copy.');
+		threads.set([]);
+	});
+
+	it('an edit after a press whose post failed for a reason that passes: no trigger sends, and only the edited text posts, under a fresh id', async () => {
+		const page = await open(), { chatCommentDrafts, chatPress } = await import('$lib/chatCommentDrafts.svelte');
+		const { postChatComment } = await import('$lib/components/composerSend');
+		const send = (note: string) => (inputId: string) => postChatComment({ id: inputId, input_id: inputId, ...CHAT, note } as never, 'thread-1', false, true);
+		chatCommentDrafts.setRoot('thread-1', 'm1', CHAT, 'Move it to Monday please');
+		answers.push(new TypeError('Failed to fetch'));
+		expect(await chatCommentDrafts.postRoot('thread-1', 'm1', CHAT, 'Move it to Monday please', send('Move it to Monday please'), chatPress(CHAT))).toBe(false);
+		const key = chatCommentDrafts.rootKey('thread-1', 'm1', CHAT), pressedId = page.drafts.keptCommentDrafts.get(key)!.clientId;
+		expect(page.queue.unsentComments.sending(key)).toBe(true);
+		chatCommentDrafts.setRoot('thread-1', 'm1', CHAT, 'Move it to Tuesday please');
+		await connect(page); await returnToApp(page);
+		page.queue.unsentComments.open(key); await page.queue.unsentComments.settled();
+		expect(chatPosts).toHaveBeenCalledTimes(1);
+		expect(await chatCommentDrafts.postRoot('thread-1', 'm1', CHAT, 'Move it to Tuesday please', send('Move it to Tuesday please'), chatPress(CHAT))).toBe(true);
+		const sent = chatPosts.mock.calls.map(([body]) => body as { input_id: string; comment: { note: string } });
+		expect(sent.map((body) => body.comment.note)).toEqual(['Move it to Monday please', 'Move it to Tuesday please']);
+		expect(sent[1].input_id).not.toBe(pressedId);
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
 	it('a box’s own press: a restart passes, and only a chat with no model to answer waits for the person', async () => {
 		await open();
 		const outcome = await import('$lib/unsentCommentOutcome');
