@@ -150,7 +150,17 @@ describe('Activity list', () => {
 		render(); await settle();
 		buttonNamed('Done')!.click();
 		await vi.waitFor(() => expect(alert()).toContain('Couldn’t mark this done. Try again.'));
+		expect(pane().querySelector('[role="alert"]')?.classList.contains('failure')).toBe(true);
 		expect(rows()).toHaveLength(1);
+	});
+
+	it('pauses Done for an unconfirmed missing draft while offline', async () => {
+		served = [activityItem({ key: 'draft:missing', external_id: 'draft-1', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unconfirmed: true } })];
+		connectionState.set('disconnected');
+		render(); await settle();
+		expect(buttonNamed('Done')?.disabled).toBe(true);
+		expect(pane().textContent).toContain('Done is paused until this reconnects.');
 	});
 
 	it('explains why removing an open missing draft is paused offline', async () => {
@@ -169,7 +179,8 @@ describe('Activity list', () => {
 		alsoServe('/api/email-drafts/art-draft/discard', () => respond(500, {}));
 		render(); await settle();
 		buttonNamed('Don’t send')!.click();
-		await vi.waitFor(() => expect(alert()).toContain('Couldn’t remove this draft. Try again.'));
+		await vi.waitFor(() => expect(alert()).toContain('Don’t send didn’t go through. Try again.'));
+		expect(pane().querySelector('[role="alert"]')?.classList.contains('failure')).toBe(true);
 		const actions = buttonNamed('Don’t send')!.parentElement!;
 		expect(actions).toBe(buttonNamed('Open the chat')!.parentElement!.parentElement);
 		expect(actions.nextElementSibling?.getAttribute('role')).toBe('alert');

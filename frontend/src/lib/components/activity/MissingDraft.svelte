@@ -36,16 +36,17 @@
 	<p role="status">This draft’s file is missing, so it can’t be sent.</p>
 {/if}
 <div class="actions">
-	{#if unconfirmed}<Button size="sm" variant="primary" loading={sending} onclick={() => void acknowledge()}>Done</Button>
+	{#if unconfirmed}<Button size="sm" variant="primary" loading={sending} disabled={offline} onclick={() => void acknowledge()}>Done</Button>
 	{:else if artifactId}<Button size="sm" variant="secondary" loading={sending} disabled={offline} onclick={() => void discard()}>Don’t send</Button>{/if}
 	{@render children?.()}
 </div>
-{#if offline && !unconfirmed}<p class="act-failure-row offline-notice" role="status">Don’t send is paused until this reconnects.</p>{/if}
-{#if failure}<p role="alert">{unconfirmed ? 'Couldn’t mark this done. Try again.' : 'Couldn’t remove this draft. Try again.'}</p>{/if}
+{#if offline}<p class="act-failure-row offline-notice" role="status">{unconfirmed ? 'Done is paused until this reconnects.' : 'Don’t send is paused until this reconnects.'}</p>{/if}
+{#if failure}<p class="failure" role="alert">{unconfirmed ? 'Couldn’t mark this done. Try again.' : 'Don’t send didn’t go through. Try again.'}</p>{/if}
 
 <style>
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 	p { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-relaxed); }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
-	:global(.activity.phone) p:not(.offline-notice) { font-size: var(--text-input); }
+	.failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }
+	:global(.activity.phone) p:not(.offline-notice):not(.failure) { font-size: var(--text-input); }
 </style>
